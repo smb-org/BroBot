@@ -291,7 +291,7 @@ describe("Module panel loader", () => {
     />);
 
     expect(document.querySelector(".module-detail-breadcrumb")).not.toBeInTheDocument();
-    expect(document.querySelector(".module-detail__icon .module-glyph")).toBeInTheDocument();
+    expect(document.querySelector(".module-detail-heading__icon .module-heading-glyph")).toBeInTheDocument();
   });
 
   it("shows unknown and disabled module IDs understandably on the detail page", () => {
@@ -343,7 +343,7 @@ describe("Module panel loader", () => {
     expect(editorFixture.loader).toHaveBeenCalledOnce();
     resolveSettings?.(Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }));
 
-    const amount = await screen.findByRole("spinbutton", { name: "Menge" });
+    await screen.findByRole("spinbutton", { name: "Menge" });
     const handle = screen.getByRole("textbox", { name: "Konto" });
     const message = screen.getByRole("textbox", { name: "Nachricht" });
     const mode = screen.getByRole("radiogroup", { name: "Modus" });
@@ -351,11 +351,15 @@ describe("Module panel loader", () => {
     const threshold = screen.getByRole("spinbutton", { name: "Schwelle" });
     expect(document.querySelector(".ui-field__prefix")).toHaveTextContent("@");
     expect(screen.getByText("Hello Ada")).toBeInTheDocument();
-    for (const field of [amount, handle, message, mode, extraAction, threshold]) {
-      const describedBy = field.getAttribute("aria-describedby");
-      expect(describedBy).toBeTruthy();
-      expect((describedBy ?? "").split(/\s+/u).map((id) => document.getElementById(id)?.textContent ?? "").join(" ").trim()).not.toBe("");
-    }
+    const fieldHelp: readonly (readonly [string, string])[] = [
+      ["Menge", "Eine ganze Zahl."],
+      ["Konto", "Twitch-Name."],
+      ["Nachricht", "Vorlage für die Nachricht."],
+      ["Modus", "Runs automatically."],
+      ["Zusatzaktion", "Zusätzliche Aktion ausführen."],
+      ["Schwelle", "Mindestmenge."],
+    ];
+    for (const [label, help] of fieldHelp) expect(screen.getByRole("button", { name: `${label}: ${help}` })).toHaveAttribute("title", help);
 
     fireEvent.click(screen.getByRole("button", { name: "Increase amount" }));
     fireEvent.change(handle, { target: { value: "@Ada" } });

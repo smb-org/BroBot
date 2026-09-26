@@ -53,7 +53,7 @@ import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { navPageActive, navPageById, navPageGroupHeading, visibleNavPages } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ControlDurationDialog, Icon, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
+import { BlockingState, Button, ControlDurationDialog, Icon, InspectorSection, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
 import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
@@ -892,37 +892,39 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
   const emptyValue = "—";
   const { selectedKey, select, rowRef, close } = useInspectorSelection<string>();
   const selected = subscriptions.find((subscription) => subscriptionKey(subscription) === selectedKey) ?? null;
-  return (
-    <section className={`content-section inspector-section${selected === null ? "" : " inspector-section--open"}`} aria-label={texts.system.subscriptions}>
-      <div className="inspector-section__list">
-        <div className="section-heading"><h2>{texts.system.subscriptions}</h2><span className="muted number">{formatNumber(subscriptions.length)}</span></div>
-        {subscriptions.length === 0 ? <p className="empty-state">{texts.system.noSubscriptions}</p> : (
-          <div className="table-wrap">
-            <table className="table subscriptions-table">
-              <thead><tr><th scope="col">{texts.system.subscription}</th><th scope="col">{texts.system.state}</th><th scope="col">{texts.system.reason}</th></tr></thead>
-              <tbody>{subscriptions.map((subscription) => {
-                const key = subscriptionKey(subscription);
-                const name = subscriptionDisplayName(subscription);
-                const unknown = name === subscription.subscriptionType;
-                const tone = subscriptionTone(subscription.status, subscription.reason);
-                return <tr
-                  key={key}
-                  ref={rowRef(key)}
-                  tabIndex={0}
-                  aria-selected={selectedKey === key}
-                  onClick={() => { select(key); }}
-                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(key); } }}
-                >
-                  <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
-                  <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status, subscription.reason)} /></td>
-                  <td>{maintenanceReasonText(subscription.reason) ?? emptyValue}</td>
-                </tr>;
-              })}</tbody>
-            </table>
-          </div>
-        )}
-      </div>
-      {selected === null ? null : <SubInspector ariaLabel={texts.system.subscriptionDetails} title={subscriptionDisplayName(selected)} identifier={selected.subscriptionId ?? emptyValue} closeLabel={dashboardCommonTexts().close} onClose={close}>
+  const list = (
+    <section className="content-section" aria-label={texts.system.subscriptions}>
+      <div className="section-heading"><h2>{texts.system.subscriptions}</h2><span className="muted number">{formatNumber(subscriptions.length)}</span></div>
+      {subscriptions.length === 0 ? <p className="empty-state">{texts.system.noSubscriptions}</p> : (
+        <div className="table-wrap">
+          <table className="table subscriptions-table">
+            <thead><tr><th scope="col">{texts.system.subscription}</th><th scope="col">{texts.system.state}</th><th scope="col">{texts.system.reason}</th></tr></thead>
+            <tbody>{subscriptions.map((subscription) => {
+              const key = subscriptionKey(subscription);
+              const name = subscriptionDisplayName(subscription);
+              const unknown = name === subscription.subscriptionType;
+              const tone = subscriptionTone(subscription.status, subscription.reason);
+              return <tr
+                key={key}
+                ref={rowRef(key)}
+                tabIndex={0}
+                aria-selected={selectedKey === key}
+                onClick={() => { select(key); }}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(key); } }}
+              >
+                <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
+                <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status, subscription.reason)} /></td>
+                <td>{maintenanceReasonText(subscription.reason) ?? emptyValue}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+  const inspector = selected === null ? null : (
+    <SubInspector ariaLabel={texts.system.subscriptionDetails} title={subscriptionDisplayName(selected)} identifier={selected.subscriptionId ?? emptyValue} closeLabel={dashboardCommonTexts().close} onClose={close}>
+      <InspectorSection title={texts.system.subscription}>
         <dl className="properties">
           <div><dt>{texts.system.subscriptionRawType}</dt><dd className="mono">{selected.subscriptionType}</dd></div>
           <div><dt>{texts.system.subscriptionVersion}</dt><dd className="mono">{selected.version}</dd></div>
@@ -931,8 +933,11 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
           <div><dt>{texts.system.twitchMessage}</dt><dd>{selected.message ?? emptyValue}</dd></div>
           <div><dt>{texts.system.httpStatus}</dt><dd className="mono">{selected.statusCode === null ? emptyValue : String(selected.statusCode)}</dd></div>
         </dl>
-      </SubInspector>}
-    </section>
+      </InspectorSection>
+    </SubInspector>
+  );
+  return (
+    <ListDetail list={list} inspector={inspector} onCloseInspector={close} />
   );
 };
 

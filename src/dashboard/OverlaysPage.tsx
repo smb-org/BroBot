@@ -24,8 +24,8 @@ import {
   type PanelOverlaySummary,
   type PanelOverlayToken,
 } from "./api";
-import { apiErrorText, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
-import { Button, ConfirmDialog, Field, FormDialog, ListDetail, NumberField, Select, SubInspector } from "./ui";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
+import { Button, ConfirmDialog, DangerSection, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, NumberField, PageHeader, Select, SubInspector } from "./ui";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -654,14 +654,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     ? labels.legacyTokenName
     : `${labels.legacyTokenName} (${legacyRevokeTarget.id.slice(0, 8)})`;
   const list = <section className="overlays-page config-section" aria-label={labels.list}>
-    <div className="section-heading">
-      <h1>{labels.title}</h1>
-      <span className="muted">{labels.count(overlays.length, maximum)}</span>
-      <span title={manageReason}>
-        <Button icon="add" iconOnly ariaLabel={labels.create} disabled={!canManage || pending || overlays.length >= maximum}
-          {...(manageReason === undefined ? {} : { title: manageReason })} onClick={beginCreate} />
-      </span>
-    </div>
     {loading ? <p className="loading-line">{labels.loading}</p> : null}
     {error === null ? null : <p className="form-error" role="alert">{error}</p>}
     {!loading && overlays.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
@@ -688,7 +680,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         }}>{labels.legacyImport}</Button> : null}
       </div>
       <p className="muted">{labels.legacyDescription}</p>
-      <ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item">
+      <DangerSection title={dashboardCommonTexts().dangerZone}><ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item">
         <div><strong>{labels.legacyTokenName}</strong>
           <span className="muted">{labels.legacyTokenId}: {token.id.slice(0, 8)}</span>
           <span className="muted">{labels.legacyCreatedAt}: {formatTimestamp(token.createdAt)}</span>
@@ -700,6 +692,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       </li>)}</ul>
       {legacyNextOffset === null ? null : <Button variant="subtle" disabled={pending}
         onClick={() => { void loadLegacyTokens(legacyNextOffset, true); }}>{labels.loadMore}</Button>}
+      </DangerSection>
     </section> : null}
     {legacyError === null ? null : <p className="form-error" role="alert">{legacyError}</p>}
     {manageReason === undefined ? null : <p className="muted" role="note">{labels.readOnly}</p>}
@@ -722,25 +715,27 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         <NumberField id="overlay-height" label={labels.height} value={draftHeight} min={64} max={2160} step={1} increaseLabel={`${labels.height} +1`} decreaseLabel={`${labels.height} −1`} disabled={pending} onChange={setDraftHeight} />
       </div> : null}
       {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-      <div className="overlay-form-actions"><Button variant="primary" disabled={!canManage || pending || draftName.trim().length === 0} onClick={() => { void create(); }}>{labels.createSubmit}</Button>
-        <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.cancel}</Button></div>
       {manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}
+      <InspectorActions><Button variant="primary" disabled={!canManage || pending || draftName.trim().length === 0} onClick={() => { void create(); }}>{labels.createSubmit}</Button>
+        <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.cancel}</Button></InspectorActions>
     </div>
   </SubInspector> : selectedId === null ? null : <SubInspector ariaLabel={labels.title} title={selected?.name ?? labels.title}
     identifier={selected?.id} closeLabel={labels.close} onClose={closeInspector}>
     {selectedOverlay === null ? <p className="loading-line">{labels.loading}</p> : <div className="overlay-inspector">
-      <dl className="properties"><div><dt>{labels.width} × {labels.height}</dt><dd>{selectedOverlay.width} × {selectedOverlay.height}</dd></div>
-        <div><dt>{labels.elements}</dt><dd>{selectedOverlay.elements.length}</dd></div></dl>
-      {onOpenEditor === undefined ? null : <Button variant="primary" onClick={() => { onOpenEditor(selectedOverlay.id); }}>{labels.editComposition}</Button>}
-      <section className="overlay-elements-section" aria-label={labels.elements}>
-        <h3>{labels.elements}</h3>
+      <InspectorSection title={labels.details}>
+        <dl className="properties"><div><dt>{labels.width} × {labels.height}</dt><dd>{selectedOverlay.width} × {selectedOverlay.height}</dd></div>
+          <div><dt>{labels.elements}</dt><dd>{selectedOverlay.elements.length}</dd></div></dl>
+        {onOpenEditor === undefined ? null : <Button variant="primary" onClick={() => { onOpenEditor(selectedOverlay.id); }}>{labels.editComposition}</Button>}
+      </InspectorSection>
+      <InspectorSection title={labels.elements}>
         {selectedOverlay.elements.length === 0 ? <p className="muted">{labels.elementCount(0)}</p> : <ul className="overlay-elements-list">{selectedOverlay.elements.map((element) => <li key={element.id}>
           {element.label || element.id}{element.variableName === null ? <span className="muted"> · {element.missingVariableName === undefined || element.missingVariableName === null ? "—" : labels.missingVariable(element.missingVariableName)}</span> : null}
         </li>)}</ul>}
-      </section>
-      <section className="overlay-access-section" aria-label={labels.accesses}>
-        <h3>{labels.accesses}</h3>
-        <Field id="overlay-access-name" label={labels.issueLabel} hint={labels.issueHint} value={accessName} maxLength={40} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManage || pending} onChange={setAccessName} />
+      </InspectorSection>
+      <InspectorSection title={labels.accesses}>
+        <InspectorFieldRow label={labels.issueLabel} help={labels.issueHint}>
+          <Field id="overlay-access-name" label={labels.issueLabel} value={accessName} maxLength={40} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManage || pending} onChange={setAccessName} />
+        </InspectorFieldRow>
           <Button variant="primary" disabled={!canManage || pending || accessName.trim().length === 0}
             {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void issue(); }}>{labels.issue}</Button>
           {accesses.length === 0 ? <p className="muted">{labels.noAccesses}</p> : <ul className="overlay-access-list">{accesses.map((access) => {
@@ -765,7 +760,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
                     }}>{labels.setup}</Button>
                   <Button variant="neutral" disabled={!canManage || pending || !active || !access.recoverable} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void reveal(access); }}>{labels.reveal}</Button>
                   <Button variant="neutral" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void replace(access); }}>{labels.replace}</Button>
-                  <Button danger="subtle" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { setRevokeTarget(access); }}>{labels.revoke}</Button>
                   {!access.recoverable ? <span className="muted">{labels.accessUnrecoverable}</span> : null}
                 </div>
               </li>
@@ -787,13 +781,23 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
             <Button variant="neutral" disabled={pending} onClick={() => { void copySecret(); }}>{copied ? labels.copied : labels.copy}</Button>
           </div>}
           {manageReason === undefined ? null : <p className="muted" role="note">{labels.readOnly}</p>}
-      </section>
-      {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-      <Button danger="subtle" disabled={!canManage || pending} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>
+      <DangerSection title={dashboardCommonTexts().dangerZone}>
+        {accesses.filter((access) => access.revokedAt === null).length === 0 ? null : <ul className="overlay-access-list overlay-access-list--danger">{accesses.filter((access) => access.revokedAt === null).map((access) => <li key={access.tokenId} className="overlay-access-list__item">
+          <span>{access.label}</span>
+          <Button danger="subtle" ariaLabel={`${labels.revoke}: ${access.label}`} disabled={!canManage || pending || !isAccessActive(access)} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { setRevokeTarget(access); }}>{labels.revoke}</Button>
+        </li>)}</ul>}
+        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
+        <Button danger="subtle" disabled={!canManage || pending} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>
+      </DangerSection>
+      </InspectorSection>
     </div>}
   </SubInspector>;
 
   return <>
+    <PageHeader kind="overlays" title={labels.title} subtitle={labels.count(overlays.length, maximum)} actions={<span title={manageReason}>
+      <Button icon="add" iconOnly ariaLabel={labels.create} disabled={!canManage || pending || overlays.length >= maximum}
+        {...(manageReason === undefined ? {} : { title: manageReason })} onClick={beginCreate} />
+    </span>} />
     <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
     <ConfirmDialog opened={confirmDelete} title={labels.deleteTitle(selected?.name ?? "")} description={labels.deleteDescription(selected?.name ?? "")}
       confirmLabel={labels.deleteConfirm(selected?.name ?? "")} cancelLabel={labels.cancel} onCancel={() => { setConfirmDelete(false); }}

@@ -150,7 +150,7 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
   expect(channelSelectBox?.y ?? 0).toBeGreaterThan((brandBox?.y ?? 0) + (brandBox?.height ?? 0) - 1);
 });
 
-test("ListDetail shows the two-column form at 1280px, the second monitor next to OBS the old 1360px threshold missed", async ({ page }) => {
+test("ListDetail uses the shared desktop grid and mobile overlay inspector", async ({ page }) => {
   const channel = {
     channelId: "kanal-e2e",
     login: "brotkrumen-kanal",
@@ -227,10 +227,8 @@ test("ListDetail shows the two-column form at 1280px, the second monitor next to
   const row = page.getByRole("row", { name: /!hallo/ });
   const inspector = page.getByRole("region", { name: "Eigenschaften von !hallo" });
 
-  // At 1280px -- narrower than the old, purely-derived 1360px threshold,
-  // and the actual second monitor next to OBS this fix targets -- selecting
-  // a row must show list and inspector side by side, not the editor
-  // dropping below the list with the right half staying empty.
+  // At 1280px, selecting a row uses the shared desktop grid with the list
+  // beside a fixed-width inspector.
   await page.setViewportSize({ width: 1280, height: 900 });
   await row.click();
   await expect(inspector).toBeVisible();
@@ -242,12 +240,12 @@ test("ListDetail shows the two-column form at 1280px, the second monitor next to
   // and roughly on the same row rather than further down the page.
   expect(inspectorBoxDesktop?.x ?? 0).toBeGreaterThanOrEqual((listBoxDesktop?.x ?? 0) + (listBoxDesktop?.width ?? 0) - 1);
   expect(Math.abs((inspectorBoxDesktop?.y ?? 0) - (listBoxDesktop?.y ?? 0))).toBeLessThan(80);
-  expect(inspectorBoxDesktop?.width ?? 0).toBeCloseTo(420, -1);
+  expect(inspectorBoxDesktop?.width ?? 0).toBeCloseTo(592, -1);
 
-  // Counter-probe: below 1024px the same selection must NOT produce that
+  // Counter-probe: below 1280px the same selection must NOT produce that
   // two-column form -- the inspector floats over the list as a drawer
   // instead, sized to the drawer's own 480px rather than the column's
-  // 420px, and overlapping the list horizontally rather than sitting
+  // 592px, and overlapping the list horizontally rather than sitting
   // beside it.
   await page.setViewportSize({ width: 900, height: 900 });
   await expect(inspector).toBeVisible();

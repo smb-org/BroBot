@@ -38,26 +38,30 @@ Die Feldhülle trägt genau eine Inhaltsstufe: `config-field--narrow` für
 Zahlen und kurze Werte, `config-field--medium` für Namen und Bezeichner oder
 `config-field--wide` für Fließtext.
 
-Eine Tabelle mit wählbaren Zeilen und der Inspektor ihrer gewählten Zeile
-liegen zusammen in einem `.config-section.inspector-section` mit genau zwei
-direkten Kindern: zuerst `.inspector-section__list` (Überschrift, Tabelle,
-Nachladen-Knopf, Fehler- und Leerzeile), dann der `.sub-inspector` — oder,
-solange dessen Anlegen-Formular über den Plus-Knopf an der Überschrift
-geöffnet ist, das Formular auf derselben Fläche. Ohne Auswahl und ohne
-geöffnetes Formular bleibt die Fläche leer; beides schließt sich gegenseitig
-aus. Wo die Fläche neben oder unter der Liste steht, entscheidet der Host
-nach Fensterbreite (ab 1360 px daneben, darunter wie bisher im Fluss); die
-Ansicht legt nur die Reihenfolge fest und bleibt selbst höchstens 960 px
-breit. Inspektor wie Anlegen-Formular beginnen mit `.inspector-section__heading`
-(Titel, Kennung in Mono, Schließen-Taste) und rufen bei Schließen und Escape
-den vom Host gereichten Rückruf: Der Inspektor hebt die Auswahl auf und gibt
-den Fokus an die Zeile zurück, das Formular schließt sich. Die Auswahl bleibt
-beim Nachladen bestehen, solange die Zeile noch existiert. Zerstörende
-Handlungen verwenden `button--danger`, stehen vom primären Knopf abgesetzt und
-fragen mit `.inspector-confirmation` an Ort und Stelle nach. Eine Ansicht ohne
-`.inspector-section` bleibt einspaltig; sie bricht nicht, sie nutzt nur die
-Breite nicht. Eine Liste fehlender Berechtigungen ist kein Inspektor und trägt
-`.sub-inspector` nicht.
+Für wiederkehrende Panel-Inhalte stellt `src/dashboard/ui` `InspectorSection`,
+`InspectorFieldRow`, `InspectorActions`, `DangerSection`, `Badge` und
+`FilterBar` bereit. Inspektorabschnitte verwenden kurze Haarlinien-Überschriften;
+Feldzeilen setzen das Label links und füllen die rechte Kontrollspalte. Hilfen
+stehen am Info-Symbol, Speichern und Verwerfen bleiben am Inspektorfuß, und
+Lösch- oder Widerrufshandlungen gehören in `DangerSection`. Tabellen zeigen
+Status-Badges; ihre Spalten folgen dem Inhalt und kurze Werte werden nicht
+abgeschnitten. Module importieren diese Bauteile aus dem UI-Seam; der Host
+enthält keine modulabhängigen Sonderfälle.
+
+Eine Tabelle mit wählbaren Zeilen und ihrem Inspektor verwendet das gemeinsame
+`ListDetail`: Die Ansicht übergibt `list` und `inspector`, die Komponente hält
+Reihenfolge und Layout konsistent. Ab 1280 px steht der 592-px-Inspektor rechts
+neben der Liste; darunter öffnet er als überlagernde Fläche mit bis zu 480 px
+Breite. Auf kleinen Viewports bleibt die Seite selbst in der Viewportbreite.
+Ein Anlegen-Formular belegt dieselbe Fläche wie der Zeileninspektor; beide
+schließen sich gegenseitig aus. Die Ansicht stellt Tabellen, Plus-Knopf,
+Überschrift sowie Lade-, Fehler- und Leerzustand bereit. Inspektor wie Formular
+beginnen mit dem gemeinsamen Kopf (Titel, optionale Kennung in Mono,
+Schließen-Taste) und verwenden denselben Schließen-Rückruf für Taste und
+Escape. Die Auswahl bleibt beim Nachladen bestehen, solange die Zeile noch
+existiert. Zerstörende Handlungen stehen in `DangerSection` und fragen mit
+`inspector-confirmation` an Ort und Stelle nach. Eine Liste fehlender
+Berechtigungen ist kein Inspektor und trägt `.sub-inspector` nicht.
 
 ## Registrierung
 

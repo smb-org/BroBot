@@ -2,7 +2,7 @@ import type { AuditArea, ChannelRole } from "../../contracts/values";
 import type { PanelAuditEntry, PanelAuditFilters } from "../../panel-contract";
 import { auditAreaForAction } from "./areas";
 import { auditActionLabel, roleLabel } from "../labels";
-import { memberAsWord, type DashboardLanguage } from "../locale";
+import { dashboardTexts, memberAsWord, type DashboardLanguage } from "../locale";
 import { dayKey } from "../events/model";
 import { moduleName } from "../module-labels";
 import type { IconName } from "../ui/Icon";
@@ -192,6 +192,21 @@ export const auditRowLabel = (entry: PanelAuditEntry, language: DashboardLanguag
   const action = auditActionLabel(entry.action, language);
   const subject = auditSubjectText(entry, language);
   return subject === null || subject.length === 0 ? action : `${action}: ${subject}`;
+};
+
+/** A short, sentence-ready action phrase for the audit feed. The action code
+ * selects the verb; the detail inspector continues to show the complete diff. */
+export const auditSentenceAction = (action: string, language: DashboardLanguage): string => {
+  const labels = dashboardTexts(language).audit.sentenceActions;
+  if (action === "member.role_changed") return labels.roleChanged;
+  if (action.endsWith(".settings_changed") || action.endsWith(".full_consent_changed") || action.endsWith(".variable.value_changed")) return labels.changed;
+  if (action.endsWith(".created") || action.endsWith(".added")) return labels.created;
+  if (action.endsWith(".updated") || action.endsWith(".renamed")) return labels.updated;
+  if (action.endsWith(".removed") || action.endsWith(".deleted") || action.endsWith(".revoked")) return labels.removed;
+  if (action.endsWith(".enabled") || action === "module.enabled") return labels.enabled;
+  if (action.endsWith(".disabled") || action === "module.disabled") return labels.disabled;
+  if (action.endsWith(".issued") || action.endsWith(".released")) return labels.issued;
+  return auditActionLabel(action, language);
 };
 
 export interface AuditDayGroup {

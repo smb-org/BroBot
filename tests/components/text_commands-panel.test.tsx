@@ -579,27 +579,15 @@ describe("Text command editor", () => {
     });
   });
 
-  it("keeps the row minimum-tier control as an immediate action and restores focus when the editor closes", async () => {
-    let minimumTier: TextCommand["minimumTier"] = "everyone";
-    const fetcher = panelFetch({
-      commands: () => [makeCommand({ minimumTier })],
-      onMutation: (method, _path, body) => {
-        if (method === "PATCH" && typeof body === "object" && body !== null && "minimumTier" in body && typeof body.minimumTier === "string") {
-          minimumTier = body.minimumTier as TextCommand["minimumTier"];
-        }
-        return jsonResponse({ warnings: [] });
-      },
-    });
+  it("shows the minimum tier as a badge and restores focus when the inspector closes", async () => {
+    const fetcher = panelFetch();
     const onCloseInspector = vi.fn();
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" onCloseInspector={onCloseInspector} /></UiProvider>);
 
     const row = await screen.findByRole("row", { name: /!hallo/u });
-    const tierSelect = within(row).getByRole("combobox", { name: "Wer darf auslösen: !hallo" });
-    fireEvent.click(tierSelect);
-    fireEvent.click(await screen.findByRole("option", { name: "Moderatoren", hidden: true }));
-    await waitFor(() => expect(fetcher.mock.calls.some(([, init]) =>
-      init?.method === "PATCH" && init.body === JSON.stringify({ revision: 1, minimumTier: "moderator" }))).toBe(true));
+    expect(within(row).getByText("Alle")).toHaveClass("ui-badge");
+    expect(within(row).queryByRole("combobox")).not.toBeInTheDocument();
 
     row.focus();
     fireEvent.click(row);
@@ -616,7 +604,7 @@ describe("Text command editor", () => {
     expect(onCloseInspector).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the inspector draft's loaded revision when the row minimum tier changes", async () => {
+  it("edits the minimum tier in the inspector and saves the draft as one change", async () => {
     let current = makeCommand();
     const fetcher = panelFetch({
       commands: () => [current],
@@ -637,47 +625,38 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     await selectCommand();
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf" } });
-
-    const row = screen.getByRole("row", { name: /!hallo/u });
-    fireEvent.click(within(row).getByRole("combobox", { name: "Wer darf auslösen: !hallo" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Moderatoren", hidden: true }));
+    fireEvent.click(within(editor()).getByRole("tab", { name: "Erweitert" }));
+    const minimumTierGroup = within(editor()).getByRole("radiogroup", { name: "Wer darf auslösen" });
+    fireEvent.click(within(minimumTierGroup).getByRole("radio", { name: /^Moderatoren\./u }));
+    fireEvent.click(within(editor()).getByRole("button", { name: "Änderungen speichern" }));
     await waitFor(() => expect(current).toMatchObject({ minimumTier: "moderator", revision: 2 }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
-    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(2));
     const patches = fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH");
-    const patchBodies = patches.map(([, init]) => {
-      if (typeof init?.body !== "string") throw new Error("PATCH body is missing.");
-      return JSON.parse(init.body) as unknown;
-    });
-    expect(patchBodies).toEqual([
-      { revision: 1, minimumTier: "moderator" },
-      {
-        revision: 1,
-        name: "hallo",
-        kind: "text",
-        text: "Entwurf",
-        minimumTier: "everyone",
-        cooldownSeconds: 5,
-        aliases: ["hey"],
-        userCooldownSeconds: 15,
-        streamCondition: "online",
-        responseType: "reply",
-        variableAction: null,
-      },
-    ]);
-    expect(await screen.findByRole("button", { name: "Serverstand laden" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Inzwischen von jemand anderem geändert.");
-    expect(screen.getByRole("button", { name: "Änderungen speichern" })).toBeDisabled();
-    expect(current).toMatchObject({ text: "Hallo {user} aus {channel}", minimumTier: "moderator", revision: 2 });
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.[1]?.body).toEqual(JSON.stringify({
+      revision: 1,
+      name: "hallo",
+      kind: "text",
+      text: "Hallo {user} aus {channel}",
+      minimumTier: "moderator",
+      cooldownSeconds: 5,
+      aliases: ["hey"],
+      userCooldownSeconds: 15,
+      streamCondition: "online",
+      responseType: "reply",
+      variableAction: null,
+    }));
+    await waitFor(() => expect(within(screen.getByRole("row", { name: /!hallo/u })).getByText("Moderatoren")).toHaveClass("ui-badge"));
+    expect(current.minimumTier).toBe("moderator");
   });
 
   it("deletes through ConfirmDialog", async () => {
     const fetcher = panelFetch();
     renderPanel(fetcher);
     await selectCommand();
-    fireEvent.click(screen.getByRole("button", { name: "Befehl löschen" }));
+    const deleteButton = screen.getByRole("button", { name: "Befehl löschen" });
+    expect(deleteButton).toHaveTextContent("Befehl löschen");
+    fireEvent.click(deleteButton);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/Aliase !hey/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Befehl !hallo endgültig löschen" }));

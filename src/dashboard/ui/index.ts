@@ -11,6 +11,16 @@ export { Stack, Group, Grid } from "./Layout";
 export { Shell } from "./Shell";
 export type { ShellProps, ShellNavContext } from "./Shell";
 
+export { NavigationIcon } from "./NavigationIcon";
+export { PageHeader } from "./PageHeader";
+export type { PageHeaderProps } from "./PageHeader";
+export { FilterBar } from "./FilterBar";
+export { AuditSentence } from "./AuditSentence";
+export type { AuditSentenceProps } from "./AuditSentence";
+export { Badge } from "./Badge";
+export type { BadgeTone } from "./Badge";
+export { InspectorSection, InspectorFieldRow, InspectorActions, DangerSection } from "./InspectorParts";
+
 export { Sidebar } from "./Sidebar";
 export type { SidebarProps, SidebarEntry, SidebarGroup, SidebarModulesGroup } from "./Sidebar";
 

@@ -55,6 +55,12 @@ afterEach(() => {
 });
 
 describe("EventsPage failure cause icon", () => {
+  it("uses the audit page person search placeholder", () => {
+    renderPage([]);
+
+    expect(screen.getByRole("textbox", { name: "Person" })).toHaveAttribute("placeholder", "Login oder ID, z. B. beispielnutzer");
+  });
+
   it("shows the cause icon only on warning/error rows whose diagnostic detail carries a cause", () => {
     renderPage([
       entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" }),
@@ -452,6 +458,6 @@ describe("EventsPage failure cause icon", () => {
     fireEvent.click(row);
 
     expect(row).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Vorgang")).toBeInTheDocument();
+    expect(screen.getAllByText("Vorgang").length).toBeGreaterThan(0);
   });
 });

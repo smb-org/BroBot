@@ -538,19 +538,15 @@ describe("EditorShell and declaration renderer", () => {
       variables={{ message: templateOptions }}
       templateMessages={textAreaMessages}
     />);
-    const fields = [
-      screen.getByRole("spinbutton", { name: "Threshold" }),
-      screen.getByRole("textbox", { name: "Shoutout name" }),
-      screen.getByRole("textbox", { name: "Message" }),
-      screen.getByRole("radiogroup", { name: "Mode" }),
-      screen.getByRole("switch", { name: /^Shoutout/u }),
-      screen.getByRole("spinbutton", { name: "Dependent threshold" }),
+    const fieldHelp: readonly (readonly [string, string])[] = [
+      ["Threshold", "Minimum viewer count."],
+      ["Shoutout name", "The account sent a shoutout."],
+      ["Message", "What the bot writes."],
+      ["Mode", "First choice."],
+      ["Shoutout", "Send a shoutout after a large raid."],
+      ["Dependent threshold", "Minimum viewer count."],
     ];
-    for (const field of fields) {
-      const describedBy = field.getAttribute("aria-describedby");
-      expect(describedBy, "field description ids").toBeTruthy();
-      for (const id of describedBy?.split(" ") ?? []) expect((document.getElementById(id)?.textContent ?? "").trim()).not.toBe("");
-    }
+    for (const [label, help] of fieldHelp) expect(screen.getByRole("button", { name: `${label}: ${help}` })).toHaveAttribute("title", help);
     expect(screen.getByRole("radiogroup", { name: "Mode" })).toBeInTheDocument();
   });
 });

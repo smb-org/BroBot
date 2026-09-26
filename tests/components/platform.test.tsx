@@ -76,6 +76,7 @@ describe("Platform level", () => {
 
     const channelRow = await screen.findByRole("row", { name: /alpha_login/ });
     fireEvent.click(channelRow);
+    fireEvent.click(await screen.findByRole("row", { name: /Helfer/ }));
     const rolle = await screen.findByRole("combobox", { name: "Rolle: Helfer" });
 
     expect(within(rolle).queryByRole("option", { name: "Broadcaster" })).not.toBeInTheDocument();
@@ -102,7 +103,7 @@ describe("Platform level", () => {
     expect(counts).toHaveAttribute("title", membersHeader.getAttribute("title"));
   });
 
-  it("hides the channel id and uses the UI Select for member roles while the inspector is open", async () => {
+  it("hides the channel id and edits a selected member role in the inspector", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -118,6 +119,7 @@ describe("Platform level", () => {
     expect(within(table).getByRole("columnheader", { name: "Identität" })).toBeInTheDocument();
     expect(within(channelRow).getByRole("rowheader")).toHaveAttribute("title", "123");
 
+    fireEvent.click(await screen.findByRole("row", { name: /Helfer/ }));
     const role = await screen.findByRole("combobox", { name: "Rolle: Helfer" });
     expect(role).toHaveClass("mantine-Select-input");
     expect(role).not.toBeInstanceOf(HTMLSelectElement);
@@ -132,7 +134,8 @@ describe("Platform level", () => {
 
     fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
     const helferZeile = await screen.findByRole("row", { name: /Helfer/ });
-    const remove = within(helferZeile).getByRole("button", { name: "Entfernen" });
+    fireEvent.click(helferZeile);
+    const remove = await screen.findByRole("button", { name: "Entfernen" });
     fireEvent.click(remove);
 
     const dialog = await screen.findByRole("dialog", { name: /Zugriff für Helfer entfernen/ });
@@ -148,7 +151,8 @@ describe("Platform level", () => {
 
     fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
     const broadcasterZeile = await screen.findByRole("row", { name: /Alpha/ });
-    const remove = within(broadcasterZeile).getByRole("button", { name: "Entfernen" });
+    fireEvent.click(broadcasterZeile);
+    const remove = await screen.findByRole("button", { name: "Entfernen" });
 
     expect(remove).toBeDisabled();
     expect(remove).toHaveAttribute("title", "Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
@@ -293,7 +297,8 @@ describe("Platform level", () => {
     const bereich = await screen.findByRole("region", { name: "Kanalübersicht" });
     expect(bereich.children).toHaveLength(1);
     expect(bereich.children[0]).not.toHaveClass("list-detail--open");
-    const plus = within(bereich).getByRole("button", { name: "Kanal freigeben" });
+    const plus = screen.getByRole("button", { name: "Kanal freigeben" });
+    expect(plus.parentElement).toHaveClass("page-header__actions");
     fireEvent.click(plus);
     const freigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
     expect(bereich.children[0]).toHaveClass("list-detail--open");

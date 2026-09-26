@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
-import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
+import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
-  Button, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
+  Badge, Button, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
   registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
@@ -12,7 +12,7 @@ import { commandListReply, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsF
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions } from "../../../dashboard/ui";
-import { createTextCommand, deleteTextCommand, loadTextCommandData, saveTextCommand, setTextCommandMinimumTier, toggleTextCommand, type TextCommandChannelVariable } from "./service";
+import { createTextCommand, deleteTextCommand, loadTextCommandData, saveTextCommand, toggleTextCommand, type TextCommandChannelVariable } from "./service";
 import { textCommandsTexts } from "./locale";
 
 const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
@@ -101,14 +101,11 @@ interface TextCommandRowProperties {
   selected: boolean;
   onSelect: () => void;
   rowRef: (row: HTMLTableRowElement | null) => void;
-  canManageContent: boolean;
   toggleBusy: boolean;
   onToggle: () => Promise<void>;
-  minimumBusy: boolean;
-  onMinimumChange: (minimumTier: TextCommandMinimumTier) => Promise<void>;
 }
 
-const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canManageContent, toggleBusy, onToggle, minimumBusy, onMinimumChange }: TextCommandRowProperties): ReactElement => {
+const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, toggleBusy, onToggle }: TextCommandRowProperties): ReactElement => {
   const labels = textCommandsTexts(language);
   return (
     <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
@@ -117,19 +114,7 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canMana
       <td className={`table__answer${initial.text.length === 0 && initial.variableAction !== null ? " table__answer--placeholder" : ""}`} title={initial.kind === "list" ? undefined : initial.text}>
         {initial.kind === "list" ? "—" : initial.text.length > 0 ? initial.text : initial.variableAction === null ? "—" : labels.actionResponse(initial.variableAction.name, initial.variableAction.operation, initial.variableAction.amount)}
       </td>
-      <td>
-        <div className="minimum-tier-select" onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
-          <Select
-            ariaLabel={`${labels.minimumTier}: !${initial.name}`}
-            value={initial.minimumTier}
-            disabled={!canManageContent || minimumBusy}
-            busy={minimumBusy}
-            {...(canManageContent ? {} : { title: labels.minimumTierLocked })}
-            options={TEXT_COMMAND_MINIMUM_TIERS.map((tier) => ({ value: tier, label: labels.tierLabels[tier] }))}
-            onChange={(value) => { if (value !== null) void onMinimumChange(value as TextCommandMinimumTier); }}
-          />
-        </div>
-      </td>
+      <td><Badge tone={initial.minimumTier === "everyone" ? "neutral" : "brand"}>{labels.tierLabels[initial.minimumTier]}</Badge></td>
       <td><div onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
         <Switch
           ariaLabel={`${labels.active}: !${initial.name} · ${initial.enabled ? labels.enabled : labels.disabled}`}
@@ -601,7 +586,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     </>}
   </dl>;
 
-  const deleteButton = command === null ? undefined : <Button icon="remove" iconOnly ariaLabel={labels.delete} title={labels.delete} danger="subtle" onClick={() => { setConfirmingDelete(true); }} />;
+  const deleteButton = command === null ? undefined : <Button icon="remove" danger="subtle" onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>;
   return <>
     <EditorShell
       className="command-editor-shell"
@@ -627,7 +612,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       savedLabel={labels.saved}
       pendingLabel={labels.pending}
       issueLabels={{ error: labels.issueError, warning: labels.issueWarning }}
-      {...(isCreate ? {} : { footer: deleteButton })}
+      {...(isCreate || deleteButton === undefined ? {} : { dangerTitle: dashboardCommonTexts().dangerZone, dangerContent: deleteButton })}
       onClose={onClose}
       closeLabel={labels.close}
     />
@@ -681,7 +666,6 @@ export const TextCommandsPanel = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
-  const [minimumBusyName, setMinimumBusyName] = useState<string | null>(null);
   const guardRef = useRef<((proceed: () => void, cancel?: () => void) => void) | null>(null);
   const guardSwitch = useCallback((proceed: () => void, cancel?: () => void): void => {
     const guard = guardRef.current;
@@ -748,12 +732,6 @@ export const TextCommandsPanel = ({
     catch { setError(labels.saveError); }
     finally { setToggleBusyName(null); }
   };
-  const changeMinimum = async (command: TextCommand, minimumTier: TextCommandMinimumTier): Promise<void> => {
-    setMinimumBusyName(command.name); setError(null);
-    try { await setTextCommandMinimumTier(channelId, command.name, command.revision, minimumTier); await refresh(); }
-    catch { setError(labels.saveError); }
-    finally { setMinimumBusyName(null); }
-  };
   const handleDeleted = async (): Promise<void> => {
     await refresh();
     setCreateOpen(false);
@@ -777,11 +755,8 @@ export const TextCommandsPanel = ({
       selected={selectedName === command.name}
       onSelect={() => { selectCommand(command.name); }}
       rowRef={rowRef(command.name)}
-      canManageContent={canManageContent}
       toggleBusy={toggleBusyName === command.name}
       onToggle={() => toggle(command)}
-      minimumBusy={minimumBusyName === command.name}
-      onMinimumChange={(tier) => changeMinimum(command, tier)}
     />)}</tbody></table></div> : null}
   </section>;
 

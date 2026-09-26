@@ -23,9 +23,9 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { Button, ConfirmDialog, EditorShell, Field, InspectorHeading, ListDetail, Select, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
+import { Badge, Button, ConfirmDialog, DangerSection, EditorShell, Field, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, PageHeader, Select, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
 import { MemberGrantEditor } from "./member-grant-editor";
-import { NavigationIcon, StateRow, type StateTone } from "./module-panels";
+import { StateRow, type StateTone } from "./module-panels";
 
 interface PlatformPageProperties {
   onAuthenticationRequired: () => void;
@@ -67,14 +67,12 @@ const connectionWord = (channel: PanelPlatformChannelOverview, compact = false):
 
 const MembersTable = ({
   members: members,
-  busyUserId,
-  onRoleChange: onRoleChange,
-  onRemove: onRemove,
+  selectedUserId,
+  onSelect: onSelect,
 }: {
   members: PanelMember[];
-  busyUserId: string | null;
-  onRoleChange: (member: PanelMember, role: "manager" | "operator") => void;
-  onRemove: (member: PanelMember) => void;
+  selectedUserId: string | null;
+  onSelect: (member: PanelMember) => void;
 }): ReactElement => {
   const texts = platformTexts();
   if (members.length === 0) return <p className="muted">{texts.noMembers}</p>;
@@ -85,47 +83,16 @@ const MembersTable = ({
           <tr>
             <th scope="col">{texts.login}</th>
             <th scope="col">{texts.role}</th>
-            <th scope="col" className="table__action">{texts.remove}</th>
           </tr>
         </thead>
         <tbody>
           {members.map((member) => (
-            <tr key={member.userId}>
+            <tr key={member.userId} tabIndex={0} aria-selected={selectedUserId === member.userId} onClick={() => { onSelect(member); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(member); } }}>
               <th scope="row">
                 <span>{memberName(member)}</span>
                 <span className="login-hint" title={texts.twitchId(member.userId)}>{member.login === null ? texts.member : "@" + member.login}</span>
               </th>
-              <td>
-                {member.role === "broadcaster" ? <span>{roleLabel(member.role)}</span> : (
-                  <Select
-                    ariaLabel={texts.role + ": " + memberName(member)}
-                    value={member.role}
-                    disabled={busyUserId === member.userId}
-                    onChange={(role) => { if (role !== null) onRoleChange(member, role as "manager" | "operator"); }}
-                    options={roleSelectOptions()}
-                  />
-                )}
-              </td>
-              <td className="table__action">
-                {member.role === "broadcaster" ? (
-                  <>
-                    <button
-                      className="button button--danger"
-                      type="button"
-                      disabled
-                      title={texts.removeBroadcasterHint}
-                      aria-describedby={"betreiber-entfernen-hinweis-" + member.userId}
-                    >
-                      {texts.remove}
-                    </button>
-                    <span id={"betreiber-entfernen-hinweis-" + member.userId} className="sr-only">{texts.removeBroadcasterHint}</span>
-                  </>
-                ) : (
-                  <button className="button button--danger" type="button" disabled={busyUserId === member.userId} onClick={() => { onRemove(member); }}>
-                    {texts.remove}
-                  </button>
-                )}
-              </td>
+              <td><Badge tone={member.role === "broadcaster" ? "brand" : "neutral"}>{roleLabel(member.role)}</Badge></td>
             </tr>
           ))}
         </tbody>
@@ -149,6 +116,7 @@ const ChannelInspector = ({
   const common = dashboardCommonTexts();
   const [members, setMembers] = useState<LoadState<PanelPlatformMembersResponse>>(() => emptyLoadState());
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<PanelMember | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [consentInProgress, setConsentInProgress] = useState(false);
@@ -208,6 +176,8 @@ const ChannelInspector = ({
     }
   };
 
+  const selectedMember = members.data?.members.find((member) => member.userId === selectedMemberId) ?? null;
+
   const removeMember = async (member: PanelMember): Promise<void> => {
     setBusyUserId(member.userId);
     setActionError(null);
@@ -242,20 +212,34 @@ const ChannelInspector = ({
         />
       </section>
       <InvitationLink channel={channel} />
-      <section className="config-section platform-inspector-section" aria-label={texts.members}>
-        <div className="section-heading"><h3>{texts.members}</h3></div>
+      <InspectorSection title={texts.members}>
         {members.status === "loading" && members.data === null ? <p className="loading-line">{texts.loadMembers}</p> : null}
         {members.error === null ? null : <p className="form-error" role="alert">{members.error}</p>}
         {members.data === null ? null : (
           <MembersTable
             members={members.data.members}
-            busyUserId={busyUserId}
-            onRoleChange={(member, role) => { void changeRole(member, role); }}
-            onRemove={(member) => { setPendingRemoval(member); }}
+            selectedUserId={selectedMemberId}
+            onSelect={(member) => { setSelectedMemberId(member.userId); }}
           />
         )}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
-      </section>
+      </InspectorSection>
+        {selectedMember === null ? null : <>
+          <InspectorSection title={roleLabel(selectedMember.role)}>
+            {selectedMember.role === "broadcaster" ? <p className="muted" id={`platform-remove-broadcaster-reason-${selectedMember.userId}`}>{texts.removeBroadcasterHint}</p> : <InspectorFieldRow label={texts.role}>
+              <Select ariaLabel={texts.role + ": " + memberName(selectedMember)} value={selectedMember.role}
+                disabled={busyUserId === selectedMember.userId}
+                onChange={(role) => { if (role !== null) void changeRole(selectedMember, role as "manager" | "operator"); }}
+                options={roleSelectOptions()} />
+            </InspectorFieldRow>}
+          </InspectorSection>
+          <DangerSection title={common.dangerZone}>
+            <Button danger="subtle" disabled={selectedMember.role === "broadcaster" || busyUserId === selectedMember.userId}
+              {...(selectedMember.role === "broadcaster" ? { title: texts.removeBroadcasterHint } : {})}
+              {...(selectedMember.role === "broadcaster" ? { "aria-describedby": `platform-remove-broadcaster-reason-${selectedMember.userId}` } : {})}
+              onClick={() => { setPendingRemoval(selectedMember); }}>{texts.remove}</Button>
+          </DangerSection>
+        </>}
       <section className="config-section platform-inspector-section" aria-label={texts.addMember}>
         <div className="section-heading"><h3>{texts.addMember}</h3></div>
         <MemberGrantEditor
@@ -543,15 +527,14 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
 
   return (
     <section className="module-stack" aria-label={texts.title}>
-      <header className="module-detail-heading">
-        <div className="module-detail-heading__icon" aria-hidden="true"><NavigationIcon kind="members" className="module-heading-glyph" /></div>
-        <div className="module-detail-heading__copy"><h1>{texts.title}</h1><p>{texts.subtitle(formatNumber(overview.data?.length ?? 0))}</p></div>
-      </header>
+      <PageHeader kind="platform" title={texts.title} subtitle={texts.subtitle(formatNumber(overview.data?.length ?? 0))} actions={
+        <Button ref={channelReleaseButton} variant="primary" icon="add" onClick={openChannelRelease}>{texts.releaseChannel}</Button>
+      } />
       <section className="config-section" aria-label={texts.channelOverview}>
         <ListDetail
           list={
             <div>
-              <InspectorHeading level="h2" title={texts.channelOverview} buttonRef={channelReleaseButton} action={{ kind: "add", label: texts.releaseChannel, onClick: openChannelRelease }} />
+              <InspectorHeading level="h2" title={texts.channelOverview} />
               {overview.status === "loading" && overview.data === null ? <p className="loading-line">{texts.load}</p> : null}
               {overview.error === null ? null : <p className="form-error" role="alert">{overview.error}</p>}
               {overview.data?.length === 0 ? <p className="muted">{texts.noChannels}</p> : null}

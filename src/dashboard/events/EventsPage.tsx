@@ -7,7 +7,7 @@ import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, ErrorPanel, Field, ListDetail, Popover, Select as UiSelect, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
+import { ChipGroup, EmptyState, ErrorPanel, Field, FilterBar, InspectorSection, ListDetail, Popover, Select as UiSelect, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import type { LoadState } from "../load-state";
 import {
   actorLabel,
@@ -99,8 +99,7 @@ const EventFilterBar = ({
   activeFilter.push(...selectedTones.map((tone) => tone === "info" ? texts.events.info : tone === "warning" ? texts.events.notice : texts.events.error));
   if (filters.person !== null) activeFilter.push(filters.person);
   const moduleSelectOptions: SelectOption[] = moduleOptions.map((module) => ({ value: module.id, label: moduleName(module.id) }));
-  return <div className="event-filter" aria-label={texts.events.filter}>
-    <div className="event-filter__controls">
+  return <FilterBar label={texts.events.filter} className="event-filter" summary={activeFilter.length === 0 ? undefined : <div className="form-actions"><p className="muted" aria-live="polite">{texts.events.activeFilters} {activeFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(emptyEventFilter); }}>{texts.events.resetFilters}</button></div>}>
       <ChipGroup
         className="event-filter__chips"
         ariaLabel={texts.events.origin}
@@ -154,14 +153,13 @@ const EventFilterBar = ({
       />
       <Field
         label={texts.events.person}
+        placeholder={texts.audit.personPlaceholder}
         icon="search"
         value={personDraft}
         onChange={setPersonDraft}
         onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
       />
-    </div>
-    {activeFilter.length === 0 ? null : <div className="form-actions"><p className="muted" aria-live="polite">{texts.events.activeFilters} {activeFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(emptyEventFilter); }}>{texts.events.resetFilters}</button></div>}
-  </div>;
+  </FilterBar>;
 };
 
 const EventFeedEnd = ({
@@ -285,12 +283,12 @@ export const EventsPage = ({
     : filters.tone === null ? [] : [filters.tone];
   return (
     <>
-      <ModuleHeading kind="events" title={texts.events.title} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texts.events.count} />} />
+      <ModuleHeading kind="events" title={texts.events.title} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texts.events.count} />} actions={<RealtimeFeedStatus status={realtime.status} />} />
       <ListDetail
         onCloseInspector={closeGroup}
         list={
           <section className="content-section" aria-label={texts.events.log}>
-            <div className="section-heading"><h2>{texts.events.log}</h2><RealtimeFeedStatus status={realtime.status} /></div>
+            <div className="section-heading"><h2>{texts.events.log}</h2></div>
             <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
             {realtime.pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
             {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texts.events.load}</p> : null}
@@ -380,14 +378,14 @@ export const EventsPage = ({
             closeLabel={dashboardCommonTexts().close}
             onClose={closeGroup}
           >
-            <dl className="properties">
+            <InspectorSection title={texts.events.operation}><dl className="properties">
               <div><dt>{texts.events.timestamp}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div>
               <div><dt>{texts.events.module}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div>
               <div><dt>{texts.events.trigger}</dt><dd>{triggerNames.join(", ")}</dd></div>
               {moderatorNames.length === 0 ? null : <div><dt>{texts.events.moderator}</dt><dd>{moderatorNames.join(", ")}</dd></div>}
               {affectedNames.length === 0 ? null : <div><dt>{texts.events.affectedPerson}</dt><dd>{affectedNames.join(", ")}</dd></div>}
-            </dl>
-            <div className="inspector-section__heading"><h3>{texts.events.history}</h3></div>
+            </dl></InspectorSection>
+            <InspectorSection title={texts.events.history}>
             <ol className="event-history">{selectedHistory.map((entry) => {
               return <li key={entry.eventId}>
                 <div className="event-history__heading">
@@ -401,6 +399,7 @@ export const EventsPage = ({
                 </details>
               </li>;
             })}</ol>
+            </InspectorSection>
           </SubInspector>
         )}
       />

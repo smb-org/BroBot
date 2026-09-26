@@ -70,7 +70,7 @@ export const NAV_PAGES: readonly NavPageDefinition[] = [
   {
     id: "overlays",
     group: "channel",
-    iconKind: "token",
+    iconKind: "overlays",
     route: channelRoute("overlays"),
     label: (texts) => texts.navigation.overlays,
     keywords: ["overlay", "obs", "link", "links", "token", "widget"],
@@ -94,7 +94,7 @@ export const NAV_PAGES: readonly NavPageDefinition[] = [
   {
     id: "platform",
     group: "platform",
-    iconKind: "members",
+    iconKind: "platform",
     route: () => ({ kind: "platform" }),
     label: () => platformTexts().navigation,
     keywords: ["operator", "betreiber", "admin", "platform", "plattform"],

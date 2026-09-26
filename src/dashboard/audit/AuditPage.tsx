@@ -4,20 +4,21 @@ import type { PanelAuditEntry, PanelAuditFilters, PanelAuditResponse } from "../
 import { AUDIT_AREAS } from "../../contracts/values";
 import { MODULES } from "../../modules/registry";
 import { auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
+import { moduleName } from "../module-labels";
 import { ModuleHeading } from "../module-panels";
 import { formatEventDetail } from "../events/model";
-import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, Field, ListDetail, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import type { LoadState } from "../load-state";
 import {
   auditActorLabel,
   auditAreaForAction,
-  auditAreaIcon,
   auditDayGroups,
   auditDiffRows,
   auditDiffValueText,
   auditFilterIsActive,
   auditRowLabel,
+  auditSentenceAction,
+  auditSubjectText,
   emptyAuditFilter,
   type AuditDiffRow,
 } from "./model";
@@ -53,8 +54,7 @@ const AuditFilterBar = ({
   const activeFilter: string[] = [];
   if (filters.area !== null) activeFilter.push(texts.audit.areaLabels[filters.area]);
   if (filters.person !== null) activeFilter.push(filters.person);
-  return <div className="event-filter" aria-label={texts.audit.filter}>
-    <div className="event-filter__controls">
+  return <FilterBar label={texts.audit.filter} className="event-filter audit-filter" summary={activeFilter.length === 0 ? undefined : <div className="form-actions"><p className="muted" aria-live="polite">{texts.audit.activeFilters} {activeFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(emptyAuditFilter); }}>{texts.audit.resetFilters}</button></div>}>
       <ChipGroup
         className="event-filter__chips"
         ariaLabel={texts.audit.area}
@@ -74,17 +74,59 @@ const AuditFilterBar = ({
         onChange={setPersonDraft}
         onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
       />
-    </div>
-    {activeFilter.length === 0 ? null : <div className="form-actions"><p className="muted" aria-live="polite">{texts.audit.activeFilters} {activeFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(emptyAuditFilter); }}>{texts.audit.resetFilters}</button></div>}
-  </div>;
+  </FilterBar>;
 };
 
-const AuditRowLabel = ({ entry }: { entry: PanelAuditEntry }): ReactElement => {
+interface AuditSentenceContent {
+  who: string;
+  action: string;
+  what: string | null;
+  fromLabel: string;
+  from: string | null;
+  to: string | null;
+}
+
+const auditSentenceContent = (entry: PanelAuditEntry): AuditSentenceContent => {
   const language = dashboardLanguage();
-  return <span className="event-label">
-    <Icon name={auditAreaIcon(auditAreaForAction(entry.action))} size={16} />
-    <span>{auditRowLabel(entry, language)}</span>
-  </span>;
+  const texts = dashboardTexts();
+  const rows = auditDiffRows(entry.before, entry.after);
+  const firstChange = rows.find((row) => row.kind === "changed") ?? rows.find((row) => row.kind === "added" || row.kind === "removed");
+  const createdName = rows.find((row) => row.key === "name" && row.kind === "added")?.newValue;
+  const createdObjectKind = entry.action.startsWith("channel.variable.") ? "variable"
+    : entry.action.startsWith("overlay.") ? "overlay"
+      : entry.action.startsWith("text_commands.command.") ? "command"
+        : entry.action.startsWith("member.") ? "member"
+          : entry.action.startsWith("module.") ? "module"
+            : entry.action.startsWith("channel.") ? "channel" : null;
+  const createdObject = (entry.action.endsWith(".created") || entry.action.endsWith(".added"))
+    && createdObjectKind !== null && typeof createdName === "string"
+    ? texts.audit.sentenceObject(createdObjectKind, createdName)
+    : null;
+  const isMemberRole = entry.action === "member.role_changed";
+  const subject = isMemberRole && entry.subjectUserId != null
+    ? auditActorLabel({ actorUserId: entry.subjectUserId, actorLogin: entry.subjectLogin ?? null, actorDisplayName: entry.subjectDisplayName ?? null })
+    : null;
+  const isModuleStatusAction = entry.action === "module.enabled" || entry.action === "module.disabled";
+  const moduleSubject = (entry.action.endsWith(".settings_changed") || isModuleStatusAction) && entry.moduleId !== null ? moduleName(entry.moduleId, language) : null;
+  const what = isModuleStatusAction
+    ? moduleSubject ?? auditSubjectText(entry, language)
+    : createdObject
+    ? createdObject
+    : firstChange === undefined
+    ? subject ?? (moduleSubject === null ? auditSubjectText(entry, language) : moduleSubject)
+    : isMemberRole ? subject
+      : entry.action.endsWith(".settings_changed") && moduleSubject !== null
+        ? texts.audit.sentenceFieldOfModule(auditFieldLabel(firstChange.key, language), moduleSubject)
+        : auditFieldLabel(firstChange.key, language);
+  const sentenceValue = (row: AuditDiffRow, value: unknown): string => {
+    const text = auditDiffValueText(value, { on: texts.audit.yes, off: texts.audit.no });
+    return row.key === "leadSeconds" && typeof value === "number" ? `${text} s` : text;
+  };
+  const from = createdObject !== null ? null : firstChange?.kind === "changed" ? sentenceValue(firstChange, firstChange.oldValue) : null;
+  const to = createdObject !== null ? null : firstChange?.kind === "changed" ? sentenceValue(firstChange, firstChange.newValue)
+    : firstChange?.kind === "added" ? sentenceValue(firstChange, firstChange.newValue)
+      : firstChange?.kind === "removed" ? sentenceValue(firstChange, firstChange.oldValue) : null;
+  return { who: auditActorLabel(entry), action: auditSentenceAction(entry.action, language), what, fromLabel: texts.audit.sentenceFrom, from, to };
 };
 
 /** Field label + boolean words for a diff row: the module's own settings catalogue when it's loaded and matches, the generic fallback otherwise. */
@@ -92,12 +134,13 @@ const diffFieldTexts = (
   row: AuditDiffRow,
   moduleCatalog: SettingsEditorCatalog | null,
   texts: ReturnType<typeof dashboardTexts>,
+  language: ReturnType<typeof dashboardLanguage>,
 ): { label: string; boolWords: { on: string; off: string } } => {
   if (row.fromSettings && moduleCatalog !== null) {
     const field = moduleCatalog.fields[row.key];
-    return { label: field?.label ?? row.key, boolWords: { on: moduleCatalog.enabledLabel, off: moduleCatalog.disabledLabel } };
+    return { label: field?.label ?? auditFieldLabel(row.key, language), boolWords: { on: moduleCatalog.enabledLabel, off: moduleCatalog.disabledLabel } };
   }
-  return { label: auditFieldLabel(row.key), boolWords: { on: texts.audit.yes, off: texts.audit.no } };
+  return { label: auditFieldLabel(row.key, language), boolWords: { on: texts.audit.yes, off: texts.audit.no } };
 };
 
 const AuditDiffList = ({ rows, moduleCatalog, texts }: {
@@ -108,7 +151,7 @@ const AuditDiffList = ({ rows, moduleCatalog, texts }: {
   if (rows.length === 0) return null;
   return <dl className="properties audit-diff">
     {rows.map((row) => {
-      const { label, boolWords } = diffFieldTexts(row, moduleCatalog, texts);
+      const { label, boolWords } = diffFieldTexts(row, moduleCatalog, texts, dashboardLanguage());
       const oldText = auditDiffValueText(row.oldValue, boolWords);
       const newText = auditDiffValueText(row.newValue, boolWords);
       return <div key={row.key} className="audit-diff__row" data-kind={row.kind}>
@@ -155,13 +198,14 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
   const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>();
   const selectedAudit = auditState.data?.entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
   const moduleCatalog = useModuleFieldCatalog(selectedAudit);
+  const selectedDiffRows = selectedAudit === null ? [] : auditDiffRows(selectedAudit.before, selectedAudit.after);
   const entries = auditState.data?.entries ?? [];
   const dayGroups = auditDayGroups(entries, formatDate);
   const filterActive = auditFilterIsActive(filters);
   return (
     <>
       <ModuleHeading
-        kind="system"
+        kind="audit"
         title={texts.audit.title}
         subtitle={auditState.data === null ? "" : <><span className="number">{formatNumber(auditState.data.entries.length)}</span> {texts.audit.entries}</>}
       />
@@ -182,23 +226,37 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
                 {dayGroups.map((day) => (
                   <section key={day.key} className="event-day">
                     <h3 className="event-day__heading">{day.label}</h3>
-                    <table className="table audit-table">
-                      <thead><tr><th scope="col">{texts.audit.time}</th><th scope="col">{texts.audit.action}</th><th scope="col">{texts.audit.who}</th></tr></thead>
-                      <tbody>{day.entries.map((entry) => (
-                        <tr
+                    <div className="audit-sentence-list">
+                      {day.entries.map((entry) => {
+                        const sentence = auditSentenceContent(entry);
+                        const area = texts.audit.areaLabels[auditAreaForAction(entry.action)];
+                        const time = formatClockTime(entry.createdAt);
+                        const accessibleName = [
+                          sentence.who,
+                          sentence.action,
+                          sentence.what,
+                          sentence.from === null ? null : `${sentence.fromLabel} ${sentence.from}`,
+                          sentence.to === null ? null : `→ ${sentence.to}`,
+                          area,
+                          time,
+                        ].filter((part): part is string => part !== null && part.length > 0).join(" ");
+                        return <button
                           key={entry.auditId}
+                          type="button"
+                          className="audit-sentence-row"
                           ref={auditRowRef(entry.auditId)}
-                          tabIndex={0}
-                          aria-selected={selectedAuditId === entry.auditId}
+                          aria-pressed={selectedAuditId === entry.auditId}
+                          aria-label={accessibleName}
                           onClick={() => { selectAudit(entry.auditId); }}
-                          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}
                         >
-                          <td className="mono"><time dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time></td>
-                          <th scope="row"><AuditRowLabel entry={entry} /></th>
-                          <td title={entry.actorUserId}>{auditActorLabel(entry)}</td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
+                          <span className="audit-sentence-row__sentence"><AuditSentence {...sentence} /></span>
+                          <span className="audit-sentence-row__meta">
+                            <Badge>{area}</Badge>
+                            <time className="mono" dateTime={entry.createdAt} title={entry.createdAt}>{time}</time>
+                          </span>
+                        </button>;
+                      })}
+                    </div>
                   </section>
                 ))}
               </div>
@@ -208,8 +266,12 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
         }
         inspector={selectedAudit === null ? null : (
           <SubInspector ariaLabel={texts.audit.changeData} title={auditRowLabel(selectedAudit, dashboardLanguage())} identifier={selectedAudit.auditId} closeLabel={dashboardCommonTexts().close} onClose={closeAudit}>
-            <dl className="properties"><div><dt>{texts.audit.who}</dt><dd title={selectedAudit.actorUserId}>{auditActorLabel(selectedAudit)}</dd></div></dl>
-            <AuditDiffList rows={auditDiffRows(selectedAudit.before, selectedAudit.after)} moduleCatalog={moduleCatalog} texts={texts} />
+            <InspectorSection title={texts.audit.who}>
+              <dl className="properties"><div><dt>{texts.audit.who}</dt><dd title={selectedAudit.actorUserId}>{auditActorLabel(selectedAudit)}</dd></div></dl>
+            </InspectorSection>
+            {selectedDiffRows.length === 0 ? null : <InspectorSection title={texts.audit.changesHeading}>
+              <AuditDiffList rows={selectedDiffRows} moduleCatalog={moduleCatalog} texts={texts} />
+            </InspectorSection>}
             <details>
               <summary>{texts.events.technicalDetails}</summary>
               <div className="inspector-columns">

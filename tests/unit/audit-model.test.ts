@@ -12,6 +12,7 @@ import {
   auditDiffValueText,
   auditFilterIsActive,
   auditRowLabel,
+  auditSentenceAction,
   auditSubjectText,
   emptyAuditFilter,
 } from "../../src/dashboard/audit/model";
@@ -60,6 +61,13 @@ describe("overlay-token audit labels", () => {
     expect(auditFieldLabel("expiresAt", "en")).toBe("Valid until");
     expect(auditFieldLabel("revocationReason", "en")).toBe("Revocation reason");
   });
+
+  it("humanizes unknown field keys in both dashboard languages", () => {
+    expect(auditFieldLabel("futureField_name", "de")).toBe("future field name");
+    expect(auditFieldLabel("futureField_name", "en")).toBe("future field name");
+    expect(auditFieldLabel("Name", "en")).toBe("name");
+    expect(auditFieldLabel("name", "en")).toBe("Object name");
+  });
 });
 
 describe("stored overlay audit labels", () => {
@@ -69,6 +77,15 @@ describe("stored overlay audit labels", () => {
     expect(auditRowLabel(entry, "en")).toBe("Overlay updated: Gameplay");
     expect(auditFieldLabel("elementCount", "de")).toBe("Elemente");
     expect(auditFieldLabel("elementCount", "en")).toBe("Elements");
+  });
+});
+
+describe("audit sentence action templates", () => {
+  it("maps action codes to concise bilingual sentence verbs", () => {
+    expect(auditSentenceAction("member.role_changed", "de")).toBe("änderte die Rolle von");
+    expect(auditSentenceAction("member.role_changed", "en")).toBe("changed the role of");
+    expect(auditSentenceAction("text_commands.command.updated", "de")).toBe("änderte");
+    expect(auditSentenceAction("text_commands.command.updated", "en")).toBe("updated");
   });
 });
 

@@ -244,7 +244,8 @@ const MemberInspector = ({
         issueLabels={{ error: common.error, warning: common.warning }}
         onClose={onClose}
         closeLabel={common.close}
-        footer={<span title={locked ?? undefined}><Button danger icon="memberRemove" disabled={locked !== null} onClick={() => { setRemoveConfirmOpen(true); }}>{texts.remove}</Button></span>}
+        dangerTitle={common.dangerZone}
+        dangerContent={<span title={locked ?? undefined}><Button danger="subtle" icon="memberRemove" disabled={locked !== null} onClick={() => { setRemoveConfirmOpen(true); }}>{texts.remove}</Button></span>}
       />
       <ConfirmDialog
         opened={removeConfirmOpen}
@@ -351,13 +352,12 @@ export const MembersPage = ({
 
   return (
     <>
-      <ModuleHeading kind="members" title={texts.title} subtitle={<ModuleCount count={members.length} label={texts.count} />} />
+      <ModuleHeading kind="members" title={texts.title} subtitle={<ModuleCount count={members.length} label={texts.count} />} actions={<span title={canManageMembers ? undefined : texts.managementLocked}>
+        <Button ref={grantButtonRef} variant="subtle" iconOnly icon="add" ariaLabel={texts.grantAccessTitle} disabled={!canManageMembers} onClick={openGrant} />
+      </span>} />
       <section className="content-section" aria-label={texts.membersWithAccess}>
         <div className="section-heading">
           <h2>{texts.membersWithAccess}</h2>
-          <span title={canManageMembers ? undefined : texts.managementLocked}>
-            <Button ref={grantButtonRef} variant="subtle" iconOnly icon="add" ariaLabel={texts.grantAccessTitle} disabled={!canManageMembers} onClick={openGrant} />
-          </span>
         </div>
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}

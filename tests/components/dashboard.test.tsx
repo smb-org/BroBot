@@ -962,7 +962,7 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(row);
 
     const inspector = await screen.findByRole("region", { name: "Detail" });
-    const inspectorHeading = within(inspector).getByRole("heading", { name: "Vorgang" });
+    const inspectorHeading = within(inspector).getAllByRole("heading", { name: "Vorgang" })[0];
     expect(inspectorHeading).toHaveAttribute("title", "trigger-1");
     expect(inspectorHeading).not.toHaveTextContent("trigger-1");
     // Event text and chip come before the internal code, both inside and outside the inspector.
@@ -1373,6 +1373,7 @@ describe("Dashboard skeleton", () => {
       actorDisplayName: "Alice",
       createdAt: "2026-09-18T04:00:00.000Z",
       action: "module.enabled",
+      moduleId: "ads",
       before: "{\"enabled\":false}",
       after: "{\"enabled\":true}",
     };
@@ -1383,6 +1384,7 @@ describe("Dashboard skeleton", () => {
       actorDisplayName: null,
       createdAt: "2026-09-18T03:00:00.000Z",
       action: "module.disabled",
+      moduleId: "ads",
       before: "{\"enabled\":true}",
       after: "{\"enabled\":false}",
     };
@@ -1397,14 +1399,13 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await screen.findByRole("columnheader", { name: "Zeit" })).toBeInTheDocument();
     expect(await screen.findByText("Alice")).toBeInTheDocument();
     expect(await screen.findByText("gelöscht")).toBeInTheDocument();
-    const row = screen.getByText("Modul aktiviert").closest("tr");
-    expect(row).not.toBeNull();
-    expect(row).toHaveAttribute("aria-selected", "false");
-    fireEvent.keyDown(row as HTMLElement, { key: "Enter" });
-    expect(row).toHaveAttribute("aria-selected", "true");
+    const row = screen.getByRole("button", { name: /Alice aktivierte Werbung/ });
+    expect(row.querySelector("time")).toBeInTheDocument();
+    expect(row).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(row);
+    expect(row).toHaveAttribute("aria-pressed", "true");
     const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
     // #181 item 2: the inspector shows the display name like the table, the
     // raw id only as a tooltip -- not "user-1" as visible text.
@@ -1418,11 +1419,10 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(within(inspector).getByText("Technische Details"));
     const rawBlocks = inspector.querySelectorAll("pre");
     expect(Array.from(rawBlocks).map((pre) => pre.textContent.trim())).toEqual(['{\n  "enabled": false\n}', '{\n  "enabled": true\n}']);
-    const secondRow = screen.getByText("Modul deaktiviert").closest("tr");
-    expect(secondRow).not.toBeNull();
-    fireEvent.keyDown(secondRow as HTMLElement, { key: " " });
-    expect(secondRow).toHaveAttribute("aria-selected", "true");
-    expect(row).toHaveAttribute("aria-selected", "false");
+    const secondRow = screen.getByRole("button", { name: /deaktivierte Werbung/ });
+    fireEvent.click(secondRow);
+    expect(secondRow).toHaveAttribute("aria-pressed", "true");
+    expect(row).toHaveAttribute("aria-pressed", "false");
   });
 
   it("labels a module.enabled entry's settings diff with the module's own field catalogue, not the raw key", async () => {
@@ -1452,7 +1452,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = await screen.findByText("Modul aktiviert: Werbung");
+    const row = await screen.findByRole("button", { name: /Alice aktivierte Werbung/ });
     fireEvent.click(row);
     const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
     expect(await within(inspector).findByText("Vorlaufzeit")).toBeInTheDocument();
@@ -3674,7 +3674,7 @@ describe("Dashboard skeleton", () => {
     });
   });
 
-  it("arranges the subscriptions list and its inspector as direct region children", async () => {
+  it("uses the shared list-detail grid for the subscriptions list and inspector", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const subscriptions = [{
       subscriptionType: "channel.chat.message",
@@ -3699,12 +3699,71 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     const row = (await screen.findByText("Chat-Nachrichten")).closest("tr");
-    expect(row).not.toBeNull();
-    fireEvent.click(row as HTMLElement);
+    if (!(row instanceof HTMLTableRowElement)) throw new Error("Subscription row is missing.");
+    fireEvent.click(row);
     const section = screen.getByRole("region", { name: "Abonnements" });
-    expect(section.children).toHaveLength(2);
-    expect(section.children[0]).toHaveClass("inspector-section__list");
-    expect(section.children[1]).toHaveClass("sub-inspector");
+    const layout = section.closest(".list-detail--open");
+    expect(layout).not.toBeNull();
+    expect(section.closest(".list-detail__list")).toBe(layout?.children[0]);
+    expect(layout?.querySelector(".list-detail__inspector > .sub-inspector")).toBeInTheDocument();
+  });
+
+  it("renders localized audit sentences with field values and named objects", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const entries = [
+      {
+        auditId: "audit-ads",
+        actorUserId: "manager-1",
+        actorLogin: "kanal_b",
+        actorDisplayName: "Kanal B",
+        actorKind: "member",
+        createdAt: "2026-09-18T04:00:00.000Z",
+        action: "ads.settings_changed",
+        moduleId: "ads",
+        before: JSON.stringify({ settings: JSON.stringify({ leadSeconds: 45 }) }),
+        after: JSON.stringify({ settings: JSON.stringify({ leadSeconds: 60 }) }),
+      },
+      {
+        auditId: "audit-variable",
+        actorUserId: "manager-1",
+        actorLogin: "kanal_b",
+        actorDisplayName: "Kanal B",
+        actorKind: "member",
+        createdAt: "2026-09-18T03:00:00.000Z",
+        action: "channel.variable.created",
+        moduleId: null,
+        before: "{}",
+        after: JSON.stringify({ name: "support_goal", value: 64 }),
+      },
+      {
+        auditId: "audit-overlay",
+        actorUserId: "user-1",
+        actorLogin: "esembe",
+        actorDisplayName: "Esembe",
+        actorKind: "member",
+        createdAt: "2026-09-18T02:00:00.000Z",
+        action: "overlay.created",
+        moduleId: null,
+        before: "{}",
+        after: JSON.stringify({ name: "Stream Studio", width: 1920, height: 1080 }),
+      },
+    ];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/audit-log")) return jsonResponse({ entries, nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/audit");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("button", { name: /Kanal B änderte die Vorlaufzeit bei Werbung von 45 s → 60 s/ })).toBeInTheDocument();
+    const variableRow = await screen.findByRole("button", { name: /Kanal B erstellte die Variable support_goal/ });
+    const overlayRow = await screen.findByRole("button", { name: /Esembe erstellte das Overlay Stream Studio/ });
+    expect(variableRow).not.toHaveTextContent("Name");
+    expect(overlayRow).not.toHaveTextContent("Name");
   });
 
   it("shows the audit inspector only once an entry is selected, alongside the list", async () => {
@@ -3716,6 +3775,7 @@ describe("Dashboard skeleton", () => {
       actorDisplayName: "Alice",
       createdAt: "2026-09-18T04:00:00.000Z",
       action: "module.enabled",
+      moduleId: "ads",
       before: "{}",
       after: "{}",
     };
@@ -3733,9 +3793,8 @@ describe("Dashboard skeleton", () => {
     const list = await screen.findByRole("region", { name: "Audit-Log" });
     expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
 
-    const row = (await screen.findByText("Modul aktiviert")).closest("tr");
-    expect(row).not.toBeNull();
-    fireEvent.click(row as HTMLElement);
+    const row = await screen.findByRole("button", { name: /Alice aktivierte Werbung/ });
+    fireEvent.click(row);
 
     expect(list).toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
@@ -3750,6 +3809,7 @@ describe("Dashboard skeleton", () => {
       actorDisplayName: "Alice",
       createdAt: "2026-09-18T04:00:00.000Z",
       action: "module.enabled",
+      moduleId: "ads",
       before: "{\"enabled\":false}",
       after: "{\"enabled\":true}",
     };
@@ -3770,9 +3830,8 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = (await screen.findByText("Modul aktiviert")).closest("tr");
-    expect(row).not.toBeNull();
-    fireEvent.click(row as HTMLElement);
+    const row = await screen.findByRole("button", { name: /Alice aktivierte Werbung/ });
+    fireEvent.click(row);
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("link", { name: "System" }));
     await screen.findByRole("heading", { name: "System", level: 1 });
@@ -3781,9 +3840,9 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(auditRequests).toBe(2));
     resolveReload?.(jsonResponse({ entries: [entry], nextCursor: null }));
 
-    const restoredRow = (await screen.findAllByRole("row", { name: /Modul aktiviert/ }))[0];
+    const restoredRow = (await screen.findAllByRole("button", { name: /Alice aktivierte Werbung/ }))[0];
     expect(restoredRow).toBeDefined();
-    expect(restoredRow).toHaveAttribute("aria-selected", "false");
+    expect(restoredRow).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
   });
 
@@ -3816,7 +3875,8 @@ describe("Dashboard skeleton", () => {
 
     const row = (await screen.findByText("Befehl !wiki ausgeführt")).closest("tr");
     expect(row).not.toBeNull();
-    fireEvent.click(row as HTMLElement);
+    if (!(row instanceof HTMLTableRowElement)) throw new Error("Event row is missing.");
+    fireEvent.click(row);
 
     expect(list).toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "Detail" })).toBeInTheDocument();
@@ -3855,7 +3915,8 @@ describe("Dashboard skeleton", () => {
 
     const row = (await screen.findByText("Befehl !wiki ausgeführt")).closest("tr");
     expect(row).not.toBeNull();
-    fireEvent.click(row as HTMLElement);
+    if (!(row instanceof HTMLTableRowElement)) throw new Error("Event row is missing.");
+    fireEvent.click(row);
     expect(await screen.findByRole("region", { name: "Detail" })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("link", { name: "Ereignisse" }));
     await waitFor(() => expect(eventRequests).toBe(2));
@@ -3953,6 +4014,7 @@ describe("Dashboard skeleton", () => {
       actorDisplayName: "Alice",
       createdAt: "2026-09-18T04:00:00.000Z",
       action: "module.enabled",
+      moduleId: "ads",
       before: "{}",
       after: "{}",
     };
@@ -3967,8 +4029,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = (await screen.findByText("Modul aktiviert")).closest("tr");
-    if (row === null) throw new Error("Audit-Zeile fehlt");
+    const row = await screen.findByRole("button", { name: /Alice aktivierte Werbung/ });
     row.focus();
     fireEvent.click(row);
     expect(row).toHaveFocus();

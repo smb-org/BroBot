@@ -55,16 +55,15 @@ describe("Channel variables page", () => {
     if (!(inspector instanceof HTMLElement)) throw new Error("Variable inspector is missing.");
     const controls = within(inspector);
     const resetSwitch = controls.getByRole("switch", { name: "Bei Streamstart auf null setzen" });
-    expect(resetSwitch.closest(".ui-switch-card")).toBeInTheDocument();
-    expect(resetSwitch.closest(".ui-switch")).toBeNull();
-    const resetCard = resetSwitch.closest(".ui-switch-card");
-    if (!(resetCard instanceof HTMLElement)) throw new Error("Reset switch card is missing.");
-    expect(within(resetCard).getByText("Wird zurückgesetzt, wenn der nächste Stream startet.")).toBeInTheDocument();
-    const permissionNote = inspector.querySelector(".switch-locked-reason");
+    const resetField = resetSwitch.closest(".ui-switch-field");
+    if (!(resetField instanceof HTMLElement)) throw new Error("Reset switch field is missing.");
+    expect(resetSwitch.closest(".ui-switch-card")).toBeNull();
+    expect(controls.getByRole("button", { name: "Bei Streamstart auf null setzen: Wird zurückgesetzt, wenn der nächste Stream startet." })).toHaveAttribute("title", "Wird zurückgesetzt, wenn der nächste Stream startet.");
+    const permissionNote = resetField.querySelector(".switch-locked-reason");
     if (!(permissionNote instanceof HTMLElement)) throw new Error("Reset switch permission note is missing.");
     expect(permissionNote).toHaveAttribute("role", "note");
     expect(permissionNote).toHaveTextContent(/Nur Broadcaster und Verwalter dürfen Variablen/u);
-    expect(resetCard).not.toContainElement(permissionNote);
+    expect(resetSwitch.getAttribute("aria-describedby")).toContain(permissionNote.id);
     expect(await controls.findByRole("button", { name: "+1" })).toBeInTheDocument();
     expect(controls.getByRole("button", { name: "−1" })).toBeInTheDocument();
     expect(controls.getByRole("spinbutton", { name: "Setzen auf" })).toBeInTheDocument();
@@ -99,6 +98,22 @@ describe("Channel variables page", () => {
     expect(onOpenOverlay).toHaveBeenCalledWith("overlay-a", "score");
     expect(requests.some(({ path, method }) => path.endsWith("/overlays/overlay-a") && method !== "GET")).toBe(false);
     expect(requests.some(({ path }) => path.endsWith("/overlays/overlay-a"))).toBe(false);
+  });
+
+  it("shows text command usages with one leading bang", async () => {
+    const usedVariable = { ...variable, usages: [{ moduleId: "text_commands", itemName: "!score", kind: "template" as const }] };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ variables: [usedVariable], count: 1, maximum: 25 }))));
+    const onOpenCommand = vi.fn();
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={onOpenCommand} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+
+    const usage = await screen.findByRole("button", { name: "!score" });
+    expect(usage).not.toHaveTextContent("!!score");
+    const usageRow = usage.closest(".channel-variable-usage-row");
+    expect(usageRow).toHaveTextContent("Vorlage");
+    expect(usageRow).toHaveTextContent("Textbefehle");
+    fireEvent.click(usage);
+    expect(onOpenCommand).toHaveBeenCalledWith("score");
   });
 
   it("keeps a new overlay local until its editor is saved", async () => {

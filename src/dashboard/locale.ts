@@ -24,6 +24,7 @@ export interface DashboardCommonTexts {
   /** `EditorShell.issueLabels` -- appended to a tab's accessible name. */
   error: string;
   warning: string;
+  dangerZone: string;
   /** `Switch.hint` on an immediate-action switch (2, "Sofort gegen gespeichert"). */
   immediate: string;
   roles: Record<ChannelRole, string>;
@@ -41,6 +42,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     saving: "Wird gespeichert …",
     error: "Fehler",
     warning: "Hinweis",
+    dangerZone: "Gefahrenzone",
     immediate: "wirkt sofort",
     roles: {
       broadcaster: "Broadcaster",
@@ -62,6 +64,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     saving: "Saving …",
     error: "Error",
     warning: "Notice",
+    dangerZone: "Danger zone",
     immediate: "takes effect immediately",
     roles: {
       broadcaster: "Broadcaster",
@@ -165,6 +168,11 @@ export interface ChannelVariablesTexts {
   descriptionHint: string;
   noDescription: string;
   value: string;
+  generalSection: string;
+  valueSection: string;
+  dangerSection: string;
+  currentValue: string;
+  deleteHint: string;
   setValue: string;
   valueHint: string;
   resetOnStreamStart: string;
@@ -173,6 +181,8 @@ export interface ChannelVariablesTexts {
   renameHint: string;
   usages: string;
   noUsages: string;
+  usageKindLabel: (kind: "template" | "action" | "display") => string;
+  usageModuleLabel: (moduleId: string) => string;
   usageLine: (moduleId: string, itemName: string, kind: "template" | "action" | "display") => string;
   set: string;
   increase: string;
@@ -215,11 +225,14 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     saveError: "Die Kanalvariable konnte nicht gespeichert werden.", deleteError: "Die Kanalvariable konnte nicht gelöscht werden.",
     name: "Name", nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; höchstens 32 Zeichen.", nameInvalid: "Nur Kleinbuchstaben, Zahlen und Unterstrich.",
     description: "Beschreibung", descriptionHint: "Erscheint in der Variablenauswahl. Höchstens 80 Zeichen.", noDescription: "Keine Beschreibung",
-    value: "Wert", setValue: "Setzen auf", valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.",
+    value: "Wert", generalSection: "Allgemein", valueSection: "Wert", dangerSection: "Gefahrenzone", currentValue: "Aktueller Wert", deleteHint: "Löscht die Variable und ihre Verwendungen.",
+    setValue: "Setzen auf", valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.",
     resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird zurückgesetzt, wenn der nächste Stream startet.",
     limitNote: (maximum) => `Bis zu ${String(maximum)} Variablen pro Kanal.`,
     renameHint: "Vorlagen und gespeicherte Overlay-Elemente werden angepasst.", usages: "Verwendet in", noUsages: "Noch nicht verwendet.",
-    usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "zählt eine Aktion" : kind === "display" ? "Overlay-Anzeige" : "Vorlage"}`,
+    usageKindLabel: (kind) => kind === "action" ? "Aktion" : kind === "display" ? "Anzeige" : "Vorlage",
+    usageModuleLabel: (moduleId) => moduleId === "text_commands" ? "Textbefehle" : moduleId === "overlays" ? "Overlays" : moduleId.replace(/[_-]+/gu, " "),
+    usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? `!${itemName.replace(/^!/u, "")}` : itemName} · ${kind === "action" ? "zählt eine Aktion" : kind === "display" ? "Overlay-Anzeige" : "Vorlage"}`,
     set: "Setzen", increase: "+1", decrease: "−1", increaseDraftValue: "Setzwert um eins erhöhen", decreaseDraftValue: "Setzwert um eins verringern", delete: "Variable löschen", deleteTitle: (name) => `Variable ${name} löschen?`,
     deleteDescription: (name, usages, overlayCount = 0) => overlayCount > 0
       ? `„${name}“ wird dauerhaft gelöscht. Wird in ${String(overlayCount)} Overlay-Element${overlayCount === 1 ? "" : "en"} angezeigt; diese zeigen danach nichts.${usages.length === 0 ? "" : ` Weitere Verwendungen: ${usages}`}`
@@ -242,11 +255,14 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     saveError: "The channel variable could not be saved.", deleteError: "The channel variable could not be deleted.",
     name: "Name", nameHint: "Lowercase letters, numbers, and underscores; up to 32 characters.", nameInvalid: "Use lowercase letters, numbers, and underscores only.",
     description: "Description", descriptionHint: "Shown in the variable picker. Up to 80 characters.", noDescription: "No description",
-    value: "Value", setValue: "Set to", valueHint: "Integer from −999,999,999 to 999,999,999.",
+    value: "Value", generalSection: "General", valueSection: "Value", dangerSection: "Danger zone", currentValue: "Current value", deleteHint: "Removes the variable and its references.",
+    setValue: "Set to", valueHint: "Integer from −999,999,999 to 999,999,999.",
     resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets when the next stream starts.",
     limitNote: (maximum) => `Up to ${String(maximum)} variables per channel.`,
     renameHint: "Templates and saved overlay elements are updated.", usages: "Used in", noUsages: "Not used yet.",
-    usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "changes a variable" : kind === "display" ? "overlay display" : "template"}`,
+    usageKindLabel: (kind) => kind === "action" ? "action" : kind === "display" ? "display" : "template",
+    usageModuleLabel: (moduleId) => moduleId === "text_commands" ? "Text commands" : moduleId === "overlays" ? "Overlays" : moduleId.replace(/[_-]+/gu, " "),
+    usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? `!${itemName.replace(/^!/u, "")}` : itemName} · ${kind === "action" ? "changes a variable" : kind === "display" ? "overlay display" : "template"}`,
     set: "Set", increase: "+1", decrease: "−1", increaseDraftValue: "Increase the value to set by one", decreaseDraftValue: "Decrease the value to set by one", delete: "Delete variable", deleteTitle: (name) => `Delete variable ${name}?`,
     deleteDescription: (name, usages, overlayCount = 0) => overlayCount > 0
       ? `“${name}” will be deleted permanently. It appears in ${String(overlayCount)} overlay element${overlayCount === 1 ? "" : "s"}; ${overlayCount === 1 ? "it" : "they"} will show nothing afterward.${usages.length === 0 ? "" : ` Other uses: ${usages}`}`
@@ -268,7 +284,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
 export const channelVariablesTexts = (language: DashboardLanguage = dashboardLanguage()): ChannelVariablesTexts => channelVariablesCatalog[language];
 
 export interface OverlaysTexts {
-  title: string; list: string; count: (count: number, maximum: number) => string; empty: string; loading: string;
+  title: string; list: string; details: string; count: (count: number, maximum: number) => string; empty: string; loading: string;
   loadError: string; actionError: string; managementLocked: string; create: string; createTitle: string;
   name: string; width: string; height: string; standardSize: string; compactSize: string; customSize: string;
   createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; lastUsedNever: string; never: string; statusLabel: string;
@@ -334,6 +350,7 @@ export interface OverlaysTexts {
 const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
   de: {
     title: "Overlays", list: "Overlays", count: (count, maximum) => `${String(count)} von ${String(maximum)}`,
+    details: "Übersicht",
     empty: "Noch keine Overlays angelegt.", loading: "Overlays werden geladen …", loadError: "Overlays konnten nicht geladen werden.",
     actionError: "Die Änderung konnte nicht durchgeführt werden.", managementLocked: "Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.",
     create: "Neues Overlay", createTitle: "Neues Overlay anlegen", name: "Name", width: "Breite", height: "Höhe",
@@ -432,6 +449,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
   },
   en: {
     title: "Overlays", list: "Overlays", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
+    details: "Overview",
     empty: "No overlays yet.", loading: "Loading overlays …", loadError: "Overlays could not be loaded.",
     actionError: "The change could not be completed.", managementLocked: "Only broadcasters and managers may change overlays or accesses.",
     create: "New overlay", createTitle: "Create an overlay", name: "Name", width: "Width", height: "Height",
@@ -690,8 +708,6 @@ export interface DashboardTexts {
   audit: {
     title: string;
     entries: string;
-    time: string;
-    action: string;
     who: string;
     load: string;
     empty: string;
@@ -705,6 +721,20 @@ export interface DashboardTexts {
     newValue: string;
     removedValue: string;
     changedTruncated: string;
+    changesHeading: string;
+    sentenceFrom: string;
+    sentenceFieldOfModule: (field: string, module: string) => string;
+    sentenceObject: (kind: "variable" | "overlay" | "command" | "member" | "module" | "channel", name: string) => string;
+    sentenceActions: {
+      roleChanged: string;
+      changed: string;
+      created: string;
+      updated: string;
+      removed: string;
+      enabled: string;
+      disabled: string;
+      issued: string;
+    };
     filter: string;
     person: string;
     personHint: string;
@@ -990,11 +1020,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       twitchMessage: "Twitch-Meldung", httpStatus: "HTTP-Status", missingBotPermissions: "Fehlende Bot-Berechtigungen", missingScopes: "Fehlende Scopes",
     },
     audit: {
-      title: "Audit-Log", entries: "Einträge", time: "Zeit", action: "Aktion", who: "Wer",
+      title: "Audit-Log", entries: "Einträge", who: "Wer",
       load: "Audit-Log wird geladen …", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
       before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loadingOlderEntries: "Ältere Einträge werden geladen …",
       yes: "Ja", no: "Nein", newValue: "neu", removedValue: "entfernt",
-      changedTruncated: "geändert (Text länger als die Vorschau)",
+      changedTruncated: "geändert (Text länger als die Vorschau)", changesHeading: "Änderungen", sentenceFrom: "von",
+      sentenceFieldOfModule: (field, module) => `die ${field} bei ${module}`,
+      sentenceObject: (kind, name) => `${kind === "variable" ? "die Variable" : kind === "overlay" ? "das Overlay" : kind === "command" ? "den Befehl" : kind === "member" ? "das Mitglied" : kind === "module" ? "das Modul" : "den Kanal"} ${name}`,
+      sentenceActions: { roleChanged: "änderte die Rolle von", changed: "änderte", created: "erstellte", updated: "änderte", removed: "entfernte", enabled: "aktivierte", disabled: "deaktivierte", issued: "gab frei" },
       filter: "Filter", person: "Person",
       personHint: "Wer die Aktion ausgeführt hat, nicht wer betroffen war.",
       personPlaceholder: "Login oder ID, z. B. beispielnutzer",
@@ -1201,11 +1234,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       twitchMessage: "Twitch message", httpStatus: "HTTP status", missingBotPermissions: "Missing bot permissions", missingScopes: "Missing scopes",
     },
     audit: {
-      title: "Audit log", entries: "entries", time: "Time", action: "Action", who: "Who",
+      title: "Audit log", entries: "entries", who: "Who",
       load: "Loading audit log …", empty: "No audit entries saved yet.", changeData: "Change data",
       before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
       yes: "Yes", no: "No", newValue: "new", removedValue: "removed",
-      changedTruncated: "changed (text longer than preview)",
+      changedTruncated: "changed (text longer than preview)", changesHeading: "Changes", sentenceFrom: "from",
+      sentenceFieldOfModule: (field, module) => `the ${field} of ${module}`,
+      sentenceObject: (kind, name) => `the ${kind} ${name}`,
+      sentenceActions: { roleChanged: "changed the role of", changed: "changed", created: "created", updated: "updated", removed: "removed", enabled: "enabled", disabled: "disabled", issued: "issued" },
       filter: "Filters", person: "Person",
       personHint: "Who performed the action, not who was affected by it.",
       personPlaceholder: "Login or ID, e.g. example_user",
@@ -2124,25 +2160,22 @@ const memberAsWords: LocaleCatalog<string> = { de: "als", en: "as" };
 export const memberAsWord = (language: DashboardLanguage = dashboardLanguage()): string => memberAsWords[language];
 
 /**
- * Fallback labels for the handful of common audit diff field keys that
- * aren't a module's own settings (member role, channel consent, overlay
- * token lifecycle, ...). Anything not listed here falls back to its raw
- * key, per #181's explicit allowance -- this stays a short, curated list,
- * not an attempt at completeness.
+ * Fallback labels for common audit diff fields. Unknown keys are converted
+ * to readable words so new audit fields never expose storage names.
  */
 const auditFieldLabels: LocaleCatalog<Record<string, string>> = {
   de: {
     role: "Rolle", enabled: "Aktiv", fullConsent: "Vollzustimmung", revocationReason: "Widerrufsgrund",
     expiresAt: "Gültig bis", createdAt: "Erstellt am", revokedAt: "Widerrufen am", length: "Länge (Sekunden)", retryAfter: "Erneut möglich ab",
-    clipId: "Clip-ID", tokenId: "Token-ID", login: "Login", displayName: "Anzeigename",
-    name: "Name", value: "Wert", description: "Beschreibung", overlayId: "Overlay-ID",
+    clipId: "Clip-ID", tokenId: "Token-ID", login: "Login", displayName: "Anzeigename", leadSeconds: "Vorlaufzeit",
+    name: "Objektname", value: "Wert", description: "Beschreibung", overlayId: "Overlay-ID",
     width: "Breite", height: "Höhe", revision: "Revision", elementCount: "Elemente",
   },
   en: {
     role: "Role", enabled: "Enabled", fullConsent: "Full consent", revocationReason: "Revocation reason",
     expiresAt: "Valid until", createdAt: "Created at", revokedAt: "Revoked at", length: "Length (seconds)", retryAfter: "Retry after",
-    clipId: "Clip ID", tokenId: "Token ID", login: "Login", displayName: "Display name",
-    name: "Name", value: "Value", description: "Description", overlayId: "Overlay ID",
+    clipId: "Clip ID", tokenId: "Token ID", login: "Login", displayName: "Display name", leadSeconds: "lead time",
+    name: "Object name", value: "Value", description: "Description", overlayId: "Overlay ID",
     width: "Width", height: "Height", revision: "Revision", elementCount: "Elements",
   },
 };
@@ -2150,7 +2183,17 @@ const auditFieldLabels: LocaleCatalog<Record<string, string>> = {
 export const auditFieldLabel = (
   key: string,
   language: DashboardLanguage = dashboardLanguage(),
-): string => catalogString(auditFieldLabels[language], key) ?? key;
+): string => {
+  const knownLabel = catalogString(auditFieldLabels[language], key);
+  if (knownLabel !== undefined) return knownLabel;
+  const humanized = key
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .replace(/[_-]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLocaleLowerCase(language);
+  return humanized.length > 0 ? humanized : language === "de" ? "unbekanntes Feld" : "unknown field";
+};
 
 /**
  * DE/EN text for every `ApiErrorCode` the worker (or the dashboard's own
@@ -2423,7 +2466,7 @@ export const maintenanceReasonText = (
   return catalogString(catalog, code) ?? code;
 };
 
-export const dashboardTexts = (): DashboardTexts => dashboardTextsCatalog[dashboardLanguage()];
+export const dashboardTexts = (language: DashboardLanguage = dashboardLanguage()): DashboardTexts => dashboardTextsCatalog[language];
 
 export const immediateActionUnavailableReasonText = (
   reason: ImmediateActionUnavailableReason,
