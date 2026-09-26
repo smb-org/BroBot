@@ -323,7 +323,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
           </div>
           <div className="text-library__filters">
             <Field label={labels.search} value={search} onChange={setSearch} />
-            <Select label={labels.categoryFilter} value={categoryFilter} onChange={(value) => setCategoryFilter(value ?? "")} options={[{ value: "", label: labels.filterAny }, ...categories]} />
+            <Select label={labels.categoryFilter} value={categoryFilter} onChange={(value) => setCategoryFilter(value ?? "")} options={[{ value: "", label: labels.allCategories }, ...categories]} />
             <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter} messages={{ ...labels.gamePicker, label: labels.gameFilter }} />
           </div>
           <p className="muted">{labels.blockLimit(TEXT_BLOCK_MAXIMUMS.blocksPerChannel)}</p>
@@ -336,7 +336,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                   <li key={block.name}>
                     <button type="button" className="text-library__row" aria-current={selectedName === block.name ? "true" : undefined} onClick={() => selectBlock(block)}>
                       <span className="text-library__row-main"><strong className="mono">{`{${block.name}}`}</strong><span className="text-library__row-meta">{category === undefined ? block.categoryId : categoryLabel(category, labels)} · {labels.variantsCount(block.variants.length)}</span></span>
-                      <span className="text-library__usage-count number" aria-label={labels.uses}>{usages.length}</span>
+                      <span className="text-library__usage-count" aria-label={labels.usesCount(usages.length)}>{labels.usesCount(usages.length)}</span>
                     </button>
                   </li>
                 );

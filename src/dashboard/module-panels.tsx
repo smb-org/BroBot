@@ -630,6 +630,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
   const registered = MODULES.find((candidate) => candidate.id === moduleId);
+  const navigationPage = registered?.navigationEntries?.find((entry) => entry.showMainSwitch === false);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
   const mandatory = moduleState?.mandatory === true || moduleId === "channel_events";
@@ -657,13 +658,13 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
     <>
       <section className="module-detail" aria-label={details.name}>
         <header className="module-detail__header">
-          <div className="module-detail__icon" aria-hidden="true">{iconFor(moduleId)}</div>
+          <div className="module-detail__icon" aria-hidden="true">{navigationPage === undefined ? iconFor(moduleId) : <NavigationIcon kind={navigationPage.iconKind} className="module-glyph" />}</div>
           <div>
             <h1 title={moduleId}>{details.name}</h1>
             <p className="module-detail__description">{details.description}</p>
           </div>
         </header>
-        <section className="module-detail__switch inspector-section--switch" aria-label={labels.status}>
+        {navigationPage?.showMainSwitch === false ? null : <section className="module-detail__switch inspector-section--switch" aria-label={labels.status}>
           <div>
             <strong>{labels.mainSwitch}</strong>
             {mandatory
@@ -672,7 +673,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           </div>
           {mandatory ? null : <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />}
           {disabledReason === null || mandatory ? null : <p className="lock-reason lock-reason--with-icon"><Icon name="lock" size={16} />{disabledReason}</p>}
-        </section>
+        </section>}
         {missingScopes.length === 0 ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>
           <div className="section-heading"><h2>{texts.module.scopeList}</h2></div>
           <div className="state-list module-scope-list">

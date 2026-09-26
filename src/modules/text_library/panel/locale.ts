@@ -8,6 +8,7 @@ export interface TextLibraryTexts {
   search: string;
   categoryFilter: string;
   gameFilter: string;
+  allCategories: string;
   addBlock: string;
   empty: string;
   loading: string;
@@ -81,6 +82,7 @@ export interface TextLibraryTexts {
   depth: (path: readonly string[]) => string;
   saveError: string;
   uses: string;
+  usesCount: (count: number) => string;
   noUsages: string;
   usageKind: Record<TextBlockUsage["kind"], string>;
   roleConditionHint: string;
@@ -101,6 +103,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     library: "Textbausteine",
     search: "Textbausteine suchen",
     categoryFilter: "Kategorie",
+    allCategories: "Alle Kategorien",
     gameFilter: "Spiel",
     addBlock: "Textbaustein anlegen",
     empty: "Noch keine Textbausteine gefunden.",
@@ -175,12 +178,13 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     depth: (path) => `Die Einbettung überschreitet die maximale Tiefe von 3: ${path.join(" → ")}.`,
     saveError: "Der Textbaustein konnte nicht gespeichert werden.",
     uses: "Verwendet in",
+    usesCount: (count) => `${String(count)} ${count === 1 ? "Verwendung" : "Verwendungen"}`,
     noUsages: "Noch keine Verwendungen.",
     usageKind: { command: "Befehl", timer: "Timer", overlay: "Overlay", event: "Ereignis" },
     roleConditionHint: "Rollenbedingungen greifen nur in Chatbefehlen; in Ereignissen, Overlays und Timern sind sie immer falsch.",
     argsContextWarning: "{args} und {convert} enthalten Eingaben aus einem Befehl und zeigen außerhalb von Befehlen den Nutzungs- oder Fehlertext.",
     filterAny: "Alle Spiele",
-    variantsCount: (count) => `${String(count)} Varianten`,
+    variantsCount: (count) => `${String(count)} ${count === 1 ? "Variante" : "Varianten"}`,
     textsCount: (count) => `${String(count)} Texte`,
     gamePicker: {
       label: "Twitch-Spiele",
@@ -216,6 +220,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     library: "Text blocks",
     search: "Search text blocks",
     categoryFilter: "Category",
+    allCategories: "All categories",
     gameFilter: "Game",
     addBlock: "Add text block",
     empty: "No text blocks found.",
@@ -290,12 +295,13 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     depth: (path) => `Nesting exceeds the maximum depth of 3: ${path.join(" → ")}.`,
     saveError: "The text block could not be saved.",
     uses: "Used in",
+    usesCount: (count) => `${String(count)} ${count === 1 ? "use" : "uses"}`,
     noUsages: "No usages yet.",
     usageKind: { command: "Command", timer: "Timer", overlay: "Overlay", event: "Event" },
     roleConditionHint: "Role conditions only match in chat commands; they are always false in events, overlays, and timers.",
     argsContextWarning: "{args} and {convert} contain command input and show usage or error text outside command contexts.",
     filterAny: "All games",
-    variantsCount: (count) => `${String(count)} variants`,
+    variantsCount: (count) => `${String(count)} ${count === 1 ? "variant" : "variants"}`,
     textsCount: (count) => `${String(count)} texts`,
     gamePicker: {
       label: "Twitch games",

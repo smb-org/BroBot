@@ -69,8 +69,11 @@ Breite nicht. Eine Liste fehlender Berechtigungen ist kein Inspektor und trägt
 ### Generische Erweiterungspunkte
 
 Module dürfen über `navigationEntries` lokalisierte Einträge für Kanalnavigation
-und Spotlight bereitstellen. Der Host baut daraus Modulrouten; Namen, Texte,
-Symbole und Suchbegriffe bleiben beim Modul.
+und Spotlight bereitstellen. `group: "channel"` fügt einen Eintrag neben den
+Kanalbereichen ein; ohne Angabe erscheint er unter „Module“.
+`showMainSwitch: false` blendet bei dauerhaft verfügbaren Modulansichten den
+nicht bedienbaren Hauptschalter aus. Der Host baut daraus Modulrouten; Namen,
+Texte, Symbole und Suchbegriffe bleiben beim Modul.
 Für nicht abschaltbare Module kann `mandatoryReason` den Grund je Sprache
 angeben.
 

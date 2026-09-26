@@ -254,6 +254,10 @@ export interface ModuleNavigationEntry {
   id: string;
   label: Readonly<Record<ModuleLanguage, string>>;
   description?: Readonly<Record<ModuleLanguage, string>>;
+  /** Channel pages join the shared Channel group; omitted entries stay under Modules. */
+  group?: "channel" | "modules";
+  /** Hide the module's main switch when this page is permanently available. */
+  showMainSwitch?: boolean;
   iconKind: string;
   keywords?: readonly string[];
 }

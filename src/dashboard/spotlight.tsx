@@ -10,7 +10,7 @@ import { evaluateImmediateActionAvailability } from "./immediate-action-availabi
 import { channelVariablesTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
 import { ModuleIcon, NavigationIcon } from "./module-panels";
-import { navPageGroupHeading, registeredModuleNavEntries, visibleNavPages } from "./nav-pages";
+import { dashboardNavEntries, navPageGroupHeading, registeredModuleNavEntries } from "./nav-pages";
 import { dashboardRouteRequiresBot, type DashboardRoute } from "./router";
 import { Spotlight, type SpotlightItem } from "./ui";
 
@@ -91,7 +91,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
     const declarations = registeredModuleNavEntries(MODULES, channelId, dashboardLanguage());
     return MODULES.flatMap((module) => {
       const entries = declarations.filter((entry) => entry.moduleId === module.id);
-      if (entries.length > 0) return entries.map((entry) => {
+      if (entries.length > 0) return entries.filter((entry) => entry.group === "modules").map((entry) => {
         const description = entry.description ?? moduleDescription(module.id) ?? "";
         const accessibleDescription = module.mandatory === true
           ? `${description.length === 0 ? "" : `${description} `}${module.mandatoryReason?.[dashboardLanguage()] ?? moduleWorkspaceTexts().mandatoryReason}`
@@ -143,22 +143,34 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
     };
   }), [botSignedIn, commands, channelId, onNavigate, onOpenCommand, texts.blocking.botTitle, texts.spotlight]);
 
-  // Every sidebar page, indexed from the same `NAV_PAGES` list `PanelSidebar`
-  // renders from (#208) -- a page added there appears here too, and the
-  // platform page is gated by the same account-wide flag the sidebar uses.
-  const pageItems = useMemo<SpotlightItem[]>(() => visibleNavPages({ isPlatformAdmin }).map((page) => {
-    const pageRoute = page.route(channelId);
+  // Every sidebar page comes from the shared page list, including enabled
+  // module Channel entries; platform visibility uses the sidebar's same flag.
+  const pageItems = useMemo<SpotlightItem[]>(() => dashboardNavEntries(
+    { isPlatformAdmin },
+    MODULES,
+    channelId,
+    dashboardLanguage(),
+    texts,
+    modules,
+  ).map((page) => {
+    const pageRoute = page.route;
     const blockedByBot = botBlocksRoute(pageRoute, botSignedIn);
+    const module = page.moduleId === undefined ? undefined : MODULES.find((candidate) => candidate.id === page.moduleId);
+    const description = page.description ?? (page.moduleId === undefined ? "" : moduleDescription(page.moduleId) ?? "");
+    const accessibleDescription = module?.mandatory === true
+      ? `${description.length === 0 ? "" : `${description} `}${module.mandatoryReason?.[dashboardLanguage()] ?? moduleWorkspaceTexts().mandatoryReason}`
+      : description;
     return {
       id: `page:${page.id}`,
-      label: page.label(texts),
+      label: page.label,
       icon: <NavigationIcon kind={page.iconKind} className="spotlight-module-icon" />,
+      ...(accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
       group: navPageGroupHeading(page.group, texts),
       keywords: [...page.keywords],
       ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
       onTrigger: () => { onNavigate(pageRoute); },
     };
-  }), [botSignedIn, channelId, isPlatformAdmin, onNavigate, texts]);
+  }), [botSignedIn, channelId, isPlatformAdmin, modules, onNavigate, texts]);
 
   const variableItems = useMemo<SpotlightItem[]>(() => variables.map((variable) => ({
     id: `variable:${variable.name}`,

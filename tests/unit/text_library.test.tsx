@@ -18,6 +18,7 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { firstMatchingTextBlockVariant, textBlockConditionsMatch } from "../../src/modules/text_library/domain";
 import TextLibraryPanel from "../../src/modules/text_library/panel/index";
+import { textLibraryTexts } from "../../src/modules/text_library/panel/locale";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -45,6 +46,22 @@ describe("text library", () => {
     await insertChannel(database, CHANNEL_ID);
     repository = createTextBlockRepository(database as unknown as D1Database, authorize);
     service = createTextLibraryService(repository);
+  });
+
+  it("declares a bilingual Channel page without an always-active switch", () => {
+    expect(textLibraryModule.navigationEntries?.[0]).toMatchObject({
+      id: "texts",
+      group: "channel",
+      showMainSwitch: false,
+      iconKind: "texts",
+      label: { de: "Texte", en: "Texts" },
+    });
+    expect(textLibraryTexts("de").allCategories).toBe("Alle Kategorien");
+    expect(textLibraryTexts("en").allCategories).toBe("All categories");
+    expect(textLibraryTexts("de").variantsCount(1)).toBe("1 Variante");
+    expect(textLibraryTexts("en").variantsCount(1)).toBe("1 variant");
+    expect(textLibraryTexts("de").usesCount(1)).toBe("1 Verwendung");
+    expect(textLibraryTexts("en").usesCount(2)).toBe("2 uses");
   });
 
   afterEach(() => {
@@ -652,6 +669,10 @@ describe("text library", () => {
 
     render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage={false} /></MantineProvider>);
     expect(await screen.findByRole("heading", { name: "Text blocks" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Category" })).toHaveValue("All categories");
+    const welcomeRow = screen.getByRole("button", { name: /\{welcome\}/u });
+    expect(welcomeRow).toHaveTextContent("1 variant");
+    expect(welcomeRow).toHaveTextContent("0 uses");
     fireEvent.click(screen.getByRole("button", { name: /\{welcome\}/u }));
     expect(screen.getAllByRole("note")[0]).toHaveTextContent("Only broadcasters and managers can change text blocks and categories.");
     expect(document.querySelector(".text-library__read-only-properties")).toHaveTextContent("Hello");

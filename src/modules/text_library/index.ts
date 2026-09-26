@@ -26,6 +26,8 @@ export const textLibraryModule: BotModule<typeof settingsSchema> = {
     id: "texts",
     label: { de: textLibraryModuleCatalog.de.label, en: textLibraryModuleCatalog.en.label },
     description: { de: textLibraryModuleCatalog.de.description, en: textLibraryModuleCatalog.en.description },
+    group: "channel",
+    showMainSwitch: false,
     iconKind: "texts",
     keywords: ["text", "texts", "texte", "textbausteine", "library", "bibliothek"],
   }],
