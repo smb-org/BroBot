@@ -23,7 +23,11 @@ export interface TemplateResolverSources {
   userCreatedAt: (userId: string) => Promise<string | null>;
   channelLanguage: () => Promise<ModuleLanguage>;
   readChannelVariables: (names: readonly string[]) => Promise<Readonly<Record<string, number>>>;
-  expandModuleTemplateVariables?: (text: string, knownVariables: ReadonlySet<string>) => Promise<ModuleTemplateExpansionResult>;
+  expandModuleTemplateVariables?: (
+    text: string,
+    knownVariables: ReadonlySet<string>,
+    resolveTemplateVariables: (text: string) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>,
+  ) => Promise<ModuleTemplateExpansionResult>;
   now?: () => number;
   random?: (maximumExclusive: number) => number;
 }
@@ -112,9 +116,28 @@ export const createTemplateRenderer = (
       .filter((variable) => variable.unavailableContextText !== undefined)
       .map((variable) => variable.name),
   ]);
-  const expanded: ModuleTemplateExpansionResult = sources.expandModuleTemplateVariables === undefined
-    ? { text, used: false }
-    : await sources.expandModuleTemplateVariables(text, moduleExpansionVariableNames);
+  let expanded: ModuleTemplateExpansionResult = { text, used: false };
+  if (sources.expandModuleTemplateVariables !== undefined) {
+    const { expandModuleTemplateVariables: _expandModuleTemplateVariables, ...sourcesWithoutExpansion } = sources;
+    void _expandModuleTemplateVariables;
+    const resolveTemplateVariables = async (fragment: string): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }> =>
+      createTemplateRenderer(event, context, moduleVariables, sourcesWithoutExpansion)(fragment, moduleValues, changed);
+    expanded = await sources.expandModuleTemplateVariables(text, moduleExpansionVariableNames, resolveTemplateVariables);
+  }
+  if (expanded.used && expanded.variablesResolved === true) {
+    const outputLimit = expanded.outputLimit ?? 500;
+    const truncated = expanded.complete === false || expanded.text.length > outputLimit;
+    const limitedText = truncated
+      ? `${expanded.text.slice(0, Math.max(0, outputLimit - 1))}…`
+      : expanded.text;
+    return {
+      text: limitedText,
+      diagnostics: [
+        ...(expanded.diagnostics ?? []),
+        ...(truncated ? [{ code: "template_truncated", detail: { current: expanded.text.length } } satisfies ModuleDiagnostic] : []),
+      ],
+    };
+  }
   const resolvedSource = expanded.text;
   const templateSource = moduleValues.legacyFallback === "true"
     ? [resolvedSource, moduleValues.offlineText, moduleValues.notFollowingText, moduleValues.unavailableText]

@@ -1,4 +1,4 @@
-import type { ModuleChatStatus, ModuleStreamState, TemplateContext } from "../../contract";
+import type { ModuleChatStatus, ModuleDiagnostic, ModuleStreamState, TemplateContext } from "../../contract";
 import type { TextBlock, TextBlockVariant, TwitchGame } from "../contracts";
 import { blockReferencesInText, firstMatchingTextBlockVariant, textBlockAppliesToGame, type TextBlockState } from "../domain";
 
@@ -20,6 +20,7 @@ export interface TextBlockExpansionContext {
   chatStatus: readonly ModuleChatStatus[] | null;
   streamState: () => Promise<ModuleStreamState>;
   currentGame: () => Promise<TwitchGame | null>;
+  resolveTemplateVariables?: (text: string) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
   now: number;
 }
 
@@ -27,6 +28,9 @@ export interface TextBlockExpansion {
   text: string;
   used: boolean;
   outputLimit?: number;
+  complete: boolean;
+  variablesResolved: boolean;
+  diagnostics: readonly ModuleDiagnostic[];
 }
 
 const parseJson = <T,>(value: string, fallback: T): T => {
@@ -54,6 +58,7 @@ const variantMap = (rows: readonly VariantRow[]): Map<string, TextBlockVariant[]
 };
 
 const EXPANSION_BUDGET = 501;
+const MAX_EXPANSION_STEPS = 10_000;
 
 export const createTextBlockTemplateExpander = (
   db: D1Database,
@@ -61,7 +66,13 @@ export const createTextBlockTemplateExpander = (
   context: TextBlockExpansionContext,
 ) => async (text: string, knownVariables: ReadonlySet<string>): Promise<TextBlockExpansion> => {
   const initialReferences = blockReferencesInText(text).filter((name) => !knownVariables.has(name));
-  if (initialReferences.length === 0) return { text, used: false };
+  if (initialReferences.length === 0) return {
+    text,
+    used: false,
+    complete: true,
+    variablesResolved: false,
+    diagnostics: [],
+  };
   const loadBlockRows = async (names: readonly string[]): Promise<BlockRow[]> => {
     if (names.length === 0) return [];
     const chunks = chunksOf(names, 50);
@@ -83,7 +94,13 @@ export const createTextBlockTemplateExpander = (
     return results.flatMap((result) => result.results);
   };
   const rootRows = await loadBlockRows(initialReferences);
-  if (rootRows.length === 0) return { text, used: false };
+  if (rootRows.length === 0) return {
+    text,
+    used: false,
+    complete: true,
+    variablesResolved: false,
+    diagnostics: [],
+  };
   const blockRows = new Map(rootRows.map((row) => [row.block_name, row]));
   const allVariantRows: VariantRow[] = [];
   let frontier = rootRows.map((row) => row.block_name);
@@ -131,6 +148,21 @@ export const createTextBlockTemplateExpander = (
     return row?.last_chosen_index ?? 0;
   };
   const selectedTextByVariant = new Map<string, Promise<string>>();
+  const expandedBlockByPath = new Map<string, Promise<{ text: string; complete: boolean }>>();
+  const diagnostics: ModuleDiagnostic[] = [];
+  const diagnosticKeys = new Set<string>();
+  let remainingSteps = MAX_EXPANSION_STEPS;
+  const resolveChunk = async (chunk: string): Promise<string> => {
+    if (context.resolveTemplateVariables === undefined || !/\{[a-z0-9_]{1,32}\}/u.test(chunk)) return chunk;
+    const resolved = await context.resolveTemplateVariables(chunk);
+    for (const diagnostic of resolved.diagnostics) {
+      const key = JSON.stringify(diagnostic);
+      if (diagnosticKeys.has(key)) continue;
+      diagnosticKeys.add(key);
+      diagnostics.push(diagnostic);
+    }
+    return resolved.text;
+  };
   let streamState: ModuleStreamState | undefined;
   let currentGame: TwitchGame | null | undefined;
   const state = async (): Promise<TextBlockState> => {
@@ -152,7 +184,10 @@ export const createTextBlockTemplateExpander = (
   ): Promise<{ text: string; complete: boolean }> => {
     if (budget <= 0) return { text: "", complete: source.length === 0 };
     const tokens = [...source.matchAll(/\{([a-z0-9_]{1,32})\}/gu)];
-    if (tokens.length === 0) return { text: source.slice(0, budget), complete: source.length <= budget };
+    if (tokens.length === 0) {
+      const resolved = await resolveChunk(source);
+      return { text: resolved.slice(0, budget), complete: resolved.length <= budget };
+    }
     const currentState = await state();
     let offset = 0;
     let result = "";
@@ -162,12 +197,14 @@ export const createTextBlockTemplateExpander = (
       return value.length <= remaining;
     };
     for (const token of tokens) {
+      remainingSteps -= 1;
+      if (remainingSteps < 0) return { text: result, complete: false };
       const name = token[1];
       const start = token.index;
       if (name === undefined || knownVariables.has(name) || ancestry.includes(name) || ancestry.length >= 3) continue;
       const block = blocks.get(name);
       if (block === undefined) continue;
-      if (!append(source.slice(offset, start))) return { text: result, complete: false };
+      if (!append(await resolveChunk(source.slice(offset, start)))) return { text: result, complete: false };
       if (!textBlockAppliesToGame(block, currentState.game?.id ?? null)) {
         offset = start + token[0].length;
         continue;
@@ -187,15 +224,32 @@ export const createTextBlockTemplateExpander = (
         selectedTextByVariant.set(selectionKey, selectedTextPromise);
       }
       const selectedText = await selectedTextPromise;
-      const expandedSelection = await expand(selectedText, [...ancestry, name], budget - result.length);
+      const childAncestry = [...ancestry, name];
+      const expansionKey = childAncestry.join("\u0000");
+      let expandedSelectionPromise = expandedBlockByPath.get(expansionKey);
+      if (expandedSelectionPromise === undefined) {
+        expandedSelectionPromise = expand(selectedText, childAncestry, EXPANSION_BUDGET);
+        expandedBlockByPath.set(expansionKey, expandedSelectionPromise);
+      }
+      const expandedSelection = await expandedSelectionPromise;
       if (!append(expandedSelection.text) || !expandedSelection.complete) return { text: result, complete: false };
       offset = start + token[0].length;
     }
-    if (offset === 0) return { text: source.slice(0, budget), complete: source.length <= budget };
-    const complete = append(source.slice(offset));
+    if (offset === 0) {
+      const resolved = await resolveChunk(source);
+      return { text: resolved.slice(0, budget), complete: resolved.length <= budget };
+    }
+    const complete = append(await resolveChunk(source.slice(offset)));
     return { text: result, complete };
   };
 
   const expanded = await expand(text, [], EXPANSION_BUDGET);
-  return { text: expanded.text, used: true, outputLimit: 500 };
+  return {
+    text: expanded.text,
+    used: true,
+    outputLimit: 500,
+    complete: expanded.complete,
+    variablesResolved: context.resolveTemplateVariables !== undefined,
+    diagnostics,
+  };
 };

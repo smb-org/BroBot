@@ -161,7 +161,7 @@ const render = async (
 const processTextCommandMessageAttempt = async (
   event: ModuleEvent,
   repository: TextCommandRepository,
-  context: Partial<Pick<ModuleExecutionContext, "streamState" | "channelInfo" | "renderTemplate" | "prepareVariableChange">>,
+  context: Partial<Pick<ModuleExecutionContext, "streamState" | "channelInfo" | "channelGameId" | "renderTemplate" | "prepareVariableChange">>,
   staleRetries: number,
 ): Promise<ModuleResult> => {
   const text = messageText(event);
@@ -195,8 +195,8 @@ const processTextCommandMessageAttempt = async (
   }
 
   if ((command.games?.length ?? 0) > 0) {
-    const channelInfo = await (context.channelInfo ?? (() => Promise.resolve(null)))();
-    if (channelInfo === null || !command.games?.some((game) => game.id === channelInfo.gameId)) {
+    const currentGameId = await (context.channelGameId ?? (() => Promise.resolve(null)))();
+    if (currentGameId === null || !command.games?.some((game) => game.id === currentGameId)) {
       return rejection("text_commands.game_filter", { name: command.name });
     }
   }
@@ -283,5 +283,5 @@ const processTextCommandMessageAttempt = async (
 export const processTextCommandMessage = (
   event: ModuleEvent,
   repository: TextCommandRepository,
-  context: Partial<Pick<ModuleExecutionContext, "streamState" | "channelInfo" | "renderTemplate" | "prepareVariableChange">> = {},
+  context: Partial<Pick<ModuleExecutionContext, "streamState" | "channelInfo" | "channelGameId" | "renderTemplate" | "prepareVariableChange">> = {},
 ): Promise<ModuleResult> => processTextCommandMessageAttempt(event, repository, context, 0);

@@ -573,6 +573,10 @@ export const dispatchEventSubNotification = async (
     channelInfoPromise ??= channelInfoFor(environment, event.channelId, appAccessToken, fetcher);
     return channelInfoPromise;
   };
+  const channelGameId = async (): Promise<string | null> => {
+    const details = await channelDetails();
+    return details === null || details.gameId.length === 0 ? null : details.gameId;
+  };
   const followedAt = (userId: string): Promise<ModuleFollowedAt> => {
     let pending = followedAtPromises.get(userId);
     if (pending === undefined) {
@@ -647,9 +651,13 @@ export const dispatchEventSubNotification = async (
       const expandModuleTemplateVariables = async (
         text: string,
         knownVariables: ReadonlySet<string>,
+        resolveTemplateVariables: (text: string) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>,
       ) => {
         let expandedText = text;
         let used = false;
+        let complete = true;
+        let variablesResolved = false;
+        const expansionDiagnostics: ModuleDiagnostic[] = [];
         let outputLimit: number | undefined;
         for (const provider of registry) {
           if (provider.expandTemplateVariables === undefined) continue;
@@ -662,15 +670,27 @@ export const dispatchEventSubNotification = async (
             chatStatus: moduleEvent.chatStatus,
             streamState,
             channelInfo,
+            channelGameId,
+            resolveTemplateVariables,
             now: Number.isFinite(eventTime) ? eventTime : Date.now(),
           });
           expandedText = expanded.text;
           used ||= expanded.used;
+          complete &&= expanded.complete !== false;
+          variablesResolved ||= expanded.variablesResolved === true;
+          expansionDiagnostics.push(...(expanded.diagnostics ?? []));
           if (expanded.outputLimit !== undefined) outputLimit = outputLimit === undefined
             ? expanded.outputLimit
             : Math.min(outputLimit, expanded.outputLimit);
         }
-        return { text: expandedText, used, ...(outputLimit === undefined ? {} : { outputLimit }) };
+        return {
+          text: expandedText,
+          used,
+          complete,
+          variablesResolved,
+          diagnostics: expansionDiagnostics,
+          ...(outputLimit === undefined ? {} : { outputLimit }),
+        };
       };
       const render = createTemplateRenderer(moduleEvent, templateContext, moduleVariables, {
         streamState,
@@ -691,6 +711,7 @@ export const dispatchEventSubNotification = async (
             authorizeMutation: authorizeModuleMutation,
             streamState,
             channelInfo,
+            channelGameId,
             followedAt,
             followerTotal,
             chattersTotal,

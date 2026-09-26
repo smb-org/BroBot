@@ -214,6 +214,8 @@ export interface ModuleExecutionContext {
   streamState: () => Promise<ModuleStreamState>;
   /** Lazily loads the current channel's public Helix fields and live start time. */
   channelInfo: () => Promise<ModuleChannelInfo | null>;
+  /** Lazily loads only the current channel game, independently of stream details. */
+  channelGameId?: () => Promise<string | null>;
   /** Lazily loads whether the caller follows the current channel. */
   followedAt: (userId: string) => Promise<ModuleFollowedAt>;
   followerTotal: () => Promise<number | null>;
@@ -273,6 +275,10 @@ export interface ModuleTemplateExpansionContext {
   chatStatus: readonly ModuleChatStatus[] | null;
   streamState: () => Promise<ModuleStreamState>;
   channelInfo: () => Promise<ModuleChannelInfo | null>;
+  /** The current game can be queried without requiring a successful stream lookup. */
+  channelGameId?: () => Promise<string | null>;
+  /** Resolves host variables in a bounded fragment before a module appends it. */
+  resolveTemplateVariables?: (text: string) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
   now: number;
 }
 
@@ -281,6 +287,11 @@ export interface ModuleTemplateExpansionResult {
   used: boolean;
   /** An output bound contributed by a module-owned variable source. */
   outputLimit?: number;
+  /** Whether the module expanded its complete input within its work and output budgets. */
+  complete?: boolean;
+  /** Whether host variables in the expansion were already resolved. */
+  variablesResolved?: boolean;
+  diagnostics?: readonly ModuleDiagnostic[];
 }
 
 export interface ModuleVariableReferenceUsage {

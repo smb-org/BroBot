@@ -34,9 +34,10 @@ export const textLibraryModule: BotModule<typeof settingsSchema> = {
     chatStatus: context.chatStatus,
     streamState: context.streamState,
     currentGame: async () => {
-      const channel = await context.channelInfo();
-      return channel === null || channel.gameId.length === 0 ? null : { id: channel.gameId, name: channel.gameName };
+      const gameId = await context.channelGameId?.();
+      return gameId === null || gameId === undefined || gameId.length === 0 ? null : { id: gameId, name: "" };
     },
+    ...(context.resolveTemplateVariables === undefined ? {} : { resolveTemplateVariables: context.resolveTemplateVariables }),
     now: context.now,
   })(context.text, context.knownVariables),
   routes: textLibraryRoutes,
