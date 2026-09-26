@@ -155,6 +155,60 @@ describe("text library", () => {
     await expect(createRenderer("event", false, event)("{greeting}", {})).resolves.toMatchObject({ text: "Hello offline" });
   });
 
+  it("fully resolves host variables (dotted, parameterized) that follow or sit inside a block", async () => {
+    await expect(createBlock("welcome", [variant("default", "Hello")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("roll", [variant("default", "You rolled {random 2-5}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("stats", [variant("default", "Points: {var.points}")])).resolves.toMatchObject({ ok: true });
+
+    const expand = textLibraryModule.expandTemplateVariables;
+    if (expand === undefined) throw new Error("Text library does not register its template expansion.");
+    const event: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.raid",
+      triggerId: "fictional-raid-trigger",
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: null,
+      chatStatus: null,
+    };
+    const createRenderer = () => {
+      const sources: TemplateResolverSources = {
+        streamState: () => Promise.resolve("offline"),
+        channelDetails: () => Promise.resolve(null),
+        streamDetails: () => Promise.resolve(null),
+        followedAt: () => Promise.resolve("unavailable"),
+        followerTotal: () => Promise.resolve(null),
+        chattersTotal: () => Promise.resolve(null),
+        userCreatedAt: () => Promise.resolve(null),
+        channelLanguage: () => Promise.resolve("en"),
+        readChannelVariables: () => Promise.resolve({ points: 42 }),
+        random: () => 0,
+        expandModuleTemplateVariables: async (text, knownVariables, resolveTemplateVariables) => expand({
+          DB: database as unknown as D1Database,
+          channelId: CHANNEL_ID,
+          text,
+          knownVariables,
+          templateContext: "event",
+          chatStatus: event.chatStatus,
+          streamState: sources.streamState,
+          channelInfo: () => Promise.resolve(null),
+          resolveTemplateVariables,
+          now: NOW,
+        } satisfies ModuleTemplateExpansionContext),
+        now: () => NOW,
+      };
+      return createTemplateRenderer(event, "event", [], sources);
+    };
+
+    // A dotted channel variable right after a block, in the same command text (#252).
+    await expect(createRenderer()("{welcome} {var.points}", {})).resolves.toMatchObject({ text: "Hello 42" });
+    // A parameterized system variable nested inside a block's own text.
+    await expect(createRenderer()("{roll}", {})).resolves.toMatchObject({ text: "You rolled 2" });
+    // A dotted channel variable nested inside a block's own text.
+    await expect(createRenderer()("{stats}", {})).resolves.toMatchObject({ text: "Points: 42" });
+  });
+
   it("rejects cycles and nesting deeper than three blocks when saving", async () => {
     await expect(createBlock("cycle_a", [variant("default", "{cycle_b}")])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("cycle_b", [variant("default", "{cycle_a}")])).resolves.toMatchObject({

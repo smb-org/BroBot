@@ -1,6 +1,11 @@
 import type { ModuleChatStatus, ModuleDiagnostic, ModuleStreamState, TemplateContext } from "../../contract";
+import { TEMPLATE_VARIABLE_PATTERN } from "../../contract";
 import type { TextBlock, TextBlockVariant, TwitchGame } from "../contracts";
 import { blockReferencesInText, firstMatchingTextBlockVariant, textBlockAppliesToGame, type TextBlockState } from "../domain";
+
+// Stateless (non-global) copy of the host's variable pattern: it allows dotted names (`{var.points}`)
+// and parameters (`{random 2-5}`), unlike the plain block-name token pattern used elsewhere in this file.
+const HOST_TEMPLATE_VARIABLE_PATTERN = new RegExp(TEMPLATE_VARIABLE_PATTERN.source);
 
 interface BlockRow {
   block_name: string;
@@ -153,7 +158,7 @@ export const createTextBlockTemplateExpander = (
   const diagnosticKeys = new Set<string>();
   let remainingSteps = MAX_EXPANSION_STEPS;
   const resolveChunk = async (chunk: string): Promise<string> => {
-    if (context.resolveTemplateVariables === undefined || !/\{[a-z0-9_]{1,32}\}/u.test(chunk)) return chunk;
+    if (context.resolveTemplateVariables === undefined || !HOST_TEMPLATE_VARIABLE_PATTERN.test(chunk)) return chunk;
     const resolved = await context.resolveTemplateVariables(chunk);
     for (const diagnostic of resolved.diagnostics) {
       const key = JSON.stringify(diagnostic);
