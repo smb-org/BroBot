@@ -171,10 +171,13 @@ export interface ChannelVariablesTexts {
   generalSection: string;
   valueSection: string;
   dangerSection: string;
-  currentValue: string;
   deleteHint: string;
-  setValue: string;
   valueHint: string;
+  editValue: string;
+  applyValue: string;
+  cancelValueEdit: string;
+  minimumValueReached: string;
+  maximumValueReached: string;
   resetOnStreamStart: string;
   limitNote: (maximum: number) => string;
   resetHint: string;
@@ -184,11 +187,8 @@ export interface ChannelVariablesTexts {
   usageKindLabel: (kind: "template" | "action" | "display") => string;
   usageModuleLabel: (moduleId: string) => string;
   usageLine: (moduleId: string, itemName: string, kind: "template" | "action" | "display") => string;
-  set: string;
   increase: string;
   decrease: string;
-  increaseDraftValue: string;
-  decreaseDraftValue: string;
   delete: string;
   deleteTitle: (name: string) => string;
   deleteDescription: (name: string, usages: string, overlayCount?: number) => string;
@@ -225,22 +225,23 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     saveError: "Die Kanalvariable konnte nicht gespeichert werden.", deleteError: "Die Kanalvariable konnte nicht gelöscht werden.",
     name: "Name", nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; höchstens 32 Zeichen.", nameInvalid: "Nur Kleinbuchstaben, Zahlen und Unterstrich.",
     description: "Beschreibung", descriptionHint: "Erscheint in der Variablenauswahl. Höchstens 80 Zeichen.", noDescription: "Keine Beschreibung",
-    value: "Wert", generalSection: "Allgemein", valueSection: "Wert", dangerSection: "Gefahrenzone", currentValue: "Aktueller Wert", deleteHint: "Löscht die Variable und ihre Verwendungen.",
-    setValue: "Setzen auf", valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.",
+    value: "Wert", generalSection: "Allgemein", valueSection: "Aktueller Wert", dangerSection: "Gefahrenzone", deleteHint: "Löscht die Variable und ihre Verwendungen.",
+    valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.", editValue: "Wert bearbeiten", applyValue: "Übernehmen", cancelValueEdit: "Abbrechen",
+    minimumValueReached: "Der Mindestwert ist erreicht.", maximumValueReached: "Der Höchstwert ist erreicht.",
     resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird zurückgesetzt, wenn der nächste Stream startet.",
     limitNote: (maximum) => `Bis zu ${String(maximum)} Variablen pro Kanal.`,
     renameHint: "Vorlagen und gespeicherte Overlay-Elemente werden angepasst.", usages: "Verwendet in", noUsages: "Noch nicht verwendet.",
     usageKindLabel: (kind) => kind === "action" ? "Aktion" : kind === "display" ? "Anzeige" : "Vorlage",
     usageModuleLabel: (moduleId) => moduleId === "text_commands" ? "Textbefehle" : moduleId === "overlays" ? "Overlays" : moduleId.replace(/[_-]+/gu, " "),
     usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? `!${itemName.replace(/^!/u, "")}` : itemName} · ${kind === "action" ? "zählt eine Aktion" : kind === "display" ? "Overlay-Anzeige" : "Vorlage"}`,
-    set: "Setzen", increase: "+1", decrease: "−1", increaseDraftValue: "Setzwert um eins erhöhen", decreaseDraftValue: "Setzwert um eins verringern", delete: "Variable löschen", deleteTitle: (name) => `Variable ${name} löschen?`,
+    increase: "+1", decrease: "−1", delete: "Variable löschen", deleteTitle: (name) => `Variable ${name} löschen?`,
     deleteDescription: (name, usages, overlayCount = 0) => overlayCount > 0
       ? `„${name}“ wird dauerhaft gelöscht. Wird in ${String(overlayCount)} Overlay-Element${overlayCount === 1 ? "" : "en"} angezeigt; diese zeigen danach nichts.${usages.length === 0 ? "" : ` Weitere Verwendungen: ${usages}`}`
       : usages.length === 0 ? `„${name}“ wird dauerhaft gelöscht.` : `„${name}“ wird dauerhaft gelöscht. Verwendungen: ${usages}`,
     deleteConfirm: (name) => `${name} endgültig löschen`, deleteCancel: "Abbrechen",
     inUseReason: (usages) => `Wird von ${usages} verwendet. Entferne zuerst die Befehlsaktion.`,
     managementLocked: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen, beschreiben oder löschen.",
-    valueLocked: "Nur Kanalmitglieder dürfen den Wert ändern.", limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
+    valueLocked: "Nur Broadcaster und Verwalter dürfen Variablenwerte ändern.", limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
     conflict: "Die Variable wurde inzwischen geändert.", created: "Variable angelegt.", updated: "Variable gespeichert.",
     useInOverlay: "In Overlay verwenden", useOverlayHint: "Wähle ein Overlay. Die Variable wird im Editor als ungespeicherter Entwurf eingefügt.",
     chooseOverlay: "Overlay auswählen", createOverlay: "Neues Overlay", newOverlayName: "Name des neuen Overlays",
@@ -255,22 +256,23 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     saveError: "The channel variable could not be saved.", deleteError: "The channel variable could not be deleted.",
     name: "Name", nameHint: "Lowercase letters, numbers, and underscores; up to 32 characters.", nameInvalid: "Use lowercase letters, numbers, and underscores only.",
     description: "Description", descriptionHint: "Shown in the variable picker. Up to 80 characters.", noDescription: "No description",
-    value: "Value", generalSection: "General", valueSection: "Value", dangerSection: "Danger zone", currentValue: "Current value", deleteHint: "Removes the variable and its references.",
-    setValue: "Set to", valueHint: "Integer from −999,999,999 to 999,999,999.",
+    value: "Value", generalSection: "General", valueSection: "Current value", dangerSection: "Danger zone", deleteHint: "Removes the variable and its references.",
+    valueHint: "Integer from −999,999,999 to 999,999,999.", editValue: "Edit value", applyValue: "Apply", cancelValueEdit: "Cancel",
+    minimumValueReached: "The minimum value has been reached.", maximumValueReached: "The maximum value has been reached.",
     resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets when the next stream starts.",
     limitNote: (maximum) => `Up to ${String(maximum)} variables per channel.`,
     renameHint: "Templates and saved overlay elements are updated.", usages: "Used in", noUsages: "Not used yet.",
     usageKindLabel: (kind) => kind === "action" ? "action" : kind === "display" ? "display" : "template",
     usageModuleLabel: (moduleId) => moduleId === "text_commands" ? "Text commands" : moduleId === "overlays" ? "Overlays" : moduleId.replace(/[_-]+/gu, " "),
     usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? `!${itemName.replace(/^!/u, "")}` : itemName} · ${kind === "action" ? "changes a variable" : kind === "display" ? "overlay display" : "template"}`,
-    set: "Set", increase: "+1", decrease: "−1", increaseDraftValue: "Increase the value to set by one", decreaseDraftValue: "Decrease the value to set by one", delete: "Delete variable", deleteTitle: (name) => `Delete variable ${name}?`,
+    increase: "+1", decrease: "−1", delete: "Delete variable", deleteTitle: (name) => `Delete variable ${name}?`,
     deleteDescription: (name, usages, overlayCount = 0) => overlayCount > 0
       ? `“${name}” will be deleted permanently. It appears in ${String(overlayCount)} overlay element${overlayCount === 1 ? "" : "s"}; ${overlayCount === 1 ? "it" : "they"} will show nothing afterward.${usages.length === 0 ? "" : ` Other uses: ${usages}`}`
       : usages.length === 0 ? `“${name}” will be deleted permanently.` : `“${name}” will be deleted permanently. Used in: ${usages}`,
     deleteConfirm: (name) => `Delete ${name} permanently`, deleteCancel: "Cancel",
     inUseReason: (usages) => `Used by ${usages}. Remove the command action first.`,
     managementLocked: "Only broadcasters and managers may create, rename, describe, or delete variables.",
-    valueLocked: "Only channel members may change the value.", limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
+    valueLocked: "Only broadcasters and managers may change variable values.", limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
     conflict: "This variable has changed since it was loaded.", created: "Variable created.", updated: "Variable saved.",
     useInOverlay: "Use in overlay", useOverlayHint: "Choose an overlay. The variable is added as an unsaved draft in the editor.",
     chooseOverlay: "Choose an overlay", createOverlay: "New overlay", newOverlayName: "New overlay name",
@@ -1855,6 +1857,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
       const current = detail.streamState === "online" ? "online" : "offline";
       return `Befehl !${name} unterdrückt: nur wenn der Stream ${allowed} ist (gerade ${current})`;
     }),
+    "text_commands.game_filter": (detail) => eventTextWithName(detail, "Befehl durch Spiel-Filter unterdrückt", (name) => `Befehl !${name} unterdrückt: anderes Spiel`),
     "text_commands.triggered": (detail) => eventTextWithName(detail, "Befehl ausgeführt", (name) => `Befehl !${name} ausgeführt`),
     "text_commands.disabled": (detail) => eventTextWithName(detail, "Textbefehl ausgeschaltet", (name) => `Textbefehl !${name} ausgeschaltet`),
     "text_commands.permission_denied": (detail) => eventTextWithName(detail, "Textbefehl nicht berechtigt", (name) => `Befehl !${name} nicht ausgelöst: Mindeststufe ${textCommandTier(detail, "requiredTier", "unbekannt", "de")}, vorhanden ${textCommandTier(detail, "currentTier", "kein Chat-Status", "de")}`),
@@ -1953,6 +1956,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
       const current = detail.streamState === "online" ? "online" : "offline";
       return `Command !${name} suppressed: only when the stream is ${allowed} (currently ${current})`;
     }),
+    "text_commands.game_filter": (detail) => eventTextWithName(detail, "Command suppressed by game filter", (name) => `Command !${name} suppressed: current game is not selected`),
     "text_commands.triggered": (detail) => eventTextWithName(detail, "Command executed", (name) => `Command !${name} executed`),
     "text_commands.disabled": (detail) => eventTextWithName(detail, "Text command disabled", (name) => `Text command !${name} disabled`),
     "text_commands.permission_denied": (detail) => eventTextWithName(detail, "Text command not authorized", (name) => `Command !${name} not executed: minimum level ${textCommandTier(detail, "requiredTier", "unknown", "en")}, present ${textCommandTier(detail, "currentTier", "no chat status", "en")}`),
@@ -2037,6 +2041,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "text_commands.cooldown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: "remainingSeconds", tone: "warning" },
   "text_commands.user_cooldown": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: "remainingSeconds", tone: "info" },
   "text_commands.stream_state": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "text_commands.game_filter": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.triggered": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.disabled": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.permission_denied": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
@@ -2082,6 +2087,13 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_commands.command.created": "Textbefehl erstellt",
     "text_commands.command.updated": "Textbefehl aktualisiert",
     "text_commands.command.removed": "Textbefehl entfernt",
+    "text_library.block.created": "Textbaustein erstellt",
+    "text_library.block.updated": "Textbaustein aktualisiert",
+    "text_library.block.removed": "Textbaustein entfernt",
+    "text_library.category.created": "Textkategorie erstellt",
+    "text_library.category.renamed": "Textkategorie umbenannt",
+    "text_library.category.removed": "Textkategorie entfernt",
+    "text_library.settings.updated": "Textbibliothekseinstellungen geändert",
     "channel.variable.created": "Kanalvariable erstellt",
     "channel.variable.renamed": "Kanalvariable geändert",
     "channel.variable.removed": "Kanalvariable gelöscht",
@@ -2113,6 +2125,13 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_commands.command.created": "Text command created",
     "text_commands.command.updated": "Text command updated",
     "text_commands.command.removed": "Text command removed",
+    "text_library.block.created": "Text block created",
+    "text_library.block.updated": "Text block updated",
+    "text_library.block.removed": "Text block removed",
+    "text_library.category.created": "Text category created",
+    "text_library.category.renamed": "Text category renamed",
+    "text_library.category.removed": "Text category removed",
+    "text_library.settings.updated": "Text library settings changed",
     "channel.variable.created": "Channel variable created",
     "channel.variable.renamed": "Channel variable changed",
     "channel.variable.removed": "Channel variable deleted",

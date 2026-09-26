@@ -59,6 +59,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [draftDescription, setDraftDescription] = useState("");
   const [draftReset, setDraftReset] = useState(false);
   const [draftSetValue, setDraftSetValue] = useState<number | "">(0);
+  const [editingValue, setEditingValue] = useState(false);
+  const [inlineValue, setInlineValue] = useState<number | "">(0);
   const [pending, setPending] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [useOverlayOpen, setUseOverlayOpen] = useState(false);
@@ -121,6 +123,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const beginCreate = (): void => {
     setCreating(true);
     setSelectedName(null);
+    setEditingValue(false);
     setDraftName("");
     setDraftDescription("");
     setDraftReset(false);
@@ -135,6 +138,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   };
   const selectVariable = (variable: PanelChannelVariable): void => {
     setCreating(false);
+    setEditingValue(false);
     setSelectedName(variable.name);
     setDraftName(variable.name);
     setDraftDescription(variable.description);
@@ -170,6 +174,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setCreating(false);
     setSelectedName(null);
     setError(null);
+    setEditingValue(false);
   };
   const save = async (): Promise<void> => {
     const name = normalizedVariableName(draftName);
@@ -206,19 +211,29 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       setPending(false);
     }
   };
-  const changeValue = async (operation: "add" | "subtract" | "set", amount: number): Promise<void> => {
-    if (selected === null) return;
+  const changeValue = async (operation: "add" | "subtract" | "set", amount: number): Promise<boolean> => {
+    if (selected === null || !canManageContent || pending) return false;
     setPending(true);
     setError(null);
     try {
       const response = await changeChannelVariableValue(channelId, selected.name, operation, amount);
       setVariables((current) => current.map((variable) => variable.name === selected.name ? { ...variable, ...response.variable } : variable));
       setDraftSetValue(response.variable.value);
+      return true;
     } catch (caught) {
       setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError);
+      return false;
     } finally {
       setPending(false);
     }
+  };
+  const cancelValueEdit = (): void => {
+    setInlineValue(selected?.value ?? 0);
+    setEditingValue(false);
+  };
+  const applyValueEdit = async (): Promise<void> => {
+    if (typeof inlineValue !== "number" || !Number.isInteger(inlineValue) || inlineValue < CHANNEL_VARIABLE_MINIMUM_VALUE || inlineValue > CHANNEL_VARIABLE_MAXIMUM_VALUE) return;
+    if (await changeValue("set", inlineValue)) setEditingValue(false);
   };
   const beginUseInOverlay = async (): Promise<void> => {
     if (selected === null || !canManageContent || overlayPending) return;
@@ -351,18 +366,54 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         </InspectorSection>
         {selected === null ? null : <>
           <InspectorSection title={labels.valueSection}>
-            <InspectorFieldRow label={labels.currentValue}>
+            <InspectorFieldRow className="inspector-field-row--variable-value" label={labels.value} help={labels.valueHint}>
               <div className="channel-variable-value-controls">
-                <strong className="number">{new Intl.NumberFormat(language).format(selected.value)}</strong>
-                <Button variant="neutral" disabled={pending} title={labels.decrease} onClick={() => { void changeValue("subtract", 1); }}>{labels.decrease}</Button>
-                <Button variant="neutral" disabled={pending} title={labels.increase} onClick={() => { void changeValue("add", 1); }}>{labels.increase}</Button>
+                {editingValue ? <>
+                  <NumberField
+                    id="channel-variable-inline-value"
+                    label={labels.value}
+                    ariaLabel={labels.value}
+                    min={CHANNEL_VARIABLE_MINIMUM_VALUE}
+                    max={CHANNEL_VARIABLE_MAXIMUM_VALUE}
+                    value={inlineValue}
+                    disabled={pending}
+                    onChange={(value) => { setInlineValue(value); }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancelValueEdit(); }
+                      if (event.key === "Enter") { event.preventDefault(); void applyValueEdit(); }
+                    }}
+                  />
+                  <Button variant="primary" disabled={pending || typeof inlineValue !== "number" || !Number.isInteger(inlineValue) || inlineValue < CHANNEL_VARIABLE_MINIMUM_VALUE || inlineValue > CHANNEL_VARIABLE_MAXIMUM_VALUE} onClick={() => { void applyValueEdit(); }}>{labels.applyValue}</Button>
+                  <Button variant="subtle" disabled={pending} onClick={cancelValueEdit}>{labels.cancelValueEdit}</Button>
+                </> : <>
+                  <strong className="channel-variable-value-controls__value number" aria-live="polite">{new Intl.NumberFormat(language).format(selected.value)}</strong>
+                  <Button
+                    variant="neutral"
+                    disabled={!canManageContent || pending || selected.value <= CHANNEL_VARIABLE_MINIMUM_VALUE}
+                    {...(!canManageContent
+                      ? { title: labels.valueLocked, describedBy: "channel-variable-value-permission-reason" }
+                      : selected.value <= CHANNEL_VARIABLE_MINIMUM_VALUE ? { title: labels.minimumValueReached } : {})}
+                    onClick={() => { void changeValue("subtract", 1); }}
+                  >{labels.decrease}</Button>
+                  <Button
+                    variant="neutral"
+                    disabled={!canManageContent || pending || selected.value >= CHANNEL_VARIABLE_MAXIMUM_VALUE}
+                    {...(!canManageContent
+                      ? { title: labels.valueLocked, describedBy: "channel-variable-value-permission-reason" }
+                      : selected.value >= CHANNEL_VARIABLE_MAXIMUM_VALUE ? { title: labels.maximumValueReached } : {})}
+                    onClick={() => { void changeValue("add", 1); }}
+                  >{labels.increase}</Button>
+                  <Button
+                    icon="edit"
+                    iconOnly
+                    ariaLabel={labels.editValue}
+                    disabled={!canManageContent || pending}
+                    {...(!canManageContent ? { title: labels.valueLocked, describedBy: "channel-variable-value-permission-reason" } : { title: labels.editValue })}
+                    onClick={() => { setInlineValue(selected.value); setEditingValue(true); }}
+                  />
+                </>}
               </div>
-            </InspectorFieldRow>
-            <InspectorFieldRow label={labels.setValue} help={labels.valueHint}>
-              <div className="channel-variable-set-row">
-                <NumberField id="channel-variable-set-value" label={labels.setValue} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} increaseLabel={labels.increaseDraftValue} decreaseLabel={labels.decreaseDraftValue} value={draftSetValue} disabled={pending} onChange={setDraftSetValue} />
-                <Button disabled={pending || draftSetValue === "" || !Number.isInteger(draftSetValue)} onClick={() => { if (typeof draftSetValue === "number") void changeValue("set", draftSetValue); }}>{labels.set}</Button>
-              </div>
+              {!canManageContent ? <p className="lock-reason" id="channel-variable-value-permission-reason" role="note">{labels.valueLocked}</p> : null}
             </InspectorFieldRow>
           </InspectorSection>
           <InspectorSection title={labels.usages}>

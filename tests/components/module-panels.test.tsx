@@ -60,6 +60,19 @@ vi.mock("../../src/modules/registry", () => ({
     { id: "aktiv", settingsSchema: {}, defaultSettings: {}, panel: activeLoader },
     { id: "ohne-panel", settingsSchema: {}, defaultSettings: {} },
     {
+      id: "channel-page-fixture",
+      mandatory: true,
+      settingsSchema: {},
+      defaultSettings: {},
+      navigationEntries: [{
+        id: "texts",
+        label: { de: "Texte", en: "Texts" },
+        group: "channel",
+        showMainSwitch: false,
+        iconKind: "texts",
+      }],
+    },
+    {
       id: "editor-fixture",
       settingsSchema: { shape: { amount: {}, handle: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
       defaultSettings: { amount: 2, handle: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
@@ -198,6 +211,25 @@ describe("Module panel loader", () => {
     expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse sind immer aktiv.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Kanalereignisse sind immer aktiv.");
     expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
+  });
+
+  it("lets a registered channel page hide its always-active main switch and use its declared icon", () => {
+    renderWithMantine(<ModulePage
+      channelId="kanal-a"
+      moduleId="channel-page-fixture"
+      ownRole="manager"
+      modules={[{ id: "channel-page-fixture", enabled: true, mandatory: true, settings: "{}" }]}
+      activeModules={[]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+
+    expect(screen.getByRole("heading", { name: "Texte", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText("Hauptschalter")).not.toBeInTheDocument();
+    const icon = document.querySelector(".module-detail__icon svg");
+    expect(icon).toHaveClass("module-glyph");
+    expect(icon?.querySelector("rect")).toBeNull();
+    expect(icon?.querySelector("path")).toBeInTheDocument();
   });
 
   it("shows the module name and state once in the row", () => {

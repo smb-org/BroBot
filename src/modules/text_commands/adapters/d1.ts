@@ -42,6 +42,7 @@ const auditValues = async (command: TextCommand) => ({
   aliases: [...command.aliases],
   userCooldownSeconds: command.userCooldownSeconds,
   streamCondition: command.streamCondition,
+  games: (command.games ?? []).map((game) => `${game.id}:${game.name}`),
   responseType: command.responseType,
   ...(command.variableAction === null ? {} : {
     variableName: command.variableAction.name,
@@ -67,6 +68,7 @@ const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
   left.aliases.every((alias, index) => alias === right.aliases[index]) &&
   left.userCooldownSeconds === right.userCooldownSeconds &&
   left.streamCondition === right.streamCondition &&
+  JSON.stringify(left.games ?? []) === JSON.stringify(right.games ?? []) &&
   left.responseType === right.responseType &&
   JSON.stringify(left.variableAction) === JSON.stringify(right.variableAction) &&
   left.legacyFallback === right.legacyFallback &&
@@ -145,6 +147,7 @@ interface TextCommandRow {
   user_cooldown_seconds: number;
   stream_condition: TextCommandStreamCondition;
   response_type: TextCommandResponseType;
+  games_json: string;
   template_fields_json: string;
   last_used_at: string | null;
   created_at: string;
@@ -168,6 +171,7 @@ const mapTextCommand = (row: TextCommandRow): TextCommand => ({
   aliases: JSON.parse(row.aliases_json) as string[],
   userCooldownSeconds: row.user_cooldown_seconds,
   streamCondition: row.stream_condition,
+  games: JSON.parse(row.games_json) as NonNullable<TextCommand["games"]>,
   responseType: row.response_type,
   variableAction: row.variable_name === null || row.variable_operation === null || row.variable_amount === null
     ? null
@@ -220,7 +224,7 @@ const aliasConflict = async (
 
 export const textCommandSelectColumns = `channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
                                        aliases_json, user_cooldown_seconds, stream_condition, response_type,
-                                       template_fields_json, last_used_at, created_at, updated_at, revision,
+                                       games_json, template_fields_json, last_used_at, created_at, updated_at, revision,
                                        use_count, variable_name, variable_operation, variable_amount`;
 
 export const createTextCommandRepository = (
@@ -252,7 +256,7 @@ export const createTextCommandRepository = (
       `SELECT command.channel_id, command.command_name, command.response_text, command.kind, command.enabled,
               command.minimum_level, command.cooldown_seconds, command.aliases_json,
               command.user_cooldown_seconds, command.stream_condition, command.response_type,
-              command.template_fields_json, command.last_used_at, command.created_at, command.updated_at,
+              command.games_json, command.template_fields_json, command.last_used_at, command.created_at, command.updated_at,
               command.revision, command.use_count, command.variable_name, command.variable_operation, command.variable_amount
          FROM text_command_aliases AS alias
          JOIN text_commands AS command
@@ -276,9 +280,9 @@ export const createTextCommandRepository = (
       `INSERT INTO text_commands
         (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
          aliases_json, user_cooldown_seconds, stream_condition, response_type,
-         template_fields_json, variable_name, variable_operation, variable_amount,
+         games_json, template_fields_json, variable_name, variable_operation, variable_amount,
          last_used_at, created_at, updated_at, revision)
-       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
+       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
         WHERE NOT EXISTS (
           SELECT 1 FROM text_commands AS other
            WHERE other.channel_id = ? AND other.command_name = ?
@@ -305,6 +309,7 @@ export const createTextCommandRepository = (
       userCooldownSeconds,
       streamCondition,
       responseType,
+      JSON.stringify(input.games ?? []),
       extraTemplatesJson,
       input.variableAction?.name ?? null,
       input.variableAction?.operation ?? null,
@@ -334,6 +339,7 @@ export const createTextCommandRepository = (
       aliases,
       userCooldownSeconds,
       streamCondition,
+      games: input.games ?? [],
       responseType,
       variableAction: input.variableAction ?? null,
       useCount: 0,
@@ -389,7 +395,7 @@ export const createTextCommandRepository = (
       : db.prepare(
         `UPDATE text_commands
             SET command_name = ?, response_text = ?, kind = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?,
-              aliases_json = ?, user_cooldown_seconds = ?, stream_condition = ?, response_type = ?,
+              aliases_json = ?, user_cooldown_seconds = ?, stream_condition = ?, response_type = ?, games_json = ?,
                 template_fields_json = ?, variable_name = ?, variable_operation = ?, variable_amount = ?,
                 updated_at = ?, revision = revision + 1
           WHERE channel_id = ? AND command_name = ? AND revision = ?
@@ -419,6 +425,7 @@ export const createTextCommandRepository = (
         input.userCooldownSeconds,
         input.streamCondition,
         input.responseType,
+        JSON.stringify(input.games ?? before.games ?? []),
         extraTemplatesJson,
         input.variableAction?.name ?? null,
         input.variableAction?.operation ?? null,
@@ -453,6 +460,7 @@ export const createTextCommandRepository = (
         aliases: [...input.aliases],
         userCooldownSeconds: input.userCooldownSeconds,
         streamCondition: input.streamCondition,
+        games: input.games ?? before.games ?? [],
         responseType: input.responseType,
         variableAction: input.variableAction ?? null,
         useCount: before.useCount,
@@ -774,4 +782,18 @@ export const initializeListCommand = async (
       },
     }, now),
   ];
+};
+
+export const listTextCommandTemplateUsageSources = async (
+  db: D1Database,
+  channelId: string,
+): Promise<readonly { text: string; kind: "command"; label: string }[]> => {
+  const rows = await db.prepare(
+    "SELECT command_name, response_text, template_fields_json FROM text_commands WHERE channel_id = ? ORDER BY command_name",
+  ).bind(channelId).all<{ command_name: string; response_text: string; template_fields_json: string }>();
+  return rows.results.map((row) => ({
+    text: `${row.response_text} ${row.template_fields_json}`,
+    kind: "command",
+    label: `!${row.command_name}`,
+  }));
 };

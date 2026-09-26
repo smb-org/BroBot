@@ -3,16 +3,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
   Badge, Button, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
+  GamePicker, InspectorFieldRow, InspectorSection,
   registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, type TextCommand, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
+import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, type TextCommand, type TextCommandGame, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
 import { minimumTierAfterVariableOperation } from "./editor-state";
 import { commandListReply, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsFor } from "../contracts/chat-defaults";
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions } from "../../../dashboard/ui";
-import { createTextCommand, deleteTextCommand, loadTextCommandData, saveTextCommand, toggleTextCommand, type TextCommandChannelVariable } from "./service";
+import { createTextCommand, deleteTextCommand, loadTextCommandData, loadTextLibraryBlocks, saveTextCommand, searchTextGames, toggleTextCommand, type TextCommandChannelVariable } from "./service";
 import { textCommandsTexts } from "./locale";
 
 const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
@@ -27,6 +28,7 @@ interface CommandDraft {
   aliases: string[];
   userCooldownSeconds: number | "";
   streamCondition: TextCommandStreamCondition;
+  games: TextCommandGame[];
   responseType: TextCommandResponseType;
   variableAction: TextCommand["variableAction"];
 }
@@ -41,6 +43,7 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
   aliases: [...command.aliases],
   userCooldownSeconds: command.userCooldownSeconds,
   streamCondition: command.streamCondition,
+  games: [...(command.games ?? [])],
   responseType: command.responseType,
   variableAction: command.variableAction === null ? null : { ...command.variableAction },
 });
@@ -55,6 +58,7 @@ const newCommandDraft = (): CommandDraft => ({
   aliases: [],
   userCooldownSeconds: 0,
   streamCondition: "any",
+  games: [],
   responseType: "say",
   variableAction: null,
 });
@@ -145,6 +149,7 @@ interface TextCommandEditorProperties {
 
 const TextCommandEditor = ({ channelId, language, initial, command, commands, channelVariables, canManageContent, botIsModerator, onClose, onCreateSuccess, onGuardChange, onRefresh, onDeleted }: TextCommandEditorProperties): ReactElement => {
   const labels = useMemo(() => textCommandsTexts(language), [language]);
+  const searchGames = useCallback((query: string) => searchTextGames(channelId, query), [channelId]);
   const resolvedLanguage = language ?? dashboardLanguage();
   const { value: draft, setValue, dirty, reset, accept } = useDraft<CommandDraft>(initial);
   const draftRevision = useRef(command?.revision ?? null);
@@ -160,15 +165,17 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const [attemptedSave, setAttemptedSave] = useState(false);
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [minimumTierExplicit, setMinimumTierExplicit] = useState(false);
+  const [libraryBlocks, setLibraryBlocks] = useState<readonly string[]>([]);
+  const [selectedLibraryBlock, setSelectedLibraryBlock] = useState("");
   const isCreate = command === null;
-  const templateFields = templateFieldsForKind(draft.kind, channelVariables);
+  const blockVariables: TemplateVariable[] = libraryBlocks.map((name) => ({ name, group: "channel", sample: name, maxLength: 500 }));
+  const baseTemplateFields = templateFieldsForKind(draft.kind, channelVariables);
+  const templateFields = Object.fromEntries(Object.entries(baseTemplateFields).map(([field, variables]) => [field, [...variables, ...blockVariables]]));
   const variableAction = draft.variableAction;
-  const templateVariables = () => panelTemplateOptions(
-    "chat_command",
-    [],
-    channelVariables,
-    resolvedLanguage,
-  );
+  const templateVariables = () => [
+    ...panelTemplateOptions("chat_command", [], channelVariables, resolvedLanguage),
+    ...libraryBlocks.map((name) => ({ name, description: labels.libraryText, sample: name, group: "channel" as const, kind: "module" as const })),
+  ];
   const templateValue = (field: CommandTemplateField): string => draft[field];
   const normalizedName = normalizeCommandName(draft.name);
   const nameInvalid = normalizedName.length === 0 || !validCommandName(normalizedName);
@@ -224,6 +231,12 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       : undefined;
   const listPreview = commandListReply(commands.filter((item) => item.enabled && item.name !== command?.name).map((item) => item.name));
 
+  useEffect(() => {
+    let active = true;
+    loadTextLibraryBlocks(channelId).then((blocks) => { if (active) setLibraryBlocks(blocks); }).catch(() => { if (active) setLibraryBlocks([]); });
+    return () => { active = false; };
+  }, [channelId]);
+
   const saveDraft = useCallback(async (): Promise<string | null> => {
     setAttemptedSave(true);
     if (!canManageContent || !valid) return labels.invalid;
@@ -237,6 +250,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       aliases: draft.aliases,
       userCooldownSeconds: draft.userCooldownSeconds as number,
       streamCondition: draft.streamCondition,
+      games: draft.games,
       responseType: draft.responseType,
       variableAction: draft.variableAction,
     };
@@ -346,25 +360,37 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
 
   const templateEditor = (field: CommandTemplateField, label: string): ReactElement => {
     const value = templateValue(field);
-    return <TextArea
-      key={field}
-      id={`command-${field}`}
-      name={field}
-      label={field === "text" ? labels.response : label}
-      hint={labels.responseHint}
-      value={value}
-      onChange={(next) => { setDraftField(field, next); }}
-      maxLength={500}
-      variables={templateVariables()}
-      preview={(template, values) => renderTemplate(template, values)}
-      previewLabel={labels.previewLabel}
-      previewSpeaker={labels.previewSpeaker}
-      disabled={!canManageContent || pending}
-      messages={labels.textAreaMessages}
-      createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`}
-      required={field !== "text" || draft.variableAction === null}
-      {...(attemptedSave && value.trim().length === 0 && !(field === "text" && draft.variableAction !== null) ? { error: labels.responseMissing } : {})}
-    />;
+    return <div className="command-template-editor" key={field}>
+      <TextArea
+        id={`command-${field}`}
+        name={field}
+        label={field === "text" ? labels.response : label}
+        hint={labels.responseHint}
+        value={value}
+        onChange={(next) => { setDraftField(field, next); }}
+        maxLength={500}
+        variables={templateVariables()}
+        preview={(template, values) => renderTemplate(template, values)}
+        previewLabel={labels.previewLabel}
+        previewSpeaker={labels.previewSpeaker}
+        disabled={!canManageContent || pending}
+        messages={labels.textAreaMessages}
+        createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`}
+        required={field !== "text" || draft.variableAction === null}
+        {...(attemptedSave && value.trim().length === 0 && !(field === "text" && draft.variableAction !== null) ? { error: labels.responseMissing } : {})}
+      />
+      <InspectorSection title={labels.libraryText}>
+        {libraryBlocks.length === 0 ? <p className="muted">{labels.noLibraryTexts}</p> : <InspectorFieldRow label={labels.libraryText}>
+          <div className="command-library-picker">
+            <Select label={labels.libraryText} value={selectedLibraryBlock || null} placeholder={labels.libraryTextPlaceholder} options={libraryBlocks.map((name) => ({ value: name, label: `{${name}}` }))} disabled={!canManageContent || pending} onChange={(name) => setSelectedLibraryBlock(name ?? "")} />
+            <Button disabled={!canManageContent || pending || selectedLibraryBlock.length === 0} onClick={() => {
+              const insertion = `{${selectedLibraryBlock}}`;
+              setDraftField(field, `${value}${value.length === 0 || /\s$/u.test(value) ? "" : " "}${insertion}`);
+            }}>{labels.insertLibraryText}</Button>
+          </div>
+        </InspectorFieldRow>}
+      </InspectorSection>
+    </div>;
   };
 
   const sections = [
@@ -508,14 +534,27 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           disabled={!canManageContent || pending}
           onChange={(value) => { setDraftField("minimumTier", value as TextCommandMinimumTier); }}
         />
-        <SegmentedControl
-          label={labels.streamCondition}
-          hint={labels.streamHints[draft.streamCondition]}
-          value={draft.streamCondition}
-          options={(["any", "online", "offline"] as const).map((value) => ({ value, label: labels.streamLabels[value] }))}
-          disabled={!canManageContent || pending}
-          onChange={(value) => { setDraftField("streamCondition", value as TextCommandStreamCondition); }}
-        />
+        <InspectorSection title={labels.availability}>
+          <InspectorFieldRow label={labels.streamCondition} help={labels.streamHints[draft.streamCondition]}>
+            <SegmentedControl
+              label={labels.streamCondition}
+              hint={labels.streamHints[draft.streamCondition]}
+              value={draft.streamCondition}
+              options={(["any", "online", "offline"] as const).map((value) => ({ value, label: labels.streamLabels[value] }))}
+              disabled={!canManageContent || pending}
+              onChange={(value) => { setDraftField("streamCondition", value as TextCommandStreamCondition); }}
+            />
+          </InspectorFieldRow>
+          <InspectorFieldRow label={labels.gameFilter} help={labels.gameFilterHint}>
+            <GamePicker
+              searchGames={searchGames}
+              value={draft.games}
+              onChange={(games) => { setDraftField("games", games); }}
+              messages={{ ...labels.gamePicker, label: labels.gameFilter, hint: labels.gameFilterHint }}
+              disabled={!canManageContent || pending}
+            />
+          </InspectorFieldRow>
+        </InspectorSection>
         <FieldPair>
           <NumberField
             id="command-cooldown"
@@ -560,6 +599,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     minimumTier: labels.tierLabels[draft.minimumTier],
     minimumDescription: tierDescription(draft.minimumTier, labels),
     stream: draft.streamCondition === "any" ? labels.streamAny : draft.streamCondition === "online" ? labels.streamOnline : labels.streamOffline,
+    games: draft.games.map((game) => game.name).join(", ") || labels.streamAny,
     cooldown: draft.cooldownSeconds === "" ? "—" : `${String(draft.cooldownSeconds)} s`,
     userCooldown: draft.userCooldownSeconds === 0 ? labels.cooldownOff : draft.userCooldownSeconds === "" ? "—" : `${String(draft.userCooldownSeconds)} s`,
   }), [draft, labels]);
@@ -577,6 +617,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     {draft.kind === "shoutout" ? null : <div><dt>{labels.responseType}</dt><dd>{props.responseType}</dd></div>}
     <div><dt>{labels.minimumTier}</dt><dd>{props.minimumTier} · {props.minimumDescription}</dd></div>
     <div><dt>{labels.streamCondition}</dt><dd>{props.stream}</dd></div>
+    <div><dt>{labels.gameFilter}</dt><dd>{props.games}</dd></div>
     <div><dt>{labels.cooldown}</dt><dd className="mono">{props.cooldown}</dd></div>
     <div><dt>{labels.userCooldown}</dt><dd className="mono">{props.userCooldown}</dd></div>
     {command === null ? null : <>

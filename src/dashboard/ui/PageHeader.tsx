@@ -13,7 +13,7 @@ export interface PageHeaderProps {
 export function PageHeader({ kind, title, subtitle, actions, icon }: PageHeaderProps) {
   return (
     <header className="page-header module-detail-heading">
-      <div className="page-header__icon module-detail-heading__icon" aria-hidden="true">
+      <div className="page-header__icon module-detail__icon module-detail-heading__icon" aria-hidden="true">
         {icon ?? <NavigationIcon kind={kind} className="module-heading-glyph" />}
       </div>
       <div className="page-header__copy module-detail-heading__copy">

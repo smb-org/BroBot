@@ -11,7 +11,9 @@ export function NavigationIcon({ kind, className = "navigation-icon" }: { kind: 
             : kind === "members" ? <><circle cx="9" cy="8" r="3" /><path d="M3.5 19c.6-3.4 2.4-5 5.5-5s4.9 1.6 5.5 5M16 6.5a2.5 2.5 0 0 1 0 5M17 14c2.1.5 3.2 2.1 3.5 4" />
               </>
               : kind === "modules" ? <><rect x="4" y="4" width="7" height="7" rx="1" /><rect x="13" y="4" width="7" height="7" rx="1" /><rect x="4" y="13" width="7" height="7" rx="1" /><rect x="13" y="13" width="7" height="7" rx="1" /></>
-                : kind === "permission" ? <><circle cx="8.5" cy="15.5" r="3.5" /><path d="m11 13 7-7 2 2-7 7M16 8l2 2" />
+                : kind === "texts" ? <><path d="M5 4.5h10a4 4 0 0 1 4 4v11H9a4 4 0 0 0-4 1.5zM5 4.5v15M9 9h6M9 12.5h6M9 16h4" />
+                  </>
+                  : kind === "permission" ? <><circle cx="8.5" cy="15.5" r="3.5" /><path d="m11 13 7-7 2 2-7 7M16 8l2 2" />
                   </>
                   : kind === "token" || kind === "overlays" ? <><rect x="4" y="5" width="13" height="14" rx="1.5" /><path d="M8 3h12v14M8 10h5M8 14h5" /></>
                     : kind === "variable" ? <><path d="M8 5C5 5 5 7 5 9v1c0 1.5-1 2-2 2 1 0 2 .5 2 2v1c0 2 0 4 3 4M16 5c3 0 3 2 3 4v1c0 1.5 1 2 2 2-1 0-2 .5-2 2v1c0 2 0 4-3 4" /><path d="m10 15 4-6" /><circle cx="10" cy="9" r=".8" /><circle cx="14" cy="15" r=".8" /></>

@@ -4,6 +4,8 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { textFingerprint } from "../../src/text";
+import { createTextBlockRepository } from "../../src/modules/text_library/adapters/d1";
+import { createTextLibraryService } from "../../src/modules/text_library/service";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -117,22 +119,22 @@ describe("Text commands panel", () => {
         module_id: "text_commands",
         action: "text_commands.command.created",
         before_json: "null",
-        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, textHash: longTextHash, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
+        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, textHash: longTextHash, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
         action: "text_commands.command.updated",
-        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, textHash: longTextHash, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
-        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
+        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, textHash: longTextHash, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
+        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
         action: "text_commands.command.removed",
-        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
+        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
         after_json: "null",
       }),
     ]));
@@ -491,6 +493,38 @@ describe("Text commands panel", () => {
     expect(oversized.status).toBe(400);
   });
 
+  it("recognizes registered text-library variables when validating a command", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const library = createTextLibraryService(createTextBlockRepository(
+      database as unknown as D1Database,
+      () => ({ sql: "AND 1 = 1", values: [] }),
+    ));
+    const snapshot = await library.list("kanal-a");
+    const createdBlock = await library.create({
+      channelId: "kanal-a",
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: ["Welcome!"] }],
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date().toISOString(),
+    }, { userId: "user-1", sessionId: "session-user-1" });
+    expect(createdBlock.ok).toBe(true);
+
+    const createdCommand = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "greeting", text: "Hello {welcome}", cooldownSeconds: 0,
+      }),
+      environmentFor(database),
+    );
+
+    expect(createdCommand.status).toBe(201);
+    const body = await createdCommand.json<{ warnings: Array<{ code: string; unknownVariables?: string[] }> }>();
+    expect(body.warnings.flatMap((warning) => warning.unknownVariables ?? [])).not.toContain("welcome");
+  });
+
   it("lets a manager toggle a command and audits the toggle", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -519,8 +553,8 @@ describe("Text commands panel", () => {
       "SELECT action, before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
     ).first()).resolves.toEqual({
       action: "text_commands.command.updated",
-      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
-      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
+      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
+      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
     });
   });
 
@@ -653,8 +687,8 @@ describe("Text commands panel", () => {
     await expect(database.prepare(
       "SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
     ).first()).resolves.toEqual({
-      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
-      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "moderator", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
+      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
+      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "moderator", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
     });
   });
 });

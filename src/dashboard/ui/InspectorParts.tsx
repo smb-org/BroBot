@@ -12,9 +12,9 @@ export function InspectorSection({ title, children, danger = false, help }: { ti
   );
 }
 
-export function InspectorFieldRow({ label, help, children }: { label: string; help?: string; children: ReactNode }) {
+export function InspectorFieldRow({ label, help, children, className }: { label: string; help?: string; children: ReactNode; className?: string }) {
   return (
-    <div className="inspector-field-row">
+    <div className={`inspector-field-row${className === undefined ? "" : ` ${className}`}`}>
       <div className="inspector-field-row__label">
         <span>{label}</span>
         {help === undefined ? null : <button className="inspector-field-row__info" type="button" title={help} aria-label={`${label}: ${help}`}><Icon name="cause" size={16} /></button>}

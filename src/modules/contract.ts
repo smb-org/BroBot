@@ -2,7 +2,7 @@ import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ImmediateActionRequirement } from "../contracts/values";
-import type { TemplateContext, TemplateFields } from "../template";
+import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 
@@ -50,7 +50,7 @@ export {
   TEMPLATE_TOKEN_CANDIDATE_PATTERN,
   TEMPLATE_VARIABLE_PATTERN,
 } from "../template";
-export type { TemplateFields, TemplateVariable, TemplateValues, TemplateWarning } from "../template";
+export type { TemplateContext, TemplateFields, TemplateVariable, TemplateValues, TemplateWarning } from "../template";
 export { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 /** Status of the chat-triggering person, derived from Twitch badges. */
@@ -214,6 +214,8 @@ export interface ModuleExecutionContext {
   streamState: () => Promise<ModuleStreamState>;
   /** Lazily loads the current channel's public Helix fields and live start time. */
   channelInfo: () => Promise<ModuleChannelInfo | null>;
+  /** Lazily loads only the current channel game, independently of stream details. */
+  channelGameId?: () => Promise<string | null>;
   /** Lazily loads whether the caller follows the current channel. */
   followedAt: (userId: string) => Promise<ModuleFollowedAt>;
   followerTotal: () => Promise<number | null>;
@@ -242,8 +244,58 @@ export type ModuleStreamState = "online" | "offline" | "unknown";
 export interface ModuleChannelInfo {
   title: string;
   gameName: string;
+  gameId: string;
   startedAt: string | null;
   viewerCount: number;
+}
+
+/** A localized, module-owned item in the channel navigation. */
+export interface ModuleNavigationEntry {
+  id: string;
+  label: Readonly<Record<ModuleLanguage, string>>;
+  description?: Readonly<Record<ModuleLanguage, string>>;
+  /** Channel pages join the shared Channel group; omitted entries stay under Modules. */
+  group?: "channel" | "modules";
+  /** Hide the module's main switch when this page is permanently available. */
+  showMainSwitch?: boolean;
+  iconKind: string;
+  keywords?: readonly string[];
+}
+
+/** A module-owned source of text that can contain template-variable references. */
+export interface ModuleTemplateUsageSource {
+  text: string;
+  kind: "command" | "timer" | "overlay" | "event";
+  label: string;
+}
+
+/** Inputs available to any registered module that contributes template variables. */
+export interface ModuleTemplateExpansionContext {
+  DB: D1Database;
+  channelId: string;
+  text: string;
+  knownVariables: ReadonlySet<string>;
+  templateContext: TemplateContext;
+  chatStatus: readonly ModuleChatStatus[] | null;
+  streamState: () => Promise<ModuleStreamState>;
+  channelInfo: () => Promise<ModuleChannelInfo | null>;
+  /** The current game can be queried without requiring a successful stream lookup. */
+  channelGameId?: () => Promise<string | null>;
+  /** Resolves host variables in a bounded fragment before a module appends it. */
+  resolveTemplateVariables?: (text: string) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
+  now: number;
+}
+
+export interface ModuleTemplateExpansionResult {
+  text: string;
+  used: boolean;
+  /** An output bound contributed by a module-owned variable source. */
+  outputLimit?: number;
+  /** Whether the module expanded its complete input within its work and output budgets. */
+  complete?: boolean;
+  /** Whether host variables in the expansion were already resolved. */
+  variablesResolved?: boolean;
+  diagnostics?: readonly ModuleDiagnostic[];
 }
 
 export interface ModuleVariableReferenceUsage {
@@ -359,6 +411,24 @@ export interface ModuleImmediateActionDefinition {
 
 export type ModuleLanguage = "de" | "en";
 
+export const MODULE_TEMPLATE_MINIMUM_TIERS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
+export type ModuleTemplateMinimumTier = (typeof MODULE_TEMPLATE_MINIMUM_TIERS)[number];
+
+/** Chat badges that meet each shared minimum tier. */
+export const MODULE_TEMPLATE_TIER_CHAT_STATUSES: Readonly<Record<ModuleTemplateMinimumTier, readonly ModuleChatStatus[]>> = {
+  everyone: ["viewer", "subscriber", "vip", "moderator", "broadcaster"],
+  subscriber: ["subscriber", "moderator", "broadcaster"],
+  vip: ["vip", "moderator", "broadcaster"],
+  moderator: ["moderator", "broadcaster"],
+  broadcaster: ["broadcaster"],
+};
+
+/** A variable name provided by a module for template validation. */
+export interface ModuleRegisteredTemplateVariable {
+  moduleId: string;
+  name: string;
+}
+
 export const browserModuleLanguage = (): ModuleLanguage => {
   const language = typeof navigator === "undefined" ? "de" : navigator.language;
   return language.toLowerCase().startsWith("de") ? "de" : "en";
@@ -413,6 +483,8 @@ export interface ModuleRouteVariables {
   writeModuleAudit: WriteModuleAudit;
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];
   findChannelVariable: ModuleChannelVariableAccess["findChannelVariable"];
+  templateUsageSources: (channelId: string) => Promise<readonly ModuleTemplateUsageSource[]>;
+  listRegisteredTemplateVariables: (channelId: string) => Promise<readonly ModuleRegisteredTemplateVariable[]>;
   writeModuleDiagnostics: (
     db: D1Database,
     channelId: string,
@@ -462,6 +534,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
   /** The module is always enabled for every released channel and cannot be disabled. */
   mandatory?: boolean;
+  /** Localized explanation shown when this module cannot be disabled. */
+  mandatoryReason?: Readonly<Record<ModuleLanguage, string>>;
   /**
    * The declaration the release path uses to write an enabled
    * `channel_modules` row for new channels. A channel released before the
@@ -474,8 +548,21 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   defaultSettings: z.output<SettingsSchema>;
   /** Template fields and variables used by both panel validation and worker rendering. */
   templateFields?: TemplateFields<z.output<SettingsSchema>>;
+  /** Dynamic template variables registered from module-owned data. */
+  templateVariables?: (db: D1Database, channelId: string) => Promise<readonly TemplateVariable[]>;
   /** Which host catalog groups are available in this module's templates. */
   templateContext?: TemplateContext;
+  /** Generic template-variable expansion supplied by the module itself. */
+  expandTemplateVariables?: (
+    context: ModuleTemplateExpansionContext,
+  ) => Promise<ModuleTemplateExpansionResult>;
+  /** Channel navigation entries contributed by this module. */
+  navigationEntries?: readonly ModuleNavigationEntry[];
+  /** Template text contributed by this module for generic library usage views. */
+  templateUsageSources?: (
+    db: D1Database,
+    channelId: string,
+  ) => Promise<readonly ModuleTemplateUsageSource[]>;
   /** Optional references to channel variables stored in module-owned data. */
   variableReferences?: ModuleVariableReferences;
   /** Broadcaster consent the host verifies before the EventSub subscription. */

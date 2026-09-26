@@ -2881,7 +2881,7 @@ describe("Dashboard skeleton", () => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot, platformAdmin });
       if (path.endsWith("/system")) return jsonResponse(system);
-      if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "text_library", enabled: true, mandatory: true, settings: "{}" }] });
       return jsonResponse({}, 404);
     }));
     window.history.replaceState({}, "", "/channels/kanal-a/system");
@@ -2892,6 +2892,9 @@ describe("Dashboard skeleton", () => {
     const dialog = await screen.findByRole("dialog");
 
     const sidebar = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    const textsLink = within(sidebar).getByRole("link", { name: "Texte" });
+    expect(textsLink.closest(".sidebar__group")?.querySelector(".sidebar__heading")).toHaveTextContent("Kanal");
+    expect(within(sidebar).queryByRole("link", { name: "Texte · Läuft" })).not.toBeInTheDocument();
     const sidebarPageIds = Array.from(sidebar.querySelectorAll<HTMLElement>("[data-nav-page-id]"), (entry) => entry.dataset.navPageId)
       .filter((id): id is string => id !== undefined);
     const spotlightPageIds = Array.from(dialog.querySelectorAll<HTMLElement>("[data-spotlight-item-id^='page:']"), (action) => action.dataset.spotlightItemId?.slice("page:".length))
