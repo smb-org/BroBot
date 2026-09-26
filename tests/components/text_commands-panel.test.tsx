@@ -42,6 +42,7 @@ const panelFetch = ({ commands = () => [makeCommand()], onMutation = () => jsonR
     const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+    if (url.pathname.endsWith("/modules/text_library/blocks") && method === "GET") return Promise.resolve(jsonResponse({ blocks: [{ name: "welcome" }] }));
     if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: [] }));
     if (url.pathname.includes("/commands/") || (url.pathname.endsWith("/commands") && method !== "GET")) {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
@@ -141,6 +142,21 @@ describe("Text command editor", () => {
     }
     fireEvent.click(within(picker).getByRole("option", { name: /\{uptime\}/u, hidden: true }));
     expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("{uptime}");
+  });
+
+  it("inserts a selected text-library block into a command response", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher);
+    await selectCommand();
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/modules/text_library/blocks")));
+    const picker = document.querySelector(".command-library-picker");
+    if (!(picker instanceof HTMLElement)) throw new Error("Text-library picker is missing");
+    fireEvent.click(within(picker).getByRole("combobox", { name: "Text aus Bibliothek" }));
+    fireEvent.click(await screen.findByText("{welcome}"));
+    fireEvent.click(screen.getByRole("button", { name: "Text einsetzen" }));
+
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Hallo {user} aus {channel} {welcome}");
   });
 
   it("keeps the variable action in a left-aligned switch card and the command body scrollable", async () => {
@@ -298,6 +314,7 @@ describe("Text command editor", () => {
         aliases: ["hey"],
         userCooldownSeconds: 0,
         streamCondition: "online",
+        games: [],
         responseType: "reply",
         variableAction: null,
       }));
@@ -328,6 +345,7 @@ describe("Text command editor", () => {
       aliases: [],
       userCooldownSeconds: 0,
       streamCondition: "any",
+      games: [],
       responseType: "say",
       variableAction: null,
     }));
@@ -359,6 +377,7 @@ describe("Text command editor", () => {
       aliases: [],
       userCooldownSeconds: 0,
       streamCondition: "any",
+      games: [],
       responseType: "say",
       variableAction: null,
     }));
@@ -663,6 +682,7 @@ describe("Text command editor", () => {
         aliases: ["hey"],
         userCooldownSeconds: 15,
         streamCondition: "online",
+        games: [],
         responseType: "reply",
         variableAction: null,
       },

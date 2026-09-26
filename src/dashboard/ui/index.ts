@@ -15,6 +15,7 @@ export { Sidebar } from "./Sidebar";
 export type { SidebarProps, SidebarEntry, SidebarGroup, SidebarModulesGroup } from "./Sidebar";
 
 export { Field } from "./Field";
+export { GamePicker, type GamePickerGame, type GamePickerMessages } from "./GamePicker";
 export type { FieldProps } from "./Field";
 
 export { ColorField } from "./ColorField";

@@ -49,9 +49,10 @@ import { PlatformPage } from "./platform";
 import { channelPanelTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
 import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration } from "../contracts/values";
+import { MODULES } from "../modules/registry";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
-import { navPageActive, navPageById, navPageGroupHeading, visibleNavPages } from "./nav-pages";
+import { navPageActive, navPageById, navPageGroupHeading, registeredModuleNavEntries, visibleNavPages } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
 import { BlockingState, Button, ControlDurationDialog, Icon, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
@@ -309,11 +310,22 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
   // "jedes aktive Modul als Eintrag" -- only modules that are actually on
   // (enabled, and not held back by a missing broadcaster scope) appear
   // here; everything else lives in the module list only.
+  const registeredModuleEntries = registeredModuleNavEntries(MODULES, navigationChannelId, dashboardLanguage());
   const activeModuleEntries: SidebarEntry[] = (moduleStates ?? [])
     .filter((module) => module.enabled && (module.missingBroadcasterScopes?.length ?? 0) === 0)
-    .map((module) => {
+    .flatMap((module) => {
+      const declared = registeredModuleEntries.filter((entry) => entry.moduleId === module.id);
+      if (declared.length > 0) return declared.map((entry): SidebarEntry => ({
+        id: entry.id,
+        label: entry.label,
+        icon: <NavigationIcon kind={entry.iconKind} className="sidebar-nav-icon" />,
+        href: dashboardRoutePath(entry.route),
+        active: route.kind === "module" && route.moduleId === entry.moduleId,
+        onNavigate: () => { onNavigate(entry.route); },
+        led: { status: "green" as const, word: statusWord(true) },
+      }));
       const moduleRoute: DashboardRoute = { kind: "module", channelId: navigationChannelId, moduleId: module.id };
-      return {
+      return [{
         id: module.id,
         label: moduleName(module.id),
         icon: <ModuleIcon moduleId={module.id} className="sidebar-nav-icon" />,
@@ -321,7 +333,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
         active: route.kind === "module" && route.moduleId === module.id,
         onNavigate: () => { onNavigate(moduleRoute); },
         led: { status: "green" as const, word: statusWord(true) },
-      };
+      }];
     });
   const modulesGroup: SidebarModulesGroup = {
     heading: navPageGroupHeading("modules", texts),

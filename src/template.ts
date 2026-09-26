@@ -11,6 +11,8 @@ export interface TemplateVariable {
   readonly sample: string;
   readonly source?: TemplateVariableSource;
   readonly contexts?: readonly TemplateContext[];
+  /** Localized value used when this input-dependent variable is placed outside its declared context. */
+  readonly unavailableContextText?: "command_input_usage" | "command_input_error";
   readonly external?: boolean;
 }
 

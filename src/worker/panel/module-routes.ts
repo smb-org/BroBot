@@ -35,6 +35,7 @@ interface ModuleRouteEnvironment {
     "writeModuleDiagnostics" | "broadcasterHasScope" | "broadcasterScopesForChannel"
     | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
     | "listChannelVariables" | "findChannelVariable"
+    | "templateUsageSources"
   >;
 }
 
@@ -94,6 +95,25 @@ moduleRouter.use("/api/channels/:channelId/modules/*", (context, next) => {
   context.set("findChannelVariable", async (channelId, name): Promise<ModuleChannelVariable | null> => {
     const variable = await findChannelVariable(context.env.DB, channelId, name);
     return variable === null ? null : { name: variable.name, value: variable.value, description: variable.description };
+  });
+  context.set("templateUsageSources", async (channelId) => {
+    const moduleSources = await Promise.all(MODULES.map((module) =>
+      module.templateUsageSources?.(context.env.DB, channelId) ?? Promise.resolve([]),
+    ));
+    const overlayRows = await context.env.DB.prepare(
+      `SELECT overlay.name AS overlay_name, element.label, element.text, element.config_json
+         FROM overlay_elements AS element JOIN overlays AS overlay
+           ON overlay.channel_id = element.channel_id AND overlay.overlay_id = element.overlay_id
+        WHERE element.channel_id = ? ORDER BY overlay.name, element.label`,
+    ).bind(channelId).all<{ overlay_name: string; label: string; text: string; config_json: string }>();
+    return [
+      ...moduleSources.flat(),
+      ...overlayRows.results.map((row) => ({
+        text: `${row.text} ${row.config_json}`,
+        kind: "overlay" as const,
+        label: row.label || row.overlay_name,
+      })),
+    ];
   });
   return next();
 });

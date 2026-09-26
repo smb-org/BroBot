@@ -1,6 +1,7 @@
 import { platformTexts } from "./labels";
 import type { DashboardTexts } from "./locale";
 import type { DashboardRoute } from "./router";
+import type { BotModule, ModuleLanguage } from "../modules/contract";
 
 export type NavPageGroup = "operation" | "channel" | "modules" | "platform";
 
@@ -23,6 +24,31 @@ export interface NavPageDefinition {
   label: (texts: DashboardTexts) => string;
   keywords: readonly string[];
 }
+
+export interface RegisteredModuleNavEntry {
+  id: string;
+  moduleId: string;
+  label: string;
+  description?: string;
+  iconKind: string;
+  keywords: readonly string[];
+  route: DashboardRoute;
+}
+
+/** Converts module-owned navigation declarations into host routes and labels. */
+export const registeredModuleNavEntries = (
+  modules: readonly Pick<BotModule, "id" | "navigationEntries">[],
+  channelId: string,
+  language: ModuleLanguage,
+): readonly RegisteredModuleNavEntry[] => modules.flatMap((module) => (module.navigationEntries ?? []).map((entry) => ({
+  id: `${module.id}:${entry.id}`,
+  moduleId: module.id,
+  label: entry.label[language],
+  ...(entry.description === undefined ? {} : { description: entry.description[language] }),
+  iconKind: entry.iconKind,
+  keywords: entry.keywords ?? [],
+  route: { kind: "module", channelId, moduleId: module.id },
+})));
 
 const channelRoute = (section: ChannelSection) => (channelId: string): DashboardRoute => ({ kind: "channel", channelId, section });
 

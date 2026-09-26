@@ -50,7 +50,7 @@ export {
   TEMPLATE_TOKEN_CANDIDATE_PATTERN,
   TEMPLATE_VARIABLE_PATTERN,
 } from "../template";
-export type { TemplateFields, TemplateVariable, TemplateValues, TemplateWarning } from "../template";
+export type { TemplateContext, TemplateFields, TemplateVariable, TemplateValues, TemplateWarning } from "../template";
 export { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 /** Status of the chat-triggering person, derived from Twitch badges. */
@@ -242,8 +242,45 @@ export type ModuleStreamState = "online" | "offline" | "unknown";
 export interface ModuleChannelInfo {
   title: string;
   gameName: string;
+  gameId: string;
   startedAt: string | null;
   viewerCount: number;
+}
+
+/** A localized, module-owned item in the channel navigation. */
+export interface ModuleNavigationEntry {
+  id: string;
+  label: Readonly<Record<ModuleLanguage, string>>;
+  description?: Readonly<Record<ModuleLanguage, string>>;
+  iconKind: string;
+  keywords?: readonly string[];
+}
+
+/** A module-owned source of text that can contain template-variable references. */
+export interface ModuleTemplateUsageSource {
+  text: string;
+  kind: "command" | "timer" | "overlay" | "event";
+  label: string;
+}
+
+/** Inputs available to any registered module that contributes template variables. */
+export interface ModuleTemplateExpansionContext {
+  DB: D1Database;
+  channelId: string;
+  text: string;
+  knownVariables: ReadonlySet<string>;
+  templateContext: TemplateContext;
+  chatStatus: readonly ModuleChatStatus[] | null;
+  streamState: () => Promise<ModuleStreamState>;
+  channelInfo: () => Promise<ModuleChannelInfo | null>;
+  now: number;
+}
+
+export interface ModuleTemplateExpansionResult {
+  text: string;
+  used: boolean;
+  /** An output bound contributed by a module-owned variable source. */
+  outputLimit?: number;
 }
 
 export interface ModuleVariableReferenceUsage {
@@ -413,6 +450,7 @@ export interface ModuleRouteVariables {
   writeModuleAudit: WriteModuleAudit;
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];
   findChannelVariable: ModuleChannelVariableAccess["findChannelVariable"];
+  templateUsageSources: (channelId: string) => Promise<readonly ModuleTemplateUsageSource[]>;
   writeModuleDiagnostics: (
     db: D1Database,
     channelId: string,
@@ -462,6 +500,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
   /** The module is always enabled for every released channel and cannot be disabled. */
   mandatory?: boolean;
+  /** Localized explanation shown when this module cannot be disabled. */
+  mandatoryReason?: Readonly<Record<ModuleLanguage, string>>;
   /**
    * The declaration the release path uses to write an enabled
    * `channel_modules` row for new channels. A channel released before the
@@ -476,6 +516,17 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   templateFields?: TemplateFields<z.output<SettingsSchema>>;
   /** Which host catalog groups are available in this module's templates. */
   templateContext?: TemplateContext;
+  /** Generic template-variable expansion supplied by the module itself. */
+  expandTemplateVariables?: (
+    context: ModuleTemplateExpansionContext,
+  ) => Promise<ModuleTemplateExpansionResult>;
+  /** Channel navigation entries contributed by this module. */
+  navigationEntries?: readonly ModuleNavigationEntry[];
+  /** Template text contributed by this module for generic library usage views. */
+  templateUsageSources?: (
+    db: D1Database,
+    channelId: string,
+  ) => Promise<readonly ModuleTemplateUsageSource[]>;
   /** Optional references to channel variables stored in module-owned data. */
   variableReferences?: ModuleVariableReferences;
   /** Broadcaster consent the host verifies before the EventSub subscription. */

@@ -1,4 +1,5 @@
 import type { TextCommand, TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, TextCommandStreamCondition } from "../contracts";
+import { TEXT_LIBRARY_BLOCKS_PATH, TEXT_LIBRARY_GAME_SEARCH_PATH, TEXT_LIBRARY_MODULE_ID, type TextLibraryBlockSummary, type TwitchGame } from "../../text_library/contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
 import type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../contract";
 
@@ -34,6 +35,17 @@ export const loadTextCommandData = async (channelId: string): Promise<TextComman
 
 export const loadTextCommands = async (channelId: string): Promise<TextCommand[]> => (await loadTextCommandData(channelId)).commands;
 
+export const loadTextLibraryBlocks = async (channelId: string): Promise<readonly string[]> => {
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/${TEXT_LIBRARY_MODULE_ID}${TEXT_LIBRARY_BLOCKS_PATH}`);
+  const data = await json<{ blocks: readonly TextLibraryBlockSummary[] }>(response);
+  return data.blocks.map((block) => block.name);
+};
+
+export const searchTextGames = async (channelId: string, query: string): Promise<readonly TwitchGame[]> => {
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/${TEXT_LIBRARY_MODULE_ID}${TEXT_LIBRARY_GAME_SEARCH_PATH}?q=${encodeURIComponent(query)}`);
+  return (await json<{ games: TwitchGame[] }>(response)).games;
+};
+
 const mutation = async (
   channelId: string,
   method: "POST" | "PATCH" | "DELETE",
@@ -60,7 +72,7 @@ const mutation = async (
 
 export const createTextCommand = async (
   channelId: string,
-  command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "responseType" | "variableAction">,
+  command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "games" | "responseType" | "variableAction">,
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "POST", command);
 
 export const saveTextCommand = async (
@@ -80,6 +92,7 @@ export const saveTextCommand = async (
     aliases: readonly string[];
     userCooldownSeconds: number;
     streamCondition: TextCommandStreamCondition;
+    games?: TextCommand["games"];
     responseType: TextCommandResponseType;
     variableAction: TextCommand["variableAction"];
 },
@@ -97,6 +110,7 @@ export const saveTextCommand = async (
   aliases: command.aliases,
   userCooldownSeconds: command.userCooldownSeconds,
   streamCondition: command.streamCondition,
+  games: command.games ?? [],
   responseType: command.responseType,
   variableAction: command.variableAction,
 }, command.oldName);

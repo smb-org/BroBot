@@ -11,7 +11,7 @@ src/modules/<id>/
 ├── service.ts     # Anwendungsfälle; orchestriert Domain und Repository
 ├── repository.ts  # kleines Interface für dauerhafte Daten
 ├── adapters/      # konkrete D1-, Durable-Object- oder externe Adapter
-├── overlay/       # schlanke Overlay-Ansicht mit strikten Bundle-Grenzen
+├── overlay/       # optionale schlanke Overlay-Ansicht mit strikten Bundle-Grenzen
 └── panel/         # Panel-Ansicht für Formulare und Bedienung
 ```
 
@@ -65,6 +65,24 @@ Breite nicht. Eine Liste fehlender Berechtigungen ist kein Inspektor und trägt
 2. Einen `BotModule`-Wert mit `id`, Settings-Schema und Defaults definieren; optionale EventSub-Typen, `handleEvent`, Routen sowie `overlayElements` und/oder Panel nur bei Bedarf ergänzen.
 3. Genau diesen Wert in `src/modules/registry.ts` in `MODULES` eintragen. Das ist die einzige globale Kenntnis aller Module.
 4. Prüfen: `pnpm run check`.
+
+### Generische Erweiterungspunkte
+
+Module dürfen über `navigationEntries` lokalisierte Einträge für Kanalnavigation
+und Spotlight bereitstellen. Der Host baut daraus Modulrouten; Namen, Texte,
+Symbole und Suchbegriffe bleiben beim Modul.
+Für nicht abschaltbare Module kann `mandatoryReason` den Grund je Sprache
+angeben.
+
+Module dürfen außerdem `expandTemplateVariables` implementieren. Der Host fragt
+registrierte Erweiterungen beim Rendern nach zusätzlichen Variablen und reicht
+den Vorlagentext, bekannte Variablennamen sowie Kanal-, Stream- und Chatkontext
+weiter. Die Erweiterung kennt nur ihren eigenen Speicher und ihre Verträge.
+Die Host-Auflösung bleibt für System- und Kanalvariablen zuständig.
+
+`templateUsageSources` meldet eigene Vorlagentexte für generische
+Nutzungsanzeigen. Der Host ergänzt seine eigenen Oberflächenquellen; Module
+fragen dafür keine Tabellen anderer Module ab.
 
 Das erste Modul ist `src/modules/text_commands/`. Es ist in der Registry als
 `text_commands` eingetragen, abonniert `channel.chat.message` und definiert

@@ -78,7 +78,11 @@ const channelDetailsFor = async (
     if (!result.ok) return null;
     const channel = firstDataRecord(result.data);
     if (channel === null || typeof channel.title !== "string" || typeof channel.game_name !== "string") return null;
-    return { title: channel.title, gameName: channel.game_name };
+    return {
+      title: channel.title,
+      gameName: channel.game_name,
+      gameId: typeof channel.game_id === "string" ? channel.game_id : "",
+    };
   } catch {
     return null;
   }
@@ -638,7 +642,37 @@ export const dispatchEventSubNotification = async (
         chatStatus: chatStatusFor(event.subscriptionType, event.payload),
       };
       const moduleVariables = Object.values(module.templateFields ?? {}).flatMap((variables) => variables ?? []) as TemplateVariable[];
-      const render = createTemplateRenderer(moduleEvent, module.templateContext ?? "event", moduleVariables, {
+      const templateContext = module.templateContext ?? "event";
+      const eventTime = Date.parse(moduleEvent.receivedAt);
+      const expandModuleTemplateVariables = async (
+        text: string,
+        knownVariables: ReadonlySet<string>,
+      ) => {
+        let expandedText = text;
+        let used = false;
+        let outputLimit: number | undefined;
+        for (const provider of registry) {
+          if (provider.expandTemplateVariables === undefined) continue;
+          const expanded = await provider.expandTemplateVariables({
+            DB: environment.DB,
+            channelId: moduleEvent.channelId,
+            text: expandedText,
+            knownVariables,
+            templateContext,
+            chatStatus: moduleEvent.chatStatus,
+            streamState,
+            channelInfo,
+            now: Number.isFinite(eventTime) ? eventTime : Date.now(),
+          });
+          expandedText = expanded.text;
+          used ||= expanded.used;
+          if (expanded.outputLimit !== undefined) outputLimit = outputLimit === undefined
+            ? expanded.outputLimit
+            : Math.min(outputLimit, expanded.outputLimit);
+        }
+        return { text: expandedText, used, ...(outputLimit === undefined ? {} : { outputLimit }) };
+      };
+      const render = createTemplateRenderer(moduleEvent, templateContext, moduleVariables, {
         streamState,
         channelDetails,
         streamDetails,
@@ -648,6 +682,7 @@ export const dispatchEventSubNotification = async (
         userCreatedAt,
         channelLanguage,
         readChannelVariables: channelVariables,
+        expandModuleTemplateVariables,
       });
         result = module.handleEvent === undefined
           ? null

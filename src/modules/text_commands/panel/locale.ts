@@ -3,6 +3,7 @@ import type { ModuleChatStatus } from "../contract";
 import type { TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, TextCommandStreamCondition } from "../contracts";
 import type { TagInputMessages, TextAreaMessages } from "../../../dashboard/ui";
 import type { PanelTemplateWarning } from "../contract";
+import type { GamePickerMessages } from "../../../dashboard/ui";
 
 export interface TextCommandsTexts {
   title: string;
@@ -40,6 +41,13 @@ export interface TextCommandsTexts {
   streamCondition: string;
   streamLabels: Record<TextCommandStreamCondition, string>;
   streamHints: Record<TextCommandStreamCondition, string>;
+  gameFilter: string;
+  gameFilterHint: string;
+  gamePicker: GamePickerMessages;
+  libraryText: string;
+  libraryTextPlaceholder: string;
+  insertLibraryText: string;
+  noLibraryTexts: string;
   cooldown: string;
   userCooldown: string;
   cooldownHint: string;
@@ -183,6 +191,13 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     botIsModerator: "Der Bot muss Moderator im Kanal sein.",
     streamCondition: "Stream", streamLabels: { any: "Immer", online: "Online", offline: "Offline" },
     streamHints: { any: "Wirkt unabhängig vom Stream.", online: "Wirkt nur, während der Stream läuft.", offline: "Wirkt nur, während der Stream aus ist." },
+    gameFilter: "Twitch-Spiele",
+    gameFilterHint: "Der Befehl antwortet nur, wenn gerade eines dieser Spiele läuft.",
+    gamePicker: { label: "Twitch-Spiele", hint: "Spiele über Twitch-Kategorien suchen und auswählen.", search: "Spiel suchen", searchHint: "Mindestens zwei Zeichen eingeben.", loading: "Spiele werden gesucht …", empty: "Keine Spiele gefunden.", error: "Die Twitch-Spiele konnten nicht geladen werden.", remove: (name) => `${name} entfernen` },
+    libraryText: "Text aus Bibliothek",
+    libraryTextPlaceholder: "Textbaustein auswählen",
+    insertLibraryText: "Text einsetzen",
+    noLibraryTexts: "Noch keine Textbausteine angelegt.",
     cooldown: "Abkühlzeit", userCooldown: "Je Nutzer", cooldownHint: "Für den ganzen Kanal. 0 bis 86 400.", userCooldownHint: "Für jeden Zuschauer einzeln. 0 = aus.", numberMissing: "Zahl eingeben.",
     nameHint: "a–z, 0–9, - und _",
     nameInvalid: "Nur Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich.", nameMissing: "Namen ausfüllen.", nameExists: "Der Befehl existiert bereits.",
@@ -259,6 +274,13 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     botIsModerator: "The bot must be a channel moderator.",
     streamCondition: "Stream", streamLabels: { any: "Always", online: "Online", offline: "Offline" },
     streamHints: { any: "Works regardless of stream status.", online: "Works only while the stream is live.", offline: "Works only while the stream is offline." },
+    gameFilter: "Twitch games",
+    gameFilterHint: "The command only replies while one of these games is current.",
+    gamePicker: { label: "Twitch games", hint: "Search and select games from Twitch categories.", search: "Search games", searchHint: "Enter at least two characters.", loading: "Searching games …", empty: "No games found.", error: "Twitch games could not be loaded.", remove: (name) => `Remove ${name}` },
+    libraryText: "Text from library",
+    libraryTextPlaceholder: "Choose a text block",
+    insertLibraryText: "Insert text",
+    noLibraryTexts: "No text blocks yet.",
     cooldown: "Cooldown", userCooldown: "Per user", cooldownHint: "For the whole channel. 0 to 86,400.", userCooldownHint: "For each viewer separately. 0 = off.", numberMissing: "Enter a number.",
     nameHint: "a–z, 0–9, - and _",
     nameInvalid: "Use lowercase letters, numbers, hyphen, and underscore.", nameMissing: "Enter a name.", nameExists: "This command already exists.",
