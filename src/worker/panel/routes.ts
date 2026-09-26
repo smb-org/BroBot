@@ -136,14 +136,19 @@ type AuditPersonFilterResolution =
 const resolveAuditPersonFilter = async (
   environment: Env,
   filters: PanelAuditFilters,
+  channelId: string,
 ): Promise<AuditPersonFilterResolution> => {
   if (filters.person === null) return { kind: "resolved", filters: { area: filters.area, person: null } };
   if (isTwitchUserId(filters.person)) {
     return { kind: "resolved", filters: { area: filters.area, person: { kind: "id", userId: filters.person } } };
   }
   const term = filters.person.replace(/^@/u, "").trim().toLowerCase();
+  // "@" alone (or only whitespace/"@") normalizes to "" -- a "%%" pattern
+  // would match every login and return the unfiltered log, so an empty term
+  // is treated like no person filter at all (#250).
+  if (term.length === 0) return { kind: "resolved", filters: { area: filters.area, person: null } };
   const likePattern = `%${escapeLoginLikeTerm(term)}%`;
-  if (await hasLoginIdentityMatchingPattern(environment.DB, likePattern)) {
+  if (await hasLoginIdentityMatchingPattern(environment.DB, likePattern, channelId)) {
     return { kind: "resolved", filters: { area: filters.area, person: { kind: "loginLike", pattern: likePattern } } };
   }
   try {
@@ -493,7 +498,7 @@ panelRouter.get(
     if (parsed instanceof Response) return parsed;
     const filters = parseAuditFilters(context);
     if (filters instanceof Response) return filters;
-    const personResolution = await resolveAuditPersonFilter(context.env, filters);
+    const personResolution = await resolveAuditPersonFilter(context.env, filters, channelId);
     if (personResolution.kind === "missing") return context.json({ entries: [], nextCursor: null });
     if (personResolution.kind === "failed") return context.json({ error: "twitch_user_search_failed" }, 502);
     const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor, personResolution.filters);

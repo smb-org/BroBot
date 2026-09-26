@@ -1175,6 +1175,68 @@ describe("Panel read endpoints", () => {
     expect(body.entries.map((entry) => entry.auditId)).toEqual(["audit-underscore"]);
   });
 
+  it("treats an empty person filter (\"@\" alone or whitespace) as no filter (#250)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertLoginIdentity(database, "user-2", "member_c");
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-member", "user-2", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
+      "audit-1", "user-1", "2026-09-18T03:00:00.000Z", "kanal-a", "module.disabled", "{}", "{}",
+    ).run();
+    const twitch = vi.fn();
+    vi.stubGlobal("fetch", twitch);
+
+    const response = await panelRouter.fetch(
+      // "@" alone normalizes to an empty term -- a "%%" LIKE pattern would
+      // otherwise match every login and return the whole log.
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=%40"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<{ auditId: string }> }>();
+
+    expect(response.status).toBe(200);
+    expect(body.entries.map((entry) => entry.auditId)).toEqual(["audit-member", "audit-1"]);
+    expect(twitch).not.toHaveBeenCalled();
+  });
+
+  it("does not use a login matching only another channel's audit log for the local match (#250)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertLoginIdentity(database, "user-2", "member_c");
+    await insertDefaultAppAccessToken(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-a", "user-1", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
+      "audit-b", "user-2", "2026-09-18T03:00:00.000Z", "kanal-b", "module.enabled", "{}", "{}",
+    ).run();
+    const twitch = vi.fn(() => Promise.resolve(Response.json({ data: [] })));
+    vi.stubGlobal("fetch", twitch);
+
+    const response = await panelRouter.fetch(
+      // "member_c" only ever acted in kanal-b's audit log -- the local
+      // partial-login match must not fire on the strength of that row, so
+      // this falls back to the (here empty) Twitch lookup and returns
+      // nothing for kanal-a.
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=member_c"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<{ auditId: string }> }>();
+
+    expect(response.status).toBe(200);
+    expect(body.entries).toEqual([]);
+    expect(twitch).toHaveBeenCalled();
+  });
+
   it("resolves a non-numeric person filter as a login before querying (#181 review)", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");

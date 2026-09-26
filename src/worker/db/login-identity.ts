@@ -71,17 +71,24 @@ export const listLoginIdentities = async (
 export const escapeLoginLikeTerm = (term: string): string => term.replace(/[\\%_]/gu, (character) => `\\${character}`);
 
 /**
- * Whether any stored login matches a `LIKE` pattern (built with
- * `escapeLoginLikeTerm`) -- used to decide between a local partial-login
- * match and falling back to a Twitch lookup (#250).
+ * Whether any login that actually acted in this channel's audit log matches
+ * a `LIKE` pattern (built with `escapeLoginLikeTerm`) -- used to decide
+ * between a local partial-login match and falling back to a Twitch lookup
+ * (#250). Scoped to `channelId` so this can't be used as an existence oracle
+ * for logins of other channels, and so a match elsewhere doesn't skip the
+ * Twitch fallback for a login this channel's log never saw.
  */
 export const hasLoginIdentityMatchingPattern = async (
   db: D1Database,
   likePattern: string,
+  channelId: string,
 ): Promise<boolean> => {
   const row = await db.prepare(
-    `SELECT 1 AS is_present FROM twitch_login_identity WHERE login LIKE ? ESCAPE '\\' LIMIT 1`,
-  ).bind(likePattern).first<{ is_present: number }>();
+    `SELECT 1 AS is_present FROM twitch_login_identity
+      WHERE login LIKE ? ESCAPE '\\'
+        AND user_id IN (SELECT actor_user_id FROM audit_log WHERE channel_id = ?)
+      LIMIT 1`,
+  ).bind(likePattern, channelId).first<{ is_present: number }>();
   return row !== null;
 };
 

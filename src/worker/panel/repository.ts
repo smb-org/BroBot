@@ -534,8 +534,10 @@ export const getAuditLogForChannel = async (
       where.push("actor_user_id = ?");
       filterValues.push(filters.person.userId);
     } else {
-      where.push("actor_user_id IN (SELECT user_id FROM twitch_login_identity WHERE login LIKE ? ESCAPE '\\')");
-      filterValues.push(filters.person.pattern);
+      where.push(
+        "actor_user_id IN (SELECT user_id FROM twitch_login_identity WHERE login LIKE ? ESCAPE '\\' AND user_id IN (SELECT actor_user_id FROM audit_log WHERE channel_id = ?))",
+      );
+      filterValues.push(filters.person.pattern, channelId);
     }
   }
   if (filters.area !== null) {
