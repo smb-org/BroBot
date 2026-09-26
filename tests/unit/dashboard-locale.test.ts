@@ -168,7 +168,7 @@ describe("dashboard locale", () => {
       "ads.prewarning.too_late", "ads.prewarning.break_started", "ads.prewarning.rescheduled",
       "ads.prewarning.scope_missing", "ads.prewarning.schedule_error", "ads.snooze", "ads.commercial.failed", "text_commands.cooldown",
       "text_commands.user_cooldown", "text_commands.stream_state", "text_commands.triggered",
-      "text_commands.disabled", "text_commands.permission_denied", "text_commands.already_exists",
+      "text_commands.disabled", "text_commands.permission_denied", "text_commands.game_filter", "text_commands.already_exists",
       "text_commands.not_authorized", "text_commands.unknown", "text_commands.invalid",
       "text_commands.lookup_unavailable", "text_commands.argument_missing",
       "text_commands.argument_invalid", "text_commands.changed_concurrently", "text_commands.variable_update_failed", "template.lookup_unavailable", "template_parameters_invalid",

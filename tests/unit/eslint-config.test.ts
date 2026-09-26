@@ -51,6 +51,10 @@ describe("effective ESLint module boundaries", () => {
     expect(rejects(restrictions, "../repository.js")).toBe(true);
     expect(rejects(restrictions, "../overlay/view")).toBe(true);
     expect(rejects(restrictions, "../../other-module/contract")).toBe(true);
+    expect(rejects(restrictions, "../../text_library/contracts")).toBe(false);
+    expect(rejects(restrictions, "../../text_library/adapters/d1")).toBe(true);
+    expect(rejects(restrictions, "../../contract")).toBe(false);
+    expect(rejects(restrictions, "../../contracts/values")).toBe(false);
     expect(rejects(restrictions, "../service.js")).toBe(false);
   });
 

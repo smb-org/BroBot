@@ -5,7 +5,7 @@ export const SYSTEM_TEMPLATE_VARIABLES = {
   displayname: { name: "displayname", group: "context", contexts: ["chat_command"], sample: "Viewer", maxLength: 25 },
   channel: { name: "channel", group: "context", contexts: ["chat_command"], sample: "samplechannel", maxLength: 25 },
   target: { name: "target", group: "context", contexts: ["chat_command"], sample: "friend", maxLength: 25 },
-  args: { name: "args", group: "context", contexts: ["chat_command"], sample: "hello everyone", maxLength: 100 },
+  args: { name: "args", group: "context", contexts: ["chat_command"], unavailableContextText: "command_input_usage", sample: "hello everyone", maxLength: 100 },
   game: { name: "game", group: "stream", contexts: ["chat_command", "event", "system"], sample: "Minecraft", maxLength: 100, external: true },
   title: { name: "title", group: "stream", contexts: ["chat_command", "event", "system"], sample: "A cozy evening", maxLength: 140, external: true },
   uptime: { name: "uptime", group: "stream", contexts: ["chat_command", "event", "system"], sample: "2 h 14 min", maxLength: 32, external: true },

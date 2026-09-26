@@ -1,15 +1,29 @@
 import type { ChannelVariableOperation } from "../../../contracts/values";
+import type { ModuleChatStatus } from "../../contract";
 import type { TemplateFields } from "../contract";
 
 export const TEXT_COMMAND_KINDS = ["text", "list", "shoutout"] as const;
 export type TextCommandKind = (typeof TEXT_COMMAND_KINDS)[number];
 export const TEXT_COMMAND_MINIMUM_TIERS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
 export type TextCommandMinimumTier = (typeof TEXT_COMMAND_MINIMUM_TIERS)[number];
+/** Twitch chat badges that satisfy each command tier, per the role ladder. */
+export const TEXT_COMMAND_TIER_CHAT_STATUSES: Readonly<Record<TextCommandMinimumTier, readonly ModuleChatStatus[]>> = {
+  everyone: ["viewer", "subscriber", "vip", "moderator", "broadcaster"],
+  subscriber: ["subscriber", "moderator", "broadcaster"],
+  vip: ["vip", "moderator", "broadcaster"],
+  moderator: ["moderator", "broadcaster"],
+  broadcaster: ["broadcaster"],
+};
 export const TEXT_COMMAND_RESPONSE_TYPES = ["say", "reply", "announcement"] as const;
 export type TextCommandResponseType = (typeof TEXT_COMMAND_RESPONSE_TYPES)[number];
 export const TEXT_COMMAND_STREAM_CONDITIONS = ["any", "online", "offline"] as const;
 export type TextCommandStreamCondition = (typeof TEXT_COMMAND_STREAM_CONDITIONS)[number];
 export const TEXT_COMMAND_MAX_ALIASES = 10;
+
+export interface TextCommandGame {
+  id: string;
+  name: string;
+}
 
 export interface TextCommand {
   channelId: string;
@@ -30,6 +44,7 @@ export interface TextCommand {
   aliases: readonly string[];
   userCooldownSeconds: number;
   streamCondition: TextCommandStreamCondition;
+  games?: readonly TextCommandGame[];
   responseType: TextCommandResponseType;
   variableAction: TextCommandVariableAction | null;
   useCount: number;
@@ -68,6 +83,7 @@ export interface NewTextCommand {
   aliases?: readonly string[];
   userCooldownSeconds?: number;
   streamCondition?: TextCommandStreamCondition;
+  games?: readonly TextCommandGame[];
   responseType?: TextCommandResponseType;
   variableAction?: TextCommandVariableAction | null;
   now: string;
@@ -92,6 +108,7 @@ export interface TextCommandChange {
   aliases: readonly string[];
   userCooldownSeconds: number;
   streamCondition: TextCommandStreamCondition;
+  games?: readonly TextCommandGame[];
   responseType: TextCommandResponseType;
   variableAction?: TextCommandVariableAction | null;
   expectedRevision?: number;

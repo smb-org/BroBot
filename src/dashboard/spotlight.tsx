@@ -7,10 +7,10 @@ import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelModuleState } from "../panel-contract";
 import { createClip, fetchChannelVariables, sendManualShoutout, setChannelModuleEnabled, startCommercial, type PanelChannelVariable } from "./api";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
-import { channelVariablesTexts, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
+import { channelVariablesTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
 import { ModuleIcon, NavigationIcon } from "./module-panels";
-import { navPageGroupHeading, visibleNavPages } from "./nav-pages";
+import { navPageGroupHeading, registeredModuleNavEntries, visibleNavPages } from "./nav-pages";
 import { dashboardRouteRequiresBot, type DashboardRoute } from "./router";
 import { Spotlight, type SpotlightItem } from "./ui";
 
@@ -87,23 +87,44 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
     fetchChannelVariables(channelId).then((data) => { setVariables(data.variables); }).catch(() => { setVariables([]); });
   }, [channelId]);
 
-  const moduleItems = useMemo<SpotlightItem[]>(() => MODULES.map((module) => {
-    const route: DashboardRoute = { kind: "module", channelId, moduleId: module.id };
-    const description = moduleDescription(module.id);
-    const accessibleDescription = module.mandatory === true
-      ? `${description === null ? "" : `${description} `}${moduleWorkspaceTexts().mandatoryReason}`
-      : description;
-    const blockedByBot = botBlocksRoute(route, botSignedIn);
-    return {
-      id: `module:${module.id}`,
-      label: moduleName(module.id),
-      icon: <ModuleIcon moduleId={module.id} className="spotlight-module-icon" />,
-      ...(accessibleDescription === null || accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
-      group: texts.spotlight.groupModules,
-      ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
-      onTrigger: () => { onNavigate(route); },
-    };
-  }), [botSignedIn, channelId, onNavigate, texts.blocking.botTitle, texts.spotlight.groupModules]);
+  const moduleItems = useMemo<SpotlightItem[]>(() => {
+    const declarations = registeredModuleNavEntries(MODULES, channelId, dashboardLanguage());
+    return MODULES.flatMap((module) => {
+      const entries = declarations.filter((entry) => entry.moduleId === module.id);
+      if (entries.length > 0) return entries.map((entry) => {
+        const description = entry.description ?? moduleDescription(module.id) ?? "";
+        const accessibleDescription = module.mandatory === true
+          ? `${description.length === 0 ? "" : `${description} `}${module.mandatoryReason?.[dashboardLanguage()] ?? moduleWorkspaceTexts().mandatoryReason}`
+          : description;
+        const blockedByBot = botBlocksRoute(entry.route, botSignedIn);
+        return {
+          id: `module:${entry.id}`,
+          label: entry.label,
+          icon: <NavigationIcon kind={entry.iconKind} className="spotlight-module-icon" />,
+          ...(accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
+          group: texts.spotlight.groupModules,
+          keywords: [...entry.keywords],
+          ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
+          onTrigger: () => { onNavigate(entry.route); },
+        };
+      });
+      const route: DashboardRoute = { kind: "module", channelId, moduleId: module.id };
+      const description = moduleDescription(module.id);
+      const accessibleDescription = module.mandatory === true
+        ? `${description === null ? "" : `${description} `}${module.mandatoryReason?.[dashboardLanguage()] ?? moduleWorkspaceTexts().mandatoryReason}`
+        : description;
+      const blockedByBot = botBlocksRoute(route, botSignedIn);
+      return [{
+        id: `module:${module.id}`,
+        label: moduleName(module.id),
+        icon: <ModuleIcon moduleId={module.id} className="spotlight-module-icon" />,
+        ...(accessibleDescription === null || accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
+        group: texts.spotlight.groupModules,
+        ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
+        onTrigger: () => { onNavigate(route); },
+      }];
+    });
+  }, [botSignedIn, channelId, onNavigate, texts.blocking.botTitle, texts.spotlight.groupModules]);
 
   const commandItems = useMemo<SpotlightItem[]>(() => commands.map((command) => {
     const route: DashboardRoute = { kind: "module", channelId, moduleId: "text_commands" };

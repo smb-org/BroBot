@@ -40,7 +40,7 @@ const overlayEditorImportBoundaryPattern = {
 
 const moduleIsolationPatterns = [
   {
-    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:(?:\\.\\./)+dashboard/(?:locale|ui)(?:\\.[^/]+)?(?:/|$)|(?:\\.\\./)+contracts|contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
+    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:(?:\\.\\./)+dashboard/(?:locale|ui)(?:\\.[^/]+)?(?:/|$)|(?:\\.\\./)+contracts|(?:\\.\\./)+text_(?:commands|library)/contracts|(?:\\.\\./)+contract|contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
     message: "Module dürfen kein anderes Modul importieren.",
   },
   {

@@ -380,6 +380,7 @@ const expectedModuleSettings = {
     textShort: "Danke für den Raid, {channel}, mit {viewers} Zuschauern!",
   },
   text_commands: {},
+  text_library: {},
   ads: {
     automatic: "Automatische Werbepause: {duration} Sekunden. Bin gleich zurück!",
     manual: "Werbepause: {duration} Sekunden. Bin gleich zurück!",
@@ -696,6 +697,7 @@ describe("serialized contract shapes", () => {
         "clips",
         "raid",
         "text_commands",
+        "text_library",
       ]);
       expect(Object.fromEntries(MODULES.map((module) => [module.id, JSON.parse(JSON.stringify(module.defaultSettings))]))).toEqual(expectedModuleSettings);
       expect([...TEXT_COMMAND_MINIMUM_TIERS].sort()).toEqual(["broadcaster", "everyone", "moderator", "subscriber", "vip"]);

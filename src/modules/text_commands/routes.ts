@@ -33,6 +33,7 @@ const bodySchema = z.object({
   aliases: aliasesSchema.default([]),
   userCooldownSeconds: z.number().int().min(0).max(86400).default(0),
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).default("any"),
+  games: z.array(z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().min(1).max(100) })).max(50).default([]),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).default("say"),
   variableAction: z.object({
     name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
@@ -56,6 +57,7 @@ const editBodySchema = z.object({
   aliases: aliasesSchema.optional(),
   userCooldownSeconds: z.number().int().min(0).max(86400).optional(),
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).optional(),
+  games: z.array(z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().min(1).max(100) })).max(50).optional(),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).optional(),
   variableAction: z.object({
     name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
@@ -111,6 +113,7 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
     aliases: parsed.data.aliases,
     userCooldownSeconds: parsed.data.userCooldownSeconds,
     streamCondition: parsed.data.streamCondition,
+    games: parsed.data.games,
     responseType: parsed.data.responseType,
     variableAction,
     text,
@@ -200,6 +203,7 @@ textCommandRoutes.post("/commands", async (context) => {
       aliases: body.aliases,
       userCooldownSeconds: body.userCooldownSeconds,
       streamCondition: body.streamCondition,
+      games: body.games,
       responseType: body.responseType,
       variableAction: body.variableAction,
       useCount: 0,
@@ -267,6 +271,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     : before.minimumTier);
   const userCooldownSeconds = body.userCooldownSeconds ?? before.userCooldownSeconds;
   const streamCondition = body.streamCondition ?? before.streamCondition;
+  const games = body.games ?? before.games ?? [];
   const responseType = body.responseType ?? before.responseType;
   const warnings = kind === "list"
     ? []
@@ -292,6 +297,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     aliases,
     userCooldownSeconds,
     streamCondition,
+    games,
     responseType,
     variableAction,
     ...(before.legacyFallback === undefined ? {} : { legacyFallback: before.legacyFallback }),
@@ -312,6 +318,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
       aliases: [...aliases],
       userCooldownSeconds,
       streamCondition,
+      games,
       responseType,
       variableAction,
       useCount: before.useCount,
