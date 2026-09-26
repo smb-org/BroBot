@@ -31,8 +31,10 @@ import {
   getEventLogForChannel,
   getSystemOverviewForUser,
   listChannelsForUser,
+  type AuditQueryFilters,
   type LogCursor,
 } from "./repository";
+import { escapeLoginLikeTerm, hasLoginIdentityMatchingPattern } from "../db/login-identity";
 import { memberRouter } from "./member-routes";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { moduleRouter } from "./module-routes";
@@ -113,16 +115,21 @@ const parseAuditFilters = (
 const isTwitchUserId = (value: string): boolean => /^\d+$/.test(value);
 
 /**
- * The "Person" filter's raw id requirement makes it unusable from a search
+ * The "Person" filter's raw id requirement made it unusable from a search
  * box -- a Twitch user id is never what's displayed (#181 review). A value
  * that isn't already numeric is treated as a login (an optional leading "@"
  * is stripped, matching how a login is shown elsewhere in the dashboard) and
- * resolved to an id. A confirmed empty result means "no such person"; an
- * upstream failure stays distinct so the caller can report it instead of
- * presenting an empty page as if the login were missing.
+ * matched as a partial, case-insensitive login search against the locally
+ * known audit actors (members and platform admins who logged in at least
+ * once, in `twitch_login_identity`) -- so e.g. "member" finds "member_c"
+ * (#250). Only when no local login matches at all does this fall back to
+ * the previous exact Twitch lookup, which covers an actor whose identity row
+ * is gone. A confirmed empty result means "no such person"; an upstream
+ * failure stays distinct so the caller can report it instead of presenting
+ * an empty page as if the login were missing.
  */
 type AuditPersonFilterResolution =
-  | { kind: "resolved"; filters: PanelAuditFilters }
+  | { kind: "resolved"; filters: AuditQueryFilters }
   | { kind: "missing" }
   | { kind: "failed" };
 
@@ -130,10 +137,20 @@ const resolveAuditPersonFilter = async (
   environment: Env,
   filters: PanelAuditFilters,
 ): Promise<AuditPersonFilterResolution> => {
-  if (filters.person === null || isTwitchUserId(filters.person)) return { kind: "resolved", filters };
+  if (filters.person === null) return { kind: "resolved", filters: { area: filters.area, person: null } };
+  if (isTwitchUserId(filters.person)) {
+    return { kind: "resolved", filters: { area: filters.area, person: { kind: "id", userId: filters.person } } };
+  }
+  const term = filters.person.replace(/^@/u, "").trim().toLowerCase();
+  const likePattern = `%${escapeLoginLikeTerm(term)}%`;
+  if (await hasLoginIdentityMatchingPattern(environment.DB, likePattern)) {
+    return { kind: "resolved", filters: { area: filters.area, person: { kind: "loginLike", pattern: likePattern } } };
+  }
   try {
-    const user = await fetchTwitchUserByLogin(fetch, environment, filters.person.replace(/^@/u, ""), "app");
-    return user === null ? { kind: "missing" } : { kind: "resolved", filters: { ...filters, person: user.userId } };
+    const user = await fetchTwitchUserByLogin(fetch, environment, term, "app");
+    return user === null
+      ? { kind: "missing" }
+      : { kind: "resolved", filters: { area: filters.area, person: { kind: "id", userId: user.userId } } };
   } catch {
     return { kind: "failed" };
   }

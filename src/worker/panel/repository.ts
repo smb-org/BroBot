@@ -1,7 +1,6 @@
 import type {
   PanelActiveModule,
   PanelAuditEntry,
-  PanelAuditFilters,
   PanelAuditResponse,
   PanelBotStatus,
   PanelBotPermissions,
@@ -501,7 +500,22 @@ export const auditAreaSqlClause = (area: AuditArea): { sql: string; values: stri
   };
 };
 
-const NO_AUDIT_FILTERS: PanelAuditFilters = Object.freeze({ person: null, area: null });
+/**
+ * The audit person filter, resolved server-side (routes.ts) from the raw
+ * `PanelAuditFilters.person` string: either an exact actor id (a numeric
+ * input, or a login that only Twitch could resolve) or a partial-login
+ * `LIKE` pattern matched against locally known logins (#250).
+ */
+export type ResolvedAuditPersonFilter =
+  | { kind: "id"; userId: string }
+  | { kind: "loginLike"; pattern: string };
+
+export interface AuditQueryFilters {
+  person: ResolvedAuditPersonFilter | null;
+  area: AuditArea | null;
+}
+
+const NO_AUDIT_FILTERS: AuditQueryFilters = Object.freeze({ person: null, area: null });
 
 // The channel + actor and channel + action indexes keep both optional filters
 // selective before the descending timestamp scan as each channel's audit log
@@ -511,13 +525,18 @@ export const getAuditLogForChannel = async (
   channelId: string,
   limit: number,
   cursor: LogCursor | null,
-  filters: PanelAuditFilters = NO_AUDIT_FILTERS,
+  filters: AuditQueryFilters = NO_AUDIT_FILTERS,
 ): Promise<PanelAuditResponse> => {
   const where = ["channel_id = ?"];
   const filterValues: string[] = [channelId];
   if (filters.person !== null) {
-    where.push("actor_user_id = ?");
-    filterValues.push(filters.person);
+    if (filters.person.kind === "id") {
+      where.push("actor_user_id = ?");
+      filterValues.push(filters.person.userId);
+    } else {
+      where.push("actor_user_id IN (SELECT user_id FROM twitch_login_identity WHERE login LIKE ? ESCAPE '\\')");
+      filterValues.push(filters.person.pattern);
+    }
   }
   if (filters.area !== null) {
     const area = auditAreaSqlClause(filters.area);

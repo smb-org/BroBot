@@ -67,6 +67,24 @@ export const listLoginIdentities = async (
   return result.results.map(mapLoginIdentity);
 };
 
+/** Escapes `\`, `%`, and `_` so a raw search term is matched literally by `LIKE ... ESCAPE '\'`. */
+export const escapeLoginLikeTerm = (term: string): string => term.replace(/[\\%_]/gu, (character) => `\\${character}`);
+
+/**
+ * Whether any stored login matches a `LIKE` pattern (built with
+ * `escapeLoginLikeTerm`) -- used to decide between a local partial-login
+ * match and falling back to a Twitch lookup (#250).
+ */
+export const hasLoginIdentityMatchingPattern = async (
+  db: D1Database,
+  likePattern: string,
+): Promise<boolean> => {
+  const row = await db.prepare(
+    `SELECT 1 AS is_present FROM twitch_login_identity WHERE login LIKE ? ESCAPE '\\' LIMIT 1`,
+  ).bind(likePattern).first<{ is_present: number }>();
+  return row !== null;
+};
+
 export const getLoginIdentity = async (
   db: D1Database,
   userId: string,

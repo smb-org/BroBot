@@ -73,6 +73,28 @@ const insertDefaultAppAccessToken = async (database: TestD1Database): Promise<vo
   ).run();
 };
 
+// Only the login identity row, without an auth session -- audit actors can be
+// members or platform admins who logged in at least once (#250) but aren't
+// necessarily the signed-in test user.
+const insertLoginIdentity = async (
+  database: TestD1Database,
+  userId: string,
+  login: string,
+): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO twitch_login_identity
+      (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, status, reason, created_at, updated_at)
+     VALUES (?, ?, '[]', '[]', 'access', 'refresh', ?, 'connected', NULL, ?, ?)`,
+  ).bind(
+    userId,
+    login,
+    "2099-09-19T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+  ).run();
+};
+
 const insertBotChannelStatus = async (
   database: TestD1Database,
   channelId: string,
@@ -1094,6 +1116,63 @@ describe("Panel read endpoints", () => {
     );
     expect(invalidAreaResponse.status).toBe(400);
     expect(await invalidAreaResponse.json()).toEqual({ error: "audit_area_invalid" });
+  });
+
+  it("matches the person filter as a case-insensitive partial login against local identities (#250)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertLoginIdentity(database, "user-2", "member_c");
+    await insertLoginIdentity(database, "user-3", "alice");
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-member", "user-2", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
+      "audit-alice", "user-3", "2026-09-18T03:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
+    ).run();
+    const twitch = vi.fn();
+    vi.stubGlobal("fetch", twitch);
+
+    const response = await panelRouter.fetch(
+      // Uppercase and a leading "@", like a login is displayed elsewhere.
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=%40MEMBER"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<{ auditId: string }> }>();
+
+    expect(response.status).toBe(200);
+    expect(body.entries.map((entry) => entry.auditId)).toEqual(["audit-member"]);
+    // The local match was used -- no Twitch fallback call.
+    expect(twitch).not.toHaveBeenCalled();
+  });
+
+  it("treats % and _ in the person filter as literal characters, not LIKE wildcards (#250)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertLoginIdentity(database, "user-2", "mem_ber");
+    await insertLoginIdentity(database, "user-3", "memxber");
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-underscore", "user-2", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
+      "audit-x", "user-3", "2026-09-18T03:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
+    ).run();
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=mem_ber"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<{ auditId: string }> }>();
+
+    expect(response.status).toBe(200);
+    // Only the literal "mem_ber" login, not "memxber" which "_" would also
+    // match if it were treated as a wildcard.
+    expect(body.entries.map((entry) => entry.auditId)).toEqual(["audit-underscore"]);
   });
 
   it("resolves a non-numeric person filter as a login before querying (#181 review)", async () => {
