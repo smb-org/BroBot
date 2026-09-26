@@ -27,7 +27,7 @@ export type LedStatus = "green" | "amber" | "red" | "off";
 
 export const NavigationIcon = ({ kind, className = "navigation-icon" }: { kind: string; className?: string }): ReactElement => (
   <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-    {kind === "overview" ? <><rect x="5" y="5" width="5" height="5" rx="1" /><rect x="14" y="5" width="5" height="5" rx="1" /><rect x="5" y="14" width="5" height="5" rx="1" /><rect x="14" y="14" width="5" height="5" rx="1" /></> : kind === "channel" ? <><path d="M5 7.5h14M5 12h14M5 16.5h9" /><circle cx="18" cy="16.5" r="1" /></> : kind === "system" ? <><circle cx="12" cy="12" r="7" /><path d="M12 8v4l2.5 2" /></> : kind === "members" ? <><circle cx="10" cy="9" r="3" /><path d="M4.5 18c.8-3 2.6-4.5 5.5-4.5s4.7 1.5 5.5 4.5M17 8.5a2.5 2.5 0 0 1 0 5" /></> : kind === "modules" ? <><rect x="5" y="5" width="6" height="6" rx="1" /><rect x="13" y="5" width="6" height="6" rx="1" /><rect x="5" y="13" width="6" height="6" rx="1" /><rect x="13" y="13" width="6" height="6" rx="1" /></> : kind === "permission" ? <><circle cx="8.5" cy="15.5" r="3.5" /><path d="m11 13 7-7 2 2-7 7M16 8l2 2" /></> : kind === "token" ? <><circle cx="8" cy="12" r="3" /><path d="M11 12h8m-3 0v3m-3-3v2" /></> : <><path d="M6 5h12v14H6z" /><path d="M9 9h6M9 13h6M9 17h4" /></>}
+    {kind === "overview" ? <><rect x="5" y="5" width="5" height="5" rx="1" /><rect x="14" y="5" width="5" height="5" rx="1" /><rect x="5" y="14" width="5" height="5" rx="1" /><rect x="14" y="14" width="5" height="5" rx="1" /></> : kind === "channel" ? <><path d="M5 7.5h14M5 12h14M5 16.5h9" /><circle cx="18" cy="16.5" r="1" /></> : kind === "system" ? <><circle cx="12" cy="12" r="7" /><path d="M12 8v4l2.5 2" /></> : kind === "members" ? <><circle cx="10" cy="9" r="3" /><path d="M4.5 18c.8-3 2.6-4.5 5.5-4.5s4.7 1.5 5.5 4.5M17 8.5a2.5 2.5 0 0 1 0 5" /></> : kind === "modules" ? <><rect x="5" y="5" width="6" height="6" rx="1" /><rect x="13" y="5" width="6" height="6" rx="1" /><rect x="5" y="13" width="6" height="6" rx="1" /><rect x="13" y="13" width="6" height="6" rx="1" /></> : kind === "texts" ? <><path d="M5 4.5h10a4 4 0 0 1 4 4v11H9a4 4 0 0 0-4 1.5zM5 4.5v15M9 9h6M9 12.5h6M9 16h4" /></> : kind === "permission" ? <><circle cx="8.5" cy="15.5" r="3.5" /><path d="m11 13 7-7 2 2-7 7M16 8l2 2" /></> : kind === "token" ? <><circle cx="8" cy="12" r="3" /><path d="M11 12h8m-3 0v3m-3-3v2" /></> : <><path d="M6 5h12v14H6z" /><path d="M9 9h6M9 13h6M9 17h4" /></>}
   </svg>
 );
 
@@ -630,6 +630,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
   const registered = MODULES.find((candidate) => candidate.id === moduleId);
+  const navigationPage = registered?.navigationEntries?.find((entry) => entry.showMainSwitch === false);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
   const mandatory = moduleState?.mandatory === true || moduleId === "channel_events";
@@ -657,13 +658,13 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
     <>
       <section className="module-detail" aria-label={details.name}>
         <header className="module-detail__header">
-          <div className="module-detail__icon" aria-hidden="true">{iconFor(moduleId)}</div>
+          <div className="module-detail__icon" aria-hidden="true">{navigationPage === undefined ? iconFor(moduleId) : <NavigationIcon kind={navigationPage.iconKind} className="module-glyph" />}</div>
           <div>
             <h1 title={moduleId}>{details.name}</h1>
             <p className="module-detail__description">{details.description}</p>
           </div>
         </header>
-        <section className="module-detail__switch inspector-section--switch" aria-label={labels.status}>
+        {navigationPage?.showMainSwitch === false ? null : <section className="module-detail__switch inspector-section--switch" aria-label={labels.status}>
           <div>
             <strong>{labels.mainSwitch}</strong>
             {mandatory
@@ -672,7 +673,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           </div>
           {mandatory ? null : <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />}
           {disabledReason === null || mandatory ? null : <p className="lock-reason lock-reason--with-icon"><Icon name="lock" size={16} />{disabledReason}</p>}
-        </section>
+        </section>}
         {missingScopes.length === 0 ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>
           <div className="section-heading"><h2>{texts.module.scopeList}</h2></div>
           <div className="state-list module-scope-list">

@@ -33,6 +33,7 @@ const bodySchema = z.object({
   aliases: aliasesSchema.default([]),
   userCooldownSeconds: z.number().int().min(0).max(86400).default(0),
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).default("any"),
+  games: z.array(z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().min(1).max(100) })).max(50).default([]),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).default("say"),
   variableAction: z.object({
     name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
@@ -56,6 +57,7 @@ const editBodySchema = z.object({
   aliases: aliasesSchema.optional(),
   userCooldownSeconds: z.number().int().min(0).max(86400).optional(),
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).optional(),
+  games: z.array(z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().min(1).max(100) })).max(50).optional(),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).optional(),
   variableAction: z.object({
     name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
@@ -111,6 +113,7 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
     aliases: parsed.data.aliases,
     userCooldownSeconds: parsed.data.userCooldownSeconds,
     streamCondition: parsed.data.streamCondition,
+    games: parsed.data.games,
     responseType: parsed.data.responseType,
     variableAction,
     text,
@@ -153,7 +156,11 @@ const effectiveCommandVariables = (variables: readonly ModuleChannelVariable[]):
   return effectiveTemplateVariables("chat_command", [], channelVariables, SYSTEM_TEMPLATE_VARIABLE_LIST);
 };
 
-const warningsForText = (text: string, variables: readonly TemplateVariable[]) => templateWarnings("text", text, variables);
+const warningsForText = (
+  text: string,
+  variables: readonly TemplateVariable[],
+  registeredVariableNames: readonly string[],
+) => templateWarnings("text", text, variables, registeredVariableNames);
 
 textCommandRoutes.get("/commands", async (context) => {
   const channelId = param(context, "channelId");
@@ -179,10 +186,13 @@ textCommandRoutes.post("/commands", async (context) => {
     return context.json({ error: "command_data_invalid" }, 400);
   }
   const now = nowIso();
-  const variables = effectiveCommandVariables(await context.get("listChannelVariables")(channelId));
+  const [channelVariables, registeredVariables] = await Promise.all([
+    context.get("listChannelVariables")(channelId),
+    context.get("listRegisteredTemplateVariables")(channelId),
+  ]);
   const warnings = body.kind === "list"
     ? []
-    : warningsForText(body.text, variables);
+    : warningsForText(body.text, effectiveCommandVariables(channelVariables), registeredVariables.map(({ name }) => name));
   const created = await repository.create({ channelId, ...body, now }, context.get("actor"));
   if (created.ok) {
     const command: TextCommand = {
@@ -200,6 +210,7 @@ textCommandRoutes.post("/commands", async (context) => {
       aliases: body.aliases,
       userCooldownSeconds: body.userCooldownSeconds,
       streamCondition: body.streamCondition,
+      games: body.games,
       responseType: body.responseType,
       variableAction: body.variableAction,
       useCount: 0,
@@ -267,10 +278,15 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     : before.minimumTier);
   const userCooldownSeconds = body.userCooldownSeconds ?? before.userCooldownSeconds;
   const streamCondition = body.streamCondition ?? before.streamCondition;
+  const games = body.games ?? before.games ?? [];
   const responseType = body.responseType ?? before.responseType;
+  const [channelVariables, registeredVariables] = await Promise.all([
+    context.get("listChannelVariables")(channelId),
+    context.get("listRegisteredTemplateVariables")(channelId),
+  ]);
   const warnings = kind === "list"
     ? []
-    : warningsForText(text, effectiveCommandVariables(await context.get("listChannelVariables")(channelId)));
+    : warningsForText(text, effectiveCommandVariables(channelVariables), registeredVariables.map(({ name }) => name));
   const authorizeMutation = contentChanged
     ? context.get("authorizeManagementMutation")
     : context.get("authorizeMutation");
@@ -292,6 +308,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     aliases,
     userCooldownSeconds,
     streamCondition,
+    games,
     responseType,
     variableAction,
     ...(before.legacyFallback === undefined ? {} : { legacyFallback: before.legacyFallback }),
@@ -312,6 +329,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
       aliases: [...aliases],
       userCooldownSeconds,
       streamCondition,
+      games,
       responseType,
       variableAction,
       useCount: before.useCount,

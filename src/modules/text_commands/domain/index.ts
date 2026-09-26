@@ -1,5 +1,5 @@
 import type { ModuleChatStatus } from "../contract";
-import type { TextCommandMinimumTier } from "../contracts";
+import { TEXT_COMMAND_TIER_CHAT_STATUSES, type TextCommandMinimumTier } from "../contracts";
 import { renderTemplate } from "../contract";
 
 export const COMMAND_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -51,13 +51,7 @@ export const initialTextCommandRevision = (createdAt: string): number => {
  * contain multiple badges: moderator and broadcaster also satisfy
  * "subscriber" and "VIP", but a VIP does not satisfy "subscriber".
  */
-export const statusForTier: Record<TextCommandMinimumTier, readonly ModuleChatStatus[]> = {
-  everyone: ["viewer", "subscriber", "vip", "moderator", "broadcaster"],
-  subscriber: ["subscriber", "moderator", "broadcaster"],
-  vip: ["vip", "moderator", "broadcaster"],
-  moderator: ["moderator", "broadcaster"],
-  broadcaster: ["broadcaster"],
-};
+export const statusForTier = TEXT_COMMAND_TIER_CHAT_STATUSES;
 
 export const chatStatusMeetsTier = (
   status: readonly ModuleChatStatus[] | null,

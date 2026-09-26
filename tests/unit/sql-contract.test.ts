@@ -26,6 +26,7 @@ import { overlayElementIdCollisionGuard, referencedVariablesGuard } from "../../
 import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
+import { textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { MANAGING_ROLES } from "../../src/contracts/values";
 import { ANY_MEMBER_ROLES } from "../../src/worker/db/guards";
 
@@ -90,6 +91,8 @@ const sqlGetFixtures = new Map<string, string>([
   ["placeholders", "?, ?, ?"],
   ["channelStateQuery", channelStateQuery],
   ["textCommandSelectColumns", textCommandSelectColumns],
+  ["textBlockSelectColumns", textBlockSelectColumns],
+  ["textBlockCategorySelectColumns", textBlockCategorySelectColumns],
   ["channelBotConsentCondition(\"channel\")", channelBotConsentCondition("channel")],
 ]);
 
@@ -157,9 +160,9 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(29);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(30);
-      expect(objects).toHaveLength(59);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(33);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(31);
+      expect(objects).toHaveLength(64);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

@@ -3,6 +3,8 @@ import type { ModuleLanguage } from "./contract";
 interface TemplateLanguageText {
   offline: string;
   notFollowing: string;
+  commandInputUsage: string;
+  commandInputError: string;
   day: (count: number) => string;
   hour: (count: number) => string;
   minute: (count: number) => string;
@@ -17,6 +19,8 @@ export const templateLanguageText: Readonly<Record<ModuleLanguage, TemplateLangu
   de: {
     offline: "offline",
     notFollowing: "folgt nicht",
+    commandInputUsage: "Nur in Chatbefehlen verfügbar",
+    commandInputError: "Diese Eingabe ist nur in Chatbefehlen verfügbar",
     day: (count) => `${String(count)} Tg.`,
     hour: (count) => `${String(count)} Std.`,
     minute: (count) => `${String(count)} Min.`,
@@ -28,6 +32,8 @@ export const templateLanguageText: Readonly<Record<ModuleLanguage, TemplateLangu
   en: {
     offline: "offline",
     notFollowing: "not following",
+    commandInputUsage: "Only available in chat commands",
+    commandInputError: "This input is only available in chat commands",
     day: (count) => `${String(count)} d`,
     hour: (count) => `${String(count)} h`,
     minute: (count) => `${String(count)} min`,

@@ -1,6 +1,7 @@
 import { platformTexts } from "./labels";
 import type { DashboardTexts } from "./locale";
 import type { DashboardRoute } from "./router";
+import type { BotModule, ModuleLanguage } from "../modules/contract";
 
 export type NavPageGroup = "operation" | "channel" | "modules" | "platform";
 
@@ -23,6 +24,71 @@ export interface NavPageDefinition {
   label: (texts: DashboardTexts) => string;
   keywords: readonly string[];
 }
+
+export interface RegisteredModuleNavEntry {
+  id: string;
+  moduleId: string;
+  group: "channel" | "modules";
+  label: string;
+  description?: string;
+  showMainSwitch?: boolean;
+  iconKind: string;
+  keywords: readonly string[];
+  route: DashboardRoute;
+}
+
+export interface DashboardNavEntry {
+  id: string;
+  group: NavPageGroup;
+  moduleId?: string;
+  label: string;
+  description?: string;
+  iconKind: string;
+  keywords: readonly string[];
+  route: DashboardRoute;
+}
+
+/** Converts module-owned navigation declarations into host routes and labels. */
+export const registeredModuleNavEntries = (
+  modules: readonly Pick<BotModule, "id" | "navigationEntries">[],
+  channelId: string,
+  language: ModuleLanguage,
+): readonly RegisteredModuleNavEntry[] => modules.flatMap((module) => (module.navigationEntries ?? []).map((entry) => ({
+  id: `${module.id}:${entry.id}`,
+  moduleId: module.id,
+  group: entry.group ?? "modules",
+  label: entry.label[language],
+  ...(entry.description === undefined ? {} : { description: entry.description[language] }),
+  ...(entry.showMainSwitch === undefined ? {} : { showMainSwitch: entry.showMainSwitch }),
+  iconKind: entry.iconKind,
+  keywords: entry.keywords ?? [],
+  route: { kind: "module", channelId, moduleId: module.id },
+})));
+
+/** Static pages plus module-contributed Channel pages in the same sidebar and Spotlight order. */
+export const dashboardNavEntries = (
+  context: { isPlatformAdmin: boolean },
+  modules: readonly Pick<BotModule, "id" | "navigationEntries">[],
+  channelId: string,
+  language: ModuleLanguage,
+  texts: DashboardTexts,
+  moduleStates: readonly { id: string; enabled: boolean; missingBroadcasterScopes?: readonly string[] }[] = [],
+): readonly DashboardNavEntry[] => {
+  const pages: DashboardNavEntry[] = visibleNavPages(context).map((page) => ({
+    id: page.id,
+    group: page.group,
+    label: page.label(texts),
+    iconKind: page.iconKind,
+    keywords: page.keywords,
+    route: page.route(channelId),
+  }));
+  const channelEntries: DashboardNavEntry[] = registeredModuleNavEntries(modules, channelId, language)
+    .filter((entry) => entry.group === "channel" && moduleStates.some((state) => state.id === entry.moduleId && state.enabled && (state.missingBroadcasterScopes?.length ?? 0) === 0))
+    .map(({ id, moduleId, label, description, iconKind, keywords, route }) => ({ id, moduleId, group: "channel", label, ...(description === undefined ? {} : { description }), iconKind, keywords, route }));
+  const overlaysIndex = pages.findIndex((page) => page.id === "overlays");
+  pages.splice(overlaysIndex < 0 ? pages.length : overlaysIndex + 1, 0, ...channelEntries);
+  return pages;
+};
 
 const channelRoute = (section: ChannelSection) => (channelId: string): DashboardRoute => ({ kind: "channel", channelId, section });
 

@@ -190,6 +190,18 @@ describe("Channel Spotlight", () => {
   it('finds the variables page by typing "variab" (#208)', async () => { await findsPageByQuery("variab", "Variablen"); });
   it('finds the Overlays page through the shared navigation definition (#216)', async () => { await findsPageByQuery("overlay", "Overlays"); });
 
+  it("places a registered channel module page in the Channel group", async () => {
+    stubFetch();
+    const onNavigate = vi.fn();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[{ id: "text_library", enabled: true, mandatory: true, settings: "{}" }]} onNavigate={onNavigate} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    const action = (await screen.findByText("Texte")).closest(".mantine-Spotlight-action");
+    expect(action?.closest(".mantine-Spotlight-actionsGroup")).toHaveStyle({ "--spotlight-label": "'Kanal'" });
+    fireEvent.click(screen.getByText("Texte"));
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "text_library" });
+  });
+
   it("disables pages the router blocks while the installation bot is signed out", async () => {
     stubFetch();
     const onNavigate = vi.fn();
