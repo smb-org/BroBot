@@ -1,9 +1,12 @@
-import type { TextCommandMinimumTier } from "../../text_commands/contracts";
+import type { ModuleTemplateMinimumTier } from "../../contract";
 
-export const TEXT_LIBRARY_MODULE_ID = "text_library" as const;
-export const TEXT_LIBRARY_LIBRARY_PATH = "/library" as const;
-export const TEXT_LIBRARY_BLOCKS_PATH = "/blocks" as const;
-export const TEXT_LIBRARY_GAME_SEARCH_PATH = "/games" as const;
+export {
+  TEXT_LIBRARY_BLOCKS_PATH,
+  TEXT_LIBRARY_GAME_SEARCH_PATH,
+  TEXT_LIBRARY_LIBRARY_PATH,
+  TEXT_LIBRARY_MODULE_ID,
+} from "../../contracts/text-library";
+export type { TextLibraryBlockSummary } from "../../contracts/text-library";
 
 export const TEXT_BLOCK_NAME_PATTERN = /^[a-z0-9_]{1,32}$/u;
 export const TEXT_BLOCK_MAXIMUMS = {
@@ -25,7 +28,7 @@ export interface TwitchGame {
 export interface TextBlockConditions {
   stream?: "online" | "offline";
   game?: { mode: "is" | "is_not"; game: TwitchGame };
-  minimumTier?: TextCommandMinimumTier;
+  minimumTier?: ModuleTemplateMinimumTier;
   weekdays?: readonly number[];
   timeWindow?: { start: string; end: string };
 }
@@ -51,7 +54,6 @@ export interface TextBlock {
   games: readonly TwitchGame[];
   variants: readonly TextBlockVariant[];
   revision: number;
-  lastChosenIndex: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -62,7 +64,10 @@ export interface TextBlockMutationInput {
   categoryId: string;
   games: readonly TwitchGame[];
   variants: readonly TextBlockVariant[];
-  expectedRevision?: number;
+}
+
+export interface TextBlockSaveInput extends TextBlockMutationInput {
+  revision: number;
 }
 
 export interface TextLibrarySettings {
@@ -82,6 +87,7 @@ export interface TextLibraryData {
   categories: TextBlockCategory[];
   settings: TextLibrarySettings;
   usages: Readonly<Record<string, readonly TextBlockUsage[]>>;
+  reservedNames?: readonly string[];
 }
 
 export type TextBlockMutationError =
@@ -103,7 +109,3 @@ export const DEFAULT_TEXT_BLOCK_CATEGORIES = [
   { id: "game", catalogKey: "game" },
   { id: "fun", catalogKey: "fun" },
 ] as const;
-
-export interface TextLibraryBlockSummary {
-  name: string;
-}

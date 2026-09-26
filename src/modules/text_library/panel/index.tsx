@@ -152,6 +152,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   }, [channelId, labels.loadError]);
 
   const blockByName = useMemo(() => new Map((data?.blocks ?? []).map((block) => [block.name, block])), [data]);
+  const reservedNames = new Set(data?.reservedNames ?? []);
   const visibleBlocks = useMemo(() => (data?.blocks ?? []).filter((block) => {
     const category = data?.categories.find((entry) => entry.id === block.categoryId);
     const categoryText = category === undefined ? "" : categoryLabel(category, labels);
@@ -166,19 +167,22 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const isCreate = revision === null;
   const nameInvalid = draft === null || !validTextBlockName(draft.name);
   const nameTaken = draft !== null && (data?.blocks.some((block) => block.name === draft.name && block.name !== selectedName) ?? false);
+  const nameReserved = draft !== null && (data?.reservedNames?.includes(draft.name) ?? false);
   const variantInvalid = draft === null || draft.variants.length === 0 || draft.variants.length > TEXT_BLOCK_MAXIMUMS.variantsPerBlock ||
     draft.variants.filter((variant) => Object.keys(variant.conditions).length === 0).length !== 1 ||
     Object.keys(draft.variants.at(-1)?.conditions ?? {}).length !== 0 ||
     draft.variants.some((variant) => !validTextBlockConditions(variant.conditions) || variant.texts.length === 0 || variant.texts.length > TEXT_BLOCK_MAXIMUMS.textsPerVariant || variant.texts.some((text) => text.trim().length === 0 || text.length > TEXT_BLOCK_MAXIMUMS.textLength));
-  const valid = draft !== null && !nameInvalid && !nameTaken && !variantInvalid && draft.categoryId.length > 0;
-  const blockNames = new Set(data?.blocks.map((block) => block.name) ?? []);
+  const valid = draft !== null && !nameInvalid && !nameTaken && !nameReserved && !variantInvalid && draft.categoryId.length > 0;
+  const blockNames = new Set(data?.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => block.name) ?? []);
   const simulatedGameId = simulatedGame[0]?.id ?? null;
   const blockUnavailableForGame = draft !== null && draft.games.length > 0 &&
     (simulatedGameId === null || !draft.games.some((game) => game.id === simulatedGameId));
   const matchingVariant = draft === null || data === null || blockUnavailableForGame ? null : firstMatchingTextBlockVariant(draft.variants, {
     streamState: simulatedStream,
     game: simulatedGame[0] ?? null,
-    chatStatus: simulatedContext === "command" ? [simulatedTier as "viewer" | "subscriber" | "vip" | "moderator" | "broadcaster"] : null,
+    chatStatus: simulatedContext === "command"
+      ? [simulatedTier === "everyone" ? "viewer" : simulatedTier as "subscriber" | "vip" | "moderator" | "broadcaster"]
+      : null,
     commandContext: simulatedContext === "command",
     timeZone: data.settings.timeZone,
     now: previewNow,
@@ -222,11 +226,10 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
       const payload = {
         ...draft,
         variants: draft.variants.map((variant, index) => index === draft.variants.length - 1 ? { ...variant, conditions: {} } : variant),
-        ...(revision === null ? {} : { expectedRevision: revision }),
       };
       const saved = revision === null
         ? await createTextBlock(channelId, payload)
-        : await saveTextBlock(channelId, payload);
+        : await saveTextBlock(channelId, { ...payload, revision });
       await refresh(saved.name);
     } catch (caught: unknown) {
       const code = errorCode(caught);
@@ -310,7 +313,6 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
 
   return (
     <section className="module-stack text-library" aria-label={labels.library}>
-      {!canManage ? <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p> : null}
       {error.length === 0 ? null : <p className="form-error" role="alert">{error}</p>}
 
       <section className={`config-section inspector-section${draft === null ? "" : " inspector-section--open"}`} aria-label={labels.library}>
@@ -350,17 +352,18 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
               {isCreate ? null : <span className="mono">{`{${draft.name}}`}</span>}
             </div>
             <div className="text-library__editor-body">
+              {canManage ? <>
               <Field
                 label={labels.name}
                 hint={labels.nameHint}
                 value={draft.name}
                 onChange={(name) => setDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "_").slice(0, 32) })}
-                disabled={!isCreate || !canManage || pending}
-                {...(draft.name.length > 0 && nameInvalid ? { error: labels.nameInvalid } : nameTaken ? { error: labels.nameExists } : {})}
+                disabled={!isCreate || pending}
+                {...(draft.name.length > 0 && nameInvalid ? { error: labels.nameInvalid } : nameTaken ? { error: labels.nameExists } : nameReserved ? { error: labels.nameReserved } : {})}
                 mono
               />
-              <Select label={labels.category} value={draft.categoryId} onChange={(value) => value !== null && setDraft({ ...draft, categoryId: value })} disabled={!canManage || pending} options={categories} />
-              <GamePicker searchGames={searchGames} value={draft.games} onChange={(games) => setDraft({ ...draft, games })} messages={{ ...labels.gamePicker, label: labels.gameBound }} disabled={!canManage || pending} />
+              <Select label={labels.category} value={draft.categoryId} onChange={(value) => value !== null && setDraft({ ...draft, categoryId: value })} disabled={pending} options={categories} />
+              <GamePicker searchGames={searchGames} value={draft.games} onChange={(games) => setDraft({ ...draft, games })} messages={{ ...labels.gamePicker, label: labels.gameBound }} disabled={pending} />
 
               <section className="config-section" aria-label={labels.variants}>
                 <div className="section-heading"><h3>{labels.variants}</h3><span className="muted">{labels.variantsCount(draft.variants.length)}</span></div>
@@ -372,13 +375,13 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                       <div className="text-library__variant-heading">
                         <strong>{isDefault ? labels.defaultVariant : labels.variant(index + 1)}</strong>
                         <span className="muted">{isDefault ? labels.noConditions : conditionSummary(variant, labels)}</span>
-                        {!canManage || isDefault ? null : <div className="form-actions">
+                        {isDefault ? null : <div className="form-actions">
                           <Button size="compact" disabled={pending || index === 0} onClick={() => setDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index - 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index - 1] as TextBlockVariant : entry) })}>{labels.moveUp}</Button>
                           <Button size="compact" disabled={pending || index >= draft.variants.length - 2} onClick={() => setDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index + 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index + 1] as TextBlockVariant : entry) })}>{labels.moveDown}</Button>
                           <Button size="compact" danger="subtle" disabled={pending} onClick={() => setDraft({ ...draft, variants: draft.variants.filter((entry) => entry.id !== variant.id) })}>{labels.removeVariant}</Button>
                         </div>}
                       </div>
-                      {isDefault ? null : <fieldset className="text-library__conditions" disabled={!canManage || pending}>
+                      {isDefault ? null : <fieldset className="text-library__conditions" disabled={pending}>
                         <legend>{labels.conditions}</legend>
                         <div className="text-library__condition-grid">
                           <Select label={labels.stream} value={variant.conditions.stream ?? "any"} onChange={(value) => updateCondition(variant.id, (conditions) => value === "any" ? withoutCondition(conditions, "stream") : { ...conditions, stream: value as "online" | "offline" })} options={[{ value: "any", label: labels.anyStream }, { value: "online", label: labels.online }, { value: "offline", label: labels.offline }]} />
@@ -389,14 +392,14 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                             value={variant.conditions.game === undefined || variant.conditions.game.game.id.length === 0 ? [] : [variant.conditions.game.game]}
                             onChange={(games) => updateCondition(variant.id, (conditions) => games[0] === undefined ? withoutCondition(conditions, "game") : { ...conditions, game: { mode: conditions.game?.mode ?? "is", game: games[0] } })}
                             messages={{ ...labels.gamePicker, label: labels.gameCondition }}
-                            disabled={!canManage || pending}
+                            disabled={pending}
                           />
                         </div>
                         {variant.conditions.game?.game.id.length === 0 ? <p className="form-error">{labels.gamePicker.hint}</p> : null}
                         <div className="text-library__weekdays" role="group" aria-label={labels.weekdays}>
                           {labels.weekdaysLabels.map((day, dayIndex) => {
                             const selected = variant.conditions.weekdays?.includes(dayIndex) ?? false;
-                            return <Button key={day} size="compact" ariaPressed={selected} disabled={!canManage || pending} onClick={() => updateCondition(variant.id, (conditions) => {
+                            return <Button key={day} size="compact" ariaPressed={selected} disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => {
                               const selectedDays = new Set(conditions.weekdays ?? []);
                               if (selected) selectedDays.delete(dayIndex); else selectedDays.add(dayIndex);
                               return selectedDays.size === 0 ? withoutCondition(conditions, "weekdays") : { ...conditions, weekdays: [...selectedDays].sort((left, right) => left - right) };
@@ -405,36 +408,54 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         </div>
                         <div className="text-library__time-window">
                           <span>{labels.timeWindow}</span>
-                          <Field label={labels.startTime} value={variant.conditions.timeWindow?.start ?? "00:00"} disabled={!canManage || pending} onChange={(start) => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start, end: conditions.timeWindow?.end ?? "23:59" } }))} />
-                          <Field label={labels.endTime} value={variant.conditions.timeWindow?.end ?? "23:59"} disabled={!canManage || pending} onChange={(end) => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: conditions.timeWindow?.start ?? "00:00", end } }))} />
-                          {variant.conditions.timeWindow === undefined ? <Button size="compact" disabled={!canManage || pending} onClick={() => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: "00:00", end: "23:59" } }))}>{labels.timeWindow}</Button> : null}
-                          {variant.conditions.timeWindow === undefined ? null : <Button size="compact" disabled={!canManage || pending} onClick={() => updateCondition(variant.id, (conditions) => withoutCondition(conditions, "timeWindow"))}>{labels.removeTimeWindow}</Button>}
+                          <Field label={labels.startTime} value={variant.conditions.timeWindow?.start ?? "00:00"} disabled={pending} onChange={(start) => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start, end: conditions.timeWindow?.end ?? "23:59" } }))} />
+                          <Field label={labels.endTime} value={variant.conditions.timeWindow?.end ?? "23:59"} disabled={pending} onChange={(end) => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: conditions.timeWindow?.start ?? "00:00", end } }))} />
+                          {variant.conditions.timeWindow === undefined ? <Button size="compact" disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: "00:00", end: "23:59" } }))}>{labels.timeWindow}</Button> : null}
+                          {variant.conditions.timeWindow === undefined ? null : <Button size="compact" disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => withoutCondition(conditions, "timeWindow"))}>{labels.removeTimeWindow}</Button>}
                         </div>
                       </fieldset>}
                       <div className="text-library__texts">
                         {variant.texts.map((text, textIndex) => (
                           <div className="text-library__text-field" key={`${variant.id}-${String(textIndex)}`}>
-                            <TextArea label={`${labels.text}${variant.texts.length > 1 ? ` ${String(textIndex + 1)}` : ""}`} hint={labels.textHint} value={text} onChange={(value) => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.map((current, currentIndex) => currentIndex === textIndex ? value : current) })) })} maxLength={TEXT_BLOCK_MAXIMUMS.textLength} disabled={!canManage || pending} variables={[
+                            <TextArea label={`${labels.text}${variant.texts.length > 1 ? ` ${String(textIndex + 1)}` : ""}`} hint={labels.textHint} value={text} onChange={(value) => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.map((current, currentIndex) => currentIndex === textIndex ? value : current) })) })} maxLength={TEXT_BLOCK_MAXIMUMS.textLength} disabled={pending} variables={[
                               ...SYSTEM_TEMPLATE_VARIABLE_LIST.flatMap((variable) => variable.group === undefined ? [] : [{ name: variable.name, description: variable.name, sample: variable.sample, group: variable.group, kind: "system" as const, ...(variable.external === undefined ? {} : { external: variable.external }), ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }) }]),
-                              ...data.blocks.map((block) => ({ name: block.name, description: `Text block {${block.name}}`, sample: block.variants.flatMap((entry) => entry.texts)[0] ?? "", group: "channel" as const })),
+                              ...data.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => ({ name: block.name, description: labels.variableDescription(block.name), sample: block.variants.flatMap((entry) => entry.texts)[0] ?? "", group: "channel" as const })),
                             ]} messages={{
                               countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
                               previewCountLabel: (count) => String(count),
                               unknownVariable: (name, suggestion) => suggestion === null ? `{${name}}` : `{${name}} → {${suggestion}}`,
-                              insertSuggestionLabel: (name) => `{${name}} einsetzen`,
+                              insertSuggestionLabel: labels.insertSuggestionLabel,
                               worstCaseLength: (length, maximum) => `${String(length)} / ${String(maximum)}`,
                             }} />
-                            {variant.texts.length <= 1 || !canManage ? null : <Button size="compact" danger="subtle" disabled={pending} onClick={() => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.filter((_entry, entryIndex) => entryIndex !== textIndex) })) })}>{labels.removeText}</Button>}
+                            {variant.texts.length <= 1 ? null : <Button size="compact" danger="subtle" disabled={pending} onClick={() => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.filter((_entry, entryIndex) => entryIndex !== textIndex) })) })}>{labels.removeText}</Button>}
                           </div>
                         ))}
-                        {variant.texts.length >= TEXT_BLOCK_MAXIMUMS.textsPerVariant || !canManage ? null : <Button size="compact" disabled={pending} onClick={() => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: [...entry.texts, ""] })) })}>{labels.addText}</Button>}
+                        {variant.texts.length >= TEXT_BLOCK_MAXIMUMS.textsPerVariant ? null : <Button size="compact" disabled={pending} onClick={() => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: [...entry.texts, ""] })) })}>{labels.addText}</Button>}
                       </div>
                       {variantPreviewLength > TEXT_BLOCK_MAXIMUMS.renderedLength ? <p className="text-library__warning" role="note">{labels.previewTooLong(variantPreviewLength)}</p> : null}
                     </article>
                   );
                 })}
-                {draft.variants.length >= TEXT_BLOCK_MAXIMUMS.variantsPerBlock || !canManage ? null : <Button disabled={pending} onClick={() => setDraft({ ...draft, variants: [...draft.variants.slice(0, -1), newVariant(), draft.variants[draft.variants.length - 1] as TextBlockVariant] })}>{labels.addVariant}</Button>}
+                {draft.variants.length >= TEXT_BLOCK_MAXIMUMS.variantsPerBlock ? null : <Button disabled={pending} onClick={() => setDraft({ ...draft, variants: [...draft.variants.slice(0, -1), newVariant(), draft.variants[draft.variants.length - 1] as TextBlockVariant] })}>{labels.addVariant}</Button>}
               </section>
+              </> : <>
+                <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p>
+                <dl className="text-library__read-only-properties">
+                  <div><dt>{labels.name}</dt><dd className="mono">{draft.name}</dd></div>
+                  <div><dt>{labels.category}</dt><dd>{categories.find((category) => category.value === draft.categoryId)?.label ?? draft.categoryId}</dd></div>
+                  <div><dt>{labels.gameBound}</dt><dd>{draft.games.length === 0 ? labels.filterAny : draft.games.map((game) => game.name).join(", ")}</dd></div>
+                  <div>
+                    <dt>{labels.variants}</dt>
+                    <dd><ol>{draft.variants.map((variant, index) => (
+                      <li key={variant.id}>
+                        <strong>{index === draft.variants.length - 1 ? labels.defaultVariant : labels.variant(index + 1)}</strong>
+                        <p>{conditionSummary(variant, labels)}</p>
+                        <ul>{variant.texts.map((text, textIndex) => <li key={`${variant.id}-${String(textIndex)}`}><pre>{text}</pre></li>)}</ul>
+                      </li>
+                    ))}</ol></dd>
+                  </div>
+                </dl>
+              </>}
 
               <section className="config-section text-library__preview" aria-label={labels.preview}>
                 <div className="section-heading"><h3>{labels.preview}</h3></div>
@@ -461,7 +482,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
               <div className="form-actions">
                 {canManage ? <Button variant="primary" disabled={pending || !valid} onClick={() => { void saveDraft(); }}>{isCreate ? labels.create : labels.save}</Button> : null}
                 {canManage && !isCreate ? <Button danger="subtle" disabled={pending} onClick={() => { void removeBlock(); }}>{labels.delete}</Button> : null}
-                <Button disabled={pending} onClick={() => { setDraft(null); setSelectedName(null); setRevision(null); setError(""); }}>{labels.discard}</Button>
+                {canManage ? <Button disabled={pending} onClick={() => { setDraft(null); setSelectedName(null); setRevision(null); setError(""); }}>{labels.discard}</Button> : null}
               </div>
               {isCreate && data.blocks.length >= TEXT_BLOCK_MAXIMUMS.blocksPerChannel ? <p className="form-error">{labels.blockLimit(TEXT_BLOCK_MAXIMUMS.blocksPerChannel)}</p> : null}
             </div>
@@ -472,29 +493,36 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
       <details className="text-library__settings" open={showCategories} onToggle={(event) => setShowCategories(event.currentTarget.open)}>
         <summary>{labels.categories}</summary>
         <div className="text-library__settings-body">
+          {canManage ? <>
           {data.categories.map((category) => {
             const originalName = categoryLabel(category, labels);
             const value = categoryDrafts[category.id] ?? category.customName ?? originalName;
             const isEmpty = categoryBlockCounts.get(category.id) === 0;
             return <div className="text-library__category-row" key={category.id}>
-              <Field label={`${labels.categoryName}: ${originalName}`} value={value} onChange={(name) => setCategoryDrafts({ ...categoryDrafts, [category.id]: name })} disabled={!canManage || pending || category.catalogKey !== null} maxLength={40} countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`} />
-              {canManage && category.catalogKey === null ? <>
+              <Field label={`${labels.categoryName}: ${originalName}`} value={value} onChange={(name) => setCategoryDrafts({ ...categoryDrafts, [category.id]: name })} disabled={pending || category.catalogKey !== null} maxLength={40} countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`} />
+              {category.catalogKey === null ? <>
                 <Button size="compact" disabled={pending || value.trim().length === 0 || value === originalName} onClick={() => { void saveCategory(category); }}>{labels.categoryRename}</Button>
                 <Button size="compact" danger="subtle" disabled={pending || !isEmpty} {...(isEmpty ? {} : { title: labels.categoryDeleteBlocked })} onClick={() => { void removeCategory(category); }}>{labels.categoryDelete}</Button>
               </> : null}
               {!isEmpty ? null : <span className="muted">{labels.categoryEmpty}</span>}
-              {!isEmpty && !canManage ? <span className="muted">{labels.categoryDeleteBlocked}</span> : null}
             </div>;
           })}
-          {canManage ? <div className="text-library__category-create">
+          <div className="text-library__category-create">
             <Field label={labels.categoryName} value={newCategoryName} onChange={setNewCategoryName} maxLength={40} countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`} disabled={pending} />
             <Button disabled={pending || newCategoryName.trim().length === 0 || data.categories.length >= 25} onClick={() => { void addCategory(); }}>{labels.categoryAdd}</Button>
             {data.categories.length >= 25 ? <p className="muted">{labels.categoryLimit}</p> : null}
-          </div> : null}
-          <div className="text-library__timezone">
-            <Field label={labels.timezone} hint={labels.timezoneHint} value={timezoneDraft} onChange={setTimezoneDraft} disabled={!canManage || pending} {...(timezoneDraft.length > 0 && !validTimeZone(timezoneDraft) ? { error: labels.timezoneInvalid } : {})} />
-            {canManage ? <Button disabled={pending || timezoneDraft === data.settings.timeZone || !validTimeZone(timezoneDraft)} onClick={() => { void saveTimeZone(); }}>{labels.save}</Button> : null}
           </div>
+          <div className="text-library__timezone">
+            <Field label={labels.timezone} hint={labels.timezoneHint} value={timezoneDraft} onChange={setTimezoneDraft} disabled={pending} {...(timezoneDraft.length > 0 && !validTimeZone(timezoneDraft) ? { error: labels.timezoneInvalid } : {})} />
+            <Button disabled={pending || timezoneDraft === data.settings.timeZone || !validTimeZone(timezoneDraft)} onClick={() => { void saveTimeZone(); }}>{labels.save}</Button>
+          </div>
+          </> : <>
+            <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p>
+            <dl className="text-library__read-only-properties">
+              {data.categories.map((category) => <div key={category.id}><dt>{`${labels.categoryName}: ${categoryLabel(category, labels)}`}</dt><dd>{category.customName ?? categoryLabel(category, labels)}</dd></div>)}
+              <div><dt>{labels.timezone}</dt><dd>{data.settings.timeZone}</dd></div>
+            </dl>
+          </>}
         </div>
       </details>
     </section>

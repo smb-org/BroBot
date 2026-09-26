@@ -35,7 +35,7 @@ interface ModuleRouteEnvironment {
     "writeModuleDiagnostics" | "broadcasterHasScope" | "broadcasterScopesForChannel"
     | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
     | "listChannelVariables" | "findChannelVariable"
-    | "templateUsageSources"
+    | "templateUsageSources" | "listRegisteredTemplateVariables"
   >;
 }
 
@@ -95,6 +95,15 @@ moduleRouter.use("/api/channels/:channelId/modules/*", (context, next) => {
   context.set("findChannelVariable", async (channelId, name): Promise<ModuleChannelVariable | null> => {
     const variable = await findChannelVariable(context.env.DB, channelId, name);
     return variable === null ? null : { name: variable.name, value: variable.value, description: variable.description };
+  });
+  context.set("listRegisteredTemplateVariables", async (channelId) => {
+    const registrations = await Promise.all(MODULES.map(async (module) => {
+      const fields = Object.values(module.templateFields ?? {})
+        .flatMap((variables) => variables ?? []) as TemplateVariable[];
+      const dynamic = await module.templateVariables?.(context.env.DB, channelId) ?? [];
+      return [...fields, ...dynamic].map((variable) => ({ moduleId: module.id, name: variable.name }));
+    }));
+    return registrations.flat();
   });
   context.set("templateUsageSources", async (channelId) => {
     const moduleSources = await Promise.all(MODULES.map((module) =>

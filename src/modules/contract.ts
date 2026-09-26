@@ -2,7 +2,7 @@ import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ImmediateActionRequirement } from "../contracts/values";
-import type { TemplateContext, TemplateFields } from "../template";
+import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 
@@ -396,6 +396,24 @@ export interface ModuleImmediateActionDefinition {
 
 export type ModuleLanguage = "de" | "en";
 
+export const MODULE_TEMPLATE_MINIMUM_TIERS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
+export type ModuleTemplateMinimumTier = (typeof MODULE_TEMPLATE_MINIMUM_TIERS)[number];
+
+/** Chat badges that meet each shared minimum tier. */
+export const MODULE_TEMPLATE_TIER_CHAT_STATUSES: Readonly<Record<ModuleTemplateMinimumTier, readonly ModuleChatStatus[]>> = {
+  everyone: ["viewer", "subscriber", "vip", "moderator", "broadcaster"],
+  subscriber: ["subscriber", "moderator", "broadcaster"],
+  vip: ["vip", "moderator", "broadcaster"],
+  moderator: ["moderator", "broadcaster"],
+  broadcaster: ["broadcaster"],
+};
+
+/** A variable name provided by a module for template validation. */
+export interface ModuleRegisteredTemplateVariable {
+  moduleId: string;
+  name: string;
+}
+
 export const browserModuleLanguage = (): ModuleLanguage => {
   const language = typeof navigator === "undefined" ? "de" : navigator.language;
   return language.toLowerCase().startsWith("de") ? "de" : "en";
@@ -451,6 +469,7 @@ export interface ModuleRouteVariables {
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];
   findChannelVariable: ModuleChannelVariableAccess["findChannelVariable"];
   templateUsageSources: (channelId: string) => Promise<readonly ModuleTemplateUsageSource[]>;
+  listRegisteredTemplateVariables: (channelId: string) => Promise<readonly ModuleRegisteredTemplateVariable[]>;
   writeModuleDiagnostics: (
     db: D1Database,
     channelId: string,
@@ -514,6 +533,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   defaultSettings: z.output<SettingsSchema>;
   /** Template fields and variables used by both panel validation and worker rendering. */
   templateFields?: TemplateFields<z.output<SettingsSchema>>;
+  /** Dynamic template variables registered from module-owned data. */
+  templateVariables?: (db: D1Database, channelId: string) => Promise<readonly TemplateVariable[]>;
   /** Which host catalog groups are available in this module's templates. */
   templateContext?: TemplateContext;
   /** Generic template-variable expansion supplied by the module itself. */

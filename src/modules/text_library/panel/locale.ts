@@ -21,6 +21,7 @@ export interface TextLibraryTexts {
   nameHint: string;
   nameInvalid: string;
   nameExists: string;
+  nameReserved: string;
   category: string;
   categories: string;
   categoryAdd: string;
@@ -58,7 +59,9 @@ export interface TextLibraryTexts {
   endTime: string;
   text: string;
   textHint: string;
+  variableDescription: (name: string) => string;
   addText: string;
+  insertSuggestionLabel: (name: string) => string;
   removeText: string;
   preview: string;
   simulateStream: string;
@@ -112,6 +115,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; wird als {name} eingesetzt.",
     nameInvalid: "Nur a–z, 0–9 und Unterstriche; höchstens 32 Zeichen.",
     nameExists: "Dieser Name ist bereits vergeben.",
+    nameReserved: "Dieser Name ist für eine Vorlagenvariable reserviert.",
     category: "Kategorie",
     categories: "Kategorien und Zeitzone",
     categoryAdd: "Kategorie hinzufügen",
@@ -149,7 +153,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     endTime: "Bis",
     text: "Text",
     textHint: "Vorlagenvariablen wie {user} und Textbausteine wie {welcome} werden beim Senden aufgelöst.",
+    variableDescription: (name) => `Textbaustein {${name}}`,
     addText: "Zufallstext hinzufügen",
+    insertSuggestionLabel: (name) => `{${name}} einsetzen`,
     removeText: "Text entfernen",
     preview: "Vorschau",
     simulateStream: "Simulierter Streamstatus",
@@ -190,6 +196,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     weekdaysLabels: ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"],
     errors: {
       text_library_block_exists: "Dieser Name ist bereits vergeben.",
+      text_library_block_reserved_name: "Dieser Name ist für eine Vorlagenvariable reserviert.",
       text_library_block_conflict: "Dieser Textbaustein wurde inzwischen geändert.",
       text_library_block_limit: "Der Kanal hat bereits 200 Textbausteine.",
       text_library_block_invalid: "Prüfe Name, Kategorien, Bedingungen und Texte des Textbausteins.",
@@ -223,6 +230,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     nameHint: "Lowercase letters, numbers, and underscores; insert it as {name}.",
     nameInvalid: "Use only a–z, 0–9, and underscores; up to 32 characters.",
     nameExists: "This name is already in use.",
+    nameReserved: "This name is reserved for a template variable.",
     category: "Category",
     categories: "Categories and time zone",
     categoryAdd: "Add category",
@@ -260,7 +268,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     endTime: "To",
     text: "Text",
     textHint: "Template variables like {user} and text blocks like {welcome} are resolved when sent.",
+    variableDescription: (name) => `Text block {${name}}`,
     addText: "Add random text",
+    insertSuggestionLabel: (name) => `Insert {${name}}`,
     removeText: "Remove text",
     preview: "Preview",
     simulateStream: "Simulated stream status",
@@ -301,6 +311,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     weekdaysLabels: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
     errors: {
       text_library_block_exists: "This name is already in use.",
+      text_library_block_reserved_name: "This name is reserved for a template variable.",
       text_library_block_conflict: "This text block has changed since you opened it.",
       text_library_block_limit: "This channel already has 200 text blocks.",
       text_library_block_invalid: "Check the text block name, category, conditions, and texts.",

@@ -329,6 +329,12 @@ form.content-section { display: grid; gap: var(--s4); }
 .text-library__usage-count { display: grid; flex: none; place-items: center; min-width: 28px; min-height: 24px; padding-inline: var(--s1); border-radius: var(--r-control); color: var(--text-2); background: var(--surface-well); }
 .text-library__editor { display: grid; align-content: start; gap: var(--s4); }
 .text-library__editor-body { display: grid; gap: var(--s4); }
+.text-library__read-only-properties { display: grid; gap: var(--s3); margin: 0; }
+.text-library__read-only-properties > div { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 2fr); gap: var(--s2); padding-bottom: var(--s2); border-bottom: 1px solid var(--line); }
+.text-library__read-only-properties dt { color: var(--text-3); }
+.text-library__read-only-properties dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.text-library__read-only-properties ol, .text-library__read-only-properties ul { display: grid; gap: var(--s2); margin: 0; padding-left: var(--s4); }
+.text-library__read-only-properties pre { margin: var(--s1) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .text-library__variant { display: grid; gap: var(--s3); padding: var(--s4) 0; border-top: 1px solid var(--line); }
 .text-library__variant-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s2); }
 .text-library__variant-heading > .muted { grid-column: 1 / -1; }

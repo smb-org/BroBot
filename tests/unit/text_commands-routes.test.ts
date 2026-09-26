@@ -4,6 +4,8 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { textFingerprint } from "../../src/text";
+import { createTextBlockRepository } from "../../src/modules/text_library/adapters/d1";
+import { createTextLibraryService } from "../../src/modules/text_library/service";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -489,6 +491,38 @@ describe("Text commands panel", () => {
       environment,
     );
     expect(oversized.status).toBe(400);
+  });
+
+  it("recognizes registered text-library variables when validating a command", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const library = createTextLibraryService(createTextBlockRepository(
+      database as unknown as D1Database,
+      () => ({ sql: "AND 1 = 1", values: [] }),
+    ));
+    const snapshot = await library.list("kanal-a");
+    const createdBlock = await library.create({
+      channelId: "kanal-a",
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: ["Welcome!"] }],
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date().toISOString(),
+    }, { userId: "user-1", sessionId: "session-user-1" });
+    expect(createdBlock.ok).toBe(true);
+
+    const createdCommand = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "greeting", text: "Hello {welcome}", cooldownSeconds: 0,
+      }),
+      environmentFor(database),
+    );
+
+    expect(createdCommand.status).toBe(201);
+    const body = await createdCommand.json<{ warnings: Array<{ code: string; unknownVariables?: string[] }> }>();
+    expect(body.warnings.flatMap((warning) => warning.unknownVariables ?? [])).not.toContain("welcome");
   });
 
   it("lets a manager toggle a command and audits the toggle", async () => {

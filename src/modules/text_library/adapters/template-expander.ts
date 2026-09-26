@@ -5,7 +5,6 @@ import { blockReferencesInText, firstMatchingTextBlockVariant, textBlockAppliesT
 interface BlockRow {
   block_name: string;
   games_json: string;
-  last_chosen_index: number;
 }
 
 interface VariantRow {
@@ -54,6 +53,8 @@ const variantMap = (rows: readonly VariantRow[]): Map<string, TextBlockVariant[]
   return mapped;
 };
 
+const EXPANSION_BUDGET = 501;
+
 export const createTextBlockTemplateExpander = (
   db: D1Database,
   channelId: string,
@@ -66,7 +67,7 @@ export const createTextBlockTemplateExpander = (
     const chunks = chunksOf(names, 50);
     const results = await Promise.all(chunks.map(async (chunk) => {
       const placeholders = chunk.map(() => "?").join(", ");
-      return db.prepare(`SELECT block_name, games_json, last_chosen_index FROM text_blocks WHERE channel_id = ? AND block_name IN (${placeholders})`)
+      return db.prepare(`SELECT block_name, games_json FROM text_blocks WHERE channel_id = ? AND block_name IN (${placeholders})`)
         .bind(channelId, ...chunk).all<BlockRow>();
     }));
     return results.flatMap((result) => result.results);
@@ -106,7 +107,6 @@ export const createTextBlockTemplateExpander = (
       games: parseJson<TwitchGame[]>(row.games_json, []),
       variants: variants.get(row.block_name) ?? [],
       revision: 1,
-      lastChosenIndex: row.last_chosen_index,
       createdAt: "",
       updatedAt: "",
     });
@@ -118,19 +118,19 @@ export const createTextBlockTemplateExpander = (
   const timeZone = settingsRow?.time_zone ?? "Europe/Berlin";
   const needsStream = [...blocks.values()].some((block) => block.variants.some((variant) => variant.conditions.stream !== undefined));
   const needsGame = [...blocks.values()].some((block) => block.games.length > 0 || block.variants.some((variant) => variant.conditions.game !== undefined));
-  const persistChoice = async (name: string, length: number): Promise<number> => {
+  const persistChoice = async (name: string, variantId: string, length: number): Promise<number> => {
     const row = await db.prepare(
-      `UPDATE text_blocks SET last_chosen_index = CASE
+      `UPDATE text_block_variants SET last_chosen_index = CASE
          WHEN ? <= 1 THEN 0
          WHEN last_chosen_index >= 0 AND last_chosen_index < ?
            THEN (last_chosen_index + 1 + abs(random() % (? - 1))) % ?
          ELSE abs(random() % ?)
        END
-       WHERE channel_id = ? AND block_name = ? RETURNING last_chosen_index`,
-    ).bind(length, length, length, length, length, channelId, name).first<{ last_chosen_index: number }>();
+       WHERE channel_id = ? AND block_name = ? AND variant_id = ? RETURNING last_chosen_index`,
+    ).bind(length, length, length, length, length, channelId, name, variantId).first<{ last_chosen_index: number }>();
     return row?.last_chosen_index ?? 0;
   };
-  const selectedTextByBlock = new Map<string, Promise<string>>();
+  const selectedTextByVariant = new Map<string, Promise<string>>();
   let streamState: ModuleStreamState | undefined;
   let currentGame: TwitchGame | null | undefined;
   const state = async (): Promise<TextBlockState> => {
@@ -145,19 +145,29 @@ export const createTextBlockTemplateExpander = (
       now: context.now,
     };
   };
-  const expand = async (source: string, ancestry: readonly string[]): Promise<string> => {
+  const expand = async (
+    source: string,
+    ancestry: readonly string[],
+    budget: number,
+  ): Promise<{ text: string; complete: boolean }> => {
+    if (budget <= 0) return { text: "", complete: source.length === 0 };
     const tokens = [...source.matchAll(/\{([a-z0-9_]{1,32})\}/gu)];
-    if (tokens.length === 0) return source;
+    if (tokens.length === 0) return { text: source.slice(0, budget), complete: source.length <= budget };
     const currentState = await state();
     let offset = 0;
     let result = "";
+    const append = (value: string): boolean => {
+      const remaining = budget - result.length;
+      result += value.slice(0, remaining);
+      return value.length <= remaining;
+    };
     for (const token of tokens) {
       const name = token[1];
       const start = token.index;
       if (name === undefined || knownVariables.has(name) || ancestry.includes(name) || ancestry.length >= 3) continue;
       const block = blocks.get(name);
       if (block === undefined) continue;
-      result += source.slice(offset, start);
+      if (!append(source.slice(offset, start))) return { text: result, complete: false };
       if (!textBlockAppliesToGame(block, currentState.game?.id ?? null)) {
         offset = start + token[0].length;
         continue;
@@ -167,22 +177,25 @@ export const createTextBlockTemplateExpander = (
         offset = start + token[0].length;
         continue;
       }
-      let selectedTextPromise = selectedTextByBlock.get(name);
+      const selectionKey = `${name}\u0000${selected.id}`;
+      let selectedTextPromise = selectedTextByVariant.get(selectionKey);
       if (selectedTextPromise === undefined) {
         selectedTextPromise = (async () => {
-          const index = await persistChoice(name, selected.texts.length);
+          const index = await persistChoice(name, selected.id, selected.texts.length);
           return selected.texts[index] ?? selected.texts[0] ?? "";
         })();
-        selectedTextByBlock.set(name, selectedTextPromise);
+        selectedTextByVariant.set(selectionKey, selectedTextPromise);
       }
       const selectedText = await selectedTextPromise;
-      result += await expand(selectedText, [...ancestry, name]);
+      const expandedSelection = await expand(selectedText, [...ancestry, name], budget - result.length);
+      if (!append(expandedSelection.text) || !expandedSelection.complete) return { text: result, complete: false };
       offset = start + token[0].length;
     }
-    if (offset === 0) return source;
-    return result + source.slice(offset);
+    if (offset === 0) return { text: source.slice(0, budget), complete: source.length <= budget };
+    const complete = append(source.slice(offset));
+    return { text: result, complete };
   };
 
-  const expanded = await expand(text, []);
-  return { text: expanded, used: true, outputLimit: 500 };
+  const expanded = await expand(text, [], EXPANSION_BUDGET);
+  return { text: expanded.text, used: true, outputLimit: 500 };
 };

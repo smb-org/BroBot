@@ -2,19 +2,19 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import { canManage } from "../../contracts/values";
-import type { TextBlock, TwitchGame } from "./contracts";
+import { TEXT_LIBRARY_MODULE_ID, type TextBlock, type TwitchGame } from "./contracts";
 import { TEXT_BLOCK_MAXIMUMS } from "./contracts";
 import { firstMatchingTextBlockVariant, textBlockAppliesToGame, validTextBlock, validTimeZone } from "./domain";
 import { createTextBlockRepository } from "./adapters/d1";
 import type { TextBlockInput } from "./repository";
 import { createTextLibraryService } from "./service";
-import type { ModuleRouteEnvironment } from "../contract";
+import { MODULE_TEMPLATE_MINIMUM_TIERS, SYSTEM_TEMPLATE_VARIABLE_LIST, type ModuleRouteEnvironment } from "../contract";
 
 const gameSchema = z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().min(1).max(100) });
 const conditionsSchema = z.object({
   stream: z.enum(["online", "offline"]).optional(),
   game: z.object({ mode: z.enum(["is", "is_not"]), game: gameSchema }).optional(),
-  minimumTier: z.enum(["everyone", "subscriber", "vip", "moderator", "broadcaster"]).optional(),
+  minimumTier: z.enum(MODULE_TEMPLATE_MINIMUM_TIERS).optional(),
   weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
   timeWindow: z.object({ start: z.string(), end: z.string() }).optional(),
 });
@@ -100,7 +100,15 @@ textLibraryRoutes.get("/games", async (context) => {
 textLibraryRoutes.get("/library", async (context) => {
   const channelId = param(context, "channelId");
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeMutation"), context.get("prepareModuleAudit")));
-  return context.json(await service.list(channelId, await context.get("templateUsageSources")(channelId)));
+  const [data, registeredVariables] = await Promise.all([
+    service.list(channelId, await context.get("templateUsageSources")(channelId)),
+    context.get("listRegisteredTemplateVariables")(channelId),
+  ]);
+  const reservedNames = [...new Set([
+    ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name),
+    ...registeredVariables.filter(({ moduleId }) => moduleId !== TEXT_LIBRARY_MODULE_ID).map(({ name }) => name),
+  ])];
+  return context.json({ ...data, reservedNames });
 });
 
 textLibraryRoutes.get("/blocks", async (context) => {
@@ -122,6 +130,13 @@ textLibraryRoutes.post("/blocks", async (context) => {
   const parsed = parseBlock(await readBody(context.req.raw));
   if (parsed === null || parsed.expectedRevision !== undefined) return context.json({ error: "text_library_block_invalid" }, 400);
   const channelId = param(context, "channelId");
+  const reservedNames = new Set([
+    ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name),
+    ...(await context.get("listRegisteredTemplateVariables")(channelId))
+      .filter(({ moduleId }) => moduleId !== TEXT_LIBRARY_MODULE_ID)
+      .map(({ name }) => name),
+  ]);
+  if (reservedNames.has(parsed.name)) return context.json({ error: "text_library_block_reserved_name" }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const snapshot = await service.list(channelId);
   const result = await service.create({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"));
@@ -142,6 +157,13 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
   if (parsed === null || parsed.name !== oldName || parsed.expectedRevision === undefined) {
     return context.json({ error: "text_library_block_invalid" }, 400);
   }
+  const reservedNames = new Set([
+    ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name),
+    ...(await context.get("listRegisteredTemplateVariables")(channelId))
+      .filter(({ moduleId }) => moduleId !== TEXT_LIBRARY_MODULE_ID)
+      .map(({ name }) => name),
+  ]);
+  if (reservedNames.has(parsed.name)) return context.json({ error: "text_library_block_reserved_name" }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const snapshot = await service.list(channelId);
   const result = await service.change({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"));

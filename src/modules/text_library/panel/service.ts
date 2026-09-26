@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import { TEXT_LIBRARY_GAME_SEARCH_PATH, TEXT_LIBRARY_LIBRARY_PATH, type TextBlock, type TextBlockCategory, type TextLibraryData, type TextBlockUsage, type TwitchGame, type TextBlockMutationInput } from "../contracts";
+import { TEXT_LIBRARY_GAME_SEARCH_PATH, TEXT_LIBRARY_LIBRARY_PATH, type TextBlock, type TextBlockCategory, type TextLibraryData, type TextBlockUsage, type TwitchGame, type TextBlockMutationInput, type TextBlockSaveInput } from "../contracts";
 
 const basePath = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/text_library`;
@@ -38,7 +38,7 @@ const mutate = async <T,>(channelId: string, path: string, method: "POST" | "PAT
 export const createTextBlock = async (channelId: string, block: TextBlockMutationInput): Promise<TextBlock> =>
   (await mutate<{ block: TextBlock }>(channelId, "/blocks", "POST", block)).block;
 
-export const saveTextBlock = async (channelId: string, block: TextBlockMutationInput): Promise<TextBlock> =>
+export const saveTextBlock = async (channelId: string, block: TextBlockSaveInput): Promise<TextBlock> =>
   (await mutate<{ block: TextBlock }>(channelId, `/blocks/${encodeURIComponent(block.name)}`, "PATCH", block)).block;
 
 export const deleteTextBlock = async (channelId: string, name: string, revision: number): Promise<void> => {

@@ -17,6 +17,11 @@ export const textLibraryModule: BotModule<typeof settingsSchema> = {
   defaultEnabled: true,
   settingsSchema,
   defaultSettings: {},
+  templateVariables: async (db, channelId) => {
+    const result = await db.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ? ORDER BY block_name")
+      .bind(channelId).all<{ block_name: string }>();
+    return result.results.map(({ block_name }) => ({ name: block_name, sample: "", maxLength: 500 }));
+  },
   navigationEntries: [{
     id: "texts",
     label: { de: textLibraryModuleCatalog.de.label, en: textLibraryModuleCatalog.en.label },

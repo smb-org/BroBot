@@ -13,7 +13,6 @@ interface BlockRow {
   block_name: string;
   category_id: string;
   games_json: string;
-  last_chosen_index: number;
   revision: number;
   created_at: string;
   updated_at: string;
@@ -71,7 +70,7 @@ const mapSettings = (row: SettingsRow): TextLibrarySettings => ({
   updatedAt: row.updated_at,
 });
 
-export const textBlockSelectColumns = `channel_id, block_name, category_id, games_json, last_chosen_index,
+export const textBlockSelectColumns = `channel_id, block_name, category_id, games_json,
                      revision, created_at, updated_at`;
 export const textBlockCategorySelectColumns = `category_id, catalog_key, custom_name, created_at, updated_at`;
 
@@ -95,7 +94,6 @@ export const createTextBlockRepository = (
       games: parseJson<TwitchGame[]>(row.games_json, []),
       variants: variants.results.map(mapVariant),
       revision: row.revision,
-      lastChosenIndex: row.last_chosen_index,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -124,7 +122,6 @@ export const createTextBlockRepository = (
       games: parseJson<TwitchGame[]>(row.games_json, []),
       variants: variantsByName.get(row.block_name) ?? [],
       revision: row.revision,
-      lastChosenIndex: row.last_chosen_index,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
@@ -168,21 +165,24 @@ export const createTextBlockRepository = (
   };
 
   const repository: TextBlockRepository = {
-    async initialize(channelId, now) {
+    async initialize(channelId, actor, now) {
+      const authorization = authorizeMutation(channelId, actor, now);
       const statements = [db.prepare(
-        "INSERT OR IGNORE INTO text_library_settings (channel_id, time_zone, revision, updated_at) VALUES (?, 'Europe/Berlin', 1, ?)",
-      ).bind(channelId, now)];
+        `INSERT OR IGNORE INTO text_library_settings (channel_id, time_zone, revision, updated_at)
+         SELECT ?, 'Europe/Berlin', 1, ? WHERE 1 = 1 ${authorization.sql}`,
+      ).bind(channelId, now, ...authorization.values)];
       for (const category of DEFAULT_TEXT_BLOCK_CATEGORIES) {
         statements.push(db.prepare(
-          "INSERT OR IGNORE INTO text_library_categories (channel_id, category_id, catalog_key, custom_name, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)",
-        ).bind(channelId, category.id, category.catalogKey, now, now));
+          `INSERT OR IGNORE INTO text_library_categories (channel_id, category_id, catalog_key, custom_name, created_at, updated_at)
+           SELECT ?, ?, ?, NULL, ?, ? WHERE 1 = 1 ${authorization.sql}`,
+        ).bind(channelId, category.id, category.catalogKey, now, now, ...authorization.values));
       }
       await db.batch(statements);
     },
     list,
     find,
     async create(input, actor) {
-      await repository.initialize(input.channelId, input.now);
+      await repository.initialize(input.channelId, actor, input.now);
       const authorization = authorizeMutation(input.channelId, actor, input.now);
       const revision = initialBlockRevision(input.now);
       const advanceGraph = db.prepare(
@@ -307,7 +307,7 @@ export const createTextBlockRepository = (
       return { ok: changes > 0 };
     },
     async createCategory(channelId, name, actor, now) {
-      await repository.initialize(channelId, now);
+      await repository.initialize(channelId, actor, now);
       const authorization = authorizeMutation(channelId, actor, now);
       const categoryId = `custom_${crypto.randomUUID().replaceAll("-", "")}`;
       const mutation = db.prepare(
@@ -338,7 +338,7 @@ export const createTextBlockRepository = (
       return exists === null ? "not_found" : "not_empty";
     },
     async updateTimeZone(channelId, timeZone, revision, actor, now) {
-      await repository.initialize(channelId, now);
+      await repository.initialize(channelId, actor, now);
       const authorization = authorizeMutation(channelId, actor, now);
       const before = await db.prepare("SELECT time_zone, revision FROM text_library_settings WHERE channel_id = ?")
         .bind(channelId).first<{ time_zone: string; revision: number }>();

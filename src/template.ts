@@ -243,9 +243,11 @@ export const templateWarnings = (
   field: string,
   text: string,
   declared: readonly TemplateVariable[],
+  registeredVariableNames: readonly string[] = [],
 ): TemplateWarning[] => {
   const warnings: TemplateWarning[] = [];
-  const unknownVariables = unknownTemplateVariables(text, declared);
+  const registeredNames = new Set(registeredVariableNames);
+  const unknownVariables = unknownTemplateVariables(text, declared).filter((name) => !registeredNames.has(name));
   if (unknownVariables.length > 0) warnings.push({ field, code: "unknown_template_variables", unknownVariables });
   const invalidVariables = invalidTemplateParameters(text, declared);
   if (invalidVariables.length > 0) warnings.push({ field, code: "template_parameters_invalid", invalidVariables });

@@ -156,7 +156,11 @@ const effectiveCommandVariables = (variables: readonly ModuleChannelVariable[]):
   return effectiveTemplateVariables("chat_command", [], channelVariables, SYSTEM_TEMPLATE_VARIABLE_LIST);
 };
 
-const warningsForText = (text: string, variables: readonly TemplateVariable[]) => templateWarnings("text", text, variables);
+const warningsForText = (
+  text: string,
+  variables: readonly TemplateVariable[],
+  registeredVariableNames: readonly string[],
+) => templateWarnings("text", text, variables, registeredVariableNames);
 
 textCommandRoutes.get("/commands", async (context) => {
   const channelId = param(context, "channelId");
@@ -182,10 +186,13 @@ textCommandRoutes.post("/commands", async (context) => {
     return context.json({ error: "command_data_invalid" }, 400);
   }
   const now = nowIso();
-  const variables = effectiveCommandVariables(await context.get("listChannelVariables")(channelId));
+  const [channelVariables, registeredVariables] = await Promise.all([
+    context.get("listChannelVariables")(channelId),
+    context.get("listRegisteredTemplateVariables")(channelId),
+  ]);
   const warnings = body.kind === "list"
     ? []
-    : warningsForText(body.text, variables);
+    : warningsForText(body.text, effectiveCommandVariables(channelVariables), registeredVariables.map(({ name }) => name));
   const created = await repository.create({ channelId, ...body, now }, context.get("actor"));
   if (created.ok) {
     const command: TextCommand = {
@@ -273,9 +280,13 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const streamCondition = body.streamCondition ?? before.streamCondition;
   const games = body.games ?? before.games ?? [];
   const responseType = body.responseType ?? before.responseType;
+  const [channelVariables, registeredVariables] = await Promise.all([
+    context.get("listChannelVariables")(channelId),
+    context.get("listRegisteredTemplateVariables")(channelId),
+  ]);
   const warnings = kind === "list"
     ? []
-    : warningsForText(text, effectiveCommandVariables(await context.get("listChannelVariables")(channelId)));
+    : warningsForText(text, effectiveCommandVariables(channelVariables), registeredVariables.map(({ name }) => name));
   const authorizeMutation = contentChanged
     ? context.get("authorizeManagementMutation")
     : context.get("authorizeMutation");

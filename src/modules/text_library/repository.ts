@@ -5,6 +5,7 @@ import type { ModuleTemplateUsageSource } from "../contract";
 
 export interface TextBlockInput extends TextBlockMutationInput {
   channelId: string;
+  expectedRevision?: number;
   expectedGraphRevision: number;
   now: string;
 }
@@ -21,7 +22,7 @@ export interface TextLibrarySnapshot {
 }
 
 export interface TextBlockRepository {
-  initialize(channelId: string, now: string): Promise<void>;
+  initialize(channelId: string, actor: TextBlockActor, now: string): Promise<void>;
   list(channelId: string, usageSources?: readonly ModuleTemplateUsageSource[]): Promise<TextLibrarySnapshot>;
   find(channelId: string, name: string): Promise<TextBlock | null>;
   create(input: TextBlockInput, actor: TextBlockActor): Promise<TextBlockMutationResult>;

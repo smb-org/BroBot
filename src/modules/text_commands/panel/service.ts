@@ -1,5 +1,6 @@
 import type { TextCommand, TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, TextCommandStreamCondition } from "../contracts";
-import { TEXT_LIBRARY_BLOCKS_PATH, TEXT_LIBRARY_GAME_SEARCH_PATH, TEXT_LIBRARY_MODULE_ID, type TextLibraryBlockSummary, type TwitchGame } from "../../text_library/contracts";
+import { TEXT_LIBRARY_BLOCKS_PATH, TEXT_LIBRARY_GAME_SEARCH_PATH, TEXT_LIBRARY_MODULE_ID, type TextLibraryBlockSummary } from "../../contracts/text-library";
+import type { TextCommandGame as TwitchGame } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
 import type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../contract";
 

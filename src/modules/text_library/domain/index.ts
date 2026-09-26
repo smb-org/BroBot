@@ -1,5 +1,5 @@
 import type { ModuleChatStatus, ModuleStreamState } from "../../contract";
-import { TEXT_COMMAND_TIER_CHAT_STATUSES, type TextCommandMinimumTier } from "../../text_commands/contracts";
+import { MODULE_TEMPLATE_TIER_CHAT_STATUSES } from "../../contract";
 import type { TextBlock, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_MAXIMUMS, TEXT_BLOCK_NAME_PATTERN } from "../contracts";
 
@@ -105,7 +105,8 @@ export const textBlockConditionsMatch = (conditions: TextBlockConditions, state:
   }
   if (conditions.minimumTier !== undefined) {
     if (!state.commandContext || state.chatStatus === null || state.chatStatus.length === 0) return false;
-    if (!state.chatStatus.some((status) => TEXT_COMMAND_TIER_CHAT_STATUSES[conditions.minimumTier as TextCommandMinimumTier].includes(status))) return false;
+    const minimumTier = conditions.minimumTier;
+    if (!state.chatStatus.some((status) => MODULE_TEMPLATE_TIER_CHAT_STATUSES[minimumTier].includes(status))) return false;
   }
   if (conditions.weekdays !== undefined || conditions.timeWindow !== undefined) {
     const local = localTimeParts(state.now, state.timeZone);

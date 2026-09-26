@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,16 +11,21 @@ import type { TextBlockConditions, TextBlockVariant } from "../../src/modules/te
 import { createTextBlockTemplateExpander } from "../../src/modules/text_library/adapters/template-expander";
 import { createTextBlockRepository } from "../../src/modules/text_library/adapters/d1";
 import { createTextLibraryService } from "../../src/modules/text_library/service";
+import { panelRouter } from "../../src/worker/panel/routes";
+import { createCsrfToken } from "../../src/worker/auth/csrf";
+import { createSessionCookie } from "../../src/worker/auth/session";
 import { firstMatchingTextBlockVariant, textBlockConditionsMatch } from "../../src/modules/text_library/domain";
 import TextLibraryPanel from "../../src/modules/text_library/panel/index";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
-import { insertChannel } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "esembe";
 const NOW = Date.parse("2026-09-26T12:00:00.000Z");
 const ACTOR = { userId: "fictional-manager", sessionId: "fictional-session" };
 const authorize = () => ({ sql: "AND 1 = 1", values: [] as const });
+const TEST_SESSION_KEYS = JSON.stringify({ active: { id: "cookie-v1", key: testKey(1) }, retired: [] });
+const TEST_ENCRYPTION_KEYS = JSON.stringify({ active: { id: "encryption-v1", key: testKey(2) }, retired: [] });
 
 const variant = (id: string, text: string, conditions: TextBlockConditions = {}): TextBlockVariant => ({
   id,
@@ -63,6 +68,18 @@ describe("text library", () => {
     const snapshot = await service.list(CHANNEL_ID);
 
     expect(snapshot.categories.map((category) => category.id)).toEqual(["social", "info", "faq", "game", "fun"]);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM text_library_settings").first()).resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM text_library_categories").first()).resolves.toEqual({ count: 0 });
+  });
+
+  it("gates initialization inserts with the management SQL authorization", async () => {
+    const deniedRepository = createTextBlockRepository(
+      database as unknown as D1Database,
+      () => ({ sql: "AND 0", values: [] }),
+    );
+
+    await deniedRepository.initialize(CHANNEL_ID, ACTOR, new Date(NOW).toISOString());
+
     await expect(database.prepare("SELECT COUNT(*) AS count FROM text_library_settings").first()).resolves.toEqual({ count: 0 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM text_library_categories").first()).resolves.toEqual({ count: 0 });
   });
@@ -313,6 +330,111 @@ describe("text library", () => {
     expect(longResult.text.endsWith("…")).toBe(true);
   });
 
+  it("keeps random-choice history separate for each matching variant", async () => {
+    await expect(createBlock("status_line", [
+      { id: "online", conditions: { stream: "online" }, texts: ["A", "B"] },
+      { id: "offline", conditions: { stream: "offline" }, texts: ["B", "A"] },
+      variant("default", "fallback"),
+    ])).resolves.toMatchObject({ ok: true });
+    await database.prepare("UPDATE text_blocks SET last_chosen_index = 1 WHERE channel_id = ? AND block_name = ?")
+      .bind(CHANNEL_ID, "status_line").run();
+    await database.prepare("UPDATE text_block_variants SET last_chosen_index = 1 WHERE channel_id = ? AND block_name = ? AND variant_id IN ('online', 'offline')")
+      .bind(CHANNEL_ID, "status_line").run();
+
+    const render = async (stream: "online" | "offline"): Promise<string> => {
+      const expand = createTextBlockTemplateExpander(database as unknown as D1Database, CHANNEL_ID, {
+        templateContext: "event",
+        chatStatus: null,
+        streamState: () => Promise.resolve(stream),
+        currentGame: () => Promise.resolve(null),
+        now: NOW,
+      });
+      return (await expand("{status_line}", new Set())).text;
+    };
+
+    await expect(render("online")).resolves.toBe("A");
+    await expect(render("offline")).resolves.toBe("B");
+  });
+
+  it("bounds expansion while resolving exponentially repeated nested references", async () => {
+    const repeated = (name: string): string => Array.from({ length: 166 }, () => `{${name}}`).join("");
+    await expect(createBlock("a", [variant("default", repeated("b"))])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("b", [variant("default", repeated("c"))])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("c", [variant("default", "x".repeat(500))])).resolves.toMatchObject({ ok: true });
+
+    const expand = createTextBlockTemplateExpander(database as unknown as D1Database, CHANNEL_ID, {
+      templateContext: "event",
+      chatStatus: null,
+      streamState: () => Promise.resolve("offline"),
+      currentGame: () => Promise.resolve(null),
+      now: NOW,
+    });
+    const result = await expand("{a}", new Set());
+
+    expect(result.text).toHaveLength(501);
+    expect(result.outputLimit).toBe(500);
+  });
+
+  it("saves an edited panel block through the PATCH route using revision", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the panel test block.");
+    await insertLoginIdentityAndSession(database, "manager-1");
+    await insertMember(database, CHANNEL_ID, "manager-1", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-1" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-1", TEST_SESSION_KEYS, new Date(NOW).toISOString());
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+    let patchStatus: number | null = null;
+    let patchBody: unknown = null;
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const inputUrl = input instanceof Request ? input.url : String(input);
+      const url = new URL(inputUrl, "https://brobot.example");
+      if (url.pathname === "/api/csrf") {
+        return new Response(JSON.stringify({ token: csrf }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const headers = new Headers(init?.headers);
+      headers.set("Cookie", `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`);
+      const request = input instanceof Request
+        ? new Request(input, { ...init, headers })
+        : new Request(url, { ...init, headers });
+      if (request.method === "PATCH") patchBody = await request.clone().json();
+      const response = await panelRouter.fetch(request, environment);
+      if (request.method === "PATCH") patchStatus = response.status;
+      return response;
+    }));
+
+    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(patchStatus).toBe(200));
+    expect(patchBody).toMatchObject({ name: "welcome", revision: created.block.revision });
+    expect(patchBody).not.toHaveProperty("expectedRevision");
+
+    const reserved = await fetch(`/api/channels/${CHANNEL_ID}/modules/text_library/blocks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+      body: JSON.stringify({
+        name: "user",
+        categoryId: "social",
+        games: [],
+        variants: [{ id: "default", conditions: {}, texts: ["Reserved"] }],
+      }),
+    });
+    expect(reserved.status).toBe(400);
+    await expect(reserved.json()).resolves.toEqual({ error: "text_library_block_reserved_name" });
+  });
+
   it("measures a three-block render with ten conditional variants under the 10 ms CPU budget", async () => {
     const currentGame = { id: "77", name: "Example Game" };
     const conditionalVariants = (nestedName: string | null): TextBlockVariant[] => [
@@ -353,15 +475,91 @@ describe("text library", () => {
 
   it("shows operators the library as read-only with a reason", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-      blocks: [],
-      categories: [],
+      blocks: [{
+        channelId: CHANNEL_ID,
+        name: "welcome",
+        categoryId: "social",
+        games: [],
+        variants: [{ id: "default", conditions: {}, texts: ["Hello"] }],
+        revision: 1,
+        createdAt: new Date(NOW).toISOString(),
+        updatedAt: new Date(NOW).toISOString(),
+      }],
+      categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString() }],
       settings: { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: new Date(NOW).toISOString() },
-      usages: {},
+      usages: { welcome: [] },
+      reservedNames: ["user"],
     }), { status: 200, headers: { "content-type": "application/json" } })));
 
     render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage={false} /></MantineProvider>);
     expect(await screen.findByRole("heading", { name: "Text blocks" })).toBeInTheDocument();
-    expect(screen.getByRole("note")).toHaveTextContent("Only broadcasters and managers can change text blocks and categories.");
+    fireEvent.click(screen.getByRole("button", { name: /\{welcome\}/u }));
+    expect(screen.getAllByRole("note")[0]).toHaveTextContent("Only broadcasters and managers can change text blocks and categories.");
+    expect(document.querySelector(".text-library__read-only-properties")).toHaveTextContent("Hello");
+    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Categories and time zone"));
+    expect(screen.getAllByRole("note")).toHaveLength(2);
+    expect(document.querySelectorAll(".text-library__read-only-properties")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Add text block" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer or save a reserved host variable name as a text block", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      blocks: [{
+        channelId: CHANNEL_ID,
+        name: "user",
+        categoryId: "social",
+        games: [],
+        variants: [{ id: "default", conditions: {}, texts: ["Reserved"] }],
+        revision: 1,
+        createdAt: new Date(NOW).toISOString(),
+        updatedAt: new Date(NOW).toISOString(),
+      }],
+      categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString() }],
+      settings: { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: new Date(NOW).toISOString() },
+      usages: {},
+      reservedNames: ["user", "system"],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Add text block" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "system" } });
+
+    expect(screen.getByText("This name is reserved for a template variable.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /\{user\}/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "{us" } });
+    expect(screen.queryByText("Text block {user}")).not.toBeInTheDocument();
+  });
+
+  it("maps the everyone preview tier to the viewer chat status", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      blocks: [{
+        channelId: CHANNEL_ID,
+        name: "everyone_line",
+        categoryId: "social",
+        games: [],
+        variants: [
+          { id: "everyone", conditions: { minimumTier: "everyone" }, texts: ["Everyone sees this"] },
+          { id: "default", conditions: {}, texts: ["Fallback"] },
+        ],
+        revision: 1,
+        createdAt: new Date(NOW).toISOString(),
+        updatedAt: new Date(NOW).toISOString(),
+      }],
+      categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString() }],
+      settings: { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: new Date(NOW).toISOString() },
+      usages: { everyone_line: [] },
+      reservedNames: ["user"],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /\{everyone_line\}/u }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Preview context" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Command" }));
+
+    expect(screen.getByText("Matching variant: Variant 1")).toBeInTheDocument();
+    expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Everyone sees this");
   });
 });
