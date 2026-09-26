@@ -21,7 +21,7 @@ export type { TextCommandRepository } from "./repository";
 import { z } from "zod";
 
 import type { BotModule } from "../contract";
-import { createTextCommandRepository, initializeListCommand } from "./adapters/d1";
+import { createTextCommandRepository, initializeListCommand, listTextCommandTemplateUsageSources } from "./adapters/d1";
 import { textCommandRoutes } from "./routes";
 import { processTextCommandMessage } from "./service";
 import type { ModuleVariableReferences } from "../contract";
@@ -73,6 +73,7 @@ const settingsSchema = z.object({});
 export const textCommandModule: BotModule<typeof settingsSchema> = {
   id: "text_commands",
   templateContext: "chat_command",
+  templateUsageSources: listTextCommandTemplateUsageSources,
   variableReferences,
   settingsSchema,
   defaultSettings: {},

@@ -1,4 +1,4 @@
-import type { BotModule } from "../contract";
+import type { BotModule, ModuleTemplateUsageSource } from "../contract";
 import { ADS_TEMPLATE_FIELDS, adsSettingsSchema } from "./contracts";
 import { DEFAULT_AUTOMATIC_TEXT, DEFAULT_MANUAL_TEXT, DEFAULT_PREWARNING_TEXT } from "./contracts/chat-defaults";
 import { processAdBreak } from "./service";
@@ -6,6 +6,19 @@ import { adsRoutes } from "./routes";
 import { settingsVariableReferences } from "../contract";
 import { readAdCountdownState } from "./adapters/countdown-state";
 import { adsOverlayElements } from "./overlay/element";
+
+const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
+  const row = await db.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?")
+    .bind(channelId, "ads").first<{ settings: string }>();
+  if (row === null) return [];
+  let settings: unknown;
+  try { settings = JSON.parse(row.settings) as unknown; } catch { return []; }
+  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) return [];
+  return (["automatic", "manual", "prewarningText"] as const).flatMap((field) => {
+    const text: unknown = Reflect.get(settings, field);
+    return typeof text === "string" ? [{ text, kind: "event" as const, label: `ads.${field}` }] : [];
+  });
+};
 
 export { decideAdBreak, decideAdPrewarning, renderAdBreakText, renderPrewarningText } from "./domain";
 export { processAdBreak } from "./service";
@@ -20,6 +33,7 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   settingsSchema: adsSettingsSchema,
   templateFields: ADS_TEMPLATE_FIELDS,
   templateContext: "system",
+  templateUsageSources,
   variableReferences: settingsVariableReferences("ads", ["automatic", "manual", "prewarningText"]),
   defaultSettings: {
     automatic: DEFAULT_AUTOMATIC_TEXT,

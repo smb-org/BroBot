@@ -1,4 +1,5 @@
 import { catalogString, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { MODULES } from "../modules/registry";
 /**
  * Both catalogs are keyed by module id. Completeness is enforced by
  * `tests/unit/module-labels.test.ts`, not by the compiler: enforcing it through the
@@ -34,7 +35,8 @@ const moduleText = (catalog: Record<string, string>, moduleId: string): string |
   catalogString(catalog, moduleId) ?? null;
 
 export const moduleName = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): string => {
-  return moduleText(moduleNames[language], moduleId) ?? moduleId;
+  const registered = MODULES.find((module) => module.id === moduleId)?.navigationEntries?.[0]?.label[language];
+  return registered ?? moduleText(moduleNames[language], moduleId) ?? moduleId;
 };
 
 interface EventSubscriptionNames {
@@ -137,7 +139,8 @@ export const moduleDescription = (
   moduleId: string,
   language: DashboardLanguage = dashboardLanguage(),
 ): string | null => {
-  return moduleText(moduleDescriptions[language], moduleId);
+  const registered = MODULES.find((module) => module.id === moduleId)?.navigationEntries?.[0]?.description?.[language];
+  return registered ?? moduleText(moduleDescriptions[language], moduleId);
 };
 
 export type ModuleSymbol = "text_commands" | "channel_events" | "ads" | "standard";

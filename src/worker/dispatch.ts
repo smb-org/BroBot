@@ -78,7 +78,11 @@ const channelDetailsFor = async (
     if (!result.ok) return null;
     const channel = firstDataRecord(result.data);
     if (channel === null || typeof channel.title !== "string" || typeof channel.game_name !== "string") return null;
-    return { title: channel.title, gameName: channel.game_name };
+    return {
+      title: channel.title,
+      gameName: channel.game_name,
+      gameId: typeof channel.game_id === "string" ? channel.game_id : "",
+    };
   } catch {
     return null;
   }
@@ -569,6 +573,10 @@ export const dispatchEventSubNotification = async (
     channelInfoPromise ??= channelInfoFor(environment, event.channelId, appAccessToken, fetcher);
     return channelInfoPromise;
   };
+  const channelGameId = async (): Promise<string | null> => {
+    const details = await channelDetails();
+    return details === null || details.gameId.length === 0 ? null : details.gameId;
+  };
   const followedAt = (userId: string): Promise<ModuleFollowedAt> => {
     let pending = followedAtPromises.get(userId);
     if (pending === undefined) {
@@ -638,7 +646,53 @@ export const dispatchEventSubNotification = async (
         chatStatus: chatStatusFor(event.subscriptionType, event.payload),
       };
       const moduleVariables = Object.values(module.templateFields ?? {}).flatMap((variables) => variables ?? []) as TemplateVariable[];
-      const render = createTemplateRenderer(moduleEvent, module.templateContext ?? "event", moduleVariables, {
+      const templateContext = module.templateContext ?? "event";
+      const eventTime = Date.parse(moduleEvent.receivedAt);
+      const expandModuleTemplateVariables = async (
+        text: string,
+        knownVariables: ReadonlySet<string>,
+        resolveTemplateVariables: (text: string) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>,
+      ) => {
+        let expandedText = text;
+        let used = false;
+        let complete = true;
+        let variablesResolved = false;
+        const expansionDiagnostics: ModuleDiagnostic[] = [];
+        let outputLimit: number | undefined;
+        for (const provider of registry) {
+          if (provider.expandTemplateVariables === undefined) continue;
+          const expanded = await provider.expandTemplateVariables({
+            DB: environment.DB,
+            channelId: moduleEvent.channelId,
+            text: expandedText,
+            knownVariables,
+            templateContext,
+            chatStatus: moduleEvent.chatStatus,
+            streamState,
+            channelInfo,
+            channelGameId,
+            resolveTemplateVariables,
+            now: Number.isFinite(eventTime) ? eventTime : Date.now(),
+          });
+          expandedText = expanded.text;
+          used ||= expanded.used;
+          complete &&= expanded.complete !== false;
+          variablesResolved ||= expanded.variablesResolved === true;
+          expansionDiagnostics.push(...(expanded.diagnostics ?? []));
+          if (expanded.outputLimit !== undefined) outputLimit = outputLimit === undefined
+            ? expanded.outputLimit
+            : Math.min(outputLimit, expanded.outputLimit);
+        }
+        return {
+          text: expandedText,
+          used,
+          complete,
+          variablesResolved,
+          diagnostics: expansionDiagnostics,
+          ...(outputLimit === undefined ? {} : { outputLimit }),
+        };
+      };
+      const render = createTemplateRenderer(moduleEvent, templateContext, moduleVariables, {
         streamState,
         channelDetails,
         streamDetails,
@@ -648,6 +702,7 @@ export const dispatchEventSubNotification = async (
         userCreatedAt,
         channelLanguage,
         readChannelVariables: channelVariables,
+        expandModuleTemplateVariables,
       });
         result = module.handleEvent === undefined
           ? null
@@ -656,6 +711,7 @@ export const dispatchEventSubNotification = async (
             authorizeMutation: authorizeModuleMutation,
             streamState,
             channelInfo,
+            channelGameId,
             followedAt,
             followerTotal,
             chattersTotal,

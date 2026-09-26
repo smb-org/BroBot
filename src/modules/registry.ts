@@ -4,10 +4,11 @@ import { raidModule } from "./raid";
 import { textCommandModule } from "./text_commands";
 import { adsModule } from "./ads";
 import { clipsModule } from "./clips";
+import { textLibraryModule } from "./text_library";
 import type { ModuleOverlayElementDefinition } from "./contract";
 
 // This is the only place that knows all modules.
-export const MODULES: readonly BotModule[] = [textCommandModule, channelEventsModule, adsModule, raidModule, clipsModule];
+export const MODULES: readonly BotModule[] = [textCommandModule, textLibraryModule, channelEventsModule, adsModule, raidModule, clipsModule];
 
 export const validateModuleOverlayElements = (modules: readonly BotModule[]): void => {
   const kinds = new Set<string>();

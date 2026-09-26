@@ -322,9 +322,13 @@ describe("Text commands D1 adapter", () => {
     ).all<{ name: string }>();
 
     expect(tables.results).toEqual([
+      { name: "text_block_variants" },
+      { name: "text_blocks" },
       { name: "text_command_aliases" },
       { name: "text_command_user_cooldowns" },
       { name: "text_commands" },
+      { name: "text_library_categories" },
+      { name: "text_library_settings" },
     ]);
     await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log").first<{ count: number }>())
       .resolves.toEqual({ count: 0 });
@@ -497,11 +501,11 @@ describe("Text commands D1 adapter", () => {
     const audit = await database.prepare("SELECT before_json, after_json FROM audit_log").first<{ before_json: string; after_json: string }>();
     expect(JSON.parse(audit?.before_json ?? "null") as unknown).toEqual({
       name: "chat", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5,
-      aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
+      aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say",
     });
     expect(JSON.parse(audit?.after_json ?? "null") as unknown).toEqual({
       name: "chat", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5,
-      aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
+      aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say",
     });
   });
 

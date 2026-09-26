@@ -71,7 +71,17 @@ export const getPanelModuleDataForChannels = async (
           }),
         };
       }));
-      active.set(channelId, activeByChannel.get(channelId) ?? []);
+      // A mandatory module is always active, whether or not a
+      // `channel_modules` row exists (or one exists but is disabled) for it
+      // — mirrors selectModulesForEvent in worker/dispatch.ts, which
+      // defaults unmatched mandatory modules the same way.
+      const channelActive = activeByChannel.get(channelId) ?? [];
+      const matchedModuleIds = new Set(channelActive.map((entry) => entry.moduleId));
+      for (const module of MODULES) {
+        if (module.mandatory !== true || matchedModuleIds.has(module.id)) continue;
+        channelActive.push({ moduleId: module.id, settings: rows?.get(module.id)?.settings ?? JSON.stringify(module.defaultSettings) });
+      }
+      active.set(channelId, channelActive);
     }
   }
   return { states, active };
