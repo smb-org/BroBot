@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import type { BotModule } from "../../src/modules/contract";
+import type * as ModuleRegistry from "../../src/modules/registry";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
@@ -14,6 +15,15 @@ const testModule: BotModule<typeof testModuleSchema> = {
   id: "test-modul",
   settingsSchema: testModuleSchema,
   defaultSettings: { betrag: 42 },
+  // Mirrors raid's own event-scoped "viewers"/"channel" declarations (#253),
+  // so the template-preview tests below can exercise cross-module shadowing
+  // without depending on the real raid module.
+  templateFields: {
+    betrag: [
+      { name: "viewers", group: "event", maxLength: 7, sample: "999" },
+      { name: "channel", group: "event", maxLength: 25, sample: "raidkanal" },
+    ],
+  },
   overlayElements: [{
     kind: "test-modul.countdown",
     configVersion: 1,
@@ -63,7 +73,8 @@ const defaultEnabledTestModule: BotModule<typeof clipsTestSchema> = {
   defaultSettings: {},
 };
 
-vi.mock("../../src/modules/registry", () => ({
+vi.mock("../../src/modules/registry", async (importOriginal) => ({
+  ...(await importOriginal<typeof ModuleRegistry>()),
   MODULES: [testModule, mandatoryTestModule, defaultEnabledTestModule],
   variablesForModuleTemplateContext: (_module: unknown, variables: readonly unknown[]) => [...variables],
 }));
@@ -588,5 +599,30 @@ describe("Module management in the panel", () => {
     await expect(database.prepare(
       "SELECT settings, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
     ).first()).resolves.toEqual({ settings: '{"betrag":99}', revision: 3 });
+  });
+
+  describe("Template preview", () => {
+    it("renders the host system value for {viewers}, unshadowed by another module's own local declaration", async () => {
+      await insertChannel(database, "kanal-a");
+      await insertLoginIdentityAndSession(database, "user-1");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+
+      // test-modul declares its own local "viewers"/"channel" (like raid's event
+      // variables). The preview below has nothing to do with that module — it
+      // must still resolve the host's system "viewers", not leave it literal.
+      const response = await panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/kanal-a/template-preview", "POST", {
+          text: "{viewers}",
+          templateContext: "event",
+          streamState: "online",
+          game: null,
+          chatStatus: null,
+        }),
+        environment,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ text: "0", diagnostics: [] });
+    });
   });
 });

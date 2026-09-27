@@ -254,7 +254,12 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
     actor: { userId: "template-preview-viewer", login: "viewer", role: null },
     chatStatus: parsed.data.chatStatus,
   };
-  const render = createTemplateRenderer(event, parsed.data.templateContext, registeredTemplateVariables, {
+  // The preview has no simulated module of its own (text blocks declare no local
+  // variables), so pass none here — otherwise other modules' local declarations
+  // (e.g. raid's event-scoped "viewers"/"channel") would shadow the host system
+  // variables in every preview. The full registry stays available below for
+  // value-provider discovery only.
+  const render = createTemplateRenderer(event, parsed.data.templateContext, [], {
     DB: context.env.DB,
     channelInfo: () => Promise.resolve(channelInfo),
     channelGameId: () => Promise.resolve(game?.id ?? null),
