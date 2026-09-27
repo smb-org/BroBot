@@ -140,6 +140,7 @@ describe("overlay element template context", () => {
     await expect(context.resolveTemplateConditions(["weather.condition"])).resolves.toEqual({
       values: { "weather.condition": "rain" },
       attributionsByCondition: { "weather.condition": ["MET Norway"] },
+      nextChangeAt: { "weather.condition": new Date(now + 60_000).toISOString() },
     });
   });
 });

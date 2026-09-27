@@ -29,6 +29,8 @@ const unavailableText = {
   de: weatherModuleCatalog.de.unavailableText,
   en: weatherModuleCatalog.en.unavailableText,
 } as const;
+/** Retry delay after a provider failure, so a recovered overlay stops showing a stale error. */
+const LOOKUP_FAILURE_RETRY_MS = 30_000;
 
 const errorTextsFor = (settings: WeatherSettings) => settings.errorTexts;
 
@@ -88,6 +90,7 @@ const resolveConditions = async (
     const cached = await fetchCachedWeather(context.DB, settings.provider, locationSetting.latitude, locationSetting.longitude, context.now);
     const condition: WeatherCondition = cached.weather.condition;
     context.addTemplateValueAttribution?.(settings.provider === "met_norway" ? "MET Norway" : "Open-Meteo");
+    context.addTemplateConditionNextChangeAt?.(new Date(cached.expiresAt).toISOString());
     return { "weather.condition": condition };
   } catch {
     return {};
@@ -110,7 +113,10 @@ const resolveOverlayValues: NonNullable<BotModule<typeof settingsSchema>["resolv
       nextChangeAt: new Date(cached.expiresAt).toISOString(),
     }]));
   } catch {
-    return Object.fromEntries(relevant.map((name) => [name, { available: false }]));
+    return Object.fromEntries(relevant.map((name) => [name, {
+      available: false,
+      nextChangeAt: new Date(context.now + LOOKUP_FAILURE_RETRY_MS).toISOString(),
+    }]));
   }
 };
 

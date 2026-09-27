@@ -248,6 +248,29 @@ describe("text block overlay rendering", () => {
     });
   });
 
+  it("schedules a text block refresh from a module condition's generic next-change hint", async () => {
+    const now = Date.parse("2026-06-21T19:59:58.000Z");
+    const nextChangeAt = "2026-06-21T20:15:00.000Z";
+    const db = overlayDatabase([
+      variant("rain", "Rain incoming", { data: { "weather.condition": "rain" } }),
+    ]);
+    const context = contextFor({
+      now,
+      resolveTemplateConditions: () => Promise.resolve({
+        values: { "weather.condition": "rain" },
+        attributionsByCondition: {},
+        nextChangeAt: { "weather.condition": nextChangeAt },
+      }),
+    });
+
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+
+    expect(state).toMatchObject({
+      candidates: [{ text: "Rain incoming" }],
+      refreshAt: new Date(Date.parse(nextChangeAt) + 1_000).toISOString(),
+    });
+  });
+
   it("schedules a reload from the earliest sunrise or sunset countdown", async () => {
     const sunrise = "2026-06-21T22:00:00.000Z";
     const sunsetLater = "2026-06-22T03:00:00.000Z";

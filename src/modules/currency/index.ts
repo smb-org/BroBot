@@ -28,7 +28,9 @@ const convert = async (parameter: string, context: ModuleTemplateValueContext): 
   const commandInput = context.commandInput;
   const amount = parseCurrencyAmount(commandInput?.arguments ?? "");
   if (amount === null) {
-    if (commandInput?.usageText !== undefined && commandInput.usageText.trim().length > 0) return commandInput.usageText.trim();
+    if (commandInput?.usageText !== undefined && commandInput.usageText.trim().length > 0) {
+      return (await context.renderTemplate(commandInput.usageText.trim())).text;
+    }
     return currencyModuleCatalog[language].usageText(commandInput?.commandName ?? "convert");
   }
   try {
@@ -36,7 +38,6 @@ const convert = async (parameter: string, context: ModuleTemplateValueContext): 
     return new Intl.NumberFormat(language === "de" ? "de-DE" : "en-US", {
       style: "currency",
       currency: target,
-      maximumFractionDigits: 2,
     }).format(amount * rate);
   } catch {
     return unavailableText[language];

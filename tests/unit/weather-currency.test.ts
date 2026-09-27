@@ -9,7 +9,8 @@ import { fetchCachedWeather, readWeatherCache } from "../../src/modules/weather/
 import { metNorwayWeather, openMeteoWeather } from "../../src/modules/weather/adapters/providers";
 import { geocodeWeatherPlace, validWeatherPlaceName } from "../../src/modules/weather/adapters/geocoding";
 import { readWeatherSettings } from "../../src/modules/weather/adapters/d1";
-import { weatherConditionFromMetSymbol, weatherConditionFromWmoCode } from "../../src/modules/weather/domain";
+import { resolveWeatherValues, weatherConditionFromMetSymbol, weatherConditionFromWmoCode } from "../../src/modules/weather/domain";
+import type { NormalizedWeather } from "../../src/modules/weather/contracts";
 import { invalidTemplateParameters } from "../../src/template";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
 import type { ModuleEvent } from "../../src/modules/contract";
@@ -269,6 +270,59 @@ describe("weather data providers", () => {
       database.close();
     }
   });
+
+  it("gives only clear and mostly-clear conditions a night moon icon, keeping every other icon as-is", () => {
+    const nightBase: NormalizedWeather = {
+      temperatureC: 5, feelsLikeC: 4, condition: "rain", isDay: false, windSpeedMps: 3,
+      precipitationMm: 1, humidityPercent: 80, observedAt: "2026-09-27T22:00:00.000Z", shortForecast: "rain",
+    };
+    const rainAtNight = resolveWeatherValues({
+      names: ["weather.condition"], locationName: "Berlin", weather: nightBase, language: "en", timeZone: "UTC", showFahrenheit: false,
+    });
+    const thunderstormAtNight = resolveWeatherValues({
+      names: ["weather.condition"], locationName: "Berlin",
+      weather: { ...nightBase, condition: "thunderstorm", shortForecast: "thunderstorm" },
+      language: "en", timeZone: "UTC", showFahrenheit: false,
+    });
+    const clearAtNight = resolveWeatherValues({
+      names: ["weather.condition"], locationName: "Berlin",
+      weather: { ...nightBase, condition: "clear", shortForecast: "clear" },
+      language: "en", timeZone: "UTC", showFahrenheit: false,
+    });
+
+    expect(rainAtNight["weather.condition"]).toContain("🌧️");
+    expect(rainAtNight["weather.condition"]).not.toContain("🌙");
+    expect(thunderstormAtNight["weather.condition"]).toContain("⛈️");
+    expect(thunderstormAtNight["weather.condition"]).not.toContain("🌙");
+    expect(clearAtNight["weather.condition"]).toContain("🌙");
+  });
+});
+
+describe("weather overlay values", () => {
+  it("returns a short retry hint after a provider failure so a recovered overlay is not stuck showing the error", async () => {
+    const database = new TestD1Database();
+    const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error("provider unreachable"));
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const resolved = await weatherModule.resolveOverlayTemplateValues?.(["weather.temp"], {
+        DB: database as unknown as D1Database,
+        channelId: event.channelId,
+        now: NOW,
+        channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+        channelLocation: () => Promise.resolve({ name: "Berlin", latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" }),
+        language: "de",
+      });
+
+      expect(resolved?.["weather.temp"]?.available).toBe(false);
+      const nextChangeAt = resolved?.["weather.temp"]?.nextChangeAt;
+      expect(typeof nextChangeAt).toBe("string");
+      const delay = Date.parse(nextChangeAt as string) - NOW;
+      expect(delay).toBeGreaterThan(0);
+      expect(delay).toBeLessThanOrEqual(2 * 60_000);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 describe("currency conversion", () => {
@@ -322,6 +376,40 @@ describe("currency conversion", () => {
       await expect(currencyModule.resolveTemplateParameter?.("currency.convert", "USD EUR", customContext))
         .resolves.toBe("Try !usd 10");
       expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("renders the custom missing-amount response's template variables instead of returning it raw", async () => {
+    const database = new TestD1Database();
+    try {
+      const context = contextFor(database as unknown as D1Database, {
+        commandInput: { commandName: "usd", arguments: "words", usageText: "Try !{command} 10" },
+        renderTemplate: (text) => Promise.resolve({ text: text.replace("{command}", "usd"), diagnostics: [] }),
+      });
+
+      await expect(currencyModule.resolveTemplateParameter?.("currency.convert", "USD EUR", context))
+        .resolves.toBe("Try !usd 10");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("formats converted amounts with the target currency's own decimal precision", async () => {
+    const database = new TestD1Database();
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(response({ base: "USD", rates: { JPY: 150, KWD: 0.3 } }, { "Cache-Control": "max-age=900" })));
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const jpyResult = await currencyModule.resolveTemplateParameter?.("currency.convert", "USD JPY", contextFor(database as unknown as D1Database, {
+        commandInput: { commandName: "usd", arguments: "10" },
+      }));
+      const kwdResult = await currencyModule.resolveTemplateParameter?.("currency.convert", "USD KWD", contextFor(database as unknown as D1Database, {
+        commandInput: { commandName: "usd", arguments: "10" },
+      }));
+
+      expect(jpyResult).toBe(new Intl.NumberFormat("de-DE", { style: "currency", currency: "JPY" }).format(1_500));
+      expect(kwdResult).toBe(new Intl.NumberFormat("de-DE", { style: "currency", currency: "KWD" }).format(3));
     } finally {
       database.close();
     }

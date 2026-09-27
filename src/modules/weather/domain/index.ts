@@ -62,7 +62,7 @@ const temperatureText = (value: number, language: ModuleLanguage, showFahrenheit
 };
 
 const conditionEmoji = (condition: WeatherCondition, isDay: boolean): string => {
-  if (!isDay) return condition === "clear" || condition === "mostly_clear" ? "🌙" : "🌙";
+  if (!isDay && (condition === "clear" || condition === "mostly_clear")) return "🌙";
   switch (condition) {
     case "clear": return "☀️";
     case "mostly_clear": return "🌤️";

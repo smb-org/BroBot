@@ -175,6 +175,8 @@ export interface ModuleOverlayElementContext {
 export interface ModuleOverlayTemplateConditions {
   values: Readonly<Record<string, string>>;
   attributionsByCondition: Readonly<Record<string, readonly string[]>>;
+  /** UTC instant per condition id when its resolved value may change; drives the overlay refresh schedule. */
+  nextChangeAt?: Readonly<Record<string, string>>;
 }
 
 export interface OverlayElementEditorProps {
@@ -551,6 +553,8 @@ export interface ModuleTemplateConditionContext {
   commandInput?: { commandName: string; arguments: string; usageText?: string };
   /** Records a source label when a condition uses values from this module. */
   addTemplateValueAttribution?: (text: string) => void;
+  /** Records the UTC instant when a resolved condition value may next change, for overlay refresh scheduling. */
+  addTemplateConditionNextChangeAt?: (at: string) => void;
 }
 
 export interface ModuleTemplateConditionTimelineContext extends ModuleTemplateConditionContext {

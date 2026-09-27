@@ -259,6 +259,9 @@ export const textBlockOverlayState = async (
     const expiresAt = context.streamDetailsCacheExpiresAt();
     if (expiresAt !== null && Number.isFinite(expiresAt) && expiresAt > context.now) systemRefreshAts.push(expiresAt);
   }
+  const conditionRefreshAts = Object.values(currentConditionResolution.nextChangeAt ?? {})
+    .map(Date.parse).filter((at) => Number.isFinite(at) && at > context.now).map((at) => at + 1_000);
+  systemRefreshAts.push(...conditionRefreshAts);
   const overlayTemplateNames = [...referencedTemplateNames].filter((name) => context.overlayTemplateVariableNames.has(name));
   if (overlayTemplateNames.length > 0) {
     const overlayValues = await context.resolveOverlayTemplateValues(overlayTemplateNames);

@@ -216,6 +216,7 @@ export const createOverlayElementContext = async (
     const requested = new Set(ids);
     const values: Record<string, string> = {};
     const attributionsByCondition: Record<string, readonly string[]> = {};
+    const nextChangeAt: Record<string, string> = {};
     const context: ModuleTemplateConditionContext = {
       DB: env.DB,
       channelId,
@@ -229,6 +230,7 @@ export const createOverlayElementContext = async (
       const moduleIds = ids.filter((id) => requested.has(id) && declared.has(id));
       if (moduleIds.length === 0) continue;
       const moduleAttributions = new Set<string>();
+      let moduleNextChangeAt: string | undefined;
       const moduleContext: ModuleTemplateConditionContext = {
         ...context,
         addTemplateValueAttribution: (text) => {
@@ -240,22 +242,23 @@ export const createOverlayElementContext = async (
           normalized = normalized.trim();
           if (normalized.length > 0 && normalized.length <= 100) moduleAttributions.add(normalized);
         },
+        addTemplateConditionNextChangeAt: (at) => { moduleNextChangeAt = at; },
       };
       try {
         const resolved = await module.resolveTemplateConditions(moduleIds, moduleContext);
         Object.assign(values, resolved);
         const attributions = [...moduleAttributions];
-        if (attributions.length > 0) {
-          for (const id of moduleIds) {
-            if (typeof resolved[id] === "string") attributionsByCondition[id] = attributions;
-          }
+        for (const id of moduleIds) {
+          if (typeof resolved[id] !== "string") continue;
+          if (attributions.length > 0) attributionsByCondition[id] = attributions;
+          if (moduleNextChangeAt !== undefined) nextChangeAt[id] = moduleNextChangeAt;
         }
       } catch {
         lookupFailure = true;
         /* Missing provider data leaves conditions unmatched. */
       }
     }
-    return { values, attributionsByCondition };
+    return { values, attributionsByCondition, nextChangeAt };
   };
   const overlayValueCache = new Map<string, Promise<Readonly<Record<string, ModuleOverlayTemplateValue>>>>();
   const resolveOverlayTemplateValues = (names: readonly string[]) => {
