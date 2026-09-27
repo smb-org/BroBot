@@ -6,6 +6,9 @@ import { adsRoutes } from "./routes";
 import { settingsVariableReferences } from "../contract";
 import { readAdCountdownState } from "./adapters/countdown-state";
 import { adsOverlayElements } from "./overlay/element";
+import { adsTemplateVariableGroupLabels } from "./contracts/template-variable-catalog";
+
+const adsPanelIcon = { paths: ["M6 8h12v8H6z", "M9 8V6h6v2", "M9 12h6", "M9 16v2h6v-2"] } as const;
 
 const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
   const row = await db.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?")
@@ -30,7 +33,8 @@ export { ADS_COUNTDOWN_ELEMENT_KIND } from "./overlay/kinds";
 
 export const adsModule: BotModule<typeof adsSettingsSchema> = {
   id: "ads",
-  panelIcon: { paths: ["M6 8h12v8H6z", "M9 8V6h6v2", "M9 12h6", "M9 16v2h6v-2"] },
+  panelIcon: adsPanelIcon,
+  templateVariableGroup: { label: adsTemplateVariableGroupLabels, icon: adsPanelIcon, order: 70 },
   settingsSchema: adsSettingsSchema,
   templateFields: ADS_TEMPLATE_FIELDS,
   templateContext: "system",

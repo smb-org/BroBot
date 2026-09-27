@@ -3,6 +3,7 @@ import type { TemplateVariable, TemplateContext } from "../../template";
 import { effectiveTemplateVariables } from "../../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { channelVariableTemplateDescription, systemTemplateVariableLocale } from "../locale";
+import type { TemplateVariablePickerGroupPresentation } from "./TemplateVariablePicker";
 import type { TemplateVariableOption } from "./TextArea";
 
 export interface PanelChannelVariable {
@@ -10,6 +11,37 @@ export interface PanelChannelVariable {
   value: number;
   description: string;
 }
+
+interface ModuleTemplateVariableGroupCopy {
+  label: Readonly<Record<DashboardLanguage, string>>;
+  icon: { paths: readonly string[] };
+  order?: number;
+}
+
+interface RegisteredModuleTemplateVariable {
+  moduleId: string;
+  pickerGroup?: ModuleTemplateVariableGroupCopy & { id: string };
+}
+
+export const moduleTemplatePickerGroup = (
+  id: string,
+  group: ModuleTemplateVariableGroupCopy | undefined,
+  language: DashboardLanguage,
+): TemplateVariablePickerGroupPresentation | undefined => group === undefined ? undefined : ({
+  id,
+  label: group.label[language],
+  iconPaths: group.icon.paths,
+  order: group.order ?? 500,
+});
+
+export const registeredTemplatePickerGroup = (
+  variable: RegisteredModuleTemplateVariable,
+  language: DashboardLanguage,
+): TemplateVariablePickerGroupPresentation | undefined => moduleTemplatePickerGroup(
+  variable.pickerGroup?.id ?? variable.moduleId,
+  variable.pickerGroup,
+  language,
+);
 
 export const effectivePanelTemplateVariables = (
   context: TemplateContext,
@@ -34,6 +66,7 @@ export const panelTemplateOptions = (
   channelVariables: readonly PanelChannelVariable[],
   language: DashboardLanguage,
   moduleDescriptions: readonly TemplateVariableOption[] = [],
+  moduleGroup?: { id: string; definition: ModuleTemplateVariableGroupCopy },
 ): TemplateVariableOption[] => {
   const declarations = effectivePanelTemplateVariables(context, moduleVariables, channelVariables);
   const moduleByName = new Map(moduleDescriptions.map((variable) => [variable.name, variable]));
@@ -43,6 +76,7 @@ export const panelTemplateOptions = (
       const localized = systemTemplateVariableLocale[language][variable.name as keyof typeof systemTemplateVariableLocale.de];
       return {
         name: variable.name,
+        label: localized.label,
         description: localized.description,
         sample: localized.sample,
         group: variable.group ?? "context",
@@ -57,6 +91,7 @@ export const panelTemplateOptions = (
       const localizedSample = new Intl.NumberFormat(language === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 }).format(Number(variable.sample));
       return {
         name: variable.name,
+        label: channel?.name ?? variable.name,
         description: channel?.description || channelVariableTemplateDescription[language],
         sample: localizedSample,
         group: "channel",
@@ -64,12 +99,19 @@ export const panelTemplateOptions = (
       };
     }
     const localized = moduleByName.get(variable.name);
+    const pickerCopy = variable.picker?.[language];
+    const pickerGroup = moduleGroup === undefined
+      ? undefined
+      : moduleTemplatePickerGroup(moduleGroup.id, moduleGroup.definition, language);
     return {
       name: variable.name,
-      description: variable.localizedDescription?.[language] ?? localized?.description ?? variable.name,
+      label: pickerCopy?.label ?? localized?.label ?? variable.name,
+      description: pickerCopy?.description ?? variable.localizedDescription?.[language] ?? localized?.description ?? variable.name,
       sample: localized?.sample ?? variable.sample,
+      ...(pickerCopy?.sample === undefined ? {} : { pickerSample: pickerCopy.sample }),
       group: variable.group ?? "context",
       kind: "module",
+      ...(pickerGroup === undefined ? {} : { pickerGroup }),
       ...(variable.external === undefined ? {} : { external: variable.external }),
       ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
     };

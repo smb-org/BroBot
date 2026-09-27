@@ -11,40 +11,36 @@ import type {
 import { validChannelTimeZone, type TemplateVariable } from "../contract";
 import { DEFAULT_SUN_ERROR_TEXTS, readSunSettings } from "./adapters/d1";
 import { SUN_ERROR_TEXT_MAX_LENGTH } from "./contracts";
+import { sunModuleCatalog, SUN_TEMPLATE_VARIABLE_NAMES } from "./contracts/catalog";
 import {
   calculateSunAltitudeIntervals,
+  calculateSunDay,
   calculateSunPhaseTransitions,
+  localDateInTimeZone,
+  localMidnightInTimeZone,
   resolveSunTemplateValues,
+  shiftLocalDate,
 } from "./domain";
 import { sunRoutes } from "./routes";
-import { sunModuleCatalog } from "./contracts/catalog";
-import { calculateSunDay, localDateInTimeZone, localMidnightInTimeZone, shiftLocalDate } from "./domain";
 
 const settingsSchema = z.object({});
-const SUN_TEMPLATE_VARIABLE_SAMPLES: Readonly<Record<string, string>> = {
-  "sun.set": "18:42",
-  "sun.rise": "06:18",
-  "sun.dusk": "19:24",
-  "sun.dawn": "05:10",
-  "sun.noon": "12:31",
-  "sun.day_length": "12:34",
-  "sun.golden_hour": "06:00",
-  "sun.golden_hour_in": "2 Std. 15 Min.",
-  "sun.golden_hour_end": "06:48",
-  "sun.blue_hour": "05:45",
-  "sun.blue_hour_in": "8 Std. 30 Min.",
-  "sun.set_in": "2 Std. 15 Min.",
-  "sun.rise_in": "8 Std. 30 Min.",
-  "sun.dawn_in": "7 Std. 30 Min.",
-};
-const SUN_TEMPLATE_VARIABLES: readonly TemplateVariable[] = Object.entries(SUN_TEMPLATE_VARIABLE_SAMPLES).map(([name, sample]) => ({
+const SUN_TEMPLATE_VARIABLES: readonly TemplateVariable[] = SUN_TEMPLATE_VARIABLE_NAMES.map((name) => ({
   name,
-  localizedDescription: { de: sunModuleCatalog.de.variableDescriptions[name] ?? name, en: sunModuleCatalog.en.variableDescriptions[name] ?? name },
+  localizedDescription: {
+    de: sunModuleCatalog.de.templateVariables[name].description,
+    en: sunModuleCatalog.en.templateVariables[name].description,
+  },
   group: "time_random",
   maxLength: SUN_ERROR_TEXT_MAX_LENGTH,
-  sample,
+  sample: sunModuleCatalog.de.templateVariables[name].sample,
   source: "module",
+  picker: {
+    de: sunModuleCatalog.de.templateVariables[name],
+    en: sunModuleCatalog.en.templateVariables[name],
+  },
 }));
+
+const sunPanelIcon = { paths: ["M12 3v2", "M12 19v2", "M3 12h2", "M19 12h2", "M5.6 5.6l1.4 1.4", "M17 17l1.4 1.4", "M18.4 5.6 17 7", "M7 17l-1.4 1.4", "M17 12a5 5 0 1 1-10 0 5 5 0 0 1 10 0"] } as const;
 
 type SunSettings = Awaited<ReturnType<typeof readSunSettings>>;
 
@@ -140,7 +136,7 @@ const resolveOverlayValues = async (
   },
 ) => {
   const requested = new Set(names);
-  const needed = Object.keys(SUN_TEMPLATE_VARIABLE_SAMPLES).filter((name) => requested.has(name));
+  const needed = SUN_TEMPLATE_VARIABLE_NAMES.filter((name) => requested.has(name));
   if (needed.length === 0) return {};
   // No location configured is an expected, stable state (long refresh is fine).
   // A thrown error is a transient lookup failure and must propagate so the
@@ -203,7 +199,13 @@ const resolveOverlayValues = async (
 
 export const sunModule: BotModule<typeof settingsSchema> = {
   id: "sun",
-  panelIcon: { paths: ["M12 3v2", "M12 19v2", "M3 12h2", "M19 12h2", "M5.6 5.6l1.4 1.4", "M17 17l1.4 1.4", "M18.4 5.6 17 7", "M7 17l-1.4 1.4", "M17 12a5 5 0 1 1-10 0 5 5 0 0 1 10 0"] },
+  panelIcon: sunPanelIcon,
+  templateVariableGroup: {
+    label: { de: sunModuleCatalog.de.variableGroup, en: sunModuleCatalog.en.variableGroup },
+    icon: sunPanelIcon,
+    order: 10,
+  },
+  templateVariableCatalog: SUN_TEMPLATE_VARIABLES,
   mandatory: true,
   mandatoryReason: {
     de: sunModuleCatalog.de.mandatoryReason,

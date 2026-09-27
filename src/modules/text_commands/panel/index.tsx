@@ -12,7 +12,7 @@ import { minimumTierAfterVariableOperation } from "./editor-state";
 import { commandListReply, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsFor } from "../contracts/chat-defaults";
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
-import { effectivePanelTemplateVariables, panelTemplateOptions } from "../../../dashboard/ui";
+import { effectivePanelTemplateVariables, panelTemplateOptions, registeredTemplatePickerGroup } from "../../../dashboard/ui";
 import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, saveTextCommand, searchTextGames, textBlockNamesForPicker, toggleTextCommand, type TextCommandChannelVariable } from "./service";
 import type { ModuleRegisteredTemplateVariable } from "../../contract";
 import { textCommandsTexts } from "./locale";
@@ -176,16 +176,23 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const variableAction = draft.variableAction;
   const templateVariables = () => [
     ...panelTemplateOptions("chat_command", [], channelVariables, resolvedLanguage),
-    ...libraryBlocks.map((name) => ({ name, description: labels.libraryText, sample: name, group: "channel" as const, kind: "module" as const })),
-    ...registeredVariables.filter((variable) => !variable.isTextBlock && variable.name.includes(".") && (variable.contexts?.includes("chat_command") ?? true)).map((variable) => ({
-      name: variable.name,
-      description: variable.name,
-      sample: variable.sample,
-      group: variable.group ?? "channel" as const,
-      kind: "module" as const,
-      ...(variable.external === undefined ? {} : { external: variable.external }),
-      ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
-    })),
+    ...libraryBlocks.map((name) => ({ name, label: name, description: labels.libraryText, sample: "", group: "channel" as const, kind: "module" as const, isTextBlock: true })),
+    ...registeredVariables.filter((variable) => !variable.isTextBlock && variable.name.includes(".") && (variable.contexts?.includes("chat_command") ?? true)).map((variable) => {
+      const pickerCopy = variable.picker?.[resolvedLanguage];
+      const pickerGroup = registeredTemplatePickerGroup(variable, resolvedLanguage);
+      return {
+        name: variable.name,
+        label: pickerCopy?.label ?? variable.name,
+        description: pickerCopy?.description ?? variable.name,
+        sample: variable.sample,
+        ...(pickerCopy?.sample === undefined ? {} : { pickerSample: pickerCopy.sample }),
+        group: variable.group ?? "channel" as const,
+        kind: "module" as const,
+        ...(pickerGroup === undefined ? {} : { pickerGroup }),
+        ...(variable.external === undefined ? {} : { external: variable.external }),
+        ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+      };
+    }),
   ];
   const templateValue = (field: CommandTemplateField): string => draft[field];
   const normalizedName = normalizeCommandName(draft.name);

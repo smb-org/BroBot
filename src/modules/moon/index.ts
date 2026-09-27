@@ -4,29 +4,29 @@ import type { BotModule, ModuleChannelLocation, ModuleOverlayTemplateValue, Modu
 import { validChannelTimeZone, type TemplateVariable } from "../contract";
 import { DEFAULT_MOON_ERROR_TEXTS, readMoonSettings } from "./adapters/d1";
 import { MOON_ERROR_TEXT_MAX_LENGTH } from "./contracts";
-import { moonModuleCatalog } from "./contracts/catalog";
+import { moonModuleCatalog, MOON_TEMPLATE_VARIABLE_NAMES } from "./contracts/catalog";
 import { nextMoonEvents, nextMoonPhaseChangeAt, resolveMoonTemplateValues, type MoonLocation } from "./domain";
 import { moonRoutes } from "./routes";
 
 const settingsSchema = z.object({});
 
-const MOON_TEMPLATE_VARIABLE_SAMPLES: Readonly<Record<string, string>> = {
-  "moon.phase": "Waxing gibbous",
-  "moon.illumination": "74",
-  "moon.rise": "20:42",
-  "moon.set": "08:15",
-  "moon.rise_in": "2 hr 15 min",
-  "moon.set_in": "8 hr 30 min",
-};
-
-const MOON_TEMPLATE_VARIABLES: readonly TemplateVariable[] = Object.entries(MOON_TEMPLATE_VARIABLE_SAMPLES).map(([name, sample]) => ({
+const MOON_TEMPLATE_VARIABLES: readonly TemplateVariable[] = MOON_TEMPLATE_VARIABLE_NAMES.map((name) => ({
   name,
-  localizedDescription: { de: moonModuleCatalog.de.variableDescriptions[name] ?? name, en: moonModuleCatalog.en.variableDescriptions[name] ?? name },
+  localizedDescription: {
+    de: moonModuleCatalog.de.templateVariables[name].description,
+    en: moonModuleCatalog.en.templateVariables[name].description,
+  },
   group: "time_random",
   maxLength: MOON_ERROR_TEXT_MAX_LENGTH,
-  sample,
+  sample: moonModuleCatalog.de.templateVariables[name].sample,
   source: "module",
+  picker: {
+    de: moonModuleCatalog.de.templateVariables[name],
+    en: moonModuleCatalog.en.templateVariables[name],
+  },
 }));
+
+const moonPanelIcon = { paths: ["M20.9 13.1A8.5 8.5 0 0 1 10.9 3.1 8.5 8.5 0 1 0 20.9 13.1z"] } as const;
 
 const validLocationFor = (location: ModuleChannelLocation | null, channelTimeZone: string): MoonLocation | null =>
   validChannelTimeZone(channelTimeZone) && location !== null && validChannelTimeZone(location.timeZone)
@@ -90,7 +90,13 @@ const resolveOverlayValues: NonNullable<BotModule<typeof settingsSchema>["resolv
 
 export const moonModule: BotModule<typeof settingsSchema> = {
   id: "moon",
-  panelIcon: { paths: ["M20.9 13.1A8.5 8.5 0 0 1 10.9 3.1 8.5 8.5 0 1 0 20.9 13.1z"] },
+  panelIcon: moonPanelIcon,
+  templateVariableGroup: {
+    label: { de: moonModuleCatalog.de.variableGroup, en: moonModuleCatalog.en.variableGroup },
+    icon: moonPanelIcon,
+    order: 20,
+  },
+  templateVariableCatalog: MOON_TEMPLATE_VARIABLES,
   mandatory: true,
   mandatoryReason: {
     de: moonModuleCatalog.de.mandatoryReason,

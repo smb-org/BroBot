@@ -247,7 +247,14 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   const templateMetadata = Object.fromEntries(Object.entries(templateFields).map(([key, variables]) => {
     const context = module.templateContext ?? "event";
     const declared = effectivePanelTemplateVariables(context, variables ?? [], channelVariables);
-    const localized = panelTemplateOptions(context, variables ?? [], channelVariables, dashboardLanguage(), copy.fields[key]?.variables ?? []);
+    const localized = panelTemplateOptions(
+      context,
+      variables ?? [],
+      channelVariables,
+      dashboardLanguage(),
+      copy.fields[key]?.variables ?? [],
+      module.templateVariableGroup === undefined ? undefined : { id: module.id, definition: module.templateVariableGroup },
+    );
     const byName = new Map(declared.map((variable) => [variable.name, variable]));
     return [key, localized.flatMap((option) => {
       const variable = byName.get(option.name);

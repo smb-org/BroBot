@@ -1015,11 +1015,20 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-chat-preview__speaker { flex: none; color: var(--brand-text); }
 .ui-chat-preview__text { min-width: 0; overflow-wrap: anywhere; }
 .ui-chat-preview__count { flex: none; margin-left: auto; color: var(--text-3); font-size: 12px; }
-.ui-textarea__suggestions-dropdown { min-width: 220px; max-height: min(320px, 40vh); overflow-y: auto; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-raised); box-shadow: var(--mantine-shadow-xs); }
-.ui-textarea__suggestion { display: flex; align-items: baseline; gap: 12px; min-height: 36px; padding: 8px 10px; }
+.ui-textarea__suggestions-dropdown { display: grid; grid-template-rows: minmax(0, 1fr) auto; width: min(400px, calc(100vw - 24px)); min-width: 0; max-width: calc(100vw - 24px); max-height: none; overflow: hidden; padding: 8px; border: 1px solid var(--line-strong); border-radius: var(--r-container); background: var(--surface-raised); box-shadow: var(--mantine-shadow-xs); }
+.ui-textarea__suggestions { max-height: min(380px, 48vh); overflow: auto; overscroll-behavior: contain; }
+.ui-textarea__suggestions .mantine-Combobox-group { margin: 0; }
+.ui-textarea__suggestions .mantine-Combobox-groupLabel { display: block; padding: 0; }
+.ui-textarea__suggestions .mantine-Combobox-group + .mantine-Combobox-group { margin-top: var(--s2); }
+.ui-textarea__suggestion { display: flex; align-items: center; gap: var(--s2); min-height: 44px; padding: var(--s1) var(--s3); border-radius: var(--r-control); }
 .ui-textarea__suggestion[data-combobox-selected] { background: var(--tint-1); }
-.ui-textarea__suggestion-name { color: var(--text); }
-.ui-textarea__suggestion-description { color: var(--text-3); font-size: 12px; }
+.ui-textarea__suggestion-copy { display: grid; flex: 1 1 auto; gap: 2px; min-width: 0; }
+.ui-textarea__suggestion-name { overflow: hidden; color: var(--text); font-size: 14px; font-weight: 500; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.ui-textarea__suggestion-token { overflow: hidden; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-textarea__suggestion-description { overflow: hidden; color: var(--text-2); font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.ui-textarea__suggestion-sample { flex: none; max-width: 42%; overflow: hidden; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.ui-textarea__suggestion-sample--tag { font-family: Archivo, ui-sans-serif, system-ui, sans-serif; }
+.ui-textarea__suggestions-dropdown > .ui-variable-picker__key-hints { padding-right: 0; padding-left: 0; }
 .ui-editor-shell { display: flex; height: max-content; flex-direction: column; width: min(var(--dashboard-content-width), 100%); min-width: 0; max-height: calc(100vh - 32px); overflow: hidden; margin-top: 0; padding: 18px 16px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-inspector); container: inspector / inline-size; }
 .ui-editor-shell .inspector-section__heading { flex: none; margin: -4px 0 8px; }
 .ui-editor-shell__tabs { position: sticky; z-index: 2; top: 0; display: flex; flex: none; min-height: 44px; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--surface-inspector); }

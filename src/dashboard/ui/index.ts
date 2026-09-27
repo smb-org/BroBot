@@ -55,11 +55,13 @@ export { TextArea } from "./TextArea";
 export type { TemplateVariableOption, TextAreaMessages, TextAreaProps } from "./TextArea";
 
 export { TemplateVariablePicker } from "./TemplateVariablePicker";
-export { effectivePanelTemplateVariables, panelTemplateOptions } from "./template-variable-options";
+export { effectivePanelTemplateVariables, moduleTemplatePickerGroup, panelTemplateOptions, registeredTemplatePickerGroup } from "./template-variable-options";
 export type { PanelChannelVariable } from "./template-variable-options";
 export type {
   TemplateVariableInsertion,
   TemplateVariablePickerGroup,
+  TemplateVariablePickerGroupKey,
+  TemplateVariablePickerGroupPresentation,
   TemplateVariablePickerKind,
   TemplateVariablePickerMessages,
   TemplateVariablePickerOption,

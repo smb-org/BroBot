@@ -34,7 +34,9 @@ const textAreaMessages: TextAreaMessages = {
   variablePicker: {
     triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables", closeLabel: "Close variable picker",
     noResults: "No variables found.", createVariableLabel: "Create variable …", externalHelp: "Requests Twitch when the command runs",
-    groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time & random", event: "Event", channel: "Channel" },
+    groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time & random", event: "Event", channel: "Channel", text_blocks: "Text blocks" },
+    textBlockSample: "Text block",
+    keyHints: { navigate: "select", insert: "insert", close: "close" },
   },
 };
 
@@ -366,6 +368,32 @@ describe("template field", () => {
 
     fireEvent.keyDown(input, { key: "Enter" });
     expect(input).toHaveValue("{sun.set}");
+  });
+
+  it.each([
+    ["{sun.s}", 6, "{sun.set}"],
+    ["{sun.s", 6, "{sun.set}"],
+    ["{sun.set} rest", 6, "{sun.set} rest"],
+  ])("completes a dotted variable around the caret in %s", async (initialValue, caret, expectedValue) => {
+    const variables: readonly TemplateVariableOption[] = [
+      { name: "sun.set", description: "Sunset", sample: "20:30" },
+    ];
+    function Harness() {
+      const [value, setValue] = useState(initialValue);
+      return <TextArea label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={textAreaMessages} />;
+    }
+
+    renderUi(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Reply" });
+    if (!(input instanceof HTMLTextAreaElement)) throw new TypeError("Expected a template textarea.");
+    input.setSelectionRange(caret, caret);
+    fireEvent.select(input);
+    await waitFor(() => expect(input).toHaveAttribute("aria-expanded", "true"));
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(input).toHaveValue(expectedValue));
+    await waitFor(() => expect(input.selectionStart).toBe("{sun.set}".length));
+    expect(input.selectionEnd).toBe("{sun.set}".length);
   });
 
   it("does not accept a variable suggestion with Enter during IME composition", () => {
