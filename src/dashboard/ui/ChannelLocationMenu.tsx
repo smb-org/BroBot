@@ -23,8 +23,9 @@ const numberForUrl = (value: number): string => String(value);
 const coordinatesForDisplay = (location: PanelChannelLocation): string =>
   `${location.latitude.toFixed(2)}, ${location.longitude.toFixed(2)}`;
 // The stored name is a full geocoded address ("Springfield, Illinois,
-// United States"); the header shows only the first segment and keeps the full
-// name as the accessible name, title, and menu heading.
+// United States"); the header shows only the first segment, keeps the full
+// name as the title and menu heading, and (see below) folds it into the
+// accessible name too when it was shortened.
 const shortLocationName = (name: string): string => name.split(",")[0]?.trim() || name;
 
 export function ChannelLocationMenu({ location, messages }: {
@@ -33,6 +34,7 @@ export function ChannelLocationMenu({ location, messages }: {
 }): ReactElement {
   const [opened, setOpened] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
+  const shortName = shortLocationName(location.name);
 
   useEffect(() => {
     if (copyStatus === null) return undefined;
@@ -78,14 +80,19 @@ export function ChannelLocationMenu({ location, messages }: {
             variant="subtle"
             ariaHasPopup="menu"
             ariaExpanded={opened}
-            ariaLabel={location.name}
             title={location.name}
             onClick={() => setCopyStatus(null)}
           >
             <span className="dashboard-header__location-label">
-              <span className="dashboard-header__location-name">{shortLocationName(location.name)}</span>
+              <span className="dashboard-header__location-name">{shortName}</span>
               <span className="dashboard-header__location-coordinates mono"> · {coordinatesForDisplay(location)}</span>
             </span>
+            {/* No aria-label override: the accessible name is derived from
+                this content, so it starts with the visible label (WCAG
+                2.5.3). The full name is appended only when it was actually
+                shortened -- visually hidden, never duplicating a name that's
+                already fully visible. */}
+            {shortName === location.name ? null : <span className="sr-only">, {location.name}</span>}
           </Button>
         </Menu.Target>
         <Menu.Dropdown>

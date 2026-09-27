@@ -50,19 +50,35 @@ test("the header location button shows the short name with an ellipsis instead o
   });
 
   const locationButton = page.locator(".dashboard-header__location");
-  const label = page.locator(".dashboard-header__location-label");
+  const name = page.locator(".dashboard-header__location-name");
   const coordinates = page.locator(".dashboard-header__location-coordinates");
+
+  // Escapes the fixture's short name for use inside a `RegExp`, so
+  // `toHaveAccessibleName` can assert "contains" instead of an exact match --
+  // the accessible name folds the full name in after the visible label, and
+  // also drops the (CSS `display: none`) coordinates once they're hidden.
+  const asPattern = (text: string): RegExp => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+
+  const label = page.locator(".dashboard-header__location-label");
 
   const checkTruncation = async (): Promise<void> => {
     await expect(locationButton).toBeVisible();
-    // The full name never appears verbatim in the header -- only the short
-    // first segment (plus coordinates, where the breakpoint keeps them).
-    const visibleText = (await locationButton.textContent()) ?? "";
+    // The full name never appears verbatim in the *visible* label -- only
+    // the short first segment (plus coordinates, where the breakpoint keeps
+    // them). It does now appear a second time in the button's full text
+    // content, folded in via a visually hidden suffix for the accessible
+    // name (checked below), so this must scope to the visible label only.
+    const visibleText = (await label.textContent()) ?? "";
     expect(visibleText).not.toContain(longName);
     expect(visibleText).toContain(shortName);
-    // Accessible name and title stay the full name regardless of viewport.
+    // Title stays the full name regardless of viewport. The accessible name
+    // is content-derived (no aria-label override), so it must contain both
+    // the always-visible short name and the full name folded in afterwards
+    // (WCAG 2.5.3 Label in Name) -- not an exact match, since the
+    // coordinates segment is only part of the name while visible.
     await expect(locationButton).toHaveAttribute("title", longName);
-    await expect(locationButton).toHaveAccessibleName(longName);
+    await expect(locationButton).toHaveAccessibleName(asPattern(shortName));
+    await expect(locationButton).toHaveAccessibleName(asPattern(longName));
 
     const box = await locationButton.boundingBox();
     expect(box).not.toBeNull();
@@ -70,15 +86,16 @@ test("the header location button shows the short name with an ellipsis instead o
     // own cell and pushing or overlapping neighboring header content.
     expect(box?.width ?? 0).toBeLessThanOrEqual(220);
 
-    const overflow = await label.evaluate((element) => ({
+    const overflow = await name.evaluate((element) => ({
       scrollWidth: element.scrollWidth,
       clientWidth: element.clientWidth,
       textOverflow: getComputedStyle(element).textOverflow,
       overflowX: getComputedStyle(element).overflowX,
     }));
-    // The short name is long enough to overflow the cell at both tested
+    // The short name is long enough to overflow its own span at both tested
     // widths; when it does, the overflow must be presented as an ellipsis
-    // (never a hard, unindicated clip).
+    // (never a hard, unindicated clip) -- on the name only, never eating
+    // into the coordinates next to it (#280).
     expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
     expect(overflow.textOverflow).toBe("ellipsis");
     expect(overflow.overflowX).toBe("hidden");
@@ -94,8 +111,26 @@ test("the header location button shows the short name with an ellipsis instead o
   await expect(coordinates).toBeVisible();
   await expect(coordinates).toContainText("48.78, 9.18");
 
+  // Playwright's visibility check doesn't account for CSS clipping, so
+  // confirm with real geometry that the ellipsis on the name span never eats
+  // into the coordinates: the whole coordinates box stays inside the
+  // button's box, not just "visible" per Playwright's actionability check.
+  const buttonBox = await locationButton.boundingBox();
+  const coordinatesBox = await coordinates.boundingBox();
+  expect(buttonBox).not.toBeNull();
+  expect(coordinatesBox).not.toBeNull();
+  if (buttonBox !== null && coordinatesBox !== null) {
+    expect(coordinatesBox.x).toBeGreaterThanOrEqual(buttonBox.x);
+    expect(coordinatesBox.x + coordinatesBox.width).toBeLessThanOrEqual(buttonBox.x + buttonBox.width);
+    expect(coordinatesBox.y).toBeGreaterThanOrEqual(buttonBox.y);
+    expect(coordinatesBox.y + coordinatesBox.height).toBeLessThanOrEqual(buttonBox.y + buttonBox.height);
+  }
+
   await page.setViewportSize({ width: 390, height: 844 });
   await checkTruncation();
-  // Below the header's narrow breakpoint the coordinates move into the menu.
+  // Below the header's narrow breakpoint the coordinates move into the menu
+  // and drop out of the accessible name too (CSS `display: none` removes a
+  // node from accessible-name computation, unlike the visually-hidden
+  // full-name suffix).
   await expect(coordinates).toBeHidden();
 });

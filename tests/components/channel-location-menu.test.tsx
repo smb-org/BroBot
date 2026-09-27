@@ -40,7 +40,7 @@ describe("ChannelLocationMenu", () => {
 
     render(<UiProvider><ChannelLocationMenu location={location} messages={messages} /></UiProvider>);
 
-    const trigger = screen.getByRole("button", { name: "Regensburg" });
+    const trigger = screen.getByRole("button", { name: /Regensburg/ });
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
     expect(trigger).toHaveAttribute("title", "Regensburg");
     expect(trigger).toHaveTextContent("Regensburg · 49.01, 12.10");
@@ -67,10 +67,15 @@ describe("ChannelLocationMenu", () => {
     const longName: PanelChannelLocation = { ...location, name: "Stuttgart, Baden-Württemberg, Deutschland" };
     render(<UiProvider><ChannelLocationMenu location={longName} messages={messages} /></UiProvider>);
 
-    const trigger = screen.getByRole("button", { name: "Stuttgart, Baden-Württemberg, Deutschland" });
+    // Accessible name starts with the visible label (WCAG 2.5.3): matching
+    // it against a leading "Stuttgart" pattern finds the button at all,
+    // and a trailing full-name pattern confirms the full name is folded in
+    // afterwards, via a visually hidden suffix.
+    const trigger = screen.getByRole("button", { name: /^Stuttgart/ });
     expect(trigger).toHaveAttribute("title", "Stuttgart, Baden-Württemberg, Deutschland");
     expect(trigger).toHaveTextContent("Stuttgart · 49.01, 12.10");
-    expect(trigger).not.toHaveTextContent("Baden-Württemberg");
+    expect(trigger.querySelector(".dashboard-header__location-label")).not.toHaveTextContent("Baden-Württemberg");
+    expect(screen.getByRole("button", { name: /Baden-Württemberg, Deutschland$/ })).toBe(trigger);
 
     fireEvent.click(trigger);
     expect(await screen.findByText("Stuttgart, Baden-Württemberg, Deutschland")).toBeInTheDocument();
@@ -80,6 +85,6 @@ describe("ChannelLocationMenu", () => {
     const plainName: PanelChannelLocation = { ...location, name: "Regensburg" };
     render(<UiProvider><ChannelLocationMenu location={plainName} messages={messages} /></UiProvider>);
 
-    expect(screen.getByRole("button", { name: "Regensburg" })).toHaveTextContent("Regensburg · 49.01, 12.10");
+    expect(screen.getByRole("button", { name: /Regensburg/ })).toHaveTextContent("Regensburg · 49.01, 12.10");
   });
 });
