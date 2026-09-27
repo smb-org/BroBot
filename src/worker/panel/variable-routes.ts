@@ -123,7 +123,7 @@ variableRouter.post("/api/channels/:channelId/variables", async (context) => {
     now, now, channelId, parsed.data.name, channelId, CHANNEL_VARIABLE_MAXIMUM_COUNT, ...authorization.values);
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, now, channelId, null,
     "channel.variable.created", null,
-    { name: parsed.data.name, value: parsed.data.value, description: parsed.data.description, resetOnStreamStart: parsed.data.resetOnStreamStart === true });
+    { name: parsed.data.name, value: parsed.data.value, description: parsed.data.description, resetOnStreamStart: parsed.data.resetOnStreamStart });
   const references = prepareChannelVariableOverlayReferences(context.env.DB, channelId, [parsed.data.name]);
   const results = await context.env.DB.batch([mutation, audit, references]);
   if ((results[0]?.meta.changes ?? 0) > 0) {
