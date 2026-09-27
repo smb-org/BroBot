@@ -5,7 +5,10 @@ import type { ModuleRouteEnvironment } from "../../src/modules/contract";
 import { sunRoutes } from "../../src/modules/sun/routes";
 import { readSunSettings } from "../../src/modules/sun/adapters/d1";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
-import { insertChannel } from "./fixtures";
+import { createCsrfToken } from "../../src/worker/auth/csrf";
+import { createSessionCookie } from "../../src/worker/auth/session";
+import { panelRouter } from "../../src/worker/panel/routes";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const CHANNEL_ID = "sun-route-channel";
@@ -34,7 +37,7 @@ const appFor = (database: D1Database): Hono<ModuleRouteEnvironment> => {
 };
 
 const requestFor = (location: unknown, revision: number, errorTexts = { de: "German error", en: "English error" }): Request =>
-  new Request(`https://brobot.example/channels/${CHANNEL_ID}/settings`, {
+  new Request(`https://brobot.example/channels/${CHANNEL_ID}/location`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ revision, location, errorTexts }),
@@ -157,5 +160,49 @@ describe("sun settings mutations", () => {
     expect(winner.location.name).toMatch(/^Berlin [AB]$/u);
     expect(audits?.count).toBe(1);
     expect(saved.location?.name).toBe(winner.location.name);
+  });
+});
+
+const REAL_ROUTER_CHANNEL_ID = "sun-real-router-channel";
+const environmentKeys = {
+  SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
+  SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
+};
+
+const requestForRealRouter = async (userId: string, path: string): Promise<Request> => {
+  const sessionCookie = await createSessionCookie(
+    { sessionId: `session-${userId}` },
+    environmentKeys.SESSION_COOKIE_KEYS,
+    environmentKeys.SESSION_ENCRYPTION_KEYS,
+  );
+  // GET requests are CSRF-exempt; the token is only included for parity with
+  // how the panel actually calls the route.
+  const csrfToken = await createCsrfToken(`session-${userId}`, environmentKeys.SESSION_COOKIE_KEYS, new Date().toISOString());
+  return new Request(`https://brobot.example${path}`, {
+    headers: { Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrfToken}` },
+  });
+};
+
+describe("sun settings via the real worker router", () => {
+  it("resolves GET .../modules/sun/location to the sun shape instead of the generic module settings route", async () => {
+    const database = await createDatabase();
+    await insertChannel(database, REAL_ROUTER_CHANNEL_ID);
+    await insertLoginIdentityAndSession(database, "sun-real-router-user");
+    await insertMember(database, REAL_ROUTER_CHANNEL_ID, "sun-real-router-user", "manager");
+    const environment = { DB: database as unknown as D1Database, ...environmentKeys } as unknown as Env;
+
+    const response = await panelRouter.fetch(
+      await requestForRealRouter("sun-real-router-user", `/api/channels/${REAL_ROUTER_CHANNEL_ID}/modules/sun/location`),
+      environment,
+    );
+    const body = await response.json<{ location: unknown; errorTexts: { de: string; en: string }; revision: number }>();
+
+    expect(response.status).toBe(200);
+    expect(body.location).toBeNull();
+    expect(body.revision).toBe(1);
+    expect(body.errorTexts).toEqual({
+      de: "Sonnendaten sind derzeit nicht verfügbar.",
+      en: "Sun data is currently unavailable.",
+    });
   });
 });

@@ -37,7 +37,7 @@ const errorText = (value: string, fallback: string): string => value.trim().leng
 
 export const sunRoutes = new Hono<ModuleRouteEnvironment>();
 
-sunRoutes.get("/settings", async (context) => {
+sunRoutes.get("/location", async (context) => {
   return context.json(await readSunSettings(context.env.DB, channelIdOf(context)));
 });
 
@@ -77,7 +77,7 @@ sunRoutes.get("/geocode", async (context) => {
   }
 });
 
-sunRoutes.patch("/settings", async (context) => {
+sunRoutes.patch("/location", async (context) => {
   if (!canManage(context.get("channelRole"))) return context.json({ error: "sun_settings_denied" }, 403);
   const raw: unknown = await context.req.json().catch(() => null);
   const parsed = updateSchema.safeParse(raw);
