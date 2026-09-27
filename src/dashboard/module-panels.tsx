@@ -6,10 +6,10 @@ import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
 import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
-import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, moduleWorkspaceTexts, statusWord } from "./module-labels";
+import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, registerDashboardNavigationGuard, SettingsEditor, Switch, useDraftGuard, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, useDraftGuard, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -25,18 +25,14 @@ const moduleDetails = (moduleId: string, language: DashboardLanguage = dashboard
 export type StateTone = "healthy" | "warning" | "error" | "neutral";
 export type LedStatus = "green" | "amber" | "red" | "off";
 
-export const NavigationIcon = ({ kind, className = "navigation-icon" }: { kind: string; className?: string }): ReactElement => (
-  <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-    {kind === "overview" ? <><rect x="5" y="5" width="5" height="5" rx="1" /><rect x="14" y="5" width="5" height="5" rx="1" /><rect x="5" y="14" width="5" height="5" rx="1" /><rect x="14" y="14" width="5" height="5" rx="1" /></> : kind === "channel" ? <><path d="M5 7.5h14M5 12h14M5 16.5h9" /><circle cx="18" cy="16.5" r="1" /></> : kind === "system" ? <><circle cx="12" cy="12" r="7" /><path d="M12 8v4l2.5 2" /></> : kind === "members" ? <><circle cx="10" cy="9" r="3" /><path d="M4.5 18c.8-3 2.6-4.5 5.5-4.5s4.7 1.5 5.5 4.5M17 8.5a2.5 2.5 0 0 1 0 5" /></> : kind === "modules" ? <><rect x="5" y="5" width="6" height="6" rx="1" /><rect x="13" y="5" width="6" height="6" rx="1" /><rect x="5" y="13" width="6" height="6" rx="1" /><rect x="13" y="13" width="6" height="6" rx="1" /></> : kind === "texts" ? <><path d="M5 4.5h10a4 4 0 0 1 4 4v11H9a4 4 0 0 0-4 1.5zM5 4.5v15M9 9h6M9 12.5h6M9 16h4" /></> : kind === "permission" ? <><circle cx="8.5" cy="15.5" r="3.5" /><path d="m11 13 7-7 2 2-7 7M16 8l2 2" /></> : kind === "token" ? <><circle cx="8" cy="12" r="3" /><path d="M11 12h8m-3 0v3m-3-3v2" /></> : <><path d="M6 5h12v14H6z" /><path d="M9 9h6M9 13h6M9 17h4" /></>}
-  </svg>
-);
+export { NavigationIcon } from "./ui/NavigationIcon";
 
 const iconFor = (moduleId: string, className = "module-glyph"): ReactElement => {
-  const symbol = moduleSymbol(moduleId);
+  const paths = MODULES.find((module) => module.id === moduleId)?.panelIcon?.paths ?? ["M5 5h14v14H5z", "M9 12h6", "M12 9v6"];
   const glyphClassName = className === "module-glyph" ? className : `module-glyph ${className}`;
   return (
     <svg className={glyphClassName} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      {symbol === "text_commands" ? <><circle cx="12" cy="12" r="8" /><path d="M12 7v10M8.5 10.5h7M8.5 13.5h5" /></> : symbol === "channel_events" ? <><path d="M5 12h3l2-5 4 10 2-5h3" /><path d="M5 19h14" /></> : symbol === "ads" ? <><path d="M6 8h12v8H6z" /><path d="M9 8V6h6v2M9 12h6M9 16v2h6v-2" /></> : <><rect x="5" y="5" width="14" height="14" rx="2" /><path d="M9 12h6M12 9v6" /></>}
+      {paths.map((path, index) => <path key={`${moduleId}-${String(index)}`} d={path} />)}
     </svg>
   );
 };
@@ -81,16 +77,7 @@ export const ModuleHeading = ({ kind, title, subtitle, actions }: {
   title: string;
   subtitle: ReactNode;
   actions?: ReactNode;
-}): ReactElement => (
-  <header className="module-detail-heading">
-    <div className="module-detail-heading__icon"><NavigationIcon kind={kind} className="module-heading-glyph" /></div>
-    <div className="module-detail-heading__copy">
-      <h1>{title}</h1>
-      <p>{subtitle}</p>
-    </div>
-    {actions === undefined ? null : <div className="module-detail-heading__actions">{actions}</div>}
-  </header>
-);
+}): ReactElement => <PageHeader kind={kind} title={title} subtitle={subtitle} actions={actions} />;
 
 export const ModuleCount = ({ count, label }: { count: number; label: (formattedCount: string) => string }): ReactElement => {
   const formattedCount = formatNumber(count);
@@ -582,10 +569,7 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
   return (
     <section className="module-workspace" aria-label={dashboardTexts().navigation.module}>
       <div className="module-workspace__main">
-        <header className="module-workspace__heading">
-          <h1>{dashboardTexts().navigation.module}</h1>
-          {loading ? <span className="muted">{dashboardTexts().module.load}</span> : null}
-        </header>
+        <PageHeader kind="modules" title={dashboardTexts().navigation.module} subtitle={loading ? dashboardTexts().module.load : dashboardTexts().module.available} />
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         <ModuleToggleList channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onChanged={onChanged} />
       </div>
@@ -657,13 +641,14 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   return (
     <>
       <section className="module-detail" aria-label={details.name}>
-        <header className="module-detail__header">
-          <div className="module-detail__icon" aria-hidden="true">{navigationPage === undefined ? iconFor(moduleId) : <NavigationIcon kind={navigationPage.iconKind} className="module-glyph" />}</div>
-          <div>
-            <h1 title={moduleId}>{details.name}</h1>
-            <p className="module-detail__description">{details.description}</p>
-          </div>
-        </header>
+        <PageHeader
+          kind="modules"
+          icon={navigationPage === undefined
+            ? iconFor(moduleId, "module-heading-glyph")
+            : <NavigationIcon kind={navigationPage.iconKind} className="module-heading-glyph module-glyph" />}
+          title={details.name}
+          subtitle={details.description}
+        />
         {navigationPage?.showMainSwitch === false ? null : <section className="module-detail__switch inspector-section--switch" aria-label={labels.status}>
           <div>
             <strong>{labels.mainSwitch}</strong>

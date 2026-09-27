@@ -24,6 +24,7 @@ export type { RaidSettings } from "./contracts";
 
 export const raidModule: BotModule<typeof raidSettingsSchema> = {
   id: "raid",
+  panelIcon: { paths: ["m4 17 5-10 3 6 2-4 6 8H4Z", "M8 19h8"] },
   settingsSchema: raidSettingsSchema,
   templateFields: RAID_TEMPLATE_FIELDS,
   templateContext: "event",

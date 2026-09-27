@@ -23,6 +23,7 @@ const eventSubTypes = [
 
 export const channelEventsModule: BotModule<typeof settingsSchema> = {
   id: "channel_events",
+  panelIcon: { paths: ["M5 12h3l2-5 4 10 2-5h3", "M5 19h14"] },
   mandatory: true,
   settingsSchema,
   defaultSettings: {},

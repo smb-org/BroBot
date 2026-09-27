@@ -20,6 +20,8 @@ interface ButtonBaseProps {
   /** Points at the reason line for a disabled action -- visible, disabled,
    *  with its reason at the point of effect (editor-konzept 6). */
   describedBy?: string;
+  /** Adds row-specific context to a repeated text action without changing its visible label. */
+  ariaLabel?: string;
   ariaPressed?: boolean;
   onClick?: () => void;
   type?: "button" | "submit";
@@ -35,7 +37,6 @@ type ButtonWithTextProps = ButtonBaseProps & {
   children: ReactNode;
   icon?: IconName;
   iconOnly?: false;
-  ariaLabel?: never;
 };
 
 type ButtonIconOnlyProps = ButtonBaseProps & {
@@ -85,7 +86,7 @@ export function Button(props: ButtonProps) {
     disabled = false,
     ariaDisabled = false,
     onClick,
-    type = "button",
+      type = "button",
     autoFocus = false,
     title,
     size = "md",
@@ -126,7 +127,7 @@ export function Button(props: ButtonProps) {
       aria-disabled={ariaDisabled || undefined}
       onClick={onClick}
       type={type}
-      aria-label={iconOnly ? props.ariaLabel : undefined}
+      aria-label={props.ariaLabel}
       aria-describedby={describedBy}
       aria-pressed={ariaPressed}
       title={title}

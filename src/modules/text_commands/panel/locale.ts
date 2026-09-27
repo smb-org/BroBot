@@ -43,6 +43,7 @@ export interface TextCommandsTexts {
   streamHints: Record<TextCommandStreamCondition, string>;
   gameFilter: string;
   gameFilterHint: string;
+  availability: string;
   gamePicker: GamePickerMessages;
   libraryText: string;
   libraryTextPlaceholder: string;
@@ -193,6 +194,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     streamHints: { any: "Wirkt unabhängig vom Stream.", online: "Wirkt nur, während der Stream läuft.", offline: "Wirkt nur, während der Stream aus ist." },
     gameFilter: "Twitch-Spiele",
     gameFilterHint: "Der Befehl antwortet nur, wenn gerade eines dieser Spiele läuft.",
+    availability: "Verfügbarkeit",
     gamePicker: { label: "Twitch-Spiele", hint: "Spiele über Twitch-Kategorien suchen und auswählen.", search: "Spiel suchen", searchHint: "Mindestens zwei Zeichen eingeben.", loading: "Spiele werden gesucht …", empty: "Keine Spiele gefunden.", error: "Die Twitch-Spiele konnten nicht geladen werden.", remove: (name) => `${name} entfernen` },
     libraryText: "Text aus Bibliothek",
     libraryTextPlaceholder: "Textbaustein auswählen",
@@ -276,6 +278,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     streamHints: { any: "Works regardless of stream status.", online: "Works only while the stream is live.", offline: "Works only while the stream is offline." },
     gameFilter: "Twitch games",
     gameFilterHint: "The command only replies while one of these games is current.",
+    availability: "Availability",
     gamePicker: { label: "Twitch games", hint: "Search and select games from Twitch categories.", search: "Search games", searchHint: "Enter at least two characters.", loading: "Searching games …", empty: "No games found.", error: "Twitch games could not be loaded.", remove: (name) => `Remove ${name}` },
     libraryText: "Text from library",
     libraryTextPlaceholder: "Choose a text block",

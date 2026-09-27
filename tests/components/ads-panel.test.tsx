@@ -63,7 +63,9 @@ describe("Ad settings editor declaration", () => {
     expect(announcementsTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(prewarningTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(screen.getByText("Werbepause beginnt (90 Sekunden)")).toBeInTheDocument();
-    expect(screen.getAllByText(/Ohne \{duration\} ergänzt die Vorschau \(N Sekunden\)\./)).toHaveLength(2);
+    const durationHints = screen.getAllByRole("button", { name: /Ohne \{duration\} ergänzt die Vorschau \(N Sekunden\)\./ });
+    expect(durationHints).toHaveLength(2);
+    for (const hint of durationHints) expect(hint).toHaveAttribute("title", expect.stringContaining("Ohne {duration}"));
 
     const automatic = screen.getByRole("textbox", { name: "Automatische Werbepause" });
     fireEvent.change(automatic, { target: { value: "x".repeat(486) } });

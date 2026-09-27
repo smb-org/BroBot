@@ -143,15 +143,6 @@ export const moduleDescription = (
   return registered ?? moduleText(moduleDescriptions[language], moduleId);
 };
 
-export type ModuleSymbol = "text_commands" | "channel_events" | "ads" | "standard";
-
-export const moduleSymbol = (moduleId: string): ModuleSymbol => {
-  if (moduleId === "text_commands") return "text_commands";
-  if (moduleId === "channel_events") return "channel_events";
-  if (moduleId === "ads") return "ads";
-  return "standard";
-};
-
 export const moduleScopePurpose = (
   moduleId: string,
   scope: string,

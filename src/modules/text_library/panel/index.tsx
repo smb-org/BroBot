@@ -5,7 +5,7 @@ import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
 import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName, validTimeZone } from "../domain";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, ChatPreview, Field, GamePicker, Select, TextArea } from "../../../dashboard/ui";
+import { Badge, Button, ChatPreview, ConfirmDialog, DangerSection, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, registerDashboardNavigationGuard, Select, SubInspector, TextArea, useDraftGuard } from "../../../dashboard/ui";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../contract";
 import { textLibraryTexts } from "./locale";
 import {
@@ -96,6 +96,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const [data, setData] = useState<Awaited<ReturnType<typeof loadTextLibrary>> | null>(null);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftBlock | null>(null);
+  const [baselineDraft, setBaselineDraft] = useState<DraftBlock | null>(null);
   const [revision, setRevision] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -105,6 +106,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const [simulatedContext, setSimulatedContext] = useState<"command" | "event">("event");
   const [simulatedTier, setSimulatedTier] = useState("everyone");
   const [pending, setPending] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState("");
   const [showCategories, setShowCategories] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -126,6 +128,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
       if (selected !== undefined) {
         setSelectedName(selected.name);
         setDraft(draftFromBlock(selected));
+        setBaselineDraft(draftFromBlock(selected));
         setRevision(selected.revision);
       }
     } else if (selectedName !== null) {
@@ -133,9 +136,11 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
       if (selected === undefined) {
         setSelectedName(null);
         setDraft(null);
+        setBaselineDraft(null);
         setRevision(null);
       } else {
         setDraft(draftFromBlock(selected));
+        setBaselineDraft(draftFromBlock(selected));
         setRevision(selected.revision);
       }
     }
@@ -173,6 +178,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     Object.keys(draft.variants.at(-1)?.conditions ?? {}).length !== 0 ||
     draft.variants.some((variant) => !validTextBlockConditions(variant.conditions) || variant.texts.length === 0 || variant.texts.length > TEXT_BLOCK_MAXIMUMS.textsPerVariant || variant.texts.some((text) => text.trim().length === 0 || text.length > TEXT_BLOCK_MAXIMUMS.textLength));
   const valid = draft !== null && !nameInvalid && !nameTaken && !nameReserved && !variantInvalid && draft.categoryId.length > 0;
+  const dirty = draft !== null && baselineDraft !== null && JSON.stringify(draft) !== JSON.stringify(baselineDraft);
   const blockNames = new Set(data?.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => block.name) ?? []);
   const simulatedGameId = simulatedGame[0]?.id ?? null;
   const blockUnavailableForGame = draft !== null && draft.games.length > 0 &&
@@ -203,23 +209,34 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const inputVariableUsedOutsideCommand = draft !== null && variantsInDraftTree.some((variant) => variant.texts.some((text) => /\{(?:args|convert)\}/u.test(text))) &&
     (data?.usages[draft.name] ?? []).some((usage) => usage.kind !== "command");
 
-  const openCreate = (): void => {
+  const openCreateNow = (): void => {
     const categoryId = data?.categories[0]?.id ?? "";
+    const initial = newDraft(categoryId);
     setSelectedName(null);
-    setDraft(newDraft(categoryId));
+    setDraft(initial);
+    setBaselineDraft(initial);
     setRevision(null);
     setError("");
   };
 
-  const selectBlock = (block: TextBlock): void => {
+  const closeEditorNow = (): void => {
+    setSelectedName(null);
+    setDraft(null);
+    setBaselineDraft(null);
+    setRevision(null);
+    setError("");
+  };
+
+  const selectBlockNow = (block: TextBlock): void => {
     setSelectedName(block.name);
     setDraft(draftFromBlock(block));
+    setBaselineDraft(draftFromBlock(block));
     setRevision(block.revision);
     setError("");
   };
 
-  const saveDraft = async (): Promise<void> => {
-    if (draft === null || !valid || !canManage) return;
+  const saveDraft = async (): Promise<string | null> => {
+    if (draft === null || !valid || !canManage) return labels.saveError;
     setPending(true);
     setError("");
     try {
@@ -231,25 +248,39 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
         ? await createTextBlock(channelId, payload)
         : await saveTextBlock(channelId, { ...payload, revision });
       await refresh(saved.name);
+      return null;
     } catch (caught: unknown) {
       const code = errorCode(caught);
       const path = errorPath(caught);
-      setError(code === "text_library_reference_cycle" ? labels.cycle(path)
+      const message = code === "text_library_reference_cycle" ? labels.cycle(path)
         : code === "text_library_reference_depth_exceeded" ? labels.depth(path)
-          : code === null ? labels.saveError : labels.errors[code] ?? (caught instanceof PanelApiError && caught.status === 409 ? labels.conflict : labels.saveError));
+          : code === null ? labels.saveError : labels.errors[code] ?? (caught instanceof PanelApiError && caught.status === 409 ? labels.conflict : labels.saveError);
+      setError(message);
+      return message;
     } finally {
       setPending(false);
     }
   };
 
+  const discardDraft = useCallback((): void => {
+    if (baselineDraft !== null) setDraft({ ...baselineDraft, games: [...baselineDraft.games], variants: baselineDraft.variants.map((variant) => ({ ...variant, conditions: { ...variant.conditions }, texts: [...variant.texts] })) });
+  }, [baselineDraft]);
+  const draftGuard = useDraftGuard(dirty, saveDraft, discardDraft);
+  useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
+  const openCreate = (): void => { draftGuard.guardSwitch(openCreateNow); };
+  const closeEditor = (): void => { draftGuard.guardSwitch(closeEditorNow); };
+  const selectBlock = (block: TextBlock): void => { draftGuard.guardSwitch(() => { selectBlockNow(block); }); };
+
   const removeBlock = async (): Promise<void> => {
-    if (selectedName === null || revision === null || !canManage || !window.confirm(labels.deleteConfirm(selectedName))) return;
+    if (selectedName === null || revision === null || !canManage) return;
     setPending(true);
     try {
       await deleteTextBlock(channelId, selectedName, revision);
       setSelectedName(null);
       setDraft(null);
+      setBaselineDraft(null);
       setRevision(null);
+      setConfirmingDelete(false);
       await refresh();
     } catch (caught: unknown) {
       setError(errorCode(caught) === "text_library_block_conflict" ? labels.conflict : labels.saveError);
@@ -310,63 +341,72 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   if (data === null) return <section className="module-stack" aria-label={labels.library}><p className={error ? "form-error" : "loading-line"}>{error || labels.loading}</p></section>;
   const categories = data.categories.map((category) => ({ value: category.id, label: categoryLabel(category, labels) }));
   const categoryBlockCounts = new Map(data.categories.map((category) => [category.id, data.blocks.filter((block) => block.categoryId === category.id).length]));
+  const activeFilters = [
+    ...(search.trim().length === 0 ? [] : [`${labels.search}: ${search.trim()}`]),
+    ...(categoryFilter.length === 0 ? [] : [`${labels.categoryFilter}: ${categories.find((category) => category.value === categoryFilter)?.label ?? categoryFilter}`]),
+    ...gameFilter.map((game) => `${labels.gameFilter}: ${game.name}`),
+  ];
 
   return (
     <section className="module-stack text-library" aria-label={labels.library}>
       {error.length === 0 ? null : <p className="form-error" role="alert">{error}</p>}
 
-      <section className={`config-section inspector-section${draft === null ? "" : " inspector-section--open"}`} aria-label={labels.library}>
-        <div className="inspector-section__list">
+      <ListDetail
+        list={<section className="config-section text-library__list-panel" aria-label={labels.library}>
           <div className="section-heading">
             <h2>{labels.library}</h2>
             {canManage ? <Button icon="add" iconOnly ariaLabel={labels.addBlock} disabled={pending || data.blocks.length >= TEXT_BLOCK_MAXIMUMS.blocksPerChannel} {...(data.blocks.length >= TEXT_BLOCK_MAXIMUMS.blocksPerChannel ? { title: labels.blockLimit(TEXT_BLOCK_MAXIMUMS.blocksPerChannel) } : {})} onClick={openCreate} /> : null}
           </div>
-          <div className="text-library__filters">
-            <Field label={labels.search} value={search} onChange={setSearch} />
+          <FilterBar label={labels.library} className="text-library__filters" summary={activeFilters.length === 0 ? undefined : <div className="form-actions"><p className="muted" aria-live="polite">{labels.activeFilters} {activeFilters.join(" · ")}</p><Button variant="subtle" onClick={() => { setSearch(""); setCategoryFilter(""); setGameFilter([]); }}>{labels.resetFilters}</Button></div>}>
+            <Field label={labels.search} placeholder={labels.search} value={search} onChange={setSearch} />
             <Select label={labels.categoryFilter} value={categoryFilter} onChange={(value) => setCategoryFilter(value ?? "")} options={[{ value: "", label: labels.allCategories }, ...categories]} />
-            <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter} messages={{ ...labels.gamePicker, label: labels.gameFilter }} />
-          </div>
+            <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter} messages={{ ...labels.gamePicker, label: labels.gameFilter }} visuallyHiddenLabel />
+          </FilterBar>
           <p className="muted">{labels.blockLimit(TEXT_BLOCK_MAXIMUMS.blocksPerChannel)}</p>
           {visibleBlocks.length === 0 ? <p className="empty-state">{labels.empty}</p> : (
-            <ul className="text-library__list">
-              {visibleBlocks.map((block) => {
-                const category = data.categories.find((entry) => entry.id === block.categoryId);
-                const usages = data.usages[block.name] ?? [];
-                return (
-                  <li key={block.name}>
-                    <button type="button" className="text-library__row" aria-current={selectedName === block.name ? "true" : undefined} onClick={() => selectBlock(block)}>
-                      <span className="text-library__row-main"><strong className="mono">{`{${block.name}}`}</strong><span className="text-library__row-meta">{category === undefined ? block.categoryId : categoryLabel(category, labels)} · {labels.variantsCount(block.variants.length)}</span></span>
-                      <span className="text-library__usage-count" aria-label={labels.usesCount(usages.length)}>{labels.usesCount(usages.length)}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        {draft === null ? null : (
-          <section className="sub-inspector text-library__editor" aria-label={isCreate ? labels.addBlock : labels.name}>
-            <div className="inspector-section__heading">
-              <h2>{isCreate ? labels.addBlock : `${labels.name}: ${draft.name}`}</h2>
-              {isCreate ? null : <span className="mono">{`{${draft.name}}`}</span>}
+            <div className="table-wrap">
+              <table className="table table--content text-library__table">
+                <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.category}</th><th scope="col">{labels.variants}</th><th scope="col">{labels.uses}</th></tr></thead>
+                <tbody>{visibleBlocks.map((block) => {
+                  const category = data.categories.find((entry) => entry.id === block.categoryId);
+                  const usages = data.usages[block.name] ?? [];
+                  return <tr key={block.name} aria-selected={selectedName === block.name}>
+                    <th scope="row"><button type="button" className="text-library__name-button mono" aria-current={selectedName === block.name ? "true" : undefined} onClick={(event) => { event.currentTarget.focus(); selectBlock(block); }}>{`{${block.name}}`}</button></th>
+                    <td>{category === undefined ? block.categoryId : categoryLabel(category, labels)}</td>
+                    <td><Badge>{labels.variantsCount(block.variants.length)}</Badge></td>
+                    <td><Badge tone={usages.length === 0 ? "neutral" : "brand"}>{labels.usesCount(usages.length)}</Badge></td>
+                  </tr>;
+                })}</tbody>
+              </table>
             </div>
+          )}
+        </section>}
+        inspector={draft === null ? null : (
+
+          <SubInspector className="text-library__editor" ariaLabel={isCreate ? labels.addBlock : labels.name} title={isCreate ? labels.addBlock : `${labels.name}: ${draft.name}`} identifier={isCreate ? undefined : draft.name} closeLabel={labels.close} onClose={closeEditor}>
             <div className="text-library__editor-body">
               {canManage ? <>
-              <Field
-                label={labels.name}
-                hint={labels.nameHint}
-                value={draft.name}
-                onChange={(name) => setDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "_").slice(0, 32) })}
-                disabled={!isCreate || pending}
-                {...(draft.name.length > 0 && nameInvalid ? { error: labels.nameInvalid } : nameTaken ? { error: labels.nameExists } : nameReserved ? { error: labels.nameReserved } : {})}
-                mono
-              />
-              <Select label={labels.category} value={draft.categoryId} onChange={(value) => value !== null && setDraft({ ...draft, categoryId: value })} disabled={pending} options={categories} />
-              <GamePicker searchGames={searchGames} value={draft.games} onChange={(games) => setDraft({ ...draft, games })} messages={{ ...labels.gamePicker, label: labels.gameBound }} disabled={pending} />
+              <InspectorSection title={labels.generalSection}>
+                <InspectorFieldRow label={labels.name} help={labels.nameHint}>
+                  <Field
+                    label={labels.name}
+                    hint={labels.nameHint}
+                    value={draft.name}
+                    onChange={(name) => setDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "_").slice(0, 32) })}
+                    disabled={!isCreate || pending}
+                    {...(draft.name.length > 0 && nameInvalid ? { error: labels.nameInvalid } : nameTaken ? { error: labels.nameExists } : nameReserved ? { error: labels.nameReserved } : {})}
+                    mono
+                  />
+                </InspectorFieldRow>
+                <InspectorFieldRow label={labels.category}>
+                  <Select label={labels.category} value={draft.categoryId} onChange={(value) => value !== null && setDraft({ ...draft, categoryId: value })} disabled={pending} options={categories} />
+                </InspectorFieldRow>
+                <InspectorFieldRow label={labels.gameBound} help={labels.gamePicker.hint}>
+                  <GamePicker searchGames={searchGames} value={draft.games} onChange={(games) => setDraft({ ...draft, games })} messages={{ ...labels.gamePicker, label: labels.gameBound }} disabled={pending} />
+                </InspectorFieldRow>
+              </InspectorSection>
 
-              <section className="config-section" aria-label={labels.variants}>
-                <div className="section-heading"><h3>{labels.variants}</h3><span className="muted">{labels.variantsCount(draft.variants.length)}</span></div>
+              <InspectorSection title={labels.variants} help={labels.variantsCount(draft.variants.length)}>
                 {draft.variants.map((variant, index) => {
                   const isDefault = index === draft.variants.length - 1;
                   const variantPreviewLength = Math.max(...variant.texts.map((text) => formatEstimate(text, blockNames)));
@@ -386,14 +426,20 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         <div className="text-library__condition-grid">
                           <Select label={labels.stream} value={variant.conditions.stream ?? "any"} onChange={(value) => updateCondition(variant.id, (conditions) => value === "any" ? withoutCondition(conditions, "stream") : { ...conditions, stream: value as "online" | "offline" })} options={[{ value: "any", label: labels.anyStream }, { value: "online", label: labels.online }, { value: "offline", label: labels.offline }]} />
                           <Select label={labels.minimumTier} value={variant.conditions.minimumTier ?? "none"} onChange={(value) => updateCondition(variant.id, (conditions) => value === "none" ? withoutCondition(conditions, "minimumTier") : { ...conditions, minimumTier: value as NonNullable<TextBlockConditions["minimumTier"]> })} options={[{ value: "none", label: labels.noMinimumTier }, ...Object.entries(labels.tierLabels).map(([value, label]) => ({ value, label }))]} />
-                          <Select label={labels.gameCondition} value={variant.conditions.game?.mode ?? ""} onChange={(value) => updateCondition(variant.id, (conditions) => value === "" ? withoutCondition(conditions, "game") : { ...conditions, game: { mode: value as "is" | "is_not", game: conditions.game?.game ?? { id: "", name: "" } } })} options={[{ value: "", label: labels.anyStream }, { value: "is", label: labels.gameIs }, { value: "is_not", label: labels.gameIsNot }]} />
-                          <GamePicker
-                            searchGames={searchGames}
-                            value={variant.conditions.game === undefined || variant.conditions.game.game.id.length === 0 ? [] : [variant.conditions.game.game]}
-                            onChange={(games) => updateCondition(variant.id, (conditions) => games[0] === undefined ? withoutCondition(conditions, "game") : { ...conditions, game: { mode: conditions.game?.mode ?? "is", game: games[0] } })}
-                            messages={{ ...labels.gamePicker, label: labels.gameCondition }}
-                            disabled={pending}
-                          />
+                          <fieldset className="text-library__game-condition">
+                            <legend>{labels.gameCondition}</legend>
+                            <div className={`text-library__game-match${variant.conditions.game === undefined ? " text-library__game-match--only" : ""}`}>
+                              <Select ariaLabel={labels.gameMatch} value={variant.conditions.game?.mode ?? ""} onChange={(value) => updateCondition(variant.id, (conditions) => value === "" ? withoutCondition(conditions, "game") : { ...conditions, game: { mode: value as "is" | "is_not", game: conditions.game?.game ?? { id: "", name: "" } } })} options={[{ value: "", label: labels.anyStream }, { value: "is", label: labels.gameIs }, { value: "is_not", label: labels.gameIsNot }]} />
+                            </div>
+                            {variant.conditions.game === undefined ? null : <GamePicker
+                              searchGames={searchGames}
+                              value={variant.conditions.game.game.id.length === 0 ? [] : [variant.conditions.game.game]}
+                              onChange={(games) => updateCondition(variant.id, (conditions) => games[0] === undefined ? withoutCondition(conditions, "game") : { ...conditions, game: { mode: conditions.game?.mode ?? "is", game: games[0] } })}
+                              messages={{ ...labels.gamePicker, label: labels.gameCondition }}
+                              visuallyHiddenLabel
+                              disabled={pending}
+                            />}
+                          </fieldset>
                         </div>
                         {variant.conditions.game?.game.id.length === 0 ? <p className="form-error">{labels.gamePicker.hint}</p> : null}
                         <div className="text-library__weekdays" role="group" aria-label={labels.weekdays}>
@@ -437,7 +483,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                   );
                 })}
                 {draft.variants.length >= TEXT_BLOCK_MAXIMUMS.variantsPerBlock ? null : <Button disabled={pending} onClick={() => setDraft({ ...draft, variants: [...draft.variants.slice(0, -1), newVariant(), draft.variants[draft.variants.length - 1] as TextBlockVariant] })}>{labels.addVariant}</Button>}
-              </section>
+              </InspectorSection>
               </> : <>
                 <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p>
                 <dl className="text-library__read-only-properties">
@@ -457,8 +503,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                 </dl>
               </>}
 
-              <section className="config-section text-library__preview" aria-label={labels.preview}>
-                <div className="section-heading"><h3>{labels.preview}</h3></div>
+              <InspectorSection title={labels.preview}>
                 <div className="text-library__condition-grid">
                   <Select label={labels.simulateStream} value={simulatedStream} onChange={(value) => value !== null && setSimulatedStream(value as "online" | "offline")} options={[{ value: "online", label: labels.online }, { value: "offline", label: labels.offline }]} />
                   <Select label={labels.simulateContext} value={simulatedContext} onChange={(value) => value !== null && setSimulatedContext(value as "command" | "event")} options={[{ value: "command", label: labels.commandContext }, { value: "event", label: labels.eventContext }]} />
@@ -472,28 +517,33 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                 </>}
                 {roleConditionUsedOutsideCommand ? <p className="text-library__warning" role="note">{labels.roleConditionHint}</p> : null}
                 {inputVariableUsedOutsideCommand ? <p className="text-library__warning" role="note">{labels.argsContextWarning}</p> : null}
-              </section>
+              </InspectorSection>
 
-              <section className="config-section" aria-label={labels.uses}>
-                <div className="section-heading"><h3>{labels.uses}</h3></div>
+              <InspectorSection title={labels.uses}>
                 {(data.usages[draft.name] ?? []).length === 0 ? <p className="muted">{labels.noUsages}</p> : <ul className="text-library__usages">{(data.usages[draft.name] ?? []).map((usage, index) => <li key={`${usage.kind}-${usage.label}-${String(index)}`}><span>{labels.usageKind[usage.kind]}</span><span>{usage.label}</span></li>)}</ul>}
-              </section>
+              </InspectorSection>
 
-              <div className="form-actions">
+              {canManage && !isCreate ? <DangerSection title={labels.delete}>
+                <p className="muted">{labels.deleteHint}</p>
+                <Button danger="subtle" disabled={pending} onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>
+              </DangerSection> : null}
+
+              <InspectorActions>
                 {canManage ? <Button variant="primary" disabled={pending || !valid} onClick={() => { void saveDraft(); }}>{isCreate ? labels.create : labels.save}</Button> : null}
-                {canManage && !isCreate ? <Button danger="subtle" disabled={pending} onClick={() => { void removeBlock(); }}>{labels.delete}</Button> : null}
-                {canManage ? <Button disabled={pending} onClick={() => { setDraft(null); setSelectedName(null); setRevision(null); setError(""); }}>{labels.discard}</Button> : null}
-              </div>
+                {canManage ? <Button variant="subtle" disabled={pending} onClick={closeEditor}>{labels.discard}</Button> : null}
+              </InspectorActions>
               {isCreate && data.blocks.length >= TEXT_BLOCK_MAXIMUMS.blocksPerChannel ? <p className="form-error">{labels.blockLimit(TEXT_BLOCK_MAXIMUMS.blocksPerChannel)}</p> : null}
             </div>
-          </section>
+          </SubInspector>
         )}
-      </section>
+        onCloseInspector={closeEditor}
+      />
 
       <details className="text-library__settings" open={showCategories} onToggle={(event) => setShowCategories(event.currentTarget.open)}>
         <summary>{labels.categories}</summary>
         <div className="text-library__settings-body">
           {canManage ? <>
+          <InspectorSection title={labels.categories}>
           {data.categories.map((category) => {
             const originalName = categoryLabel(category, labels);
             const value = categoryDrafts[category.id] ?? category.customName ?? originalName;
@@ -516,6 +566,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
             <Field label={labels.timezone} hint={labels.timezoneHint} value={timezoneDraft} onChange={setTimezoneDraft} disabled={pending} {...(timezoneDraft.length > 0 && !validTimeZone(timezoneDraft) ? { error: labels.timezoneInvalid } : {})} />
             <Button disabled={pending || timezoneDraft === data.settings.timeZone || !validTimeZone(timezoneDraft)} onClick={() => { void saveTimeZone(); }}>{labels.save}</Button>
           </div>
+          </InspectorSection>
           </> : <>
             <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p>
             <dl className="text-library__read-only-properties">
@@ -525,6 +576,20 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
           </>}
         </div>
       </details>
+      <ConfirmDialog opened={confirmingDelete} title={labels.delete} description={labels.deleteConfirm(selectedName ?? "")} confirmLabel={labels.delete} cancelLabel={labels.close} onCancel={() => { setConfirmingDelete(false); }} onConfirm={() => { void removeBlock(); }} pending={pending} danger />
+      <ConfirmDialog
+        opened={draftGuard.confirmOpen}
+        title={labels.draftGuardTitle}
+        description={labels.draftGuardDescription}
+        confirmLabel={labels.discardAndSwitch}
+        cancelLabel={labels.continueEditing}
+        onCancel={draftGuard.continueEditing}
+        onConfirm={draftGuard.discardAndSwitch}
+        {...(valid && canManage ? { alternative: { label: labels.saveAndSwitch, onClick: () => { void draftGuard.saveAndSwitch(); } } } : {})}
+        pending={draftGuard.saving}
+        {...(draftGuard.saveError === undefined ? {} : { error: draftGuard.saveError })}
+        danger
+      />
     </section>
   );
 }

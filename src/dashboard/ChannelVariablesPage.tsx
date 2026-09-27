@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import {
   changeChannelVariableValue,
@@ -16,7 +16,7 @@ import {
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage } from "./locale";
 import { useRealtimeVariableUpdates } from "./realtime";
-import { Button, ConfirmDialog, Field, Icon, ListDetail, NumberField, Select, SubInspector, Switch } from "./ui";
+import { Button, ConfirmDialog, DangerSection, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, NumberField, PageHeader, Select, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 
 interface ChannelVariablesPageProperties {
@@ -59,6 +59,10 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [draftDescription, setDraftDescription] = useState("");
   const [draftReset, setDraftReset] = useState(false);
   const [draftSetValue, setDraftSetValue] = useState<number | "">(0);
+  const [editingValue, setEditingValue] = useState(false);
+  const [inlineValue, setInlineValue] = useState<number | "">(0);
+  const editValueButtonRef = useRef<HTMLButtonElement>(null);
+  const wasEditingValue = useRef(false);
   const [pending, setPending] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [useOverlayOpen, setUseOverlayOpen] = useState(false);
@@ -108,6 +112,11 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   useRealtimeVariableUpdates({ channelId, refresh });
 
   const selected = useMemo(() => variables.find((variable) => variable.name === selectedName) ?? null, [selectedName, variables]);
+  useLayoutEffect(() => {
+    if (editingValue) document.getElementById("channel-variable-inline-value")?.focus();
+    else if (wasEditingValue.current) editValueButtonRef.current?.focus();
+    wasEditingValue.current = editingValue;
+  }, [editingValue]);
   const hasLegacyLinks = legacyLinkStatus?.channelId === channelId && legacyLinkStatus.hasLinks;
   const selectedUsages = selected?.usages ?? [];
   const overlayUsageLabel = (usage: PanelChannelVariable["usages"][number]): string =>
@@ -121,6 +130,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const beginCreate = (): void => {
     setCreating(true);
     setSelectedName(null);
+    setEditingValue(false);
     setDraftName("");
     setDraftDescription("");
     setDraftReset(false);
@@ -135,6 +145,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   };
   const selectVariable = (variable: PanelChannelVariable): void => {
     setCreating(false);
+    setEditingValue(false);
     setSelectedName(variable.name);
     setDraftName(variable.name);
     setDraftDescription(variable.description);
@@ -170,6 +181,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setCreating(false);
     setSelectedName(null);
     setError(null);
+    setEditingValue(false);
   };
   const save = async (): Promise<void> => {
     const name = normalizedVariableName(draftName);
@@ -206,19 +218,29 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       setPending(false);
     }
   };
-  const changeValue = async (operation: "add" | "subtract" | "set", amount: number): Promise<void> => {
-    if (selected === null) return;
+  const changeValue = async (operation: "add" | "subtract" | "set", amount: number): Promise<boolean> => {
+    if (selected === null || pending) return false;
     setPending(true);
     setError(null);
     try {
       const response = await changeChannelVariableValue(channelId, selected.name, operation, amount);
       setVariables((current) => current.map((variable) => variable.name === selected.name ? { ...variable, ...response.variable } : variable));
       setDraftSetValue(response.variable.value);
+      return true;
     } catch (caught) {
       setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError);
+      return false;
     } finally {
       setPending(false);
     }
+  };
+  const cancelValueEdit = (): void => {
+    setInlineValue(selected?.value ?? 0);
+    setEditingValue(false);
+  };
+  const applyValueEdit = async (): Promise<void> => {
+    if (typeof inlineValue !== "number" || !Number.isInteger(inlineValue) || inlineValue < CHANNEL_VARIABLE_MINIMUM_VALUE || inlineValue > CHANNEL_VARIABLE_MAXIMUM_VALUE) return;
+    if (await changeValue("set", inlineValue)) setEditingValue(false);
   };
   const beginUseInOverlay = async (): Promise<void> => {
     if (selected === null || !canManageContent || overlayPending) return;
@@ -292,13 +314,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   };
 
   const list = <section className="channel-variables-page config-section" aria-label={labels.list}>
-    <div className="section-heading">
-      <h1>{labels.title}</h1>
-      <span className="muted">{labels.count(variables.length, maximum)}</span>
-      <span title={createReason}>
-        <Button icon="add" iconOnly ariaLabel={labels.create} disabled={createDisabled} onClick={beginCreate} />
-      </span>
-    </div>
     <p className="muted channel-variables-limit-note" role="note">{labels.limitNote(maximum)}</p>
     {canManageContent && variables.length >= maximum ? <p className="muted" role="note">{labels.limitReached}</p> : null}
     {loading ? <p className="loading-line">{labels.loading}</p> : null}
@@ -338,46 +353,98 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       onClose={closeInspector}
     >
       <div className="channel-variable-editor">
-        <Field id="channel-variable-name" label={labels.name} hint={creating ? labels.nameHint : labels.renameHint} value={draftName} normalize={normalizedVariableName} maxLength={32} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManageContent || pending} onChange={setDraftName} {...(nameInvalid ? { error: labels.nameInvalid } : {})} />
-        {selected !== null && hasLegacyLinks && normalizedVariableName(draftName) !== selected.name
-          ? <p className="muted" role="note">{labels.legacyRenameWarning}</p> : null}
-        <Field id="channel-variable-description" label={labels.description} hint={labels.descriptionHint} value={draftDescription} maxLength={80} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManageContent || pending} onChange={setDraftDescription} />
-        <Switch layout="card" label={labels.resetOnStreamStart} description={labels.resetHint} checked={draftReset} disabled={!canManageContent || pending} {...(!canManageContent ? { lockedReason: labels.managementLocked } : {})} onChange={setDraftReset} />
-        {creating ? <NumberField id="channel-variable-initial-value" label={labels.value} hint={labels.valueHint} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} increaseLabel={labels.increase} decreaseLabel={labels.decrease} value={draftSetValue} disabled={!canManageContent || pending} onChange={setDraftSetValue} /> : null}
-        {selected === null ? null : <>
-          <div className="channel-variable-value-controls">
-            <strong>{labels.value}: {new Intl.NumberFormat(language).format(selected.value)}</strong>
-            <Button variant="neutral" disabled={pending} title={labels.decrease} onClick={() => { void changeValue("subtract", 1); }}>{labels.decrease}</Button>
-            <Button variant="neutral" disabled={pending} title={labels.increase} onClick={() => { void changeValue("add", 1); }}>{labels.increase}</Button>
-          </div>
-          <NumberField id="channel-variable-set-value" label={labels.setValue} hint={labels.valueHint} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} increaseLabel={labels.increaseDraftValue} decreaseLabel={labels.decreaseDraftValue} value={draftSetValue} disabled={pending} onChange={setDraftSetValue} />
-          <Button disabled={pending || draftSetValue === "" || !Number.isInteger(draftSetValue)} onClick={() => { if (typeof draftSetValue === "number") void changeValue("set", draftSetValue); }}>{labels.set}</Button>
-          <div className="channel-variable-usages"><h3>{labels.usages}</h3>
-            {usageNames.length === 0 ? <p className="muted">{labels.noUsages}</p> : <ul>{selectedUsages.map((usage, index) => (
-              <li key={`${usage.moduleId}-${usage.itemName}-${usage.kind}-${String(index)}`}>
-                {usage.moduleId === "text_commands"
-                  ? <Button variant="subtle" onClick={() => { onOpenCommand(usage.itemName.replace(/^!/u, "")); }}>{labels.usageLine(usage.moduleId, usage.itemName, usage.kind)}</Button>
-                  : usage.moduleId === "overlays" && usage.overlayId !== undefined
-                    ? <><Button variant="subtle" onClick={() => { onOpenOverlay?.(usage.overlayId as string); }}>{overlayUsageLabel(usage)}</Button>
-                      {usage.reconnect ? <><span className="muted"> · {labels.variableMissing}</span>
-                        <Button variant="neutral" disabled={!canManageContent || overlayPending}
-                          {...(!canManageContent ? { title: labels.managementLocked } : {})}
-                          onClick={() => { void reconnectElement(usage); }}>{labels.reconnect}</Button></> : null}</>
-                    : <span>{labels.usageLine(usage.moduleId, usage.itemName, usage.kind)}</span>}
-              </li>
-            ))}</ul>}
-          </div>
-          {selectedUsages.some((usage) => usage.kind === "action") ? <p className="muted" role="note">{labels.inUseReason(usageNames.filter((_, index) => selectedUsages[index]?.kind === "action").join(", "))}</p> : null}
-        </>}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {overlayError === null ? null : <p className="form-error" role="alert">{overlayError}</p>}
-        <div className="channel-variable-editor__actions">
-          <Button variant="primary" disabled={!canManageContent || pending || nameInvalid || draftSetValue === ""} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { void save(); }}>{labels.save}</Button>
-          <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.discard}</Button>
-        </div>
-        {selected === null ? null : <section className="config-section channel-variable-use-overlay" aria-label={labels.useInOverlay}>
-          <h3>{labels.useInOverlay}</h3>
-          <p className="muted">{labels.useOverlayHint}</p>
+        <InspectorSection title={labels.generalSection}>
+          <InspectorFieldRow label={labels.name} help={creating ? labels.nameHint : labels.renameHint}>
+            <Field id="channel-variable-name" label={labels.name} value={draftName} normalize={normalizedVariableName} maxLength={32} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManageContent || pending} onChange={setDraftName} {...(nameInvalid ? { error: labels.nameInvalid } : {})} />
+          </InspectorFieldRow>
+          {selected !== null && hasLegacyLinks && normalizedVariableName(draftName) !== selected.name
+            ? <p className="muted" role="note">{labels.legacyRenameWarning}</p> : null}
+          <InspectorFieldRow label={labels.description} help={labels.descriptionHint}>
+            <Field id="channel-variable-description" label={labels.description} value={draftDescription} maxLength={80} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManageContent || pending} onChange={setDraftDescription} />
+          </InspectorFieldRow>
+          <InspectorFieldRow label={labels.resetOnStreamStart} help={labels.resetHint}>
+            <Switch layout="inline" ariaLabel={labels.resetOnStreamStart} checked={draftReset} disabled={!canManageContent || pending} {...(!canManageContent ? { lockedReason: labels.managementLocked } : {})} onChange={setDraftReset} />
+          </InspectorFieldRow>
+          {creating ? <InspectorFieldRow label={labels.value} help={labels.valueHint}>
+            <NumberField id="channel-variable-initial-value" label={labels.value} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} increaseLabel={labels.increase} decreaseLabel={labels.decrease} value={draftSetValue} disabled={!canManageContent || pending} onChange={setDraftSetValue} />
+          </InspectorFieldRow> : null}
+        </InspectorSection>
+        {selected === null ? null : <>
+          <InspectorSection title={labels.valueSection}>
+            <InspectorFieldRow className="inspector-field-row--variable-value" label={labels.value} help={labels.valueHint}>
+              <div className="channel-variable-value-controls">
+                {editingValue ? <>
+                  <NumberField
+                    id="channel-variable-inline-value"
+                    label={labels.value}
+                    ariaLabel={labels.value}
+                    min={CHANNEL_VARIABLE_MINIMUM_VALUE}
+                    max={CHANNEL_VARIABLE_MAXIMUM_VALUE}
+                    value={inlineValue}
+                    disabled={pending}
+                    onChange={(value) => { setInlineValue(value); }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancelValueEdit(); }
+                      if (event.key === "Enter") { event.preventDefault(); void applyValueEdit(); }
+                    }}
+                  />
+                  <Button variant="primary" disabled={pending || typeof inlineValue !== "number" || !Number.isInteger(inlineValue) || inlineValue < CHANNEL_VARIABLE_MINIMUM_VALUE || inlineValue > CHANNEL_VARIABLE_MAXIMUM_VALUE} onClick={() => { void applyValueEdit(); }}>{labels.applyValue}</Button>
+                  <Button variant="subtle" disabled={pending} onClick={cancelValueEdit}>{labels.cancelValueEdit}</Button>
+                </> : <>
+                  <strong className="channel-variable-value-controls__value number" aria-live="polite">{new Intl.NumberFormat(language).format(selected.value)}</strong>
+                  <Button
+                    variant="neutral"
+                    disabled={pending || selected.value <= CHANNEL_VARIABLE_MINIMUM_VALUE}
+                    {...(selected.value <= CHANNEL_VARIABLE_MINIMUM_VALUE ? { title: labels.minimumValueReached } : {})}
+                    onClick={() => { void changeValue("subtract", 1); }}
+                  >{labels.decrease}</Button>
+                  <Button
+                    variant="neutral"
+                    disabled={pending || selected.value >= CHANNEL_VARIABLE_MAXIMUM_VALUE}
+                    {...(selected.value >= CHANNEL_VARIABLE_MAXIMUM_VALUE ? { title: labels.maximumValueReached } : {})}
+                    onClick={() => { void changeValue("add", 1); }}
+                  >{labels.increase}</Button>
+                  <Button
+                    icon="edit"
+                    iconOnly
+                    ariaLabel={labels.editValue}
+                    ref={editValueButtonRef}
+                    disabled={pending}
+                    title={labels.editValue}
+                    onClick={() => { setInlineValue(selected.value); setEditingValue(true); }}
+                  />
+                </>}
+              </div>
+            </InspectorFieldRow>
+          </InspectorSection>
+          <InspectorSection title={labels.usages}>
+            {usageNames.length === 0 ? <p className="muted">{labels.noUsages}</p> : <ul className="channel-variable-usages">{selectedUsages.map((usage, index) => (
+              <li key={`${usage.moduleId}-${usage.itemName}-${usage.kind}-${String(index)}`}>
+                <div className="channel-variable-usage-row">
+                  <div className="channel-variable-usage-row__target">
+                    {usage.moduleId === "text_commands"
+                      ? <Button className="channel-variable-usage-row__link" variant="subtle" onClick={() => { onOpenCommand(usage.itemName.replace(/^!/u, "")); }}>{`!${usage.itemName.replace(/^!/u, "")}`}</Button>
+                      : usage.moduleId === "overlays" && usage.overlayId !== undefined
+                        ? <Button className="channel-variable-usage-row__link" variant="subtle" onClick={() => { onOpenOverlay?.(usage.overlayId as string); }}>{overlayUsageLabel(usage)}</Button>
+                        : <span>{usage.itemName}</span>}
+                    <span className="channel-variable-usage-row__kind">{labels.usageKindLabel(usage.kind)}</span>
+                  </div>
+                  <span className="channel-variable-usage-row__module">{labels.usageModuleLabel(usage.moduleId)}</span>
+                </div>
+                {usage.reconnect ? <div className="channel-variable-usage-reconnect">
+                  <span className="muted">{labels.variableMissing}</span>
+                  <Button variant="neutral" disabled={!canManageContent || overlayPending}
+                    {...(!canManageContent ? { title: labels.managementLocked } : {})}
+                    onClick={() => { void reconnectElement(usage); }}>{labels.reconnect}</Button>
+                </div> : null}
+              </li>
+            ))}</ul>}
+          </InspectorSection>
+          {selectedUsages.some((usage) => usage.kind === "action") ? <p className="muted" role="note">{labels.inUseReason(usageNames.filter((_, index) => selectedUsages[index]?.kind === "action").join(", "))}</p> : null}
+        </>}
+        {selected === null ? null : <InspectorSection title={labels.useInOverlay} help={labels.useOverlayHint}>
           <Button variant="neutral" disabled={!canManageContent || overlayPending}
             {...(!canManageContent ? { title: labels.managementLocked } : {})}
             onClick={() => { void beginUseInOverlay(); }}>{labels.useInOverlay}</Button>
@@ -392,14 +459,24 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
               <Button variant="subtle" disabled={overlayPending} onClick={() => { setUseOverlayOpen(false); }}>{labels.discard}</Button>
             </div>
           </div> : null}
-        </section>}
-        {selected !== null ? <Button danger="subtle" disabled={!canManageContent || pending || selectedUsages.some((usage) => usage.kind === "action")} {...(!canManageContent ? { title: labels.managementLocked } : selectedUsages.some((usage) => usage.kind === "action") ? { title: labels.inUseReason(usageNames.join(", ")) } : {})} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button> : null}
+        </InspectorSection>}
+        {selected !== null ? <DangerSection title={labels.dangerSection}>
+          <p className="muted">{labels.deleteHint}</p>
+          <Button danger="subtle" disabled={!canManageContent || pending || selectedUsages.some((usage) => usage.kind === "action")} {...(!canManageContent ? { title: labels.managementLocked } : selectedUsages.some((usage) => usage.kind === "action") ? { title: labels.inUseReason(usageNames.join(", ")) } : {})} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>
+        </DangerSection> : null}
         {!canManageContent ? <p className="muted" role="note">{labels.managementLocked}</p> : null}
+        <InspectorActions>
+          <Button variant="primary" disabled={!canManageContent || pending || nameInvalid || draftSetValue === ""} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { void save(); }}>{labels.save}</Button>
+          <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.discard}</Button>
+        </InspectorActions>
       </div>
     </SubInspector>
   ) : null;
 
   return <>
+    <PageHeader kind="variable" title={labels.title} subtitle={labels.count(variables.length, maximum)} actions={<span title={createReason}>
+      <Button icon="add" iconOnly ariaLabel={labels.create} disabled={createDisabled} onClick={beginCreate} />
+    </span>} />
     <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
     <ConfirmDialog opened={confirmDelete} title={labels.deleteTitle(selected?.name ?? "")} description={labels.deleteDescription(selected?.name ?? "", usageNames.join(", "), selectedUsages.filter((usage) => usage.moduleId === "overlays" && usage.reconnect !== true).length)} confirmLabel={labels.deleteConfirm(selected?.name ?? "")} cancelLabel={labels.deleteCancel} onCancel={() => { setConfirmDelete(false); }} onConfirm={() => { void remove(); }} pending={pending} danger />
   </>;

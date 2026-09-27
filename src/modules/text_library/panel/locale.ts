@@ -6,6 +6,8 @@ export interface TextLibraryTexts {
   title: string;
   library: string;
   search: string;
+  activeFilters: string;
+  resetFilters: string;
   categoryFilter: string;
   gameFilter: string;
   allCategories: string;
@@ -16,13 +18,21 @@ export interface TextLibraryTexts {
   save: string;
   create: string;
   discard: string;
+  draftGuardTitle: string;
+  draftGuardDescription: string;
+  continueEditing: string;
+  discardAndSwitch: string;
+  saveAndSwitch: string;
+  close: string;
   delete: string;
   deleteConfirm: (name: string) => string;
+  deleteHint: string;
   name: string;
   nameHint: string;
   nameInvalid: string;
   nameExists: string;
   nameReserved: string;
+  generalSection: string;
   category: string;
   categories: string;
   categoryAdd: string;
@@ -48,6 +58,7 @@ export interface TextLibraryTexts {
   online: string;
   offline: string;
   gameCondition: string;
+  gameMatch: string;
   gameIs: string;
   gameIsNot: string;
   minimumTier: string;
@@ -102,6 +113,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     title: "Texte",
     library: "Textbausteine",
     search: "Textbausteine suchen",
+    activeFilters: "Aktive Filter:",
+    resetFilters: "Zurücksetzen",
     categoryFilter: "Kategorie",
     allCategories: "Alle Kategorien",
     gameFilter: "Spiel",
@@ -112,13 +125,21 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     save: "Änderungen speichern",
     create: "Anlegen",
     discard: "Verwerfen",
+    draftGuardTitle: "Ungespeicherte Änderungen",
+    draftGuardDescription: "Dieser Textbaustein enthält ungespeicherte Änderungen. Was möchtest du tun?",
+    continueEditing: "Weiter bearbeiten",
+    discardAndSwitch: "Verwerfen und wechseln",
+    saveAndSwitch: "Speichern und wechseln",
+    close: "Schließen",
     delete: "Textbaustein löschen",
     deleteConfirm: (name) => `Textbaustein „${name}“ dauerhaft löschen?`,
+    deleteHint: "Der Textbaustein wird dauerhaft entfernt.",
     name: "Name",
     nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; wird als {name} eingesetzt.",
     nameInvalid: "Nur a–z, 0–9 und Unterstriche; höchstens 32 Zeichen.",
     nameExists: "Dieser Name ist bereits vergeben.",
     nameReserved: "Dieser Name ist für eine Vorlagenvariable reserviert.",
+    generalSection: "Allgemein",
     category: "Kategorie",
     categories: "Kategorien und Zeitzone",
     categoryAdd: "Kategorie hinzufügen",
@@ -144,6 +165,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     online: "Live",
     offline: "Offline",
     gameCondition: "Aktuelles Spiel",
+    gameMatch: "Spielbedingung",
     gameIs: "ist",
     gameIsNot: "ist nicht",
     minimumTier: "Aufrufer mindestens",
@@ -219,6 +241,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     title: "Texts",
     library: "Text blocks",
     search: "Search text blocks",
+    activeFilters: "Active filters:",
+    resetFilters: "Reset",
     categoryFilter: "Category",
     allCategories: "All categories",
     gameFilter: "Game",
@@ -229,13 +253,21 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     save: "Save changes",
     create: "Create",
     discard: "Discard",
+    draftGuardTitle: "Unsaved changes",
+    draftGuardDescription: "This text block has unsaved changes. What would you like to do?",
+    continueEditing: "Continue editing",
+    discardAndSwitch: "Discard and switch",
+    saveAndSwitch: "Save and switch",
+    close: "Close",
     delete: "Delete text block",
     deleteConfirm: (name) => `Delete text block “${name}” permanently?`,
+    deleteHint: "This permanently removes the text block.",
     name: "Name",
     nameHint: "Lowercase letters, numbers, and underscores; insert it as {name}.",
     nameInvalid: "Use only a–z, 0–9, and underscores; up to 32 characters.",
     nameExists: "This name is already in use.",
     nameReserved: "This name is reserved for a template variable.",
+    generalSection: "General",
     category: "Category",
     categories: "Categories and time zone",
     categoryAdd: "Add category",
@@ -261,6 +293,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     online: "Live",
     offline: "Offline",
     gameCondition: "Current game",
+    gameMatch: "Game match",
     gameIs: "is",
     gameIsNot: "is not",
     minimumTier: "Caller role at least",

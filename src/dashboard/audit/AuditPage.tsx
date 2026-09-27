@@ -6,19 +6,19 @@ import { MODULES } from "../../modules/registry";
 import { auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
 import { ModuleHeading } from "../module-panels";
 import { formatEventDetail } from "../events/model";
-import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, Field, ListDetail, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import type { LoadState } from "../load-state";
 import {
   auditActorLabel,
   auditAreaForAction,
-  auditAreaIcon,
   auditDayGroups,
   auditDiffRows,
   auditDiffValueText,
   auditFilterIsActive,
   auditRowLabel,
+  auditSentenceText,
   emptyAuditFilter,
+  roleText,
   type AuditDiffRow,
 } from "./model";
 
@@ -53,8 +53,7 @@ const AuditFilterBar = ({
   const activeFilter: string[] = [];
   if (filters.area !== null) activeFilter.push(texts.audit.areaLabels[filters.area]);
   if (filters.person !== null) activeFilter.push(filters.person);
-  return <div className="event-filter" aria-label={texts.audit.filter}>
-    <div className="event-filter__controls">
+  return <FilterBar label={texts.audit.filter} className="event-filter audit-filter" summary={activeFilter.length === 0 ? undefined : <div className="form-actions"><p className="muted" aria-live="polite">{texts.audit.activeFilters} {activeFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(emptyAuditFilter); }}>{texts.audit.resetFilters}</button></div>}>
       <ChipGroup
         className="event-filter__chips"
         ariaLabel={texts.audit.area}
@@ -74,17 +73,7 @@ const AuditFilterBar = ({
         onChange={setPersonDraft}
         onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
       />
-    </div>
-    {activeFilter.length === 0 ? null : <div className="form-actions"><p className="muted" aria-live="polite">{texts.audit.activeFilters} {activeFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(emptyAuditFilter); }}>{texts.audit.resetFilters}</button></div>}
-  </div>;
-};
-
-const AuditRowLabel = ({ entry }: { entry: PanelAuditEntry }): ReactElement => {
-  const language = dashboardLanguage();
-  return <span className="event-label">
-    <Icon name={auditAreaIcon(auditAreaForAction(entry.action))} size={16} />
-    <span>{auditRowLabel(entry, language)}</span>
-  </span>;
+  </FilterBar>;
 };
 
 /** Field label + boolean words for a diff row: the module's own settings catalogue when it's loaded and matches, the generic fallback otherwise. */
@@ -92,12 +81,13 @@ const diffFieldTexts = (
   row: AuditDiffRow,
   moduleCatalog: SettingsEditorCatalog | null,
   texts: ReturnType<typeof dashboardTexts>,
+  language: ReturnType<typeof dashboardLanguage>,
 ): { label: string; boolWords: { on: string; off: string } } => {
   if (row.fromSettings && moduleCatalog !== null) {
     const field = moduleCatalog.fields[row.key];
-    return { label: field?.label ?? row.key, boolWords: { on: moduleCatalog.enabledLabel, off: moduleCatalog.disabledLabel } };
+    return { label: field?.label ?? auditFieldLabel(row.key, language), boolWords: { on: moduleCatalog.enabledLabel, off: moduleCatalog.disabledLabel } };
   }
-  return { label: auditFieldLabel(row.key), boolWords: { on: texts.audit.yes, off: texts.audit.no } };
+  return { label: auditFieldLabel(row.key, language), boolWords: { on: texts.audit.yes, off: texts.audit.no } };
 };
 
 const AuditDiffList = ({ rows, moduleCatalog, texts }: {
@@ -108,9 +98,12 @@ const AuditDiffList = ({ rows, moduleCatalog, texts }: {
   if (rows.length === 0) return null;
   return <dl className="properties audit-diff">
     {rows.map((row) => {
-      const { label, boolWords } = diffFieldTexts(row, moduleCatalog, texts);
-      const oldText = auditDiffValueText(row.oldValue, boolWords);
-      const newText = auditDiffValueText(row.newValue, boolWords);
+      const { label, boolWords } = diffFieldTexts(row, moduleCatalog, texts, dashboardLanguage());
+      // A member's role diff carries the raw role value (e.g. "operator"), the
+      // same one the feed sentence localizes via the role catalogue (#254 review).
+      const language = dashboardLanguage();
+      const oldText = row.key === "role" ? roleText(row.oldValue, language) ?? auditDiffValueText(row.oldValue, boolWords) : auditDiffValueText(row.oldValue, boolWords);
+      const newText = row.key === "role" ? roleText(row.newValue, language) ?? auditDiffValueText(row.newValue, boolWords) : auditDiffValueText(row.newValue, boolWords);
       return <div key={row.key} className="audit-diff__row" data-kind={row.kind}>
         <dt>{label}</dt>
         <dd className="audit-diff__value">
@@ -155,13 +148,14 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
   const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>();
   const selectedAudit = auditState.data?.entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
   const moduleCatalog = useModuleFieldCatalog(selectedAudit);
+  const selectedDiffRows = selectedAudit === null ? [] : auditDiffRows(selectedAudit.before, selectedAudit.after);
   const entries = auditState.data?.entries ?? [];
   const dayGroups = auditDayGroups(entries, formatDate);
   const filterActive = auditFilterIsActive(filters);
   return (
     <>
       <ModuleHeading
-        kind="system"
+        kind="audit"
         title={texts.audit.title}
         subtitle={auditState.data === null ? "" : <><span className="number">{formatNumber(auditState.data.entries.length)}</span> {texts.audit.entries}</>}
       />
@@ -182,23 +176,33 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
                 {dayGroups.map((day) => (
                   <section key={day.key} className="event-day">
                     <h3 className="event-day__heading">{day.label}</h3>
-                    <table className="table audit-table">
-                      <thead><tr><th scope="col">{texts.audit.time}</th><th scope="col">{texts.audit.action}</th><th scope="col">{texts.audit.who}</th></tr></thead>
-                      <tbody>{day.entries.map((entry) => (
-                        <tr
+                    <div className="audit-sentence-list">
+                      {day.entries.map((entry) => {
+                        const sentence = auditSentenceText(entry, dashboardLanguage());
+                        const area = texts.audit.areaLabels[auditAreaForAction(entry.action)];
+                        const time = formatClockTime(entry.createdAt);
+                        const accessibleName = [
+                          sentence,
+                          area,
+                          time,
+                        ].join(" ");
+                        return <button
                           key={entry.auditId}
+                          type="button"
+                          className="audit-sentence-row"
                           ref={auditRowRef(entry.auditId)}
-                          tabIndex={0}
-                          aria-selected={selectedAuditId === entry.auditId}
+                          aria-pressed={selectedAuditId === entry.auditId}
+                          aria-label={accessibleName}
                           onClick={() => { selectAudit(entry.auditId); }}
-                          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}
                         >
-                          <td className="mono"><time dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time></td>
-                          <th scope="row"><AuditRowLabel entry={entry} /></th>
-                          <td title={entry.actorUserId}>{auditActorLabel(entry)}</td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
+                          <span className="audit-sentence-row__sentence"><AuditSentence sentence={sentence} /></span>
+                          <span className="audit-sentence-row__meta">
+                            <Badge>{area}</Badge>
+                            <time className="mono" dateTime={entry.createdAt} title={entry.createdAt}>{time}</time>
+                          </span>
+                        </button>;
+                      })}
+                    </div>
                   </section>
                 ))}
               </div>
@@ -208,8 +212,12 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
         }
         inspector={selectedAudit === null ? null : (
           <SubInspector ariaLabel={texts.audit.changeData} title={auditRowLabel(selectedAudit, dashboardLanguage())} identifier={selectedAudit.auditId} closeLabel={dashboardCommonTexts().close} onClose={closeAudit}>
-            <dl className="properties"><div><dt>{texts.audit.who}</dt><dd title={selectedAudit.actorUserId}>{auditActorLabel(selectedAudit)}</dd></div></dl>
-            <AuditDiffList rows={auditDiffRows(selectedAudit.before, selectedAudit.after)} moduleCatalog={moduleCatalog} texts={texts} />
+            <InspectorSection title={texts.audit.who}>
+              <dl className="properties"><div><dt>{texts.audit.who}</dt><dd title={selectedAudit.actorUserId}>{auditActorLabel(selectedAudit)}</dd></div></dl>
+            </InspectorSection>
+            {selectedDiffRows.length === 0 ? null : <InspectorSection title={texts.audit.changesHeading}>
+              <AuditDiffList rows={selectedDiffRows} moduleCatalog={moduleCatalog} texts={texts} />
+            </InspectorSection>}
             <details>
               <summary>{texts.events.technicalDetails}</summary>
               <div className="inspector-columns">

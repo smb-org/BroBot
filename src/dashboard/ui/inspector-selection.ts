@@ -3,21 +3,21 @@ import { useCallback, useRef, useState, type RefCallback } from "react";
 interface InspectorSelection<Key extends string> {
   selectedKey: Key | null;
   select: (key: Key) => void;
-  rowRef: (key: Key) => RefCallback<HTMLTableRowElement>;
+  rowRef: (key: Key) => RefCallback<HTMLElement>;
   close: () => void;
 }
 
 export const useInspectorSelection = <Key extends string>(): InspectorSelection<Key> => {
   const [selectedKey, setSelectedKey] = useState<Key | null>(null);
   const selectedKeyRef = useRef<Key | null>(null);
-  const rowRefs = useRef(new Map<Key, HTMLTableRowElement>());
+  const rowRefs = useRef(new Map<Key, HTMLElement>());
 
   const select = useCallback((key: Key): void => {
     selectedKeyRef.current = key;
     setSelectedKey(key);
   }, []);
 
-  const rowRef = useCallback((key: Key): RefCallback<HTMLTableRowElement> => (row: HTMLTableRowElement | null): void => {
+  const rowRef = useCallback((key: Key): RefCallback<HTMLElement> => (row: HTMLElement | null): void => {
     if (row === null) {
       rowRefs.current.delete(key);
     } else {

@@ -53,7 +53,9 @@ describe("audit actions", () => {
   it("composes module settings labels from the bilingual module catalogue", () => {
     expect(auditActionLabel("raid.settings_changed", "de")).toBe("Einstellungen geändert: Shoutout");
     expect(auditActionLabel("raid.settings_changed", "en")).toBe("Settings changed: Shoutout");
-    expect(auditActionLabel("__proto__.settings_changed", "de")).toBe("__proto__.settings_changed");
+    expect(auditActionLabel("__proto__.settings_changed", "de")).toBe("Unbekannte Aktion");
+    expect(auditActionLabel("beta-erster", "en")).toBe("Unknown action");
+    expect(auditActionLabel("future.created", "en")).toBe("Unknown action");
   });
 
   it("uses the audit writer action type as the writer call-site guard", () => {

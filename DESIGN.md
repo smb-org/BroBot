@@ -257,7 +257,7 @@ components:
     padding: "18px 16px"
   inspektor-spalte:
     width: "592px"
-    description: "Fließtextfeld 40 rem plus 2 × 16 px Innenabstand; Inspektor neben seiner Liste ab 1360 px Fensterbreite"
+    description: "Fließtextfeld 40 rem plus 2 × 16 px Innenabstand; Inspektor neben seiner Liste ab 1280 px Fensterbreite"
   eigenschaft:
     backgroundColor: "transparent"
     textColor: "{colors.text}"
@@ -330,9 +330,9 @@ jeder Breite ein Band fester 64×64-Tasten.
 
 Seit Phase 2 gilt das Gerät auf allen fünf Seiten: Die Übersicht zeigt Kanäle
 als Tasten, Kanal und System sprechen in Zustandszeilen (LED + Wort + Detail +
-Aktion), Mitglieder, Audit und Ereignisse liegen in einer gemeinsamen Tabelle,
-deren gewählte Zeile ihren Sub-Inspector öffnet — neben der Tabelle, wo Platz
-ist, sonst darunter. Die alte
+Aktion), Mitglieder und Ereignisse liegen in einer gemeinsamen Tabelle; die
+Audit-Seite zeigt Satzzeilen mit Bereich und Uhrzeit. Gewählte Zeilen öffnen
+ihren Sub-Inspector — neben der Liste, wo Platz ist, sonst darunter. Die alte
 Welt (232-px-Seitenleiste, Zustandskarten, Versalien-Plaketten) ist aus dem
 Stylesheet entfernt.
 
@@ -434,7 +434,7 @@ ablesbar, nie an der Farbe allein.
 - **Feldname** (500, 12 px, Text-2): Beschriftung über Feldern; Hinweis darunter 12 px, 400, Text-3. Auch Zustandsdetail, Eigenschaftsnamen und Login-Hinweis stehen in 12 px.
 - **LED-Wort** (600, 12 px): das Wort neben dem LED-Punkt, in Zustandsfarbe (bei Rot in Fehler-Text); auch das Wort im Art-Chip der Ereigniszeile, dort in Familienfarbe.
 - **Schienenetikett** (400, 11 px, 1.1, Ellipse): Wort unter dem Symbol in der 64er-Taste; Modul-ID unter dem Modultitel; Sperrgrund unter dem Schalter; Vorher/Nachher-Kopf im Sub-Inspector (600, Text-3).
-- **Spaltenkopf** (600, 10 px, 0.06 em, Versalien, Text-3, auf Tint-2): einziger Versalien-Einsatz im System.
+- **Spaltenkopf** (600, 11 px, Text-3, auf Tint-2): ruhige Satzschreibung ohne Versalien und ohne Laufweite.
 - **Zahl** (Plex Mono 400, 12 px, Tabellenziffern): Twitch-ID in der Kopfleiste, Abkühlzeit, Befehlstoken `!name`, Meta-Zeile „zuletzt“, Zeitstempel und Nutzer-IDs in Audit und Ereignissen, Audit-Aktion, Audit-/Ereignis-ID, rohe Ereignis- und Modulcodes, Zähler neben Bereichstiteln, der Zahl-Chip der Ereigniszeile.
 
 ### Named Rules
@@ -448,8 +448,8 @@ Das Gerüst ist ein Gerät mit festen Maßen:
 
 - **Kopfleiste** 56 px, Rail-Farbe, Haarlinie unten, Innenabstand 0 20 px, Spaltenraster `auto minmax(180px,1fr) auto auto auto`: Marke (18-px-Quadrat mit 2 px Marke-Text-Rand, 6 px Radius, Wortmarke 15 px/700), Kanalwahl (Select bis 280 px, 44 px hoch) mit Twitch-ID in Mono, LED mit Wort, Lebenszeichen („aktualisiert vor …“, Text-3, 12 px), Abmelden. Auf der Modulseite kommt der Hauptschalter als sechste Spalte hinzu.
 - **Schiene** 80 px breit, Rail-Farbe, Haarlinie rechts, Innenabstand 12 px 8 px. Enthält senkrecht gestapelte 64×64-Tasten mit 8 px Lücke, zentriert. Zustandspunkt 7 px oben rechts nur für Warnung/Fehler.
-- **Mitte** ist auf die Seitenbreite `--page-width` 1576 px plus 32 px Seitenabstand begrenzt (`min(1640px, 100%)`), Innenabstand 24 px 32 px 40 px; der Modul-Arbeitsbereich hebt das auf und setzt 28 px 32 px 40 px. Die Seitenbreite ist 960 + 24 + 592: ein Block, eine Lücke, ein Inspektor. Jede Seite beginnt mit dem Seitenkopf (56-px-Symbolkachel + Titel + Unterzeile + optionale Aktionen rechts, Haarlinie unten über die ganze Seitenbreite, 24 px Abstand). Jeder Block darunter — Tastenraster, Zustandsliste, Eigenschaftenliste, Tabelle, Formular — bleibt auf `--dashboard-content-width` 960 px begrenzt: Das ist seine Lesebreite, nicht die Seite. 960 px war nie eine Eigenschaft der Seite, sondern immer die Breite, bei der eine Tabellenzeile, ein Formular oder eine Zustandszeile noch in einem Blick liegt; deshalb wird kein Block breiter, nur weil die Seite es ist. Das Tastenraster ist `repeat(4, 132px)` mit 12 px Lücke, linksbündig, nicht fluid. Zustandszeilen stapeln mit 8 px Lücke. Bereiche (`content-section`) tragen eine Bereichsüberschrift mit Haarlinie.
-- **Inspektorbereich** (`.inspector-section`): der Bereich, in dem eine Tabelle und der Inspektor ihrer gewählten Zeile liegen. Zwei direkte Kinder, Liste zuerst. Ab 1360 px Fensterbreite ist er ein Raster `minmax(600px, 960px) 592px` mit 24 px Lücke, `align-items: start`: links die Liste, rechts der Inspektor. Die 592 px sind hergeleitet, nicht gewählt: das Fließtextfeld `config-field--wide` (40 rem = 560 px) plus 2 × 16 px Innenabstand des Inspektors — die Spalte ist genau so breit, dass das breiteste Formularfeld hineinpasst. Die Schwelle 1360 px ist ebenso hergeleitet: 1360 − 80 (Schiene) − 64 (Seitenabstand) = 1216 = 600 (Tabellenminimum) + 24 + 592. Zwischen 1360 und 1720 px wächst nur die Listenspalte von 600 auf 960; darüber steht sie fest. Unter 1360 px ist der Bereich eine Spalte mit 16 px Lücke: der Inspektor unter der Liste, im Fluss — genau das heutige Verhalten, es gibt keine dritte Form. **Die Tabelle springt beim Wählen nicht:** Sie behält in beiden Formen ihre Breite, beim Öffnen wie beim Schließen des Inspektors bricht keine Spalte um, keine Ellipse wechselt, keine Zeile wandert unter dem Zeiger. In der Spalte haftet der Inspektor 16 px unter dem oberen Fensterrand (`sticky`) und scrollt innen, wenn er höher als das Fenster ist — sonst stünde das Detail einer tiefen Zeile außer Sicht. Die Spalte blendet nicht ein und schiebt nicht: Sie ist da oder nicht.
+- **Mitte** ist auf `--page-width` (1576 px) plus Innenabstand begrenzt. Jede Seite beginnt mit `PageHeader`: 56-px-Symbolkachel, Titel, Anzahl oder Beschreibung und optionale Hauptaktion rechts; die Haarlinie endet an der Inhaltsbreite. Blöcke bleiben normalerweise auf `--dashboard-content-width` (960 px) begrenzt. Ist ein Zeileninspektor geöffnet, wächst `ListDetail` auf die verfügbare Seitenbreite und hält Liste und Inspector in einem gemeinsamen Raster. Das Tastenraster bleibt `repeat(4, 132px)` mit 12 px Lücke, linksbündig. Zustandszeilen stapeln mit 8 px Lücke. Bereiche (`content-section`) tragen eine Bereichsüberschrift mit Haarlinie.
+- **Listen-Inspektor** (`ListDetail`): Die Liste steht zuerst, der ausgewählten Zeile gehört der zweite Bereich. Ab 1280 px ist das Raster `minmax(0, 1fr) 592px` mit 24 px Lücke; der Inspektor haftet 16 px unter dem oberen Fensterrand und scrollt innen. Unter 1280 px öffnet sich der Inspektor über dem Listenbereich, rechtsbündig und bis zu 480 px breit; auf schmalen Viewports füllt er die Breite. Der Hintergrund fängt den Klick zum Schließen ab. Beide Formen nutzen denselben Inspektor, ohne die Seite horizontal zu verbreitern.
 - **Kein rechtes Dock.** Es gibt keine dauerhafte rechte Spalte der Seite, die leer wartet. Der Inspektor gehört zu seiner Tabelle, nicht zur Seite; ohne gewählte Zeile bleibt die Spalte leer, auch wenn der Bereich ein Anlegen-Formular hat — das öffnet erst über den Plus-Knopf an der Bereichsüberschrift und belegt dann dieselbe Fläche wie der Inspektor, nie beide zugleich (siehe Sub-Inspector).
 - **Zustandszeile** ist ein Vier-Spalten-Raster `240px auto minmax(0,1fr) auto`: Etikett in fester Spalte (`--state-label-width`), LED mit Wort, Detail einzeilig mit Ellipse, Aktion rechtsbündig. Mindesthöhe 58 px, Innenabstand 16 px.
 - **Eigenschaftenliste** (`dl.properties`) ist zweispaltig; jedes Paar ist selbst ein Raster `1fr 1.3fr` mit 16 px Lücke, 10 px senkrechtem Abstand und Haarlinie unten. Werte sind einzeilig mit Ellipse.
@@ -458,9 +458,9 @@ Das Gerüst ist ein Gerät mit festen Maßen:
 
 **Schmal (≤ 768 px):** Kopfleiste zweizeilig (40 px + 40 px; mit Hauptschalter dreizeilig): Marke, LED, Abmelden oben; Kanalwahl über die volle Breite darunter. Das Lebenszeichen verschwindet. Die Schiene wird zu einem waagerechten, scrollbaren Band mit denselben 64×64-Tasten (Lücke 6 px). Das Raster wird zweispaltig, die Taste bleibt 132×132. Der Seitenkopf verliert seine dritte Spalte; Aktionen rutschen linksbündig in eine eigene Zeile. Die Eigenschaftenliste wird einspaltig; `form-row` und Ergebniskasten stapeln. Unter 420 px schrumpft nur die Rasterlücke auf 8 px.
 
-**Eng (≤ 639 px):** Die Zustandszeile bricht um: Etikett über die volle Breite, darunter LED und mehrzeiliges Detail, Aktion linksbündig in eigener Zeile. Der Sub-Inspector zeigt Vorher und Nachher untereinander. Tabellen geben ihre Mindestbreite von 600 px auf und verstecken die dritte Spalte (Audit „Wer“, Ereignis „Modul“). Eng gilt je Block, nicht nur je Fenster: Der Inspektor ist ein benannter Container (`inspector`), und seine Inhalte — Vorher/Nachher, Zustandszeile, Tabelle, Eigenschaftenliste — wenden dieselben Eng-Regeln ab 639 px *Inspektorbreite* an. In der 592-px-Spalte sind sie deshalb immer eng: Vorher und Nachher stehen untereinander, eine Zustandszeile bricht um, eine Tabelle gibt ihr 600-px-Minimum auf.
+**Eng (≤ 639 px):** Die Zustandszeile bricht um: Etikett über die volle Breite, darunter LED und mehrzeiliges Detail, Aktion linksbündig in eigener Zeile. Der Sub-Inspector zeigt Vorher und Nachher untereinander. Tabellen geben ihre Mindestbreite von 600 px auf und verstecken die Ereignisspalte „Modul“. Audit-Zeilen halten Satz, Bereich und Uhrzeit sichtbar; nur die Filterzeile scrollt horizontal. Eng gilt je Block, nicht nur je Fenster: Der Inspektor ist ein benannter Container (`inspector`), und seine Inhalte — Vorher/Nachher, Zustandszeile, Tabelle, Eigenschaftenliste — wenden dieselben Eng-Regeln ab 639 px *Inspektorbreite* an. In der 592-px-Spalte sind sie deshalb immer eng: Vorher und Nachher stehen untereinander, eine Zustandszeile bricht um, eine Tabelle gibt ihr 600-px-Minimum auf.
 
-**Container ≤ 640 px (Befehlstabelle):** Die Spalte „zuletzt“ verschwindet; der Wert wandert als Mono-Metazeile in den Sub-Inspector der gewählten Zeile. Container ist die Listenspalte (`inspector-section__list`, named `list`), nicht das Panel — sonst blendet das Panel bei 1216 px die Spalte ein, während die Liste nur 600 px hat.
+**Container ≤ 640 px (Befehlstabelle):** Die Spalte „zuletzt“ verschwindet; der Wert wandert als Mono-Metazeile in den Sub-Inspector der gewählten Zeile. Container ist die Listenspalte (`.list-detail__list`), nicht das Panel.
 
 **Die Trefferflächen-Regel.** Alleinstehende Bedienelemente (Knopf, Feld, Select, Schalter, Brotkrumen-Link) sind mindestens 44 px hoch. In dichten Tabellenzeilen gelten 34 px — auch für Select und Knopf in der Aktionsspalte —, weil Dichte dort ein Feature ist. Beides liegt über der AA-Untergrenze von 24 px.
 
@@ -562,12 +562,10 @@ Textarea, Select und Hinweistext die Welt erben; ohne diese Hülle erscheint sie
 unformatiert. Jeder fachliche Abschnitt bekommt eine Überschrift und eine
 Haarlinie über `.config-section` und `.section-heading`. Die Fläche bleibt im
 Fluss: keine Container-Karten. Die Auswahl einer Tabellenzeile öffnet den
-Bearbeiten-Teil auf der Inspektor-Fläche (`sub-inspector`) — neben der Tabelle,
-wo die Seite breit genug ist, sonst darunter; die Tabelle und ihr Inspektor
-liegen dafür als zwei direkte Kinder in einem `inspector-section`.
+Bearbeiten-Teil auf der Inspektor-Fläche (`sub-inspector`) in `ListDetail`.
 
-### Seitenkopf (`ModuleHeading`)
-Auf jeder Seite dasselbe Bauteil: Raster `56px minmax(0,1fr) auto`, 16 px Lücke, min. 56 px hoch, Haarlinie unten, 24 px Abstand darunter, Breite `min(960px, 100%)`. Links die 56-px-Symbolkachel (Tint-1, Marke-Text, Glyph 28 px) mit dem Seitensymbol aus der Schienenfamilie; Mitte Titel 22 px und Unterzeile 13 px Text-2 (Rolle, Anzahl mit Zahl in Mono, „nur lesend“, Beschreibung max. 70 ch); rechts optional Aktionen (`header-action`: Knopf, darunter rechtsbündig 11.5-px-Zeitangabe, Sperrgrund 11 px, Fehlerzeile). Auf der Modulseite steht davor die Brotkrume (44 px Trefferhöhe, 8 px Abstand).
+### Seitenkopf (`PageHeader`)
+Jede Seite verwendet `PageHeader`: Raster `56px minmax(0,1fr) auto`, 16 px Lücke, min. 56 px hoch, Haarlinie unten, 24 px Abstand darunter. Links die 56-px-Symbolkachel (Tint-1, Marke-Text, Glyph 28 px) mit einem eigenen Symbol je Seite und Modul; Mitte Titel 22 px und Unterzeile 13 px Text-2 (Rolle, Anzahl mit Zahl in Mono, „nur lesend“, Beschreibung); rechts optionale Aktionen. Ohne geöffnete Listen-Inspektor-Fläche ist der Kopf höchstens 960 px breit. Mit offener Fläche richtet sich seine Haarlinie an der vollen Liste-plus-Inspektor-Fläche aus und endet dort. Auf der Modulseite steht davor die Brotkrume.
 
 ### Zustandszeile (`ZustandZeile`)
 Ein `article` mit `aria-label`, Raster `240px auto minmax(0,1fr) auto`, 12 px Lücke, min. 58 px, 16 px Innenabstand, {rounded.control}, Haarlinie, transparent. Etikett 13 px/600 Text; LED mit Wort (Ton `healthy`→grün, `warning`→bernstein, `error`→rot, `neutral`→aus); Detail 12 px Text-2 einzeilig mit Ellipse; Aktion rechtsbündig (Knopf, Link oder Sperrgrund).
@@ -580,14 +578,14 @@ Zeilen stapeln in `state-list` mit 8 px Lücke; Kanal und System verwenden diese
 Lesende Werte, die kein Zustand sind (Gründe, Abo-ID, Gültig-bis): zweispaltig, Paar als Raster `1fr 1.3fr`, Name 12 px Text-3, Wert 13 px Text (Zeitstempel und IDs in Mono), 10 px senkrecht, Haarlinie oben und je Paar unten, Leerwert „—“. Unter 768 px einspaltig. Auch der Ereignis-Sub-Inspector nutzt sie für Code, Modul, Zeitstempel.
 
 ### Tabelle (`.table`)
-Allgemeine Bauform für Mitglieder, Audit, Ereignisse und Befehle (ersetzt `command-table`). `table-layout: fixed`, min. 600 px in scrollbarer `table-wrap`, Zellen 34 px hoch, 8 px 10 px, 12 px, Haarlinie unten (letzte Zeile ohne). Kopf 30 px, Spaltenkopf-Stil auf Tint-2. Zeilenkopf (`th scope="row"`) in Text/600; nur die Befehlstabelle färbt ihn Marke-Text, weil das Token ein Link auf den Sub-Inspector ist. Spaltenbreiten je Tabelle in Prozent (`audit-table` 22/48/30, `event-table` 22/40/18/20; Befehle 116 px/auto/64/88).
-- **Wählbare Zeilen** tragen `tabIndex={0}` und `aria-selected`; nur `tr[tabindex]` bekommt Zeiger und Hover (Taste). Gewählt: Tint-1 mit 2 px Markenkante links; Fokus 2 px Marke-Text innen. Enter/Leertaste wählen. Ein Nachladen hebt die Auswahl auf.
-- **Aktionsspalte** `table__action`: rechtsbündig, Kopf mit `sr-only`-Text; Select und Knopf darin 34 px.
+Allgemeine Bauform für Mitglieder, Ereignisse und Befehle. Spalten richten sich nach ihrem Inhalt (`table-layout: auto`); kurze Werte bleiben vollständig lesbar und lange Texte dürfen umbrechen. Bei schmalen Listen darf die `table-wrap` horizontal scrollen, ohne die Seite zu verbreitern. Zellen sind 34 px hoch, 8 px 10 px, 12 px, Haarlinie unten (letzte Zeile ohne). Kopf 30 px, Spaltenkopf-Stil auf Tint-2, Satzschreibung ohne Versalien. Zeilenkopf (`th scope="row"`) in Text/600.
+- **Wählbare Tabellenzeilen** tragen `tabIndex={0}` und `aria-selected`; nur `tr[tabindex]` bekommt Zeiger und Hover (Taste). Gewählt: Tint-1 mit 2 px Markenkante links; Fokus 2 px Marke-Text innen. Enter/Leertaste wählen. Ein Nachladen hebt die Auswahl auf. Audit-Satzzeilen sind Buttons mit `aria-pressed` und behalten Bereich und Uhrzeit auch auf schmalen Viewports sichtbar.
+- **Bearbeitung** passiert im Inspektor; die Tabelle zeigt den Status als Badge statt eines Inline-Selects.
 - **Mitgliederzeile:** `avatar-row` mit 28-px-Avatar ({rounded.control}, Platzhalter Taste mit Linie-Stark-Rand), Name in Text und Login-Hinweis 12 px Text-3 darunter (als Profil-Link in Marke-Text).
 - **Nachladen:** Container `.stale` (55 %), darunter der Knopf „Ältere Einträge laden“.
 
 ### Sub-Inspector
-Die Fläche für die gewählte Zeile einer Tabelle: 18 px 16 px Innenabstand, Haarlinie, {rounded.control}, Fläche Inspektor. Er ist das zweite Kind eines `inspector-section`; seine Position bestimmt der Bereich, nicht er selbst: ab 1360 px Fensterbreite rechts neben der Liste in einer 592-px-Spalte (`--inspector-width`, das 40-rem-Fließtextfeld plus Innenabstand), haftend 16 px unter dem Fensterrand mit innerem Scrollen; darunter im Fluss unter der Liste mit 16 px Abstand, `min(960px, 100%)` breit.
+Die Fläche für die gewählte Zeile einer Tabelle: 18 px 16 px Innenabstand, Haarlinie, {rounded.control}, Fläche Inspektor. Sie liegt im zweiten Bereich von `ListDetail`; ab 1280 px Fensterbreite steht sie rechts neben der Liste in einer 592-px-Spalte (`--inspector-width`), haftend 16 px unter dem Fensterrand mit innerem Scrollen. Darunter liegt sie als schließbare Fläche über der Liste.
 - **Kopf** `inspector-section__heading`: Titel 13 px/600 links, Datensatz-ID in Mono Text-2, rechts die Schließen-Taste — 44 × 44, still (`quiet`), Symbol × aus der Familie (20 px), `aria-label` „Schließen“. Schließen hebt die Auswahl auf (`aria-selected="false"`) und gibt den Fokus an die Zeile zurück; Escape innerhalb des Inspektors tut dasselbe. Das ist die einzige Fokusregel: Beim Öffnen bleibt der Fokus auf der Zeile, damit Tastaturbedienung weiter durch die Liste laufen kann.
 - **Auswahl bleibt** beim Nachladen bestehen, solange die Zeile noch existiert; verschwindet die Zeile, schließt der Inspektor. Nie schließt er von selbst, während der Bediener liest.
 - **Inhalt ist eng:** Der Inspektor ist Container `inspector`; seine Inhalte gelten ab 639 px Inspektorbreite als eng (siehe Layout). In der Spalte heißt das immer: Vorher und Nachher untereinander, Eigenschaftenliste einspaltig, Zustandszeile umgebrochen, Tabellen ohne Mindestbreite.
@@ -600,6 +598,15 @@ Die Fläche für die gewählte Zeile einer Tabelle: 18 px 16 px Innenabstand, Ha
 - **Plus-Knopf** öffnet das Anlegen-Formular eines Bereichs (Befehl anlegen, Kanal freigeben), sofern es eines gibt: rechts in der `section-heading` der Liste, wo sonst die Anzahl steht — 44 × 44, still (`quiet`), Symbol + aus der Familie (20 px), `aria-label` nennt die Handlung. Ein Klick lässt das Formular in derselben Fläche wie der Inspektor erscheinen, mit derselben Kopfzeile und derselben Schließen-Taste, und es reagiert auf Escape wie er. Das ist neu gegenüber der alten Fassung: Vorher war das Formular der Ruhezustand, da hätte Schließen ins Leere geführt; jetzt hat man es aktiv geöffnet und muss es ebenso aktiv wieder loswerden können. Zeile wählen und Formular öffnen schließen einander aus, ohne Übergang und ohne Einblenden — die Spalte trägt immer nur eines von beidem. Ein Bereich hat so nie zwei primäre Knöpfe zugleich.
 - **Scope-Listen sind keine Inspektoren.** Eine Liste fehlender Berechtigungen hat keine gewählte Zeile; sie ist ein Bereich im Fluss (`content-section` mit `section-heading` und `scope-liste`) und trägt die Klasse `sub-inspector` nicht. Wer die Inspektor-Fläche für einen Block ohne Auswahl leiht, baut ein Dock.
 - **Mitglied:** Ergebniskasten (`inspector-result`, Taste, {rounded.container}, Avatar-Zeile + Rollenwahl + Knopf) und Bestätigungskasten (`inspector-confirmation`, 14-px-Titel) sind kein Sub-Inspector; beide bleiben im Fluss unter dem Suchformular.
+
+### Filterleiste (`FilterBar`)
+Audit und Ereignisse verwenden dieselbe Leiste: Filterchips, Auswahl und Personensuche stehen in einer 44-px-Zeile. Auf kleinen Viewports scrollt nur diese Zeile horizontal; die Seite selbst bleibt in der Viewportbreite. Aktive Filter und Zurücksetzen stehen in einer eigenen Zeile darunter.
+
+### Inspektorabschnitte und Felder
+`InspectorSection` trennt Inhalte mit einer Haarlinie und einer kurzen Überschrift. `InspectorFieldRow` stellt das Feldlabel links und ein über die Kontrollspalte gefülltes Feld rechts dar; Hilfetext erscheint über das fokussierbare Info-Symbol mit 44 px Trefferfläche. `InspectorActions` bleibt am unteren Rand des scrollenden Inspektors angeheftet. Zerstörende Handlungen stehen gemeinsam in `DangerSection` mit Gefahrentitel.
+
+### Audit-Satz und Badge
+Audit-Zeilen zeigen eine knappe Satzvorlage mit Akteur, Handlung und geänderten Werten als Chips; Bereich und Uhrzeit stehen rechts. Vorher-/Nachher-Werte verwenden Pfeil und Mono-Chips. Der Detail-Inspektor behält den vollständigen Diff. `Badge` stellt kurze Status- und Rollenwerte ohne Inline-Bedienelement dar.
 
 ### Brotkrume
 13 px, Text-2; Link Marke-Text mit 44 px Trefferhöhe, Hover Text mit Unterstrich; Trenner Text-4; aktuelles Glied 600 in Marke-Text mit 20-px-Glyph davor. Nur auf der Modulseite.
@@ -625,7 +632,7 @@ Größen: 16 px führend in Knöpfen mit Wort, in Feldern und Hinweiszeilen; 20 
 - **Do** jeden Block auf 960 px begrenzen und Bereiche mit Haarlinie plus Abstand trennen; nur Liste und Inspektor stehen nebeneinander.
 - **Do** den Sperr- oder Fehlergrund an die Wirkung schreiben (Sperrgrund unter dem Schalter oder Knopf, Hinweis neben dem gedeckten Knopf).
 - **Do** veraltete Werte mit 55 % Deckkraft stehen lassen; nur beim ersten Laden eine Ladezeile.
-- **Do** wählbare Tabellenzeilen mit `tabIndex` und `aria-selected` bauen, Liste und Inspektor als zwei Kinder eines `inspector-section` anlegen und jeden Inspektor wie auch ein per Plus-Knopf geöffnetes Anlegen-Formular mit Schließen-Taste und Escape wieder schließbar machen.
+- **Do** wählbare Tabellenzeilen mit `tabIndex` und `aria-selected` bauen, Liste und Inspektor über `ListDetail` anordnen und jeden Inspektor wie auch ein per Plus-Knopf geöffnetes Anlegen-Formular mit Schließen-Taste und Escape wieder schließbar machen.
 - **Do** Panel-Ansichten in `.module-stack` und Konfigurationsabschnitte mit Überschrift, Haarlinie und einer benannten Feldbreite bauen.
 - **Do** Löschhandlungen dauerhaft als `danger` markieren und mit `inspector-confirmation` bestätigen lassen.
 
@@ -646,6 +653,6 @@ Größen: 16 px führend in Knöpfen mit Wort, in Feldern und Hinweiszeilen; 20 
 - **Don't** eine Panel-Ansicht ohne `.module-stack` oder eine Löschhandlung als `quiet` bauen.
 
 ### Eingelöst: Phase 2 (Issue #81)
-Übersicht (Kanaltasten), Kanal und System (Seitenkopf, Zustandszeilen, Eigenschaftenliste), Mitglieder (Tabelle mit Aktionsspalte, Inspector im Fluss), Audit und Ereignisse (Tabelle mit Zeilenauswahl, Sub-Inspector mit Vorher/Nachher bzw. JSON, Ereignis-LED-Wort) laufen in dieser Welt; die Blöcke der alten Welt (232-px-Seitenleiste, `status-card`, `channel-card`, `member-table`, `page-heading`, `command-table`, Versalien-Plakette) sind aus `styles.css` entfernt.
+Übersicht (Kanaltasten), Kanal und System (Seitenkopf, Zustandszeilen, Eigenschaftenliste), Mitglieder (Tabelle mit Aktionsspalte, Inspector im Fluss), Audit (Satzzeilen mit Sub-Inspector und Vorher/Nachher), Ereignisse (Tabelle mit Zeilenauswahl und Ereignis-LED-Wort) laufen in dieser Welt; die Blöcke der alten Welt (232-px-Seitenleiste, `status-card`, `channel-card`, `member-table`, `page-heading`, `command-table`, Versalien-Plakette) sind aus `styles.css` entfernt.
 
 Offen bleiben zwei Punkte, die kein Stil lösen kann: die Bündelung von Ereignissen nach Auslöser (die Daten tragen keine Auslöser-ID) und die Ladewettläufe der Mitgliederliste beim schnellen Kanalwechsel (#83).

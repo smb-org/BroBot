@@ -1,10 +1,11 @@
-import type { AuditArea, ChannelRole } from "../../contracts/values";
+import { AUDIT_ACTIONS, CHANNEL_ROLES, type AuditArea, type ChannelRole } from "../../contracts/values";
 import type { PanelAuditEntry, PanelAuditFilters } from "../../panel-contract";
 import { auditAreaForAction } from "./areas";
 import { auditActionLabel, roleLabel } from "../labels";
-import { memberAsWord, type DashboardLanguage } from "../locale";
+import { auditObjectFallback, auditSentenceForAction, auditSettingsChangedSentence, dashboardTexts, memberAsWord, type AuditSentenceParts, type DashboardLanguage } from "../locale";
 import { dayKey } from "../events/model";
 import { moduleName } from "../module-labels";
+import { MODULES } from "../../modules/registry";
 import type { IconName } from "../ui/Icon";
 
 export { auditAreaForAction, auditSubjectUserId } from "./areas";
@@ -169,15 +170,16 @@ export const auditSubjectText = (entry: PanelAuditEntry, language: DashboardLang
     return name === null ? null : `!${name}`;
   }
   if (area === "member") {
-    const role = record !== null && typeof record.role === "string" ? record.role as ChannelRole : null;
+    const storedRole = record !== null && typeof record.role === "string" ? record.role : null;
+    const role = storedRole !== null && (CHANNEL_ROLES as readonly string[]).includes(storedRole) ? storedRole as ChannelRole : null;
     // Falls back to the raw subject id, the same chain `auditActorLabel`
     // uses for the actor -- a failed Twitch lookup (e.g. a deleted account)
     // must still name *who*, not just the role (#181 review).
     const identity = entry.subjectUserId === null || entry.subjectUserId === undefined
       ? null
       : auditActorLabel({ actorUserId: entry.subjectUserId, actorLogin: entry.subjectLogin ?? null, actorDisplayName: entry.subjectDisplayName ?? null });
-    if (identity === null) return role === null ? null : roleLabel(role);
-    return role === null ? identity : `${identity} ${memberAsWord(language)} ${roleLabel(role)}`;
+    if (identity === null) return role === null ? null : roleLabel(role, language);
+    return role === null ? identity : `${identity} ${memberAsWord(language)} ${roleLabel(role, language)}`;
   }
   if (area === "channel") {
     const login = record !== null && typeof record.login === "string" && record.login.length > 0 ? record.login : null;
@@ -192,6 +194,113 @@ export const auditRowLabel = (entry: PanelAuditEntry, language: DashboardLanguag
   const action = auditActionLabel(entry.action, language);
   const subject = auditSubjectText(entry, language);
   return subject === null || subject.length === 0 ? action : `${action}: ${subject}`;
+};
+
+const recordValue = (record: Record<string, unknown> | null, key: string): unknown => record !== null && Object.hasOwn(record, key) ? record[key] : undefined;
+
+const recordText = (record: Record<string, unknown> | null, ...keys: string[]): string | null => {
+  for (const key of keys) {
+    const value = recordValue(record, key);
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return null;
+};
+
+/** A stored role value (`member.*` before/after, or a diff row's raw "role" field) localized via the role catalogue -- `null` when the value isn't a known role. */
+export const roleText = (value: unknown, language: DashboardLanguage): string | null =>
+  typeof value === "string" && (CHANNEL_ROLES as readonly string[]).includes(value) ? roleLabel(value as ChannelRole, language) : null;
+
+const memberSubject = (entry: PanelAuditEntry, language: DashboardLanguage): string => {
+  if (entry.subjectUserId === null || entry.subjectUserId === undefined) return auditObjectFallback("member.added", language);
+  return auditActorLabel({ actorUserId: entry.subjectUserId, actorLogin: entry.subjectLogin ?? null, actorDisplayName: entry.subjectDisplayName ?? null });
+};
+
+const auditObject = (entry: PanelAuditEntry, language: DashboardLanguage): string => {
+  const before = parseObject(entry.before);
+  const after = parseObject(entry.after);
+  if (entry.action.startsWith("member.")) return memberSubject(entry, language);
+  if (entry.action === "module.enabled" || entry.action === "module.disabled") {
+    return entry.moduleId == null ? auditObjectFallback(entry.action, language) : moduleName(entry.moduleId, language);
+  }
+  if (entry.action === "channel.released" || entry.action === "channel.full_consent_changed") {
+    return recordText(after, "displayName", "login") ?? recordText(before, "displayName", "login") ?? auditObjectFallback(entry.action, language);
+  }
+  const name = recordText(after, "name") ?? recordText(before, "name");
+  if (entry.action.startsWith("text_commands.command.")) return name === null ? auditObjectFallback(entry.action, language) : `!${name.replace(/^!+/u, "")}`;
+  if (entry.action.startsWith("text_library.block.")) return name === null ? auditObjectFallback(entry.action, language) : `{${name}}`;
+  if (entry.action.startsWith("text_library.category.")) return name ?? auditObjectFallback(entry.action, language);
+  if (entry.action.startsWith("channel.variable.")) return name === null ? auditObjectFallback(entry.action, language) : `{var.${name}}`;
+  if (entry.action.startsWith("overlay.") && ["overlay.created", "overlay.updated", "overlay.deleted", "overlay.legacy.imported"].includes(entry.action)) return name ?? auditObjectFallback(entry.action, language);
+  return auditObjectFallback(entry.action, language);
+};
+
+const sentencePartValue = (action: string, before: Record<string, unknown> | null, after: Record<string, unknown> | null, language: DashboardLanguage): { from: string | null; to: string | null } => {
+  if (action === "member.role_changed" || action === "member.removed" || action === "member.added") {
+    return { from: roleText(recordValue(before, "role"), language), to: roleText(recordValue(after, "role"), language) };
+  }
+  if (action === "channel.full_consent_changed") {
+    const words = dashboardTexts(language).audit;
+    const value = (record: Record<string, unknown> | null): string | null => typeof recordValue(record, "fullConsent") === "boolean" ? (recordValue(record, "fullConsent") ? words.yes : words.no) : null;
+    return { from: value(before), to: value(after) };
+  }
+  if (action === "channel.variable.value_changed") {
+    const from = recordValue(before, "value");
+    const to = recordValue(after, "value");
+    return { from: typeof from === "number" ? String(from) : null, to: typeof to === "number" ? String(to) : null };
+  }
+  if (action === "channel.variable.renamed" || action === "text_library.category.renamed") {
+    return { from: recordText(before, "name"), to: recordText(after, "name") };
+  }
+  if (action === "text_library.settings.updated") return { from: recordText(before, "timeZone"), to: recordText(after, "timeZone") };
+  if (action === "ads.commercial_started") {
+    const length = recordValue(after, "length");
+    return { from: null, to: typeof length === "number" ? `${String(length)} s` : null };
+  }
+  return { from: null, to: null };
+};
+
+type ChannelVariableChangeKind = "renamed" | "description" | "settings";
+
+/**
+ * `channel.variable.renamed` is written for any patch (name, description, or
+ * the reset-on-stream-start setting) -- #254 review. The stored action never
+ * changes, so which sentence to show is derived from the diff itself, which
+ * also makes existing stored entries render correctly. A name change always
+ * wins (it is the most salient edit); of the rest, the reset setting outranks
+ * a plain description edit only because "changed settings" already covers a
+ * description edited alongside it, while a description-only edit gets its
+ * own, more specific sentence.
+ */
+const channelVariableChangeKind = (before: Record<string, unknown> | null, after: Record<string, unknown> | null): ChannelVariableChangeKind => {
+  if (!deepEqual(recordValue(before, "name"), recordValue(after, "name"))) return "renamed";
+  if (!deepEqual(recordValue(before, "resetOnStreamStart"), recordValue(after, "resetOnStreamStart"))) return "settings";
+  return "description";
+};
+
+/** Builds a complete localized sentence from a closed action template. Unknown stored actions never expose their code. */
+export const auditSentenceText = (entry: PanelAuditEntry, language: DashboardLanguage): string => {
+  const actor = auditActorLabel(entry);
+  const moduleSettingsSuffix = ".settings_changed";
+  if (entry.action.endsWith(moduleSettingsSuffix)) {
+    const moduleId = entry.action.slice(0, -moduleSettingsSuffix.length);
+    if (entry.moduleId === moduleId && MODULES.some((module) => module.id === moduleId)) {
+      return auditSettingsChangedSentence(actor, moduleName(moduleId, language), language);
+    }
+  }
+  if (!(AUDIT_ACTIONS as readonly string[]).includes(entry.action)) {
+    return auditSentenceForAction(entry.action, { actor, object: "", from: null, to: null }, language);
+  }
+  const before = parseObject(entry.before);
+  const after = parseObject(entry.after);
+  const object = auditObject(entry, language);
+  if (entry.action === "channel.variable.renamed") {
+    const kind = channelVariableChangeKind(before, after);
+    if (kind === "description") return dashboardTexts(language).audit.sentenceVariableDescriptionChanged(actor, object);
+    if (kind === "settings") return dashboardTexts(language).audit.sentenceVariableSettingsChanged(actor, object);
+  }
+  const { from, to } = sentencePartValue(entry.action, before, after, language);
+  const parts: AuditSentenceParts = { actor, object, from, to };
+  return auditSentenceForAction(entry.action, parts, language);
 };
 
 export interface AuditDayGroup {

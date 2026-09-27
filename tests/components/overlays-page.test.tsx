@@ -169,12 +169,12 @@ describe("Overlays page", () => {
     expect(table.closest(".overlays-table-wrap")).toHaveClass("overlays-table-wrap--inspector-open");
 
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
-    expect(within(inspector).getByText("OBS Main PC")).toBeInTheDocument();
+    expect(within(inspector).getByText("OBS Main PC", { selector: "strong" })).toBeInTheDocument();
     expect(within(inspector).getByRole("button", { name: "Zugang ausstellen" })).toBeDisabled();
     expect(within(inspector).getByRole("button", { name: "Link erneut anzeigen" })).toBeDisabled();
     expect(within(inspector).getByRole("button", { name: "Ersetzen" })).toBeDisabled();
-    expect(within(inspector).getByRole("button", { name: "Widerrufen" })).toBeDisabled();
-    const accessRow = within(inspector).getByText("OBS Main PC").closest("li");
+    expect(within(inspector).getByRole("button", { name: "Widerrufen: OBS Main PC" })).toBeDisabled();
+    const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
     expect(within(accessRow).getByText(/^Zuletzt benutzt:/u)).toHaveTextContent("Zuletzt benutzt: 24.09.2026");
     expect(within(accessRow).getByText("Status: Aktiv")).toHaveClass("overlay-access-list__status");
@@ -227,13 +227,13 @@ describe("Overlays page", () => {
     fireEvent.click(await screen.findByText("Gameplay"));
 
     const inspector = await screen.findByRole("region", { name: language === "en-US" ? "Accesses" : "Zugänge" });
-    const accessRow = within(inspector).getByText("OBS Main PC").closest("li");
+    const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
     expect(within(accessRow).getByText(lastUsed)).toBeInTheDocument();
     expect(within(accessRow).getByText(status)).toHaveClass("overlay-access-list__status");
 
     const actions = within(accessRow).getAllByRole("button");
-    expect(actions).toHaveLength(4);
+    expect(actions).toHaveLength(3);
     for (const action of actions) expect(action).toHaveAttribute("data-variant", "default");
   });
 
@@ -270,7 +270,7 @@ describe("Overlays page", () => {
     fireEvent.click(await screen.findByText("Gameplay"));
 
     const inspector = await screen.findByRole("region", { name: language === "en-US" ? "Accesses" : "Zugänge" });
-    const accessRow = within(inspector).getByText("OBS Main PC").closest("li");
+    const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
     expect(within(accessRow).getByRole("button", { name: reveal })).toBeDisabled();
     expect(within(accessRow).getByRole("button", { name: replace })).toBeEnabled();
@@ -297,7 +297,7 @@ describe("Overlays page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Link kopieren" }));
     expect(writeText).toHaveBeenCalledWith(secret);
 
-    const originalAccess = within(inspector).getByText("OBS Main PC").closest("li");
+    const originalAccess = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(originalAccess instanceof HTMLElement)) throw new Error("Access list row is missing.");
     fireEvent.click(within(originalAccess).getByRole("button", { name: "Link erneut anzeigen" }));
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/reveal"))).toBe(true); });
@@ -307,7 +307,7 @@ describe("Overlays page", () => {
     expect(await screen.findByText(maskedSecret)).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/replace"))).toBe(true);
 
-    fireEvent.click(within(originalAccess).getByRole("button", { name: "Widerrufen" }));
+    fireEvent.click(within(inspector).getByRole("button", { name: "Widerrufen: OBS Main PC" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Widerrufen: OBS Main PC" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Zugang widerrufen.");
@@ -476,7 +476,7 @@ describe("Overlays page", () => {
     fireEvent.click(output);
     fireEvent.click(await screen.findByRole("option", { name: "Einzelnes Element: Score" }));
 
-    const accessRow = within(inspector).getByText("OBS Main PC").closest("li");
+    const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
     fireEvent.click(within(accessRow).getByRole("button", { name: "Ersetzen" }));
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/replace"))).toBe(true); });
@@ -639,7 +639,7 @@ describe("Overlays page", () => {
     const table = await screen.findByRole("table");
     fireEvent.click(within(table).getByText("Gameplay"));
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
-    const row = within(inspector).getByText("OBS Main PC").closest("li");
+    const row = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(row instanceof HTMLElement)) throw new Error("Access row is missing.");
     fireEvent.click(within(row).getByRole("button", { name: "Link erneut anzeigen" }));
     await vi.waitFor(() => { expect(resolveReveal).toBeTypeOf("function"); });

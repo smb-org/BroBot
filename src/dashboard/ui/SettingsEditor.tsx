@@ -5,6 +5,7 @@ import type { PanelTemplateWarning } from "../../panel-contract";
 import type { IconName } from "./Icon";
 import { ChoiceCards } from "./ChoiceCards";
 import { Field } from "./Field";
+import { InspectorFieldRow, InspectorSection } from "./InspectorParts";
 import { NumberField } from "./NumberField";
 import { SegmentedControl } from "./SegmentedControl";
 import { Switch } from "./Switch";
@@ -121,82 +122,83 @@ export function SettingsEditor<Settings extends object>({
     const error = fieldErrors[field.key];
     if (field.kind === "number") {
       return (
-        <NumberField
-          key={field.key}
-          id={id}
-          label={copy.label}
-          hint={copy.hint}
-          {...((copy.unit ?? field.unit) === undefined ? {} : { unit: copy.unit ?? field.unit })}
-          {...(error === undefined ? {} : { error })}
-          min={field.min}
-          max={field.max}
-          step={field.step}
-          increaseLabel={copy.increaseLabel ?? copy.label}
-          decreaseLabel={copy.decreaseLabel ?? copy.label}
-          value={typeof fieldValue === "number" ? fieldValue : ""}
-          disabled={disabled}
-          onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-        />
+        <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
+          <NumberField
+            id={id}
+            label={copy.label}
+            {...((copy.unit ?? field.unit) === undefined ? {} : { unit: copy.unit ?? field.unit })}
+            {...(error === undefined ? {} : { error })}
+            min={field.min}
+            max={field.max}
+            step={field.step}
+            increaseLabel={copy.increaseLabel ?? copy.label}
+            decreaseLabel={copy.decreaseLabel ?? copy.label}
+            value={typeof fieldValue === "number" ? fieldValue : ""}
+            disabled={disabled}
+            onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+          />
+        </InspectorFieldRow>
       );
     }
     if (field.kind === "text") {
       const maxLength = field.maxLength;
       return (
-        <Field
-          key={field.key}
-          id={id}
-          label={copy.label}
-          hint={copy.hint}
-          {...(error === undefined ? {} : { error })}
-          value={typeof fieldValue === "string" ? fieldValue : ""}
-          disabled={disabled}
-          onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-          {...(field.prefix === undefined ? {} : { prefix: field.prefix })}
-          {...(maxLength === undefined ? {} : { maxLength, countLabel: copy.countLabel ?? ((count, maximum) => `${String(count)} / ${String(maximum)}`) })}
-        />
+        <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
+          <Field
+            id={id}
+            label={copy.label}
+            {...(error === undefined ? {} : { error })}
+            value={typeof fieldValue === "string" ? fieldValue : ""}
+            disabled={disabled}
+            onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+            {...(field.prefix === undefined ? {} : { prefix: field.prefix })}
+            {...(maxLength === undefined ? {} : { maxLength, countLabel: copy.countLabel ?? ((count, maximum) => `${String(count)} / ${String(maximum)}`) })}
+          />
+        </InspectorFieldRow>
       );
     }
     if (field.kind === "template") {
       const metadata = templateMetadata?.[field.key];
       const fieldVariables = variables?.[field.key] ?? metadata?.map(({ name, description, sample }) => ({ name, description, sample }));
       return (
-        <TextArea
-          key={field.key}
-          id={id}
-          name={field.key}
-          label={copy.label}
-          hint={copy.hint}
-          {...(error === undefined ? {} : { error })}
-          value={typeof fieldValue === "string" ? fieldValue : ""}
-          disabled={disabled}
-          onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-          maxLength={500}
-          {...(metadata === undefined ? {} : { worstCaseLength: worstCaseTemplateLength(String(fieldValue ?? ""), metadata) })}
-          {...(fieldVariables === undefined ? {} : { variables: fieldVariables })}
-          preview={field.preview}
-          required
-          onIssuesChange={(issues) => { onIssuesChange?.(field.key, issues); }}
-          {...(copy.previewLabel === undefined ? {} : { previewLabel: copy.previewLabel })}
-          {...(copy.previewSpeaker === undefined ? {} : { previewSpeaker: copy.previewSpeaker })}
-          {...(field.minRows === undefined ? {} : { minRows: field.minRows })}
-          messages={templateMessages}
-          {...(createVariableHref === undefined ? {} : { createVariableHref })}
-        />
+        <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
+          <TextArea
+            id={id}
+            name={field.key}
+            label={copy.label}
+            hint=""
+            {...(error === undefined ? {} : { error })}
+            value={typeof fieldValue === "string" ? fieldValue : ""}
+            disabled={disabled}
+            onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+            maxLength={500}
+            {...(metadata === undefined ? {} : { worstCaseLength: worstCaseTemplateLength(String(fieldValue ?? ""), metadata) })}
+            {...(fieldVariables === undefined ? {} : { variables: fieldVariables })}
+            preview={field.preview}
+            required
+            onIssuesChange={(issues) => { onIssuesChange?.(field.key, issues); }}
+            {...(copy.previewLabel === undefined ? {} : { previewLabel: copy.previewLabel })}
+            {...(copy.previewSpeaker === undefined ? {} : { previewSpeaker: copy.previewSpeaker })}
+            {...(field.minRows === undefined ? {} : { minRows: field.minRows })}
+            messages={templateMessages}
+            {...(createVariableHref === undefined ? {} : { createVariableHref })}
+          />
+        </InspectorFieldRow>
       );
     }
     if (field.kind === "segment" || field.kind === "choice") {
       if (field.kind === "segment") {
         const options = field.options.map((option) => ({ value: option.value, label: copy.options?.[option.value]?.label ?? "" }));
         return (
-          <SegmentedControl
-            key={field.key}
-            label={copy.label}
-            hint={copy.options?.[String(fieldValue)]?.description ?? copy.hint}
-            value={String(fieldValue ?? "")}
-            onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-            options={options}
-            disabled={disabled}
-          />
+          <InspectorFieldRow key={field.key} label={copy.label} help={copy.options?.[String(fieldValue)]?.description ?? copy.hint}>
+            <SegmentedControl
+              label={copy.label}
+              value={String(fieldValue ?? "")}
+              onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+              options={options}
+              disabled={disabled}
+            />
+          </InspectorFieldRow>
         );
       }
       const options = field.options.map((option) => ({
@@ -206,50 +208,54 @@ export function SettingsEditor<Settings extends object>({
         ...(option.icon === undefined ? {} : { icon: option.icon }),
       }));
       return (
-        <ChoiceCards
-          key={field.key}
-          label={copy.label}
-          hint={copy.hint}
-          value={String(fieldValue ?? "")}
-          onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-          options={options}
-          disabled={disabled}
-        />
+        <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
+          <ChoiceCards
+            label={copy.label}
+            value={String(fieldValue ?? "")}
+            onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+            options={options}
+            disabled={disabled}
+          />
+        </InspectorFieldRow>
       );
     }
     const children = field.children?.map(renderField) ?? [];
     const lockedReason = copy.disabledReason ?? field.children?.map((child) => texts.fields[child.key]?.disabledReason).find((reason) => reason !== undefined);
     return (
-      <Switch
-        key={field.key}
-        layout="card"
-        label={copy.label}
-        description={copy.description ?? copy.hint}
-        checked={fieldValue === true}
-        onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-        disabled={disabled}
-        {...(lockedReason === undefined ? {} : { lockedReason })}
-      >
-        {field.children === undefined ? undefined : children as ReactElement[]}
-      </Switch>
+      <InspectorFieldRow key={field.key} label={copy.label} help={copy.description ?? copy.hint}>
+        <Switch
+          layout="card"
+          ariaLabel={copy.label}
+          checked={fieldValue === true}
+          onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+          disabled={disabled}
+          {...(lockedReason === undefined ? {} : { lockedReason })}
+        >
+          {field.children === undefined ? undefined : children as ReactElement[]}
+        </Switch>
+      </InspectorFieldRow>
     );
   };
 
   if (readOnly) {
     return (
-      <dl className="properties ui-settings-editor__properties">
-        {flattenFields(spec.sections.flatMap((candidate) => candidate.fields)).map((field) => {
-          const copy = texts.fields[field.key];
-          if (copy === undefined) return null;
-          return <div key={field.key}><dt>{copy.label}</dt><dd>{renderReadOnlyField(field, copy, settings[field.key], enabledLabel, disabledLabel)}</dd></div>;
-        })}
-      </dl>
+      <InspectorSection title={section === undefined ? "" : texts.sections[section.id]}>
+        <dl className="properties ui-settings-editor__properties">
+          {flattenFields(spec.sections.flatMap((candidate) => candidate.fields)).map((field) => {
+            const copy = texts.fields[field.key];
+            if (copy === undefined) return null;
+            return <div key={field.key}><dt>{copy.label}</dt><dd>{renderReadOnlyField(field, copy, settings[field.key], enabledLabel, disabledLabel)}</dd></div>;
+          })}
+        </dl>
+      </InspectorSection>
     );
   }
 
   return (
     <div className="ui-settings-editor" data-section={sectionId} aria-label={section === undefined ? undefined : texts.sections[section.id]}>
-      {section?.fields.map(renderField)}
+      {section === undefined ? null : <InspectorSection title={texts.sections[section.id]}>
+        {section.fields.map(renderField)}
+      </InspectorSection>}
     </div>
   );
 }

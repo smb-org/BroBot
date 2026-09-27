@@ -28,7 +28,8 @@ describe("editor seam styles", () => {
 
   it("keeps stepped number fields in one row and confirmation actions readable at narrow widths", () => {
     expect(styles).toContain(".ui-number-field__stepper { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-rows: auto 44px auto auto;");
-    expect(styles).toContain(".ui-number-field__stepper .mantine-NumberInput-input { padding-right: calc(var(--input-right-section-width) + var(--input-padding)); text-align: left;");
+    expect(styles).toContain(".ui-number-field__stepper .mantine-NumberInput-input { padding-right: var(--input-padding); text-align: left;");
+    expect(styles).toContain(".ui-number-field__stepper .ui-number-field--has-unit .mantine-NumberInput-input { padding-right: calc(var(--input-right-section-width) + var(--input-padding)); }");
     expect(styles).toContain(".ui-number-field__stepper .mantine-InputWrapper-description { grid-column: 1 / -1; grid-row: 3;");
     expect(styles).toContain(".ui-field--prefixed input.mantine-Input-input.mantine-TextInput-input { padding-left: calc(var(--input-left-section-width) + var(--input-padding)); }");
     expect(styles).toContain(".ui-confirm-dialog__actions { display: flex; flex-wrap: wrap;");

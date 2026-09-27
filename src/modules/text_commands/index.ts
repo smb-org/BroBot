@@ -72,6 +72,7 @@ const settingsSchema = z.object({});
 
 export const textCommandModule: BotModule<typeof settingsSchema> = {
   id: "text_commands",
+  panelIcon: { paths: ["M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z", "M12 7v10", "M8.5 10.5h7", "M8.5 13.5h5"] },
   templateContext: "chat_command",
   templateUsageSources: listTextCommandTemplateUsageSources,
   variableReferences,

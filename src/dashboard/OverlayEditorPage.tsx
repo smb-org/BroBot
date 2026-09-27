@@ -30,9 +30,9 @@ import {
   type PanelOverlayDraft,
   type PanelOverlayElement,
 } from "./api";
-import { apiErrorText, dashboardLanguage, overlaysTexts } from "./locale";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, overlaysTexts } from "./locale";
 import { useRealtimeVariableUpdates } from "./realtime";
-import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, NumberField, SaveBar, Select, Switch, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
+import { Button, CodeField, ColorField, ConfirmDialog, DangerSection, Field, Icon, NumberField, PageHeader, SaveBar, Select, Switch, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
 interface OverlayEditorPageProperties {
@@ -1005,10 +1005,7 @@ function OverlayEditorWorkspace({
   const rendererMarkup = <OverlayCanvas overlay={rendererOverlay} language={language} variables={liveVariables} elementId={null} />;
 
   return <div className="overlay-editor">
-    <header className="overlay-editor__header">
-      <Button variant="subtle" disabled={saving} onClick={onBack}>{labels.editorBack}</Button>
-      <div><h1>{overlay.name}</h1><span className="muted">{labels.editorReference(draft.width, draft.height)}</span></div>
-    </header>
+    <PageHeader kind="overlays" title={overlay.name} subtitle={labels.editorReference(draft.width, draft.height)} actions={<Button variant="neutral" disabled={saving} onClick={onBack}>{labels.editorBack}</Button>} />
     <div className="overlay-editor__workspace">
       <section className="overlay-editor__elements" aria-label={labels.editorElements}>
         <div className="overlay-editor__section-heading"><h2>{labels.editorElements}</h2><span className="muted">{draft.elements.length} / {String(OVERLAY_ELEMENT_MAXIMUM_COUNT)}</span></div>
@@ -1128,9 +1125,11 @@ function OverlayEditorWorkspace({
             onChange={(inComposition) => { updateElement(selectedElement.id, inComposition
               ? { inComposition, ...clampPosition(selectedElement, selectedElement.x, selectedElement.y) }
               : { inComposition }); }} />
-          <Button danger="subtle" disabled={!canEdit}
-            {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
-            onClick={removeElement}>{labels.editorRemove}</Button>
+          <DangerSection title={dashboardCommonTexts().dangerZone}>
+            <Button danger="subtle" disabled={!canEdit}
+              {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
+              onClick={removeElement}>{labels.editorRemove}</Button>
+          </DangerSection>
         </div>}
         {!canManage ? <p className="muted" id="overlay-editor-readonly-reason" role="note">{labels.editorReadOnly}</p> : null}
         </div>
