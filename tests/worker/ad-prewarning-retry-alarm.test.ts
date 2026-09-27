@@ -254,6 +254,78 @@ describe("ad prewarning retry through ChannelObject.alarm()", () => {
     }
   });
 
+  it("retries an app-token failure that never clears at +5s/+10s, then stops retrying once the ad has started", async () => {
+    vi.useFakeTimers();
+    const leadSeconds = 30; // settings schema minimum
+    const dueAt = Date.parse("2026-09-24T12:03:00.000Z");
+    const adStartsAtMs = dueAt + leadSeconds * 1_000;
+    vi.setSystemTime(dueAt);
+    mocks.getChannelModuleForChannel.mockResolvedValue({
+      channelId: "kanal-a",
+      moduleId: "ads",
+      enabled: true,
+      revision: 1,
+      settings: JSON.stringify({
+        automatic: "Automatic ad message",
+        manual: "Manual ad message",
+        prewarning: true,
+        leadSeconds,
+        prewarningText: "Ad in {ads.seconds}",
+      }),
+    });
+    mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
+    // The app token never becomes available again -- every fetch fails the same way.
+    mocks.getAdSchedule.mockResolvedValue({
+      fetched: false,
+      reason: "app_token_unavailable",
+      detail: { status: null },
+      schedule: null,
+    });
+    mocks.writeModuleDiagnostics.mockResolvedValue([]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const object = objectFor("kanal-a");
+    const storage = storageOf(object);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await object.scheduleAdPrewarning(dueAt);
+
+      // T: well before the planned ad start, so the retryable failure throws
+      // and gets the short retry instead of completing the occurrence.
+      await object.alarm();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(storage.values.get("channel:alarm_schedule")).toMatchObject({
+        ad_prewarning: { deadline: dueAt, nextAttemptAt: dueAt + 5_000, failures: 1 },
+      });
+      expect(errorLog).toHaveBeenCalled();
+
+      // T + 5s: still before the ad start -- second retry, delay grows to 10s.
+      vi.setSystemTime(dueAt + 5_000);
+      await object.alarm();
+      expect(storage.values.get("channel:alarm_schedule")).toMatchObject({
+        ad_prewarning: { deadline: dueAt, nextAttemptAt: dueAt + 15_000, failures: 2 },
+      });
+
+      // Jump past the planned ad start (T + 30s): the next due alarm entry
+      // (nextAttemptAt = T + 15s) is still picked up, but now
+      // `Date.parse(now) < adStartsAtMs` is false, so processAdPrewarning
+      // returns instead of throwing, and the occurrence completes with no
+      // further retry entry.
+      expect(dueAt + 40_000).toBeGreaterThan(adStartsAtMs);
+      vi.setSystemTime(dueAt + 40_000);
+      await object.alarm();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(storage.values.get("channel:alarm_schedule")).toBeUndefined();
+      expect(mocks.writeModuleDiagnostics.mock.calls.at(-1)?.[5]).toMatchObject([
+        { code: "ads.prewarning.schedule_error", detail: { reason: "app_token_unavailable" } },
+      ]);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   it("keeps a sent occurrence's send claim across clear+re-arm, but still sends a genuinely new occurrence", async () => {
     vi.useFakeTimers();
     const leadSeconds = 60;

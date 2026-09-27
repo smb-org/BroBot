@@ -327,10 +327,10 @@ export const processAdPrewarning = async (
     } else {
       await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);
       // Same short-retry treatment as the pre-POST failures below: this
-      // fetch never reached the ad break's chat send, so retrying is safe,
-      // and decideAdPrewarning's too_late check (re-run on the retry) bounds
-      // how long that continues.
-      if (result.reason !== null && isRetryablePrePostFailure(result.reason)) {
+      // fetch never reached the ad break's chat send, so retrying is safe
+      // until the planned ad break starts; after that a warning is pointless.
+      const adStartsAtMs = scheduledDueAtMs + configured.settings.leadSeconds * 1000;
+      if (result.reason !== null && isRetryablePrePostFailure(result.reason) && Date.parse(now) < adStartsAtMs) {
         throw new Error(`ad prewarning retryable failure: ${result.reason}`);
       }
     }
