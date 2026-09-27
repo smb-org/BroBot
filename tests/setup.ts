@@ -29,9 +29,13 @@ if (typeof window !== "undefined") {
   Element.prototype.scrollIntoView = () => {};
 
   // jsdom doesn't implement matchMedia; Mantine's AppShell (navbar
-  // breakpoint collapse) and Burger (`hiddenFrom`) both call it.
+  // breakpoint collapse) and Burger (`hiddenFrom`) both call it. Reporting
+  // `prefers-reduced-motion: reduce` as matched makes Mantine skip its
+  // internal transition timers (e.g. ModalBase's use-lock-scroll setTimeout),
+  // which otherwise fire after a test's jsdom environment is torn down and
+  // crash with "window is not defined".
   window.matchMedia = (query: string): MediaQueryList => ({
-    matches: false,
+    matches: query === "(prefers-reduced-motion: reduce)",
     media: query,
     onchange: null,
     addListener: () => {},
