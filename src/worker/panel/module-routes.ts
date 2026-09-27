@@ -11,7 +11,7 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleLanguage, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState } from "../../modules/contract";
+import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleLanguage, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
@@ -39,6 +39,8 @@ interface ModuleRouteEnvironment {
     "writeModuleDiagnostics" | "broadcasterHasScope" | "broadcasterScopesForChannel"
     | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
     | "listChannelVariables" | "findChannelVariable"
+    | "listTextBlockConditions"
+    | "resolveTextBlockConditions"
     | "templateUsageSources" | "listRegisteredTemplateVariables"
   >;
 }
@@ -125,6 +127,32 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   });
   context.set("listRegisteredTemplateVariables", async (channelId) => {
     return registeredTemplateVariablesForChannel(context.env.DB, channelId);
+  });
+  context.set("listTextBlockConditions", () => Promise.resolve(MODULES.flatMap((module) => module.textBlockConditions ?? [])));
+  context.set("resolveTextBlockConditions", async (channelId, ids, now) => {
+    const requested = new Set(ids);
+    const channel = await context.env.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")
+      .bind(channelId).first<{ time_zone: string }>();
+    if (channel === null) return {};
+    const resolveContext: ModuleTemplateConditionContext = {
+      DB: context.env.DB,
+      channelId,
+      channelTimeZone: () => Promise.resolve(channel.time_zone),
+      now,
+    };
+    const resolved: Record<string, string> = {};
+    for (const module of MODULES) {
+      if (module.resolveTemplateConditions === undefined) continue;
+      const declared = new Set((module.textBlockConditions ?? []).map(({ id }) => id));
+      const moduleIds = ids.filter((id) => requested.has(id) && declared.has(id));
+      if (moduleIds.length === 0) continue;
+      try {
+        Object.assign(resolved, await module.resolveTemplateConditions(moduleIds, resolveContext));
+      } catch {
+        // A failed data source leaves its conditions unmatched in the editor preview.
+      }
+    }
+    return resolved;
   });
   context.set("templateUsageSources", async (channelId) => {
     const moduleSources = await Promise.all(MODULES.map((module) =>
@@ -227,6 +255,9 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
       moduleId: module.id,
       ...(module.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: module.templateVariableNamespace }),
       variables,
+      ...(module.textBlockConditions === undefined ? {} : { textBlockConditions: module.textBlockConditions }),
+      ...(module.templateUnavailableText === undefined ? {} : { templateUnavailableText: module.templateUnavailableText }),
+      ...(module.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: module.resolveTemplateConditions }),
       resolveTemplateValues,
     }];
   });

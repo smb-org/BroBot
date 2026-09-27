@@ -307,13 +307,14 @@ describe("Panel read endpoints", () => {
     );
 
     expect(response.status).toBe(200);
-    // Mandatory modules (text_library, channel_events) are always active,
+    // Mandatory modules (text_library, sun, channel_events) are always active,
     // even without a `channel_modules` row.
     await expect(response.json()).resolves.toMatchObject({
       channelId: "kanal-a",
       streamState: "offline",
       activeModules: [
         { moduleId: "text_library", settings: "{}" },
+        { moduleId: "sun", settings: "{}" },
         { moduleId: "channel_events", settings: "{}" },
       ],
     });
@@ -921,11 +922,12 @@ describe("Panel read endpoints", () => {
       checkedAt: "2026-09-18T02:00:00.000Z",
       reason: "moderator_entfernt",
     });
-    // Mandatory modules (text_library, channel_events) are always active,
+    // Mandatory modules (text_library, sun, channel_events) are always active,
     // even without a `channel_modules` row.
     expect(body.activeModules).toEqual([
       { moduleId: "polls", settings: '{"frage":"heute"}' },
       { moduleId: "text_library", settings: "{}" },
+      { moduleId: "sun", settings: "{}" },
       { moduleId: "channel_events", settings: "{}" },
     ]);
     expect(body.tokens).toEqual({

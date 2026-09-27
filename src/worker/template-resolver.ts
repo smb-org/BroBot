@@ -7,7 +7,7 @@ import {
 } from "../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 import { templateLanguageText } from "../modules/template-language";
-import type { ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateRenderMode, ModuleTemplateValueContext } from "../modules/contract";
+import type { ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
 import { formatCount } from "../text";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN } from "../contracts/template-names";
@@ -19,6 +19,12 @@ export interface TemplateValueProvider {
   moduleId: string;
   templateVariableNamespace?: "text_blocks";
   variables: readonly TemplateVariable[];
+  textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
+  templateUnavailableText?: Readonly<Record<ModuleLanguage, string>>;
+  resolveTemplateConditions?: (
+    ids: readonly string[],
+    context: ModuleTemplateConditionContext,
+  ) => Promise<Readonly<Record<string, string>>>;
   resolveTemplateValues: (
     names: readonly string[],
     context: ModuleTemplateValueContext,
@@ -308,6 +314,7 @@ export const createTemplateRenderer = (
     knownTemplateVariableNames: knownVariableNames,
     chatStatus: event.chatStatus,
     mode,
+    channelLanguage: sources.channelLanguage,
     streamState: sources.streamState,
     channelInfo: sources.channelInfo,
     ...(sources.channelGameId === undefined ? {} : { channelGameId: sources.channelGameId }),
@@ -315,6 +322,32 @@ export const createTemplateRenderer = (
     renderTemplate: renderNestedTemplate,
     addDiagnostic,
     now,
+    resolveTemplateConditions: async (ids) => {
+      const requested = new Set(ids);
+      const resolved: Record<string, string> = {};
+      for (const provider of sources.templateValueProviders ?? []) {
+        if (provider.resolveTemplateConditions === undefined) continue;
+        const declared = new Set((provider.textBlockConditions ?? []).map(({ id }) => id));
+        const names = ids.filter((id) => requested.has(id) && declared.has(id));
+        if (names.length === 0) continue;
+        let values: Readonly<Record<string, string>>;
+        try {
+          values = await provider.resolveTemplateConditions(names, {
+            DB: sources.DB,
+            channelId: event.channelId,
+            channelTimeZone: sources.channelTimeZone,
+            now,
+          });
+        } catch {
+          continue;
+        }
+        for (const name of names) {
+          const value: unknown = values[name];
+          if (typeof value === "string") resolved[name] = value;
+        }
+      }
+      return resolved;
+    },
   };
   for (const provider of sources.templateValueProviders ?? []) {
     const declaredNames = new Set(provider.variables
@@ -324,7 +357,15 @@ export const createTemplateRenderer = (
       ? renderNames.filter((name) => TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name) && !knownVariableNames.has(name))
       : renderNames.filter((name) => declaredNames.has(name));
     if (requestedNames.length === 0) continue;
-    const resolved = await provider.resolveTemplateValues(requestedNames, providerContext);
+    let resolved: Readonly<Record<string, string>>;
+    try {
+      resolved = await provider.resolveTemplateValues(requestedNames, providerContext);
+    } catch {
+      if (provider.templateVariableNamespace === "text_blocks" || provider.templateUnavailableText === undefined) continue;
+      for (const name of requestedNames) values[name] = provider.templateUnavailableText[language];
+      requestedNames.forEach((name) => { addDiagnostic({ code: "template.lookup_unavailable", detail: { name } }); });
+      continue;
+    }
     for (const name of requestedNames) {
       const value: unknown = resolved[name];
       if (typeof value === "string") values[name] = value;

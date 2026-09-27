@@ -74,7 +74,12 @@ const errorPath = (error: unknown): string[] => {
   return error.details.path.filter((part): part is string => typeof part === "string");
 };
 
-const conditionSummary = (variant: TextBlockVariant, labels: ReturnType<typeof textLibraryTexts>): string => {
+const conditionSummary = (
+  variant: TextBlockVariant,
+  labels: ReturnType<typeof textLibraryTexts>,
+  dataConditions: NonNullable<ModulePanelProperties["textBlockConditions"]>,
+  language: "de" | "en",
+): string => {
   const conditions = variant.conditions;
   if (Object.keys(conditions).length === 0) return labels.defaultVariant;
   const values: string[] = [];
@@ -83,6 +88,11 @@ const conditionSummary = (variant: TextBlockVariant, labels: ReturnType<typeof t
   if (conditions.minimumTier !== undefined) values.push(`${labels.minimumTier}: ${labels.tierLabels[conditions.minimumTier] ?? conditions.minimumTier}`);
   if (conditions.weekdays !== undefined) values.push(conditions.weekdays.map((day) => labels.weekdaysLabels[day] ?? "").filter(Boolean).join(", "));
   if (conditions.timeWindow !== undefined) values.push(`${conditions.timeWindow.start}–${conditions.timeWindow.end}`);
+  for (const [id, selected] of Object.entries(conditions.data ?? {})) {
+    const definition = dataConditions.find((condition) => condition.id === id);
+    const value = definition?.values[selected];
+    if (definition !== undefined && value !== undefined) values.push(`${definition.label[language]}: ${value[language]}`);
+  }
   return values.length === 0 ? labels.conditions : values.join(" · ");
 };
 
@@ -92,10 +102,17 @@ const withoutCondition = (conditions: TextBlockConditions, key: keyof TextBlockC
   return next;
 };
 
+const withDataCondition = (conditions: TextBlockConditions, id: string, value: string): TextBlockConditions => {
+  const data = { ...conditions.data };
+  if (value.length === 0) Reflect.deleteProperty(data, id);
+  else data[id] = value;
+  return Object.keys(data).length === 0 ? withoutCondition(conditions, "data") : { ...conditions, data };
+};
+
 const updateVariant = (variants: TextBlockVariant[], id: string, update: (variant: TextBlockVariant) => TextBlockVariant): TextBlockVariant[] =>
   variants.map((variant) => variant.id === id ? update(variant) : variant);
 
-export default function TextLibraryPanel({ channelId, language, canManage = true }: ModulePanelProperties): ReactElement {
+export default function TextLibraryPanel({ channelId, language, canManage = true, textBlockConditions = [] }: ModulePanelProperties): ReactElement {
   const labels = useMemo(() => textLibraryTexts(language), [language]);
   const searchGames = useCallback((query: string) => searchTextLibraryGames(channelId, query), [channelId]);
   const [data, setData] = useState<Awaited<ReturnType<typeof loadTextLibrary>> | null>(null);
@@ -194,6 +211,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     commandContext: simulatedContext === "command",
     timeZone: data.channelSettings.timeZone,
     now: previewNow,
+    ...(data.dataConditionValues === undefined ? {} : { dataConditions: data.dataConditionValues }),
   });
   const previewTemplate = matchingVariant?.texts[0] ?? "";
   const [previewResult, setPreviewResult] = useState<{ template: string; text: string } | null>(null);
@@ -428,7 +446,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                     <article className="text-library__variant" key={variant.id}>
                       <div className="text-library__variant-heading">
                         <strong>{isDefault ? labels.defaultVariant : labels.variant(index + 1)}</strong>
-                        <span className="muted">{isDefault ? labels.noConditions : conditionSummary(variant, labels)}</span>
+                        <span className="muted">{isDefault ? labels.noConditions : conditionSummary(variant, labels, textBlockConditions, language === "en" ? "en" : "de")}</span>
                         {isDefault ? null : <div className="form-actions">
                           <Button size="compact" disabled={pending || index === 0} onClick={() => setDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index - 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index - 1] as TextBlockVariant : entry) })}>{labels.moveUp}</Button>
                           <Button size="compact" disabled={pending || index >= draft.variants.length - 2} onClick={() => setDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index + 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index + 1] as TextBlockVariant : entry) })}>{labels.moveDown}</Button>
@@ -440,6 +458,13 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         <div className="text-library__condition-grid">
                           <Select label={labels.stream} value={variant.conditions.stream ?? "any"} onChange={(value) => updateCondition(variant.id, (conditions) => value === "any" ? withoutCondition(conditions, "stream") : { ...conditions, stream: value as "online" | "offline" })} options={[{ value: "any", label: labels.anyStream }, { value: "online", label: labels.online }, { value: "offline", label: labels.offline }]} />
                           <Select label={labels.minimumTier} value={variant.conditions.minimumTier ?? "none"} onChange={(value) => updateCondition(variant.id, (conditions) => value === "none" ? withoutCondition(conditions, "minimumTier") : { ...conditions, minimumTier: value as NonNullable<TextBlockConditions["minimumTier"]> })} options={[{ value: "none", label: labels.noMinimumTier }, ...Object.entries(labels.tierLabels).map(([value, label]) => ({ value, label }))]} />
+                          {textBlockConditions.map((condition) => <Select
+                            key={condition.id}
+                            label={condition.label[language === "en" ? "en" : "de"]}
+                            value={variant.conditions.data?.[condition.id] ?? ""}
+                            onChange={(value) => updateCondition(variant.id, (conditions) => withDataCondition(conditions, condition.id, value ?? ""))}
+                            options={[{ value: "", label: labels.anyCondition }, ...Object.entries(condition.values).map(([value, labelsByLanguage]) => ({ value, label: labelsByLanguage[language === "en" ? "en" : "de"] }))]}
+                          />)}
                           <fieldset className="text-library__game-condition">
                             <legend>{labels.gameCondition}</legend>
                             <div className={`text-library__game-match${variant.conditions.game === undefined ? " text-library__game-match--only" : ""}`}>
@@ -517,7 +542,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                     <dd><ol>{draft.variants.map((variant, index) => (
                       <li key={variant.id}>
                         <strong>{index === draft.variants.length - 1 ? labels.defaultVariant : labels.variant(index + 1)}</strong>
-                        <p>{conditionSummary(variant, labels)}</p>
+                        <p>{conditionSummary(variant, labels, textBlockConditions, language === "en" ? "en" : "de")}</p>
                         <ul>{variant.texts.map((text, textIndex) => <li key={`${variant.id}-${String(textIndex)}`}><pre>{text}</pre></li>)}</ul>
                       </li>
                     ))}</ol></dd>

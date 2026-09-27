@@ -29,6 +29,8 @@ export interface TextBlockConditions {
   minimumTier?: ModuleTemplateMinimumTier;
   weekdays?: readonly number[];
   timeWindow?: { start: string; end: string };
+  /** Conditions contributed by registered data-source modules, keyed by their dotted id. */
+  data?: Readonly<Record<string, string>>;
 }
 
 export interface TextBlockVariant {
@@ -85,6 +87,7 @@ export interface TextLibraryData {
   settings: TextLibrarySettings;
   usages: Readonly<Record<string, readonly TextBlockUsage[]>>;
   reservedNames?: readonly string[];
+  dataConditionValues?: Readonly<Record<string, string>>;
 }
 
 export type TextBlockMutationError =

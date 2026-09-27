@@ -11,6 +11,7 @@ export interface TextBlockState {
   commandContext: boolean;
   timeZone: string;
   now: number;
+  dataConditions?: Readonly<Record<string, string>>;
 }
 
 export type TextBlockGraphError =
@@ -30,6 +31,9 @@ export const validTextBlockConditions = (conditions: TextBlockConditions): boole
   const gameMode: unknown = conditions.game?.mode;
   if (gameMode !== undefined && gameMode !== "is" && gameMode !== "is_not") return false;
   if (conditions.minimumTier !== undefined && !["everyone", "subscriber", "vip", "moderator", "broadcaster"].includes(conditions.minimumTier)) return false;
+  if (conditions.data !== undefined && Object.entries(conditions.data).some(([id, value]) =>
+    !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/u.test(id) || value.length === 0 || value.length > 32,
+  )) return false;
   if (conditions.weekdays !== undefined && (conditions.weekdays.length === 0 || conditions.weekdays.some((day) => !Number.isInteger(day) || day < 0 || day > 6))) return false;
   if (conditions.timeWindow !== undefined && (!VALID_TIME.test(conditions.timeWindow.start) || !VALID_TIME.test(conditions.timeWindow.end))) return false;
   return true;
@@ -102,6 +106,7 @@ export const textBlockConditionsMatch = (conditions: TextBlockConditions, state:
     const minimumTier = conditions.minimumTier;
     if (!state.chatStatus.some((status) => MODULE_TEMPLATE_TIER_CHAT_STATUSES[minimumTier].includes(status))) return false;
   }
+  if (conditions.data !== undefined && Object.entries(conditions.data).some(([id, value]) => state.dataConditions?.[id] !== value)) return false;
   if (conditions.weekdays !== undefined || conditions.timeWindow !== undefined) {
     const local = localTimeParts(state.now, state.timeZone);
     if (local === null || !timeWindowMatches(conditions, local)) return false;

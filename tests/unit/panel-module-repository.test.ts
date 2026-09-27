@@ -4,10 +4,9 @@ import { getPanelModuleDataForChannels } from "../../src/worker/panel/module-rep
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-// A mandatory module (text_library, channel_events) has no `channel_modules`
-// row for channels that predate it -- there is no backfill migration, by
-// design (see selectModulesForEvent in worker/dispatch.ts, which applies the
-// same rule). Both the module list and the active-module list must still
+// Mandatory modules may have no `channel_modules` row for a channel. The sun
+// migration backfills existing channels, while registry defaults keep the
+// behavior safe for newly created channels. Both module lists must still
 // report it as active, or its panel never mounts (issue behind this test).
 describe("getPanelModuleDataForChannels: mandatory modules without a row", () => {
   let database: TestD1Database;
@@ -31,7 +30,7 @@ describe("getPanelModuleDataForChannels: mandatory modules without a row", () =>
     expect(channelStates.find((module) => module.id === "text_library")).toMatchObject({ enabled: true, mandatory: true });
     expect(channelStates.find((module) => module.id === "channel_events")).toMatchObject({ enabled: true, mandatory: true });
     expect(channelActive.map((module) => module.moduleId)).toEqual(
-      expect.arrayContaining(["text_library", "channel_events"]),
+      expect.arrayContaining(["text_library", "sun", "channel_events"]),
     );
 
     // Non-mandatory modules stay off without a row.

@@ -57,12 +57,26 @@ Picker und Twitch-Kategoriesuche verwenden die Host-Routen
 Module auf. Die Kanalzeitzone liegt in der Host-Tabelle `channels` und gilt
 für `{date}`, `{time}` sowie zeitabhängige Textblockbedingungen.
 
+Die Sonnendatenquelle `src/modules/sun/` ergänzt den Contract um eigene
+Templatewerte, eine Tag-/Nachtbedingung, einen Alarm-Handler und ein Feld in
+den gemeinsamen Kanaleinstellungen. Open-Meteo liefert nur die Geocoding-
+Ergebnisse einschließlich Koordinaten und Standortzeitzone. Die Worker-
+Berechnung verwendet die NOAA-Gleichungen nach Meeus für Aufgang, Untergang und
+bürgerliche Abenddämmerung, sodass tägliche Berechnungen keinen externen
+Dienst benötigen. D1 hält je Kanal genau die beiden lokalen Datumszeilen für
+heute und morgen. Der Durable-Object-Alarm erneuert sie um 00:15 Uhr in der
+Kanalzeitzone; ein vorhandener gültiger Eintrag bleibt bei einem Fehler bis zu
+seinem Ablauf nutzbar. Polartag und Polarnacht sind als Zustände gespeichert,
+statt nicht existierende Ereigniszeiten zu schätzen.
+
 Migration `0016_text_library.sql` führte Textblöcke und zunächst eine
 Bibliothekszeitzone ein. `0017_text_library_variant_choices.sql` ergänzte den
 Zufallswahlindex je Variante. Migration `0018_template_value_providers.sql`
 überführt die gespeicherten Zeitzonen in die Kanaleinstellungen, entfernt die
 Bibliothekseinstellung und benennt gespeicherte Ads-Platzhalter auf
-`{ads.duration}` und `{ads.seconds}` um.
+`{ads.duration}` und `{ads.seconds}` um. Migration `0019_sun_data_source.sql`
+legt die kanalgebundenen Standort- und Sonnentabellen an und aktiviert die
+Sonnendatenquelle für bestehende Kanäle.
 
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 

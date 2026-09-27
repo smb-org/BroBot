@@ -94,6 +94,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["textBlockSelectColumns", textBlockSelectColumns],
   ["textBlockCategorySelectColumns", textBlockCategorySelectColumns],
   ["channelBotConsentCondition(\"channel\")", channelBotConsentCondition("channel")],
+  ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
 ]);
 
 // Wrangler manages this table itself and doesn't create it via our migrations.
@@ -160,9 +161,9 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(33);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(34);
       expect(objects.filter((object) => object.type === "index")).toHaveLength(31);
-      expect(objects).toHaveLength(64);
+      expect(objects).toHaveLength(65);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

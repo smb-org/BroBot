@@ -20,6 +20,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     ads: "Werbung",
     raid: "Shoutout",
     clips: "Clips",
+    sun: "Sonne",
   },
   en: {
     host: "System",
@@ -28,6 +29,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     ads: "Ad breaks",
     raid: "Shoutout",
     clips: "Clips",
+    sun: "Sun times",
   },
 };
 
@@ -125,6 +127,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     ads: "Kündigt beginnende Werbepausen im Chat an.",
     raid: "Begrüßt eingehende Raids und ermöglicht manuelle Shoutouts.",
     clips: "Erstellt manuell einen Clip des laufenden Streams.",
+    sun: "Berechnet Sonnenaufgang, Sonnenuntergang und Dämmerung für den Kanalstandort.",
   },
   en: {
     text_commands: "Replies to short commands in chat.",
@@ -132,6 +135,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     ads: "Announces beginning ad breaks in chat.",
     raid: "Greets incoming raids and lets you send manual shoutouts.",
     clips: "Creates a clip from the live stream on demand.",
+    sun: "Calculates sunrise, sunset, and dusk for the channel location.",
   },
 };
 

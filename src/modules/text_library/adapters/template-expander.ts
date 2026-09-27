@@ -107,7 +107,14 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
   const needsTimeZone = [...blocks.values()].some((block) => block.variants.some((variant) =>
     variant.conditions.weekdays !== undefined || variant.conditions.timeWindow !== undefined,
   ));
+  const conditionIds = [...new Set([...blocks.values()].flatMap((block) => block.variants.flatMap((variant) =>
+    Object.keys(variant.conditions.data ?? {}),
+  )))];
+  const dataConditionsPromise = conditionIds.length === 0
+    ? Promise.resolve<Readonly<Record<string, string>>>({})
+    : context.resolveTemplateConditions(conditionIds);
   const timeZone = needsTimeZone ? await context.channelTimeZone() : "UTC";
+  const dataConditions = await dataConditionsPromise;
   const needsStream = [...blocks.values()].some((block) => block.variants.some((variant) => variant.conditions.stream !== undefined));
   const needsGame = [...blocks.values()].some((block) =>
     block.games.length > 0 || block.variants.some((variant) => variant.conditions.game !== undefined),
@@ -142,6 +149,7 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
       commandContext: context.templateContext === "chat_command",
       timeZone,
       now: context.now,
+      dataConditions,
     };
   };
 
