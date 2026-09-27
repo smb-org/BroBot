@@ -55,6 +55,7 @@ import { HELIX_STREAM_STATE_TTL_MS, lookupAndRefreshStreamState } from "../strea
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { getChannelModuleForChannel } from "../db/channel-modules";
 import { measureServerTiming, scheduleBackgroundWork } from "../server-timing";
+import { DEFAULT_CHANNEL_TIME_ZONE, validChannelTimeZone } from "../../modules/contract";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -226,6 +227,34 @@ panelRouter.route("/", moduleRouter);
 panelRouter.route("/", variableRouter);
 panelRouter.route("/", overlayRouter);
 panelRouter.route("/", overlayAccessRouter);
+
+panelRouter.get("/api/channels/:channelId/settings", requireChannelAuthorization(), async (context) => {
+  const row = await context.env.DB.prepare("SELECT time_zone, time_zone_revision FROM channels WHERE channel_id = ?")
+    .bind(context.req.param("channelId")).first<{ time_zone: string; time_zone_revision: number }>();
+  if (row === null) return context.json({ error: "channel_not_found" }, 404);
+  return context.json({ timeZone: row.time_zone, revision: row.time_zone_revision });
+});
+
+panelRouter.patch("/api/channels/:channelId/settings", requireChannelAuthorization(), async (context) => {
+  if (!canManage(context.get("channelRole"))) return context.json({ error: "channel_settings_denied" }, 403);
+  const body: unknown = await context.req.json().catch(() => null);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return context.json({ error: "channel_settings_invalid" }, 400);
+  }
+  const timeZone: unknown = Reflect.get(body, "timeZone");
+  const revision: unknown = Reflect.get(body, "revision");
+  if (typeof timeZone !== "string" || timeZone.length > 80 || !validChannelTimeZone(timeZone) ||
+      !Number.isSafeInteger(revision) || (revision as number) < 1) {
+    return context.json({ error: "channel_time_zone_invalid" }, 400);
+  }
+  const nextRevision = (revision as number) + 1;
+  const result = await context.env.DB.prepare(
+    `UPDATE channels SET time_zone = ?, time_zone_revision = ?, updated_at = ?
+      WHERE channel_id = ? AND time_zone_revision = ?`,
+  ).bind(timeZone, nextRevision, nowIso(), context.req.param("channelId"), revision).run();
+  if (result.meta.changes === 0) return context.json({ error: "channel_settings_conflict" }, 409);
+  return context.json({ ok: true, timeZone, revision: nextRevision, defaultTimeZone: DEFAULT_CHANNEL_TIME_ZONE });
+});
 
 panelRouter.post(
   "/api/channels/:channelId/controls/:control",

@@ -30,6 +30,7 @@ import {
 import {
   fetchAuditLog,
   fetchChannelOverview,
+  fetchChannelSettings,
   fetchChannels,
   fetchEvents,
   fetchMembers,
@@ -39,6 +40,7 @@ import {
   PanelApiError,
   refreshModeratorStatus,
   setChannelControl,
+  saveChannelTimeZone,
   setChannelModuleEnabled,
 } from "./api";
 import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleToggleList, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
@@ -54,7 +56,7 @@ import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { dashboardNavEntries, navPageGroupHeading, registeredModuleNavEntries } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ControlDurationDialog, Icon, InspectorSection, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
+import { BlockingState, Button, ControlDurationDialog, Field, Icon, InspectorSection, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
 import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
@@ -63,6 +65,7 @@ import { OverlaysPage } from "./OverlaysPage";
 import { OverlayEditorPage } from "./OverlayEditorPage";
 import { emptyAuditFilter, auditFilterIsActive } from "./audit/model";
 import { useRealtimePanelMessages } from "./realtime";
+import { channelSettingsTexts } from "./channel-settings-locale";
 import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
 import "./styles.css";
 
@@ -989,6 +992,38 @@ const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; chi
 };
 
 const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, onModulesChanged }: ChannelOverviewPageProperties): ReactElement => {
+  const settingsTexts = channelSettingsTexts(dashboardLanguage());
+  const [channelSettings, setChannelSettings] = useState<{ timeZone: string; revision: number } | null>(null);
+  const [timeZoneDraft, setTimeZoneDraft] = useState("");
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
+  useEffect(() => {
+    let active = true;
+    fetchChannelSettings(overview.channelId).then((settings) => {
+      if (!active) return;
+      setChannelSettings(settings);
+      setTimeZoneDraft(settings.timeZone);
+      setSettingsError("");
+    }).catch(() => { if (active) setSettingsError(settingsTexts.loadError); });
+    return () => { active = false; };
+  }, [overview.channelId, settingsTexts.loadError]);
+  const saveTimeZone = async (): Promise<void> => {
+    if (channelSettings === null || timeZoneDraft.trim().length === 0 || !canManage(overview.role)) {
+      setSettingsError(settingsTexts.invalid);
+      return;
+    }
+    setSettingsBusy(true);
+    setSettingsError("");
+    try {
+      const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZoneDraft.trim());
+      setChannelSettings({ timeZone: saved.timeZone, revision: saved.revision });
+      setTimeZoneDraft(saved.timeZone);
+    } catch {
+      setSettingsError(settingsTexts.saveError);
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
   const entries = sortBySeverity([
     broadcasterRow(overview.broadcasterConnection),
     channelBotConsentRow(overview.channelBotConsent, overview.channelId, overview.role === "broadcaster"),
@@ -1008,6 +1043,14 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
         title={overview.displayName}
         subtitle={roleLabel(overview.role)}
       />
+      <section className="content-section" aria-label={settingsTexts.section}>
+        <div className="section-heading"><h2>{settingsTexts.section}</h2></div>
+        {canManage(overview.role) ? <div className="form-actions">
+          <Field label={settingsTexts.timeZone} hint={settingsTexts.timeZoneHint} value={timeZoneDraft} onChange={setTimeZoneDraft} disabled={settingsBusy || channelSettings === null} />
+          <Button disabled={settingsBusy || channelSettings === null || timeZoneDraft === channelSettings.timeZone || timeZoneDraft.trim().length === 0} onClick={() => { void saveTimeZone(); }}>{settingsTexts.save}</Button>
+        </div> : <p className="muted">{settingsTexts.readOnly}</p>}
+        {settingsError.length === 0 ? null : <p className="error-text" role="alert">{settingsError}</p>}
+      </section>
       <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} modules={modules} />
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
       <section className="content-section" aria-label={dashboardTexts().navigation.module}>

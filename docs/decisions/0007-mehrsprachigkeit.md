@@ -92,7 +92,7 @@ wäre jeder gespeicherte Text nach einem Sprachwechsel kaputt.
 | Modul | Platzhalter |
 |---|---|
 | `text_commands` | `{user}`, `{channel}` |
-| `ads` | `{duration}`, `{seconds}` |
+| `ads` | `{ads.duration}`, `{ads.seconds}` |
 | `raid` | `{channel}`, `{viewers}` |
 
 ## 7. Ausdrücklich nicht betroffen

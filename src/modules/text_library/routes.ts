@@ -2,13 +2,15 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import { canManage } from "../../contracts/values";
-import { TEXT_LIBRARY_MODULE_ID, type TextBlock, type TwitchGame } from "./contracts";
+import type { TextBlock } from "./contracts";
 import { TEXT_BLOCK_MAXIMUMS } from "./contracts";
-import { firstMatchingTextBlockVariant, textBlockAppliesToGame, validTextBlock, validTimeZone } from "./domain";
+import { validTextBlock } from "./domain";
 import { createTextBlockRepository } from "./adapters/d1";
 import type { TextBlockInput } from "./repository";
 import { createTextLibraryService } from "./service";
 import { MODULE_TEMPLATE_MINIMUM_TIERS, SYSTEM_TEMPLATE_VARIABLE_LIST, type ModuleRouteEnvironment } from "../contract";
+
+const TEXT_LIBRARY_MODULE_ID = "text_library";
 
 const gameSchema = z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().min(1).max(100) });
 const conditionsSchema = z.object({
@@ -31,13 +33,6 @@ const blockSchema = z.object({
   revision: z.number().int().min(1).optional(),
 });
 const categorySchema = z.object({ name: z.string().trim().min(1).max(TEXT_BLOCK_MAXIMUMS.categoryNameLength) });
-const timeZoneSchema = z.object({ timeZone: z.string().min(1).max(80), revision: z.number().int().min(1) });
-const previewSchema = z.object({
-  streamState: z.enum(["online", "offline", "unknown"]).default("offline"),
-  gameId: z.string().nullable().default(null),
-  chatStatus: z.array(z.enum(["viewer", "subscriber", "vip", "moderator", "broadcaster"])).nullable().default(null),
-  now: z.number().int().optional(),
-});
 
 const nowIso = (): string => new Date().toISOString();
 const param = (context: { req: { param: (name: string) => string | undefined } }, name: string): string => context.req.param(name) ?? "";
@@ -67,35 +62,6 @@ const parseBlock = (raw: unknown): Omit<TextBlockInput, "channelId" | "now" | "e
 };
 
 export const textLibraryRoutes = new Hono<ModuleRouteEnvironment>();
-
-textLibraryRoutes.get("/games", async (context) => {
-  const query = (context.req.query("q") ?? "").trim();
-  if (query.length < 2 || query.length > 100) return context.json({ games: [] });
-  try {
-    const now = nowIso();
-    const token = await context.get("measureServerTiming")("helix", () => context.get("getAppAccessToken")(context.env, now));
-    const result = await context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{
-      data?: readonly { id?: unknown; name?: unknown }[];
-    }>({
-      url: "https://api.twitch.tv/helix/search/categories",
-      query: { query, first: "20" },
-      accessToken: token,
-      clientId: context.env.TWITCH_CLIENT_ID,
-    }));
-    if (!result.ok) return context.json({ error: "text_library_games_unavailable" }, 503);
-    const resultRows: unknown = result.data.data;
-    if (!Array.isArray(resultRows)) return context.json({ error: "text_library_games_unavailable" }, 503);
-    const games: TwitchGame[] = resultRows.flatMap((entry: unknown): TwitchGame[] => {
-      if (typeof entry !== "object" || entry === null) return [];
-      const id: unknown = Reflect.get(entry, "id");
-      const name: unknown = Reflect.get(entry, "name");
-      return typeof id === "string" && typeof name === "string" ? [{ id, name }] : [];
-    });
-    return context.json({ games });
-  } catch {
-    return context.json({ error: "text_library_games_unavailable" }, 503);
-  }
-});
 
 textLibraryRoutes.get("/library", async (context) => {
   const channelId = param(context, "channelId");
@@ -139,7 +105,7 @@ textLibraryRoutes.post("/blocks", async (context) => {
   if (reservedNames.has(parsed.name)) return context.json({ error: "text_library_block_reserved_name" }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const snapshot = await service.list(channelId);
-  const result = await service.create({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"));
+  const result = await service.create({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"), snapshot);
   if (result.ok) return context.json({ block: result.block }, 201);
   if (result.reason === "already_exists") return context.json({ error: "text_library_block_exists" }, 409);
   if (result.reason === "category_not_found") return context.json({ error: "text_library_category_not_found" }, 400);
@@ -166,7 +132,7 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
   if (reservedNames.has(parsed.name)) return context.json({ error: "text_library_block_reserved_name" }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const snapshot = await service.list(channelId);
-  const result = await service.change({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"));
+  const result = await service.change({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"), snapshot);
   if (result.ok) return context.json({ block: result.block });
   return context.json({ error: `text_library_${result.reason}`, ...(result.current === undefined ? {} : { current: result.current }), ...(result.path === undefined ? {} : { path: result.path }) }, result.reason === "conflict" ? 409 : result.reason === "not_authorized" ? 403 : 400);
 });
@@ -207,40 +173,4 @@ textLibraryRoutes.delete("/categories/:id", async (context) => {
   const result = await repository.deleteCategory(param(context, "channelId"), param(context, "id"), context.get("actor"), nowIso());
   if (result === "ok") return context.json({ ok: true });
   return context.json({ error: result === "not_empty" ? "text_library_category_not_empty" : "text_library_category_not_found" }, result === "not_empty" ? 409 : 404);
-});
-
-textLibraryRoutes.patch("/settings", async (context) => {
-  if (!canManage(context.get("channelRole"))) return denied(context);
-  const parsed = timeZoneSchema.safeParse(await readBody(context.req.raw));
-  if (!parsed.success || !validTimeZone(parsed.data.timeZone)) return context.json({ error: "text_library_time_zone_invalid" }, 400);
-  const repository = createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit"));
-  const changed = await repository.updateTimeZone(param(context, "channelId"), parsed.data.timeZone, parsed.data.revision, context.get("actor"), nowIso());
-  return changed ? context.json({ ok: true }) : context.json({ error: "text_library_settings_conflict" }, 409);
-});
-
-textLibraryRoutes.post("/preview/:name", async (context) => {
-  const parsed = previewSchema.safeParse(await readBody(context.req.raw));
-  if (!parsed.success) return context.json({ error: "text_library_preview_invalid" }, 400);
-  const repository = createTextBlockRepository(context.env.DB, context.get("authorizeMutation"), context.get("prepareModuleAudit"));
-  const [snapshot, block] = await Promise.all([
-    repository.list(param(context, "channelId")),
-    repository.find(param(context, "channelId"), param(context, "name")),
-  ]);
-  if (block === null) return context.json({ error: "text_library_block_not_found" }, 404);
-  if (!textBlockAppliesToGame(block, parsed.data.gameId)) {
-    return context.json({ variantId: null, text: "", timeZone: snapshot.settings.timeZone });
-  }
-  const simulatedGame = parsed.data.gameId === null ? null : block.games.find((game) => game.id === parsed.data.gameId)
-    ?? block.variants.flatMap((candidate) => candidate.conditions.game === undefined ? [] : [candidate.conditions.game.game])
-      .find((game) => game.id === parsed.data.gameId)
-    ?? { id: parsed.data.gameId, name: "" };
-  const variant = firstMatchingTextBlockVariant(block.variants, {
-    streamState: parsed.data.streamState,
-    game: simulatedGame,
-    chatStatus: parsed.data.chatStatus,
-    commandContext: parsed.data.chatStatus !== null,
-    timeZone: snapshot.settings.timeZone,
-    now: parsed.data.now ?? Date.now(),
-  });
-  return context.json({ variantId: variant?.id ?? null, text: variant?.texts[0] ?? "", timeZone: snapshot.settings.timeZone });
 });

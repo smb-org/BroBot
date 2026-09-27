@@ -1,10 +1,7 @@
 import type { ModuleTemplateMinimumTier } from "../../contract";
 
 export {
-  TEXT_LIBRARY_BLOCKS_PATH,
-  TEXT_LIBRARY_GAME_SEARCH_PATH,
   TEXT_LIBRARY_LIBRARY_PATH,
-  TEXT_LIBRARY_MODULE_ID,
 } from "../../contracts/text-library";
 export type { TextLibraryBlockSummary } from "../../contracts/text-library";
 
@@ -71,7 +68,6 @@ export interface TextBlockSaveInput extends TextBlockMutationInput {
 }
 
 export interface TextLibrarySettings {
-  timeZone: string;
   revision: number;
   graphRevision: number;
   updatedAt: string;

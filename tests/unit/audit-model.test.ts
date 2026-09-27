@@ -91,7 +91,7 @@ describe("audit sentence action templates", () => {
         subjectUserId: action.startsWith("member.") ? "user-2" : null,
         subjectLogin: action.startsWith("member.") ? "bob" : null,
         subjectDisplayName: action.startsWith("member.") ? "Bob" : null,
-        before: JSON.stringify({ name: "before_name", role: "manager", value: 4, fullConsent: false, timeZone: "Europe/Berlin" }),
+        before: JSON.stringify({ name: "before_name", role: "manager", value: 4, fullConsent: false, timeZone: "UTC" }),
         after: JSON.stringify({ name: "after_name", role: "operator", value: 5, fullConsent: true, length: 60, displayName: "Alpha", timeZone: "UTC" }),
       });
       for (const language of ["de", "en"] as const) {

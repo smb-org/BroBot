@@ -2533,7 +2533,7 @@ describe("Dashboard skeleton", () => {
     });
     fireEvent.keyDown(document.body, { key: "k", metaKey: true });
     await screen.findByRole("dialog");
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "clip" } });
+    fireEvent.change(screen.getByPlaceholderText("Suchen oder Aktion ausführen …"), { target: { value: "clip" } });
     fireEvent.click(await within(screen.getByRole("dialog")).findByText("Clip erstellen"));
 
     await waitFor(() => {

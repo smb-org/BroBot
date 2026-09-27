@@ -71,7 +71,7 @@ describe("ads module", () => {
       manual: "Pause läuft",
       prewarning: true,
       leadSeconds: 60,
-      prewarningText: "Vorwarnung {seconds}",
+      prewarningText: "Vorwarnung {ads.seconds}",
     }));
 
     expect(result.actions).toEqual([{ kind: "chat", text: "Pause läuft (45 Sekunden)" }]);
@@ -83,11 +83,11 @@ describe("ads module", () => {
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: false,
     }, {
-      automatic: "auto {duration}",
+      automatic: "auto {ads.duration}",
       manual: "Pause {dauer}",
       prewarning: true,
       leadSeconds: 60,
-      prewarningText: "Vorwarnung {seconds}",
+      prewarningText: "Vorwarnung {ads.seconds}",
     }));
 
     expect(result.actions).toEqual([{ kind: "chat", text: "Pause {dauer} (45 Sekunden)" }]);

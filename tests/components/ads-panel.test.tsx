@@ -11,7 +11,7 @@ const settings = {
   manual: "Manuell gestartete Werbung",
   prewarning: false,
   leadSeconds: 60,
-  prewarningText: "Werbung in {seconds} Sekunden.",
+  prewarningText: "Werbung in {ads.seconds} Sekunden.",
 };
 const schedule: AdsScheduleResponse = {
   schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: 2, snoozeRefreshAt: null },
@@ -63,9 +63,9 @@ describe("Ad settings editor declaration", () => {
     expect(announcementsTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(prewarningTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(screen.getByText("Werbepause beginnt (90 Sekunden)")).toBeInTheDocument();
-    const durationHints = screen.getAllByRole("button", { name: /Ohne \{duration\} ergänzt die Vorschau \(N Sekunden\)\./ });
+    const durationHints = screen.getAllByRole("button", { name: /Ohne \{ads\.duration\} ergänzt die Vorschau \(N Sekunden\)\./ });
     expect(durationHints).toHaveLength(2);
-    for (const hint of durationHints) expect(hint).toHaveAttribute("title", expect.stringContaining("Ohne {duration}"));
+    for (const hint of durationHints) expect(hint).toHaveAttribute("title", expect.stringContaining("Ohne {ads.duration}"));
 
     const automatic = screen.getByRole("textbox", { name: "Automatische Werbepause" });
     fireEvent.change(automatic, { target: { value: "x".repeat(486) } });
@@ -82,10 +82,10 @@ describe("Ad settings editor declaration", () => {
     const fetcher = adsFetch(() => jsonResponse({ error: "module_settings_changed_concurrently" }, 409));
     renderAds(fetcher);
     const field = await screen.findByRole("textbox", { name: "Automatische Werbepause" });
-    fireEvent.change(field, { target: { value: "Mein Entwurf {duration}" } });
+    fireEvent.change(field, { target: { value: "Mein Entwurf {ads.duration}" } });
     fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Ansagen-Einstellungen wurden inzwischen geändert.");
-    expect(field).toHaveValue("Mein Entwurf {duration}");
+    expect(field).toHaveValue("Mein Entwurf {ads.duration}");
 
     cleanup();
     renderAds(adsFetch(), "operator");

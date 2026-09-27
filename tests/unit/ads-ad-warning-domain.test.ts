@@ -7,7 +7,7 @@ const plannedAtMs = Date.parse("2026-09-21T12:00:00.000Z");
 const settings = {
   prewarning: true,
   leadSeconds: 60,
-  prewarningText: "Werbung in {seconds} Sekunden.",
+  prewarningText: "Werbung in {ads.seconds} Sekunden.",
 };
 
 const input = (overrides: Partial<Parameters<typeof decideAdPrewarning>[0]> = {}) => ({

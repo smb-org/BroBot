@@ -84,9 +84,6 @@ export interface TextLibraryTexts {
   noMatchingVariant: string;
   blockUnavailableForGame: string;
   previewTooLong: (length: number) => string;
-  timezone: string;
-  timezoneHint: string;
-  timezoneInvalid: string;
   operatorReason: string;
   conflict: string;
   cycle: (path: readonly string[]) => string;
@@ -97,7 +94,7 @@ export interface TextLibraryTexts {
   noUsages: string;
   usageKind: Record<TextBlockUsage["kind"], string>;
   roleConditionHint: string;
-  argsContextWarning: string;
+  inputContextWarning: string;
   filterAny: string;
   variantsCount: (count: number) => string;
   textsCount: (count: number) => string;
@@ -141,7 +138,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     nameReserved: "Dieser Name ist für eine Vorlagenvariable reserviert.",
     generalSection: "Allgemein",
     category: "Kategorie",
-    categories: "Kategorien und Zeitzone",
+    categories: "Kategorien",
     categoryAdd: "Kategorie hinzufügen",
     categoryName: "Kategoriename",
     categoryRename: "Umbenennen",
@@ -191,9 +188,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     noMatchingVariant: "Keine Variante trifft unter diesen Bedingungen zu.",
     blockUnavailableForGame: "Der Textbaustein ist für das simulierte Spiel nicht aktiv.",
     previewTooLong: (length) => `Diese Variante kann mit eingebetteten Textbausteinen ${String(length)} Zeichen überschreiten; Ausgaben werden bei 500 Zeichen gekürzt.`,
-    timezone: "Kanalzeitzone",
-    timezoneHint: "IANA-Zeitzone, zum Beispiel Europe/Berlin.",
-    timezoneInvalid: "Bitte eine gültige IANA-Zeitzone eingeben.",
     operatorReason: "Nur Broadcaster und Verwalter dürfen Textbausteine und Kategorien ändern.",
     conflict: "Dieser Textbaustein wurde inzwischen geändert. Lade den Serverstand neu.",
     cycle: (path) => `Zirkuläre Einbettung: ${path.join(" → ")}.`,
@@ -204,7 +198,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     noUsages: "Noch keine Verwendungen.",
     usageKind: { command: "Befehl", timer: "Timer", overlay: "Overlay", event: "Ereignis" },
     roleConditionHint: "Rollenbedingungen greifen nur in Chatbefehlen; in Ereignissen, Overlays und Timern sind sie immer falsch.",
-    argsContextWarning: "{args} und {convert} enthalten Eingaben aus einem Befehl und zeigen außerhalb von Befehlen den Nutzungs- oder Fehlertext.",
+    inputContextWarning: "Diese Vorlage enthält Eingabevariablen aus einem Chatbefehl. Außerhalb von Befehlen erscheint deren Nutzungs- oder Fehlertext.",
     filterAny: "Alle Spiele",
     variantsCount: (count) => `${String(count)} ${count === 1 ? "Variante" : "Varianten"}`,
     textsCount: (count) => `${String(count)} Texte`,
@@ -230,8 +224,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
       text_library_reference_depth_exceeded: "Die Einbettung überschreitet die maximale Tiefe von 3.",
       text_library_category_not_found: "Diese Kategorie gibt es nicht mehr.",
       text_library_category_not_empty: "Kategorie kann nur gelöscht werden, wenn sie leer ist.",
-      text_library_settings_conflict: "Die Zeitzone wurde inzwischen geändert.",
-      text_library_time_zone_invalid: "Bitte eine gültige IANA-Zeitzone eingeben.",
       text_library_management_denied: "Nur Broadcaster und Verwalter dürfen Änderungen speichern.",
       text_library_category_limit: "Es können höchstens 25 Kategorien angelegt werden.",
     },
@@ -269,7 +261,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     nameReserved: "This name is reserved for a template variable.",
     generalSection: "General",
     category: "Category",
-    categories: "Categories and time zone",
+    categories: "Categories",
     categoryAdd: "Add category",
     categoryName: "Category name",
     categoryRename: "Rename",
@@ -319,9 +311,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     noMatchingVariant: "No variant matches this state.",
     blockUnavailableForGame: "This text block is not active for the simulated game.",
     previewTooLong: (length) => `This variant can exceed ${String(length)} characters with embedded blocks; output is cut at 500 characters.`,
-    timezone: "Channel time zone",
-    timezoneHint: "IANA time zone, for example Europe/Berlin.",
-    timezoneInvalid: "Enter a valid IANA time zone.",
     operatorReason: "Only broadcasters and managers can change text blocks and categories.",
     conflict: "This text block has changed since you opened it. Reload the server version.",
     cycle: (path) => `Circular reference: ${path.join(" → ")}.`,
@@ -332,7 +321,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     noUsages: "No usages yet.",
     usageKind: { command: "Command", timer: "Timer", overlay: "Overlay", event: "Event" },
     roleConditionHint: "Role conditions only match in chat commands; they are always false in events, overlays, and timers.",
-    argsContextWarning: "{args} and {convert} contain command input and show usage or error text outside command contexts.",
+    inputContextWarning: "This template uses chat command input. Outside commands, the variable's usage or error text appears.",
     filterAny: "All games",
     variantsCount: (count) => `${String(count)} ${count === 1 ? "variant" : "variants"}`,
     textsCount: (count) => `${String(count)} texts`,
@@ -358,8 +347,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
       text_library_reference_depth_exceeded: "Nesting exceeds the maximum depth of 3.",
       text_library_category_not_found: "This category no longer exists.",
       text_library_category_not_empty: "A category can only be deleted when it is empty.",
-      text_library_settings_conflict: "The time zone changed since you opened it.",
-      text_library_time_zone_invalid: "Enter a valid IANA time zone.",
       text_library_management_denied: "Only broadcasters and managers can save changes.",
       text_library_category_limit: "A channel can have up to 25 categories.",
     },

@@ -382,11 +382,11 @@ const expectedModuleSettings = {
   text_commands: {},
   text_library: {},
   ads: {
-    automatic: "Automatische Werbepause: {duration} Sekunden. Bin gleich zurück!",
-    manual: "Werbepause: {duration} Sekunden. Bin gleich zurück!",
+    automatic: "Automatische Werbepause: {ads.duration} Sekunden. Bin gleich zurück!",
+    manual: "Werbepause: {ads.duration} Sekunden. Bin gleich zurück!",
     prewarning: true,
     leadSeconds: 60,
-    prewarningText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
+    prewarningText: "Werbung in {ads.seconds} Sekunden. Bin gleich zurück!",
   },
 };
 

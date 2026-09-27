@@ -1,7 +1,7 @@
 import type { EventCode } from "../contracts/values";
 import type { BotModule, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState } from "../modules/contract";
 import type { RealtimeMessage } from "../realtime-contract";
-import { MODULES } from "../modules/registry";
+import { MODULES, validateModuleTemplateVariable } from "../modules/registry";
 import {
   getChannelMemberForChannel,
 } from "./db/channel-members";
@@ -24,9 +24,10 @@ import { readChannelControls, readDispatchChannelState } from "./db/channel-cont
 import { getBotIdentity } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { readChannelVariables, prepareChannelVariableChange, prepareResetChannelVariablesForStream } from "./db/channel-variables";
-import { createTemplateRenderer, type TemplateChannelDetails, type TemplateStreamDetails } from "./template-resolver";
+import { createTemplateRenderer, type TemplateChannelDetails, type TemplateStreamDetails, type TemplateValueProvider } from "./template-resolver";
 import type { ChannelVariableOperation } from "../contracts/values";
 import type { TemplateVariable } from "../template";
+import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -219,6 +220,12 @@ const channelLanguageFor = async (db: D1Database, channelId: string): Promise<Mo
   const row = await db.prepare("SELECT language FROM channels WHERE channel_id = ?").bind(channelId)
     .first<{ language: ModuleLanguage }>();
   return row?.language === "en" ? "en" : "de";
+};
+
+const channelTimeZoneFor = async (db: D1Database, channelId: string): Promise<string> => {
+  const row = await db.prepare("SELECT time_zone FROM channels WHERE channel_id = ?").bind(channelId)
+    .first<{ time_zone: string }>();
+  return row?.time_zone ?? DEFAULT_CHANNEL_TIME_ZONE;
 };
 
 const recordValue = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -549,6 +556,7 @@ export const dispatchEventSubNotification = async (
   let streamDetailsPromise: Promise<TemplateStreamDetails | null> | undefined;
   let appAccessTokenPromise: Promise<string> | undefined;
   let channelLanguagePromise: Promise<ModuleLanguage> | undefined;
+  let channelTimeZonePromise: Promise<string> | undefined;
   let followerTotalPromise: Promise<number | null> | undefined;
   let chattersTotalPromise: Promise<number | null> | undefined;
   const followedAtPromises = new Map<string, Promise<ModuleFollowedAt>>();
@@ -589,6 +597,10 @@ export const dispatchEventSubNotification = async (
     channelLanguagePromise ??= channelLanguageFor(environment.DB, event.channelId);
     return channelLanguagePromise;
   };
+  const channelTimeZone = (): Promise<string> => {
+    channelTimeZonePromise ??= channelTimeZoneFor(environment.DB, event.channelId);
+    return channelTimeZonePromise;
+  };
   const followerTotal = (): Promise<number | null> => {
     followerTotalPromise ??= totalFor(environment, event.channelId, "followers", fetcher);
     return followerTotalPromise;
@@ -615,6 +627,34 @@ export const dispatchEventSubNotification = async (
     if (channelId !== event.channelId) throw new Error("Variable changes must use the event channel.");
     return prepareChannelVariableChange(environment.DB, channelId, change, now, claim);
   };
+
+  const registeredModuleVariables = new Map<string, readonly TemplateVariable[]>();
+  await Promise.all(registry.map(async (module) => {
+    let dynamicVariables: readonly TemplateVariable[];
+    try {
+      dynamicVariables = await module.templateVariables?.(environment.DB, event.channelId) ?? [];
+    } catch {
+      dynamicVariables = [];
+    }
+    const staticVariables = Object.values(module.templateFields ?? {}).flatMap((variables) => variables ?? []) as TemplateVariable[];
+    const variables = [...staticVariables, ...dynamicVariables];
+    for (const variable of variables) validateModuleTemplateVariable(module, variable.name);
+    registeredModuleVariables.set(module.id, variables);
+  }));
+  const registeredTemplateVariables = registry
+    .filter((module) => module.templateVariableNamespace !== "text_blocks")
+    .flatMap((module) => registeredModuleVariables.get(module.id) ?? []);
+  const templateValueProviders: TemplateValueProvider[] = registry.flatMap((provider) => {
+    const resolveTemplateValues = provider.resolveTemplateValues;
+    if (resolveTemplateValues === undefined) return [];
+    return [{
+      moduleId: provider.id,
+      ...(provider.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: provider.templateVariableNamespace }),
+      variables: registeredModuleVariables.get(provider.id) ?? [],
+      ...(provider.templateValueOutputLimit === undefined ? {} : { outputLimit: provider.templateValueOutputLimit }),
+      resolveTemplateValues,
+    }];
+  });
 
   for (const moduleId of unknownModules) {
     newEntries.push(...await writeModuleDiagnostics(
@@ -647,52 +687,13 @@ export const dispatchEventSubNotification = async (
       };
       const moduleVariables = Object.values(module.templateFields ?? {}).flatMap((variables) => variables ?? []) as TemplateVariable[];
       const templateContext = module.templateContext ?? "event";
-      const eventTime = Date.parse(moduleEvent.receivedAt);
-      const expandModuleTemplateVariables = async (
-        text: string,
-        knownVariables: ReadonlySet<string>,
-        resolveTemplateVariables: (text: string) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>,
-      ) => {
-        let expandedText = text;
-        let used = false;
-        let complete = true;
-        let variablesResolved = false;
-        const expansionDiagnostics: ModuleDiagnostic[] = [];
-        let outputLimit: number | undefined;
-        for (const provider of registry) {
-          if (provider.expandTemplateVariables === undefined) continue;
-          const expanded = await provider.expandTemplateVariables({
-            DB: environment.DB,
-            channelId: moduleEvent.channelId,
-            text: expandedText,
-            knownVariables,
-            templateContext,
-            chatStatus: moduleEvent.chatStatus,
-            streamState,
-            channelInfo,
-            channelGameId,
-            resolveTemplateVariables,
-            now: Number.isFinite(eventTime) ? eventTime : Date.now(),
-          });
-          expandedText = expanded.text;
-          used ||= expanded.used;
-          complete &&= expanded.complete !== false;
-          variablesResolved ||= expanded.variablesResolved === true;
-          expansionDiagnostics.push(...(expanded.diagnostics ?? []));
-          if (expanded.outputLimit !== undefined) outputLimit = outputLimit === undefined
-            ? expanded.outputLimit
-            : Math.min(outputLimit, expanded.outputLimit);
-        }
-        return {
-          text: expandedText,
-          used,
-          complete,
-          variablesResolved,
-          diagnostics: expansionDiagnostics,
-          ...(outputLimit === undefined ? {} : { outputLimit }),
-        };
-      };
       const render = createTemplateRenderer(moduleEvent, templateContext, moduleVariables, {
+        DB: environment.DB,
+        channelInfo,
+        channelGameId,
+        channelTimeZone,
+        templateValueProviders,
+        registeredTemplateVariables,
         streamState,
         channelDetails,
         streamDetails,
@@ -702,7 +703,6 @@ export const dispatchEventSubNotification = async (
         userCreatedAt,
         channelLanguage,
         readChannelVariables: channelVariables,
-        expandModuleTemplateVariables,
       });
         result = module.handleEvent === undefined
           ? null
@@ -720,6 +720,7 @@ export const dispatchEventSubNotification = async (
             renderTemplate: render,
             prepareVariableChange,
             channelLanguage,
+            channelTimeZone,
           });
     } catch (error: unknown) {
       // A module that throws doesn't take down the worker or the other

@@ -2,6 +2,7 @@ import type { ModuleChatStatus, ModuleStreamState } from "../../contract";
 import { MODULE_TEMPLATE_TIER_CHAT_STATUSES } from "../../contract";
 import type { TextBlock, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_MAXIMUMS, TEXT_BLOCK_NAME_PATTERN } from "../contracts";
+import { validChannelTimeZone } from "../../contract";
 
 export interface TextBlockState {
   streamState: ModuleStreamState;
@@ -20,14 +21,7 @@ const VALID_TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 export const validTextBlockName = (name: string): boolean => TEXT_BLOCK_NAME_PATTERN.test(name);
 
-export const validTimeZone = (timeZone: string): boolean => {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone }).format(0);
-    return true;
-  } catch {
-    return false;
-  }
-};
+export const validTimeZone = validChannelTimeZone;
 
 export const validTextBlockConditions = (conditions: TextBlockConditions): boolean => {
   const stream: unknown = conditions.stream;

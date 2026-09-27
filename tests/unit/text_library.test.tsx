@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MantineProvider } from "@mantine/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleTemplateExpansionContext } from "../../src/modules/contract";
 import type { ModuleEvent } from "../../src/modules/contract";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { adsModule } from "../../src/modules/ads";
@@ -10,7 +9,6 @@ import { raidModule } from "../../src/modules/raid";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { processTextCommandMessage } from "../../src/modules/text_commands/service";
 import type { TextBlockConditions, TextBlockVariant } from "../../src/modules/text_library/contracts";
-import { createTextBlockTemplateExpander } from "../../src/modules/text_library/adapters/template-expander";
 import { createTextBlockRepository } from "../../src/modules/text_library/adapters/d1";
 import { createTextLibraryService } from "../../src/modules/text_library/service";
 import { panelRouter } from "../../src/worker/panel/routes";
@@ -20,7 +18,8 @@ import { firstMatchingTextBlockVariant, textBlockConditionsMatch } from "../../s
 import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import TextLibraryPanel from "../../src/modules/text_library/panel/index";
 import { textLibraryTexts } from "../../src/modules/text_library/panel/locale";
-import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
+import { createTemplateRenderer, type TemplateResolverSources, type TemplateValueProvider } from "../../src/worker/template-resolver";
+import { DEFAULT_CHANNEL_TIME_ZONE } from "../../src/modules/contract";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -36,6 +35,20 @@ const variant = (id: string, text: string, conditions: TextBlockConditions = {})
   conditions,
   texts: [text],
 });
+
+const stubTextLibraryPanelApi = (library: unknown): void => {
+  vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+    if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+    if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+    if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ timeZone: DEFAULT_CHANNEL_TIME_ZONE, revision: 1 }));
+    if (url.pathname.endsWith("/template-preview")) {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) as { text?: unknown } : {};
+      return Promise.resolve(jsonResponse({ text: typeof body.text === "string" ? body.text : "", diagnostics: [] }));
+    }
+    return Promise.resolve(jsonResponse(library));
+  }));
+};
 
 describe("text library", () => {
   let database: TestD1Database;
@@ -83,8 +96,48 @@ describe("text library", () => {
       variants,
       expectedGraphRevision: snapshot.settings.graphRevision,
       now: new Date(NOW).toISOString(),
-    }, ACTOR);
+    }, ACTOR, snapshot);
   };
+
+  const resolveBlockValues = textLibraryModule.resolveTemplateValues;
+  if (resolveBlockValues === undefined) throw new Error("Text library template value provider is required.");
+
+  const blockProvider = async (): Promise<TemplateValueProvider> => ({
+    moduleId: textLibraryModule.id,
+    templateVariableNamespace: "text_blocks",
+    variables: await textLibraryModule.templateVariables?.(database as unknown as D1Database, CHANNEL_ID) ?? [],
+    outputLimit: 500,
+    resolveTemplateValues: resolveBlockValues,
+  });
+
+  const sourcesFor = async (
+    overrides: Partial<TemplateResolverSources> = {},
+  ): Promise<TemplateResolverSources> => ({
+    DB: database as unknown as D1Database,
+    channelInfo: () => Promise.resolve(null),
+    channelGameId: () => Promise.resolve(null),
+    channelTimeZone: () => Promise.resolve(DEFAULT_CHANNEL_TIME_ZONE),
+    templateValueProviders: [await blockProvider()],
+    streamState: () => Promise.resolve("offline"),
+    channelDetails: () => Promise.resolve(null),
+    streamDetails: () => Promise.resolve(null),
+    followedAt: () => Promise.resolve("unavailable"),
+    followerTotal: () => Promise.resolve(null),
+    chattersTotal: () => Promise.resolve(null),
+    userCreatedAt: () => Promise.resolve(null),
+    channelLanguage: () => Promise.resolve("en"),
+    readChannelVariables: () => Promise.resolve({}),
+    now: () => NOW,
+    ...overrides,
+  });
+
+  const renderWithBlocks = async (
+    text: string,
+    event: ModuleEvent,
+    templateContext: "chat_command" | "event",
+    overrides: Partial<TemplateResolverSources> = {},
+    mode: "chat" | "preview" | "overlay" = "chat",
+  ) => createTemplateRenderer(event, templateContext, [], await sourcesFor(overrides))(text, {}, undefined, mode);
 
   it("keeps library reads read-only while supplying default categories", async () => {
     const snapshot = await service.list(CHANNEL_ID);
@@ -113,37 +166,10 @@ describe("text library", () => {
       variant("default", "Hello", {}),
     ])).resolves.toMatchObject({ ok: true });
 
-    const expand = textLibraryModule.expandTemplateVariables;
-    if (expand === undefined) throw new Error("Text library does not register its template expansion.");
-    const createRenderer = (templateContext: "chat_command" | "event", isLive: boolean, event: ModuleEvent) => {
-      const sources: TemplateResolverSources = {
+    const createRenderer = async (templateContext: "chat_command" | "event", isLive: boolean, event: ModuleEvent) =>
+      createTemplateRenderer(event, templateContext, [], await sourcesFor({
         streamState: () => Promise.resolve(isLive ? "online" : "offline"),
-        channelDetails: () => Promise.resolve(null),
-        streamDetails: () => Promise.resolve(null),
-        followedAt: () => Promise.resolve("unavailable"),
-        followerTotal: () => Promise.resolve(null),
-        chattersTotal: () => Promise.resolve(null),
-        userCreatedAt: () => Promise.resolve(null),
-        channelLanguage: () => Promise.resolve("en"),
-        readChannelVariables: () => Promise.resolve({}),
-        expandModuleTemplateVariables: async (text, knownVariables, resolveTemplateVariables) => {
-          return expand({
-            DB: database as unknown as D1Database,
-            channelId: CHANNEL_ID,
-            text,
-            knownVariables,
-            templateContext,
-            chatStatus: event.chatStatus,
-            streamState: sources.streamState,
-            channelInfo: () => Promise.resolve(null),
-            resolveTemplateVariables,
-            now: NOW,
-          } satisfies ModuleTemplateExpansionContext);
-        },
-        now: () => NOW,
-      };
-      return createTemplateRenderer(event, templateContext, [], sources);
-    };
+      }));
     const commandEvent: ModuleEvent = {
       channelId: CHANNEL_ID,
       subscriptionType: "channel.chat.message",
@@ -163,7 +189,7 @@ describe("text library", () => {
     await commands.create({ channelId: CHANNEL_ID, name: "guide", text: "{greeting}", kind: "text", cooldownSeconds: 0, now: new Date(NOW).toISOString() }, ACTOR);
     const runCommand = async (isLive: boolean): Promise<string | undefined> => {
       const result = await processTextCommandMessage(commandEvent, commands, {
-        renderTemplate: createRenderer("chat_command", isLive, commandEvent),
+        renderTemplate: await createRenderer("chat_command", isLive, commandEvent),
       });
       return result.actions.find((action) => action.kind === "chat")?.text;
     };
@@ -171,8 +197,8 @@ describe("text library", () => {
     await expect(runCommand(false)).resolves.toBe("Hello offline");
 
     const event: ModuleEvent = { ...commandEvent, subscriptionType: "channel.raid", payload: {}, actor: null, chatStatus: null };
-    await expect(createRenderer("event", true, event)("{greeting}", {})).resolves.toMatchObject({ text: "Hello live" });
-    await expect(createRenderer("event", false, event)("{greeting}", {})).resolves.toMatchObject({ text: "Hello offline" });
+    await expect((await createRenderer("event", true, event))("{greeting}", {})).resolves.toMatchObject({ text: "Hello live" });
+    await expect((await createRenderer("event", false, event))("{greeting}", {})).resolves.toMatchObject({ text: "Hello offline" });
   });
 
   it("fully resolves host variables (dotted, parameterized) that follow or sit inside a block", async () => {
@@ -180,8 +206,6 @@ describe("text library", () => {
     await expect(createBlock("roll", [variant("default", "You rolled {random 2-5}")])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("stats", [variant("default", "Points: {var.points}")])).resolves.toMatchObject({ ok: true });
 
-    const expand = textLibraryModule.expandTemplateVariables;
-    if (expand === undefined) throw new Error("Text library does not register its template expansion.");
     const event: ModuleEvent = {
       channelId: CHANNEL_ID,
       subscriptionType: "channel.raid",
@@ -192,41 +216,37 @@ describe("text library", () => {
       actor: null,
       chatStatus: null,
     };
-    const createRenderer = () => {
-      const sources: TemplateResolverSources = {
-        streamState: () => Promise.resolve("offline"),
-        channelDetails: () => Promise.resolve(null),
-        streamDetails: () => Promise.resolve(null),
-        followedAt: () => Promise.resolve("unavailable"),
-        followerTotal: () => Promise.resolve(null),
-        chattersTotal: () => Promise.resolve(null),
-        userCreatedAt: () => Promise.resolve(null),
-        channelLanguage: () => Promise.resolve("en"),
-        readChannelVariables: () => Promise.resolve({ points: 42 }),
-        random: () => 0,
-        expandModuleTemplateVariables: async (text, knownVariables, resolveTemplateVariables) => expand({
-          DB: database as unknown as D1Database,
-          channelId: CHANNEL_ID,
-          text,
-          knownVariables,
-          templateContext: "event",
-          chatStatus: event.chatStatus,
-          streamState: sources.streamState,
-          channelInfo: () => Promise.resolve(null),
-          resolveTemplateVariables,
-          now: NOW,
-        } satisfies ModuleTemplateExpansionContext),
-        now: () => NOW,
-      };
-      return createTemplateRenderer(event, "event", [], sources);
-    };
+    const createRenderer = async () => createTemplateRenderer(event, "event", [], await sourcesFor({
+      readChannelVariables: () => Promise.resolve({ points: 42 }),
+      random: () => 0,
+    }));
 
     // A dotted channel variable right after a block, in the same command text (#252).
-    await expect(createRenderer()("{welcome} {var.points}", {})).resolves.toMatchObject({ text: "Hello 42" });
+    await expect((await createRenderer())("{welcome} {var.points}", {})).resolves.toMatchObject({ text: "Hello 42" });
     // A parameterized system variable nested inside a block's own text.
-    await expect(createRenderer()("{roll}", {})).resolves.toMatchObject({ text: "You rolled 2" });
+    await expect((await createRenderer())("{roll}", {})).resolves.toMatchObject({ text: "You rolled 2" });
     // A dotted channel variable nested inside a block's own text.
-    await expect(createRenderer()("{stats}", {})).resolves.toMatchObject({ text: "Points: 42" });
+    await expect((await createRenderer())("{stats}", {})).resolves.toMatchObject({ text: "Points: 42" });
+  });
+
+  it("does not treat viewer arguments as text block references", async () => {
+    await expect(createBlock("welcome", [variant("default", "Expanded block")])).resolves.toMatchObject({ ok: true });
+    const event: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.chat.message",
+      triggerId: "fictional-command-trigger",
+      payload: { message: { text: "!echo {welcome}" }, chatter_user_login: "esembe" },
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: { userId: "fictional-user", login: "esembe", role: null },
+      chatStatus: ["viewer"],
+    };
+    const rendered = await createTemplateRenderer(event, "chat_command", [], await sourcesFor())(
+      "{args}",
+      { args: "{welcome}" },
+    );
+
+    expect(rendered.text).toBe("{welcome}");
   });
 
   it("rejects cycles and nesting deeper than three blocks when saving", async () => {
@@ -348,7 +368,7 @@ describe("text library", () => {
       game: { id: "42", name: "Example Game" },
       chatStatus: ["vip"] as const,
       commandContext: true,
-      timeZone: "Europe/Berlin",
+      timeZone: DEFAULT_CHANNEL_TIME_ZONE,
       now: NOW,
     };
     expect(textBlockConditionsMatch(moderatorCondition, state)).toBe(false);
@@ -371,18 +391,8 @@ describe("text library", () => {
       actor: null,
       chatStatus: null,
     };
-    const sourcesFor = (language: "de" | "en"): TemplateResolverSources => ({
-      streamState: () => Promise.resolve("offline"),
-      channelDetails: () => Promise.resolve(null),
-      streamDetails: () => Promise.resolve(null),
-      followedAt: () => Promise.resolve("unavailable"),
-      followerTotal: () => Promise.resolve(null),
-      chattersTotal: () => Promise.resolve(null),
-      userCreatedAt: () => Promise.resolve(null),
-      channelLanguage: () => Promise.resolve(language),
-      readChannelVariables: () => Promise.resolve({}),
-      now: () => NOW,
-    });
+    const sourcesForLanguage = async (language: "de" | "en"): Promise<TemplateResolverSources> =>
+      sourcesFor({ channelLanguage: () => Promise.resolve(language) });
     const inputVariable = {
       name: "convert",
       contexts: ["chat_command"],
@@ -390,8 +400,8 @@ describe("text library", () => {
       sample: "12",
       maxLength: 12,
     } as const;
-    const renderer = createTemplateRenderer(event, "event", [inputVariable], sourcesFor("en"));
-    const germanRenderer = createTemplateRenderer(event, "event", [inputVariable], sourcesFor("de"));
+    const renderer = createTemplateRenderer(event, "event", [inputVariable], await sourcesForLanguage("en"));
+    const germanRenderer = createTemplateRenderer(event, "event", [inputVariable], await sourcesForLanguage("de"));
 
     await expect(renderer("{args}", {})).resolves.toMatchObject({ text: "Only available in chat commands" });
     await expect(renderer("{convert}", {})).resolves.toMatchObject({ text: "This input is only available in chat commands" });
@@ -402,16 +412,18 @@ describe("text library", () => {
   it("does not repeat a random text directly and caps resolved output at 500 characters", async () => {
     await expect(createBlock("random_line", [{ id: "default", conditions: {}, texts: ["first", "second"] }]))
       .resolves.toMatchObject({ ok: true });
-    const renderRandom = async (): Promise<string> => {
-      const expansion = createTextBlockTemplateExpander(database as unknown as D1Database, CHANNEL_ID, {
-        templateContext: "event",
-        chatStatus: null,
-        streamState: () => Promise.resolve("offline"),
-        currentGame: () => Promise.resolve(null),
-        now: NOW,
-      });
-      return (await expansion("{random_line}", new Set())).text;
+    const randomEvent: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.raid",
+      triggerId: "fictional-random-trigger",
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: null,
+      chatStatus: null,
     };
+    const renderRandom = async (): Promise<string> =>
+      (await renderWithBlocks("{random_line}", randomEvent, "event")).text;
     const results = await Promise.all(Array.from({ length: 8 }, renderRandom));
     for (let index = 1; index < results.length; index += 1) {
       expect(results[index]).not.toBe(results[index - 1]);
@@ -429,37 +441,37 @@ describe("text library", () => {
       actor: null,
       chatStatus: null,
     };
-    const sources: TemplateResolverSources = {
-      streamState: () => Promise.resolve("offline"),
-      channelDetails: () => Promise.resolve(null),
-      streamDetails: () => Promise.resolve(null),
-      followedAt: () => Promise.resolve("unavailable"),
-      followerTotal: () => Promise.resolve(null),
-      chattersTotal: () => Promise.resolve(null),
-      userCreatedAt: () => Promise.resolve(null),
-      channelLanguage: () => Promise.resolve("en"),
-      readChannelVariables: () => Promise.resolve({}),
-      expandModuleTemplateVariables: (text, knownVariables, resolveTemplateVariables) => {
-        const expand = textLibraryModule.expandTemplateVariables;
-        if (expand === undefined) throw new Error("Text library does not register its template expansion.");
-        return expand({
-          DB: database as unknown as D1Database,
-          channelId: CHANNEL_ID,
-          text,
-          knownVariables,
-          templateContext: "event",
-          chatStatus: null,
-          streamState: () => Promise.resolve("offline"),
-          channelInfo: () => Promise.resolve(null),
-          resolveTemplateVariables,
-          now: NOW,
-        });
-      },
-      now: () => NOW,
-    };
-    const longResult = await createTemplateRenderer(event, "event", [], sources)("{long_line}", {});
+    const longResult = await renderWithBlocks("{long_line}", event, "event");
     expect(longResult.text).toHaveLength(500);
     expect(longResult.text.endsWith("…")).toBe(true);
+  });
+
+  it("does not write single-text choices or consume choices during preview and overlay renders", async () => {
+    await expect(createBlock("single_line", [variant("default", "One text")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("multi_line", [{ id: "default", conditions: {}, texts: ["First", "Second"] }]))
+      .resolves.toMatchObject({ ok: true });
+    const event: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.raid",
+      triggerId: "fictional-choice-trigger",
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: null,
+      chatStatus: null,
+    };
+
+    await renderWithBlocks("{single_line}", event, "event");
+    await renderWithBlocks("{multi_line}", event, "event", {}, "preview");
+    await renderWithBlocks("{multi_line}", event, "event", {}, "overlay");
+
+    const rows = await database.prepare(
+      "SELECT block_name, last_chosen_index FROM text_block_variants WHERE channel_id = ? ORDER BY block_name",
+    ).bind(CHANNEL_ID).all<{ block_name: string; last_chosen_index: number }>();
+    expect(rows.results).toEqual([
+      { block_name: "multi_line", last_chosen_index: -1 },
+      { block_name: "single_line", last_chosen_index: -1 },
+    ]);
   });
 
   it("preserves suffix text when host variables shrink nested expansion below the output limit", async () => {
@@ -476,35 +488,9 @@ describe("text library", () => {
       actor: { userId: "fictional-user", login: "esembe", role: null },
       chatStatus: ["viewer"],
     };
-    const sources: TemplateResolverSources = {
+    const rendered = await createTemplateRenderer(event, "chat_command", [], await sourcesFor({
       streamState: () => Promise.resolve("offline"),
-      channelDetails: () => Promise.resolve(null),
-      streamDetails: () => Promise.resolve(null),
-      followedAt: () => Promise.resolve("unavailable"),
-      followerTotal: () => Promise.resolve(null),
-      chattersTotal: () => Promise.resolve(null),
-      userCreatedAt: () => Promise.resolve(null),
-      channelLanguage: () => Promise.resolve("en"),
-      readChannelVariables: () => Promise.resolve({}),
-      expandModuleTemplateVariables: (text, knownVariables, resolveTemplateVariables) => {
-        const expand = textLibraryModule.expandTemplateVariables;
-        if (expand === undefined) throw new Error("Text library does not register its template expansion.");
-        return expand({
-          DB: database as unknown as D1Database,
-          channelId: CHANNEL_ID,
-          text,
-          knownVariables,
-          templateContext: "chat_command",
-          chatStatus: ["viewer"],
-          streamState: () => Promise.resolve("offline"),
-          channelInfo: () => Promise.resolve(null),
-          resolveTemplateVariables,
-          now: NOW,
-        });
-      },
-    };
-
-    const rendered = await createTemplateRenderer(event, "chat_command", [], sources)("{args_root}", { args: "" });
+    }))("{args_root}", { args: "" });
 
     expect(rendered.text).toBe("TAIL");
   });
@@ -521,14 +507,16 @@ describe("text library", () => {
       .bind(CHANNEL_ID, "status_line").run();
 
     const render = async (stream: "online" | "offline"): Promise<string> => {
-      const expand = createTextBlockTemplateExpander(database as unknown as D1Database, CHANNEL_ID, {
-        templateContext: "event",
+      return (await renderWithBlocks("{status_line}", {
+        channelId: CHANNEL_ID,
+        subscriptionType: "channel.raid",
+        triggerId: "fictional-status-trigger",
+        payload: {},
+        settings: {},
+        receivedAt: new Date(NOW).toISOString(),
+        actor: null,
         chatStatus: null,
-        streamState: () => Promise.resolve(stream),
-        currentGame: () => Promise.resolve(null),
-        now: NOW,
-      });
-      return (await expand("{status_line}", new Set())).text;
+      }, "event", { streamState: () => Promise.resolve(stream) })).text;
     };
 
     await expect(render("online")).resolves.toBe("A");
@@ -541,17 +529,19 @@ describe("text library", () => {
     await expect(createBlock("b", [variant("default", repeated("c"))])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("c", [variant("default", "x".repeat(500))])).resolves.toMatchObject({ ok: true });
 
-    const expand = createTextBlockTemplateExpander(database as unknown as D1Database, CHANNEL_ID, {
-      templateContext: "event",
+    const result = await renderWithBlocks("{a}", {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.raid",
+      triggerId: "fictional-depth-trigger",
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: null,
       chatStatus: null,
-      streamState: () => Promise.resolve("offline"),
-      currentGame: () => Promise.resolve(null),
-      now: NOW,
-    });
-    const result = await expand("{a}", new Set());
+    }, "event");
 
-    expect(result.text).toHaveLength(501);
-    expect(result.outputLimit).toBe(500);
+    expect(result.text).toHaveLength(500);
+    expect(result.text.endsWith("…")).toBe(true);
   });
 
   it("saves an edited panel block through the PATCH route using revision", async () => {
@@ -633,17 +623,23 @@ describe("text library", () => {
     await expect(createBlock("middle", conditionalVariants("leaf"))).resolves.toMatchObject({ ok: true });
     await expect(createBlock("top", conditionalVariants("middle"))).resolves.toMatchObject({ ok: true });
 
-    const expand = createTextBlockTemplateExpander(database as unknown as D1Database, CHANNEL_ID, {
-      templateContext: "chat_command",
+    const event: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.chat.message",
+      triggerId: "fictional-performance-trigger",
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: { userId: "fictional-user", login: "esembe", role: "broadcaster" },
       chatStatus: ["broadcaster"],
-      streamState: () => Promise.resolve("offline"),
-      currentGame: () => Promise.resolve(currentGame),
-      now: NOW,
-    });
+    };
     const durations: number[] = [];
     for (let index = 0; index < 10; index += 1) {
       const start = performance.now();
-      await expand("{top}", new Set());
+      await renderWithBlocks("{top}", event, "chat_command", {
+        channelGameId: () => Promise.resolve(currentGame.id),
+        streamState: () => Promise.resolve("offline"),
+      });
       durations.push(performance.now() - start);
     }
     const averageMs = durations.reduce((total, duration) => total + duration, 0) / durations.length;
@@ -653,7 +649,7 @@ describe("text library", () => {
   });
 
   it("shows operators the library as read-only with a reason", async () => {
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+    stubTextLibraryPanelApi({
       blocks: [{
         channelId: CHANNEL_ID,
         name: "welcome",
@@ -665,10 +661,10 @@ describe("text library", () => {
         updatedAt: new Date(NOW).toISOString(),
       }],
       categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString() }],
-      settings: { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: new Date(NOW).toISOString() },
+      settings: { revision: 1, graphRevision: 1, updatedAt: new Date(NOW).toISOString() },
       usages: { welcome: [] },
       reservedNames: ["user"],
-    }), { status: 200, headers: { "content-type": "application/json" } })));
+    });
 
     render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage={false} /></MantineProvider>);
     expect(await screen.findByRole("heading", { name: "Text blocks" })).toBeInTheDocument();
@@ -681,7 +677,7 @@ describe("text library", () => {
     expect(screen.getAllByRole("note")[0]).toHaveTextContent("Only broadcasters and managers can change text blocks and categories.");
     expect(document.querySelector(".text-library__read-only-properties")).toHaveTextContent("Hello");
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("Categories and time zone"));
+    fireEvent.click(screen.getByText("Categories"));
     expect(screen.getAllByRole("note")).toHaveLength(2);
     expect(document.querySelectorAll(".text-library__read-only-properties")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Add text block" })).not.toBeInTheDocument();
@@ -704,10 +700,12 @@ describe("text library", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ timeZone: DEFAULT_CHANNEL_TIME_ZONE, revision: 1 }));
       if (url.pathname.endsWith("/library")) return Promise.resolve(jsonResponse({
         blocks,
         categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
-        settings: { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: timestamp },
+        settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
         usages: { welcome: [], faq: [] },
         reservedNames: ["user"],
       }));
@@ -757,6 +755,8 @@ describe("text library", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ timeZone: DEFAULT_CHANNEL_TIME_ZONE, revision: 1 }));
       if (url.pathname.endsWith("/library")) return Promise.resolve(jsonResponse({
         blocks: [{
           channelId: CHANNEL_ID,
@@ -769,7 +769,7 @@ describe("text library", () => {
           updatedAt: timestamp,
         }],
         categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
-        settings: { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: timestamp },
+        settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
         usages: { welcome: [] },
         reservedNames: ["user"],
       }));
@@ -795,7 +795,7 @@ describe("text library", () => {
   });
 
   it("does not offer or save a reserved host variable name as a text block", async () => {
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+    stubTextLibraryPanelApi({
       blocks: [{
         channelId: CHANNEL_ID,
         name: "user",
@@ -807,10 +807,10 @@ describe("text library", () => {
         updatedAt: new Date(NOW).toISOString(),
       }],
       categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString() }],
-      settings: { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: new Date(NOW).toISOString() },
+      settings: { revision: 1, graphRevision: 1, updatedAt: new Date(NOW).toISOString() },
       usages: {},
       reservedNames: ["user", "system"],
-    }), { status: 200, headers: { "content-type": "application/json" } })));
+    });
 
     render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Add text block" }));
@@ -825,7 +825,7 @@ describe("text library", () => {
   });
 
   it("maps the everyone preview tier to the viewer chat status", async () => {
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+    stubTextLibraryPanelApi({
       blocks: [{
         channelId: CHANNEL_ID,
         name: "everyone_line",
@@ -840,10 +840,10 @@ describe("text library", () => {
         updatedAt: new Date(NOW).toISOString(),
       }],
       categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString() }],
-      settings: { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: new Date(NOW).toISOString() },
+      settings: { revision: 1, graphRevision: 1, updatedAt: new Date(NOW).toISOString() },
       usages: { everyone_line: [] },
       reservedNames: ["user"],
-    }), { status: 200, headers: { "content-type": "application/json" } })));
+    });
 
     render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /\{everyone_line\}/u }));

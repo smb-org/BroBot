@@ -510,7 +510,7 @@ describe("Text commands panel", () => {
       variants: [{ id: "default", conditions: {}, texts: ["Welcome!"] }],
       expectedGraphRevision: snapshot.settings.graphRevision,
       now: new Date().toISOString(),
-    }, { userId: "user-1", sessionId: "session-user-1" });
+    }, { userId: "user-1", sessionId: "session-user-1" }, snapshot);
     expect(createdBlock.ok).toBe(true);
 
     const createdCommand = await panelRouter.fetch(

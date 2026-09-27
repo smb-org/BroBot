@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { BotModule } from "../contract";
 import { textLibraryModuleCatalog } from "./catalog";
 import { textLibraryRoutes } from "./routes";
-import { createTextBlockTemplateExpander } from "./adapters/template-expander";
+import { createTextBlockTemplateValueProvider } from "./adapters/template-expander";
 
 const settingsSchema = z.object({});
 
@@ -32,17 +32,10 @@ export const textLibraryModule: BotModule<typeof settingsSchema> = {
     iconKind: "texts",
     keywords: ["text", "texts", "texte", "textbausteine", "library", "bibliothek"],
   }],
-  expandTemplateVariables: (context) => createTextBlockTemplateExpander(context.DB, context.channelId, {
-    templateContext: context.templateContext,
-    chatStatus: context.chatStatus,
-    streamState: context.streamState,
-    currentGame: async () => {
-      const gameId = await context.channelGameId?.();
-      return gameId === null || gameId === undefined || gameId.length === 0 ? null : { id: gameId, name: "" };
-    },
-    ...(context.resolveTemplateVariables === undefined ? {} : { resolveTemplateVariables: context.resolveTemplateVariables }),
-    now: context.now,
-  })(context.text, context.knownVariables),
+  templateVariableNamespace: "text_blocks",
+  templateValueOutputLimit: 500,
+  resolveTemplateValues: (names, context) =>
+    createTextBlockTemplateValueProvider(context.DB, context.channelId)(names, context),
   routes: textLibraryRoutes,
   panel: () => import("./panel/index"),
 };

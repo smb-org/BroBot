@@ -51,8 +51,8 @@ export function processAdBreak(
     diagnostics: [...templateDiagnostics, { code: diagnosticCode(decision), detail: diagnoseDetail(decision) }],
   });
   if (render !== undefined) {
-    return render(template, { duration: decision.event.durationSeconds }).then(({ text, diagnostics }) => {
-      const hasDuration = templateVariableNames(template.trim()).includes("duration");
+    return render(template, { "ads.duration": decision.event.durationSeconds }).then(({ text, diagnostics }) => {
+      const hasDuration = templateVariableNames(template.trim()).includes("ads.duration");
       const completed = hasDuration ? text : `${text} (${String(decision.event.durationSeconds)} ${adsChatLanguage[language].seconds})`;
       return makeResult(completed, diagnostics);
     });

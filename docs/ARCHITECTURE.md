@@ -42,6 +42,28 @@ Worker mountet registrierte Router kanalbezogen unter
 `channel_modules` eine Zeile für den jeweiligen `channel_id` und `module_id`
 mit `enabled = 1` steht. Dafür ist kein Deploy erforderlich.
 
+Module stellen Vorlagenwerte über `resolveTemplateValues(names, context)` und
+deklarierte Variablen über `templateFields` oder `templateVariables` bereit.
+Der Host extrahiert die Namen aus dem ursprünglichen Text, sammelt passende
+Werte und rendert genau einmal; eingefügte Werte werden nicht erneut gelesen.
+Neue Host- und Datenquellenvariablen sind punktgetrennt (`{sun.set}`), einfache
+Namen wie `{welcome}` bezeichnen Textblöcke. Bereits vorhandene einfache
+Hostnamen bleiben reserviert. Nur der markierte Textblock-Provider darf solche
+Blocknamen registrieren und verschachtelte Blöcke intern auflösen.
+
+Picker und Twitch-Kategoriesuche verwenden die Host-Routen
+`/api/channels/:channelId/template-variables` und
+`/api/channels/:channelId/games?q=...`; Module rufen keine Routen anderer
+Module auf. Die Kanalzeitzone liegt in der Host-Tabelle `channels` und gilt
+für `{date}`, `{time}` sowie zeitabhängige Textblockbedingungen.
+
+Migration `0016_text_library.sql` führte Textblöcke und zunächst eine
+Bibliothekszeitzone ein. `0017_text_library_variant_choices.sql` ergänzte den
+Zufallswahlindex je Variante. Migration `0018_template_value_providers.sql`
+überführt die gespeicherten Zeitzonen in die Kanaleinstellungen, entfernt die
+Bibliothekseinstellung und benennt gespeicherte Ads-Platzhalter auf
+`{ads.duration}` und `{ads.seconds}` um.
+
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 
 ESLint schützt die Grenze: Overlay-Ansichten importieren weder Worker-, Service-, Repository- oder Adaptercode noch Zod. Panel-Ansichten importieren weder Worker-, Repository- noch Adaptercode; Zod und der Service sind dort für Formulare und ausgelöste Anwendungsfälle erlaubt. Module importieren keine Geschwistermodule. Der Worker importiert kein React.

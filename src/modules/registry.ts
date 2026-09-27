@@ -6,9 +6,44 @@ import { adsModule } from "./ads";
 import { clipsModule } from "./clips";
 import { textLibraryModule } from "./text_library";
 import type { ModuleOverlayElementDefinition } from "./contract";
+import type { TemplateVariable } from "../template";
+import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 // This is the only place that knows all modules.
 export const MODULES: readonly BotModule[] = [textCommandModule, textLibraryModule, channelEventsModule, adsModule, raidModule, clipsModule];
+
+const HOST_TEMPLATE_VARIABLE_NAMES = new Set(SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name));
+const EXISTING_BARE_MODULE_VARIABLES: Readonly<Record<string, ReadonlySet<string>>> = {
+  text_commands: new Set(["target", "command", "cooldown", "uses"]),
+};
+const DOTTED_TEMPLATE_VARIABLE_NAME = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
+const BLOCK_TEMPLATE_VARIABLE_NAME = /^[a-z0-9_]{1,32}$/u;
+
+export const validateModuleTemplateVariable = (module: BotModule, name: string): void => {
+  if (module.templateVariableNamespace === "text_blocks") {
+    if (!BLOCK_TEMPLATE_VARIABLE_NAME.test(name)) {
+      throw new Error(`Text block variable ${name} must be a bare block name.`);
+    }
+    if (HOST_TEMPLATE_VARIABLE_NAMES.has(name)) {
+      throw new Error(`Text block variable ${name} is reserved by the host.`);
+    }
+    return;
+  }
+  if (HOST_TEMPLATE_VARIABLE_NAMES.has(name) || EXISTING_BARE_MODULE_VARIABLES[module.id]?.has(name) === true) return;
+  if (!DOTTED_TEMPLATE_VARIABLE_NAME.test(name)) {
+    throw new Error(`Module template variable ${module.id}.${name} must use a dotted name.`);
+  }
+};
+
+export const validateModuleTemplateVariables = (modules: readonly BotModule[]): void => {
+  for (const module of modules) {
+    const templateFields = module.templateFields as Readonly<Record<string, readonly TemplateVariable[] | undefined>> | undefined;
+    const variableNames = Object.values(templateFields ?? {}).flatMap((variables) =>
+      (variables ?? []).map((variable) => variable.name),
+    );
+    for (const name of variableNames) validateModuleTemplateVariable(module, name);
+  }
+};
 
 export const validateModuleOverlayElements = (modules: readonly BotModule[]): void => {
   const kinds = new Set<string>();
@@ -37,3 +72,4 @@ export const moduleOverlayElementForKind = (
 };
 
 validateModuleOverlayElements(MODULES);
+validateModuleTemplateVariables(MODULES);

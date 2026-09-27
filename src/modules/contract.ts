@@ -6,6 +6,18 @@ import type { TemplateContext, TemplateFields, TemplateVariable } from "../templ
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 
+/** The default channel timezone used by host template values and channel settings. */
+export const DEFAULT_CHANNEL_TIME_ZONE = "Europe/Berlin";
+
+export const validChannelTimeZone = (timeZone: string): boolean => {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone }).format();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonObject = Readonly<Record<string, JsonValue>>;
 
@@ -226,6 +238,7 @@ export interface ModuleExecutionContext {
     text: string,
     moduleValues: Readonly<Record<string, string | number>>,
     changed?: { name: string; value: number },
+    mode?: ModuleTemplateRenderMode,
   ) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
   prepareVariableChange: (
     channelId: string,
@@ -235,6 +248,8 @@ export interface ModuleExecutionContext {
   ) => D1PreparedStatement;
   /** Lazily reads the channel's configured chat-template language. */
   channelLanguage: () => Promise<ModuleLanguage>;
+  /** Lazily reads the channel's configured time zone for date/time and module conditions. */
+  channelTimeZone: () => Promise<string>;
 }
 
 export type ModuleFollowedAt = (string & {}) | null | "unavailable";
@@ -274,33 +289,24 @@ export interface ModuleTemplateUsageSource {
   label: string;
 }
 
-/** Inputs available to any registered module that contributes template variables. */
-export interface ModuleTemplateExpansionContext {
+export type ModuleTemplateRenderMode = "chat" | "preview" | "overlay";
+
+/** Host services available to a module while resolving its declared template values. */
+export interface ModuleTemplateValueContext {
   DB: D1Database;
   channelId: string;
-  text: string;
-  knownVariables: ReadonlySet<string>;
   templateContext: TemplateContext;
+  knownTemplateVariableNames: ReadonlySet<string>;
   chatStatus: readonly ModuleChatStatus[] | null;
+  mode: ModuleTemplateRenderMode;
   streamState: () => Promise<ModuleStreamState>;
   channelInfo: () => Promise<ModuleChannelInfo | null>;
-  /** The current game can be queried without requiring a successful stream lookup. */
   channelGameId?: () => Promise<string | null>;
-  /** Resolves host variables in a bounded fragment before a module appends it. */
-  resolveTemplateVariables?: (text: string) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
+  channelTimeZone: () => Promise<string>;
+  /** Renders a module-owned nested fragment with the same host values and channel context. */
+  renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
+  addDiagnostic: (diagnostic: ModuleDiagnostic) => void;
   now: number;
-}
-
-export interface ModuleTemplateExpansionResult {
-  text: string;
-  used: boolean;
-  /** An output bound contributed by a module-owned variable source. */
-  outputLimit?: number;
-  /** Whether the module expanded its complete input within its work and output budgets. */
-  complete?: boolean;
-  /** Whether host variables in the expansion were already resolved. */
-  variablesResolved?: boolean;
-  diagnostics?: readonly ModuleDiagnostic[];
 }
 
 export interface ModuleVariableReferenceUsage {
@@ -429,9 +435,8 @@ export const MODULE_TEMPLATE_TIER_CHAT_STATUSES: Readonly<Record<ModuleTemplateM
 };
 
 /** A variable name provided by a module for template validation. */
-export interface ModuleRegisteredTemplateVariable {
+export interface ModuleRegisteredTemplateVariable extends TemplateVariable {
   moduleId: string;
-  name: string;
 }
 
 export const browserModuleLanguage = (): ModuleLanguage => {
@@ -558,10 +563,15 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   templateVariables?: (db: D1Database, channelId: string) => Promise<readonly TemplateVariable[]>;
   /** Which host catalog groups are available in this module's templates. */
   templateContext?: TemplateContext;
-  /** Generic template-variable expansion supplied by the module itself. */
-  expandTemplateVariables?: (
-    context: ModuleTemplateExpansionContext,
-  ) => Promise<ModuleTemplateExpansionResult>;
+  /** Allows this designated provider to register bare text-block names. */
+  templateVariableNamespace?: "text_blocks";
+  /** Maximum rendered output when one of this module's values is used. */
+  templateValueOutputLimit?: number;
+  /** Resolves only the declared names requested from the original template fragment. */
+  resolveTemplateValues?: (
+    names: readonly string[],
+    context: ModuleTemplateValueContext,
+  ) => Promise<Readonly<Record<string, string>>>;
   /** Channel navigation entries contributed by this module. */
   navigationEntries?: readonly ModuleNavigationEntry[];
   /** Template text contributed by this module for generic library usage views. */

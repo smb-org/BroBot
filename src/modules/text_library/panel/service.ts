@@ -1,5 +1,12 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import { TEXT_LIBRARY_GAME_SEARCH_PATH, TEXT_LIBRARY_LIBRARY_PATH, type TextBlock, type TextBlockCategory, type TextLibraryData, type TextBlockUsage, type TwitchGame, type TextBlockMutationInput, type TextBlockSaveInput } from "../contracts";
+import { TEXT_LIBRARY_LIBRARY_PATH, type TextBlock, type TextBlockCategory, type TextLibraryData, type TextBlockUsage, type TwitchGame, type TextBlockMutationInput, type TextBlockSaveInput } from "../contracts";
+import type { ModuleRegisteredTemplateVariable } from "../../contract";
+import { DEFAULT_CHANNEL_TIME_ZONE } from "../../contract";
+
+export interface TextLibraryPanelData extends TextLibraryData {
+  templateVariables: readonly ModuleRegisteredTemplateVariable[];
+  channelSettings: { timeZone: string; revision: number };
+}
 
 const basePath = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/text_library`;
@@ -13,12 +20,44 @@ const readJson = async <T,>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const loadTextLibrary = async (channelId: string): Promise<TextLibraryData> =>
-  readJson<TextLibraryData>(await fetch(`${basePath(channelId)}${TEXT_LIBRARY_LIBRARY_PATH}`));
+export const loadTextLibrary = async (channelId: string): Promise<TextLibraryPanelData> => {
+  const encodedChannelId = encodeURIComponent(channelId);
+  const [library, registered, channelSettings] = await Promise.all([
+    readJson<TextLibraryData>(await fetch(`${basePath(channelId)}${TEXT_LIBRARY_LIBRARY_PATH}`)),
+    readJson<{ variables: ModuleRegisteredTemplateVariable[] }>(await fetch(`/api/channels/${encodedChannelId}/template-variables`)),
+    readJson<{ timeZone: string; revision: number }>(await fetch(`/api/channels/${encodedChannelId}/settings`)),
+  ]);
+  return {
+    ...library,
+    templateVariables: registered.variables,
+    channelSettings: {
+      timeZone: channelSettings.timeZone || DEFAULT_CHANNEL_TIME_ZONE,
+      revision: channelSettings.revision,
+    },
+  };
+};
 
 export const searchTextLibraryGames = async (channelId: string, query: string): Promise<readonly TwitchGame[]> => {
-  const response = await fetch(`${basePath(channelId)}${TEXT_LIBRARY_GAME_SEARCH_PATH}?q=${encodeURIComponent(query)}`);
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/games?q=${encodeURIComponent(query)}`);
   return (await readJson<{ games: TwitchGame[] }>(response)).games;
+};
+
+export const renderTextLibraryPreview = async (
+  channelId: string,
+  input: {
+    text: string;
+    templateContext: "chat_command" | "event";
+    streamState: "online" | "offline" | "unknown";
+    game: TwitchGame | null;
+    chatStatus: readonly ("viewer" | "subscriber" | "vip" | "moderator" | "broadcaster")[] | null;
+  },
+): Promise<{ text: string; diagnostics: readonly { code: string }[] }> => {
+  const csrf = await readJson<{ token: string }>(await fetch("/api/csrf"));
+  return readJson(await fetch(`/api/channels/${encodeURIComponent(channelId)}/template-preview`, {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrf.token, "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }));
 };
 
 const mutate = async <T,>(channelId: string, path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown): Promise<T> => {
@@ -55,16 +94,5 @@ export const renameTextCategory = async (channelId: string, id: string, name: st
 export const deleteTextCategory = async (channelId: string, id: string): Promise<void> => {
   await mutate<{ ok: boolean }>(channelId, `/categories/${encodeURIComponent(id)}`, "DELETE");
 };
-
-export const saveTextLibraryTimeZone = async (channelId: string, timeZone: string, revision: number): Promise<void> => {
-  await mutate<{ ok: boolean }>(channelId, "/settings", "PATCH", { timeZone, revision });
-};
-
-export const previewTextBlock = async (
-  channelId: string,
-  name: string,
-  simulation: { streamState: "online" | "offline"; gameId: string | null; chatStatus: readonly string[] | null; now?: number },
-): Promise<{ variantId: string | null; text: string; timeZone: string }> =>
-  mutate<{ variantId: string | null; text: string; timeZone: string }>(channelId, `/preview/${encodeURIComponent(name)}`, "POST", simulation);
 
 export type { TextBlock, TextBlockUsage, TwitchGame };

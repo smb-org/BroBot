@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 
 import {
   createChannelModuleWithAudit,
@@ -10,8 +11,8 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleChannelVariable, ModuleRouteVariables } from "../../modules/contract";
-import { MODULES } from "../../modules/registry";
+import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleLanguage, ModuleRouteVariables, ModuleStreamState } from "../../modules/contract";
+import { MODULES, validateModuleTemplateVariable } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { moduleBroadcasterScopeState } from "../module-scopes";
@@ -27,6 +28,9 @@ import { listChannelVariables } from "../db/channel-variables";
 import { findChannelVariable } from "../db/channel-variables";
 import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from "../server-timing";
 import { publishOverlayChanged } from "../realtime";
+import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
+import { readChannelVariables } from "../db/channel-variables";
+import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -40,6 +44,13 @@ interface ModuleRouteEnvironment {
 }
 
 const nowIso = (): string => new Date().toISOString();
+const previewSchema = z.object({
+  text: z.string().max(500),
+  templateContext: z.enum(["event", "chat_command"]),
+  streamState: z.enum(["online", "offline", "unknown"]),
+  game: z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().max(100) }).nullable(),
+  chatStatus: z.array(z.enum(["viewer", "subscriber", "vip", "moderator", "broadcaster"])).nullable(),
+});
 
 const canManageModules = canManage;
 
@@ -80,7 +91,7 @@ export const moduleRouter = new Hono<ModuleRouteEnvironment>();
 moduleRouter.use("/api/channels/:channelId/modules", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/modules/*", requireChannelAuthorization());
 
-moduleRouter.use("/api/channels/:channelId/modules/*", (context, next) => {
+moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   context.set("writeModuleDiagnostics", writeModuleDiagnostics);
   context.set("broadcasterHasScope", broadcasterHasScope);
   context.set("broadcasterScopesForChannel", broadcasterScopesForChannel);
@@ -101,7 +112,10 @@ moduleRouter.use("/api/channels/:channelId/modules/*", (context, next) => {
       const fields = Object.values(module.templateFields ?? {})
         .flatMap((variables) => variables ?? []) as TemplateVariable[];
       const dynamic = await module.templateVariables?.(context.env.DB, channelId) ?? [];
-      return [...fields, ...dynamic].map((variable) => ({ moduleId: module.id, name: variable.name }));
+      return [...fields, ...dynamic].map((variable) => {
+        validateModuleTemplateVariable(module, variable.name);
+        return { ...variable, moduleId: module.id };
+      });
     }));
     return registrations.flat();
   });
@@ -125,6 +139,136 @@ moduleRouter.use("/api/channels/:channelId/modules/*", (context, next) => {
     ];
   });
   return next();
+});
+
+moduleRouter.use("/api/channels/:channelId/games", requireChannelAuthorization());
+moduleRouter.use("/api/channels/:channelId/template-variables", requireChannelAuthorization());
+moduleRouter.use("/api/channels/:channelId/template-preview", requireChannelAuthorization());
+
+moduleRouter.get("/api/channels/:channelId/games", async (context) => {
+  const query = (context.req.query("q") ?? "").trim();
+  if (query.length < 2 || query.length > 100) return context.json({ games: [] });
+  try {
+    const token = await context.get("measureServerTiming")("helix", () =>
+      context.get("getAppAccessToken")(context.env, nowIso()),
+    );
+    const result = await context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{
+      data?: readonly { id?: unknown; name?: unknown }[];
+    }>({
+      url: "https://api.twitch.tv/helix/search/categories",
+      query: { query, first: "20" },
+      accessToken: token,
+      clientId: context.env.TWITCH_CLIENT_ID,
+    }));
+    if (!result.ok || !Array.isArray(result.data.data)) return context.json({ error: "games_unavailable" }, 503);
+    const entries = result.data.data as unknown as readonly unknown[];
+    const games = entries.flatMap((entry): { id: string; name: string }[] => {
+      if (typeof entry !== "object" || entry === null) return [];
+      const record = entry as Record<string, unknown>;
+      const id = record.id;
+      const name = record.name;
+      if (typeof id !== "string" || typeof name !== "string") return [];
+      return [{ id, name }];
+    });
+    return context.json({ games });
+  } catch {
+    return context.json({ error: "games_unavailable" }, 503);
+  }
+});
+
+moduleRouter.get("/api/channels/:channelId/template-variables", async (context) => {
+  const channelId = context.req.param("channelId");
+  const [moduleVariables, channelVariables] = await Promise.all([
+    context.get("listRegisteredTemplateVariables")(channelId),
+    context.get("listChannelVariables")(channelId),
+  ]);
+  const variables = [
+    ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => ({ ...variable, moduleId: "host" })),
+    ...moduleVariables,
+    ...channelVariables.map((variable) => ({
+      name: `var.${variable.name}`,
+      moduleId: "host",
+      group: "channel" as const,
+      sample: String(variable.value),
+      maxLength: 10,
+      source: "channel" as const,
+    })),
+  ];
+  const unique = new Map(variables.map((variable) => [variable.name, variable]));
+  return context.json({ variables: [...unique.values()], defaultTimeZone: DEFAULT_CHANNEL_TIME_ZONE });
+});
+
+moduleRouter.post("/api/channels/:channelId/template-preview", async (context) => {
+  const parsed = previewSchema.safeParse(await readJsonBody(context.req.raw));
+  if (!parsed.success) return context.json({ error: "template_preview_invalid" }, 400);
+  const channelId = context.req.param("channelId");
+  const [registeredVariables, channelSettings, channelLanguage] = await Promise.all([
+    context.get("listRegisteredTemplateVariables")(channelId),
+    context.env.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?").bind(channelId).first<{ time_zone: string }>(),
+    context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?").bind(channelId).first<{ language: ModuleLanguage }>(),
+  ]);
+  const providerVariables = new Map(MODULES.map((module) => [
+    module.id,
+    registeredVariables.filter((variable) => variable.moduleId === module.id),
+  ]));
+  const templateValueProviders: TemplateValueProvider[] = MODULES.flatMap((module) => {
+    const resolveTemplateValues = module.resolveTemplateValues;
+    if (resolveTemplateValues === undefined) return [];
+    const variables = providerVariables.get(module.id) ?? [];
+    return [{
+      moduleId: module.id,
+      ...(module.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: module.templateVariableNamespace }),
+      variables,
+      ...(module.templateValueOutputLimit === undefined ? {} : { outputLimit: module.templateValueOutputLimit }),
+      resolveTemplateValues,
+    }];
+  });
+  const registeredTemplateVariables = registeredVariables
+    .filter((variable) => MODULES.find((module) => module.id === variable.moduleId)?.templateVariableNamespace !== "text_blocks");
+  const now = Date.now();
+  const game = parsed.data.game;
+  const streamState: ModuleStreamState = parsed.data.streamState;
+  const channelInfo: ModuleChannelInfo = {
+    title: "",
+    gameName: game?.name ?? "",
+    gameId: game?.id ?? "",
+    startedAt: streamState === "online" ? new Date(now).toISOString() : null,
+    viewerCount: 0,
+  };
+  const event: ModuleEvent = {
+    channelId,
+    subscriptionType: "channel.chat.message",
+    triggerId: "template-preview",
+    payload: { chatter_user_login: "viewer", chatter_user_name: "Viewer", broadcaster_user_login: channelId },
+    settings: {},
+    receivedAt: new Date(now).toISOString(),
+    actor: { userId: "template-preview-viewer", login: "viewer", role: null },
+    chatStatus: parsed.data.chatStatus,
+  };
+  const render = createTemplateRenderer(event, parsed.data.templateContext, registeredTemplateVariables, {
+    DB: context.env.DB,
+    channelInfo: () => Promise.resolve(channelInfo),
+    channelGameId: () => Promise.resolve(game?.id ?? null),
+    channelTimeZone: () => Promise.resolve(channelSettings === null ? DEFAULT_CHANNEL_TIME_ZONE : channelSettings.time_zone),
+    templateValueProviders,
+    registeredTemplateVariables,
+    streamState: () => Promise.resolve(streamState),
+    channelDetails: () => Promise.resolve({ title: channelInfo.title, gameName: channelInfo.gameName, gameId: channelInfo.gameId }),
+    streamDetails: () => Promise.resolve({ startedAt: channelInfo.startedAt, viewerCount: channelInfo.viewerCount }),
+    followedAt: () => Promise.resolve("unavailable"),
+    followerTotal: () => Promise.resolve(null),
+    chattersTotal: () => Promise.resolve(null),
+    userCreatedAt: () => Promise.resolve(null),
+    channelLanguage: () => Promise.resolve(channelLanguage?.language === "en" ? "en" : "de"),
+    readChannelVariables: (names) => readChannelVariables(context.env.DB, channelId, names),
+    now: () => now,
+  });
+  const textCommands = {
+    args: parsed.data.templateContext === "chat_command" ? "viewer input" : "",
+    target: "viewer",
+    command: "preview",
+  };
+  return context.json(await render(parsed.data.text, textCommands, undefined, "preview"));
 });
 
 moduleRouter.get("/api/channels/:channelId/modules", async (context) => {
@@ -168,11 +312,12 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   const channelVariables = (await listChannelVariables(context.env.DB, channelId)).map((variable) => ({
     name: `var.${variable.name}`, group: "channel" as const, sample: String(variable.value), maxLength: 10, source: "channel" as const,
   }));
+  const registeredVariables = (await context.get("listRegisteredTemplateVariables")(channelId)).map((variable) => variable.name);
   const warnings = module.templateFields === undefined ? [] : Object.entries(module.templateFields).flatMap(([field, variables]) => {
     const value = (settings.data as Readonly<Record<string, unknown>>)[field];
     if (typeof value !== "string") return [];
     const effective = effectiveTemplateVariables(module.templateContext ?? "event", (variables ?? []) as readonly TemplateVariable[], channelVariables, SYSTEM_TEMPLATE_VARIABLE_LIST);
-    return templateWarnings(field, value, effective);
+    return templateWarnings(field, value, effective, registeredVariables);
   });
   const changed = await updateChannelModuleWithAudit(
     context.env.DB,

@@ -7,13 +7,31 @@ import {
 } from "../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 import { templateLanguageText } from "../modules/template-language";
-import type { ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateExpansionResult } from "../modules/contract";
+import type { ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateRenderMode, ModuleTemplateValueContext } from "../modules/contract";
 import { formatCount } from "../text";
+import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 
 export type TemplateChannelDetails = Pick<ModuleChannelInfo, "title" | "gameName" | "gameId">;
 export type TemplateStreamDetails = Pick<ModuleChannelInfo, "startedAt" | "viewerCount">;
 
+export interface TemplateValueProvider {
+  moduleId: string;
+  templateVariableNamespace?: "text_blocks";
+  variables: readonly TemplateVariable[];
+  outputLimit?: number;
+  resolveTemplateValues: (
+    names: readonly string[],
+    context: ModuleTemplateValueContext,
+  ) => Promise<Readonly<Record<string, string>>>;
+}
+
 export interface TemplateResolverSources {
+  DB: D1Database;
+  channelInfo: () => Promise<ModuleChannelInfo | null>;
+  channelGameId?: () => Promise<string | null>;
+  channelTimeZone: () => Promise<string>;
+  templateValueProviders?: readonly TemplateValueProvider[];
+  registeredTemplateVariables?: readonly TemplateVariable[];
   streamState: () => Promise<ModuleStreamState>;
   channelDetails: () => Promise<TemplateChannelDetails | null>;
   streamDetails: () => Promise<TemplateStreamDetails | null>;
@@ -23,11 +41,6 @@ export interface TemplateResolverSources {
   userCreatedAt: (userId: string) => Promise<string | null>;
   channelLanguage: () => Promise<ModuleLanguage>;
   readChannelVariables: (names: readonly string[]) => Promise<Readonly<Record<string, number>>>;
-  expandModuleTemplateVariables?: (
-    text: string,
-    knownVariables: ReadonlySet<string>,
-    resolveTemplateVariables: (text: string) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>,
-  ) => Promise<ModuleTemplateExpansionResult>;
   now?: () => number;
   random?: (maximumExclusive: number) => number;
 }
@@ -104,48 +117,17 @@ export const createTemplateRenderer = (
   text: string,
   moduleValues: Readonly<Record<string, string | number>>,
   changed?: { name: string; value: number },
+  mode: ModuleTemplateRenderMode = "chat",
 ): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }> => {
-  const moduleExpansionVariableNames = new Set([
-    ...SYSTEM_TEMPLATE_VARIABLE_LIST
-      .filter((variable) => variable.contexts?.includes(context) ?? true)
-      .map((variable) => variable.name),
-    ...moduleVariables
-      .filter((variable) => variable.contexts?.includes(context) ?? true)
-      .map((variable) => variable.name),
-    ...SYSTEM_TEMPLATE_VARIABLE_LIST
-      .filter((variable) => variable.unavailableContextText !== undefined)
-      .map((variable) => variable.name),
-  ]);
-  let expanded: ModuleTemplateExpansionResult = { text, used: false };
-  if (sources.expandModuleTemplateVariables !== undefined) {
-    const { expandModuleTemplateVariables: _expandModuleTemplateVariables, ...sourcesWithoutExpansion } = sources;
-    void _expandModuleTemplateVariables;
-    const resolveTemplateVariables = async (fragment: string): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }> =>
-      createTemplateRenderer(event, context, moduleVariables, sourcesWithoutExpansion)(fragment, moduleValues, changed);
-    expanded = await sources.expandModuleTemplateVariables(text, moduleExpansionVariableNames, resolveTemplateVariables);
-  }
-  if (expanded.used && expanded.variablesResolved === true) {
-    const outputLimit = expanded.outputLimit ?? 500;
-    const truncated = expanded.complete === false || expanded.text.length > outputLimit;
-    const limitedText = truncated
-      ? `${expanded.text.slice(0, Math.max(0, outputLimit - 1))}…`
-      : expanded.text;
-    return {
-      text: limitedText,
-      diagnostics: [
-        ...(expanded.diagnostics ?? []),
-        ...(truncated ? [{ code: "template_truncated", detail: { current: expanded.text.length } } satisfies ModuleDiagnostic] : []),
-      ],
-    };
-  }
-  const resolvedSource = expanded.text;
+  const providerVariables = (sources.templateValueProviders ?? []).flatMap((provider) => provider.variables);
+  const declaredModuleVariables = [...moduleVariables, ...providerVariables];
   const templateSource = moduleValues.legacyFallback === "true"
-    ? [resolvedSource, moduleValues.offlineText, moduleValues.notFollowingText, moduleValues.unavailableText]
+    ? [text, moduleValues.offlineText, moduleValues.notFollowingText, moduleValues.unavailableText]
       .filter((value): value is string => typeof value === "string").join(" ")
-    : resolvedSource;
+    : text;
   const names = templateVariableNames(templateSource);
   const requested = new Set(names);
-  const inputFallbacks = [...SYSTEM_TEMPLATE_VARIABLE_LIST, ...moduleVariables].filter((variable) =>
+  const inputFallbacks = [...SYSTEM_TEMPLATE_VARIABLE_LIST, ...declaredModuleVariables].filter((variable) =>
     variable.unavailableContextText !== undefined &&
     !(variable.contexts?.includes(context) ?? true) &&
     requested.has(variable.name),
@@ -165,12 +147,13 @@ export const createTemplateRenderer = (
   const eligibleSystem = SYSTEM_TEMPLATE_VARIABLE_LIST.filter((variable) =>
     variable.contexts?.includes(context) ?? true,
   );
-  const declaredSystem = eligibleSystem.filter((variable) => !moduleVariables.some((moduleVariable) => moduleVariable.name === variable.name));
+  const declaredSystem = eligibleSystem.filter((variable) => !declaredModuleVariables.some((moduleVariable) => moduleVariable.name === variable.name));
   const requiredSystem = new Set([...requested].filter((name) => declaredSystem.some((variable) => variable.name === name)));
   const requiresChannelDetails = ["game", "title"].some((name) => requiredSystem.has(name));
   const requiresStreamDetails = ["uptime", "viewers"].some((name) => requiredSystem.has(name));
   const requiresLanguage = ["game", "title", "uptime", "followage", "accountage", "date", "time", "followers", "viewers", "var"].some((name) => requiredSystem.has(name)) || channelNames.length > 0 || inputFallbacks.length > 0;
-  const [language, channelDetails, streamDetails, streamState, followedAt, followerTotal, chattersTotal, channelValues] = await Promise.all([
+  const requiresTimeZone = requiredSystem.has("date") || requiredSystem.has("time");
+  const [language, channelDetails, streamDetails, streamState, followedAt, followerTotal, chattersTotal, channelValues, channelTimeZone] = await Promise.all([
     requiresLanguage ? sources.channelLanguage() : Promise.resolve("de" as const),
     requiresChannelDetails ? sources.channelDetails() : Promise.resolve(null),
     requiresStreamDetails ? sources.streamDetails() : Promise.resolve(null),
@@ -182,6 +165,7 @@ export const createTemplateRenderer = (
     requiredSystem.has("followers") ? sources.followerTotal() : Promise.resolve(null),
     requiredSystem.has("chatters") ? sources.chattersTotal() : Promise.resolve(null),
     channelValuesPromise,
+    requiresTimeZone ? sources.channelTimeZone() : Promise.resolve(DEFAULT_CHANNEL_TIME_ZONE),
   ]);
 
   const eventTime = Date.parse(event.receivedAt);
@@ -193,6 +177,13 @@ export const createTemplateRenderer = (
       : templateLanguageText[language].commandInputError;
   }
   const diagnostics: ModuleDiagnostic[] = [];
+  const diagnosticKeys = new Set<string>();
+  const addDiagnostic = (diagnostic: ModuleDiagnostic): void => {
+    const key = JSON.stringify(diagnostic);
+    if (diagnosticKeys.has(key)) return;
+    diagnosticKeys.add(key);
+    diagnostics.push(diagnostic);
+  };
   const missing = (name: string): string => {
     diagnostics.push({ code: "template.lookup_unavailable", detail: { name } });
     return "?";
@@ -233,11 +224,11 @@ export const createTemplateRenderer = (
       values[name] = createdAt === null ? missing(name) : durationSince(createdAt, now, language);
     } else if (name === "date") {
       values[name] = new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-US", {
-        day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Europe/Berlin",
+        day: "2-digit", month: "2-digit", year: "numeric", timeZone: channelTimeZone,
       }).format(now);
     } else if (name === "time") {
       values[name] = new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-US", {
-        hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Europe/Berlin",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: channelTimeZone,
       }).format(now);
     }
   }
@@ -259,7 +250,7 @@ export const createTemplateRenderer = (
   }
   for (const [name, value] of Object.entries(channelValues)) values[`var.${name}`] = formatCount(value, language);
 
-  const effective = effectiveTemplateVariables(context, moduleVariables, formattedChannelValues, SYSTEM_TEMPLATE_VARIABLE_LIST);
+  const effective = effectiveTemplateVariables(context, declaredModuleVariables, formattedChannelValues, SYSTEM_TEMPLATE_VARIABLE_LIST);
   const variableNames = new Set(effective.map((variable) => variable.name));
   for (const name of requested) {
     if (name.startsWith("var.") && !effectiveChannelVariables.has(name)) variableNames.delete(name);
@@ -280,7 +271,7 @@ export const createTemplateRenderer = (
       return choices[randomIndex(choices.length)]?.trim() ?? "";
     },
   };
-  let renderSource = resolvedSource;
+  let renderSource = text;
   if (moduleValues.legacyFallback === "true") {
     if (requiredSystem.has("uptime") && streamDetails?.startedAt === null) {
       renderSource = valueFrom(moduleValues.offlineText) ?? templateLanguageText[language].offline;
@@ -290,11 +281,57 @@ export const createTemplateRenderer = (
       renderSource = valueFrom(moduleValues.unavailableText) ?? "?";
     }
   }
+  const renderNames = [...new Set(templateVariableNames(renderSource))];
+  let outputLimit: number | undefined;
+  const renderNestedTemplate = async (
+    fragment: string,
+    nestedMode: ModuleTemplateRenderMode = mode,
+  ): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }> => {
+    const nested = await createTemplateRenderer(event, context, moduleVariables, sources)(fragment, moduleValues, changed, nestedMode);
+    nested.diagnostics.forEach(addDiagnostic);
+    return nested;
+  };
+  const providerContext: ModuleTemplateValueContext = {
+    DB: sources.DB,
+    channelId: event.channelId,
+    templateContext: context,
+    knownTemplateVariableNames: new Set([
+      ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name),
+      ...(sources.registeredTemplateVariables ?? []).map((variable) => variable.name),
+      ...moduleVariables.map((variable) => variable.name),
+      ...(sources.templateValueProviders ?? []).filter((provider) => provider.templateVariableNamespace !== "text_blocks")
+        .flatMap((provider) => provider.variables)
+        .map((variable) => variable.name),
+    ]),
+    chatStatus: event.chatStatus,
+    mode,
+    streamState: sources.streamState,
+    channelInfo: sources.channelInfo,
+    ...(sources.channelGameId === undefined ? {} : { channelGameId: sources.channelGameId }),
+    channelTimeZone: sources.channelTimeZone,
+    renderTemplate: renderNestedTemplate,
+    addDiagnostic,
+    now,
+  };
+  for (const provider of sources.templateValueProviders ?? []) {
+    const declaredNames = new Set(provider.variables
+      .filter((variable) => variable.contexts?.includes(context) ?? true)
+      .map((variable) => variable.name));
+    const requestedNames = renderNames.filter((name) => declaredNames.has(name));
+    if (requestedNames.length === 0) continue;
+    const resolved = await provider.resolveTemplateValues(requestedNames, providerContext);
+    for (const name of requestedNames) {
+      const value: unknown = resolved[name];
+      if (typeof value === "string") values[name] = value;
+    }
+    if (provider.outputLimit !== undefined) outputLimit = outputLimit === undefined
+      ? provider.outputLimit
+      : Math.min(outputLimit, provider.outputLimit);
+  }
   const rendered = renderTemplate(renderSource, values, parameterValues, effectiveForRender);
-  const outputLimit = expanded.used ? expanded.outputLimit : undefined;
   const limited = outputLimit === undefined || rendered.length <= outputLimit
     ? { text: rendered, truncated: false }
     : { text: `${rendered.slice(0, Math.max(0, outputLimit - 1))}…`, truncated: true };
-  if (limited.truncated) diagnostics.push({ code: "template_truncated", detail: { current: rendered.length } });
+  if (limited.truncated) addDiagnostic({ code: "template_truncated", detail: { current: rendered.length } });
   return { text: limited.text, diagnostics };
 };

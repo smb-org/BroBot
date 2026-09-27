@@ -214,6 +214,7 @@ export const EVENT_CODES = [
   "text_commands.user_cooldown",
   "text_commands.stream_state",
   "text_commands.game_filter",
+  "text_commands.game_unknown",
   "text_commands.triggered",
   "text_commands.disabled",
   "text_commands.permission_denied",

@@ -50,7 +50,7 @@ describe("ad setting defaults", () => {
       manual: "manuell",
       prewarning: true,
       leadSeconds: 60,
-      prewarningText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
+      prewarningText: "Werbung in {ads.seconds} Sekunden. Bin gleich zurück!",
     });
   });
 });

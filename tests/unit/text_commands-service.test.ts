@@ -307,6 +307,36 @@ describe("Text commands service", () => {
     expect(result.diagnostics[0]?.detail).toMatchObject({ name: "hallo", streamState: "unknown" });
   });
 
+  it("runs a game-filtered command when the current game is unknown and records a diagnostic", async () => {
+    const entry = { ...command("guide", "Guide text"), games: [{ id: "42", name: "Fictional Game" }] };
+    const result = await processTextCommandMessage(
+      eventFor("!guide"),
+      repositoryFor([entry]),
+      { channelGameId: () => Promise.resolve(null) },
+    );
+
+    expect(result.actions).toEqual([{ kind: "chat", text: "Guide text", replyToMessageId: "twitch-message-1" }]);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      "text_commands.game_unknown",
+      "text_commands.triggered",
+    ]);
+  });
+
+  it("still rejects a game-filtered command when a known current game is not selected", async () => {
+    const entry = { ...command("guide", "Guide text"), games: [{ id: "42", name: "Fictional Game" }] };
+    const repository = repositoryFor([entry]);
+    const claim = vi.spyOn(repository, "claim");
+    const result = await processTextCommandMessage(
+      eventFor("!guide"),
+      repository,
+      { channelGameId: () => Promise.resolve("99") },
+    );
+
+    expect(result.actions).toEqual([]);
+    expect(result.diagnostics[0]?.code).toBe("text_commands.game_filter");
+    expect(claim).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["text", "say", { kind: "chat", text: "Antwort" }],
     ["text", "reply", { kind: "chat", text: "Antwort", replyToMessageId: "twitch-message-1" }],

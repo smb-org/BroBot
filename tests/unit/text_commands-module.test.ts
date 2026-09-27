@@ -332,12 +332,12 @@ describe("Text commands module", () => {
         "SELECT code, detail_json FROM event_log ORDER BY rowid",
       ).all<{ code: string; detail_json: string }>();
       expect(rows.results.map((row) => row.code)).toEqual([
-        "template_truncated",
         "text_commands.triggered",
+        "template_truncated",
         "host.chat.sent",
       ]);
-      expect(JSON.parse(rows.results[0]?.detail_json ?? "{}")).toEqual({ current: 508 });
-      expect(JSON.parse(rows.results[1]?.detail_json ?? "{}")).toMatchObject({ name: "lang" });
+      expect(JSON.parse(rows.results[0]?.detail_json ?? "{}")).toMatchObject({ name: "lang" });
+      expect(JSON.parse(rows.results[1]?.detail_json ?? "{}")).toEqual({ current: 508 });
     } finally {
       database.close();
     }

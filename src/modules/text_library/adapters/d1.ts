@@ -34,7 +34,6 @@ interface CategoryRow {
 }
 
 interface SettingsRow {
-  time_zone: string;
   revision: number;
   graph_revision: number;
   updated_at: string;
@@ -64,7 +63,6 @@ const mapCategory = (row: CategoryRow): TextBlockCategory => ({
 });
 
 const mapSettings = (row: SettingsRow): TextLibrarySettings => ({
-  timeZone: row.time_zone,
   revision: row.revision,
   graphRevision: row.graph_revision,
   updatedAt: row.updated_at,
@@ -103,7 +101,7 @@ export const createTextBlockRepository = (
     const [blockRows, categoryRows, settingsRow] = await Promise.all([
       db.prepare(`SELECT ${textBlockSelectColumns} FROM text_blocks WHERE channel_id = ? ORDER BY block_name`).bind(channelId).all<BlockRow>(),
       db.prepare(`SELECT ${textBlockCategorySelectColumns} FROM text_library_categories WHERE channel_id = ? ORDER BY catalog_key IS NULL, catalog_key, custom_name, category_id`).bind(channelId).all<CategoryRow>(),
-      db.prepare("SELECT time_zone, revision, graph_revision, updated_at FROM text_library_settings WHERE channel_id = ?").bind(channelId).first<SettingsRow>(),
+      db.prepare("SELECT revision, graph_revision, updated_at FROM text_library_settings WHERE channel_id = ?").bind(channelId).first<SettingsRow>(),
     ]);
     const variantRows: { results: Array<VariantRow & { block_name: string }> } = blockRows.results.length === 0 ? { results: [] } : await db.prepare(
       `SELECT variant_id, block_name, position, conditions_json, texts_json FROM text_block_variants
@@ -159,7 +157,7 @@ export const createTextBlockRepository = (
     return {
       blocks,
       categories,
-      settings: settingsRow === null ? { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: new Date().toISOString() } : mapSettings(settingsRow),
+      settings: settingsRow === null ? { revision: 1, graphRevision: 1, updatedAt: new Date().toISOString() } : mapSettings(settingsRow),
       usages,
     };
   };
@@ -168,8 +166,8 @@ export const createTextBlockRepository = (
     async initialize(channelId, actor, now) {
       const authorization = authorizeMutation(channelId, actor, now);
       const statements = [db.prepare(
-        `INSERT OR IGNORE INTO text_library_settings (channel_id, time_zone, revision, updated_at)
-         SELECT ?, 'Europe/Berlin', 1, ? WHERE 1 = 1 ${authorization.sql}`,
+        `INSERT OR IGNORE INTO text_library_settings (channel_id, revision, updated_at)
+         SELECT ?, 1, ? WHERE 1 = 1 ${authorization.sql}`,
       ).bind(channelId, now, ...authorization.values)];
       for (const category of DEFAULT_TEXT_BLOCK_CATEGORIES) {
         statements.push(db.prepare(
@@ -336,20 +334,6 @@ export const createTextBlockRepository = (
       if (changes > 0) return "ok";
       const exists = await db.prepare("SELECT 1 AS present FROM text_blocks WHERE channel_id = ? AND category_id = ?").bind(channelId, categoryId).first();
       return exists === null ? "not_found" : "not_empty";
-    },
-    async updateTimeZone(channelId, timeZone, revision, actor, now) {
-      await repository.initialize(channelId, actor, now);
-      const authorization = authorizeMutation(channelId, actor, now);
-      const before = await db.prepare("SELECT time_zone, revision FROM text_library_settings WHERE channel_id = ?")
-        .bind(channelId).first<{ time_zone: string; revision: number }>();
-      if (before === null || before.revision !== revision) return false;
-      const mutation = db.prepare(
-        `UPDATE text_library_settings SET time_zone = ?, revision = revision + 1, updated_at = ?
-          WHERE channel_id = ? AND revision = ? ${authorization.sql}`,
-      ).bind(timeZone, now, channelId, revision, ...authorization.values);
-      const audit = prepareModuleAudit?.({ channelId, moduleId: MODULE_ID, action: "text_library.settings.updated" satisfies AuditAction, before: { timeZone: before.time_zone }, after: { timeZone } }, now);
-      const changes = (await db.batch([mutation, ...(audit === undefined ? [] : [audit])]))[0]?.meta.changes ?? 0;
-      return changes > 0;
     },
   };
   return repository;

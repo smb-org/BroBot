@@ -12,7 +12,6 @@ import type { TextCommand } from "./contracts";
 import type { TextCommandRepository } from "./repository";
 import { NO_COMMANDS_REPLY, TEXT_COMMAND_DEFAULT_USAGE_TEXT, commandListReply } from "./contracts/chat-defaults";
 
-const CHAT_MESSAGE_MAXIMUM_LENGTH = 500;
 
 const recordValue = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? Reflect.get(value, key) : undefined;
@@ -26,10 +25,6 @@ const textValue = (value: unknown): string | null => typeof value === "string" &
 const userFor = (event: ModuleEvent): string => event.actor?.login ?? textValue(event.payload.chatter_user_login) ?? "unknown";
 const userIdFor = (event: ModuleEvent): string | null => event.actor?.userId ?? textValue(event.payload.chatter_user_id);
 const channelFor = (event: ModuleEvent): string => textValue(event.payload.broadcaster_user_login) ?? event.channelId;
-
-const truncateCommandResponse = (text: string): { text: string; originalLength: number | null } => text.length <= CHAT_MESSAGE_MAXIMUM_LENGTH
-  ? { text, originalLength: null }
-  : { text: `${text.slice(0, CHAT_MESSAGE_MAXIMUM_LENGTH - 1)}…`, originalLength: text.length };
 
 const diagnosticTriggered = (
   input: Exclude<TextCommandInput, { kind: "unknown" }>,
@@ -65,23 +60,21 @@ const response = (
     noChat?: boolean;
   } = {},
 ): ModuleResult => {
-  const prepared = truncateCommandResponse(text);
   const replyToMessageId = textValue(event.payload.message_id);
   const action = !options.forceChat && command.responseType === "announcement"
-    ? { kind: "announcement" as const, text: prepared.text }
+    ? { kind: "announcement" as const, text }
     : {
       kind: "chat" as const,
-      text: prepared.text,
+      text,
       ...(!options.forceChat && command.responseType === "reply" && replyToMessageId !== null
         ? { replyToMessageId }
         : {}),
     };
   return {
-    actions: [...(options.prefixActions ?? []), ...(!options.noChat && prepared.text.length > 0 ? [action] : [])],
+    actions: [...(options.prefixActions ?? []), ...(!options.noChat && text.length > 0 ? [action] : [])],
     diagnostics: [
-      ...(prepared.originalLength === null ? [] : [{ code: "template_truncated" satisfies EventCode, detail: { current: prepared.originalLength } }]),
       ...(options.diagnostics ?? []),
-      diagnosticTriggered(input, command, prepared.text, alias, streamState, options.changedVariable),
+      diagnosticTriggered(input, command, text, alias, streamState, options.changedVariable),
     ],
     ...(options.changedVariable === undefined ? {} : { variableChanges: [options.changedVariable] }),
   };
@@ -194,9 +187,12 @@ const processTextCommandMessageAttempt = async (
     }
   }
 
+  let gameUnknownDiagnostic: ModuleDiagnostic | undefined;
   if ((command.games?.length ?? 0) > 0) {
     const currentGameId = await (context.channelGameId ?? (() => Promise.resolve(null)))();
-    if (currentGameId === null || !command.games?.some((game) => game.id === currentGameId)) {
+    if (currentGameId === null) {
+      gameUnknownDiagnostic = { code: "text_commands.game_unknown" satisfies EventCode, detail: { name: command.name } };
+    } else if (!command.games?.some((game) => game.id === currentGameId)) {
       return rejection("text_commands.game_filter", { name: command.name });
     }
   }
@@ -212,7 +208,7 @@ const processTextCommandMessageAttempt = async (
       command.usageText ?? TEXT_COMMAND_DEFAULT_USAGE_TEXT,
       alias,
       streamState,
-      { forceChat: true, diagnostics: [{ code: "text_commands.argument_invalid" satisfies EventCode, detail: { name: command.name } }] },
+      { forceChat: true, diagnostics: [...(gameUnknownDiagnostic === undefined ? [] : [gameUnknownDiagnostic]), { code: "text_commands.argument_invalid" satisfies EventCode, detail: { name: command.name } }] },
     );
   }
   const claim = await repository.claim(
@@ -249,8 +245,10 @@ const processTextCommandMessageAttempt = async (
   if (claimed.kind === "list") {
     const commands = (await repository.list(event.channelId)).filter((entry) => entry.enabled).sort((left, right) => left.name.localeCompare(right.name));
     const list = commands.length === 0 ? NO_COMMANDS_REPLY : commandListReply(commands.map((entry) => entry.name));
-    return response(event, input, claimed, list, alias, streamState,
-      changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult });
+    return response(event, input, claimed, list, alias, streamState, {
+      ...(gameUnknownDiagnostic === undefined ? {} : { diagnostics: [gameUnknownDiagnostic] }),
+      ...(changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult }),
+    });
   }
 
   if (claimed.kind === "shoutout") {
@@ -258,14 +256,14 @@ const processTextCommandMessageAttempt = async (
     if (typeof target !== "string" || !/^[a-zA-Z0-9_]{1,25}$/u.test(target)) {
       return response(event, input, claimed, claimed.usageText ?? TEXT_COMMAND_DEFAULT_USAGE_TEXT, alias, streamState, {
         forceChat: true,
-        diagnostics: [{ code: "text_commands.argument_missing" satisfies EventCode, detail: { name: claimed.name } }],
+        diagnostics: [...(gameUnknownDiagnostic === undefined ? [] : [gameUnknownDiagnostic]), { code: "text_commands.argument_missing" satisfies EventCode, detail: { name: claimed.name } }],
       });
     }
     const rendered = await render(context, event, input, claimed, alias, claimed.text, claim.changedVariable);
     return response(event, input, claimed, rendered.text, alias, streamState, {
       forceChat: true,
       prefixActions: [{ kind: "shoutout", targetLogin: target }],
-      diagnostics: rendered.diagnostics,
+      diagnostics: [...(gameUnknownDiagnostic === undefined ? [] : [gameUnknownDiagnostic]), ...rendered.diagnostics],
       ...(changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult }),
     });
   }
@@ -273,6 +271,7 @@ const processTextCommandMessageAttempt = async (
   const rendered = await render(context, event, input, claimed, alias, claimed.text, claim.changedVariable);
   return response(event, input, claimed, rendered.text, alias, streamState, {
     diagnostics: [
+      ...(gameUnknownDiagnostic === undefined ? [] : [gameUnknownDiagnostic]),
       ...rendered.diagnostics,
     ],
     ...(changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult }),
