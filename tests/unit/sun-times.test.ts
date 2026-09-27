@@ -118,6 +118,32 @@ describe("localMidnightInTimeZone", () => {
   });
 });
 
+describe("calculateSunAltitudeIntervals across a skipped local midnight", () => {
+  // Real Cairo (~30°N) has no golden-/blue-hour crossing anywhere near local midnight, so this
+  // uses a synthetic high latitude with the real Africa/Cairo 2026 spring-forward date to force a
+  // crossing right at the boundary the old wallTimeUtc fixed-point search got wrong by one hour.
+  const location = { latitude: 73.1, longitude: 31.2357, timeZone: "Africa/Cairo" };
+
+  it("keeps the evening golden-hour interval when only the day before the skip is scanned", () => {
+    const intervals = calculateSunAltitudeIntervals(location, "2026-04-23", 1, "golden");
+
+    // Before the fix, altitudeCrossings computed this day's end bound one hour early (using the
+    // buggy wallTimeUtc(shiftLocalDate(date, 1), 0, 0, timeZone) instead of the shared, DST-safe
+    // localMidnightInTimeZone), which excluded this interval's end crossing and dropped it entirely.
+    expect(intervals).toEqual([
+      { startAt: "2026-04-22T22:47:00.000Z", endAt: "2026-04-23T02:29:00.000Z" },
+      { startAt: "2026-04-23T17:21:00.000Z", endAt: "2026-04-23T21:23:00.000Z" },
+    ]);
+  });
+
+  it("matches the multi-day scan that already spans the transition", () => {
+    const singleDayInterval = calculateSunAltitudeIntervals(location, "2026-04-23", 1, "golden")[1];
+    const multiDayIntervals = calculateSunAltitudeIntervals(location, "2026-04-23", 2, "golden");
+
+    expect(multiDayIntervals).toContainEqual(singleDayInterval);
+  });
+});
+
 describe("on-demand sun template values", () => {
   it("uses location-local solar dates for Honolulu while formatting in Berlin", () => {
     const location = { latitude: 21.3069, longitude: -157.8583, timeZone: "Pacific/Honolulu" };
