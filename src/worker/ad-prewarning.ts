@@ -215,6 +215,18 @@ const decisionDetail = (decision: AdPrewarningDecision): Readonly<Record<string,
 const shouldReplan = (decision: AdPrewarningDecision): boolean =>
   decision.kind === "skip" && (decision.reason === "rescheduled" || decision.reason === "break_started");
 
+/**
+ * `sendChatMessage` failures that happen before the claim/POST (identity or
+ * app token unavailable) never touched the external send, so retrying is
+ * safe -- the alarm handler above throws for these to get a short retry
+ * instead of ChannelObject's much longer default backoff, which would burn
+ * through the (short) prewarning lead time. Anything at or after the claim
+ * (`stale_before_send`, `already_attempted`) or an actual Twitch outcome is
+ * excluded: that send may already be in flight or done.
+ */
+const isRetryablePrePostFailure = (reason: string | null): boolean =>
+  reason === "bot_identity_missing" || reason === "app_token_unavailable";
+
 const replanFromSchedule = async (
   scheduler: AdScheduler | null,
   settings: { leadSeconds: number },
@@ -356,6 +368,7 @@ export const processAdPrewarning = async (
     code: decisionCode(finalDecision),
     detail: decisionDetail(finalDecision),
   }];
+  let retryableFailureReason: string | null = null;
   if (finalDecision.kind === "announce") {
     // sendChatMessage still awaits bot identity and an access token before
     // its own POST, so a snooze can land after the recheck above but before
@@ -387,12 +400,22 @@ export const processAdPrewarning = async (
       diagnostics.push({ code: "host.chat.skipped" satisfies EventCode, detail: { reason: sent.reason } });
     } else {
       diagnostics.push({ code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });
+      if (isRetryablePrePostFailure(sent.reason)) retryableFailureReason = sent.reason;
     }
   }
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 
   if (shouldReplan(finalDecision)) {
     await replanFromSchedule(scheduler, configured.settings, (freshSchedule ?? currentSchedule).nextAdAt);
+  }
+
+  // Throwing (rather than just logging above) gets ChannelObject's alarm
+  // dispatcher to retry this occurrence through its short prewarning-specific
+  // backoff. A retry re-runs this whole function, including the `too_late`
+  // check inside `decideAdPrewarning` above -- so retries stop by themselves
+  // once the ad has actually started, with no separate attempt counter needed.
+  if (retryableFailureReason !== null) {
+    throw new Error(`ad prewarning retryable failure: ${retryableFailureReason}`);
   }
 };
 

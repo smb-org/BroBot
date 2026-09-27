@@ -61,6 +61,12 @@ const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
 const AD_COUNTDOWN_REFRESH_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
 const ALARM_HANDLER_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
+// The default 60s backoff above would itself burn through the (typically 60s)
+// prewarning lead time on a single retry. A short delay here still lets a
+// transient identity/token failure recover in time; `decideAdPrewarning`'s
+// `too_late` check (see ad-prewarning.ts) is what actually bounds retries
+// once the ad has started, not attempt count.
+const AD_PREWARNING_RETRY_DELAYS_MS = [5_000, 10_000] as const;
 const ALARM_HANDLER_RECOVERY_DELAY_MS = 60_000;
 const SECURITY_ROUND_HANDLER = "channel.security_round";
 const SECURITY_RETRY_HANDLER = "channel.security_retry";
@@ -826,7 +832,10 @@ export class ChannelObject extends DurableObject<Env> {
     const handlers = new Map<string, AlarmHandlerRegistration>([
       [SECURITY_ROUND_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
       [SECURITY_RETRY_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
-      [AD_PREWARNING_HANDLER, { handle: (_key, entry, _now, nowIso) => this.runAdPrewarning(entry.deadline, nowIso) }],
+      [AD_PREWARNING_HANDLER, {
+        handle: (_key, entry, _now, nowIso) => this.runAdPrewarning(entry.deadline, nowIso),
+        retryDelaysMs: AD_PREWARNING_RETRY_DELAYS_MS,
+      }],
       [AD_COUNTDOWN_REFRESH_HANDLER, {
         handle: async () => {
           await this.refreshCountdownScheduleFromAlarm();

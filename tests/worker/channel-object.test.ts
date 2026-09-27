@@ -907,16 +907,18 @@ describe("ChannelObject realtime path", () => {
 
       expect(mocks.processAdPrewarning).toHaveBeenCalledOnce();
       expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
-      expect(storage.values.get("ad_prewarning")).toBe(now + 90_000);
+      // Ad prewarning uses its own short backoff (not the generic 60s default):
+      // a retry that slow would itself consume the prewarning lead time.
+      expect(storage.values.get("ad_prewarning")).toBe(now + 35_000);
       expect(storage.values.get("ads:countdown_refresh_deadline")).toBe(
         Date.parse(nextSchedule.nextAdAt as string) + (nextSchedule.duration ?? 0) * 1_000 + 30_000,
       );
       expect(storage.values.get("channel:alarm_schedule")).toMatchObject({
-        ad_prewarning: { deadline: now + 30_000, nextAttemptAt: now + 90_000, failures: 1 },
+        ad_prewarning: { deadline: now + 30_000, nextAttemptAt: now + 35_000, failures: 1 },
       });
       expect(errorLog).toHaveBeenCalled();
 
-      vi.setSystemTime(now + 90_000);
+      vi.setSystemTime(now + 35_000);
       await object.alarm();
       expect(mocks.processAdPrewarning).toHaveBeenCalledTimes(2);
       expect(mocks.processAdPrewarning.mock.calls[1]?.[2]).toBe(now + 30_000);
