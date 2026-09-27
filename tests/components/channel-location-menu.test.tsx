@@ -40,8 +40,10 @@ describe("ChannelLocationMenu", () => {
 
     render(<UiProvider><ChannelLocationMenu location={location} messages={messages} /></UiProvider>);
 
-    const trigger = screen.getByRole("button", { name: /Regensburg.*49\.01, 12\.10/u });
+    const trigger = screen.getByRole("button", { name: /Regensburg/ });
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).toHaveAttribute("title", "Regensburg");
+    expect(trigger).toHaveTextContent("Regensburg · 49.01, 12.10");
     fireEvent.click(trigger);
 
     const openStreetMap = await screen.findByRole("menuitem", { name: "OpenStreetMap", hidden: true });
@@ -59,5 +61,30 @@ describe("ChannelLocationMenu", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Copy coordinates", hidden: true }));
     expect(writeText).toHaveBeenCalledWith("49.0100, 12.1000");
     expect(await screen.findByRole("status")).toHaveTextContent("Coordinates copied");
+  });
+
+  it("shows only the first name segment in the header while keeping the full name accessible", async () => {
+    const longName: PanelChannelLocation = { ...location, name: "Stuttgart, Baden-Württemberg, Deutschland" };
+    render(<UiProvider><ChannelLocationMenu location={longName} messages={messages} /></UiProvider>);
+
+    // Accessible name starts with the visible label (WCAG 2.5.3): matching
+    // it against a leading "Stuttgart" pattern finds the button at all,
+    // and a trailing full-name pattern confirms the full name is folded in
+    // afterwards, via a visually hidden suffix.
+    const trigger = screen.getByRole("button", { name: /^Stuttgart/ });
+    expect(trigger).toHaveAttribute("title", "Stuttgart, Baden-Württemberg, Deutschland");
+    expect(trigger).toHaveTextContent("Stuttgart · 49.01, 12.10");
+    expect(trigger.querySelector(".dashboard-header__location-label")).not.toHaveTextContent("Baden-Württemberg");
+    expect(screen.getByRole("button", { name: /Baden-Württemberg, Deutschland$/ })).toBe(trigger);
+
+    fireEvent.click(trigger);
+    expect(await screen.findByText("Stuttgart, Baden-Württemberg, Deutschland")).toBeInTheDocument();
+  });
+
+  it("uses the full name as the short name when it has no comma-separated segments", () => {
+    const plainName: PanelChannelLocation = { ...location, name: "Regensburg" };
+    render(<UiProvider><ChannelLocationMenu location={plainName} messages={messages} /></UiProvider>);
+
+    expect(screen.getByRole("button", { name: /Regensburg/ })).toHaveTextContent("Regensburg · 49.01, 12.10");
   });
 });
