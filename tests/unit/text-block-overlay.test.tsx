@@ -191,4 +191,61 @@ describe("text block overlay rendering", () => {
       refreshAt: "2026-06-21T19:59:59.000Z",
     });
   });
+
+  it("schedules a reload from the earliest sunrise or sunset countdown", async () => {
+    const sunrise = "2026-06-21T22:00:00.000Z";
+    const sunsetLater = "2026-06-22T03:00:00.000Z";
+    const db = overlayDatabase([variant("default", "Sunrise {sun.rise_in}, sunset {sun.set_in}", {})]);
+    const context = contextFor({
+      dynamicTemplateVariableNames: new Set(["sun.rise_in", "sun.set_in"]),
+      overlayTemplateVariableNames: new Set(["sun.rise_in", "sun.set_in"]),
+      resolveOverlayTemplateValues: () => Promise.resolve({
+        "sun.rise_in": { available: true, targetAts: [sunrise] },
+        "sun.set_in": { available: true, targetAts: [sunsetLater] },
+      }),
+    });
+
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+
+    expect(state).toMatchObject({
+      countdownTargets: { "sun.rise_in": [sunrise], "sun.set_in": [sunsetLater] },
+      refreshAt: "2026-06-21T21:00:00.000Z",
+    });
+  });
+
+  it("schedules refreshed template values at their displayed time boundaries", async () => {
+    const timeDatabase = overlayDatabase([variant("default", "It is {time}, uptime {uptime}", {})]);
+    const timeContext = contextFor({
+      now: Date.parse("2026-06-21T19:59:58.000Z"),
+    });
+    const timeState = await textBlockOverlayState(timeDatabase, channelId, { blockName: "sun" }, timeContext);
+    expect(timeState).toMatchObject({ refreshAt: "2026-06-21T20:00:00.000Z" });
+
+    const dateDatabase = overlayDatabase([variant("default", "Today is {date}", {})]);
+    const dateContext = contextFor({
+      now: Date.parse("2026-06-21T19:59:58.000Z"),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+    });
+    const dateState = await textBlockOverlayState(dateDatabase, channelId, { blockName: "sun" }, dateContext);
+    expect(dateState).toMatchObject({ refreshAt: "2026-06-21T22:00:00.000Z" });
+  });
+
+  it("schedules a refresh after fixed sun times advance to their next event", async () => {
+    const sunrise = "2026-06-21T20:30:00.000Z";
+    const sunset = "2026-06-21T21:00:00.000Z";
+    const dusk = "2026-06-21T21:30:00.000Z";
+    const db = overlayDatabase([variant("default", "Rise {sun.rise}, set {sun.set}, dusk {sun.dusk}", {})]);
+    const context = contextFor({
+      overlayTemplateVariableNames: new Set(["sun.rise", "sun.set", "sun.dusk"]),
+      resolveOverlayTemplateValues: () => Promise.resolve({
+        "sun.rise": { available: true, targetAt: sunrise },
+        "sun.set": { available: true, targetAt: sunset },
+        "sun.dusk": { available: true, targetAt: dusk },
+      }),
+    });
+
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+
+    expect(state).toMatchObject({ refreshAt: "2026-06-21T20:30:01.000Z" });
+  });
 });

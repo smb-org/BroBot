@@ -21,6 +21,9 @@ import { createTemplateRenderer, type TemplateValueProvider } from "../template-
 const moduleIsEnabled = (module: BotModule, enabled: ReadonlyMap<string, boolean>): boolean =>
   module.mandatory === true || enabled.get(module.id) === true;
 
+const recordValue = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 /** Builds the same registered template providers used by chat, in deterministic overlay mode. */
 export const createOverlayElementContext = async (
   env: Env,
@@ -38,11 +41,43 @@ export const createOverlayElementContext = async (
   const enabled = new Map(moduleRows.results.map(({ module_id, enabled: value }) => [module_id, value === 1]));
   const channelTimeZone = (): Promise<string> => Promise.resolve(channel?.time_zone ?? "Europe/Berlin");
   const streamState = (): Promise<"online" | "offline" | "unknown"> => Promise.resolve(stream?.state ?? "unknown");
+  let appAccessTokenPromise: Promise<string> | undefined;
+  const appAccessToken = (): Promise<string> => {
+    appAccessTokenPromise ??= getAppAccessToken(env, new Date(now).toISOString());
+    return appAccessTokenPromise;
+  };
+  let streamDetailsPromise: Promise<{ startedAt: string | null; viewerCount: number } | null> | undefined;
+  const streamDetails = (): Promise<{ startedAt: string | null; viewerCount: number } | null> => {
+    streamDetailsPromise ??= (async () => {
+      try {
+        const result = await helixRequest<{ data?: unknown }>({
+          url: "https://api.twitch.tv/helix/streams",
+          query: { user_id: channelId, type: "live" },
+          accessToken: await appAccessToken(),
+          clientId: env.TWITCH_CLIENT_ID,
+        });
+        if (!result.ok || !recordValue(result.data) || !Array.isArray(result.data.data)) return null;
+        const item: unknown = result.data.data[0];
+        if (item === undefined) return { startedAt: null, viewerCount: 0 };
+        if (!recordValue(item) || typeof item.started_at !== "string") return null;
+        return {
+          startedAt: item.started_at,
+          viewerCount: typeof item.viewer_count === "number" && Number.isSafeInteger(item.viewer_count)
+            ? item.viewer_count
+            : 0,
+        };
+      } catch {
+        return null;
+      }
+    })();
+    return streamDetailsPromise;
+  };
   let channelInfoPromise: Promise<ModuleChannelInfo | null> | undefined;
   const channelInfo = (): Promise<ModuleChannelInfo | null> => {
     channelInfoPromise ??= (async () => {
       try {
-        const accessToken = await getAppAccessToken(env, new Date(now).toISOString());
+        const [accessToken, details] = await Promise.all([appAccessToken(), streamDetails()]);
+        if (details === null) return null;
         const result = await helixRequest<{ data?: readonly Record<string, unknown>[] }>({
           url: "https://api.twitch.tv/helix/channels",
           query: { broadcaster_id: channelId },
@@ -55,8 +90,8 @@ export const createOverlayElementContext = async (
           title: item.title,
           gameName: item.game_name,
           gameId: typeof item.game_id === "string" ? item.game_id : "",
-          startedAt: stream?.startedAt ?? null,
-          viewerCount: 0,
+          startedAt: details.startedAt,
+          viewerCount: details.viewerCount,
         };
       } catch {
         return null;
@@ -131,7 +166,7 @@ export const createOverlayElementContext = async (
       const info = await channelInfo();
       return info === null ? null : { title: info.title, gameName: info.gameName, gameId: info.gameId };
     },
-    streamDetails: () => Promise.resolve({ startedAt: stream?.startedAt ?? null, viewerCount: 0 }),
+    streamDetails,
     followedAt: () => Promise.resolve("unavailable"),
     followerTotal: () => Promise.resolve(null),
     chattersTotal: () => Promise.resolve(null),
@@ -156,7 +191,7 @@ export const createOverlayElementContext = async (
   };
   const overlayValueCache = new Map<string, Promise<Readonly<Record<string, { available: boolean; targetAt?: string; targetAts?: readonly string[] }>>>>();
   const resolveOverlayTemplateValues = (names: readonly string[]) => {
-    const key = [...new Set(names)].sort().join("\u0000");
+    const key = [...new Set(names)].sort((left, right) => left.localeCompare(right)).join("\u0000");
     let pending = overlayValueCache.get(key);
     if (pending === undefined) {
       pending = (async () => {

@@ -188,6 +188,39 @@ describe("on-demand sun template values", () => {
     expect(atSunset.dataConditions["sun.phase"]).toBe("night");
   });
 
+  it("exposes the next fixed sun event as an overlay refresh target", async () => {
+    const location = { latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" };
+    const now = Date.parse("2026-06-21T00:00:00.000Z");
+    const day = calculateSunDay({ ...location, localDate: "2026-06-21" });
+    const database = {
+      prepare: () => ({
+        bind: () => ({ first: () => Promise.resolve({
+          name: "Berlin",
+          latitude: location.latitude,
+          longitude: location.longitude,
+          location_time_zone: location.timeZone,
+          error_text_de: "Nicht verfügbar.",
+          error_text_en: errorText,
+          revision: 1,
+        }) }),
+      }),
+    } as unknown as D1Database;
+
+    const values = await sunModule.resolveOverlayTemplateValues?.(["sun.rise", "sun.set", "sun.dusk"], {
+      DB: database,
+      channelId: "sun-channel",
+      now,
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      language: "en",
+    });
+
+    expect(values).toEqual({
+      "sun.rise": { available: true, targetAt: day.sunriseAt },
+      "sun.set": { available: true, targetAt: day.sunsetAt },
+      "sun.dusk": { available: true, targetAt: day.duskAt },
+    });
+  });
+
   it("uses configured fallback text when there is no location", async () => {
     const variables = await sunModule.templateVariables?.({} as D1Database, "sun-channel") ?? [];
     const fallback = "x".repeat(SUN_ERROR_TEXT_MAX_LENGTH);

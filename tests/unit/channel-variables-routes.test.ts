@@ -413,6 +413,35 @@ describe("Channel variable routes", () => {
     ]);
   });
 
+  it("reloads text block overlays after a channel variable value changes", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, description, created_at, updated_at)
+       VALUES ('channel-a', 'score', 4, 'Score', '2026-09-27T00:00:00.000Z', '2026-09-27T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-text', 'channel-a', 'Text only', '2026-09-27T00:00:00.000Z', '2026-09-27T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, config_json)
+       VALUES ('element-text', 'channel-a', 'overlay-text', 'text_library.block', '{"blockName":"welcome"}')`,
+    ).run();
+
+    const changed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score/value", "POST", {
+      operation: "add", amount: 1,
+    });
+
+    expect(changed.status).toBe(200);
+    expect(realtimePublish.mock.calls.at(-1)?.[0]).toContainEqual(expect.objectContaining({
+      type: "modul.text_library.state_changed",
+      payload: { reason: "template.data.changed" },
+      overlayIds: ["overlay-text"],
+    }));
+  });
+
   it("carries resetOnStreamStart in the channel.variable.renamed audit snapshot for every kind of patch (#254 review)", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");

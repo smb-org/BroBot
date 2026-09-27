@@ -194,6 +194,7 @@ export const publishOverlayChanged = async (
 /** Sends a channel-variable hint best-effort; D1 remains the authoritative state. */
 export const publishVariablesChanged = async (
   namespace: Env["CHANNEL"] | undefined,
+  database: D1Database,
   channelId: string,
   set: RealtimeEnvelope<"variables.changed">["payload"]["set"],
   removed: RealtimeEnvelope<"variables.changed">["payload"]["removed"],
@@ -201,7 +202,15 @@ export const publishVariablesChanged = async (
   additionalMessages: readonly RealtimeMessage[] = [],
 ): Promise<void> => {
   if (set.length === 0 && removed.length === 0 && additionalMessages.length === 0) return;
-  const messages: RealtimeMessage[] = [...additionalMessages];
+  let templateStateMessages: RealtimeMessage[] = [];
+  if (namespace !== undefined && (set.length > 0 || removed.length > 0)) {
+    try {
+      templateStateMessages = await prepareModuleOverlayHostEventMessages(database, channelId, "template.data.changed");
+    } catch (error: unknown) {
+      console.warn("Module overlay state refresh hint could not be prepared.", error);
+    }
+  }
+  const messages: RealtimeMessage[] = [...additionalMessages, ...templateStateMessages];
   if (set.length > 0 || removed.length > 0) {
     messages.push({
       version: 1,

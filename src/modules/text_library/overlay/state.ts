@@ -1,7 +1,7 @@
 import type { JsonObject, ModuleOverlayElementContext } from "../../contract";
 import type { TextBlock, TextBlockConditions, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_NAME_PATTERN } from "../contracts";
-import { blockReferencesInText, textBlockConditionSwitchTimes } from "../domain";
+import { blockReferencesInText, nextTextBlockLocalMidnight, textBlockConditionSwitchTimes } from "../domain";
 import { renderOverlayTextPreservingDynamicValues } from "./render";
 
 interface BlockRow {
@@ -106,6 +106,11 @@ const dynamicNamesIn = (text: string, names: ReadonlySet<string>): string[] => [
     .flatMap((match) => match[1] !== undefined && names.has(match[1]) ? [match[1]] : []),
 )];
 
+const templateNamesIn = (texts: readonly string[]): ReadonlySet<string> => new Set(
+  texts.flatMap((text) => [...text.matchAll(/\{([a-z][a-z0-9_.]{0,63})\}/gu)]
+    .flatMap((match) => match[1] === undefined ? [] : [match[1]])),
+);
+
 const candidateText = async (
   source: string,
   context: ModuleOverlayElementContext,
@@ -137,6 +142,8 @@ export const textBlockOverlayState = async (
   if (block === null || block.variants.length === 0) return null;
   const dependencyBlocks = await referencedBlocksFor(db, channelId, block);
   const nestedBlocks = dependencyBlocks.filter((dependency) => dependency.name !== block.name);
+  const referencedTemplateNames = templateNamesIn(dependencyBlocks.flatMap((dependency) =>
+    dependency.variants.flatMap((variant) => variant.texts)));
 
   const needsStream = block.variants.some((variant) => variant.conditions.stream !== undefined);
   const needsGame = block.games.length > 0 || block.variants.some((variant) => variant.conditions.game !== undefined);
@@ -210,9 +217,26 @@ export const textBlockOverlayState = async (
   ].filter((at) => Date.parse(at) > context.now && Date.parse(at) <= until);
   const countdownExpiries = Object.values(countdownTargets).flatMap((targets) => targets.map(Date.parse))
     .filter((at) => Number.isFinite(at) && at > context.now);
+  const systemRefreshAts: number[] = [];
+  if (referencedTemplateNames.has("time") || referencedTemplateNames.has("uptime")) {
+    systemRefreshAts.push((Math.floor(context.now / 60_000) + 1) * 60_000);
+  }
+  if (referencedTemplateNames.has("date")) {
+    systemRefreshAts.push(nextTextBlockLocalMidnight(context.now, timeZone));
+  }
+  const fixedSunNames = ["sun.set", "sun.rise", "sun.dusk"].filter((name) => referencedTemplateNames.has(name));
+  if (fixedSunNames.length > 0) {
+    const sunValues = await context.resolveOverlayTemplateValues(fixedSunNames);
+    const sunRefreshAts = Object.values(sunValues).flatMap((value) => [
+      ...(value.targetAt === undefined ? [] : [value.targetAt]),
+      ...(value.targetAts ?? []),
+    ]).map(Date.parse).filter((at) => Number.isFinite(at) && at > context.now)
+      .map((at) => at + 1_000);
+    systemRefreshAts.push(...sunRefreshAts);
+  }
   const timelineExpiry = Math.min(
     ...(timeConditionIds.length === 0 ? [] : [until]),
-    ...(countdownExpiries.length === 0 ? [] : [Math.max(...countdownExpiries)]),
+    ...(countdownExpiries.length === 0 ? [] : [Math.min(...countdownExpiries)]),
   );
   const timelineRefreshAt = Number.isFinite(timelineExpiry)
     ? Math.max(context.now + 1_000, Math.min(timelineExpiry - 60 * 60 * 1_000, timelineExpiry - 5_000))
@@ -220,7 +244,8 @@ export const textBlockOverlayState = async (
   const nestedRefreshAt = nestedSwitchTimes.length === 0
     ? Number.POSITIVE_INFINITY
     : Math.max(context.now + 1_000, Math.min(...nestedSwitchTimes.map((at) => Date.parse(at))) - 5_000);
-  const refreshAt = Math.min(timelineRefreshAt, nestedRefreshAt);
+  const systemRefreshAt = systemRefreshAts.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...systemRefreshAts);
+  const refreshAt = Math.min(timelineRefreshAt, nestedRefreshAt, systemRefreshAt);
   const switchTimes = [...new Set([
     ...textBlockConditionSwitchTimes(candidates.map(({ conditions }) => conditions), timeZone, context.now, until),
     ...textBlockConditionSwitchTimes(nestedTimeConditions, timeZone, context.now, until),

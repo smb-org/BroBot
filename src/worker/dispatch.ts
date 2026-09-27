@@ -780,6 +780,7 @@ export const dispatchEventSubNotification = async (
   if (changedVariables.size > 0) {
     await publishVariablesChanged(
       environment.CHANNEL,
+      environment.DB,
       event.channelId,
       [...changedVariables].map(([name, value]) => ({ name, value })),
       [],

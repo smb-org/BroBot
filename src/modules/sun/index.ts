@@ -131,7 +131,11 @@ const resolveOverlayValues = async (
     };
     return Object.fromEntries(needed.map((name) => {
       const targets = events[name as keyof typeof events];
-      return [name, { available: targets.length > 0, ...(name.endsWith("_in") && targets.length > 0 ? { targetAts: targets } : {}) }];
+      return [name, {
+        available: targets.length > 0,
+        ...(targets[0] === undefined ? {} : { targetAt: targets[0] }),
+        ...(name.endsWith("_in") && targets.length > 0 ? { targetAts: targets } : {}),
+      }];
     }));
   } catch {
     return Object.fromEntries(needed.map((name) => [name, { available: false }]));

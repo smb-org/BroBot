@@ -122,6 +122,21 @@ const wallTimeUtc = (date: string, time: string, timeZone: string): number => {
   return candidate;
 };
 
+/** Returns the next local midnight as a UTC instant for a channel time zone. */
+export const nextTextBlockLocalMidnight = (from: number, timeZone: string): number => {
+  try {
+    let nextDate = shiftDate(localDate(from, timeZone), 1);
+    let midnight = wallTimeUtc(nextDate, "00:00", timeZone);
+    if (midnight <= from) {
+      nextDate = shiftDate(nextDate, 1);
+      midnight = wallTimeUtc(nextDate, "00:00", timeZone);
+    }
+    return midnight;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+};
+
 /** Local clock boundaries delivered with overlay candidates for browser-side time switching. */
 export const textBlockConditionSwitchTimes = (
   conditions: readonly Pick<TextBlockConditions, "weekdays" | "timeWindow">[],
