@@ -16,6 +16,7 @@ import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 import type { AdsSchedule } from "../../modules/ads/contracts";
+import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
 import type { BotModule, HelixRequest, HelixRequestOptions } from "../../modules/contract";
 import type { ModuleAlarmContext, ModuleAlarmDefinition } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
@@ -56,6 +57,7 @@ const TWITCH_RETRY_AFTER_KEY = "twitch:retry_after";
 const AD_COUNTDOWN_REFRESH_ATTEMPT_KEY = "ads:countdown_refresh_attempt";
 const AD_COUNTDOWN_REFRESH_DEADLINE_KEY = "ads:countdown_refresh_deadline";
 const AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY = "ads:countdown_refresh_retry_count";
+const OVERLAY_STREAM_DETAILS_CACHE_KEY = "overlay:stream_details";
 const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
 const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
@@ -129,6 +131,18 @@ export interface AdScheduleRefreshResult {
 interface StreamRefreshLease {
   token: string;
   expiresAt: number;
+}
+
+interface OverlayStreamDetails {
+  startedAt: string | null;
+  viewerCount: number;
+}
+
+interface CachedOverlayStreamDetails {
+  expectedStartedAt: string | null;
+  expectedStreamId: string | null;
+  checkedAt: number;
+  details: OverlayStreamDetails | null;
 }
 
 const revokedTokenKey = (tokenId: string): string => `overlay_revoked:${tokenId}`;
@@ -303,6 +317,7 @@ const envelopeFor = (
  * alarm, and the authorization data lives in D1.
  */
 export class ChannelObject extends DurableObject<Env> {
+  private overlayStreamDetailsRefreshes = new Map<string, Promise<OverlayStreamDetails | null>>();
   private adScheduleRefresh: Promise<AdScheduleRefreshResult> | null = null;
   private adScheduleRefreshStartedAt = 0;
   private adScheduleRefreshGeneration = 0;
@@ -429,6 +444,69 @@ export class ChannelObject extends DurableObject<Env> {
     if (channelId === null) return null;
     const cache = await this.ctx.storage.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
     return cache ?? null;
+  }
+
+  /** Shares overlay stream lookups across bootstraps for this channel. */
+  public async getOverlayStreamDetails(
+    expectedStartedAt: string | null,
+    expectedStreamId: string | null,
+    now: number,
+  ): Promise<OverlayStreamDetails | null> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return null;
+    const cached = await this.ctx.storage.get<CachedOverlayStreamDetails>(OVERLAY_STREAM_DETAILS_CACHE_KEY);
+    if (cached !== undefined && cached.expectedStartedAt === expectedStartedAt &&
+        cached.expectedStreamId === expectedStreamId &&
+        Number.isFinite(cached.checkedAt) && cached.checkedAt <= now &&
+        now - cached.checkedAt < OVERLAY_STREAM_DETAILS_CACHE_TTL_MS) {
+      return cached.details;
+    }
+
+    const cacheIdentity = JSON.stringify([expectedStartedAt, expectedStreamId]);
+    const refreshes = this.overlayStreamDetailsRefreshes;
+    let refresh = refreshes.get(cacheIdentity);
+    if (refresh === undefined) {
+      refresh = (async () => {
+        let details: OverlayStreamDetails | null = null;
+        try {
+          const accessToken = await getAppAccessToken(this.env, new Date(now).toISOString());
+          const result = await helixRequest<{ data?: unknown }>({
+            url: "https://api.twitch.tv/helix/streams",
+            query: { user_id: channelId, type: "live" },
+            accessToken,
+            clientId: this.env.TWITCH_CLIENT_ID,
+          });
+          if (result.ok && isRecord(result.data) && Array.isArray(result.data.data)) {
+            const item: unknown = result.data.data[0];
+            if (item === undefined) {
+              details = { startedAt: expectedStartedAt, viewerCount: 0 };
+            } else if (isRecord(item)) {
+              details = {
+                startedAt: typeof item.started_at === "string" ? item.started_at : expectedStartedAt,
+                viewerCount: typeof item.viewer_count === "number" && Number.isSafeInteger(item.viewer_count)
+                  ? item.viewer_count
+                  : 0,
+              };
+            }
+          }
+        } catch {
+          // Cache the miss briefly too, so an API outage cannot multiply lookups per bootstrap.
+        }
+        await this.ctx.storage.put(OVERLAY_STREAM_DETAILS_CACHE_KEY, {
+          expectedStartedAt,
+          expectedStreamId,
+          checkedAt: now,
+          details,
+        } satisfies CachedOverlayStreamDetails);
+        return details;
+      })();
+      refreshes.set(cacheIdentity, refresh);
+    }
+    try {
+      return await refresh;
+    } finally {
+      if (refreshes.get(cacheIdentity) === refresh) refreshes.delete(cacheIdentity);
+    }
   }
 
   public async getAdScheduleGeneration(): Promise<number> {

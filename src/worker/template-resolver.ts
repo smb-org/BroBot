@@ -44,6 +44,7 @@ export interface TemplateResolverSources {
   streamState: () => Promise<ModuleStreamState>;
   channelDetails: () => Promise<TemplateChannelDetails | null>;
   streamDetails: () => Promise<TemplateStreamDetails | null>;
+  viewerCount?: () => Promise<number | null>;
   followedAt: (userId: string) => Promise<ModuleFollowedAt>;
   followerTotal: () => Promise<number | null>;
   chattersTotal: () => Promise<number | null>;
@@ -165,10 +166,13 @@ export const createTemplateRenderer = (
   const requiresStreamDetails = ["uptime", "viewers"].some((name) => requiredSystem.has(name));
   const requiresLanguage = ["game", "title", "uptime", "followage", "accountage", "date", "time", "followers", "viewers", "var"].some((name) => requiredSystem.has(name)) || channelNames.length > 0 || inputFallbacks.length > 0;
   const requiresTimeZone = requiredSystem.has("date") || requiredSystem.has("time");
-  const [language, channelDetails, streamDetails, streamState, followedAt, followerTotal, chattersTotal, channelValues, channelTimeZone] = await Promise.all([
+  const [language, channelDetails, streamDetails, viewerCount, streamState, followedAt, followerTotal, chattersTotal, channelValues, channelTimeZone] = await Promise.all([
     requiresLanguage ? sources.channelLanguage() : Promise.resolve("de" as const),
     requiresChannelDetails ? sources.channelDetails() : Promise.resolve(null),
     requiresStreamDetails ? sources.streamDetails() : Promise.resolve(null),
+    requiredSystem.has("viewers") && sources.viewerCount !== undefined
+      ? sources.viewerCount()
+      : Promise.resolve(null),
     requiredSystem.has("live") ? sources.streamState() : Promise.resolve("unknown" as const),
     requiredSystem.has("followage") ? (() => {
       const userId = event.actor?.userId ?? payloadString(event, "chatter_user_id");
@@ -205,6 +209,9 @@ export const createTemplateRenderer = (
   const channelLogin = payloadString(event, "broadcaster_user_login") ?? event.channelId;
   const target = valueFrom(moduleValues.target) ?? userLogin;
   const args = valueFrom(moduleValues.args) ?? "";
+  const resolvedViewerCount = sources.viewerCount === undefined
+    ? streamDetails?.viewerCount ?? null
+    : viewerCount;
 
   for (const name of requiredSystem) {
     if (name === "user") values[name] = userLogin;
@@ -218,9 +225,9 @@ export const createTemplateRenderer = (
     else if (name === "uptime") values[name] = streamDetails === null
       ? missing(name)
       : streamDetails.startedAt === null ? valueFrom(moduleValues.offlineText) ?? templateLanguageText[language].offline : formatDuration(streamDetails.startedAt, now, language);
-    else if (name === "viewers") values[name] = streamDetails === null
+    else if (name === "viewers") values[name] = streamDetails === null || resolvedViewerCount === null
       ? missing(name)
-      : formatCount(streamDetails.startedAt === null ? 0 : streamDetails.viewerCount, language);
+      : formatCount(streamDetails.startedAt === null ? 0 : resolvedViewerCount, language);
     else if (name === "live") values[name] = streamState === "unknown" ? missing(name) : streamState;
     else if (name === "followers") values[name] = followerTotal === null ? missing(name) : formatCount(followerTotal, language);
     else if (name === "chatters") values[name] = chattersTotal === null ? missing(name) : formatCount(chattersTotal, language);

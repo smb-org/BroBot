@@ -9,6 +9,9 @@ export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../pane
 /** The default channel timezone used by host template values and channel settings. */
 export const DEFAULT_CHANNEL_TIME_ZONE = "Europe/Berlin";
 
+/** How long overlay stream details stay cached before live viewer counts refresh. */
+export const OVERLAY_STREAM_DETAILS_CACHE_TTL_MS = 60_000;
+
 export const validChannelTimeZone = (timeZone: string): boolean => {
   try {
     new Intl.DateTimeFormat("en", { timeZone }).format();

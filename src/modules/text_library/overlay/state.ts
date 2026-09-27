@@ -1,4 +1,5 @@
 import type { JsonObject, ModuleOverlayElementContext } from "../../contract";
+import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../contract";
 import type { TextBlock, TextBlockConditions, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_NAME_PATTERN } from "../contracts";
 import { blockReferencesInText, nextTextBlockLocalMidnight, textBlockConditionSwitchTimes } from "../domain";
@@ -145,7 +146,8 @@ export const textBlockOverlayState = async (
   const referencedTemplateNames = templateNamesIn(dependencyBlocks.flatMap((dependency) =>
     dependency.variants.flatMap((variant) => variant.texts)));
 
-  const needsStream = block.variants.some((variant) => variant.conditions.stream !== undefined);
+  const needsStream = block.variants.some((variant) => variant.conditions.stream !== undefined) ||
+    referencedTemplateNames.has("viewers");
   const needsGame = block.games.length > 0 || block.variants.some((variant) => variant.conditions.game !== undefined);
   const [streamState, gameId, timeZone] = await Promise.all([
     needsStream ? context.streamState() : Promise.resolve("unknown" as const),
@@ -224,6 +226,9 @@ export const textBlockOverlayState = async (
   if (referencedTemplateNames.has("date")) {
     systemRefreshAts.push(nextTextBlockLocalMidnight(context.now, timeZone));
   }
+  if (referencedTemplateNames.has("viewers") && streamState === "online") {
+    systemRefreshAts.push(context.now + OVERLAY_STREAM_DETAILS_CACHE_TTL_MS);
+  }
   const fixedSunNames = ["sun.set", "sun.rise", "sun.dusk"].filter((name) => referencedTemplateNames.has(name));
   if (fixedSunNames.length > 0) {
     const sunValues = await context.resolveOverlayTemplateValues(fixedSunNames);
@@ -234,13 +239,13 @@ export const textBlockOverlayState = async (
       .map((at) => at + 1_000);
     systemRefreshAts.push(...sunRefreshAts);
   }
-  const timelineExpiry = Math.min(
-    ...(timeConditionIds.length === 0 ? [] : [until]),
-    ...(countdownExpiries.length === 0 ? [] : [Math.min(...countdownExpiries)]),
-  );
-  const timelineRefreshAt = Number.isFinite(timelineExpiry)
-    ? Math.max(context.now + 1_000, Math.min(timelineExpiry - 60 * 60 * 1_000, timelineExpiry - 5_000))
-    : Number.POSITIVE_INFINITY;
+  const conditionTimelineRefreshAt = timeConditionIds.length === 0
+    ? Number.POSITIVE_INFINITY
+    : Math.max(context.now + 1_000, until - 60 * 60 * 1_000);
+  const countdownRefreshAt = countdownExpiries.length === 0
+    ? Number.POSITIVE_INFINITY
+    : Math.min(...countdownExpiries) + 1_000;
+  const timelineRefreshAt = Math.min(conditionTimelineRefreshAt, countdownRefreshAt);
   const nestedRefreshAt = nestedSwitchTimes.length === 0
     ? Number.POSITIVE_INFINITY
     : Math.max(context.now + 1_000, Math.min(...nestedSwitchTimes.map((at) => Date.parse(at))) - 5_000);

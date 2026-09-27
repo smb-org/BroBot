@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleOverlayElementContext } from "../../src/modules/contract";
+import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS, type ModuleOverlayElementContext } from "../../src/modules/contract";
 import { textBlockOverlayState } from "../../src/modules/text_library/overlay/state";
 import TextBlockOverlayElement from "../../src/modules/text_library/overlay/view";
 
@@ -209,8 +209,40 @@ describe("text block overlay rendering", () => {
 
     expect(state).toMatchObject({
       countdownTargets: { "sun.rise_in": [sunrise], "sun.set_in": [sunsetLater] },
-      refreshAt: "2026-06-21T21:00:00.000Z",
+      refreshAt: "2026-06-21T22:00:01.000Z",
     });
+  });
+
+  it("refreshes a countdown at its target instead of once per second during the final hour", async () => {
+    const target = "2026-06-21T20:29:58.000Z";
+    const db = overlayDatabase([variant("default", "Sunset in {sun.set_in}", {})]);
+    const context = contextFor({
+      dynamicTemplateVariableNames: new Set(["sun.set_in"]),
+      overlayTemplateVariableNames: new Set(["sun.set_in"]),
+      resolveOverlayTemplateValues: () => Promise.resolve({
+        "sun.set_in": { available: true, targetAt: target },
+      }),
+    });
+
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+    const refreshAt = Date.parse((state as { refreshAt: string }).refreshAt);
+
+    expect(refreshAt).toBe(Date.parse(target) + 1_000);
+    expect(refreshAt - context.now).toBeGreaterThan(29 * 60 * 1_000);
+  });
+
+  it("refreshes viewer counts at the cache TTL only while the stream is live", async () => {
+    const db = overlayDatabase([variant("default", "Live viewers: {viewers}", {})]);
+    const liveContext = contextFor({ streamState: () => Promise.resolve("online") });
+    const offlineContext = contextFor({ streamState: () => Promise.resolve("offline") });
+
+    const liveState = await textBlockOverlayState(db, channelId, { blockName: "sun" }, liveContext);
+    const offlineState = await textBlockOverlayState(db, channelId, { blockName: "sun" }, offlineContext);
+
+    expect(liveState).toMatchObject({
+      refreshAt: new Date(liveContext.now + OVERLAY_STREAM_DETAILS_CACHE_TTL_MS).toISOString(),
+    });
+    expect(offlineState).not.toHaveProperty("refreshAt");
   });
 
   it("schedules refreshed template values at their displayed time boundaries", async () => {

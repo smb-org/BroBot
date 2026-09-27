@@ -21,9 +21,6 @@ import { createTemplateRenderer, type TemplateValueProvider } from "../template-
 const moduleIsEnabled = (module: BotModule, enabled: ReadonlyMap<string, boolean>): boolean =>
   module.mandatory === true || enabled.get(module.id) === true;
 
-const recordValue = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** Builds the same registered template providers used by chat, in deterministic overlay mode. */
 export const createOverlayElementContext = async (
   env: Env,
@@ -47,24 +44,19 @@ export const createOverlayElementContext = async (
     return appAccessTokenPromise;
   };
   let streamDetailsPromise: Promise<{ startedAt: string | null; viewerCount: number } | null> | undefined;
-  const streamDetails = (): Promise<{ startedAt: string | null; viewerCount: number } | null> => {
+  const cachedStreamDetails = (): Promise<{ startedAt: string | null; viewerCount: number } | null> => {
     streamDetailsPromise ??= (async () => {
       try {
-        const result = await helixRequest<{ data?: unknown }>({
-          url: "https://api.twitch.tv/helix/streams",
-          query: { user_id: channelId, type: "live" },
-          accessToken: await appAccessToken(),
-          clientId: env.TWITCH_CLIENT_ID,
-        });
-        if (!result.ok || !recordValue(result.data) || !Array.isArray(result.data.data)) return null;
-        const item: unknown = result.data.data[0];
-        if (item === undefined) return { startedAt: null, viewerCount: 0 };
-        if (!recordValue(item) || typeof item.started_at !== "string") return null;
+        const details = await env.CHANNEL.get(env.CHANNEL.idFromName(channelId))
+          .getOverlayStreamDetails(
+            stream?.state === "online" ? stream.startedAt : null,
+            stream?.state === "online" ? stream.streamId : null,
+            now,
+          );
+        if (details === null) return null;
         return {
-          startedAt: item.started_at,
-          viewerCount: typeof item.viewer_count === "number" && Number.isSafeInteger(item.viewer_count)
-            ? item.viewer_count
-            : 0,
+          startedAt: stream?.state === "online" ? stream.startedAt ?? details.startedAt : details.startedAt,
+          viewerCount: details.viewerCount,
         };
       } catch {
         return null;
@@ -72,11 +64,25 @@ export const createOverlayElementContext = async (
     })();
     return streamDetailsPromise;
   };
+  const streamDetails = (): Promise<{ startedAt: string | null; viewerCount: number } | null> => {
+    if (stream?.state === "offline") return Promise.resolve({ startedAt: null, viewerCount: 0 });
+    if (stream?.state === "online" && stream.startedAt !== null) {
+      return Promise.resolve({ startedAt: stream.startedAt, viewerCount: 0 });
+    }
+    return cachedStreamDetails();
+  };
+  const viewerCount = async (): Promise<number | null> => {
+    if (stream?.state === "offline") return 0;
+    return (await cachedStreamDetails())?.viewerCount ?? null;
+  };
   let channelInfoPromise: Promise<ModuleChannelInfo | null> | undefined;
   const channelInfo = (): Promise<ModuleChannelInfo | null> => {
     channelInfoPromise ??= (async () => {
       try {
-        const [accessToken, details] = await Promise.all([appAccessToken(), streamDetails()]);
+        const [accessToken, details] = await Promise.all([
+          appAccessToken(),
+          stream?.state === "offline" ? streamDetails() : cachedStreamDetails(),
+        ]);
         if (details === null) return null;
         const result = await helixRequest<{ data?: readonly Record<string, unknown>[] }>({
           url: "https://api.twitch.tv/helix/channels",
@@ -167,6 +173,7 @@ export const createOverlayElementContext = async (
       return info === null ? null : { title: info.title, gameName: info.gameName, gameId: info.gameId };
     },
     streamDetails,
+    viewerCount,
     followedAt: () => Promise.resolve("unavailable"),
     followerTotal: () => Promise.resolve(null),
     chattersTotal: () => Promise.resolve(null),
