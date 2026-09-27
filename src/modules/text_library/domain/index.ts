@@ -2,7 +2,7 @@ import type { ModuleChatStatus, ModuleStreamState } from "../../contract";
 import { MODULE_TEMPLATE_TIER_CHAT_STATUSES } from "../../contract";
 import type { TextBlock, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_MAXIMUMS, TEXT_BLOCK_NAME_PATTERN } from "../contracts";
-import { localMidnightInTimeZone, nextLocalMidnightInTimeZone, validChannelTimeZone } from "../../contract";
+import { localMidnightInTimeZone, nextLocalMidnightInTimeZone, validChannelTimeZone, wallTimeInstantsInTimeZone } from "../../contract";
 
 export interface TextBlockState {
   streamState: ModuleStreamState;
@@ -97,11 +97,24 @@ const shiftDate = (date: string, amount: number): string => {
   return `${String(shifted.getUTCFullYear())}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
 };
 
-const wallTimeUtc = (date: string, time: string, timeZone: string): number => {
-  const [year, month, day] = date.split("-").map(Number);
-  const [hour, minute] = time.split(":").map(Number);
-  const target = Date.UTC(year ?? 1970, (month ?? 1) - 1, day ?? 1, hour ?? 0, minute ?? 0);
-  let candidate = target;
+/** Returns the next local midnight as a UTC instant for a channel time zone. */
+export const nextTextBlockLocalMidnight = (from: number, timeZone: string): number => {
+  try {
+    return nextLocalMidnightInTimeZone(from, timeZone);
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+};
+
+/**
+ * Returns the instant `timeZone`'s UTC offset changes on local calendar date `date`, or
+ * null if it doesn't change that day. Brackets the search with that date's own local
+ * midnights, which `localMidnightInTimeZone` already resolves correctly regardless of a
+ * DST change at midnight itself.
+ */
+const dayZoneTransition = (date: string, timeZone: string): number | null => {
+  const dayStart = Date.parse(localMidnightInTimeZone(date, timeZone)) + 1;
+  const dayEnd = Date.parse(localMidnightInTimeZone(shiftDate(date, 1), timeZone)) - 1;
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -112,23 +125,37 @@ const wallTimeUtc = (date: string, time: string, timeZone: string): number => {
     second: "2-digit",
     hourCycle: "h23",
   });
-  for (let index = 0; index < 4; index += 1) {
-    const parts = Object.fromEntries(formatter.formatToParts(candidate).map((part) => [part.type, part.value]));
-    const seen = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
-    const updated = target - (seen - candidate);
-    if (updated === candidate) break;
-    candidate = updated;
+  // Intl only resolves to whole seconds, so probe on second boundaries -- otherwise a
+  // sub-second remainder leaks into the offset and breaks the binary search below.
+  const offsetAt = (instant: number): number => {
+    const flooredSecond = Math.floor(instant / 1000) * 1000;
+    const parts = Object.fromEntries(formatter.formatToParts(flooredSecond).map((part) => [part.type, part.value]));
+    const wallClock = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
+    return wallClock - flooredSecond;
+  };
+  const offsetStart = offsetAt(dayStart);
+  if (offsetAt(dayEnd) === offsetStart) return null;
+  let low = dayStart;
+  let high = dayEnd;
+  while (high - low > 1) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (offsetAt(mid) === offsetStart) low = mid; else high = mid;
   }
-  return candidate;
+  return high;
 };
 
-/** Returns the next local midnight as a UTC instant for a channel time zone. */
-export const nextTextBlockLocalMidnight = (from: number, timeZone: string): number => {
-  try {
-    return nextLocalMidnightInTimeZone(from, timeZone);
-  } catch {
-    return Number.POSITIVE_INFINITY;
-  }
+const timeWindowMatches = (conditions: Pick<TextBlockConditions, "weekdays" | "timeWindow">, current: { weekday: number; minuteOfDay: number }): boolean => {
+  const weekdays = conditions.weekdays;
+  const window = conditions.timeWindow;
+  const todayAllowed = weekdays === undefined || weekdays.includes(current.weekday);
+  if (window === undefined) return todayAllowed;
+  const start = Number(window.start.slice(0, 2)) * 60 + Number(window.start.slice(3));
+  const end = Number(window.end.slice(0, 2)) * 60 + Number(window.end.slice(3));
+  if (start === end) return todayAllowed;
+  if (start < end) return todayAllowed && current.minuteOfDay >= start && current.minuteOfDay < end;
+  if (current.minuteOfDay >= start) return todayAllowed;
+  const previousWeekday = (current.weekday + 6) % 7;
+  return current.minuteOfDay < end && (weekdays === undefined || weekdays.includes(previousWeekday));
 };
 
 /** Local clock boundaries delivered with overlay candidates for browser-side time switching. */
@@ -143,6 +170,8 @@ export const textBlockConditionSwitchTimes = (
   const first = shiftDate(localDate(from, timeZone), -1);
   const last = shiftDate(localDate(until, timeZone), 1);
   for (let date = first, guard = 0; date <= last && guard < 12; date = shiftDate(date, 1), guard += 1) {
+    const needsTransitionCheck = conditions.some((condition) => condition.timeWindow !== undefined);
+    const transition = needsTransitionCheck ? dayZoneTransition(date, timeZone) : null;
     for (const condition of conditions) {
       if (condition.weekdays !== undefined) {
         const midnight = Date.parse(localMidnightInTimeZone(date, timeZone));
@@ -150,27 +179,25 @@ export const textBlockConditionSwitchTimes = (
       }
       if (condition.timeWindow !== undefined) {
         for (const time of [condition.timeWindow.start, condition.timeWindow.end]) {
-          const instant = wallTimeUtc(date, time, timeZone);
-          if (instant > from && instant <= until) switches.add(new Date(instant).toISOString());
+          for (const instant of wallTimeInstantsInTimeZone(date, time, timeZone)) {
+            if (instant > from && instant <= until) switches.add(new Date(instant).toISOString());
+          }
+        }
+        // A DST fall-back replays an hour of wall-clock time, which can flip this
+        // window's active state at the transition itself (not just at its start/end
+        // wall time) if that boundary falls inside the replayed hour. Add the
+        // transition only when it actually flips this specific condition.
+        if (transition !== null && transition > from && transition <= until) {
+          const before = localTimeParts(transition - 1, timeZone);
+          const after = localTimeParts(transition, timeZone);
+          if (before !== null && after !== null && timeWindowMatches(condition, before) !== timeWindowMatches(condition, after)) {
+            switches.add(new Date(transition).toISOString());
+          }
         }
       }
     }
   }
   return [...switches].sort((left, right) => Date.parse(left) - Date.parse(right));
-};
-
-const timeWindowMatches = (conditions: TextBlockConditions, current: { weekday: number; minuteOfDay: number }): boolean => {
-  const weekdays = conditions.weekdays;
-  const window = conditions.timeWindow;
-  const todayAllowed = weekdays === undefined || weekdays.includes(current.weekday);
-  if (window === undefined) return todayAllowed;
-  const start = Number(window.start.slice(0, 2)) * 60 + Number(window.start.slice(3));
-  const end = Number(window.end.slice(0, 2)) * 60 + Number(window.end.slice(3));
-  if (start === end) return todayAllowed;
-  if (start < end) return todayAllowed && current.minuteOfDay >= start && current.minuteOfDay < end;
-  if (current.minuteOfDay >= start) return todayAllowed;
-  const previousWeekday = (current.weekday + 6) % 7;
-  return current.minuteOfDay < end && (weekdays === undefined || weekdays.includes(previousWeekday));
 };
 
 export const textBlockTimeConditionsMatch = (
