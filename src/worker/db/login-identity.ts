@@ -67,6 +67,39 @@ export const listLoginIdentities = async (
   return result.results.map(mapLoginIdentity);
 };
 
+/** Escapes `\`, `%`, and `_` so a raw search term is matched literally by `LIKE ... ESCAPE '\'`. */
+export const escapeLoginLikeTerm = (term: string): string => term.replace(/[\\%_]/gu, (character) => `\\${character}`);
+
+/**
+ * Whether any login that actually acted in this channel's audit log matches
+ * a `LIKE` pattern (built with `escapeLoginLikeTerm`) -- used to decide
+ * between a local partial-login match and falling back to a Twitch lookup
+ * (#250). Scoped to `channelId` so this can't be used as an existence oracle
+ * for logins of other channels, and so a match elsewhere doesn't skip the
+ * Twitch fallback for a login this channel's log never saw.
+ */
+export const hasLoginIdentityMatchingPattern = async (
+  db: D1Database,
+  likePattern: string,
+  channelId: string,
+): Promise<boolean> => {
+  // EXISTS against audit_log rather than an IN-list subquery -- the latter
+  // materializes every actor id the channel's audit log has ever seen on
+  // each search keystroke and each cursor page; EXISTS lets the planner use
+  // audit_log_channel_actor_created_idx(channel_id, actor_user_id, created_at)
+  // as an indexed lookup per candidate login instead (review finding, #255).
+  const row = await db.prepare(
+    `SELECT 1 AS is_present FROM twitch_login_identity
+      WHERE login LIKE ? ESCAPE '\\'
+        AND EXISTS (
+          SELECT 1 FROM audit_log a
+           WHERE a.channel_id = ? AND a.actor_user_id = twitch_login_identity.user_id
+        )
+      LIMIT 1`,
+  ).bind(likePattern, channelId).first<{ is_present: number }>();
+  return row !== null;
+};
+
 export const getLoginIdentity = async (
   db: D1Database,
   userId: string,
