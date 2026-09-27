@@ -384,6 +384,7 @@ const expectedModuleSettings = {
   text_commands: {},
   text_library: {},
   sun: {},
+  moon: {},
   ads: {
     automatic: "Automatische Werbepause: {ads.duration} Sekunden. Bin gleich zurück!",
     manual: "Werbepause: {ads.duration} Sekunden. Bin gleich zurück!",
@@ -767,6 +768,7 @@ describe("serialized contract shapes", () => {
         "ads",
         "channel_events",
         "clips",
+        "moon",
         "raid",
         "sun",
         "text_commands",

@@ -504,7 +504,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                             <TextArea label={`${labels.text}${variant.texts.length > 1 ? ` ${String(textIndex + 1)}` : ""}`} hint={labels.textHint} value={text} onChange={(value) => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.map((current, currentIndex) => currentIndex === textIndex ? value : current) })) })} maxLength={TEXT_BLOCK_MAXIMUMS.textLength} disabled={pending} variables={[
                               ...data.templateVariables.filter((variable) => !data.blocks.some((block) => block.name === variable.name)).flatMap((variable) => variable.group === undefined ? [] : [{
                                 name: variable.name,
-                                description: variable.name,
+                                description: variable.localizedDescription?.[language === "en" ? "en" : "de"] ?? variable.name,
                                 sample: variable.sample,
                                 group: variable.group,
                                 kind: variable.moduleId === "host" ? variable.source === "channel" ? "channel" as const : "system" as const : "module" as const,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  calculateSunAltitudeIntervals,
   calculateSunDay,
   localDateInTimeZone,
   resolveSunTemplateValues,
@@ -135,7 +136,7 @@ describe("on-demand sun template values", () => {
     }, "Europe/Berlin");
 
     expect(localDateInTimeZone(Date.parse("2026-06-21T20:00:00.000Z"), "Pacific/Auckland")).toBe("2026-06-22");
-    expect(values.dataConditions["sun.phase"]).toBe("day");
+    expect(values.dataConditions["sun.phase"]).toBe("golden_hour");
     expect(values.values["sun.rise"]).not.toBe(errorText);
     expect(values.values["sun.set"]).not.toBe(errorText);
   });
@@ -155,7 +156,7 @@ describe("on-demand sun template values", () => {
       longitude: 18.9553,
       timeZone: "Europe/Oslo",
     }, "Europe/Berlin");
-    expect(polarNight.dataConditions["sun.phase"]).toBe("night");
+    expect(polarNight.dataConditions["sun.phase"]).toBe("blue_hour");
     expect(polarNight.values["sun.rise"]).toBe(errorText);
     expect(polarNight.values["sun.set"]).toBe(errorText);
     expect(polarNight.values["sun.dusk"]).not.toBe(errorText);
@@ -182,10 +183,10 @@ describe("on-demand sun template values", () => {
 
     expect(atSunrise.values["sun.rise"]).toBe(formatChannelTime(tomorrow.sunriseAt ?? "", "Europe/Berlin"));
     expect(atSunrise.values["sun.rise_in"]).not.toBe("0 min");
-    expect(atSunrise.dataConditions["sun.phase"]).toBe("day");
+    expect(atSunrise.dataConditions["sun.phase"]).toBe("golden_hour");
     expect(atSunset.values["sun.set"]).toBe(formatChannelTime(tomorrow.sunsetAt ?? "", "Europe/Berlin"));
     expect(atSunset.values["sun.set_in"]).not.toBe("0 min");
-    expect(atSunset.dataConditions["sun.phase"]).toBe("night");
+    expect(atSunset.dataConditions["sun.phase"]).toBe("golden_hour");
   });
 
   it("exposes the next fixed sun event as an overlay refresh target", async () => {
@@ -216,6 +217,30 @@ describe("on-demand sun template values", () => {
       "sun.set": { available: true, targetAt: day.sunsetAt },
       "sun.dusk": { available: true, targetAt: day.duskAt },
     });
+  });
+
+  it("refreshes golden- and blue-hour countdowns at both interval boundaries", async () => {
+    const location = { latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" };
+    const now = Date.parse("2026-06-21T00:00:00.000Z");
+    const values = await sunModule.resolveOverlayTemplateValues?.(["sun.golden_hour_in", "sun.blue_hour_in"], {
+      DB: {} as D1Database,
+      channelId: "sun-channel",
+      now,
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve({ name: "Berlin", ...location }),
+      language: "en",
+    });
+    const goldenIntervals = calculateSunAltitudeIntervals(location, "2026-06-20", 2, "golden");
+    const blueIntervals = calculateSunAltitudeIntervals(location, "2026-06-20", 2, "blue");
+    const nextGolden = goldenIntervals.find(({ startAt }) => Date.parse(startAt) > now);
+    const nextBlue = blueIntervals.find(({ startAt }) => Date.parse(startAt) > now);
+
+    expect(values?.["sun.golden_hour_in"]?.targetAts).toContain(nextGolden?.startAt);
+    expect(values?.["sun.golden_hour_in"]?.targetAts).toContain(nextGolden?.endAt);
+    expect(values?.["sun.blue_hour_in"]?.targetAts).toContain(nextBlue?.startAt);
+    expect(values?.["sun.blue_hour_in"]?.targetAts).toContain(nextBlue?.endAt);
+    expect(values?.["sun.golden_hour_in"]?.targetAts?.length).toBeGreaterThan(2);
+    expect(values?.["sun.blue_hour_in"]?.targetAts?.length).toBeGreaterThan(2);
   });
 
   it("propagates a transient location lookup failure instead of masking it as unavailable", async () => {
@@ -251,7 +276,7 @@ describe("on-demand sun template values", () => {
       errorText: fallback,
     });
 
-    expect(variables).toHaveLength(5);
+    expect(variables).toHaveLength(14);
     expect(variables.every((variable) => variable.maxLength >= fallback.length)).toBe(true);
     expect(Object.values(values.values).every((value) => value.length <= SUN_ERROR_TEXT_MAX_LENGTH)).toBe(true);
     expect(values.dataConditions["sun.phase"]).toBeUndefined();
