@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { ModulePanelProperties } from "../../contract";
 import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
@@ -207,9 +207,13 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     const timer = window.setTimeout(() => setDebouncedPreviewTemplate(previewTemplate), 300);
     return () => window.clearTimeout(timer);
   }, [previewTemplate]);
+  // requestId identifies the in-flight request so a late response from a superseded
+  // request (older template or simulation inputs) is ignored instead of overwriting
+  // the preview for whatever is current now.
+  const previewRequestId = useRef(0);
   useEffect(() => {
-    let active = true;
-    if (data === null || debouncedPreviewTemplate.length === 0) return () => { active = false; };
+    if (data === null || debouncedPreviewTemplate.length === 0) return;
+    const requestId = ++previewRequestId.current;
     const chatStatus: ("viewer" | "subscriber" | "vip" | "moderator" | "broadcaster")[] | null = simulatedContext === "command"
       ? [simulatedTier === "everyone" ? "viewer" : simulatedTier as "subscriber" | "vip" | "moderator" | "broadcaster"]
       : null;
@@ -220,9 +224,12 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
       game: simulatedGame[0] ?? null,
       chatStatus,
     }).then((result) => {
-      if (active) setPreviewResult(result.text);
-    }).catch(() => undefined);
-    return () => { active = false; };
+      if (previewRequestId.current === requestId) setPreviewResult(result.text);
+    }).catch(() => {
+      // Only the latest request clears a stale result; a superseded request failing
+      // must not blank out a still-current, already-rendered preview.
+      if (previewRequestId.current === requestId) setPreviewResult(null);
+    });
   }, [channelId, data, debouncedPreviewTemplate, previewNow, simulatedContext, simulatedGame, simulatedStream, simulatedTier]);
   const previewText = previewTemplate.length === 0 ? "" : previewResult ?? previewTemplate;
   const previewOverflow = matchingVariant === null ? null : estimateEmbeddedBlockOverflow(matchingVariant.texts, blockVariants, data?.templateVariables ?? []);

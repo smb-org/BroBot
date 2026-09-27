@@ -40,27 +40,31 @@ export const ChannelLocationField = ({
   const [busy, setBusy] = useState(false);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
+  const [dialogError, setDialogError] = useState("");
   const [notice, setNotice] = useState("");
 
   const search = async (): Promise<void> => {
     const normalizedQuery = query.trim();
     if (!canEdit || normalizedQuery.length < 2) return;
     setSearching(true);
-    setError("");
+    setDialogError("");
     try {
       setResults(await searchChannelLocations(channelId, normalizedQuery, language));
     } catch {
-      setError(labels.locationSearchFailed);
+      setDialogError(labels.locationSearchFailed);
     } finally {
       setSearching(false);
     }
   };
 
+  // location === null only happens via the remove ConfirmDialog (outside the main dialog),
+  // selecting a search result only happens while the main dialog is open — branch on that
+  // to route the error message to the right surface.
   const save = async (location: PanelChannelLocation | null): Promise<void> => {
     if (!canEdit || busy) return;
     setBusy(true);
-    setError("");
     setNotice("");
+    if (location === null) setError(""); else setDialogError("");
     try {
       const saved = await saveChannelLocation(channelId, revision, location);
       onSaved(saved.location, saved.locationRevision);
@@ -70,7 +74,8 @@ export const ChannelLocationField = ({
       setQuery("");
       setResults([]);
     } catch {
-      setError(labels.locationSaveFailed);
+      if (location === null) setError(labels.locationSaveFailed);
+      else setDialogError(labels.locationSaveFailed);
       setRemoveConfirmation(false);
     } finally {
       setBusy(false);
@@ -113,7 +118,7 @@ export const ChannelLocationField = ({
           variant="primary"
           disabled={actionsDisabled}
           {...(locked === null ? {} : { describedBy: "channel-location-read-only" })}
-          onClick={() => { setOpened(true); setError(""); setResults([]); setNotice(""); }}
+          onClick={() => { setOpened(true); setError(""); setDialogError(""); setResults([]); setNotice(""); }}
         >{labels.locationChange}</Button>
         <Button
           variant="secondary"
@@ -160,8 +165,9 @@ export const ChannelLocationField = ({
               {searching ? labels.locationSearching : labels.locationSearchButton}
             </Button>
           </div>
+          {dialogError.length === 0 ? null : <p className="form-error" role="alert">{dialogError}</p>}
           {searching ? <p className="muted" role="status">{labels.locationSearching}</p> : null}
-          {results.length === 0 && !searching && query.trim().length >= 2 ? <p className="muted">{labels.locationNoResults}</p> : null}
+          {results.length === 0 && !searching && dialogError.length === 0 && query.trim().length >= 2 ? <p className="muted">{labels.locationNoResults}</p> : null}
           <div className="channel-location-field__results" role="listbox" aria-label={labels.locationResults}>
             {results.map((result) => {
               const selected = value !== null && value.latitude === result.latitude && value.longitude === result.longitude;

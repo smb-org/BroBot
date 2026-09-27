@@ -1094,4 +1094,108 @@ describe("text library", () => {
     });
     expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered Final");
   });
+
+  it("ignores a late preview response from a superseded request", async () => {
+    const timestamp = new Date(NOW).toISOString();
+    const library = {
+      blocks: [{
+        channelId: CHANNEL_ID,
+        name: "preview_line",
+        categoryId: "social",
+        games: [],
+        variants: [variant("default", "First")],
+        revision: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }],
+      categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+      settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
+      usages: { preview_line: [] },
+      reservedNames: [],
+    };
+    let resolveSecondPreview: ((response: Response) => void) | null = null;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ timeZone: DEFAULT_CHANNEL_TIME_ZONE, revision: 1 }));
+      if (url.pathname.endsWith("/template-preview")) {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as { text?: unknown } : {};
+        if (body.text === "Second") return new Promise<Response>((resolve) => { resolveSecondPreview = resolve; });
+        return Promise.resolve(jsonResponse({ text: `Rendered ${typeof body.text === "string" ? body.text : ""}`, diagnostics: [] }));
+      }
+      return Promise.resolve(jsonResponse(library));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
+    await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
+
+    vi.useFakeTimers();
+    const textField = screen.getByRole("textbox", { name: "Text" });
+    fireEvent.change(textField, { target: { value: "Second" } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    // "Second" is now in flight and stays pending on purpose.
+
+    fireEvent.change(textField, { target: { value: "Final" } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered Final");
+
+    await act(async () => {
+      resolveSecondPreview?.(jsonResponse({ text: "Rendered Second", diagnostics: [] }));
+      await Promise.resolve();
+    });
+    // The superseded "Second" response must not clobber the current "Final" preview.
+    expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered Final");
+  });
+
+  it("falls back to the raw template when the latest preview request fails, without leaving stale text", async () => {
+    const timestamp = new Date(NOW).toISOString();
+    const library = {
+      blocks: [{
+        channelId: CHANNEL_ID,
+        name: "preview_line",
+        categoryId: "social",
+        games: [],
+        variants: [variant("default", "First")],
+        revision: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }],
+      categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+      settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
+      usages: { preview_line: [] },
+      reservedNames: [],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ timeZone: DEFAULT_CHANNEL_TIME_ZONE, revision: 1 }));
+      if (url.pathname.endsWith("/template-preview")) {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as { text?: unknown } : {};
+        if (body.text === "Broken") return Promise.resolve(jsonResponse({ error: "boom" }, 500));
+        return Promise.resolve(jsonResponse({ text: `Rendered ${typeof body.text === "string" ? body.text : ""}`, diagnostics: [] }));
+      }
+      return Promise.resolve(jsonResponse(library));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
+    await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
+
+    vi.useFakeTimers();
+    const textField = screen.getByRole("textbox", { name: "Text" });
+    fireEvent.change(textField, { target: { value: "Broken" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+      await Promise.resolve();
+    });
+
+    // No stale "Rendered First" left over; falls back to the raw (unrendered) template.
+    expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Broken");
+    expect(document.querySelector(".ui-chat-preview__text")).not.toHaveTextContent("Rendered First");
+  });
 });
