@@ -28,6 +28,8 @@ import { listChannelVariables } from "../db/channel-variables";
 import { findChannelVariable } from "../db/channel-variables";
 import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from "../server-timing";
 import { publishOverlayChanged } from "../realtime";
+import { publishRealtimeMessages } from "../realtime";
+import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
 import { readChannelVariables } from "../db/channel-variables";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
@@ -41,6 +43,7 @@ interface ModuleRouteEnvironment {
     | "listChannelVariables" | "findChannelVariable"
     | "listTextBlockConditions"
     | "resolveTextBlockConditions"
+    | "publishModuleOverlayMessage"
     | "templateUsageSources" | "listRegisteredTemplateVariables"
   >;
 }
@@ -154,6 +157,28 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     }
     return resolved;
   });
+  context.set("publishModuleOverlayMessage", async (channelId, moduleId, type, elementKind, payload, recipientConfig) => {
+    try {
+      const module = MODULES.find((candidate) => candidate.id === moduleId);
+      if (module === undefined) return;
+      const prepared = await prepareModuleOverlayRealtimeMessage(
+        context.env.DB,
+        channelId,
+        moduleId,
+        {
+          kind: "overlay",
+          type,
+          elementKind,
+          payload,
+          ...(recipientConfig === undefined ? {} : { recipientConfig }),
+        },
+        module.mandatory === true,
+      );
+      if (prepared.outcome === "ready") await publishRealtimeMessages(context.env.CHANNEL, [prepared.message]);
+    } catch (error: unknown) {
+      console.warn("Module overlay update could not be sent.", error);
+    }
+  });
   context.set("templateUsageSources", async (channelId) => {
     const moduleSources = await Promise.all(MODULES.map((module) =>
       module.templateUsageSources?.(context.env.DB, channelId) ?? Promise.resolve([]),
@@ -258,6 +283,9 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
       ...(module.textBlockConditions === undefined ? {} : { textBlockConditions: module.textBlockConditions }),
       ...(module.templateUnavailableText === undefined ? {} : { templateUnavailableText: module.templateUnavailableText }),
       ...(module.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: module.resolveTemplateConditions }),
+      ...(module.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: module.dynamicTemplateVariableNames }),
+      ...(module.resolveOverlayTemplateValues === undefined ? {} : { resolveOverlayTemplateValues: module.resolveOverlayTemplateValues }),
+      ...(module.resolveTemplateConditionTransitions === undefined ? {} : { resolveTemplateConditionTransitions: module.resolveTemplateConditionTransitions }),
       resolveTemplateValues,
     }];
   });

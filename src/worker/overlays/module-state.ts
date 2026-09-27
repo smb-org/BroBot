@@ -1,5 +1,5 @@
 import { moduleOverlayElementForKind, MODULES } from "../../modules/registry";
-import type { BotModule, JsonObject } from "../../modules/contract";
+import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../../modules/contract";
 
 interface ModuleOverlayStateInput {
   id: string;
@@ -17,6 +17,7 @@ export const hydrateModuleOverlayElements = async <Element extends ModuleOverlay
   channelId: string,
   elements: readonly Element[],
   modules: readonly BotModule[] = MODULES,
+  context?: ModuleOverlayElementContext,
 ): Promise<(Element & { moduleEnabled?: boolean; state?: JsonObject | null })[]> => {
   const moduleElements = elements.flatMap((element) => {
     const declaration = moduleOverlayElementForKind(element.kind, modules);
@@ -40,7 +41,7 @@ export const hydrateModuleOverlayElements = async <Element extends ModuleOverlay
       const config = item.definition.parseConfig(item.element.config);
       if (config !== null) {
         try {
-          state = await item.definition.initialState(db, channelId, config);
+          state = await item.definition.initialState(db, channelId, config, context);
         } catch (error: unknown) {
           console.warn(`Module overlay initial state failed for ${item.definition.kind}.`, error);
         }

@@ -1,6 +1,7 @@
 import type { ModuleTemplateValueContext } from "../../contract";
 import type { TextBlock, TextBlockVariant, TwitchGame } from "../contracts";
 import { blockReferencesInText, firstMatchingTextBlockVariant, textBlockAppliesToGame, type TextBlockState } from "../domain";
+import { renderOverlayTextPreservingDynamicValues } from "../overlay/render";
 
 interface BlockRow {
   block_name: string;
@@ -154,6 +155,15 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
   };
 
   const resolveHostFragment = async (fragment: string): Promise<string> => {
+    if (context.mode === "overlay" && context.dynamicTemplateVariableNames !== undefined) {
+      const rendered = await renderOverlayTextPreservingDynamicValues(
+        fragment,
+        context.dynamicTemplateVariableNames,
+        context.renderTemplate,
+      );
+      rendered.diagnostics.forEach(context.addDiagnostic);
+      return rendered.text;
+    }
     const rendered = await context.renderTemplate(fragment, context.mode);
     rendered.diagnostics.forEach(context.addDiagnostic);
     return rendered.text;

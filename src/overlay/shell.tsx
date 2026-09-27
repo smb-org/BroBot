@@ -5,6 +5,7 @@ import { sanitizeOverlayCss } from "../contracts/overlay-css";
 import { connectOverlayRealtime } from "./realtime";
 import { OverlayCanvas } from "./canvas";
 import type { OverlayBootstrapData, OverlayElementData, OverlayLanguage } from "./model";
+import { moduleOverlayMessageRequiresStateReload } from "../modules/overlay-element-registry";
 
 const LazyLegacyOverlayEntry = lazy(async () => {
   const module = await import("./legacy");
@@ -331,6 +332,11 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
           if (message.payload.overlayId === current.overlay?.id) scheduleReload();
         },
         onModuleMessage: (message) => {
+          if (moduleOverlayMessageRequiresStateReload(message.type)) {
+            if (bootstrapRef.current === null) lifecycle.reloadPending = true;
+            else scheduleReload();
+            return;
+          }
           const current = bootstrapRef.current;
           if (loadInFlight || current === null) pendingModuleMessages.push(message);
           if (current === null) return;

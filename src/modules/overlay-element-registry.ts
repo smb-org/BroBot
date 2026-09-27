@@ -1,5 +1,6 @@
 import type { ModuleOverlayElementDefinition } from "./contract";
 import { adsOverlayElements } from "./ads/overlay/element";
+import { textBlockOverlayElement } from "./text_library/overlay/element";
 
 export interface RegisteredOverlayElement {
   moduleId: string;
@@ -7,5 +8,12 @@ export interface RegisteredOverlayElement {
 }
 
 export const MODULE_OVERLAY_ELEMENTS: readonly RegisteredOverlayElement[] = [
+  { moduleId: "text_library", definition: textBlockOverlayElement },
   ...adsOverlayElements.map((definition) => ({ moduleId: "ads", definition })),
 ];
+
+export const moduleOverlayMessageRequiresStateReload = (messageType: string): boolean =>
+  MODULE_OVERLAY_ELEMENTS.some(({ moduleId, definition }) =>
+    definition.reloadStateOnModuleMessages?.includes(messageType) === true ||
+    (definition.reloadStateOnHostEvents !== undefined && messageType === `modul.${moduleId}.state_changed`),
+  );

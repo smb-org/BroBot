@@ -1,10 +1,16 @@
 import { ADS_COUNTDOWN_ELEMENT_KIND } from "./kinds";
+import { adsCountdownLabels } from "./countdown-locale";
+
+const editorLabels = { de: adsCountdownLabels("de"), en: adsCountdownLabels("en") };
 
 export const adsCountdownElement = {
   kind: ADS_COUNTDOWN_ELEMENT_KIND,
   configVersion: 2,
   defaultSize: { width: 300, height: 96 },
   defaultConfig: { showSnoozeInfo: false },
+  editorLabel: { de: editorLabels.de.editorLabel, en: editorLabels.en.editorLabel },
+  editorAddLabel: { de: editorLabels.de.editorAddLabel, en: editorLabels.en.editorAddLabel },
+  editorModuleLabel: { de: editorLabels.de.editorModuleLabel, en: editorLabels.en.editorModuleLabel },
   parseConfig: (raw: unknown) => {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
     const config = raw as Record<string, unknown>;

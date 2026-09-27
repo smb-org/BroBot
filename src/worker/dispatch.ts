@@ -656,6 +656,9 @@ export const dispatchEventSubNotification = async (
       ...(provider.textBlockConditions === undefined ? {} : { textBlockConditions: provider.textBlockConditions }),
       ...(provider.templateUnavailableText === undefined ? {} : { templateUnavailableText: provider.templateUnavailableText }),
       ...(provider.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: provider.resolveTemplateConditions }),
+      ...(provider.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: provider.dynamicTemplateVariableNames }),
+      ...(provider.resolveOverlayTemplateValues === undefined ? {} : { resolveOverlayTemplateValues: provider.resolveOverlayTemplateValues }),
+      ...(provider.resolveTemplateConditionTransitions === undefined ? {} : { resolveTemplateConditionTransitions: provider.resolveTemplateConditionTransitions }),
       resolveTemplateValues,
     }];
   });

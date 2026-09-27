@@ -81,6 +81,75 @@ export const localTimeParts = (now: number, timeZone: string): { weekday: number
   }
 };
 
+const localDate = (instant: number, timeZone: string): string => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(instant).map((part) => [part.type, part.value]));
+  return `${String(parts.year)}-${String(parts.month)}-${String(parts.day)}`;
+};
+
+const shiftDate = (date: string, amount: number): string => {
+  const [year, month, day] = date.split("-").map(Number);
+  const shifted = new Date(Date.UTC((year ?? 1970), (month ?? 1) - 1, (day ?? 1) + amount));
+  return `${String(shifted.getUTCFullYear())}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
+};
+
+const wallTimeUtc = (date: string, time: string, timeZone: string): number => {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const target = Date.UTC(year ?? 1970, (month ?? 1) - 1, day ?? 1, hour ?? 0, minute ?? 0);
+  let candidate = target;
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  for (let index = 0; index < 4; index += 1) {
+    const parts = Object.fromEntries(formatter.formatToParts(candidate).map((part) => [part.type, part.value]));
+    const seen = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
+    const updated = target - (seen - candidate);
+    if (updated === candidate) break;
+    candidate = updated;
+  }
+  return candidate;
+};
+
+/** Local clock boundaries delivered with overlay candidates for browser-side time switching. */
+export const textBlockConditionSwitchTimes = (
+  conditions: readonly Pick<TextBlockConditions, "weekdays" | "timeWindow">[],
+  timeZone: string,
+  from: number,
+  until: number,
+): readonly string[] => {
+  if (!conditions.some((condition) => condition.weekdays !== undefined || condition.timeWindow !== undefined)) return [];
+  const switches = new Set<string>();
+  const first = shiftDate(localDate(from, timeZone), -1);
+  const last = shiftDate(localDate(until, timeZone), 1);
+  for (let date = first, guard = 0; date <= last && guard < 12; date = shiftDate(date, 1), guard += 1) {
+    for (const condition of conditions) {
+      if (condition.weekdays !== undefined) {
+        const midnight = new Date(wallTimeUtc(date, "00:00", timeZone));
+        if (midnight.getTime() > from && midnight.getTime() <= until) switches.add(midnight.toISOString());
+      }
+      if (condition.timeWindow !== undefined) {
+        for (const time of [condition.timeWindow.start, condition.timeWindow.end]) {
+          const instant = wallTimeUtc(date, time, timeZone);
+          if (instant > from && instant <= until) switches.add(new Date(instant).toISOString());
+        }
+      }
+    }
+  }
+  return [...switches].sort((left, right) => Date.parse(left) - Date.parse(right));
+};
+
 const timeWindowMatches = (conditions: TextBlockConditions, current: { weekday: number; minuteOfDay: number }): boolean => {
   const weekdays = conditions.weekdays;
   const window = conditions.timeWindow;
@@ -93,6 +162,16 @@ const timeWindowMatches = (conditions: TextBlockConditions, current: { weekday: 
   if (current.minuteOfDay >= start) return todayAllowed;
   const previousWeekday = (current.weekday + 6) % 7;
   return current.minuteOfDay < end && (weekdays === undefined || weekdays.includes(previousWeekday));
+};
+
+export const textBlockTimeConditionsMatch = (
+  conditions: Pick<TextBlockConditions, "weekdays" | "timeWindow" | "data">,
+  state: { now: number; timeZone: string; dataConditions: Readonly<Record<string, string>> },
+): boolean => {
+  if (conditions.data !== undefined && Object.entries(conditions.data).some(([id, value]) => state.dataConditions[id] !== value)) return false;
+  if (conditions.weekdays === undefined && conditions.timeWindow === undefined) return true;
+  const local = localTimeParts(state.now, state.timeZone);
+  return local !== null && timeWindowMatches(conditions, local);
 };
 
 export const textBlockConditionsMatch = (conditions: TextBlockConditions, state: TextBlockState): boolean => {

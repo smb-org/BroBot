@@ -1,5 +1,8 @@
 export const adsCountdownLabels = (language: "de" | "en") => language === "de"
   ? {
+    editorLabel: "Werbe-Countdown",
+    editorAddLabel: "Werbe-Countdown hinzufügen",
+    editorModuleLabel: "Werbung",
     adIn: "Werbung in",
     adRunning: "Werbung läuft",
     snoozesLeft: (count: number) => `${String(count)}× verschiebbar`,
@@ -9,6 +12,9 @@ export const adsCountdownLabels = (language: "de" | "en") => language === "de"
     showSnoozeInfo: "Snooze-Info anzeigen",
   }
   : {
+    editorLabel: "Ad countdown",
+    editorAddLabel: "Add ad countdown",
+    editorModuleLabel: "Ads",
     adIn: "Ad in",
     adRunning: "Ad running",
     snoozesLeft: (count: number) => `${String(count)} snoozes left`,

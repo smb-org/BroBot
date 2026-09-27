@@ -1,0 +1,175 @@
+import type { JsonObject, ModuleOverlayElementContext } from "../../contract";
+import type { TextBlock, TextBlockConditions, TwitchGame } from "../contracts";
+import { TEXT_BLOCK_NAME_PATTERN } from "../contracts";
+import { textBlockConditionSwitchTimes } from "../domain";
+import { renderOverlayTextPreservingDynamicValues } from "./render";
+
+interface BlockRow {
+  block_name: string;
+  games_json: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface VariantRow {
+  variant_id: string;
+  position: number;
+  conditions_json: string;
+  texts_json: string;
+}
+
+const parseJson = <T,>(value: string, fallback: T): T => {
+  try { return JSON.parse(value) as T; } catch { return fallback; }
+};
+
+const loadBlock = async (db: D1Database, channelId: string, name: string): Promise<TextBlock | null> => {
+  const row = await db.prepare(
+    `SELECT block_name, games_json, revision, created_at, updated_at
+       FROM text_blocks WHERE channel_id = ? AND block_name = ?`,
+  ).bind(channelId, name).first<BlockRow>();
+  if (row === null) return null;
+  const variants = await db.prepare(
+    `SELECT variant_id, position, conditions_json, texts_json
+       FROM text_block_variants WHERE channel_id = ? AND block_name = ? ORDER BY position`,
+  ).bind(channelId, name).all<VariantRow>();
+  return {
+    channelId,
+    name: row.block_name,
+    categoryId: "",
+    games: parseJson<TwitchGame[]>(row.games_json, []),
+    variants: variants.results.map((variant) => ({
+      id: variant.variant_id,
+      conditions: parseJson<TextBlockConditions>(variant.conditions_json, {}),
+      texts: parseJson<string[]>(variant.texts_json, []),
+    })),
+    revision: row.revision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};
+
+const dataConditionIdsFor = (block: TextBlock): string[] => [...new Set(block.variants.flatMap((variant) =>
+  Object.keys(variant.conditions.data ?? {})))];
+
+const serverConditionsMatch = (
+  conditions: TextBlockConditions,
+  stream: "online" | "offline" | "unknown",
+  gameId: string | null,
+  dataConditions: Readonly<Record<string, string>>,
+  timeDependentConditionIds: ReadonlySet<string>,
+): boolean => {
+  if (conditions.minimumTier !== undefined) return false;
+  if (conditions.stream !== undefined && conditions.stream !== stream) return false;
+  if (conditions.game !== undefined) {
+    if (gameId === null) return false;
+    const same = gameId === conditions.game.game.id;
+    if (conditions.game.mode === "is" ? !same : same) return false;
+  }
+  for (const [id, value] of Object.entries(conditions.data ?? {})) {
+    if (!timeDependentConditionIds.has(id) && dataConditions[id] !== value) return false;
+  }
+  return true;
+};
+
+const timeConditionsFor = (
+  conditions: TextBlockConditions,
+  timeDependentConditionIds: ReadonlySet<string>,
+): TextBlockConditions => {
+  const data = Object.fromEntries(Object.entries(conditions.data ?? {}).filter(([id]) => timeDependentConditionIds.has(id)));
+  return {
+    ...(conditions.weekdays === undefined ? {} : { weekdays: conditions.weekdays }),
+    ...(conditions.timeWindow === undefined ? {} : { timeWindow: conditions.timeWindow }),
+    ...(Object.keys(data).length === 0 ? {} : { data }),
+  };
+};
+
+const dynamicNamesIn = (text: string, names: ReadonlySet<string>): string[] => [...new Set(
+  [...text.matchAll(/\{([a-z][a-z0-9_.]{0,63})\}/gu)]
+    .flatMap((match) => match[1] !== undefined && names.has(match[1]) ? [match[1]] : []),
+)];
+
+const candidateText = async (
+  source: string,
+  context: ModuleOverlayElementContext,
+): Promise<{ text: string; countdownTargets: Readonly<Record<string, readonly string[]>> } | null> => {
+  const templateNames = dynamicNamesIn(source, context.overlayTemplateVariableNames);
+  const dynamicNames = dynamicNamesIn(source, context.dynamicTemplateVariableNames);
+  const values = await context.resolveOverlayTemplateValues(templateNames);
+  if (templateNames.some((name) => values[name]?.available !== true)) return null;
+  const rendered = await renderOverlayTextPreservingDynamicValues(source, context.dynamicTemplateVariableNames, context.renderTemplate);
+  if (rendered.text.trim().length === 0) return null;
+  const countdownTargets: Record<string, readonly string[]> = {};
+  for (const name of dynamicNames) {
+    const targetAts = values[name]?.targetAts ?? (values[name]?.targetAt === undefined ? [] : [values[name].targetAt]);
+    const validTargets = targetAts.filter((target) => Number.isFinite(Date.parse(target)));
+    if (validTargets.length > 0) countdownTargets[name] = validTargets;
+  }
+  return { text: rendered.text, countdownTargets };
+};
+
+export const textBlockOverlayState = async (
+  db: D1Database,
+  channelId: string,
+  rawConfig: JsonObject,
+  context?: ModuleOverlayElementContext,
+): Promise<JsonObject | null> => {
+  const name = rawConfig.blockName;
+  if (typeof name !== "string" || !TEXT_BLOCK_NAME_PATTERN.test(name) || context === undefined) return null;
+  const block = await loadBlock(db, channelId, name);
+  if (block === null || block.variants.length === 0) return null;
+
+  const needsStream = block.variants.some((variant) => variant.conditions.stream !== undefined);
+  const needsGame = block.games.length > 0 || block.variants.some((variant) => variant.conditions.game !== undefined);
+  const [streamState, gameId, timeZone] = await Promise.all([
+    needsStream ? context.streamState() : Promise.resolve("unknown" as const),
+    needsGame ? context.channelGameId() : Promise.resolve(null),
+    context.channelTimeZone(),
+  ]);
+  if (block.games.length > 0 && (gameId === null || !block.games.some((game) => game.id === gameId))) return null;
+
+  const conditionIds = dataConditionIdsFor(block);
+  const currentDataConditions = await context.resolveTemplateConditions(conditionIds);
+  const temporalCandidates: { position: number; conditions: TextBlockConditions; text: string }[] = [];
+  let fallbackCandidate: { position: number; conditions: TextBlockConditions; text: string } | null = null;
+  const countdownTargets: Record<string, string> = {};
+  for (const [position, variant] of block.variants.entries()) {
+    if (!serverConditionsMatch(variant.conditions, streamState, gameId, currentDataConditions, context.timeDependentTemplateConditionIds)) continue;
+    const rawText = variant.texts[0];
+    if (rawText === undefined) continue;
+    const rendered = await candidateText(rawText, context);
+    if (rendered === null) continue;
+    Object.assign(countdownTargets, rendered.countdownTargets);
+    const timeConditions = timeConditionsFor(variant.conditions, context.timeDependentTemplateConditionIds);
+    const candidate = { position, conditions: timeConditions, text: rendered.text };
+    if (Object.keys(timeConditions).length === 0) {
+      fallbackCandidate ??= candidate;
+    } else {
+      temporalCandidates.push(candidate);
+    }
+  }
+  const candidates = [
+    ...temporalCandidates.filter(({ position }) => fallbackCandidate === null || position < fallbackCandidate.position),
+    ...(fallbackCandidate === null ? [] : [fallbackCandidate]),
+  ].sort((left, right) => left.position - right.position).map(({ conditions, text }) => ({ conditions, text }));
+  if (candidates.length === 0) return null;
+  const until = context.now + 7 * 24 * 60 * 60 * 1_000;
+  const timeConditionIds = [...new Set(candidates.flatMap(({ conditions }) =>
+    Object.keys(conditions.data ?? {}).filter((id) => context.timeDependentTemplateConditionIds.has(id)),
+  ))];
+  const transitions = await context.resolveTemplateConditionTransitions(timeConditionIds, context.now, until);
+  const switchTimes = [...new Set([
+    ...textBlockConditionSwitchTimes(candidates.map(({ conditions }) => conditions), timeZone, context.now, until),
+    ...transitions.map(({ at }) => at).filter((at) => Date.parse(at) > context.now && Date.parse(at) <= until),
+  ])].sort((left, right) => Date.parse(left) - Date.parse(right));
+
+  return {
+    serverNow: new Date(context.now).toISOString(),
+    timeZone,
+    dataConditions: Object.fromEntries(timeConditionIds.flatMap((id) => currentDataConditions[id] === undefined ? [] : [[id, currentDataConditions[id]]])),
+    transitions: transitions.map((transition) => ({ at: transition.at, values: transition.values })),
+    switchTimes,
+    countdownTargets,
+    candidates,
+  } as unknown as JsonObject;
+};

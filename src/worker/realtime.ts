@@ -6,6 +6,7 @@ import type {
   RealtimeOverlayPrincipal,
   RealtimePrincipal,
 } from "../realtime-contract";
+import { prepareModuleOverlayHostEventMessages } from "./module-overlay-realtime";
 import { OVERLAY_TOKEN_SUBPROTOCOL_PREFIX } from "../realtime-contract";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "./auth/guards";
 import { authenticateOverlayToken } from "./auth/overlay-token-service";
@@ -230,14 +231,16 @@ export const publishStreamStateChanged = async (
 ): Promise<void> => {
   try {
     const controls = await readChannelControls(database, channelId, checkedAt);
-    await publishRealtimeMessages(namespace, [{
+    const messages: RealtimeMessage[] = [{
       version: 1,
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       channelId,
       type: "stream.state.changed",
       payload: { state, startedAt, changedAt, checkedAt, controls },
-    }]);
+    }];
+    messages.push(...await prepareModuleOverlayHostEventMessages(database, channelId, "stream.state.changed"));
+    await publishRealtimeMessages(namespace, messages);
   } catch (error: unknown) {
     console.warn("Realtime stream state hint could not be sent.", error);
   }

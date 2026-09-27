@@ -7,7 +7,7 @@ import {
 } from "../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 import { templateLanguageText } from "../modules/template-language";
-import type { ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
+import type { BotModule, ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
 import { formatCount } from "../text";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN } from "../contracts/template-names";
@@ -25,6 +25,9 @@ export interface TemplateValueProvider {
     ids: readonly string[],
     context: ModuleTemplateConditionContext,
   ) => Promise<Readonly<Record<string, string>>>;
+  dynamicTemplateVariableNames?: readonly string[];
+  resolveOverlayTemplateValues?: BotModule["resolveOverlayTemplateValues"];
+  resolveTemplateConditionTransitions?: BotModule["resolveTemplateConditionTransitions"];
   resolveTemplateValues: (
     names: readonly string[],
     context: ModuleTemplateValueContext,
@@ -268,7 +271,7 @@ export const createTemplateRenderer = (
     ...effective.filter((variable) => variableNames.has(variable.name)),
     ...inputFallbacks.filter((variable) => requested.has(variable.name) && !variableNames.has(variable.name)),
   ];
-  const randomIndex = sources.random ?? secureRandomInteger;
+  const randomIndex = mode === "overlay" ? () => 0 : sources.random ?? secureRandomInteger;
   const parameterValues: Record<string, (parameter: string) => string> = {
     random: (parameter) => {
       const range = parseTemplateRange(parameter || "1-100");
@@ -348,6 +351,8 @@ export const createTemplateRenderer = (
       }
       return resolved;
     },
+    dynamicTemplateVariableNames: new Set((sources.templateValueProviders ?? [])
+      .flatMap((provider) => provider.dynamicTemplateVariableNames ?? [])),
   };
   for (const provider of sources.templateValueProviders ?? []) {
     const declaredNames = new Set(provider.variables

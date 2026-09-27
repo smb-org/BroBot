@@ -478,3 +478,34 @@ Eine Änderung an Zeitplan oder Snooze-Stand sendet `modul.ads.countdown` nur an
 Overlays, deren deklariertes Element `ads.countdown` ist. Modul-Toggles senden
 für betroffene Overlays `overlay.changed`, damit offene Quellen ihren Bootstrap
 neu laden. Es gibt keine Nachricht pro Sekunde und keine D1-Schreibung pro Tick.
+
+## Addendum #242: Textbausteine in Overlays
+
+**Status: vorgeschlagen**
+
+**Stand:** 27. September 2026
+
+Textbaustein-Änderungen erreichen betroffene Overlays über den
+Modulnachrichtentyp `modul.text_library.blocks_updated`. Spiel- und
+Live-Änderungen verwenden `modul.text_library.state_changed`. Diese Nachrichten
+enthalten nur einen Grund und bei einer Bausteinänderung den Bausteinnamen,
+niemals Varianten oder deren Texte. Der Worker bestimmt die Empfänger beim
+Auslöser: Bei einer Bausteinänderung berücksichtigt er nur Elemente, deren
+gespeicherte `blockName`-Konfiguration passt; bei Spiel- oder Live-Änderungen
+alle Textbaustein-Elemente des Kanals. Das Durable Object verteilt ausschließlich
+an die bereits ermittelten Overlay-Kennungen.
+
+Das Overlay lädt danach den verbindlichen Elementzustand erneut über den
+Bootstrap-Endpunkt. Der Worker löst Spiel-, Live- und Rollenbedingungen vor
+dem Senden auf und liefert nur die dabei zulässigen Textkandidaten.
+Rollenbedingungen sind in Overlays falsch. Kandidaten für Zeitfenster,
+Wochentage und zeitabhängige Datenbedingungen enthalten ihre verbleibenden
+Bedingungen und die nötigen Wechselzeitpunkte; der Browser wählt daraus anhand
+der Serverzeit. Varianten, die durch Spiel, Live-Status oder Rolle
+ausgeschlossen sind, verlassen den Worker nicht.
+
+Countdownwerte wie `sun.set_in` und `sun.rise_in` werden aus Zielzeitpunkten
+und der beim Bootstrap gelieferten Serverzeit im Browser berechnet. Dafür
+werden keine periodischen Echtzeitnachrichten gesendet. Overlay- und
+Vorschaurendering wählen keine zufälligen Textalternativen aus und verändern
+keinen gespeicherten Auswahlstand.

@@ -8,6 +8,7 @@ import { validTextBlock } from "./domain";
 import { createTextBlockRepository } from "./adapters/d1";
 import type { TextBlockInput } from "./repository";
 import { createTextLibraryService } from "./service";
+import { TEXT_BLOCK_OVERLAY_ELEMENT_KIND } from "./overlay/element";
 import { MODULE_TEMPLATE_MINIMUM_TIERS, SYSTEM_TEMPLATE_VARIABLE_LIST, type ModuleRouteEnvironment, type ModuleTextBlockConditionDefinition } from "../contract";
 
 const TEXT_LIBRARY_MODULE_ID = "text_library";
@@ -120,7 +121,17 @@ textLibraryRoutes.post("/blocks", async (context) => {
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const snapshot = await service.list(channelId);
   const result = await service.create({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"), snapshot);
-  if (result.ok) return context.json({ block: result.block }, 201);
+  if (result.ok) {
+    await context.get("publishModuleOverlayMessage")(
+      channelId,
+      TEXT_LIBRARY_MODULE_ID,
+      "blocks_updated",
+      TEXT_BLOCK_OVERLAY_ELEMENT_KIND,
+      { blockName: result.block.name },
+      { field: "blockName", value: result.block.name },
+    );
+    return context.json({ block: result.block }, 201);
+  }
   if (result.reason === "already_exists") return context.json({ error: "text_library_block_exists" }, 409);
   if (result.reason === "category_not_found") return context.json({ error: "text_library_category_not_found" }, 400);
   if (result.reason === "reference_cycle" || result.reason === "reference_depth_exceeded") {
@@ -151,7 +162,17 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const snapshot = await service.list(channelId);
   const result = await service.change({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"), snapshot);
-  if (result.ok) return context.json({ block: result.block });
+  if (result.ok) {
+    await context.get("publishModuleOverlayMessage")(
+      channelId,
+      TEXT_LIBRARY_MODULE_ID,
+      "blocks_updated",
+      TEXT_BLOCK_OVERLAY_ELEMENT_KIND,
+      { blockName: result.block.name },
+      { field: "blockName", value: result.block.name },
+    );
+    return context.json({ block: result.block });
+  }
   return context.json({ error: `text_library_${result.reason}`, ...(result.current === undefined ? {} : { current: result.current }), ...(result.path === undefined ? {} : { path: result.path }) }, result.reason === "conflict" ? 409 : result.reason === "not_authorized" ? 403 : 400);
 });
 
@@ -163,7 +184,17 @@ textLibraryRoutes.delete("/blocks/:name", async (context) => {
   const channelId = param(context, "channelId");
   const snapshot = await service.list(channelId);
   const result = await service.delete(channelId, param(context, "name"), revision, snapshot.settings.graphRevision, context.get("actor"), nowIso());
-  if (result.ok) return context.json({ ok: true });
+  if (result.ok) {
+    await context.get("publishModuleOverlayMessage")(
+      channelId,
+      TEXT_LIBRARY_MODULE_ID,
+      "blocks_updated",
+      TEXT_BLOCK_OVERLAY_ELEMENT_KIND,
+      { blockName: param(context, "name") },
+      { field: "blockName", value: param(context, "name") },
+    );
+    return context.json({ ok: true });
+  }
   return context.json({ error: `text_library_${result.reason}`, ...(result.current === undefined ? {} : { current: result.current }) }, result.reason === "conflict" ? 409 : result.reason === "not_authorized" ? 403 : 404);
 });
 
