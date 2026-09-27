@@ -470,7 +470,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         <div className="text-library__weekdays" role="group" aria-label={labels.weekdays}>
                           {labels.weekdaysLabels.map((day, dayIndex) => {
                             const selected = variant.conditions.weekdays?.includes(dayIndex) ?? false;
-                            return <Button key={day} size="compact" variant={selected ? "primary" : "neutral"} ariaPressed={selected} disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => {
+                            return <Button key={day} variant={selected ? "primary" : "neutral"} ariaPressed={selected} disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => {
                               const selectedDays = new Set(conditions.weekdays ?? []);
                               if (selected) selectedDays.delete(dayIndex); else selectedDays.add(dayIndex);
                               return selectedDays.size === 0 ? withoutCondition(conditions, "weekdays") : { ...conditions, weekdays: [...selectedDays].sort((left, right) => left - right) };
@@ -479,10 +479,10 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         </div>
                         <div className="text-library__time-window">
                           <span>{labels.timeWindow}</span>
-                          {variant.conditions.timeWindow === undefined ? <Button size="compact" disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: "00:00", end: "23:59" } }))}>{labels.addTimeWindow}</Button> : <>
+                          {variant.conditions.timeWindow === undefined ? <Button disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: "00:00", end: "23:59" } }))}>{labels.addTimeWindow}</Button> : <>
                             <Field label={labels.startTime} value={variant.conditions.timeWindow.start} disabled={pending} onChange={(start) => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start, end: conditions.timeWindow?.end ?? "23:59" } }))} />
                             <Field label={labels.endTime} value={variant.conditions.timeWindow.end} disabled={pending} onChange={(end) => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: conditions.timeWindow?.start ?? "00:00", end } }))} />
-                            <Button size="compact" disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => withoutCondition(conditions, "timeWindow"))}>{labels.removeTimeWindow}</Button>
+                            <Button disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => withoutCondition(conditions, "timeWindow"))}>{labels.removeTimeWindow}</Button>
                           </>}
                         </div>
                       </fieldset>}

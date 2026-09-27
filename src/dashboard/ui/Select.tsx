@@ -40,6 +40,10 @@ export interface SelectProps {
   disabled?: boolean;
   busy?: boolean;
   searchable?: boolean;
+  /** Controlled search text; pairs with `onSearchChange` for callers that
+   *  need to inspect what the user typed (e.g. to offer a custom entry). */
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
   required?: boolean;
   name?: string;
   id?: string;
@@ -65,6 +69,8 @@ export function Select({
   disabled = false,
   busy = false,
   searchable = false,
+  searchValue,
+  onSearchChange,
   required = false,
   name,
   id,
@@ -100,6 +106,8 @@ export function Select({
       placeholder={placeholder}
       disabled={disabled}
       searchable={searchable}
+      {...(searchValue === undefined ? {} : { searchValue })}
+      {...(onSearchChange === undefined ? {} : { onSearchChange })}
       aria-busy={busy}
       required={required}
       name={name}
