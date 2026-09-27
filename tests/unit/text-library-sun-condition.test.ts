@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { localMidnightInTimeZone } from "../../src/modules/contract";
 import { nextTextBlockLocalMidnight, textBlockConditionSwitchTimes, textBlockConditionsMatch, textBlockTimeConditionsMatch } from "../../src/modules/text_library/domain";
@@ -151,5 +151,38 @@ describe("textBlockConditionSwitchTimes when the boundary falls in a replayed ho
       "2026-11-01T05:30:00.000Z",
       "2026-11-01T09:00:00.000Z",
     ]);
+  });
+});
+
+describe("textBlockConditionSwitchTimes formatter reuse", () => {
+  it("reuses cached Intl.DateTimeFormat instances across a whole seven-day lookahead instead of rebuilding one per date probe", () => {
+    const OriginalDateTimeFormat = Intl.DateTimeFormat;
+    let constructions = 0;
+    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function (
+      this: unknown,
+      ...args: ConstructorParameters<typeof Intl.DateTimeFormat>
+    ) {
+      constructions += 1;
+      return new OriginalDateTimeFormat(...args);
+    });
+
+    // A block with many time-windowed variants against a time zone this file hasn't
+    // used yet, so the count below reflects only this one lookahead, not warm caches
+    // left over from earlier tests in this file.
+    const conditions = Array.from({ length: 20 }, (_, index) => ({
+      timeWindow: { start: `0${String(index % 10)}:00`, end: `1${String(index % 10)}:00` },
+    }));
+    const from = Date.parse("2026-11-01T00:00:00.000Z");
+    const until = from + 7 * 24 * 60 * 60 * 1_000;
+
+    textBlockConditionSwitchTimes(conditions, "Asia/Tokyo", from, until);
+
+    vi.restoreAllMocks();
+
+    // One formatter per distinct helper (day-key, wall-clock, local-date, day-transition,
+    // weekday/hour) for this one time zone, not one per date x condition probe -- the
+    // regression this guards against rebuilt one on every probe (612 for a single
+    // window, 1,372 for twenty, in a real seven-day lookahead).
+    expect(constructions).toBeLessThanOrEqual(6);
   });
 });

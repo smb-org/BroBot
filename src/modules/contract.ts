@@ -74,13 +74,22 @@ export const validChannelTimeZone = (timeZone: string): boolean => {
   }
 };
 
+// Intl.DateTimeFormat construction is far costlier than formatToParts on an existing
+// instance, and the binary searches below call these dozens of times per lookup --
+// formatters are immutable and safe to reuse, so cache one per time zone.
+const dateKeyFormatters = new Map<string, Intl.DateTimeFormat>();
+
+const dateKeyFormatterFor = (timeZone: string): Intl.DateTimeFormat => {
+  let formatter = dateKeyFormatters.get(timeZone);
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+    dateKeyFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+};
+
 const localDateKeyInTimeZone = (instant: number, timeZone: string): string => {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(instant);
+  const parts = dateKeyFormatterFor(timeZone).formatToParts(instant);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${String(values.year)}-${String(values.month)}-${String(values.day)}`;
 };
@@ -122,18 +131,29 @@ export const nextLocalMidnightInTimeZone = (from: number, timeZone: string): num
   return high;
 };
 
+const wallClockFormatters = new Map<string, Intl.DateTimeFormat>();
+
+const wallClockFormatterFor = (timeZone: string): Intl.DateTimeFormat => {
+  let formatter = wallClockFormatters.get(timeZone);
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    wallClockFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+};
+
 /** The local wall-clock reading at `instant` in `timeZone`, expressed as if it were UTC. */
 const localWallClockMillis = (instant: number, timeZone: string): number => {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(instant);
+  const parts = wallClockFormatterFor(timeZone).formatToParts(instant);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), Number(values.hour), Number(values.minute), Number(values.second));
 };

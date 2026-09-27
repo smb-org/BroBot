@@ -81,13 +81,19 @@ export const localTimeParts = (now: number, timeZone: string): { weekday: number
   }
 };
 
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
+
+const dateFormatterFor = (timeZone: string): Intl.DateTimeFormat => {
+  let formatter = dateFormatters.get(timeZone);
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+    dateFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+};
+
 const localDate = (instant: number, timeZone: string): string => {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(instant).map((part) => [part.type, part.value]));
+  const parts = Object.fromEntries(dateFormatterFor(timeZone).formatToParts(instant).map((part) => [part.type, part.value]));
   return `${String(parts.year)}-${String(parts.month)}-${String(parts.day)}`;
 };
 
@@ -112,19 +118,30 @@ export const nextTextBlockLocalMidnight = (from: number, timeZone: string): numb
  * midnights, which `localMidnightInTimeZone` already resolves correctly regardless of a
  * DST change at midnight itself.
  */
+const dayTransitionFormatters = new Map<string, Intl.DateTimeFormat>();
+
+const dayTransitionFormatterFor = (timeZone: string): Intl.DateTimeFormat => {
+  let formatter = dayTransitionFormatters.get(timeZone);
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    dayTransitionFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+};
+
 const dayZoneTransition = (date: string, timeZone: string): number | null => {
   const dayStart = Date.parse(localMidnightInTimeZone(date, timeZone)) + 1;
   const dayEnd = Date.parse(localMidnightInTimeZone(shiftDate(date, 1), timeZone)) - 1;
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
+  const formatter = dayTransitionFormatterFor(timeZone);
   // Intl only resolves to whole seconds, so probe on second boundaries -- otherwise a
   // sub-second remainder leaks into the offset and breaks the binary search below.
   const offsetAt = (instant: number): number => {
@@ -134,6 +151,8 @@ const dayZoneTransition = (date: string, timeZone: string): number | null => {
     return wallClock - flooredSecond;
   };
   const offsetStart = offsetAt(dayStart);
+  // Cheap check first: most days have no DST transition, so the offset at the day's
+  // start and end already match and the binary search below can be skipped entirely.
   if (offsetAt(dayEnd) === offsetStart) return null;
   let low = dayStart;
   let high = dayEnd;
