@@ -15,6 +15,9 @@ export interface TextCommandPanelData {
   variables: TextCommandChannelVariable[];
 }
 
+export const textBlockNamesForPicker = (variables: readonly ModuleRegisteredTemplateVariable[]): string[] =>
+  variables.filter((variable) => variable.isTextBlock).map(({ name }) => name);
+
 const pathFor = (channelId: string, name?: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/text_commands/commands${name === undefined ? "" : `/${encodeURIComponent(name)}`}`;
 

@@ -41,7 +41,7 @@ import { moduleRouter } from "./module-routes";
 import { variableRouter } from "./variable-routes";
 import { overlayRouter } from "./overlay-routes";
 import { overlayAccessRouter } from "./overlay-access-routes";
-import { EVENT_TONES, canManage, type EventCode, type EventTone } from "../../contracts/values";
+import { EVENT_TONES, MANAGING_ROLES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import { auditSubjectUserId, isAuditArea } from "../../dashboard/audit/areas";
 import { apiErrorDetail } from "../../modules/contract";
 import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
@@ -51,6 +51,8 @@ import { writeModuleAudit } from "../module-audit";
 import { writeModuleDiagnostics } from "../event-log";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { isChannelControlInput, setChannelControl, type ChannelControlKind } from "../db/channel-controls";
+import { actorGuard, bindActorGuard } from "../db/guards";
+import { prepareAudit } from "../db/audit";
 import { HELIX_STREAM_STATE_TTL_MS, lookupAndRefreshStreamState } from "../stream-state-lookup";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { getChannelModuleForChannel } from "../db/channel-modules";
@@ -247,12 +249,22 @@ panelRouter.patch("/api/channels/:channelId/settings", requireChannelAuthorizati
       !Number.isSafeInteger(revision) || (revision as number) < 1) {
     return context.json({ error: "channel_time_zone_invalid" }, 400);
   }
+  const channelId = context.req.param("channelId");
+  const previous = await context.env.DB.prepare(
+    "SELECT time_zone FROM channels WHERE channel_id = ? AND time_zone_revision = ?",
+  ).bind(channelId, revision).first<{ time_zone: string }>();
+  if (previous === null) return context.json({ error: "channel_settings_conflict" }, 409);
+  const changedAt = nowIso();
   const nextRevision = (revision as number) + 1;
-  const result = await context.env.DB.prepare(
+  const mutation = context.env.DB.prepare(
     `UPDATE channels SET time_zone = ?, time_zone_revision = ?, updated_at = ?
-      WHERE channel_id = ? AND time_zone_revision = ?`,
-  ).bind(timeZone, nextRevision, nowIso(), context.req.param("channelId"), revision).run();
-  if (result.meta.changes === 0) return context.json({ error: "channel_settings_conflict" }, 409);
+      WHERE channel_id = ? AND time_zone_revision = ? ${actorGuard(MANAGING_ROLES)}`,
+  ).bind(timeZone, nextRevision, changedAt, channelId, revision,
+    ...bindActorGuard(context.get("actor"), channelId, changedAt));
+  const audit = prepareAudit(context.env.DB, context.get("actor").userId, changedAt, channelId, null,
+    "channel.time_zone.updated", { timeZone: previous.time_zone }, { timeZone });
+  const result = await context.env.DB.batch([mutation, audit]);
+  if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "channel_settings_conflict" }, 409);
   return context.json({ ok: true, timeZone, revision: nextRevision, defaultTimeZone: DEFAULT_CHANNEL_TIME_ZONE });
 });
 

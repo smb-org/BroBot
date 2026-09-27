@@ -7,6 +7,7 @@ import { clipsModule } from "./clips";
 import { textLibraryModule } from "./text_library";
 import type { ModuleOverlayElementDefinition } from "./contract";
 import type { TemplateVariable } from "../template";
+import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN, TEMPLATE_DOTTED_VARIABLE_NAME_PATTERN } from "../contracts/template-names";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 // This is the only place that knows all modules.
@@ -16,12 +17,9 @@ const HOST_TEMPLATE_VARIABLE_NAMES = new Set(SYSTEM_TEMPLATE_VARIABLE_LIST.map((
 const EXISTING_BARE_MODULE_VARIABLES: Readonly<Record<string, ReadonlySet<string>>> = {
   text_commands: new Set(["target", "command", "cooldown", "uses"]),
 };
-const DOTTED_TEMPLATE_VARIABLE_NAME = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
-const BLOCK_TEMPLATE_VARIABLE_NAME = /^[a-z0-9_]{1,32}$/u;
-
 export const validateModuleTemplateVariable = (module: BotModule, name: string): void => {
   if (module.templateVariableNamespace === "text_blocks") {
-    if (!BLOCK_TEMPLATE_VARIABLE_NAME.test(name)) {
+    if (!TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name)) {
       throw new Error(`Text block variable ${name} must be a bare block name.`);
     }
     if (HOST_TEMPLATE_VARIABLE_NAMES.has(name)) {
@@ -30,10 +28,21 @@ export const validateModuleTemplateVariable = (module: BotModule, name: string):
     return;
   }
   if (HOST_TEMPLATE_VARIABLE_NAMES.has(name) || EXISTING_BARE_MODULE_VARIABLES[module.id]?.has(name) === true) return;
-  if (!DOTTED_TEMPLATE_VARIABLE_NAME.test(name)) {
+  if (!TEMPLATE_DOTTED_VARIABLE_NAME_PATTERN.test(name)) {
     throw new Error(`Module template variable ${module.id}.${name} must use a dotted name.`);
   }
 };
+
+export const variablesForModuleTemplateContext = (
+  module: BotModule,
+  variables: readonly TemplateVariable[],
+): TemplateVariable[] => variables.map((variable) => {
+  if (module.templateContext === undefined) return variable;
+  return {
+    ...variable,
+    contexts: (variable.contexts ?? [module.templateContext]).filter((context) => context === module.templateContext),
+  };
+});
 
 export const validateModuleTemplateVariables = (modules: readonly BotModule[]): void => {
   for (const module of modules) {

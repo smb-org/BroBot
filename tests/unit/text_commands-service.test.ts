@@ -307,7 +307,7 @@ describe("Text commands service", () => {
     expect(result.diagnostics[0]?.detail).toMatchObject({ name: "hallo", streamState: "unknown" });
   });
 
-  it("runs a game-filtered command when the current game is unknown and records a diagnostic", async () => {
+  it("follows the product decision to run a game-filtered command when the game is unknown and records it", async () => {
     const entry = { ...command("guide", "Guide text"), games: [{ id: "42", name: "Fictional Game" }] };
     const result = await processTextCommandMessage(
       eventFor("!guide"),

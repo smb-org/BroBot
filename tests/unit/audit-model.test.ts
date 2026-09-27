@@ -121,6 +121,18 @@ describe("audit sentence action templates", () => {
     expect(auditSentenceText(removed, "en")).toContain("Bob with the Manager role");
   });
 
+  it("shows the old and new channel time zone in the host audit sentence", () => {
+    const entry = baseEntry({
+      action: "channel.time_zone.updated",
+      actorDisplayName: "Alice",
+      before: JSON.stringify({ timeZone: "Europe/Paris" }),
+      after: JSON.stringify({ timeZone: "Europe/Berlin" }),
+    });
+
+    expect(auditSentenceText(entry, "en")).toContain("from Europe/Paris to Europe/Berlin");
+    expect(auditSentenceText(entry, "de")).toContain("von Europe/Paris zu Europe/Berlin");
+  });
+
   it("derives the channel.variable.renamed sentence from which fields actually changed (#254 review)", () => {
     const descriptionOnly = baseEntry({
       action: "channel.variable.renamed",

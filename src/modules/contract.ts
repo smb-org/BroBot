@@ -437,6 +437,7 @@ export const MODULE_TEMPLATE_TIER_CHAT_STATUSES: Readonly<Record<ModuleTemplateM
 /** A variable name provided by a module for template validation. */
 export interface ModuleRegisteredTemplateVariable extends TemplateVariable {
   moduleId: string;
+  isTextBlock: boolean;
 }
 
 export const browserModuleLanguage = (): ModuleLanguage => {
@@ -565,8 +566,6 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   templateContext?: TemplateContext;
   /** Allows this designated provider to register bare text-block names. */
   templateVariableNamespace?: "text_blocks";
-  /** Maximum rendered output when one of this module's values is used. */
-  templateValueOutputLimit?: number;
   /** Resolves only the declared names requested from the original template fragment. */
   resolveTemplateValues?: (
     names: readonly string[],

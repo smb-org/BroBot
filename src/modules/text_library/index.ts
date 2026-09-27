@@ -33,7 +33,6 @@ export const textLibraryModule: BotModule<typeof settingsSchema> = {
     keywords: ["text", "texts", "texte", "textbausteine", "library", "bibliothek"],
   }],
   templateVariableNamespace: "text_blocks",
-  templateValueOutputLimit: 500,
   resolveTemplateValues: (names, context) =>
     createTextBlockTemplateValueProvider(context.DB, context.channelId)(names, context),
   routes: textLibraryRoutes,

@@ -13,7 +13,7 @@ import { commandListReply, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsF
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions } from "../../../dashboard/ui";
-import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, saveTextCommand, searchTextGames, toggleTextCommand, type TextCommandChannelVariable } from "./service";
+import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, saveTextCommand, searchTextGames, textBlockNamesForPicker, toggleTextCommand, type TextCommandChannelVariable } from "./service";
 import type { ModuleRegisteredTemplateVariable } from "../../contract";
 import { textCommandsTexts } from "./locale";
 
@@ -167,7 +167,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [minimumTierExplicit, setMinimumTierExplicit] = useState(false);
   const [registeredVariables, setRegisteredVariables] = useState<readonly ModuleRegisteredTemplateVariable[]>([]);
-  const libraryBlocks = registeredVariables.filter((variable) => variable.moduleId !== "host" && !variable.name.includes(".")).map(({ name }) => name);
+  const libraryBlocks = textBlockNamesForPicker(registeredVariables);
   const [selectedLibraryBlock, setSelectedLibraryBlock] = useState("");
   const isCreate = command === null;
   const blockVariables: TemplateVariable[] = libraryBlocks.map((name) => ({ name, group: "channel", sample: name, maxLength: 500 }));
@@ -177,7 +177,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const templateVariables = () => [
     ...panelTemplateOptions("chat_command", [], channelVariables, resolvedLanguage),
     ...libraryBlocks.map((name) => ({ name, description: labels.libraryText, sample: name, group: "channel" as const, kind: "module" as const })),
-    ...registeredVariables.filter((variable) => variable.moduleId !== "host" && variable.name.includes(".") && (variable.contexts?.includes("chat_command") ?? true)).map((variable) => ({
+    ...registeredVariables.filter((variable) => !variable.isTextBlock && variable.name.includes(".") && (variable.contexts?.includes("chat_command") ?? true)).map((variable) => ({
       name: variable.name,
       description: variable.name,
       sample: variable.sample,

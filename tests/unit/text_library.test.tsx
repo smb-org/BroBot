@@ -19,6 +19,7 @@ import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-
 import TextLibraryPanel from "../../src/modules/text_library/panel/index";
 import { textLibraryTexts } from "../../src/modules/text_library/panel/locale";
 import { createTemplateRenderer, type TemplateResolverSources, type TemplateValueProvider } from "../../src/worker/template-resolver";
+import { truncateChatText } from "../../src/worker/chat";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../src/modules/contract";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -106,7 +107,6 @@ describe("text library", () => {
     moduleId: textLibraryModule.id,
     templateVariableNamespace: "text_blocks",
     variables: await textLibraryModule.templateVariables?.(database as unknown as D1Database, CHANNEL_ID) ?? [],
-    outputLimit: 500,
     resolveTemplateValues: resolveBlockValues,
   });
 
@@ -199,6 +199,21 @@ describe("text library", () => {
     const event: ModuleEvent = { ...commandEvent, subscriptionType: "channel.raid", payload: {}, actor: null, chatStatus: null };
     await expect((await createRenderer("event", true, event))("{greeting}", {})).resolves.toMatchObject({ text: "Hello live" });
     await expect((await createRenderer("event", false, event))("{greeting}", {})).resolves.toMatchObject({ text: "Hello offline" });
+  });
+
+  it.each(["1hello", "_hello"]) ("discovers and renders block names beginning with %s", async (name) => {
+    await expect(createBlock(name, [variant("default", `Rendered ${name}`)])).resolves.toMatchObject({ ok: true });
+    const event: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.raid",
+      triggerId: "fictional-bare-name-trigger",
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: null,
+      chatStatus: null,
+    };
+    await expect(renderWithBlocks(`{${name}}`, event, "event")).resolves.toMatchObject({ text: `Rendered ${name}` });
   });
 
   it("fully resolves host variables (dotted, parameterized) that follow or sit inside a block", async () => {
@@ -409,7 +424,7 @@ describe("text library", () => {
     await expect(germanRenderer("{convert}", {})).resolves.toMatchObject({ text: "Diese Eingabe ist nur in Chatbefehlen verfügbar" });
   });
 
-  it("does not repeat a random text directly and caps resolved output at 500 characters", async () => {
+  it("bounds nested block expansion and leaves the final chat limit to the send path", async () => {
     await expect(createBlock("random_line", [{ id: "default", conditions: {}, texts: ["first", "second"] }]))
       .resolves.toMatchObject({ ok: true });
     const randomEvent: ModuleEvent = {
@@ -444,6 +459,12 @@ describe("text library", () => {
     const longResult = await renderWithBlocks("{long_line}", event, "event");
     expect(longResult.text).toHaveLength(500);
     expect(longResult.text.endsWith("…")).toBe(true);
+
+    await expect(createBlock("full_line", [variant("default", "z".repeat(500))])).resolves.toMatchObject({ ok: true });
+    const message = await renderWithBlocks("{full_line} tail", event, "event");
+    expect(message.text).toHaveLength(505);
+    expect(message.text.endsWith(" tail")).toBe(true);
+    expect(truncateChatText(message.text)).toMatchObject({ truncated: true, text: `${"z".repeat(499)}…` });
   });
 
   it("does not write single-text choices or consume choices during preview and overlay renders", async () => {

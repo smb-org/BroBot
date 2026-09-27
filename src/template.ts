@@ -1,4 +1,13 @@
 import type { TemplateContext, TemplateVariableGroup, TemplateVariableSource } from "./contracts/values";
+import {
+  TEMPLATE_BARE_VARIABLE_NAME_SOURCE,
+  TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE,
+} from "./contracts/template-names";
+
+export {
+  TEMPLATE_BARE_VARIABLE_NAME_PATTERN,
+  TEMPLATE_DOTTED_VARIABLE_NAME_PATTERN,
+} from "./contracts/template-names";
 
 export type { TemplateContext, TemplateVariableSource } from "./contracts/values";
 
@@ -27,8 +36,10 @@ export type TemplateWarning =
   | { field: string; code: "template_parameters_invalid"; invalidVariables: readonly string[] }
   | { field: string; code: "template_worst_case_too_long"; worstCaseLength: number };
 
-export const TEMPLATE_VARIABLE_PATTERN = /\{([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)(?: ([^{}\n]{1,200}))?\}/g;
-export const TEMPLATE_TOKEN_CANDIDATE_PATTERN = /\{([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)?)(?: ([^{}\n]{1,200}))?\}/g;
+const strictTemplateName = `(?:${TEMPLATE_BARE_VARIABLE_NAME_SOURCE}|${TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE})`;
+const candidateTemplateName = "(?:[A-Za-z0-9_]{1,32}|[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+)";
+export const TEMPLATE_VARIABLE_PATTERN = new RegExp(`\\{(${strictTemplateName})(?: ([^{}\\n]{1,200}))?\\}`, "gu");
+export const TEMPLATE_TOKEN_CANDIDATE_PATTERN = new RegExp(`\\{(${candidateTemplateName})(?: ([^{}\\n]{1,200}))?\\}`, "gu");
 
 const matches = (text: string, pattern: RegExp): RegExpExecArray[] => {
   const expression = new RegExp(pattern.source, "g");

@@ -1,7 +1,7 @@
 import type { EventCode } from "../contracts/values";
 import type { BotModule, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState } from "../modules/contract";
 import type { RealtimeMessage } from "../realtime-contract";
-import { MODULES, validateModuleTemplateVariable } from "../modules/registry";
+import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../modules/registry";
 import {
   getChannelMemberForChannel,
 } from "./db/channel-members";
@@ -632,12 +632,14 @@ export const dispatchEventSubNotification = async (
   await Promise.all(registry.map(async (module) => {
     let dynamicVariables: readonly TemplateVariable[];
     try {
-      dynamicVariables = await module.templateVariables?.(environment.DB, event.channelId) ?? [];
+      dynamicVariables = module.templateVariableNamespace === "text_blocks"
+        ? []
+        : await module.templateVariables?.(environment.DB, event.channelId) ?? [];
     } catch {
       dynamicVariables = [];
     }
     const staticVariables = Object.values(module.templateFields ?? {}).flatMap((variables) => variables ?? []) as TemplateVariable[];
-    const variables = [...staticVariables, ...dynamicVariables];
+    const variables = variablesForModuleTemplateContext(module, [...staticVariables, ...dynamicVariables]);
     for (const variable of variables) validateModuleTemplateVariable(module, variable.name);
     registeredModuleVariables.set(module.id, variables);
   }));
@@ -651,7 +653,6 @@ export const dispatchEventSubNotification = async (
       moduleId: provider.id,
       ...(provider.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: provider.templateVariableNamespace }),
       variables: registeredModuleVariables.get(provider.id) ?? [],
-      ...(provider.templateValueOutputLimit === undefined ? {} : { outputLimit: provider.templateValueOutputLimit }),
       resolveTemplateValues,
     }];
   });

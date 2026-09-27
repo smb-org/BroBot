@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { textCommandModule, type TextCommandKind, type TextCommandMinimumTier } from "../../src/modules/text_commands";
+import { textLibraryModule } from "../../src/modules/text_library";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { prepareChannelVariableChange } from "../../src/worker/db/channel-variables";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
@@ -125,6 +126,32 @@ const eventCodes = async (database: TestD1Database): Promise<string[]> => {
 };
 
 describe("Text commands module", () => {
+  it("does not enumerate text blocks for an event without a matching module render", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const statements: string[] = [];
+      const countedDb = {
+        prepare: (sql: string) => {
+          statements.push(sql);
+          return database.prepare(sql);
+        },
+        batch: (entries: TestPreparedStatement[]) => database.batch(entries),
+      } as unknown as D1Database;
+
+      await dispatchEventSubNotification(
+        { ...environment(database), DB: countedDb },
+        eventFor("hello"),
+        fetcherForChat(),
+        [textLibraryModule],
+      );
+
+      expect(statements.some((sql) => /FROM text_blocks\b/iu.test(sql))).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
   it.each([
     { name: "an equal-value set", initialValue: 4, operation: "set" as const, amount: 4, message: "!same" },
     { name: "set_argument equal to the current value", initialValue: 4, operation: "set_argument" as const, amount: 0, message: "!same 4" },

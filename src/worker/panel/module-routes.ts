@@ -11,8 +11,8 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleLanguage, ModuleRouteVariables, ModuleStreamState } from "../../modules/contract";
-import { MODULES, validateModuleTemplateVariable } from "../../modules/registry";
+import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleLanguage, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState } from "../../modules/contract";
+import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { moduleBroadcasterScopeState } from "../module-scopes";
@@ -88,6 +88,22 @@ const moduleStateFor = async (
 
 export const moduleRouter = new Hono<ModuleRouteEnvironment>();
 
+export const registeredTemplateVariablesForChannel = async (
+  db: D1Database,
+  channelId: string,
+): Promise<readonly ModuleRegisteredTemplateVariable[]> => {
+  const registrations = await Promise.all(MODULES.map(async (module) => {
+    const fields = Object.values(module.templateFields ?? {})
+      .flatMap((variables) => variables ?? []) as TemplateVariable[];
+    const dynamic = await module.templateVariables?.(db, channelId) ?? [];
+    return variablesForModuleTemplateContext(module, [...fields, ...dynamic]).map((variable) => {
+      validateModuleTemplateVariable(module, variable.name);
+      return { ...variable, moduleId: module.id, isTextBlock: module.templateVariableNamespace === "text_blocks" };
+    });
+  }));
+  return registrations.flat();
+};
+
 moduleRouter.use("/api/channels/:channelId/modules", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/modules/*", requireChannelAuthorization());
 
@@ -108,16 +124,7 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     return variable === null ? null : { name: variable.name, value: variable.value, description: variable.description };
   });
   context.set("listRegisteredTemplateVariables", async (channelId) => {
-    const registrations = await Promise.all(MODULES.map(async (module) => {
-      const fields = Object.values(module.templateFields ?? {})
-        .flatMap((variables) => variables ?? []) as TemplateVariable[];
-      const dynamic = await module.templateVariables?.(context.env.DB, channelId) ?? [];
-      return [...fields, ...dynamic].map((variable) => {
-        validateModuleTemplateVariable(module, variable.name);
-        return { ...variable, moduleId: module.id };
-      });
-    }));
-    return registrations.flat();
+    return registeredTemplateVariablesForChannel(context.env.DB, channelId);
   });
   context.set("templateUsageSources", async (channelId) => {
     const moduleSources = await Promise.all(MODULES.map((module) =>
@@ -183,11 +190,12 @@ moduleRouter.get("/api/channels/:channelId/template-variables", async (context) 
     context.get("listChannelVariables")(channelId),
   ]);
   const variables = [
-    ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => ({ ...variable, moduleId: "host" })),
+    ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => ({ ...variable, moduleId: "host", isTextBlock: false })),
     ...moduleVariables,
     ...channelVariables.map((variable) => ({
       name: `var.${variable.name}`,
       moduleId: "host",
+      isTextBlock: false,
       group: "channel" as const,
       sample: String(variable.value),
       maxLength: 10,
@@ -219,12 +227,13 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
       moduleId: module.id,
       ...(module.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: module.templateVariableNamespace }),
       variables,
-      ...(module.templateValueOutputLimit === undefined ? {} : { outputLimit: module.templateValueOutputLimit }),
       resolveTemplateValues,
     }];
   });
-  const registeredTemplateVariables = registeredVariables
-    .filter((variable) => MODULES.find((module) => module.id === variable.moduleId)?.templateVariableNamespace !== "text_blocks");
+  const registeredTemplateVariables = registeredVariables.filter((variable) => {
+    return !variable.isTextBlock &&
+      (variable.contexts?.includes(parsed.data.templateContext) ?? true);
+  });
   const now = Date.now();
   const game = parsed.data.game;
   const streamState: ModuleStreamState = parsed.data.streamState;

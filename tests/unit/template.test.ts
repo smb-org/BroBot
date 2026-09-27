@@ -22,9 +22,14 @@ const variables: readonly TemplateVariable[] = [
 
 describe("template helpers", () => {
   it("finds strict variable names and reports near-miss candidates", () => {
-    expect(templateVariableNames("{user} {viewers} {User} {1}")).toEqual(["user", "viewers"]);
+    expect(templateVariableNames("{user} {viewers} {User} {1} {_hello}")).toEqual(["user", "viewers", "1", "_hello"]);
     expect(unknownTemplateVariables("{user} {zzz} {User} {User}", variables)).toEqual(["zzz", "User"]);
     expect(closestTemplateVariable("User", variables)).toBe("user");
+  });
+
+  it("parses multiple dotted module namespaces", () => {
+    expect(templateVariableNames("{weather.current.temperature}")).toEqual(["weather.current.temperature"]);
+    expect(renderTemplate("{weather.current.temperature}", { "weather.current.temperature": "18 °C" })).toBe("18 °C");
   });
 
   it("only suggests close names", () => {

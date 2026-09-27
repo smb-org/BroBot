@@ -246,6 +246,7 @@ export type EventCode = (typeof EVENT_CODES)[number];
 export const AUDIT_ACTIONS = [
   "channel.released",
   "channel.full_consent_changed",
+  "channel.time_zone.updated",
   "member.added",
   "member.role_changed",
   "member.removed",

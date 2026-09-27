@@ -63,7 +63,10 @@ const defaultEnabledTestModule: BotModule<typeof clipsTestSchema> = {
   defaultSettings: {},
 };
 
-vi.mock("../../src/modules/registry", () => ({ MODULES: [testModule, mandatoryTestModule, defaultEnabledTestModule] }));
+vi.mock("../../src/modules/registry", () => ({
+  MODULES: [testModule, mandatoryTestModule, defaultEnabledTestModule],
+  variablesForModuleTemplateContext: (_module: unknown, variables: readonly unknown[]) => [...variables],
+}));
 
 const { createCsrfToken } = await import("../../src/worker/auth/csrf");
 const { createSessionCookie } = await import("../../src/worker/auth/session");

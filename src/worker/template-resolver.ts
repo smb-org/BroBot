@@ -10,6 +10,7 @@ import { templateLanguageText } from "../modules/template-language";
 import type { ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateRenderMode, ModuleTemplateValueContext } from "../modules/contract";
 import { formatCount } from "../text";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
+import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN } from "../contracts/template-names";
 
 export type TemplateChannelDetails = Pick<ModuleChannelInfo, "title" | "gameName" | "gameId">;
 export type TemplateStreamDetails = Pick<ModuleChannelInfo, "startedAt" | "viewerCount">;
@@ -18,7 +19,6 @@ export interface TemplateValueProvider {
   moduleId: string;
   templateVariableNamespace?: "text_blocks";
   variables: readonly TemplateVariable[];
-  outputLimit?: number;
   resolveTemplateValues: (
     names: readonly string[],
     context: ModuleTemplateValueContext,
@@ -119,7 +119,10 @@ export const createTemplateRenderer = (
   changed?: { name: string; value: number },
   mode: ModuleTemplateRenderMode = "chat",
 ): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }> => {
-  const providerVariables = (sources.templateValueProviders ?? []).flatMap((provider) => provider.variables);
+  const providerVariables = (sources.templateValueProviders ?? [])
+    .filter((provider) => provider.templateVariableNamespace !== "text_blocks")
+    .flatMap((provider) => provider.variables)
+    .filter((variable) => variable.contexts?.includes(context) ?? true);
   const declaredModuleVariables = [...moduleVariables, ...providerVariables];
   const templateSource = moduleValues.legacyFallback === "true"
     ? [text, moduleValues.offlineText, moduleValues.notFollowingText, moduleValues.unavailableText]
@@ -282,7 +285,14 @@ export const createTemplateRenderer = (
     }
   }
   const renderNames = [...new Set(templateVariableNames(renderSource))];
-  let outputLimit: number | undefined;
+  const registeredVariablesForContext = (sources.registeredTemplateVariables ?? [])
+    .filter((variable) => variable.contexts?.includes(context) ?? true);
+  const knownVariableNames = new Set([
+    ...SYSTEM_TEMPLATE_VARIABLE_LIST.filter((variable) => variable.contexts?.includes(context) ?? true).map((variable) => variable.name),
+    ...registeredVariablesForContext.map((variable) => variable.name),
+    ...moduleVariables.map((variable) => variable.name),
+    ...providerVariables.map((variable) => variable.name),
+  ]);
   const renderNestedTemplate = async (
     fragment: string,
     nestedMode: ModuleTemplateRenderMode = mode,
@@ -295,14 +305,7 @@ export const createTemplateRenderer = (
     DB: sources.DB,
     channelId: event.channelId,
     templateContext: context,
-    knownTemplateVariableNames: new Set([
-      ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name),
-      ...(sources.registeredTemplateVariables ?? []).map((variable) => variable.name),
-      ...moduleVariables.map((variable) => variable.name),
-      ...(sources.templateValueProviders ?? []).filter((provider) => provider.templateVariableNamespace !== "text_blocks")
-        .flatMap((provider) => provider.variables)
-        .map((variable) => variable.name),
-    ]),
+    knownTemplateVariableNames: knownVariableNames,
     chatStatus: event.chatStatus,
     mode,
     streamState: sources.streamState,
@@ -317,21 +320,16 @@ export const createTemplateRenderer = (
     const declaredNames = new Set(provider.variables
       .filter((variable) => variable.contexts?.includes(context) ?? true)
       .map((variable) => variable.name));
-    const requestedNames = renderNames.filter((name) => declaredNames.has(name));
+    const requestedNames = provider.templateVariableNamespace === "text_blocks"
+      ? renderNames.filter((name) => TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name) && !knownVariableNames.has(name))
+      : renderNames.filter((name) => declaredNames.has(name));
     if (requestedNames.length === 0) continue;
     const resolved = await provider.resolveTemplateValues(requestedNames, providerContext);
     for (const name of requestedNames) {
       const value: unknown = resolved[name];
       if (typeof value === "string") values[name] = value;
     }
-    if (provider.outputLimit !== undefined) outputLimit = outputLimit === undefined
-      ? provider.outputLimit
-      : Math.min(outputLimit, provider.outputLimit);
   }
   const rendered = renderTemplate(renderSource, values, parameterValues, effectiveForRender);
-  const limited = outputLimit === undefined || rendered.length <= outputLimit
-    ? { text: rendered, truncated: false }
-    : { text: `${rendered.slice(0, Math.max(0, outputLimit - 1))}…`, truncated: true };
-  if (limited.truncated) addDiagnostic({ code: "template_truncated", detail: { current: rendered.length } });
-  return { text: limited.text, diagnostics };
+  return { text: rendered, diagnostics };
 };
