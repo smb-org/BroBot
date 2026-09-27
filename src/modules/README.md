@@ -81,11 +81,34 @@ Texte, Symbole und Suchbegriffe bleiben beim Modul.
 Für nicht abschaltbare Module kann `mandatoryReason` den Grund je Sprache
 angeben.
 
-Module dürfen außerdem `expandTemplateVariables` implementieren. Der Host fragt
-registrierte Erweiterungen beim Rendern nach zusätzlichen Variablen und reicht
-den Vorlagentext, bekannte Variablennamen sowie Kanal-, Stream- und Chatkontext
-weiter. Die Erweiterung kennt nur ihren eigenen Speicher und ihre Verträge.
-Die Host-Auflösung bleibt für System- und Kanalvariablen zuständig.
+Module können Vorlagenwerte über `resolveTemplateValues(names, context)`
+bereitstellen und ihre Namen über `templateFields` oder
+`templateVariables(db, channelId)` deklarieren. Der Host extrahiert die Namen
+aus dem ursprünglichen Text, fragt nur passende Provider ab und rendert den
+Text genau einmal. Eingefügte Werte werden dabei nie erneut als Vorlage
+eingelesen. Ein Provider liefert eine Zuordnung von Variablenname zu
+Zeichenkette; er schreibt nicht den gesamten Vorlagentext um.
+
+Neue Host- und Datenquellenvariablen verwenden einen Punkt im Namen, etwa
+`{sun.set}`, `{sun.set_in}` oder `{weather.temp}`. Ein einfacher Name wie
+`{welcome}` ist ein Textblock aus `text_library`. Bereits vorhandene einfache
+Hostnamen bleiben reserviert und können nicht als Blockname angelegt werden.
+Ein Blockverweis wie `{welcome}` wird nur erkannt, wenn er im ursprünglichen
+Vorlagentext steht. Eingefügte Chatwerte mit demselben Inhalt bleiben Text und
+werden nicht nachträglich als Blockverweis interpretiert.
+Die Registry prüft Moduldeklarationen: Nur der ausdrücklich markierte
+Textblock-Provider darf einfache Namen deklarieren; alle anderen neuen
+Modulvariablen müssen punktgetrennt sein. Die Textbibliothek löst verschachtelte
+Blöcke selbst auf und nutzt `context.renderTemplate` nur für die darin
+enthaltenen Host-Fragmente. Zufallsauswahl wird nur bei Chat-Ausgaben
+gespeichert; Vorschau- und Overlay-Aufrufe bleiben lesend.
+
+Der Host stellt `/api/channels/:channelId/template-variables` für die
+Variablenpicker aller Module und `/api/channels/:channelId/games?q=...` für die
+Twitch-Kategoriesuche bereit. Module verwenden diese gemeinsamen Routen statt
+die HTTP-Routen eines Geschwistermoduls aufzurufen. `{date}`, `{time}` und
+zeitabhängige Textblockbedingungen verwenden die Zeitzone aus den
+Kanal-Einstellungen.
 
 `templateUsageSources` meldet eigene Vorlagentexte für generische
 Nutzungsanzeigen. Der Host ergänzt seine eigenen Oberflächenquellen; Module

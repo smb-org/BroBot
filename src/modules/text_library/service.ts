@@ -15,26 +15,23 @@ const graphError = (blocks: readonly TextBlock[], candidate: TextBlockInput): Te
 export interface TextLibraryService {
   list(channelId: string, usageSources?: readonly ModuleTemplateUsageSource[]): Promise<TextLibrarySnapshot>;
   find(channelId: string, name: string): Promise<TextBlock | null>;
-  create(input: TextBlockInput, actor: TextBlockActor): Promise<TextBlockMutationResult>;
-  change(input: TextBlockInput, actor: TextBlockActor): Promise<TextBlockMutationResult>;
+  create(input: TextBlockInput, actor: TextBlockActor, snapshot: TextLibrarySnapshot): Promise<TextBlockMutationResult>;
+  change(input: TextBlockInput, actor: TextBlockActor, snapshot: TextLibrarySnapshot): Promise<TextBlockMutationResult>;
   delete(channelId: string, name: string, revision: number, graphRevision: number, actor: TextBlockActor, now: string): Promise<TextBlockMutationResult>;
   createCategory(channelId: string, name: string, actor: TextBlockActor, now: string): Promise<TextBlockCategory | null>;
   renameCategory(channelId: string, categoryId: string, name: string, actor: TextBlockActor, now: string): Promise<{ ok: boolean }>;
   deleteCategory(channelId: string, categoryId: string, actor: TextBlockActor, now: string): Promise<"ok" | "not_found" | "not_empty">;
-  updateTimeZone(channelId: string, timeZone: string, revision: number, actor: TextBlockActor, now: string): Promise<boolean>;
 }
 
 export const createTextLibraryService = (repository: TextBlockRepository): TextLibraryService => ({
   list: (channelId, usageSources) => repository.list(channelId, usageSources),
   find: (channelId, name) => repository.find(channelId, name),
-  async create(input, actor) {
-    const snapshot = await repository.list(input.channelId);
+  async create(input, actor, snapshot) {
     const invalid = graphError(snapshot.blocks, input);
     if (invalid !== null) return { ok: false, reason: invalid.reason, path: invalid.path };
     return repository.create(input, actor);
   },
-  async change(input, actor) {
-    const snapshot = await repository.list(input.channelId);
+  async change(input, actor, snapshot) {
     const invalid = graphError(snapshot.blocks, input);
     if (invalid !== null) return { ok: false, reason: invalid.reason, path: invalid.path };
     return repository.change(input, actor);
@@ -44,5 +41,4 @@ export const createTextLibraryService = (repository: TextBlockRepository): TextL
   createCategory: (channelId, name, actor, now) => repository.createCategory(channelId, name, actor, now),
   renameCategory: (channelId, categoryId, name, actor, now) => repository.renameCategory(channelId, categoryId, name, actor, now),
   deleteCategory: (channelId, categoryId, actor, now) => repository.deleteCategory(channelId, categoryId, actor, now),
-  updateTimeZone: (channelId, timeZone, revision, actor, now) => repository.updateTimeZone(channelId, timeZone, revision, actor, now),
 });

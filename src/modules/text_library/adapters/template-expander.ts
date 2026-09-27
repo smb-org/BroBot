@@ -1,11 +1,6 @@
-import type { ModuleChatStatus, ModuleDiagnostic, ModuleStreamState, TemplateContext } from "../../contract";
-import { TEMPLATE_VARIABLE_PATTERN } from "../../contract";
+import type { ModuleTemplateValueContext } from "../../contract";
 import type { TextBlock, TextBlockVariant, TwitchGame } from "../contracts";
 import { blockReferencesInText, firstMatchingTextBlockVariant, textBlockAppliesToGame, type TextBlockState } from "../domain";
-
-// Stateless (non-global) copy of the host's variable pattern: it allows dotted names (`{var.points}`)
-// and parameters (`{random 2-5}`), unlike the plain block-name token pattern used elsewhere in this file.
-const HOST_TEMPLATE_VARIABLE_PATTERN = new RegExp(TEMPLATE_VARIABLE_PATTERN.source);
 
 interface BlockRow {
   block_name: string;
@@ -18,24 +13,6 @@ interface VariantRow {
   position: number;
   conditions_json: string;
   texts_json: string;
-}
-
-export interface TextBlockExpansionContext {
-  templateContext: TemplateContext;
-  chatStatus: readonly ModuleChatStatus[] | null;
-  streamState: () => Promise<ModuleStreamState>;
-  currentGame: () => Promise<TwitchGame | null>;
-  resolveTemplateVariables?: (text: string) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
-  now: number;
-}
-
-export interface TextBlockExpansion {
-  text: string;
-  used: boolean;
-  outputLimit?: number;
-  complete: boolean;
-  variablesResolved: boolean;
-  diagnostics: readonly ModuleDiagnostic[];
 }
 
 const parseJson = <T,>(value: string, fallback: T): T => {
@@ -65,22 +42,17 @@ const variantMap = (rows: readonly VariantRow[]): Map<string, TextBlockVariant[]
 const EXPANSION_BUDGET = 501;
 const MAX_EXPANSION_STEPS = 10_000;
 
-export const createTextBlockTemplateExpander = (
-  db: D1Database,
-  channelId: string,
-  context: TextBlockExpansionContext,
-) => async (text: string, knownVariables: ReadonlySet<string>): Promise<TextBlockExpansion> => {
-  const initialReferences = blockReferencesInText(text).filter((name) => !knownVariables.has(name));
-  if (initialReferences.length === 0) return {
-    text,
-    used: false,
-    complete: true,
-    variablesResolved: false,
-    diagnostics: [],
-  };
-  const loadBlockRows = async (names: readonly string[]): Promise<BlockRow[]> => {
-    if (names.length === 0) return [];
-    const chunks = chunksOf(names, 50);
+/** Resolves each requested block name independently; nested expansion stays inside the library. */
+export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: string) => async (
+  names: readonly string[],
+  context: ModuleTemplateValueContext,
+): Promise<Readonly<Record<string, string>>> => {
+  const requestedBlocks = [...new Set(names)];
+  if (requestedBlocks.length === 0) return {};
+
+  const loadBlockRows = async (blockNames: readonly string[]): Promise<BlockRow[]> => {
+    if (blockNames.length === 0) return [];
+    const chunks = chunksOf(blockNames, 50);
     const results = await Promise.all(chunks.map(async (chunk) => {
       const placeholders = chunk.map(() => "?").join(", ");
       return db.prepare(`SELECT block_name, games_json FROM text_blocks WHERE channel_id = ? AND block_name IN (${placeholders})`)
@@ -88,37 +60,35 @@ export const createTextBlockTemplateExpander = (
     }));
     return results.flatMap((result) => result.results);
   };
-  const loadVariantRows = async (names: readonly string[]): Promise<VariantRow[]> => {
-    if (names.length === 0) return [];
-    const chunks = chunksOf(names, 50);
+  const loadVariantRows = async (blockNames: readonly string[]): Promise<VariantRow[]> => {
+    if (blockNames.length === 0) return [];
+    const chunks = chunksOf(blockNames, 50);
     const results = await Promise.all(chunks.map(async (chunk) => {
       const placeholders = chunk.map(() => "?").join(", ");
-      return db.prepare(`SELECT block_name, variant_id, position, conditions_json, texts_json FROM text_block_variants WHERE channel_id = ? AND block_name IN (${placeholders}) ORDER BY block_name, position`)
+      return db.prepare(`SELECT block_name, variant_id, position, conditions_json, texts_json FROM text_block_variants
+        WHERE channel_id = ? AND block_name IN (${placeholders}) ORDER BY block_name, position`)
         .bind(channelId, ...chunk).all<VariantRow>();
     }));
     return results.flatMap((result) => result.results);
   };
-  const rootRows = await loadBlockRows(initialReferences);
-  if (rootRows.length === 0) return {
-    text,
-    used: false,
-    complete: true,
-    variablesResolved: false,
-    diagnostics: [],
-  };
+
+  const rootRows = await loadBlockRows(requestedBlocks);
+  if (rootRows.length === 0) return {};
   const blockRows = new Map(rootRows.map((row) => [row.block_name, row]));
   const allVariantRows: VariantRow[] = [];
   let frontier = rootRows.map((row) => row.block_name);
   for (let depth = 0; depth < 3 && frontier.length > 0; depth += 1) {
     const variantRows = await loadVariantRows(frontier);
     allVariantRows.push(...variantRows);
-    const nextReferences = [...new Set(variantRows.flatMap((row) => parseJson<string[]>(row.texts_json, []).flatMap(blockReferencesInText)))]
-      .filter((name) => !knownVariables.has(name) && !blockRows.has(name));
+    const nextReferences = [...new Set(variantRows.flatMap((row) =>
+      parseJson<string[]>(row.texts_json, []).flatMap(blockReferencesInText),
+    ))].filter((name) => !context.knownTemplateVariableNames.has(name) && !blockRows.has(name));
     if (depth >= 2 || nextReferences.length === 0) break;
     const nestedRows = await loadBlockRows(nextReferences);
     for (const row of nestedRows) blockRows.set(row.block_name, row);
     frontier = nestedRows.map((row) => row.block_name);
   }
+
   const variants = variantMap(allVariantRows);
   const blocks = new Map<string, TextBlock>();
   for (const row of blockRows.values()) {
@@ -133,46 +103,38 @@ export const createTextBlockTemplateExpander = (
       updatedAt: "",
     });
   }
-  const needsTimeZone = [...blocks.values()].some((block) => block.variants.some((variant) => variant.conditions.weekdays !== undefined || variant.conditions.timeWindow !== undefined));
-  const settingsRow = needsTimeZone
-    ? await db.prepare("SELECT time_zone FROM text_library_settings WHERE channel_id = ?").bind(channelId).first<{ time_zone: string }>()
-    : null;
-  const timeZone = settingsRow?.time_zone ?? "Europe/Berlin";
+
+  const needsTimeZone = [...blocks.values()].some((block) => block.variants.some((variant) =>
+    variant.conditions.weekdays !== undefined || variant.conditions.timeWindow !== undefined,
+  ));
+  const timeZone = needsTimeZone ? await context.channelTimeZone() : "UTC";
   const needsStream = [...blocks.values()].some((block) => block.variants.some((variant) => variant.conditions.stream !== undefined));
-  const needsGame = [...blocks.values()].some((block) => block.games.length > 0 || block.variants.some((variant) => variant.conditions.game !== undefined));
+  const needsGame = [...blocks.values()].some((block) =>
+    block.games.length > 0 || block.variants.some((variant) => variant.conditions.game !== undefined),
+  );
   const persistChoice = async (name: string, variantId: string, length: number): Promise<number> => {
+    if (length <= 1 || context.mode !== "chat") return 0;
     const row = await db.prepare(
       `UPDATE text_block_variants SET last_chosen_index = CASE
-         WHEN ? <= 1 THEN 0
          WHEN last_chosen_index >= 0 AND last_chosen_index < ?
            THEN (last_chosen_index + 1 + abs(random() % (? - 1))) % ?
          ELSE abs(random() % ?)
        END
        WHERE channel_id = ? AND block_name = ? AND variant_id = ? RETURNING last_chosen_index`,
-    ).bind(length, length, length, length, length, channelId, name, variantId).first<{ last_chosen_index: number }>();
+    ).bind(length, length, length, length, channelId, name, variantId).first<{ last_chosen_index: number }>();
     return row?.last_chosen_index ?? 0;
   };
   const selectedTextByVariant = new Map<string, Promise<string>>();
   const expandedBlockByPath = new Map<string, Promise<{ text: string; complete: boolean }>>();
-  const diagnostics: ModuleDiagnostic[] = [];
-  const diagnosticKeys = new Set<string>();
   let remainingSteps = MAX_EXPANSION_STEPS;
-  const resolveChunk = async (chunk: string): Promise<string> => {
-    if (context.resolveTemplateVariables === undefined || !HOST_TEMPLATE_VARIABLE_PATTERN.test(chunk)) return chunk;
-    const resolved = await context.resolveTemplateVariables(chunk);
-    for (const diagnostic of resolved.diagnostics) {
-      const key = JSON.stringify(diagnostic);
-      if (diagnosticKeys.has(key)) continue;
-      diagnosticKeys.add(key);
-      diagnostics.push(diagnostic);
-    }
-    return resolved.text;
-  };
-  let streamState: ModuleStreamState | undefined;
+  let streamState: Awaited<ReturnType<typeof context.streamState>> | undefined;
   let currentGame: TwitchGame | null | undefined;
   const state = async (): Promise<TextBlockState> => {
     if (needsStream && streamState === undefined) streamState = await context.streamState();
-    if (needsGame && currentGame === undefined) currentGame = await context.currentGame();
+    if (needsGame && currentGame === undefined) {
+      const gameId = await context.channelGameId?.();
+      currentGame = gameId === undefined || gameId === null || gameId.length === 0 ? null : { id: gameId, name: "" };
+    }
     return {
       streamState: streamState ?? "unknown",
       game: currentGame ?? null,
@@ -182,6 +144,12 @@ export const createTextBlockTemplateExpander = (
       now: context.now,
     };
   };
+
+  const resolveHostFragment = async (fragment: string): Promise<string> => {
+    const rendered = await context.renderTemplate(fragment, context.mode);
+    rendered.diagnostics.forEach(context.addDiagnostic);
+    return rendered.text;
+  };
   const expand = async (
     source: string,
     ancestry: readonly string[],
@@ -190,7 +158,7 @@ export const createTextBlockTemplateExpander = (
     if (budget <= 0) return { text: "", complete: source.length === 0 };
     const tokens = [...source.matchAll(/\{([a-z0-9_]{1,32})\}/gu)];
     if (tokens.length === 0) {
-      const resolved = await resolveChunk(source);
+      const resolved = await resolveHostFragment(source);
       return { text: resolved.slice(0, budget), complete: resolved.length <= budget };
     }
     const currentState = await state();
@@ -206,10 +174,10 @@ export const createTextBlockTemplateExpander = (
       if (remainingSteps < 0) return { text: result, complete: false };
       const name = token[1];
       const start = token.index;
-      if (name === undefined || knownVariables.has(name) || ancestry.includes(name) || ancestry.length >= 3) continue;
+      if (name === undefined || context.knownTemplateVariableNames.has(name) || ancestry.includes(name) || ancestry.length >= 3) continue;
       const block = blocks.get(name);
       if (block === undefined) continue;
-      if (!append(await resolveChunk(source.slice(offset, start)))) return { text: result, complete: false };
+      if (!append(await resolveHostFragment(source.slice(offset, start)))) return { text: result, complete: false };
       if (!textBlockAppliesToGame(block, currentState.game?.id ?? null)) {
         offset = start + token[0].length;
         continue;
@@ -241,20 +209,44 @@ export const createTextBlockTemplateExpander = (
       offset = start + token[0].length;
     }
     if (offset === 0) {
-      const resolved = await resolveChunk(source);
+      const resolved = await resolveHostFragment(source);
       return { text: resolved.slice(0, budget), complete: resolved.length <= budget };
     }
-    const complete = append(await resolveChunk(source.slice(offset)));
+    const complete = append(await resolveHostFragment(source.slice(offset)));
     return { text: result, complete };
   };
 
-  const expanded = await expand(text, [], EXPANSION_BUDGET);
-  return {
-    text: expanded.text,
-    used: true,
-    outputLimit: 500,
-    complete: expanded.complete,
-    variablesResolved: context.resolveTemplateVariables !== undefined,
-    diagnostics,
-  };
+  const values: Record<string, string> = {};
+  for (const name of requestedBlocks) {
+    if (!blocks.has(name)) continue;
+    const currentState = await state();
+    const block = blocks.get(name);
+    if (block === undefined || !textBlockAppliesToGame(block, currentState.game?.id ?? null)) {
+      values[name] = "";
+      continue;
+    }
+    const selected = firstMatchingTextBlockVariant(block.variants, currentState);
+    if (selected === null) {
+      values[name] = "";
+      continue;
+    }
+    const selectionKey = `${name}\u0000${selected.id}`;
+    let selectedTextPromise = selectedTextByVariant.get(selectionKey);
+    if (selectedTextPromise === undefined) {
+      selectedTextPromise = (async () => {
+        const index = await persistChoice(name, selected.id, selected.texts.length);
+        return selected.texts[index] ?? selected.texts[0] ?? "";
+      })();
+      selectedTextByVariant.set(selectionKey, selectedTextPromise);
+    }
+    const selectedText = await selectedTextPromise;
+    const expanded = await expand(selectedText, [name], EXPANSION_BUDGET);
+    if (!expanded.complete || expanded.text.length > 500) {
+      context.addDiagnostic({ code: "template_truncated", detail: { current: expanded.text.length } });
+      values[name] = `${expanded.text.slice(0, 499)}…`;
+    } else {
+      values[name] = expanded.text;
+    }
+  }
+  return values;
 };

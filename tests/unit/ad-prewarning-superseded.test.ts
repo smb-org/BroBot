@@ -45,7 +45,7 @@ describe("ad prewarning schedule generations", () => {
         manual: "m",
         prewarning: true,
         leadSeconds: 60,
-        prewarningText: "In {seconds} Sekunden startet die Werbung.",
+        prewarningText: "In {ads.seconds} Sekunden startet die Werbung.",
       }),
     });
     mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
@@ -120,7 +120,7 @@ describe("ad prewarning schedule generations", () => {
         manual: "m",
         prewarning: true,
         leadSeconds: 60,
-        prewarningText: "In {seconds} Sekunden startet die Werbung.",
+        prewarningText: "In {ads.seconds} Sekunden startet die Werbung.",
       }),
     });
     mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });

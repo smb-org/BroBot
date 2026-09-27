@@ -13,7 +13,8 @@ import { commandListReply, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsF
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions } from "../../../dashboard/ui";
-import { createTextCommand, deleteTextCommand, loadTextCommandData, loadTextLibraryBlocks, saveTextCommand, searchTextGames, toggleTextCommand, type TextCommandChannelVariable } from "./service";
+import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, saveTextCommand, searchTextGames, textBlockNamesForPicker, toggleTextCommand, type TextCommandChannelVariable } from "./service";
+import type { ModuleRegisteredTemplateVariable } from "../../contract";
 import { textCommandsTexts } from "./locale";
 
 const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
@@ -165,7 +166,8 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const [attemptedSave, setAttemptedSave] = useState(false);
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [minimumTierExplicit, setMinimumTierExplicit] = useState(false);
-  const [libraryBlocks, setLibraryBlocks] = useState<readonly string[]>([]);
+  const [registeredVariables, setRegisteredVariables] = useState<readonly ModuleRegisteredTemplateVariable[]>([]);
+  const libraryBlocks = textBlockNamesForPicker(registeredVariables);
   const [selectedLibraryBlock, setSelectedLibraryBlock] = useState("");
   const isCreate = command === null;
   const blockVariables: TemplateVariable[] = libraryBlocks.map((name) => ({ name, group: "channel", sample: name, maxLength: 500 }));
@@ -175,6 +177,15 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const templateVariables = () => [
     ...panelTemplateOptions("chat_command", [], channelVariables, resolvedLanguage),
     ...libraryBlocks.map((name) => ({ name, description: labels.libraryText, sample: name, group: "channel" as const, kind: "module" as const })),
+    ...registeredVariables.filter((variable) => !variable.isTextBlock && variable.name.includes(".") && (variable.contexts?.includes("chat_command") ?? true)).map((variable) => ({
+      name: variable.name,
+      description: variable.name,
+      sample: variable.sample,
+      group: variable.group ?? "channel" as const,
+      kind: "module" as const,
+      ...(variable.external === undefined ? {} : { external: variable.external }),
+      ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+    })),
   ];
   const templateValue = (field: CommandTemplateField): string => draft[field];
   const normalizedName = normalizeCommandName(draft.name);
@@ -233,7 +244,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
 
   useEffect(() => {
     let active = true;
-    loadTextLibraryBlocks(channelId).then((blocks) => { if (active) setLibraryBlocks(blocks); }).catch(() => { if (active) setLibraryBlocks([]); });
+    loadRegisteredTemplateVariables(channelId).then((variables) => { if (active) setRegisteredVariables(variables); }).catch(() => { if (active) setRegisteredVariables([]); });
     return () => { active = false; };
   }, [channelId]);
 

@@ -7,10 +7,18 @@ import { helixRequest } from "./twitch/helix";
 
 const CHAT_MESSAGES_URL = "https://api.twitch.tv/helix/chat/messages";
 const CHAT_MESSAGE_MAXIMUM_LENGTH = 500;
+const CHAT_MENTION_PREFIX = /^@[a-zA-Z0-9_]{1,25} /u;
 
-export const truncateChatText = (text: string): { text: string; truncated: boolean } => text.length <= CHAT_MESSAGE_MAXIMUM_LENGTH
-  ? { text, truncated: false }
-  : { text: `${text.slice(0, CHAT_MESSAGE_MAXIMUM_LENGTH - 1)}…`, truncated: true };
+export const truncateChatText = (text: string): { text: string; truncated: boolean } => {
+  if (text.length <= CHAT_MESSAGE_MAXIMUM_LENGTH) return { text, truncated: false };
+  const prefix = CHAT_MENTION_PREFIX.exec(text)?.[0] ?? "";
+  const body = text.slice(prefix.length);
+  const availableBodyLength = CHAT_MESSAGE_MAXIMUM_LENGTH - prefix.length;
+  return {
+    text: `${prefix}${body.slice(0, Math.max(0, availableBodyLength - 1))}…`,
+    truncated: true,
+  };
+};
 
 export interface ChatSendResult {
   sent: boolean;

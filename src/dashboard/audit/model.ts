@@ -251,7 +251,9 @@ const sentencePartValue = (action: string, before: Record<string, unknown> | nul
   if (action === "channel.variable.renamed" || action === "text_library.category.renamed") {
     return { from: recordText(before, "name"), to: recordText(after, "name") };
   }
-  if (action === "text_library.settings.updated") return { from: recordText(before, "timeZone"), to: recordText(after, "timeZone") };
+  if (action === "text_library.settings.updated" || action === "channel.time_zone.updated") {
+    return { from: recordText(before, "timeZone"), to: recordText(after, "timeZone") };
+  }
   if (action === "ads.commercial_started") {
     const length = recordValue(after, "length");
     return { from: null, to: typeof length === "number" ? `${String(length)} s` : null };

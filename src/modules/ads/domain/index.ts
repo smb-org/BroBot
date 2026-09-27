@@ -5,8 +5,8 @@ import type { TemplateValues } from "../contract";
 
 export const renderAdBreakText = (template: string, duration: number): string => {
   const normalized = template.trim();
-  const values: TemplateValues<typeof ADS_TEMPLATE_FIELDS.automatic> = { duration };
-  return templateVariableNames(normalized).includes("duration")
+  const values: TemplateValues<typeof ADS_TEMPLATE_FIELDS.automatic> = { "ads.duration": duration };
+  return templateVariableNames(normalized).includes("ads.duration")
     ? renderTemplate(normalized, values)
     : `${renderTemplate(normalized, {})} (${String(duration)} Sekunden)`;
 };
@@ -126,7 +126,7 @@ export const decideAdPrewarning = (
   const seconds = Math.round(remainingMs / 1000);
   return {
     kind: "announce",
-    text: renderPrewarningText(input.settings.prewarningText, { seconds }),
+    text: renderPrewarningText(input.settings.prewarningText, { "ads.seconds": seconds }),
     seconds,
     scheduledAt: input.schedule.nextAdAt ?? new Date(nextAdAtMs).toISOString(),
   };

@@ -42,7 +42,7 @@ const panelFetch = ({ commands = () => [makeCommand()], onMutation = () => jsonR
     const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-    if (url.pathname.endsWith("/modules/text_library/blocks") && method === "GET") return Promise.resolve(jsonResponse({ blocks: [{ name: "welcome" }] }));
+    if (url.pathname.endsWith("/template-variables") && method === "GET") return Promise.resolve(jsonResponse({ variables: [{ name: "welcome", moduleId: "text_library", isTextBlock: true }] }));
     if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: [] }));
     if (url.pathname.includes("/commands/") || (url.pathname.endsWith("/commands") && method !== "GET")) {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
@@ -149,7 +149,7 @@ describe("Text command editor", () => {
     renderPanel(fetcher);
     await selectCommand();
 
-    await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/modules/text_library/blocks")));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/template-variables")));
     const picker = document.querySelector(".command-library-picker");
     if (!(picker instanceof HTMLElement)) throw new Error("Text-library picker is missing");
     fireEvent.click(within(picker).getByRole("combobox", { name: "Text aus Bibliothek" }));

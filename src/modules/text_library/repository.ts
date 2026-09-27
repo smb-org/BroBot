@@ -31,5 +31,4 @@ export interface TextBlockRepository {
   renameCategory(channelId: string, categoryId: string, customName: string, actor: TextBlockActor, now: string): Promise<{ ok: boolean }>;
   createCategory(channelId: string, name: string, actor: TextBlockActor, now: string): Promise<TextBlockCategory | null>;
   deleteCategory(channelId: string, categoryId: string, actor: TextBlockActor, now: string): Promise<"ok" | "not_found" | "not_empty">;
-  updateTimeZone(channelId: string, timeZone: string, revision: number, actor: TextBlockActor, now: string): Promise<boolean>;
 }

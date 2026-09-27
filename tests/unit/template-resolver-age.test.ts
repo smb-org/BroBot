@@ -20,6 +20,9 @@ const renderAge = async (
     chatStatus: null,
   };
   const sources: TemplateResolverSources = {
+    DB: {} as D1Database,
+    channelInfo: () => Promise.resolve(null),
+    channelTimeZone: () => Promise.resolve("UTC"),
     streamState: () => Promise.resolve("unknown"),
     channelDetails: () => Promise.resolve(null),
     streamDetails: () => Promise.resolve(null),

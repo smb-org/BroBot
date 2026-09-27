@@ -1,14 +1,12 @@
 import type { ModuleTemplateMinimumTier } from "../../contract";
+import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN } from "../../../contracts/template-names";
 
 export {
-  TEXT_LIBRARY_BLOCKS_PATH,
-  TEXT_LIBRARY_GAME_SEARCH_PATH,
   TEXT_LIBRARY_LIBRARY_PATH,
-  TEXT_LIBRARY_MODULE_ID,
 } from "../../contracts/text-library";
 export type { TextLibraryBlockSummary } from "../../contracts/text-library";
 
-export const TEXT_BLOCK_NAME_PATTERN = /^[a-z0-9_]{1,32}$/u;
+export const TEXT_BLOCK_NAME_PATTERN = TEMPLATE_BARE_VARIABLE_NAME_PATTERN;
 export const TEXT_BLOCK_MAXIMUMS = {
   blocksPerChannel: 200,
   variantsPerBlock: 10,
@@ -71,7 +69,6 @@ export interface TextBlockSaveInput extends TextBlockMutationInput {
 }
 
 export interface TextLibrarySettings {
-  timeZone: string;
   revision: number;
   graphRevision: number;
   updatedAt: string;

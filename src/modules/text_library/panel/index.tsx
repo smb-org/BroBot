@@ -3,10 +3,10 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 import type { ModulePanelProperties } from "../../contract";
 import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
 import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
-import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName, validTimeZone } from "../domain";
+import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { Badge, Button, ChatPreview, ConfirmDialog, DangerSection, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, registerDashboardNavigationGuard, Select, SubInspector, TextArea, useDraftGuard } from "../../../dashboard/ui";
-import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../contract";
+import { SYSTEM_TEMPLATE_VARIABLE_LIST, templateVariableNames } from "../../contract";
 import { textLibraryTexts } from "./locale";
 import {
   createTextBlock,
@@ -14,10 +14,10 @@ import {
   deleteTextBlock,
   deleteTextCategory,
   loadTextLibrary,
+  renderTextLibraryPreview,
   renameTextCategory,
   searchTextLibraryGames,
   saveTextBlock,
-  saveTextLibraryTimeZone,
 } from "./service";
 
 interface DraftBlock {
@@ -50,13 +50,18 @@ const draftFromBlock = (block: TextBlock): DraftBlock => ({
 const categoryLabel = (category: TextBlockCategory, labels: ReturnType<typeof textLibraryTexts>): string =>
   category.customName ?? (category.catalogKey === null ? category.id : labels.categoryLabels[category.catalogKey]);
 
-const formatEstimate = (text: string, blockNames: ReadonlySet<string>): number => {
+const formatEstimate = (
+  text: string,
+  blockNames: ReadonlySet<string>,
+  registeredVariables: readonly { name: string; maxLength: number }[] = [],
+): number => {
   let length = text.length;
   for (const match of text.matchAll(/\{([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)\}/gu)) {
     const name = match[1];
     if (name === undefined) continue;
     const replacementLength = blockNames.has(name) ? TEXT_BLOCK_MAXIMUMS.renderedLength
-      : SYSTEM_TEMPLATE_VARIABLE_LIST.find((variable) => variable.name === name)?.maxLength ?? match[0].length;
+      : registeredVariables.find((variable) => variable.name === name)?.maxLength ??
+        SYSTEM_TEMPLATE_VARIABLE_LIST.find((variable) => variable.name === name)?.maxLength ?? match[0].length;
     length += replacementLength - match[0].length;
   }
   return length;
@@ -110,7 +115,6 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const [error, setError] = useState("");
   const [showCategories, setShowCategories] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
-  const [timezoneDraft, setTimezoneDraft] = useState("");
   const [categoryDrafts, setCategoryDrafts] = useState<Record<string, string>>({});
   const [previewNow, setPreviewNow] = useState(() => Date.now());
 
@@ -122,7 +126,6 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const refresh = useCallback(async (select?: string): Promise<void> => {
     const next = await loadTextLibrary(channelId);
     setData(next);
-    setTimezoneDraft(next.settings.timeZone);
     if (select !== undefined) {
       const selected = next.blocks.find((block) => block.name === select);
       if (selected !== undefined) {
@@ -151,7 +154,6 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     loadTextLibrary(channelId).then((next) => {
       if (!active) return;
       setData(next);
-      setTimezoneDraft(next.settings.timeZone);
     }).catch(() => { if (active) setError(labels.loadError); });
     return () => { active = false; };
   }, [channelId, labels.loadError]);
@@ -190,11 +192,30 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
       ? [simulatedTier === "everyone" ? "viewer" : simulatedTier as "subscriber" | "vip" | "moderator" | "broadcaster"]
       : null,
     commandContext: simulatedContext === "command",
-    timeZone: data.settings.timeZone,
+    timeZone: data.channelSettings.timeZone,
     now: previewNow,
   });
-  const previewText = matchingVariant?.texts[0] ?? "";
-  const previewLength = matchingVariant === null ? 0 : Math.max(...matchingVariant.texts.map((text) => formatEstimate(text, blockNames)));
+  const previewTemplate = matchingVariant?.texts[0] ?? "";
+  const [previewResult, setPreviewResult] = useState<{ template: string; text: string } | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (data === null || previewTemplate.length === 0) return () => { active = false; };
+    const chatStatus: ("viewer" | "subscriber" | "vip" | "moderator" | "broadcaster")[] | null = simulatedContext === "command"
+      ? [simulatedTier === "everyone" ? "viewer" : simulatedTier as "subscriber" | "vip" | "moderator" | "broadcaster"]
+      : null;
+    renderTextLibraryPreview(channelId, {
+      text: previewTemplate,
+      templateContext: simulatedContext === "command" ? "chat_command" : "event",
+      streamState: simulatedStream,
+      game: simulatedGame[0] ?? null,
+      chatStatus,
+    }).then((result) => {
+      if (active) setPreviewResult({ template: previewTemplate, text: result.text });
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [channelId, data, previewNow, previewTemplate, simulatedContext, simulatedGame, simulatedStream, simulatedTier]);
+  const previewText = previewResult?.template === previewTemplate ? previewResult.text : previewTemplate;
+  const previewLength = matchingVariant === null ? 0 : Math.max(...matchingVariant.texts.map((text) => formatEstimate(text, blockNames, data?.templateVariables)));
   const previewTooLong = previewLength > TEXT_BLOCK_MAXIMUMS.renderedLength;
   const nestedVariants = (name: string, visited = new Set<string>()): TextBlockVariant[] => {
     if (visited.has(name)) return [];
@@ -206,7 +227,12 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const variantsInDraftTree = draft === null ? [] : nestedVariants(draft.name);
   const roleConditionUsedOutsideCommand = draft !== null && variantsInDraftTree.some((variant) => variant.conditions.minimumTier !== undefined) &&
     (data?.usages[draft.name] ?? []).some((usage) => usage.kind !== "command");
-  const inputVariableUsedOutsideCommand = draft !== null && variantsInDraftTree.some((variant) => variant.texts.some((text) => /\{(?:args|convert)\}/u.test(text))) &&
+  const commandInputVariables = new Set(data?.templateVariables
+    .filter((variable) => variable.unavailableContextText !== undefined && !(variable.contexts?.includes("event") ?? true))
+    .map((variable) => variable.name) ?? []);
+  const inputVariableUsedOutsideCommand = draft !== null && variantsInDraftTree.some((variant) => variant.texts.some((text) =>
+    templateVariableNames(text).some((name) => commandInputVariables.has(name)),
+  )) &&
     (data?.usages[draft.name] ?? []).some((usage) => usage.kind !== "command");
 
   const openCreateNow = (): void => {
@@ -326,18 +352,6 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     finally { setPending(false); }
   };
 
-  const saveTimeZone = async (): Promise<void> => {
-    if (data === null || !validTimeZone(timezoneDraft) || !canManage) {
-      setError(labels.timezoneInvalid);
-      return;
-    }
-    setPending(true);
-    setError("");
-    try { await saveTextLibraryTimeZone(channelId, timezoneDraft, data.settings.revision); await refresh(); }
-    catch (caught: unknown) { setError(errorCode(caught) === "text_library_settings_conflict" ? labels.conflict : labels.timezoneInvalid); }
-    finally { setPending(false); }
-  };
-
   if (data === null) return <section className="module-stack" aria-label={labels.library}><p className={error ? "form-error" : "loading-line"}>{error || labels.loading}</p></section>;
   const categories = data.categories.map((category) => ({ value: category.id, label: categoryLabel(category, labels) }));
   const categoryBlockCounts = new Map(data.categories.map((category) => [category.id, data.blocks.filter((block) => block.categoryId === category.id).length]));
@@ -409,7 +423,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
               <InspectorSection title={labels.variants} help={labels.variantsCount(draft.variants.length)}>
                 {draft.variants.map((variant, index) => {
                   const isDefault = index === draft.variants.length - 1;
-                  const variantPreviewLength = Math.max(...variant.texts.map((text) => formatEstimate(text, blockNames)));
+                  const variantPreviewLength = Math.max(...variant.texts.map((text) => formatEstimate(text, blockNames, data.templateVariables)));
                   return (
                     <article className="text-library__variant" key={variant.id}>
                       <div className="text-library__variant-heading">
@@ -464,7 +478,15 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         {variant.texts.map((text, textIndex) => (
                           <div className="text-library__text-field" key={`${variant.id}-${String(textIndex)}`}>
                             <TextArea label={`${labels.text}${variant.texts.length > 1 ? ` ${String(textIndex + 1)}` : ""}`} hint={labels.textHint} value={text} onChange={(value) => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.map((current, currentIndex) => currentIndex === textIndex ? value : current) })) })} maxLength={TEXT_BLOCK_MAXIMUMS.textLength} disabled={pending} variables={[
-                              ...SYSTEM_TEMPLATE_VARIABLE_LIST.flatMap((variable) => variable.group === undefined ? [] : [{ name: variable.name, description: variable.name, sample: variable.sample, group: variable.group, kind: "system" as const, ...(variable.external === undefined ? {} : { external: variable.external }), ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }) }]),
+                              ...data.templateVariables.filter((variable) => !data.blocks.some((block) => block.name === variable.name)).flatMap((variable) => variable.group === undefined ? [] : [{
+                                name: variable.name,
+                                description: variable.name,
+                                sample: variable.sample,
+                                group: variable.group,
+                                kind: variable.moduleId === "host" ? variable.source === "channel" ? "channel" as const : "system" as const : "module" as const,
+                                ...(variable.external === undefined ? {} : { external: variable.external }),
+                                ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+                              }]),
                               ...data.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => ({ name: block.name, description: labels.variableDescription(block.name), sample: block.variants.flatMap((entry) => entry.texts)[0] ?? "", group: "channel" as const })),
                             ]} messages={{
                               countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
@@ -516,7 +538,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                   {previewTooLong ? <p className="text-library__warning" role="note">{labels.previewTooLong(previewLength)}</p> : null}
                 </>}
                 {roleConditionUsedOutsideCommand ? <p className="text-library__warning" role="note">{labels.roleConditionHint}</p> : null}
-                {inputVariableUsedOutsideCommand ? <p className="text-library__warning" role="note">{labels.argsContextWarning}</p> : null}
+                {inputVariableUsedOutsideCommand ? <p className="text-library__warning" role="note">{labels.inputContextWarning}</p> : null}
               </InspectorSection>
 
               <InspectorSection title={labels.uses}>
@@ -562,16 +584,11 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
             <Button disabled={pending || newCategoryName.trim().length === 0 || data.categories.length >= 25} onClick={() => { void addCategory(); }}>{labels.categoryAdd}</Button>
             {data.categories.length >= 25 ? <p className="muted">{labels.categoryLimit}</p> : null}
           </div>
-          <div className="text-library__timezone">
-            <Field label={labels.timezone} hint={labels.timezoneHint} value={timezoneDraft} onChange={setTimezoneDraft} disabled={pending} {...(timezoneDraft.length > 0 && !validTimeZone(timezoneDraft) ? { error: labels.timezoneInvalid } : {})} />
-            <Button disabled={pending || timezoneDraft === data.settings.timeZone || !validTimeZone(timezoneDraft)} onClick={() => { void saveTimeZone(); }}>{labels.save}</Button>
-          </div>
           </InspectorSection>
           </> : <>
             <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p>
             <dl className="text-library__read-only-properties">
               {data.categories.map((category) => <div key={category.id}><dt>{`${labels.categoryName}: ${categoryLabel(category, labels)}`}</dt><dd>{category.customName ?? categoryLabel(category, labels)}</dd></div>)}
-              <div><dt>{labels.timezone}</dt><dd>{data.settings.timeZone}</dd></div>
             </dl>
           </>}
         </div>

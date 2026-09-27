@@ -338,6 +338,21 @@ export const fetchChannelOverview = (
   requestOptions(signal),
 );
 
+export interface PanelChannelSettings {
+  timeZone: string;
+  revision: number;
+}
+
+export const fetchChannelSettings = (channelId: string): Promise<PanelChannelSettings> =>
+  requestJson<PanelChannelSettings>(channelPath(channelId, "settings"));
+
+export const saveChannelTimeZone = (
+  channelId: string,
+  revision: number,
+  timeZone: string,
+): Promise<{ ok: boolean; timeZone: string; revision: number }> =>
+  requestMutation(channelPath(channelId, "settings"), "PATCH", { revision, timeZone });
+
 export const fetchSystemOverview = (
   channelId: string,
   signal?: AbortSignal,

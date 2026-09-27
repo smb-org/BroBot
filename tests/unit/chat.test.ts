@@ -4,7 +4,7 @@ import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import {
   upsertBotIdentity,
 } from "../../src/worker/db/bot-identity";
-import { sendChatMessage } from "../../src/worker/chat";
+import { sendChatMessage, truncateChatText } from "../../src/worker/chat";
 import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -43,6 +43,15 @@ const seedBot = async (database: TestD1Database): Promise<void> => {
 };
 
 describe("Helix chat", () => {
+  it("keeps a leading @login prefix inside the single 500-character chat limit", () => {
+    const text = `@fictional_viewer ${"x".repeat(600)}`;
+    const result = truncateChatText(text);
+
+    expect(result.truncated).toBe(true);
+    expect(result.text).toBe(`@fictional_viewer ${"x".repeat(481)}…`);
+    expect(result.text).toHaveLength(500);
+  });
+
   it("sends with app token, bot id, channel id, and for_source_only false", async () => {
     const database = new TestD1Database();
     try {

@@ -1,8 +1,8 @@
 import type { TextCommand, TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, TextCommandStreamCondition } from "../contracts";
-import { TEXT_LIBRARY_BLOCKS_PATH, TEXT_LIBRARY_GAME_SEARCH_PATH, TEXT_LIBRARY_MODULE_ID, type TextLibraryBlockSummary } from "../../contracts/text-library";
 import type { TextCommandGame as TwitchGame } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
 import type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../contract";
+import type { ModuleRegisteredTemplateVariable } from "../../contract";
 
 export interface TextCommandChannelVariable {
   name: string;
@@ -14,6 +14,9 @@ export interface TextCommandPanelData {
   commands: TextCommand[];
   variables: TextCommandChannelVariable[];
 }
+
+export const textBlockNamesForPicker = (variables: readonly ModuleRegisteredTemplateVariable[]): string[] =>
+  variables.filter((variable) => variable.isTextBlock).map(({ name }) => name);
 
 const pathFor = (channelId: string, name?: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/text_commands/commands${name === undefined ? "" : `/${encodeURIComponent(name)}`}`;
@@ -36,14 +39,13 @@ export const loadTextCommandData = async (channelId: string): Promise<TextComman
 
 export const loadTextCommands = async (channelId: string): Promise<TextCommand[]> => (await loadTextCommandData(channelId)).commands;
 
-export const loadTextLibraryBlocks = async (channelId: string): Promise<readonly string[]> => {
-  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/${TEXT_LIBRARY_MODULE_ID}${TEXT_LIBRARY_BLOCKS_PATH}`);
-  const data = await json<{ blocks: readonly TextLibraryBlockSummary[] }>(response);
-  return data.blocks.map((block) => block.name);
+export const loadRegisteredTemplateVariables = async (channelId: string): Promise<readonly ModuleRegisteredTemplateVariable[]> => {
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/template-variables`);
+  return (await json<{ variables: readonly ModuleRegisteredTemplateVariable[] }>(response)).variables;
 };
 
 export const searchTextGames = async (channelId: string, query: string): Promise<readonly TwitchGame[]> => {
-  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/${TEXT_LIBRARY_MODULE_ID}${TEXT_LIBRARY_GAME_SEARCH_PATH}?q=${encodeURIComponent(query)}`);
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/games?q=${encodeURIComponent(query)}`);
   return (await json<{ games: TwitchGame[] }>(response)).games;
 };
 

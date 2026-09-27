@@ -122,8 +122,8 @@ export const systemTemplateVariableLocale: Readonly<Record<DashboardLanguage, Sy
     uses: { description: "Auslösungen dieses Befehls einschließlich dieser", sample: "12" },
     cooldown: { description: "Abkühlzeit des Befehls in Sekunden", sample: "5" },
     command: { description: "Befehlsname oder verwendeter Alias", sample: "hallo" },
-    date: { description: "Heutiges Datum in Europe/Berlin", sample: "23.09.2026" },
-    time: { description: "Aktuelle Uhrzeit in Europe/Berlin", sample: "20:15" },
+    date: { description: "Heutiges Datum in der Kanalzeitzone", sample: "23.09.2026" },
+    time: { description: "Aktuelle Uhrzeit in der Kanalzeitzone", sample: "20:15" },
     random: { description: "Zufallszahl; Beispielbereich 1–100", sample: "73" },
     pick: { description: "Zufällige Auswahl aus deinen Optionen", sample: "Kopf" },
   },
@@ -146,8 +146,8 @@ export const systemTemplateVariableLocale: Readonly<Record<DashboardLanguage, Sy
     uses: { description: "Command triggers including this one", sample: "12" },
     cooldown: { description: "Command cooldown in seconds", sample: "5" },
     command: { description: "Command name or alias used", sample: "hello" },
-    date: { description: "Today's date in Europe/Berlin", sample: "23.09.2026" },
-    time: { description: "Current time in Europe/Berlin", sample: "20:15" },
+    date: { description: "Today's date in the channel time zone", sample: "23.09.2026" },
+    time: { description: "Current time in the channel time zone", sample: "20:15" },
     random: { description: "Random number; example range 1–100", sample: "73" },
     pick: { description: "Random choice from your options", sample: "Heads" },
   },
@@ -1030,6 +1030,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       sentenceTemplates: {
         "channel.released": ({ actor, object }) => `${actor} gab den Kanal ${object} frei`,
         "channel.full_consent_changed": ({ actor, object, from, to }) => `${actor} änderte die Vollzustimmung für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
+        "channel.time_zone.updated": ({ actor, object, from, to }) => `${actor} änderte die Zeitzone für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "member.added": ({ actor, object, to }) => `${actor} fügte ${object}${to === null ? "" : ` als ${to}`} hinzu`,
         "member.role_changed": ({ actor, object, from, to }) => `${actor} änderte die Rolle von ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "member.removed": ({ actor, object, from }) => `${actor} entfernte ${object}${from === null ? "" : ` mit der Rolle ${from}`}`,
@@ -1282,6 +1283,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       changedTruncated: "changed (text longer than preview)", changesHeading: "Changes",
       sentenceTemplates: {
         "channel.released": ({ actor, object }) => `${actor} released channel ${object}`,
+        "channel.time_zone.updated": ({ actor, object, from, to }) => `${actor} changed the time zone for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
         "channel.full_consent_changed": ({ actor, object, from, to }) => `${actor} changed full consent for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
         "member.added": ({ actor, object, to }) => `${actor} added ${object}${to === null ? "" : ` as ${to}`}`,
         "member.role_changed": ({ actor, object, from, to }) => `${actor} changed ${object}'s role from ${from ?? "—"} to ${to ?? "—"}`,
@@ -1936,6 +1938,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
       return `Befehl !${name} unterdrückt: nur wenn der Stream ${allowed} ist (gerade ${current})`;
     }),
     "text_commands.game_filter": (detail) => eventTextWithName(detail, "Befehl durch Spiel-Filter unterdrückt", (name) => `Befehl !${name} unterdrückt: anderes Spiel`),
+    "text_commands.game_unknown": (detail) => eventTextWithName(detail, "Spiel unbekannt; Filter übersprungen", (name) => `Befehl !${name} ausgeführt: aktuelles Spiel unbekannt, Filter übersprungen`),
     "text_commands.triggered": (detail) => eventTextWithName(detail, "Befehl ausgeführt", (name) => `Befehl !${name} ausgeführt`),
     "text_commands.disabled": (detail) => eventTextWithName(detail, "Textbefehl ausgeschaltet", (name) => `Textbefehl !${name} ausgeschaltet`),
     "text_commands.permission_denied": (detail) => eventTextWithName(detail, "Textbefehl nicht berechtigt", (name) => `Befehl !${name} nicht ausgelöst: Mindeststufe ${textCommandTier(detail, "requiredTier", "unbekannt", "de")}, vorhanden ${textCommandTier(detail, "currentTier", "kein Chat-Status", "de")}`),
@@ -2035,6 +2038,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
       return `Command !${name} suppressed: only when the stream is ${allowed} (currently ${current})`;
     }),
     "text_commands.game_filter": (detail) => eventTextWithName(detail, "Command suppressed by game filter", (name) => `Command !${name} suppressed: current game is not selected`),
+    "text_commands.game_unknown": (detail) => eventTextWithName(detail, "Game unknown; filter skipped", (name) => `Command !${name} ran: current game unknown, filter skipped`),
     "text_commands.triggered": (detail) => eventTextWithName(detail, "Command executed", (name) => `Command !${name} executed`),
     "text_commands.disabled": (detail) => eventTextWithName(detail, "Text command disabled", (name) => `Text command !${name} disabled`),
     "text_commands.permission_denied": (detail) => eventTextWithName(detail, "Text command not authorized", (name) => `Command !${name} not executed: minimum level ${textCommandTier(detail, "requiredTier", "unknown", "en")}, present ${textCommandTier(detail, "currentTier", "no chat status", "en")}`),
@@ -2120,6 +2124,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "text_commands.user_cooldown": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: "remainingSeconds", tone: "info" },
   "text_commands.stream_state": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.game_filter": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "text_commands.game_unknown": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.triggered": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.disabled": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.permission_denied": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
@@ -2157,6 +2162,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
   de: {
     "channel.released": "Kanal freigegeben",
     "channel.full_consent_changed": "Vollzustimmung geändert",
+    "channel.time_zone.updated": "Kanalzeitzone geändert",
     "member.added": "Mitglied hinzugefügt",
     "member.role_changed": "Mitgliedsrolle geändert",
     "member.removed": "Mitglied entfernt",
@@ -2195,6 +2201,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
   en: {
     "channel.released": "Channel released",
     "channel.full_consent_changed": "Full consent changed",
+    "channel.time_zone.updated": "Channel time zone changed",
     "member.added": "Member added",
     "member.role_changed": "Member role changed",
     "member.removed": "Member removed",
@@ -2256,7 +2263,7 @@ export const auditUnknownActionLabel = (language: DashboardLanguage = dashboardL
 
 const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> = {
   de: {
-    "channel.released": "Kanal", "channel.full_consent_changed": "Kanal",
+    "channel.released": "Kanal", "channel.full_consent_changed": "Kanal", "channel.time_zone.updated": "Kanal",
     "member.added": "Mitglied", "member.role_changed": "Mitglied", "member.removed": "Mitglied",
     "module.enabled": "Modul", "module.disabled": "Modul",
     "text_commands.command.created": "Textbefehl", "text_commands.command.updated": "Textbefehl", "text_commands.command.removed": "Textbefehl",
@@ -2270,7 +2277,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "overlay.created": "Overlay", "overlay.updated": "Overlay", "overlay.deleted": "Overlay", "overlay.legacy.imported": "Overlay-Link",
   },
   en: {
-    "channel.released": "channel", "channel.full_consent_changed": "channel",
+    "channel.released": "channel", "channel.full_consent_changed": "channel", "channel.time_zone.updated": "channel",
     "member.added": "member", "member.role_changed": "member", "member.removed": "member",
     "module.enabled": "module", "module.disabled": "module",
     "text_commands.command.created": "text command", "text_commands.command.updated": "text command", "text_commands.command.removed": "text command",

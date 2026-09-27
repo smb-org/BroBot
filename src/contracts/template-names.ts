@@ -1,0 +1,5 @@
+export const TEMPLATE_BARE_VARIABLE_NAME_SOURCE = "[a-z0-9_]{1,32}";
+export const TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE = "[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+";
+
+export const TEMPLATE_BARE_VARIABLE_NAME_PATTERN = new RegExp(`^${TEMPLATE_BARE_VARIABLE_NAME_SOURCE}$`, "u");
+export const TEMPLATE_DOTTED_VARIABLE_NAME_PATTERN = new RegExp(`^${TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE}$`, "u");

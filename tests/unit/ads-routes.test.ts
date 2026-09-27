@@ -166,7 +166,7 @@ describe("ad routes", () => {
     await insertMember(database, "kanal-a", "user-1", role);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'ads', 1, '{"automatic":"auto","manual":"manuell","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"auto","manual":"manuell","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {ads.seconds}"}')`,
     ).run();
     return environmentFor(database, schedule as unknown as () => void, clear as unknown as () => void, initialCache);
   };
@@ -229,7 +229,7 @@ describe("ad routes", () => {
       manual: "x".repeat(500),
       prewarning: true,
       leadSeconds: 60,
-      prewarningText: "Ad in {seconds}",
+      prewarningText: "Ad in {ads.seconds}",
     };
 
     const response = await panelRouter.fetch(
@@ -446,7 +446,7 @@ describe("start commercial", () => {
     await insertMember(database, "kanal-a", "user-1", role);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'ads', 1, '{"automatic":"auto","manual":"manuell","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"auto","manual":"manuell","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {ads.seconds}"}')`,
     ).run();
     return environmentFor(database, schedule as unknown as () => void, clear as unknown as () => void);
   };

@@ -140,21 +140,21 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
     sections: { announcements: "Ansagen", prewarning: "Vorwarnung" },
     fields: {
       automatic: {
-        label: "Automatische Werbepause", hint: "Geht raus, wenn eine geplante Werbung beginnt. Ohne {duration} ergänzt die Vorschau (N Sekunden).",
+        label: "Automatische Werbepause", hint: "Geht raus, wenn eine geplante Werbung beginnt. Ohne {ads.duration} ergänzt die Vorschau (N Sekunden).",
         requiredError: "Text eingeben", previewLabel: "Vorschau", previewSpeaker: "Bot",
-        variables: [{ name: "duration", description: "Dauer der Werbepause in Sekunden", sample: "90" }],
+        variables: [{ name: "ads.duration", description: "Dauer der Werbepause in Sekunden", sample: "90" }],
       },
       manual: {
-        label: "Manuell gestartete Werbepause", hint: "Geht raus, wenn jemand die Werbung von Hand startet. Ohne {duration} ergänzt die Vorschau (N Sekunden).",
+        label: "Manuell gestartete Werbepause", hint: "Geht raus, wenn jemand die Werbung von Hand startet. Ohne {ads.duration} ergänzt die Vorschau (N Sekunden).",
         requiredError: "Text eingeben", previewLabel: "Vorschau", previewSpeaker: "Bot",
-        variables: [{ name: "duration", description: "Dauer der Werbepause in Sekunden", sample: "90" }],
+        variables: [{ name: "ads.duration", description: "Dauer der Werbepause in Sekunden", sample: "90" }],
       },
       prewarning: { label: "Vorwarnung vor der Werbung", hint: "Kündigt die nächste Werbung vorher im Chat an.", description: "Kündigt die nächste Werbung vorher im Chat an." },
       leadSeconds: { label: "Vorlaufzeit", hint: "So lange vor der Werbung. 30 bis 300.", unit: "s", disabledReason: "Vorwarnung ist ausgeschaltet.", increaseLabel: "Vorlaufzeit erhöhen", decreaseLabel: "Vorlaufzeit verringern" },
       prewarningText: {
         label: "Vorwarnungstext", hint: "Was der Bot vor der Werbung schreibt.", requiredError: "Text eingeben",
         previewLabel: "Vorschau", previewSpeaker: "Bot",
-        variables: [{ name: "seconds", description: "Verbleibende Sekunden bis zur Werbung", sample: "60" }],
+        variables: [{ name: "ads.seconds", description: "Verbleibende Sekunden bis zur Werbung", sample: "60" }],
       },
     },
   },
@@ -175,21 +175,21 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
     sections: { announcements: "Announcements", prewarning: "Prewarning" },
     fields: {
       automatic: {
-        label: "Automatic ad break", hint: "Sent when a scheduled ad break starts. If {duration} is missing, the preview adds (N seconds).", requiredError: "Enter text",
+        label: "Automatic ad break", hint: "Sent when a scheduled ad break starts. If {ads.duration} is missing, the preview adds (N seconds).", requiredError: "Enter text",
         previewLabel: "Preview", previewSpeaker: "Bot",
-        variables: [{ name: "duration", description: "Ad break duration in seconds", sample: "90" }],
+        variables: [{ name: "ads.duration", description: "Ad break duration in seconds", sample: "90" }],
       },
       manual: {
-        label: "Manually started ad break", hint: "Sent when someone starts an ad break by hand. If {duration} is missing, the preview adds (N seconds).", requiredError: "Enter text",
+        label: "Manually started ad break", hint: "Sent when someone starts an ad break by hand. If {ads.duration} is missing, the preview adds (N seconds).", requiredError: "Enter text",
         previewLabel: "Preview", previewSpeaker: "Bot",
-        variables: [{ name: "duration", description: "Ad break duration in seconds", sample: "90" }],
+        variables: [{ name: "ads.duration", description: "Ad break duration in seconds", sample: "90" }],
       },
       prewarning: { label: "Warn before an ad break", hint: "Announces the next ad break in chat beforehand.", description: "Announces the next ad break in chat beforehand." },
       leadSeconds: { label: "Lead time", hint: "How long before the ad break. 30 to 300.", unit: "s", disabledReason: "Prewarning is turned off.", increaseLabel: "Increase lead time", decreaseLabel: "Decrease lead time" },
       prewarningText: {
         label: "Prewarning text", hint: "What the bot says before the ad break.", requiredError: "Enter text",
         previewLabel: "Preview", previewSpeaker: "Bot",
-        variables: [{ name: "seconds", description: "Seconds remaining until the ad break", sample: "60" }],
+        variables: [{ name: "ads.seconds", description: "Seconds remaining until the ad break", sample: "60" }],
       },
     },
   },

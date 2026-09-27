@@ -108,7 +108,7 @@ immer einen Zugang zu einem gespeicherten Overlay.
 | Name | Bedeutung |
 |---|---|
 | `APP_ENV` | `local`, `staging` oder `production`; unterscheidet Umgebungsverhalten und wird vom Deploy-Preflight geprüft |
-| `TIMEZONE` | IANA-Zeitzone, zum Beispiel `Europe/Berlin` |
+| `TIMEZONE` | IANA-Zeitzone für die Laufzeit; Kanalvorlagen verwenden stattdessen die Zeitzone aus den Kanal-Einstellungen |
 | `TWITCH_BOT_LOGIN` | Öffentlicher Twitch-Login des einzigen Bot-Accounts; der Bot-Callback akzeptiert keine andere Identität |
 
 **Secrets** (nur als Namen unter `secrets.required` in `wrangler.jsonc`; produktive Werte liegen als Secret-Bindings in Cloudflare, lokal kommen sie aus `.dev.vars`):
@@ -272,6 +272,25 @@ Sentinel-Tabelle fehlt; es prüft nicht das gesamte Schema und rollt den
 Deploy nicht zurück.
 
 Migration vor dem Deploy, nie danach: Der neue Code erwartet das neue Schema.
+
+Migration `0016_text_library.sql` legt die Bibliothek, Textblöcke und Varianten
+an; ihre damalige Zeitzone pro Bibliothek ist nur noch die Quelle der Migration
+`0018_template_value_providers.sql`. `0017_text_library_variant_choices.sql`
+ergänzt den gespeicherten Auswahlindex für mehrtextige Varianten. Migration
+`0018` kopiert die bisherigen Zeitzonen in `channels.time_zone`, setzt für
+Kanäle ohne Bibliothekswert die Standardzeitzone, entfernt die alte
+Bibliothekseinstellung und migriert gespeicherte Ads-Texte auf die Namen
+`{ads.duration}` und `{ads.seconds}`. Sie muss wie alle Schemaänderungen vor
+dem zugehörigen Worker-Deploy angewendet werden.
+
+Neue Modulwerte werden mit `resolveTemplateValues(names, context)` registriert.
+Der Host rendert den Ursprungstext einmal und verarbeitet eingesetzte Werte
+nicht ein zweites Mal. Neue Datenquellenvariablen verwenden punktgetrennte
+Namen; einfache Namen bleiben Textblöcken und den bereits reservierten
+Hostvariablen vorbehalten. Alle Picker laden die Registrierung über die
+Host-Route `/api/channels/:channelId/template-variables`; Twitch-Spielsuche
+läuft über `/api/channels/:channelId/games?q=...`. Die Textbibliothek liest
+Spiel- und Zeitzonenbedingungen aus dem Hostkontext.
 
 ```bash
 pnpm exec wrangler d1 migrations apply DB

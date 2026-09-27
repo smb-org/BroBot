@@ -711,7 +711,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .channel-variable-editor { display: grid; gap: 16px; min-width: 0; }
 .channel-variable-value-controls { display: grid; grid-template-columns: minmax(4.5rem, 1fr) auto auto auto; align-items: center; gap: 8px; }
 .channel-variable-value-controls--editing { grid-template-columns: minmax(0, 1fr) auto auto; }
-.channel-variable-value-controls__value { overflow: hidden; color: var(--text); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 20px; font-variant-numeric: tabular-nums; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.channel-variable-value-controls__value { overflow: hidden; color: var(--text); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .channel-variable-value-controls > .mantine-NumberInput-root { min-width: 0; }
 .channel-variable-value-controls--editing .mantine-NumberInput-input { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 .channel-variable-usages { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }

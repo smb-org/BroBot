@@ -91,7 +91,7 @@ describe("audit sentence action templates", () => {
         subjectUserId: action.startsWith("member.") ? "user-2" : null,
         subjectLogin: action.startsWith("member.") ? "bob" : null,
         subjectDisplayName: action.startsWith("member.") ? "Bob" : null,
-        before: JSON.stringify({ name: "before_name", role: "manager", value: 4, fullConsent: false, timeZone: "Europe/Berlin" }),
+        before: JSON.stringify({ name: "before_name", role: "manager", value: 4, fullConsent: false, timeZone: "UTC" }),
         after: JSON.stringify({ name: "after_name", role: "operator", value: 5, fullConsent: true, length: 60, displayName: "Alpha", timeZone: "UTC" }),
       });
       for (const language of ["de", "en"] as const) {
@@ -119,6 +119,18 @@ describe("audit sentence action templates", () => {
     const removed = { ...roleChanged, action: "member.removed", after: "null" };
     expect(auditSentenceText(added, "de")).toContain("Bob als Bediener");
     expect(auditSentenceText(removed, "en")).toContain("Bob with the Manager role");
+  });
+
+  it("shows the old and new channel time zone in the host audit sentence", () => {
+    const entry = baseEntry({
+      action: "channel.time_zone.updated",
+      actorDisplayName: "Alice",
+      before: JSON.stringify({ timeZone: "Europe/Paris" }),
+      after: JSON.stringify({ timeZone: "Europe/Berlin" }),
+    });
+
+    expect(auditSentenceText(entry, "en")).toContain("from Europe/Paris to Europe/Berlin");
+    expect(auditSentenceText(entry, "de")).toContain("von Europe/Paris zu Europe/Berlin");
   });
 
   it("derives the channel.variable.renamed sentence from which fields actually changed (#254 review)", () => {

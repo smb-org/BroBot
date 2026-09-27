@@ -52,7 +52,7 @@ describe("ad prewarning in the channel object", () => {
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'ads', 1, '{"automatic":"a","manual":"m","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"a","manual":"m","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {ads.seconds}"}')`,
     ).run();
 
     const scheduler = schedulerStub();
@@ -103,7 +103,7 @@ describe("ad prewarning in the channel object", () => {
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'ads', 1, '{"automatic":"a","manual":"m","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"a","manual":"m","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {ads.seconds}"}')`,
     ).run();
     const schedule = {
       nextAdAt: "2026-09-21T12:05:00.000Z",
@@ -144,7 +144,7 @@ describe("ad prewarning in the channel object", () => {
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'ads', 1, '{"automatic":"a","manual":"m","prewarning":false,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"a","manual":"m","prewarning":false,"leadSeconds":60,"prewarningText":"gleich {ads.seconds}"}')`,
     ).run();
     const schedule = {
       nextAdAt: "2026-09-21T12:05:00.000Z",
