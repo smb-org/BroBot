@@ -66,6 +66,8 @@ export const sendChatMessage = async (
    * warning.
    */
   stillValid?: () => Promise<boolean>,
+  /** Persist an idempotency claim immediately before the external POST. */
+  claimBeforePost?: () => Promise<boolean>,
 ): Promise<ChatSendResult> => {
   const preparedText = truncateChatText(text);
   const textDetail = { text: truncateTo200Chars(preparedText.text) };
@@ -86,6 +88,10 @@ export const sendChatMessage = async (
 
   if (stillValid !== undefined && !(await stillValid())) {
     return { sent: false, truncated: preparedText.truncated, reason: "stale_before_send", detail: textDetail };
+  }
+
+  if (claimBeforePost !== undefined && !(await claimBeforePost())) {
+    return { sent: false, truncated: preparedText.truncated, reason: "already_attempted", detail: textDetail };
   }
 
   const payload: Record<string, string | boolean> = {

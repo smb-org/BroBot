@@ -187,10 +187,18 @@ describe("ad prewarning schedule generations", () => {
     });
     mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
     mocks.getAdSchedule.mockResolvedValue({ fetched: true, reason: null, detail: {}, schedule });
-    mocks.sendChatMessage.mockResolvedValue({ sent: true, truncated: false, reason: null, detail: {} });
     mocks.writeModuleDiagnostics.mockRejectedValueOnce(new Error("diagnostics unavailable"))
       .mockResolvedValueOnce([]);
     let claimed = false;
+    let postAttempts = 0;
+    mocks.sendChatMessage.mockImplementation(async (...args) => {
+      const claimBeforePost = args[6] as (() => Promise<boolean>) | undefined;
+      if (claimBeforePost !== undefined && !(await claimBeforePost())) {
+        return { sent: false, truncated: false, reason: "already_attempted", detail: {} };
+      }
+      postAttempts += 1;
+      return { sent: true, truncated: false, reason: null, detail: {} };
+    });
     const scheduler: AdScheduler = {
       schedule: () => Promise.resolve(),
       clear: () => Promise.resolve(),
@@ -214,7 +222,8 @@ describe("ad prewarning schedule generations", () => {
     await expect(processAdPrewarning(...args)).rejects.toThrow("diagnostics unavailable");
     await processAdPrewarning(...args);
 
-    expect(mocks.sendChatMessage).toHaveBeenCalledOnce();
+    expect(mocks.sendChatMessage).toHaveBeenCalledTimes(2);
+    expect(postAttempts).toBe(1);
     expect(mocks.writeModuleDiagnostics).toHaveBeenCalledTimes(2);
     expect(mocks.writeModuleDiagnostics.mock.calls[1]?.[5]).toMatchObject([
       { code: "ads.prewarning.announced" },

@@ -278,7 +278,7 @@ export interface ModuleAlarmDefinition {
     context: ModuleAlarmContext,
     alarmKey: string,
     deadline: number,
-  ) => Promise<undefined | "retain">;
+  ) => Promise<void>;
 }
 
 export type ModuleFollowedAt = (string & {}) | null | "unavailable";

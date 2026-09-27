@@ -61,6 +61,7 @@ const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
 const AD_COUNTDOWN_REFRESH_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
 const ALARM_HANDLER_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
+const ALARM_HANDLER_RECOVERY_DELAY_MS = 60_000;
 const SECURITY_ROUND_HANDLER = "channel.security_round";
 const SECURITY_RETRY_HANDLER = "channel.security_retry";
 const AD_PREWARNING_HANDLER = "channel.ad_prewarning";
@@ -124,8 +125,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 type AlarmScheduleEntry = {
+  /** The original scheduled time for this occurrence; stable across retries. */
   deadline: number;
   handler: string;
+  /** The next execution time after a completed failed or retained attempt. */
+  nextAttemptAt?: number;
+  /** A durable lease left behind while the handler is running. */
+  claimUntil?: number;
   failures?: number;
   revision?: number;
   suppressedBy?: string;
@@ -148,9 +154,14 @@ interface AlarmStorageAccess {
 const validAlarmScheduleEntry = (value: unknown): value is AlarmScheduleEntry =>
   isRecord(value) && typeof value.deadline === "number" && Number.isFinite(value.deadline) &&
   typeof value.handler === "string" && value.handler.length > 0 &&
+  (value.nextAttemptAt === undefined || (typeof value.nextAttemptAt === "number" && Number.isFinite(value.nextAttemptAt))) &&
+  (value.claimUntil === undefined || (typeof value.claimUntil === "number" && Number.isFinite(value.claimUntil))) &&
   (value.failures === undefined || (typeof value.failures === "number" && Number.isInteger(value.failures) && value.failures >= 0)) &&
   (value.revision === undefined || (typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0)) &&
   (value.suppressedBy === undefined || typeof value.suppressedBy === "string");
+
+const alarmAttemptAt = (entry: AlarmScheduleEntry): number =>
+  entry.claimUntil ?? entry.nextAttemptAt ?? entry.deadline;
 
 const readAlarmScheduleTable = async (storage: AlarmStorageAccess): Promise<AlarmScheduleTable> => {
   const saved = await storage.get(ALARM_TABLE_KEY);
@@ -161,12 +172,23 @@ const readAlarmScheduleTable = async (storage: AlarmStorageAccess): Promise<Alar
     }
   }
   for (const definition of LEGACY_ALARM_DEFINITIONS) {
-    if (Object.hasOwn(table, definition.key)) continue;
     const deadline = await storage.get(definition.key);
-    if (typeof deadline !== "number" || !Number.isFinite(deadline)) continue;
+    const current = table[definition.key];
+    if (typeof deadline !== "number" || !Number.isFinite(deadline)) {
+      // During a rollback the legacy implementation could clear its key while
+      // the newer table still held the old deadline. The legacy key wins.
+      Reflect.deleteProperty(table, definition.key);
+      continue;
+    }
+    if (current !== undefined && alarmAttemptAt(current) === deadline) continue;
+
+    // Legacy keys are the compatibility source of truth across a rollback.
+    // A changed mirror is a new legacy deadline; discard retry/claim state
+    // that the old implementation could not have understood.
     table[definition.key] = {
       deadline,
       handler: definition.handler,
+      revision: (current?.revision ?? 0) + 1,
       ...( "suppressedBy" in definition ? { suppressedBy: definition.suppressedBy } : {}),
     };
   }
@@ -689,29 +711,58 @@ export class ChannelObject extends DurableObject<Env> {
     return entry === undefined ? null : entry.deadline;
   }
 
-  private async claimAlarmEntry(key: string, expected: AlarmScheduleEntry): Promise<boolean> {
+  private async claimAlarmEntry(
+    key: string,
+    expected: AlarmScheduleEntry,
+  ): Promise<AlarmScheduleEntry | null> {
     return await this.ctx.storage.transaction(async (transaction) => {
       const table = await readAlarmScheduleTable(transaction);
       const current = table[key];
-      if (current === undefined || JSON.stringify(current) !== JSON.stringify(expected) || current.deadline > Date.now()) {
+      const now = Date.now();
+      if (current === undefined || JSON.stringify(current) !== JSON.stringify(expected) || alarmAttemptAt(current) > now) {
         await transaction.put(ALARM_TABLE_KEY, table);
-        return false;
+        return null;
       }
-      Reflect.deleteProperty(table, key);
+      const claimed: AlarmScheduleEntry = {
+        ...current,
+        claimUntil: now + ALARM_HANDLER_RECOVERY_DELAY_MS,
+        revision: (current.revision ?? 0) + 1,
+      };
+      delete claimed.nextAttemptAt;
+      table[key] = claimed;
       await transaction.put(ALARM_TABLE_KEY, table);
       if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
-        await transaction.delete(key);
+        await transaction.put(key, claimed.claimUntil);
       }
-      return true;
+      return claimed;
     });
   }
 
-  private async retainAlarmEntry(key: string, entry: AlarmScheduleEntry): Promise<void> {
+  private async completeAlarmEntry(key: string, claimed: AlarmScheduleEntry): Promise<void> {
     await this.mutateAlarmSchedule(async (table, storage) => {
-      if (Object.hasOwn(table, key)) return;
-      table[key] = { ...entry, revision: (entry.revision ?? 0) + 1 };
+      if (JSON.stringify(table[key]) !== JSON.stringify(claimed)) return;
+      Reflect.deleteProperty(table, key);
       if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
-        await storage.put(key, entry.deadline);
+        await storage.delete(key);
+      }
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async retainAlarmEntry(key: string, claimed: AlarmScheduleEntry): Promise<void> {
+    await this.mutateAlarmSchedule(async (table, storage) => {
+      if (JSON.stringify(table[key]) !== JSON.stringify(claimed)) return;
+      const entry = { ...claimed };
+      delete entry.claimUntil;
+      delete entry.nextAttemptAt;
+      const retained: AlarmScheduleEntry = {
+        ...entry,
+        nextAttemptAt: Date.now() + ALARM_HANDLER_RECOVERY_DELAY_MS,
+        revision: (claimed.revision ?? 0) + 1,
+      };
+      table[key] = retained;
+      if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
+        await storage.put(key, alarmAttemptAt(retained));
       }
     });
     await this.scheduleEarliestAlarm();
@@ -719,25 +770,28 @@ export class ChannelObject extends DurableObject<Env> {
 
   private async rescheduleFailedAlarm(
     key: string,
-    expected: AlarmScheduleEntry,
+    claimed: AlarmScheduleEntry,
     retryDelaysMs: readonly number[] | undefined,
   ): Promise<void> {
     const configuredDelays = retryDelaysMs?.filter((delay) => Number.isFinite(delay) && delay >= 1);
     const delays = configuredDelays?.length ? configuredDelays : ALARM_HANDLER_RETRY_DELAYS_MS;
-    const failures = expected.failures ?? 0;
+    const failures = claimed.failures ?? 0;
     const delay = delays[Math.min(failures, delays.length - 1)];
     if (delay === undefined || !Number.isFinite(delay) || delay < 1) return;
     await this.mutateAlarmSchedule(async (table, storage) => {
       const current = table[key];
-      if (current !== undefined) return;
+      if (JSON.stringify(current) !== JSON.stringify(claimed)) return;
+      const entry = { ...claimed };
+      delete entry.claimUntil;
+      delete entry.nextAttemptAt;
       table[key] = {
-        ...expected,
-        deadline: Date.now() + delay,
+        ...entry,
+        nextAttemptAt: Date.now() + delay,
         failures: failures + 1,
-        revision: (expected.revision ?? 0) + 1,
+        revision: (claimed.revision ?? 0) + 1,
       };
       if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
-        await storage.put(key, table[key].deadline);
+        await storage.put(key, alarmAttemptAt(table[key]));
       }
     });
     await this.scheduleEarliestAlarm();
@@ -787,11 +841,13 @@ export class ChannelObject extends DurableObject<Env> {
         const modulePrefix = `module:${module.id}:`;
         handlers.set(handler, {
           ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
-          handle: async (key, entry) => await registration.handle(
-            this.moduleAlarmContext(module.id, registration),
-            key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
-            entry.deadline,
-          ),
+          handle: async (key, entry) => {
+            await registration.handle(
+              this.moduleAlarmContext(module.id, registration),
+              key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
+              entry.deadline,
+            );
+          },
         });
       }
     }
@@ -805,28 +861,31 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<void> {
     const table = await this.ensureAlarmScheduleTable();
     const dueEntries = Object.entries(table)
-      .filter(([, entry]) => entry.deadline <= now)
-      .filter(([, entry]) => entry.suppressedBy === undefined || !Object.hasOwn(table, entry.suppressedBy))
-      .sort(([, left], [, right]) => left.deadline - right.deadline);
+      .filter(([, entry]) => alarmAttemptAt(entry) <= now)
+      .filter(([, entry]) => !(entry.deadline <= now && entry.suppressedBy !== undefined &&
+        Object.hasOwn(table, entry.suppressedBy)))
+      .sort(([, left], [, right]) => alarmAttemptAt(left) - alarmAttemptAt(right));
 
     for (const [key, entry] of dueEntries) {
       const currentTable = await this.ensureAlarmScheduleTable();
       const currentEntry = currentTable[key];
       if (currentEntry === undefined || JSON.stringify(currentEntry) !== JSON.stringify(entry) ||
-          currentEntry.deadline > Date.now()) continue;
-      if (!await this.claimAlarmEntry(key, entry)) continue;
+          alarmAttemptAt(currentEntry) > Date.now()) continue;
+      const claimed = await this.claimAlarmEntry(key, entry);
+      if (claimed === null) continue;
       const registration = handlers.get(entry.handler);
       if (registration === undefined) {
         console.error(`Alarm handler ${entry.handler} is not registered for ${key}.`);
-        await this.rescheduleFailedAlarm(key, entry, undefined);
+        await this.rescheduleFailedAlarm(key, claimed, undefined);
         continue;
       }
       try {
         const result = await registration.handle(key, entry, now, nowIso);
-        if (result === "retain") await this.retainAlarmEntry(key, entry);
+        if (result === "retain") await this.retainAlarmEntry(key, claimed);
+        else await this.completeAlarmEntry(key, claimed);
       } catch (error: unknown) {
         console.error(`Alarm handler ${entry.handler} failed for ${key}.`, error);
-        await this.rescheduleFailedAlarm(key, entry, registration.retryDelaysMs);
+        await this.rescheduleFailedAlarm(key, claimed, registration.retryDelaysMs);
       }
     }
     await this.scheduleEarliestAlarm();
@@ -836,10 +895,10 @@ export class ChannelObject extends DurableObject<Env> {
     const table = await this.ensureAlarmScheduleTable();
     const now = Date.now();
     const deadlines = Object.entries(table)
-      .filter(([, entry]) => Number.isFinite(entry.deadline))
+      .filter(([, entry]) => Number.isFinite(alarmAttemptAt(entry)))
       .filter(([, entry]) => !(entry.deadline <= now && entry.suppressedBy !== undefined &&
         Object.hasOwn(table, entry.suppressedBy)))
-      .map(([, entry]) => entry.deadline);
+      .map(([, entry]) => alarmAttemptAt(entry));
     if (deadlines.length === 0) {
       await this.ctx.storage.deleteAlarm();
       return;
@@ -1396,10 +1455,6 @@ export class ChannelObject extends DurableObject<Env> {
         },
       },
     );
-    await this.ctx.storage.transaction(async (transaction) => {
-      const claimedDeadline = await transaction.get<number>(AD_PREWARNING_SEND_CLAIM_KEY);
-      if (claimedDeadline === deadline) await transaction.delete(AD_PREWARNING_SEND_CLAIM_KEY);
-    });
     return undefined;
   }
 
