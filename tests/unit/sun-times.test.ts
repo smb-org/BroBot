@@ -218,6 +218,28 @@ describe("on-demand sun template values", () => {
     });
   });
 
+  it("propagates a transient location lookup failure instead of masking it as unavailable", async () => {
+    const now = Date.parse("2026-06-21T00:00:00.000Z");
+    const database = {
+      prepare: () => ({
+        bind: () => ({ first: () => Promise.resolve({
+          error_text_de: "Nicht verfügbar.",
+          error_text_en: errorText,
+          revision: 1,
+        }) }),
+      }),
+    } as unknown as D1Database;
+
+    await expect(sunModule.resolveOverlayTemplateValues?.(["sun.set_in", "sun.rise_in"], {
+      DB: database,
+      channelId: "sun-channel",
+      now,
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.reject(new Error("location lookup unavailable")),
+      language: "en",
+    })).rejects.toThrow("location lookup unavailable");
+  });
+
   it("uses configured fallback text when there is no location", async () => {
     const variables = await sunModule.templateVariables?.({} as D1Database, "sun-channel") ?? [];
     const fallback = "x".repeat(SUN_ERROR_TEXT_MAX_LENGTH);

@@ -127,35 +127,35 @@ const resolveOverlayValues = async (
   const requested = new Set(names);
   const needed = ["sun.set", "sun.rise", "sun.dusk", "sun.set_in", "sun.rise_in"].filter((name) => requested.has(name));
   if (needed.length === 0) return {};
-  try {
-    const [locationSetting, channelTimeZone] = await Promise.all([context.channelLocation(), context.channelTimeZone()]);
-    const location = validLocationFor(locationSetting, channelTimeZone);
-    if (location === null) return Object.fromEntries(needed.map((name) => [name, { available: false }]));
-    const today = localDateInTimeZone(context.now, location.timeZone);
-    const days = [-1, 0, 1, 2, 3, 4, 5, 6, 7].map((offset) => calculateSunDay({
-      ...location,
-      localDate: shiftLocalDate(today, offset),
-    }));
-    const future = (pick: (day: ReturnType<typeof calculateSunDay>) => string | null): string[] => days
-      .map(pick).filter((value): value is string => value !== null && Number.isFinite(Date.parse(value)) && Date.parse(value) > context.now);
-    const events = {
-      "sun.set": future((day) => day.sunsetAt),
-      "sun.set_in": future((day) => day.sunsetAt),
-      "sun.rise": future((day) => day.sunriseAt),
-      "sun.rise_in": future((day) => day.sunriseAt),
-      "sun.dusk": future((day) => day.duskAt),
-    };
-    return Object.fromEntries(needed.map((name) => {
-      const targets = events[name as keyof typeof events];
-      return [name, {
-        available: targets.length > 0,
-        ...(targets[0] === undefined ? {} : { targetAt: targets[0] }),
-        ...(name.endsWith("_in") && targets.length > 0 ? { targetAts: targets } : {}),
-      }];
-    }));
-  } catch {
-    return Object.fromEntries(needed.map((name) => [name, { available: false }]));
-  }
+  // No location configured is an expected, stable state (long refresh is fine).
+  // A thrown error is a transient lookup failure and must propagate so the
+  // caller's lookup-failure retry applies (see element-context.ts), instead of
+  // being masked here as the same "unavailable" result.
+  const [locationSetting, channelTimeZone] = await Promise.all([context.channelLocation(), context.channelTimeZone()]);
+  const location = validLocationFor(locationSetting, channelTimeZone);
+  if (location === null) return Object.fromEntries(needed.map((name) => [name, { available: false }]));
+  const today = localDateInTimeZone(context.now, location.timeZone);
+  const days = [-1, 0, 1, 2, 3, 4, 5, 6, 7].map((offset) => calculateSunDay({
+    ...location,
+    localDate: shiftLocalDate(today, offset),
+  }));
+  const future = (pick: (day: ReturnType<typeof calculateSunDay>) => string | null): string[] => days
+    .map(pick).filter((value): value is string => value !== null && Number.isFinite(Date.parse(value)) && Date.parse(value) > context.now);
+  const events = {
+    "sun.set": future((day) => day.sunsetAt),
+    "sun.set_in": future((day) => day.sunsetAt),
+    "sun.rise": future((day) => day.sunriseAt),
+    "sun.rise_in": future((day) => day.sunriseAt),
+    "sun.dusk": future((day) => day.duskAt),
+  };
+  return Object.fromEntries(needed.map((name) => {
+    const targets = events[name as keyof typeof events];
+    return [name, {
+      available: targets.length > 0,
+      ...(targets[0] === undefined ? {} : { targetAt: targets[0] }),
+      ...(name.endsWith("_in") && targets.length > 0 ? { targetAts: targets } : {}),
+    }];
+  }));
 };
 
 export const sunModule: BotModule<typeof settingsSchema> = {
