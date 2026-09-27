@@ -216,11 +216,12 @@ const shouldReplan = (decision: AdPrewarningDecision): boolean =>
   decision.kind === "skip" && (decision.reason === "rescheduled" || decision.reason === "break_started");
 
 /**
- * `sendChatMessage` failures that happen before the claim/POST (identity or
- * app token unavailable) never touched the external send, so retrying is
- * safe -- the alarm handler above throws for these to get a short retry
- * instead of ChannelObject's much longer default backoff, which would burn
- * through the (short) prewarning lead time. Anything at or after the claim
+ * Failures that happen before the claim/POST (identity or app token
+ * unavailable, whether from `sendChatMessage` or from the schedule fetch in
+ * `processAdPrewarning`) never touched the external send, so retrying is
+ * safe -- callers throw for these to get a short retry instead of
+ * ChannelObject's much longer default backoff, which would burn through the
+ * (short) prewarning lead time. Anything at or after the claim
  * (`stale_before_send`, `already_attempted`) or an actual Twitch outcome is
  * excluded: that send may already be in flight or done.
  */
@@ -325,6 +326,13 @@ export const processAdPrewarning = async (
       await scopeMissing(environment, channelId, triggerId, now, scheduler);
     } else {
       await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);
+      // Same short-retry treatment as the pre-POST failures below: this
+      // fetch never reached the ad break's chat send, so retrying is safe,
+      // and decideAdPrewarning's too_late check (re-run on the retry) bounds
+      // how long that continues.
+      if (result.reason !== null && isRetryablePrePostFailure(result.reason)) {
+        throw new Error(`ad prewarning retryable failure: ${result.reason}`);
+      }
     }
     return;
   }

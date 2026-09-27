@@ -67,6 +67,12 @@ const ALARM_HANDLER_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const
 // `too_late` check (see ad-prewarning.ts) is what actually bounds retries
 // once the ad has started, not attempt count.
 const AD_PREWARNING_RETRY_DELAYS_MS = [5_000, 10_000] as const;
+// Send claims are kept per occurrence (keyed by its due-at ms) rather than
+// deleted on clear, so a clear+re-arm of the same occurrence cannot send a
+// second warning. Pruning anything older than this bounds that map's size
+// across the channel's lifetime instead of retaining every occurrence ever
+// claimed.
+const AD_PREWARNING_CLAIM_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ALARM_HANDLER_RECOVERY_DELAY_MS = 60_000;
 const SECURITY_ROUND_HANDLER = "channel.security_round";
 const SECURITY_RETRY_HANDLER = "channel.security_retry";
@@ -84,6 +90,18 @@ const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
 const SOCKET_TRANSIENT_CODE = 4008;
 const SOCKET_POLICY_VIOLATION_CODE = 1008;
+
+/** Drops occurrences older than the retention window from a prewarning send-claim map. */
+const prunePrewarningClaims = (
+  claims: Readonly<Record<string, number>>,
+  now: number,
+): Record<string, number> => {
+  const pruned: Record<string, number> = {};
+  for (const [key, dueAtMs] of Object.entries(claims)) {
+    if (Number.isFinite(dueAtMs) && now - dueAtMs <= AD_PREWARNING_CLAIM_RETENTION_MS) pruned[key] = dueAtMs;
+  }
+  return pruned;
+};
 
 const adCountdownRefreshAt = (schedule: AdsSchedule): number | null => {
   if (schedule.nextAdAt === null || typeof schedule.duration !== "number" ||
@@ -1017,7 +1035,16 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async clearAdPrewarning(): Promise<void> {
     await this.clearAlarmEntry(AD_PREWARNING_DEADLINE_KEY);
-    await this.ctx.storage.delete(AD_PREWARNING_SEND_CLAIM_KEY);
+    // The send claim for the occurrence just cleared is kept, not deleted: a
+    // re-arm for that same due-at ms (e.g. an unrelated schedule refresh
+    // clearing and re-setting the same alarm) must still see it as already
+    // sent. Only pruning happens here, to keep the claim map bounded.
+    const stored = await this.ctx.storage.get<Record<string, number> | number>(AD_PREWARNING_SEND_CLAIM_KEY);
+    if (stored === undefined) return;
+    const claims = typeof stored === "number" ? { [String(stored)]: stored } : stored;
+    const pruned = prunePrewarningClaims(claims, Date.now());
+    if (Object.keys(pruned).length === 0) await this.ctx.storage.delete(AD_PREWARNING_SEND_CLAIM_KEY);
+    else await this.ctx.storage.put(AD_PREWARNING_SEND_CLAIM_KEY, pruned);
   }
 
   /** Schedule one module-owned alarm key through its registered handler. */
@@ -1448,9 +1475,16 @@ export class ChannelObject extends DurableObject<Env> {
         readScheduleGeneration: () => this.getAdScheduleGeneration(),
         readSchedule: async () => (await this.getCachedAdSchedule())?.schedule ?? null,
         claimPrewarningSend: async (scheduledDueAtMs) => await this.ctx.storage.transaction(async (transaction) => {
-          const claimedDeadline = await transaction.get<number>(AD_PREWARNING_SEND_CLAIM_KEY);
-          if (claimedDeadline === scheduledDueAtMs) return false;
-          await transaction.put(AD_PREWARNING_SEND_CLAIM_KEY, scheduledDueAtMs);
+          // Pre-migration deployments stored a single number here instead of
+          // a per-occurrence map; fold that legacy shape in rather than
+          // dropping it, so an in-flight upgrade cannot forget a real claim.
+          const stored = await transaction.get<Record<string, number> | number>(AD_PREWARNING_SEND_CLAIM_KEY);
+          const claims = typeof stored === "number" ? { [String(stored)]: stored } : stored ?? {};
+          const key = String(scheduledDueAtMs);
+          if (Object.hasOwn(claims, key)) return false;
+          const pruned = prunePrewarningClaims(claims, Date.now());
+          pruned[key] = scheduledDueAtMs;
+          await transaction.put(AD_PREWARNING_SEND_CLAIM_KEY, pruned);
           return true;
         }),
         storeSchedule: async (schedule, asOf, options) => {

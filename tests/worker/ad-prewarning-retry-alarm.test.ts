@@ -178,4 +178,174 @@ describe("ad prewarning retry through ChannelObject.alarm()", () => {
       errorLog.mockRestore();
     }
   });
+
+  it("retries an app-token failure during the schedule fetch at a short delay and still sends before the ad", async () => {
+    vi.useFakeTimers();
+    const dueAt = Date.parse("2026-09-24T12:03:00.000Z");
+    vi.setSystemTime(dueAt);
+    const schedule: AdSchedule = {
+      nextAdAt: "2026-09-24T12:04:00.000Z", // dueAt + 60s lead
+      duration: 60,
+      lastAdAt: null,
+      prerollFreeTime: 120,
+      snoozeCount: 0,
+      snoozeRefreshAt: null,
+    };
+    mocks.getChannelModuleForChannel.mockResolvedValue({
+      channelId: "kanal-a",
+      moduleId: "ads",
+      enabled: true,
+      revision: 1,
+      settings: JSON.stringify({
+        automatic: "Automatic ad message",
+        manual: "Manual ad message",
+        prewarning: true,
+        leadSeconds: 60,
+        prewarningText: "Ad in {ads.seconds}",
+      }),
+    });
+    mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
+    // T: the app token itself is unavailable, so the schedule fetch never
+    // happens; T + 5s: the token is available again and the fetch succeeds.
+    mocks.getAdSchedule
+      .mockResolvedValueOnce({ fetched: false, reason: "app_token_unavailable", detail: { status: null }, schedule: null })
+      .mockResolvedValue({ fetched: true, reason: null, detail: {}, schedule });
+    mocks.writeModuleDiagnostics.mockResolvedValue([]);
+    mocks.getBotIdentity.mockResolvedValue({ userId: "bot-1" });
+    mocks.getAppAccessToken.mockResolvedValue("app-token");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [{ is_sent: true, message_id: "message-1" }],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const object = objectFor("kanal-a");
+    const storage = storageOf(object);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await object.scheduleAdPrewarning(dueAt);
+
+      // T: the schedule fetch fails on the app token, before any POST. The
+      // occurrence is retried at a short delay instead of completing (and
+      // giving up on the warning) or falling back to the generic 60s+ backoff.
+      await object.alarm();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mocks.getAdSchedule).toHaveBeenCalledTimes(1);
+      expect(storage.values.get("channel:alarm_schedule")).toMatchObject({
+        ad_prewarning: { deadline: dueAt, nextAttemptAt: dueAt + 5_000, failures: 1 },
+      });
+      expect(mocks.writeModuleDiagnostics.mock.calls.at(-1)?.[5]).toMatchObject([
+        { code: "ads.prewarning.schedule_error", detail: { reason: "app_token_unavailable" } },
+      ]);
+      expect(errorLog).toHaveBeenCalled();
+
+      // T + 5s: still well inside the 60s lead, so the retry fetches the
+      // schedule again and sends the warning.
+      vi.setSystemTime(dueAt + 5_000);
+      await object.alarm();
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(storage.values.get("channel:alarm_schedule")).toBeUndefined();
+      expect(mocks.writeModuleDiagnostics.mock.calls.at(-1)?.[5]).toMatchObject([
+        { code: "ads.prewarning.announced" },
+        { code: "host.chat.sent" },
+      ]);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("keeps a sent occurrence's send claim across clear+re-arm, but still sends a genuinely new occurrence", async () => {
+    vi.useFakeTimers();
+    const leadSeconds = 60;
+    const dueAt = Date.parse("2026-09-24T12:03:00.000Z");
+    const nextAdAt = dueAt + leadSeconds * 1_000;
+    vi.setSystemTime(dueAt);
+    mocks.getChannelModuleForChannel.mockResolvedValue({
+      channelId: "kanal-a",
+      moduleId: "ads",
+      enabled: true,
+      revision: 1,
+      settings: JSON.stringify({
+        automatic: "Automatic ad message",
+        manual: "Manual ad message",
+        prewarning: true,
+        leadSeconds,
+        prewarningText: "Ad in {ads.seconds}",
+      }),
+    });
+    mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
+    mocks.writeModuleDiagnostics.mockResolvedValue([]);
+    mocks.getBotIdentity.mockResolvedValue({ userId: "bot-1" });
+    mocks.getAppAccessToken.mockResolvedValue("app-token");
+    // A fresh Response per call: a mocked Response's body can only be read
+    // once, and this test's second occurrence sends a second real POST.
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      data: [{ is_sent: true, message_id: "message-1" }],
+    }), { status: 200 })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const object = objectFor("kanal-a");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      mocks.getAdSchedule.mockResolvedValue({
+        fetched: true,
+        reason: null,
+        detail: {},
+        schedule: {
+          nextAdAt: new Date(nextAdAt).toISOString(),
+          duration: 60,
+          lastAdAt: null,
+          prerollFreeTime: 120,
+          snoozeCount: 0,
+          snoozeRefreshAt: null,
+        } satisfies AdSchedule,
+      });
+
+      // The warning for this occurrence goes out normally.
+      await object.scheduleAdPrewarning(dueAt);
+      await object.alarm();
+      expect(fetchMock).toHaveBeenCalledOnce();
+
+      // Something unrelated (e.g. a schedule refresh) clears the alarm and
+      // re-arms it for the exact same occurrence. Without the claim staying
+      // in place, this would look like a brand new occurrence and send again.
+      await object.clearAdPrewarning();
+      await object.scheduleAdPrewarning(dueAt);
+      await object.alarm();
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(mocks.writeModuleDiagnostics.mock.calls.at(-1)?.[5]).toMatchObject([
+        { code: "ads.prewarning.announced" },
+        { code: "host.chat.skipped", detail: { reason: "already_attempted" } },
+      ]);
+
+      // A genuinely later occurrence -- a different due-at ms with a matching
+      // later ad -- must still be able to send.
+      const laterDueAt = dueAt + 10 * 60_000;
+      const laterNextAdAt = laterDueAt + leadSeconds * 1_000;
+      mocks.getAdSchedule.mockResolvedValue({
+        fetched: true,
+        reason: null,
+        detail: {},
+        schedule: {
+          nextAdAt: new Date(laterNextAdAt).toISOString(),
+          duration: 60,
+          lastAdAt: new Date(nextAdAt).toISOString(),
+          prerollFreeTime: 120,
+          snoozeCount: 0,
+          snoozeRefreshAt: null,
+        } satisfies AdSchedule,
+      });
+      vi.setSystemTime(laterDueAt);
+      await object.scheduleAdPrewarning(laterDueAt);
+      await object.alarm();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(mocks.writeModuleDiagnostics.mock.calls.at(-1)?.[5]).toMatchObject([
+        { code: "ads.prewarning.announced" },
+        { code: "host.chat.sent" },
+      ]);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
 });
