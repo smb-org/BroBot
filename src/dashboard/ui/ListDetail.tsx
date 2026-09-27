@@ -24,10 +24,10 @@ export interface ListDetailProps {
  * floats from the right (up to 480px wide) instead of stacking under the
  * list. The responsive layout is one CSS switch in
  * `styles.css` (`.list-detail`/`.list-detail__inspector`). Below 1280px
- * the positioned inspector becomes a modal surface: the list is inert,
- * focus moves inside and stays there, and closing returns focus to the row
- * that opened it. At 1280px the inspector sits beside the list and both
- * columns remain available.
+ * the positioned inspector becomes a modal surface: the list is inert and
+ * focus moves inside and stays there. At 1280px the inspector sits beside
+ * the list and both columns remain available. At every width, closing the
+ * inspector returns focus to the row that opened it.
  *
  * Below 1280px, the backdrop and fixed inspector keep selection available
  * without changing the list width or making the page overflow.
@@ -97,7 +97,14 @@ export function ListDetail({ list, inspector, onCloseInspector }: ListDetailProp
       wasOpen.current = false;
       const target = returnFocus.current;
       returnFocus.current = null;
-      if (wasNarrow.current && target?.isConnected) target.focus();
+      // Restores focus to the row that opened the inspector at every width --
+      // not just narrow, where modal focus-trapping already made it necessary
+      // (#254 review). Skipped when the closing inspector's own `onClose`
+      // already moved focus somewhere else on its way out (e.g. `platform.tsx`'s
+      // "Kanal freigeben" button re-focusing itself before the state update
+      // unmounts the inspector): unmounting a focused element resets focus to
+      // `document.body` by itself, so only that case is ours to take over.
+      if (target?.isConnected && (document.activeElement === null || document.activeElement === document.body)) target.focus();
     }
     wasNarrow.current = narrow;
   }, [narrow, open]);

@@ -121,6 +121,38 @@ describe("audit sentence action templates", () => {
     expect(auditSentenceText(removed, "en")).toContain("Bob with the Manager role");
   });
 
+  it("derives the channel.variable.renamed sentence from which fields actually changed (#254 review)", () => {
+    const descriptionOnly = baseEntry({
+      action: "channel.variable.renamed",
+      actorDisplayName: "Alice",
+      before: JSON.stringify({ name: "score", value: 4, description: "old description", resetOnStreamStart: false }),
+      after: JSON.stringify({ name: "score", value: 4, description: "new description", resetOnStreamStart: false }),
+    });
+    expect(auditSentenceText(descriptionOnly, "de")).toBe("Alice änderte die Beschreibung der Kanalvariable {var.score}");
+    expect(auditSentenceText(descriptionOnly, "en")).toBe("Alice changed the description of channel variable {var.score}");
+
+    const renameOnly = baseEntry({
+      action: "channel.variable.renamed",
+      actorDisplayName: "Alice",
+      before: JSON.stringify({ name: "score", value: 4, description: "same", resetOnStreamStart: false }),
+      after: JSON.stringify({ name: "points", value: 4, description: "same", resetOnStreamStart: false }),
+    });
+    expect(auditSentenceText(renameOnly, "de")).toBe("Alice benannte die Kanalvariable score in points um");
+    expect(auditSentenceText(renameOnly, "en")).toBe("Alice renamed channel variable score to points");
+
+    // Both the description and the reset setting changed together, without a
+    // rename: neither the rename nor the description-only sentence fits, so
+    // the generic settings sentence covers it.
+    const both = baseEntry({
+      action: "channel.variable.renamed",
+      actorDisplayName: "Alice",
+      before: JSON.stringify({ name: "score", value: 4, description: "old description", resetOnStreamStart: false }),
+      after: JSON.stringify({ name: "score", value: 4, description: "new description", resetOnStreamStart: true }),
+    });
+    expect(auditSentenceText(both, "de")).toBe("Alice änderte die Einstellungen der Kanalvariable {var.score}");
+    expect(auditSentenceText(both, "en")).toBe("Alice changed settings of channel variable {var.score}");
+  });
+
   it("uses the module name for settings and a neutral sentence for unknown actions", () => {
     const moduleSettings = baseEntry({ action: "ads.settings_changed", moduleId: "ads", actorDisplayName: "Alice", before: JSON.stringify({ settings: JSON.stringify({ prewarning: false }) }), after: JSON.stringify({ settings: JSON.stringify({ prewarning: true }) }) });
     expect(auditSentenceText(moduleSettings, "de")).toBe("Alice änderte die Einstellungen von Werbung");

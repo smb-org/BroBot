@@ -18,6 +18,7 @@ import {
   auditRowLabel,
   auditSentenceText,
   emptyAuditFilter,
+  roleText,
   type AuditDiffRow,
 } from "./model";
 
@@ -98,8 +99,11 @@ const AuditDiffList = ({ rows, moduleCatalog, texts }: {
   return <dl className="properties audit-diff">
     {rows.map((row) => {
       const { label, boolWords } = diffFieldTexts(row, moduleCatalog, texts, dashboardLanguage());
-      const oldText = auditDiffValueText(row.oldValue, boolWords);
-      const newText = auditDiffValueText(row.newValue, boolWords);
+      // A member's role diff carries the raw role value (e.g. "operator"), the
+      // same one the feed sentence localizes via the role catalogue (#254 review).
+      const language = dashboardLanguage();
+      const oldText = row.key === "role" ? roleText(row.oldValue, language) ?? auditDiffValueText(row.oldValue, boolWords) : auditDiffValueText(row.oldValue, boolWords);
+      const newText = row.key === "role" ? roleText(row.newValue, language) ?? auditDiffValueText(row.newValue, boolWords) : auditDiffValueText(row.newValue, boolWords);
       return <div key={row.key} className="audit-diff__row" data-kind={row.kind}>
         <dt>{label}</dt>
         <dd className="audit-diff__value">

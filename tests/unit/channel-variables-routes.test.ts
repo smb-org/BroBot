@@ -412,4 +412,49 @@ describe("Channel variable routes", () => {
       { type: "variables.changed", payload: { overlayIdsByVariable: { score: [] } } },
     ]);
   });
+
+  it("carries resetOnStreamStart in the channel.variable.renamed audit snapshot for every kind of patch (#254 review)", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 4, description: "old description", resetOnStreamStart: false,
+    });
+
+    const auditRows = async (): Promise<Array<{ before: { name: unknown; description: unknown; resetOnStreamStart: unknown }; after: { name: unknown; description: unknown; resetOnStreamStart: unknown } }>> => {
+      const rows = await database.prepare(
+        "SELECT before_json, after_json FROM audit_log WHERE action = 'channel.variable.renamed' ORDER BY created_at",
+      ).all<{ before_json: string; after_json: string }>();
+      return rows.results.map((row) => ({
+        before: JSON.parse(row.before_json) as { name: unknown; description: unknown; resetOnStreamStart: unknown },
+        after: JSON.parse(row.after_json) as { name: unknown; description: unknown; resetOnStreamStart: unknown },
+      }));
+    };
+
+    // Description only: the name and the reset setting stay put.
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { description: "new description" });
+    let [entry] = (await auditRows()).slice(-1);
+    expect(entry).toMatchObject({
+      before: { name: "score", description: "old description", resetOnStreamStart: false },
+      after: { name: "score", description: "new description", resetOnStreamStart: false },
+    });
+
+    // Rename only: description and the reset setting stay put.
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { newName: "points" });
+    [entry] = (await auditRows()).slice(-1);
+    expect(entry).toMatchObject({
+      before: { name: "score", description: "new description", resetOnStreamStart: false },
+      after: { name: "points", description: "new description", resetOnStreamStart: false },
+    });
+
+    // Both the description and the reset setting change together, without a rename.
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables/points", "PATCH", {
+      description: "final description", resetOnStreamStart: true,
+    });
+    [entry] = (await auditRows()).slice(-1);
+    expect(entry).toMatchObject({
+      before: { name: "points", description: "new description", resetOnStreamStart: false },
+      after: { name: "points", description: "final description", resetOnStreamStart: true },
+    });
+  });
 });

@@ -206,7 +206,8 @@ const recordText = (record: Record<string, unknown> | null, ...keys: string[]): 
   return null;
 };
 
-const roleText = (value: unknown, language: DashboardLanguage): string | null =>
+/** A stored role value (`member.*` before/after, or a diff row's raw "role" field) localized via the role catalogue -- `null` when the value isn't a known role. */
+export const roleText = (value: unknown, language: DashboardLanguage): string | null =>
   typeof value === "string" && (CHANNEL_ROLES as readonly string[]).includes(value) ? roleLabel(value as ChannelRole, language) : null;
 
 const memberSubject = (entry: PanelAuditEntry, language: DashboardLanguage): string => {
@@ -258,6 +259,24 @@ const sentencePartValue = (action: string, before: Record<string, unknown> | nul
   return { from: null, to: null };
 };
 
+type ChannelVariableChangeKind = "renamed" | "description" | "settings";
+
+/**
+ * `channel.variable.renamed` is written for any patch (name, description, or
+ * the reset-on-stream-start setting) -- #254 review. The stored action never
+ * changes, so which sentence to show is derived from the diff itself, which
+ * also makes existing stored entries render correctly. A name change always
+ * wins (it is the most salient edit); of the rest, the reset setting outranks
+ * a plain description edit only because "changed settings" already covers a
+ * description edited alongside it, while a description-only edit gets its
+ * own, more specific sentence.
+ */
+const channelVariableChangeKind = (before: Record<string, unknown> | null, after: Record<string, unknown> | null): ChannelVariableChangeKind => {
+  if (!deepEqual(recordValue(before, "name"), recordValue(after, "name"))) return "renamed";
+  if (!deepEqual(recordValue(before, "resetOnStreamStart"), recordValue(after, "resetOnStreamStart"))) return "settings";
+  return "description";
+};
+
 /** Builds a complete localized sentence from a closed action template. Unknown stored actions never expose their code. */
 export const auditSentenceText = (entry: PanelAuditEntry, language: DashboardLanguage): string => {
   const actor = auditActorLabel(entry);
@@ -273,8 +292,14 @@ export const auditSentenceText = (entry: PanelAuditEntry, language: DashboardLan
   }
   const before = parseObject(entry.before);
   const after = parseObject(entry.after);
+  const object = auditObject(entry, language);
+  if (entry.action === "channel.variable.renamed") {
+    const kind = channelVariableChangeKind(before, after);
+    if (kind === "description") return dashboardTexts(language).audit.sentenceVariableDescriptionChanged(actor, object);
+    if (kind === "settings") return dashboardTexts(language).audit.sentenceVariableSettingsChanged(actor, object);
+  }
   const { from, to } = sentencePartValue(entry.action, before, after, language);
-  const parts: AuditSentenceParts = { actor, object: auditObject(entry, language), from, to };
+  const parts: AuditSentenceParts = { actor, object, from, to };
   return auditSentenceForAction(entry.action, parts, language);
 };
 

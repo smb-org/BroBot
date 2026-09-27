@@ -51,6 +51,7 @@ const recordSnapshot = (variable: ChannelVariableRecord) => ({
   name: variable.name,
   value: variable.value,
   description: variable.description,
+  resetOnStreamStart: variable.resetOnStreamStart,
 });
 
 export const referencesFor = async (
@@ -172,7 +173,7 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
     before.value, before.description, before.resetOnStreamStart ? 1 : 0, before.createdAt, before.updatedAt,
     name, channelId, newName, ...authorization.values);
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, now, channelId, null, "channel.variable.renamed",
-    recordSnapshot(before), { name: newName, value: before.value, description });
+    recordSnapshot(before), { name: newName, value: before.value, description, resetOnStreamStart });
   const references = prepareChannelVariableOverlayReferences(context.env.DB, channelId, [name]);
   const overlayRevisionUpdates = newName === name ? [] : [context.env.DB.prepare(
     `UPDATE overlays

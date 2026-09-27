@@ -17,6 +17,7 @@ import { panelRouter } from "../../src/worker/panel/routes";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { firstMatchingTextBlockVariant, textBlockConditionsMatch } from "../../src/modules/text_library/domain";
+import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import TextLibraryPanel from "../../src/modules/text_library/panel/index";
 import { textLibraryTexts } from "../../src/modules/text_library/panel/locale";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
@@ -749,6 +750,48 @@ describe("text library", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(document.querySelector(".list-detail__inspector")).not.toBeInTheDocument());
     expect(document.activeElement).toBe(screen.getByRole("button", { name: /\{faq\}/u }));
+  });
+
+  it("registers its dirty-draft guard with the dashboard router so router-driven navigation is blocked", async () => {
+    const timestamp = new Date(NOW).toISOString();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname.endsWith("/library")) return Promise.resolve(jsonResponse({
+        blocks: [{
+          channelId: CHANNEL_ID,
+          name: "welcome",
+          categoryId: "social",
+          games: [],
+          variants: [{ id: "default", conditions: {}, texts: ["Hello"] }],
+          revision: 1,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }],
+        categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+        settings: { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: timestamp },
+        usages: { welcome: [] },
+        reservedNames: ["user"],
+      }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Updated" } });
+
+    // Simulates the router running its registered guards for sidebar navigation
+    // or a browser Back press, entirely outside the panel's own Close/Escape/backdrop handlers.
+    const proceed = vi.fn();
+    const cancel = vi.fn();
+    runDashboardNavigationGuards(proceed, cancel);
+    const guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    expect(proceed).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("Updated");
+
+    fireEvent.click(within(guard).getByRole("button", { name: "Discard and switch" }));
+    expect(proceed).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("Hello"));
   });
 
   it("does not offer or save a reserved host variable name as a text block", async () => {

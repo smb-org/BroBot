@@ -5,7 +5,7 @@ import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
 import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName, validTimeZone } from "../domain";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Badge, Button, ChatPreview, ConfirmDialog, DangerSection, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, Select, SubInspector, TextArea, useDraftGuard } from "../../../dashboard/ui";
+import { Badge, Button, ChatPreview, ConfirmDialog, DangerSection, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, registerDashboardNavigationGuard, Select, SubInspector, TextArea, useDraftGuard } from "../../../dashboard/ui";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../contract";
 import { textLibraryTexts } from "./locale";
 import {
@@ -266,6 +266,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     if (baselineDraft !== null) setDraft({ ...baselineDraft, games: [...baselineDraft.games], variants: baselineDraft.variants.map((variant) => ({ ...variant, conditions: { ...variant.conditions }, texts: [...variant.texts] })) });
   }, [baselineDraft]);
   const draftGuard = useDraftGuard(dirty, saveDraft, discardDraft);
+  useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
   const openCreate = (): void => { draftGuard.guardSwitch(openCreateNow); };
   const closeEditor = (): void => { draftGuard.guardSwitch(closeEditorNow); };
   const selectBlock = (block: TextBlock): void => { draftGuard.guardSwitch(() => { selectBlockNow(block); }); };

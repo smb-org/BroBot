@@ -732,6 +732,10 @@ export interface DashboardTexts {
     changesHeading: string;
     sentenceTemplates: Record<AuditAction, (parts: AuditSentenceParts) => string>;
     sentenceSettingsChanged: (actor: string, module: string) => string;
+    /** `channel.variable.renamed` when only the description changed (#254 review; see `audit/model.ts`'s `channelVariableChangeKind`). */
+    sentenceVariableDescriptionChanged: (actor: string, object: string) => string;
+    /** `channel.variable.renamed` when the reset-on-stream-start setting changed. */
+    sentenceVariableSettingsChanged: (actor: string, object: string) => string;
     sentenceUnknownAction: (actor: string) => string;
     filter: string;
     person: string;
@@ -1062,6 +1066,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "overlay.legacy.imported": ({ actor, object }) => `${actor} importierte den alten Overlay-Link ${object}`,
       },
       sentenceSettingsChanged: (actor, module) => `${actor} änderte die Einstellungen von ${module}`,
+      sentenceVariableDescriptionChanged: (actor, object) => `${actor} änderte die Beschreibung der Kanalvariable ${object}`,
+      sentenceVariableSettingsChanged: (actor, object) => `${actor} änderte die Einstellungen der Kanalvariable ${object}`,
       sentenceUnknownAction: (actor) => `${actor} führte eine nicht erkannte Aktion aus`,
       filter: "Filter", person: "Person",
       personHint: "Wer die Aktion ausgeführt hat, nicht wer betroffen war.",
@@ -1313,6 +1319,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "overlay.legacy.imported": ({ actor, object }) => `${actor} imported legacy overlay link ${object}`,
       },
       sentenceSettingsChanged: (actor, module) => `${actor} changed settings for ${module}`,
+      sentenceVariableDescriptionChanged: (actor, object) => `${actor} changed the description of channel variable ${object}`,
+      sentenceVariableSettingsChanged: (actor, object) => `${actor} changed settings of channel variable ${object}`,
       sentenceUnknownAction: (actor) => `${actor} performed an unrecognized action`,
       filter: "Filters", person: "Person",
       personHint: "Who performed the action, not who was affected by it.",
