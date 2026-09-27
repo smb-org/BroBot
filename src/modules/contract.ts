@@ -12,6 +12,59 @@ export const DEFAULT_CHANNEL_TIME_ZONE = "Europe/Berlin";
 /** How long overlay stream details stay cached before live viewer counts refresh. */
 export const OVERLAY_STREAM_DETAILS_CACHE_TTL_MS = 60_000;
 
+/** Maximum decoded size accepted for JSON responses from external providers. */
+export const PROVIDER_JSON_MAX_BYTES = 256 * 1024;
+
+/** Reads a provider JSON response while enforcing a decoded body size limit. */
+export const readBoundedJsonResponse = async <Value = unknown>(
+  response: Response,
+  maximumBytes = PROVIDER_JSON_MAX_BYTES,
+): Promise<Value> => {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+    throw new RangeError("The JSON response size limit must be a positive safe integer.");
+  }
+  const contentLength = response.headers.get("Content-Length");
+  const declaredLength = contentLength === null ? Number.NaN : Number(contentLength);
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    try { await response.body?.cancel(); } catch { /* Ignore cancellation errors after rejecting the response. */ }
+    throw new Error("JSON response exceeded the size limit.");
+  }
+  const body = response.body;
+  if (body === null) throw new Error("JSON response had no body.");
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  let done = false;
+  try {
+    while (!done) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        done = true;
+      } else {
+        byteLength += chunk.value.byteLength;
+        if (byteLength > maximumBytes) {
+          throw new Error("JSON response exceeded the size limit.");
+        }
+        chunks.push(chunk.value);
+      }
+    }
+  } catch (error) {
+    try { await reader.cancel(); } catch { /* Ignore cancellation errors while releasing the reader. */ }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const payload: unknown = JSON.parse(new TextDecoder().decode(bytes));
+  return payload as Value;
+};
+
 export const validChannelTimeZone = (timeZone: string): boolean => {
   try {
     new Intl.DateTimeFormat("en", { timeZone }).format();
@@ -107,7 +160,7 @@ export interface ModuleOverlayElementContext {
   hasLookupFailure: () => boolean;
   channelGameId: () => Promise<string | null>;
   renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
-  resolveTemplateConditions: (ids: readonly string[]) => Promise<Readonly<Record<string, string>>>;
+  resolveTemplateConditions: (ids: readonly string[]) => Promise<ModuleOverlayTemplateConditions>;
   resolveTemplateConditionTransitions: (
     ids: readonly string[],
     from: number,
@@ -117,6 +170,11 @@ export interface ModuleOverlayElementContext {
   timeDependentTemplateConditionIds: ReadonlySet<string>;
   dynamicTemplateVariableNames: ReadonlySet<string>;
   overlayTemplateVariableNames: ReadonlySet<string>;
+}
+
+export interface ModuleOverlayTemplateConditions {
+  values: Readonly<Record<string, string>>;
+  attributionsByCondition: Readonly<Record<string, readonly string[]>>;
 }
 
 export interface OverlayElementEditorProps {

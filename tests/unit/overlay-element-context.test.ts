@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAppAccessToken: vi.fn(),
@@ -18,11 +18,15 @@ const database = {
   prepare: (sql: string) => ({
     bind: () => ({
       first: () => Promise.resolve(sql.includes("FROM channels")
-        ? { login: "streamer", language: "en", time_zone: "UTC" }
+        ? {
+          login: "streamer", language: "en", time_zone: "UTC",
+          location_name: "Berlin", location_latitude: 52.52, location_longitude: 13.405, location_time_zone: "Europe/Berlin",
+        }
         : sql.includes("FROM channel_stream_state")
           ? streamStateRow
           : null),
-      all: () => Promise.resolve({ results: [] }),
+      all: () => Promise.resolve({ results: sql.includes("FROM channel_modules") ? [{ module_id: "weather", enabled: 1 }] : [] }),
+      run: () => Promise.resolve({ success: true }),
     }),
   }),
 } as unknown as D1Database;
@@ -37,6 +41,8 @@ const environment = {
 } as unknown as Env;
 
 describe("overlay element template context", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   beforeEach(() => {
     streamStateRow = { state: "online", source: "eventsub", changed_at: startedAt, started_at: startedAt, stream_id: "stream-1", checked_at: startedAt };
     mocks.getAppAccessToken.mockResolvedValue("app-token");
@@ -114,5 +120,26 @@ describe("overlay element template context", () => {
     expect(rendered.text).toContain("30 min");
     expect(mocks.getOverlayStreamDetails).not.toHaveBeenCalled();
     expect(mocks.helixRequest).not.toHaveBeenCalled();
+  });
+
+  it("carries provider attribution with conditions resolved for overlays", async () => {
+    const now = Date.parse("2026-09-27T12:30:00.000Z");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      properties: {
+        timeseries: [{
+          time: "2026-09-27T12:30:00Z",
+          data: {
+            instant: { details: { air_temperature: 12, wind_speed: 2, relative_humidity: 70 } },
+            next_1_hours: { summary: { symbol_code: "lightrain" }, details: { precipitation_amount: 0.2 } },
+          },
+        }],
+      },
+    }), { headers: { "Content-Type": "application/json", Expires: new Date(now + 60_000).toUTCString() } })));
+    const context = await createOverlayElementContext(environment, "channel-a", "en", now);
+
+    await expect(context.resolveTemplateConditions(["weather.condition"])).resolves.toEqual({
+      values: { "weather.condition": "rain" },
+      attributionsByCondition: { "weather.condition": ["MET Norway"] },
+    });
   });
 });

@@ -1,3 +1,5 @@
+import { readBoundedJsonResponse } from "../../contract";
+
 const CURRENCY_CACHE_TTL_MS = 15 * 60 * 1_000;
 
 interface CurrencyCacheRow {
@@ -43,7 +45,7 @@ export const exchangeRate = async (
     return cached.rate;
   }
   if (!response.ok) throw new Error(`Frankfurter returned HTTP ${String(response.status)}.`);
-  const payload: unknown = await response.json().catch(() => null);
+  const payload: unknown = await readBoundedJsonResponse(response);
   const payloadRecord = typeof payload === "object" && payload !== null && !Array.isArray(payload)
     ? payload as Record<string, unknown>
     : null;

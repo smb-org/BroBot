@@ -104,7 +104,7 @@ export const closestTemplateVariable = (
 };
 
 const parameterIsValid = (variable: TemplateVariable, parameter: string | undefined): boolean => {
-  if (parameter === undefined) return true;
+  if (parameter === undefined) return variable.parameters === undefined || variable.name === "random" && variable.parameters === "range";
   if (variable.parameters === "range") return parseTemplateRange(parameter) !== null;
   if (variable.parameters === "currency_pair") return /^[A-Za-z]{3} [A-Za-z]{3}$/u.test(parameter);
   if (variable.parameters === "choices") {
@@ -223,7 +223,9 @@ export const renderTemplate = (
   const declarations = new Map(declared.map((variable) => [variable.name, variable]));
   return text.replace(TEMPLATE_VARIABLE_PATTERN, (token, name: string, parameter: string | undefined) => {
     const variable = declarations.get(name);
-    if (parameter !== undefined || (name === "random" && variable?.parameters === "range")) {
+    const hasDefaultParameter = name === "random" && variable?.parameters === "range";
+    const missingCurrencyPair = parameter === undefined && variable?.parameters === "currency_pair";
+    if (parameter !== undefined || hasDefaultParameter || missingCurrencyPair) {
       const resolver = parameterValues[name];
       const resolvedParameter = parameter ?? "";
       if (variable === undefined || (parameter !== undefined && !parameterIsValid(variable, resolvedParameter)) || resolver === undefined) return token;

@@ -18,7 +18,7 @@ const contextFor = (overrides: Partial<ModuleOverlayElementContext> = {}): Modul
   hasLookupFailure: () => false,
   channelGameId: () => Promise.resolve("game-current"),
   renderTemplate: (text) => Promise.resolve({ text, diagnostics: [] }),
-  resolveTemplateConditions: () => Promise.resolve({ "sun.phase": "day" }),
+  resolveTemplateConditions: () => Promise.resolve({ values: { "sun.phase": "day" }, attributionsByCondition: {} }),
   resolveTemplateConditionTransitions: () => Promise.resolve([{ at: sunset, values: { "sun.phase": "night" } }]),
   resolveOverlayTemplateValues: () => Promise.resolve({}),
   timeDependentTemplateConditionIds: new Set(["sun.phase"]),
@@ -81,6 +81,22 @@ describe("text block overlay rendering", () => {
     expect(serialized).not.toContain("GAME_PRIVATE");
     expect(serialized).not.toContain("ROLE_PRIVATE");
     expect(serialized).toContain(sunset);
+  });
+
+  it("includes provider attribution for a condition-selected candidate", async () => {
+    const db = overlayDatabase([
+      variant("rain", "Rain is coming", { data: { "weather.condition": "rain" } }),
+    ]);
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, contextFor({
+      resolveTemplateConditions: () => Promise.resolve({
+        values: { "weather.condition": "rain" },
+        attributionsByCondition: { "weather.condition": ["Open-Meteo"] },
+      }),
+    }));
+
+    expect(state).toMatchObject({
+      candidates: [{ text: "Rain is coming", attributions: ["Open-Meteo"] }],
+    });
   });
 
   it("switches to the night candidate at sunset and ticks a countdown in the browser", () => {

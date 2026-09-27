@@ -422,7 +422,7 @@ export const createTemplateRenderer = (
   for (const token of parameterTokens) {
     const name = token[1];
     const parameter = token[2];
-    if (name === undefined || parameter === undefined) continue;
+    if (name === undefined) continue;
     const provider = (sources.templateValueProviders ?? []).find((candidate) =>
       candidate.resolveTemplateParameter !== undefined && candidate.variables.some((variable) =>
         variable.name === name && (variable.contexts?.includes(context) ?? true)),
@@ -431,11 +431,12 @@ export const createTemplateRenderer = (
     const declared = provider.variables.find((variable) => variable.name === name && (variable.contexts?.includes(context) ?? true));
     if (declared?.parameters !== "currency_pair") continue;
     try {
-      const value = await provider.resolveTemplateParameter(name, parameter, providerContext);
-      if (value !== null) parameterValuesByToken.set(`${name}\u0000${parameter}`, value);
+      const resolvedParameter = parameter ?? "";
+      const value = await provider.resolveTemplateParameter(name, resolvedParameter, providerContext);
+      if (value !== null) parameterValuesByToken.set(`${name}\u0000${resolvedParameter}`, value);
     } catch {
       const unavailable = provider.templateUnavailableText?.[language];
-      if (unavailable !== undefined) parameterValuesByToken.set(`${name}\u0000${parameter}`, unavailable);
+      if (unavailable !== undefined) parameterValuesByToken.set(`${name}\u0000${parameter ?? ""}`, unavailable);
       else addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
     }
   }

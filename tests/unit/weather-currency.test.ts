@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleTemplateValueContext } from "../../src/modules/contract";
+import { PROVIDER_JSON_MAX_BYTES, readBoundedJsonResponse } from "../../src/modules/contract";
 import { currencyModule, parseCurrencyAmount } from "../../src/modules/currency";
 import { exchangeRate } from "../../src/modules/currency/adapters/rates";
 import { weatherModule } from "../../src/modules/weather";
@@ -9,6 +10,7 @@ import { metNorwayWeather, openMeteoWeather } from "../../src/modules/weather/ad
 import { geocodeWeatherPlace, validWeatherPlaceName } from "../../src/modules/weather/adapters/geocoding";
 import { readWeatherSettings } from "../../src/modules/weather/adapters/d1";
 import { weatherConditionFromMetSymbol, weatherConditionFromWmoCode } from "../../src/modules/weather/domain";
+import { invalidTemplateParameters } from "../../src/template";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
 import type { ModuleEvent } from "../../src/modules/contract";
 import { TestD1Database } from "./test-d1";
@@ -121,7 +123,9 @@ describe("weather data providers", () => {
     expect(met.weather).toMatchObject({ condition: "rain", temperatureC: 12.3, windSpeedMps: 2.4, humidityPercent: 75 });
     expect(open.weather).toMatchObject({ condition: "rain", temperatureC: 12.3, feelsLikeC: 11.5, precipitationMm: 0.6 });
     expect(weatherConditionFromMetSymbol("clearsky_night")).toBe("clear");
-    expect(weatherConditionFromWmoCode(95)).toBe("thunderstorm");
+    expect([95, 96, 97, 99].map(weatherConditionFromWmoCode)).toEqual([
+      "thunderstorm", "thunderstorm", "thunderstorm", "thunderstorm",
+    ]);
     const [, init] = metFetcher.mock.calls[0] ?? [];
     expect(new Headers(init?.headers).get("User-Agent")).toBe("BroBot/0.1.0 (+https://github.com/smb-org/BroBot)");
     expect(requestUrl(metFetcher.mock.calls[0]?.[0])).toContain("lat=52.5200");
@@ -142,6 +146,49 @@ describe("weather data providers", () => {
     } finally {
       database.close();
     }
+  });
+
+  it("keeps MET Norway data through Expires and extends it after conditional revalidation", async () => {
+    const database = new TestD1Database();
+    const expiresAt = NOW + 60 * 60_000;
+    const revalidatedExpiresAt = NOW + 90 * 60_000;
+    const lastModified = new Date(NOW - 60 * 60_000).toUTCString();
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(response(metFixture, {
+        Expires: new Date(expiresAt).toUTCString(),
+        "Last-Modified": lastModified,
+      }))
+      .mockResolvedValueOnce(new Response(null, {
+        status: 304,
+        headers: { Expires: new Date(revalidatedExpiresAt).toUTCString() },
+      }));
+    try {
+      const first = await fetchCachedWeather(database as unknown as D1Database, "met_norway", 52.52, 13.405, NOW, fetcher);
+      const stillFresh = await fetchCachedWeather(database as unknown as D1Database, "met_norway", 52.52, 13.405, NOW + 30 * 60_000, fetcher);
+
+      expect(first.expiresAt).toBe(expiresAt);
+      expect(stillFresh.expiresAt).toBe(expiresAt);
+      expect(fetcher).toHaveBeenCalledOnce();
+
+      const revalidated = await fetchCachedWeather(database as unknown as D1Database, "met_norway", 52.52, 13.405, expiresAt + 1_000, fetcher);
+      const [, requestInit] = fetcher.mock.calls[1] ?? [];
+      expect(new Headers(requestInit?.headers).get("If-Modified-Since")).toBe(lastModified);
+      expect(revalidated.weather).toEqual(first.weather);
+      expect(revalidated.expiresAt).toBe(revalidatedExpiresAt);
+
+      await fetchCachedWeather(database as unknown as D1Database, "met_norway", 52.52, 13.405, revalidatedExpiresAt - 1_000, fetcher);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects provider JSON that exceeds the declared or streamed byte cap", async () => {
+    expect(PROVIDER_JSON_MAX_BYTES).toBe(256 * 1024);
+    await expect(readBoundedJsonResponse(new Response("{}", {
+      headers: { "Content-Length": "9" },
+    }), 8)).rejects.toThrow("size limit");
+    await expect(readBoundedJsonResponse(new Response("123456789"), 8)).rejects.toThrow("size limit");
   });
 
   it("geocodes multi-word places and rejects invalid or unbounded names", async () => {
@@ -225,6 +272,13 @@ describe("weather data providers", () => {
 });
 
 describe("currency conversion", () => {
+  it("flags a conversion token without a required pair as an invalid template parameter", () => {
+    const declaration = currencyModule.templateVariableCatalog?.[0];
+    if (declaration === undefined) throw new Error("Currency variable catalog is missing.");
+
+    expect(invalidTemplateParameters("{currency.convert}", [declaration])).toEqual(["{currency.convert}"]);
+  });
+
   it("parses bounded dot and comma decimal amounts", () => {
     expect(parseCurrencyAmount("12,50 remaining words")).toBe(12.5);
     expect(parseCurrencyAmount("12.50")).toBe(12.5);
@@ -293,6 +347,32 @@ describe("currency conversion", () => {
 
       expect(result.text).toContain("10,00");
       expect(result.text).toContain("€");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("renders a missing currency pair as provider output instead of a literal token", async () => {
+    const database = new TestD1Database();
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const declaration = currencyModule.templateVariableCatalog?.[0];
+      if (declaration === undefined) throw new Error("Currency variable catalog is missing.");
+      const provider = {
+        moduleId: "currency",
+        variables: [{ ...declaration, contexts: ["chat_command" as const] }],
+        ...(currencyModule.templateUnavailableText === undefined ? {} : { templateUnavailableText: currencyModule.templateUnavailableText }),
+        resolveTemplateParameter: currencyModule.resolveTemplateParameter,
+      };
+      const result = await createTemplateRenderer(event, "chat_command", [], resolverSources(database as unknown as D1Database, [provider]))(
+        "{currency.convert}",
+        { command: "usd", args: "12,50" },
+      );
+
+      expect(result.text).toBe("Wechselkursdaten sind derzeit nicht verfügbar.");
+      expect(result.text).not.toContain("{currency.convert}");
+      expect(fetcher).not.toHaveBeenCalled();
     } finally {
       database.close();
     }

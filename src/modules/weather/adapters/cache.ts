@@ -3,6 +3,7 @@ import { normalizeCoordinates } from "../domain";
 import { WEATHER_PROVIDER_ADAPTERS, type WeatherCoordinates } from "./providers";
 
 const WEATHER_CACHE_TTL_MS = 15 * 60 * 1_000;
+const MET_NORWAY_MAX_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 
 interface WeatherCacheRow {
   payload_json: string;
@@ -34,7 +35,16 @@ const parseWeather = (value: string): NormalizedWeather | null => {
   }
 };
 
-const cacheExpiry = (providerExpiry: number | null, now: number): number => {
+const cacheExpiry = (
+  provider: WeatherProviderId,
+  providerExpiry: number | null,
+  now: number,
+  revalidated: boolean,
+): number => {
+  if (provider === "met_norway") {
+    if (providerExpiry === null || revalidated && providerExpiry <= now) return now + WEATHER_CACHE_TTL_MS;
+    return Math.min(now + MET_NORWAY_MAX_CACHE_TTL_MS, Math.max(now, providerExpiry));
+  }
   if (providerExpiry === null) return now + WEATHER_CACHE_TTL_MS;
   return Math.min(now + WEATHER_CACHE_TTL_MS, Math.max(now, providerExpiry));
 };
@@ -83,7 +93,7 @@ export const fetchCachedWeather = async (
     fetcher,
     now,
   });
-  const expiresAt = cacheExpiry(result.expiresAt, now);
+  const expiresAt = cacheExpiry(provider, result.expiresAt, now, result.notModified);
   const weather = result.notModified ? cached : result.weather ?? null;
   if (weather === null) throw new Error("Weather provider returned no reusable observation.");
   const expiresAtIso = new Date(expiresAt).toISOString();

@@ -4,6 +4,7 @@ import type {
   ModuleEvent,
   ModuleLanguage,
   ModuleOverlayElementContext,
+  ModuleOverlayTemplateConditions,
   ModuleOverlayTemplateValue,
   ModuleTemplateConditionContext,
   ModuleTemplateConditionTimelineContext,
@@ -211,9 +212,10 @@ export const createOverlayElementContext = async (
     now: () => now,
     random: () => 0,
   });
-  const resolveTemplateConditions = async (ids: readonly string[]): Promise<Readonly<Record<string, string>>> => {
+  const resolveTemplateConditions = async (ids: readonly string[]): Promise<ModuleOverlayTemplateConditions> => {
     const requested = new Set(ids);
     const values: Record<string, string> = {};
+    const attributionsByCondition: Record<string, readonly string[]> = {};
     const context: ModuleTemplateConditionContext = {
       DB: env.DB,
       channelId,
@@ -226,12 +228,34 @@ export const createOverlayElementContext = async (
       const declared = new Set((module.textBlockConditions ?? []).map(({ id }) => id));
       const moduleIds = ids.filter((id) => requested.has(id) && declared.has(id));
       if (moduleIds.length === 0) continue;
-      try { Object.assign(values, await module.resolveTemplateConditions(moduleIds, context)); } catch {
+      const moduleAttributions = new Set<string>();
+      const moduleContext: ModuleTemplateConditionContext = {
+        ...context,
+        addTemplateValueAttribution: (text) => {
+          let normalized = "";
+          for (const character of text) {
+            const codePoint = character.codePointAt(0) ?? 0;
+            normalized += codePoint < 32 || codePoint === 127 ? " " : character;
+          }
+          normalized = normalized.trim();
+          if (normalized.length > 0 && normalized.length <= 100) moduleAttributions.add(normalized);
+        },
+      };
+      try {
+        const resolved = await module.resolveTemplateConditions(moduleIds, moduleContext);
+        Object.assign(values, resolved);
+        const attributions = [...moduleAttributions];
+        if (attributions.length > 0) {
+          for (const id of moduleIds) {
+            if (typeof resolved[id] === "string") attributionsByCondition[id] = attributions;
+          }
+        }
+      } catch {
         lookupFailure = true;
         /* Missing provider data leaves conditions unmatched. */
       }
     }
-    return values;
+    return { values, attributionsByCondition };
   };
   const overlayValueCache = new Map<string, Promise<Readonly<Record<string, ModuleOverlayTemplateValue>>>>();
   const resolveOverlayTemplateValues = (names: readonly string[]) => {

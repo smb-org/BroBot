@@ -1,4 +1,4 @@
-import type { ModuleLanguage } from "../../contract";
+import { readBoundedJsonResponse, type ModuleLanguage } from "../../contract";
 import type { ModuleChannelLocation } from "../../contract";
 
 const PLACE_NAME_MAX_LENGTH = 100;
@@ -27,7 +27,7 @@ export const geocodeWeatherPlace = async (
   url.searchParams.set("format", "json");
   const response = await fetcher(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5_000) });
   if (!response.ok) throw new Error(`Weather geocoding returned HTTP ${String(response.status)}.`);
-  const payload: unknown = await response.json().catch(() => null);
+  const payload: unknown = await readBoundedJsonResponse(response);
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) throw new Error("Weather geocoding response was invalid.");
   const results: unknown = Reflect.get(payload, "results");
   const first: unknown = Array.isArray(results) ? results[0] : undefined;

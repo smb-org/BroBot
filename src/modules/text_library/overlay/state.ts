@@ -170,7 +170,8 @@ export const textBlockOverlayState = async (
   if (block.games.length > 0 && (gameId === null || !block.games.some((game) => game.id === gameId))) return null;
 
   const conditionIds = [...new Set(dependencyBlocks.flatMap(dataConditionIdsFor))];
-  const currentDataConditions = await context.resolveTemplateConditions(conditionIds);
+  const currentConditionResolution = await context.resolveTemplateConditions(conditionIds);
+  const currentDataConditions = currentConditionResolution.values;
   const temporalCandidates: { position: number; conditions: TextBlockConditions; text: string; attributions?: readonly string[] }[] = [];
   let fallbackCandidate: { position: number; conditions: TextBlockConditions; text: string; attributions?: readonly string[] } | null = null;
   const countdownTargets: Record<string, readonly string[]> = {};
@@ -182,7 +183,15 @@ export const textBlockOverlayState = async (
     if (rendered === null) continue;
     Object.assign(countdownTargets, rendered.countdownTargets);
     const timeConditions = timeConditionsFor(variant.conditions, context.timeDependentTemplateConditionIds);
-    const candidate = { position, conditions: timeConditions, text: rendered.text, ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }) };
+    const conditionAttributions = Object.keys(variant.conditions.data ?? {})
+      .flatMap((id) => currentConditionResolution.attributionsByCondition[id] ?? []);
+    const attributions = [...new Set([...conditionAttributions, ...(rendered.attributions ?? [])])];
+    const candidate = {
+      position,
+      conditions: timeConditions,
+      text: rendered.text,
+      ...(attributions.length === 0 ? {} : { attributions }),
+    };
     if (Object.keys(timeConditions).length === 0) {
       fallbackCandidate ??= candidate;
     } else {

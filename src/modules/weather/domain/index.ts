@@ -28,7 +28,7 @@ export const weatherConditionFromWmoCode = (code: number | undefined): WeatherCo
   if (code === 45 || code === 48) return "fog";
   if (code !== undefined && [56, 57, 66, 67].includes(code)) return "sleet";
   if (code !== undefined && [71, 73, 75, 77, 85, 86].includes(code)) return "snow";
-  if (code !== undefined && [95, 96, 99].includes(code)) return "thunderstorm";
+  if (code !== undefined && [95, 96, 97, 99].includes(code)) return "thunderstorm";
   if (code !== undefined && [51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) return "rain";
   return "unknown";
 };

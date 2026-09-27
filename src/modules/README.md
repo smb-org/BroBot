@@ -143,8 +143,10 @@ Die Wetterdatenquelle `src/modules/weather/` verwendet den Kanalstandort aus
 dem schreibgeschützten Contract oder einen Ort aus dem Befehlsargument.
 MET Norway ist der Standardanbieter; Open-Meteo lässt sich je Kanal auswählen.
 Beide Adapter liefern dieselbe normalisierte Wetterstruktur. Der Cache trennt
-Anbieter und auf vier Nachkommastellen gerundete Koordinaten, nutzt höchstens
-15 Minuten und beachtet frühere Ablaufzeiten des Anbieters. Quellen, Lizenz
+Anbieter und auf vier Nachkommastellen gerundete Koordinaten. MET Norway wird
+bis zum Ablaufzeitpunkt des Anbieters zwischengespeichert, mit einer Obergrenze
+von 24 Stunden als Sicherheitsnetz; Open-Meteo nutzt höchstens 15 Minuten.
+Quellen, Lizenz
 und Nutzungsgrenze stehen auf der Wetterseite. Die allgemeine Host-Ausführung
 ergänzt gemeldete Namensnennungen einmal je Chatnachricht und zeigt sie bei
 Textblock-Overlays am Element an.

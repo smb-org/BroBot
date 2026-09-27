@@ -1,4 +1,5 @@
 import type { NormalizedWeather, WeatherProviderId } from "../contracts";
+import { readBoundedJsonResponse } from "../../contract";
 import { feelsLikeTemperatureC, weatherConditionFromMetSymbol, weatherConditionFromWmoCode } from "../domain";
 
 export interface WeatherCoordinates {
@@ -67,7 +68,7 @@ export const metNorwayWeather: WeatherProviderAdapter = async ({ coordinates, va
   const metadata = responseMetadata(response, now);
   if (response.status === 304) return { notModified: true, ...metadata };
   if (!response.ok) throw new Error(`MET Norway returned HTTP ${String(response.status)}.`);
-  const payload: unknown = await response.json().catch(() => null);
+  const payload: unknown = await readBoundedJsonResponse(response);
   const properties = record(record(payload)?.properties);
   const timeseries = properties?.timeseries;
   const first = Array.isArray(timeseries) ? record(timeseries[0]) : null;
@@ -118,7 +119,7 @@ export const openMeteoWeather: WeatherProviderAdapter = async ({ coordinates, va
   const metadata = responseMetadata(response, now);
   if (response.status === 304) return { notModified: true, ...metadata };
   if (!response.ok) throw new Error(`Open-Meteo returned HTTP ${String(response.status)}.`);
-  const payload: unknown = await response.json().catch(() => null);
+  const payload: unknown = await readBoundedJsonResponse(response);
   const current = record(record(payload)?.current);
   const hourly = record(record(payload)?.hourly);
   const temperatureC = finiteNumber(current?.temperature_2m);
