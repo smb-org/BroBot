@@ -29,7 +29,7 @@ export default function SunLocationSettings({
     fetchSunSettings(channelId).then((sunSettings) => {
       if (!active) return;
       setSettings(sunSettings);
-      setLocationDraft(sunSettings.location);
+      setLocationDraft(sunSettings.location ?? null);
       setError("");
     }).catch(() => {
       if (active) setError(labels.loadFailed);
