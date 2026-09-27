@@ -2,7 +2,7 @@ import type { ModuleChatStatus, ModuleStreamState } from "../../contract";
 import { MODULE_TEMPLATE_TIER_CHAT_STATUSES } from "../../contract";
 import type { TextBlock, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_MAXIMUMS, TEXT_BLOCK_NAME_PATTERN } from "../contracts";
-import { nextLocalMidnightInTimeZone, validChannelTimeZone } from "../../contract";
+import { localMidnightInTimeZone, nextLocalMidnightInTimeZone, validChannelTimeZone } from "../../contract";
 
 export interface TextBlockState {
   streamState: ModuleStreamState;
@@ -145,8 +145,8 @@ export const textBlockConditionSwitchTimes = (
   for (let date = first, guard = 0; date <= last && guard < 12; date = shiftDate(date, 1), guard += 1) {
     for (const condition of conditions) {
       if (condition.weekdays !== undefined) {
-        const midnight = new Date(wallTimeUtc(date, "00:00", timeZone));
-        if (midnight.getTime() > from && midnight.getTime() <= until) switches.add(midnight.toISOString());
+        const midnight = Date.parse(localMidnightInTimeZone(date, timeZone));
+        if (midnight > from && midnight <= until) switches.add(new Date(midnight).toISOString());
       }
       if (condition.timeWindow !== undefined) {
         for (const time of [condition.timeWindow.start, condition.timeWindow.end]) {

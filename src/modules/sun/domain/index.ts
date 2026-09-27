@@ -1,8 +1,9 @@
 import type { ModuleLanguage } from "../../contract";
+import { localMidnightInTimeZone } from "../../contract";
 import { sunModuleCatalog } from "../contracts/catalog";
 
 // Shared with moon and text_library so a DST-at-midnight fix lives in one place.
-export { localMidnightInTimeZone } from "../../contract";
+export { localMidnightInTimeZone };
 
 export type SolarPolarState = "normal" | "day" | "night";
 
@@ -244,8 +245,8 @@ const altitudeCrossings = (
   location: CalculateSunDayInput,
   altitude: number,
 ): SolarAltitudeCrossing[] => {
-  const start = wallTimeUtc(location.localDate, 0, 0, location.timeZone);
-  const end = wallTimeUtc(shiftLocalDate(location.localDate, 1), 0, 0, location.timeZone);
+  const start = Date.parse(localMidnightInTimeZone(location.localDate, location.timeZone));
+  const end = Date.parse(localMidnightInTimeZone(shiftLocalDate(location.localDate, 1), location.timeZone));
   const step = 10 * 60_000;
   const crossings: SolarAltitudeCrossing[] = [];
   let left = start;
