@@ -66,7 +66,7 @@ export const panelTemplateOptions = (
     const localized = moduleByName.get(variable.name);
     return {
       name: variable.name,
-      description: localized?.description ?? variable.name,
+      description: variable.localizedDescription?.[language] ?? localized?.description ?? variable.name,
       sample: localized?.sample ?? variable.sample,
       group: variable.group ?? "context",
       kind: "module",

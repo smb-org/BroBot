@@ -2,7 +2,7 @@ import type { ModuleChatStatus, ModuleStreamState } from "../../contract";
 import { MODULE_TEMPLATE_TIER_CHAT_STATUSES } from "../../contract";
 import type { TextBlock, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_MAXIMUMS, TEXT_BLOCK_NAME_PATTERN } from "../contracts";
-import { validChannelTimeZone } from "../../contract";
+import { nextLocalMidnightInTimeZone, validChannelTimeZone } from "../../contract";
 
 export interface TextBlockState {
   streamState: ModuleStreamState;
@@ -125,13 +125,7 @@ const wallTimeUtc = (date: string, time: string, timeZone: string): number => {
 /** Returns the next local midnight as a UTC instant for a channel time zone. */
 export const nextTextBlockLocalMidnight = (from: number, timeZone: string): number => {
   try {
-    let nextDate = shiftDate(localDate(from, timeZone), 1);
-    let midnight = wallTimeUtc(nextDate, "00:00", timeZone);
-    if (midnight <= from) {
-      nextDate = shiftDate(nextDate, 1);
-      midnight = wallTimeUtc(nextDate, "00:00", timeZone);
-    }
-    return midnight;
+    return nextLocalMidnightInTimeZone(from, timeZone);
   } catch {
     return Number.POSITIVE_INFINITY;
   }

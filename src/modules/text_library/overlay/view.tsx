@@ -97,7 +97,8 @@ export const TextBlockOverlayElement = ({ state: rawState, language = "en" }: Mo
     const targets = parsed.countdownTargets[name];
     if (targets === undefined) return token;
     const next = targets.map(Date.parse).find((target) => target > now);
-    return next === undefined ? "" : remainingText(next, now, language);
+    const current = targets.map(Date.parse).filter((target) => Number.isFinite(target) && target <= now).at(-1);
+    return next === undefined && current === undefined ? "" : remainingText(next ?? current ?? now, now, language);
   });
   if (output.trim().length === 0 || /\{[a-z][a-z0-9_.]{0,63}\}/u.test(output)) return null;
   return <span className="brobot-module-text">{output}</span>;

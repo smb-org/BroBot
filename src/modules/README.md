@@ -88,6 +88,9 @@ aus dem ursprünglichen Text, fragt nur passende Provider ab und rendert den
 Text genau einmal. Eingefügte Werte werden dabei nie erneut als Vorlage
 eingelesen. Ein Provider liefert eine Zuordnung von Variablenname zu
 Zeichenkette; er schreibt nicht den gesamten Vorlagentext um.
+Für zeitabhängige Overlaywerte liefert `resolveOverlayTemplateValues` optional
+`nextChangeAt` pro Wert. Die Textbibliothek verwendet diese Contract-Angabe
+generisch für den nächsten Overlay-Neuaufbau; sie kennt keine Modulanamen.
 
 Neue Host- und Datenquellenvariablen verwenden einen Punkt im Namen, etwa
 `{sun.set}`, `{sun.set_in}` oder `{weather.temp}`. Ein einfacher Name wie
@@ -123,13 +126,18 @@ Open-Meteo-Geocoding über den Host für die Standortsuche. Der Host speichert
 Name, Koordinaten und Standortzeitzone in `channels` und stellt sie Sun über
 `ModuleTemplateValueContext.channelLocation` und
 `ModuleTemplateConditionContext.channelLocation` schreibgeschützt bereit.
-Sonnenaufgang, Sonnenuntergang und bürgerliche Abenddämmerung berechnet das
-Modul bei jeder Auflösung lokal mit NOAA-Gleichungen nach Meeus. Dafür
-verwendet es den vorherigen, aktuellen und folgenden Kalendertag in der
-Zeitzone des Standorts. Die Ausgabezeiten folgen weiterhin der Kanalzeitzone.
-Bei Polartag gilt die Sonnenphase als Tag, bei Polarnacht als Nacht; nicht
-auftretende Ereigniszeiten verwenden den konfigurierbaren zweisprachigen
-Fehlertext. Das Modulschema enthält nur diese Fehlertexte.
+Sonnenaufgang, Sonnenuntergang, bürgerliche Dämmerung, Sonnenhöchststand,
+Tageslänge sowie goldene und blaue Stunde berechnet das Modul bei jeder
+Auflösung lokal mit NOAA-Gleichungen nach Meeus. Die Ausgabezeiten folgen
+weiterhin der Kanalzeitzone. Bei Polartag gilt die Sonnenphase als Tag, bei
+Polarnacht als Nacht; fehlende Ereigniszeiten verwenden den konfigurierbaren
+zweisprachigen Fehlertext.
+
+Die Monddatenquelle unter `src/modules/moon/` berechnet Mondphase, Beleuchtung
+und Mondauf- sowie -untergang lokal mit den niedrigpräzisen Meeus-Reihen. Beide
+Astronomiemodule lesen Standort und Zeitzonen ausschließlich über den
+schreibgeschützten Host-Contract; das Moon-Modul speichert nur seine eigenen
+zweisprachigen Fehlertexte.
 
 `templateUsageSources` meldet eigene Vorlagentexte für generische
 Nutzungsanzeigen. Der Host ergänzt seine eigenen Oberflächenquellen; Module

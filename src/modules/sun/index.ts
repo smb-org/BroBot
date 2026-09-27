@@ -11,19 +11,40 @@ import type {
 import { validChannelTimeZone, type TemplateVariable } from "../contract";
 import { DEFAULT_SUN_ERROR_TEXTS, readSunSettings } from "./adapters/d1";
 import { SUN_ERROR_TEXT_MAX_LENGTH } from "./contracts";
-import { resolveSunTemplateValues } from "./domain";
+import {
+  calculateSunAltitudeIntervals,
+  calculateSunPhaseTransitions,
+  resolveSunTemplateValues,
+} from "./domain";
 import { sunRoutes } from "./routes";
 import { sunModuleCatalog } from "./contracts/catalog";
-import { calculateSunDay, localDateInTimeZone, shiftLocalDate } from "./domain";
+import { calculateSunDay, localDateInTimeZone, localMidnightInTimeZone, shiftLocalDate } from "./domain";
 
 const settingsSchema = z.object({});
-const SUN_TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
-  { name: "sun.set", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "18:42", source: "module" },
-  { name: "sun.rise", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "06:18", source: "module" },
-  { name: "sun.dusk", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "19:24", source: "module" },
-  { name: "sun.set_in", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "2 Std. 15 Min.", source: "module" },
-  { name: "sun.rise_in", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "8 Std. 30 Min.", source: "module" },
-];
+const SUN_TEMPLATE_VARIABLE_SAMPLES: Readonly<Record<string, string>> = {
+  "sun.set": "18:42",
+  "sun.rise": "06:18",
+  "sun.dusk": "19:24",
+  "sun.dawn": "05:10",
+  "sun.noon": "12:31",
+  "sun.day_length": "12:34",
+  "sun.golden_hour": "06:00",
+  "sun.golden_hour_in": "2 Std. 15 Min.",
+  "sun.golden_hour_end": "06:48",
+  "sun.blue_hour": "05:45",
+  "sun.blue_hour_in": "8 Std. 30 Min.",
+  "sun.set_in": "2 Std. 15 Min.",
+  "sun.rise_in": "8 Std. 30 Min.",
+  "sun.dawn_in": "7 Std. 30 Min.",
+};
+const SUN_TEMPLATE_VARIABLES: readonly TemplateVariable[] = Object.entries(SUN_TEMPLATE_VARIABLE_SAMPLES).map(([name, sample]) => ({
+  name,
+  localizedDescription: { de: sunModuleCatalog.de.variableDescriptions[name] ?? name, en: sunModuleCatalog.en.variableDescriptions[name] ?? name },
+  group: "time_random",
+  maxLength: SUN_ERROR_TEXT_MAX_LENGTH,
+  sample,
+  source: "module",
+}));
 
 type SunSettings = Awaited<ReturnType<typeof readSunSettings>>;
 
@@ -99,19 +120,13 @@ const resolveConditionTransitions = async (
   const [locationSetting, channelTimeZone] = await Promise.all([context.channelLocation(), context.channelTimeZone()]);
   const location = validLocationFor(locationSetting, channelTimeZone);
   if (location === null) return [];
-  const firstDate = localDateInTimeZone(context.now, location.timeZone);
-  const lastDate = localDateInTimeZone(context.until, location.timeZone);
-  const transitions: ModuleTemplateConditionTransition[] = [];
-  for (let date = firstDate, guard = 0; date <= lastDate && guard < 10; date = shiftLocalDate(date, 1), guard += 1) {
-    const day = calculateSunDay({ ...location, localDate: date });
-    if (day.sunriseAt !== null && Date.parse(day.sunriseAt) > context.now && Date.parse(day.sunriseAt) <= context.until) {
-      transitions.push({ at: day.sunriseAt, values: { "sun.phase": "day" } });
-    }
-    if (day.sunsetAt !== null && Date.parse(day.sunsetAt) > context.now && Date.parse(day.sunsetAt) <= context.until) {
-      transitions.push({ at: day.sunsetAt, values: { "sun.phase": "night" } });
-    }
-  }
-  return transitions.sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
+  return calculateSunPhaseTransitions({
+    ...location,
+    localDate: localDateInTimeZone(context.now, location.timeZone),
+  }, context.now, context.until).map(({ at, phase }): ModuleTemplateConditionTransition => ({
+    at,
+    values: { "sun.phase": phase },
+  }));
 };
 
 const resolveOverlayValues = async (
@@ -125,7 +140,7 @@ const resolveOverlayValues = async (
   },
 ) => {
   const requested = new Set(names);
-  const needed = ["sun.set", "sun.rise", "sun.dusk", "sun.set_in", "sun.rise_in"].filter((name) => requested.has(name));
+  const needed = Object.keys(SUN_TEMPLATE_VARIABLE_SAMPLES).filter((name) => requested.has(name));
   if (needed.length === 0) return {};
   // No location configured is an expected, stable state (long refresh is fine).
   // A thrown error is a transient lookup failure and must propagate so the
@@ -135,25 +150,53 @@ const resolveOverlayValues = async (
   const location = validLocationFor(locationSetting, channelTimeZone);
   if (location === null) return Object.fromEntries(needed.map((name) => [name, { available: false }]));
   const today = localDateInTimeZone(context.now, location.timeZone);
-  const days = [-1, 0, 1, 2, 3, 4, 5, 6, 7].map((offset) => calculateSunDay({
+  const days = Array.from({ length: 12 }, (_, index) => index - 1).map((offset) => calculateSunDay({
     ...location,
     localDate: shiftLocalDate(today, offset),
   }));
   const future = (pick: (day: ReturnType<typeof calculateSunDay>) => string | null): string[] => days
     .map(pick).filter((value): value is string => value !== null && Number.isFinite(Date.parse(value)) && Date.parse(value) > context.now);
-  const events = {
-    "sun.set": future((day) => day.sunsetAt),
-    "sun.set_in": future((day) => day.sunsetAt),
-    "sun.rise": future((day) => day.sunriseAt),
-    "sun.rise_in": future((day) => day.sunriseAt),
-    "sun.dusk": future((day) => day.duskAt),
+  const futureAts = (events: readonly string[]): string[] => events
+    .filter((value) => Number.isFinite(Date.parse(value)) && Date.parse(value) > context.now)
+    .sort((left, right) => Date.parse(left) - Date.parse(right));
+  const goldenIntervals = calculateSunAltitudeIntervals(location, shiftLocalDate(today, -1), 12, "golden");
+  const blueIntervals = calculateSunAltitudeIntervals(location, shiftLocalDate(today, -1), 12, "blue");
+  const chooseInterval = (intervals: typeof goldenIntervals) =>
+    intervals.find(({ startAt, endAt }) => Date.parse(startAt) <= context.now && context.now < Date.parse(endAt)) ??
+    intervals.find(({ startAt }) => Date.parse(startAt) > context.now);
+  const golden = chooseInterval(goldenIntervals);
+  const blue = chooseInterval(blueIntervals);
+  const goldenIn = golden === undefined ? [] : [golden.startAt];
+  const blueIn = blue === undefined ? [] : [blue.startAt];
+  const eventValue = (targets: string[]) => ({
+    targets,
+    ...(targets[0] === undefined ? {} : { nextChangeAt: targets[0] }),
+  });
+  const nextMidnight = localMidnightInTimeZone(shiftLocalDate(today, 1), location.timeZone);
+  const events: Readonly<Record<string, { targets: string[]; nextChangeAt?: string }>> = {
+    "sun.set": eventValue(future((day) => day.sunsetAt)),
+    "sun.set_in": eventValue(futureAts(days.flatMap((day) => day.sunsetAt === null ? [] : [day.sunsetAt]))),
+    "sun.rise": eventValue(future((day) => day.sunriseAt)),
+    "sun.rise_in": eventValue(futureAts(days.flatMap((day) => day.sunriseAt === null ? [] : [day.sunriseAt]))),
+    "sun.dusk": eventValue(future((day) => day.duskAt)),
+    "sun.dawn": eventValue(future((day) => day.dawnAt)),
+    "sun.dawn_in": eventValue(futureAts(days.flatMap((day) => day.dawnAt === null ? [] : [day.dawnAt]))),
+    "sun.noon": eventValue(future((day) => day.solarNoonAt)),
+    "sun.day_length": { targets: [nextMidnight], nextChangeAt: nextMidnight },
+    "sun.golden_hour": golden === undefined ? { targets: [] } : { targets: [golden.endAt], nextChangeAt: golden.endAt },
+    "sun.golden_hour_in": golden === undefined ? { targets: [] } : { targets: goldenIn, nextChangeAt: golden.endAt },
+    "sun.golden_hour_end": golden === undefined ? { targets: [] } : { targets: [golden.endAt], nextChangeAt: golden.endAt },
+    "sun.blue_hour": blue === undefined ? { targets: [] } : { targets: [blue.endAt], nextChangeAt: blue.endAt },
+    "sun.blue_hour_in": blue === undefined ? { targets: [] } : { targets: blueIn, nextChangeAt: blue.endAt },
   };
   return Object.fromEntries(needed.map((name) => {
-    const targets = events[name as keyof typeof events];
+    const event = events[name];
+    const targets = event?.targets ?? [];
     return [name, {
       available: targets.length > 0,
       ...(targets[0] === undefined ? {} : { targetAt: targets[0] }),
       ...(name.endsWith("_in") && targets.length > 0 ? { targetAts: targets } : {}),
+      ...(event?.nextChangeAt === undefined ? {} : { nextChangeAt: event.nextChangeAt }),
     }];
   }));
 };
@@ -183,13 +226,15 @@ export const sunModule: BotModule<typeof settingsSchema> = {
     label: { de: "Sonnenphase", en: "Sun phase" },
     timeDependent: true,
     values: {
-      day: { de: "Tag", en: "Day" },
-      night: { de: "Nacht", en: "Night" },
+      day: { de: sunModuleCatalog.de.phases.day, en: sunModuleCatalog.en.phases.day },
+      night: { de: sunModuleCatalog.de.phases.night, en: sunModuleCatalog.en.phases.night },
+      golden_hour: { de: sunModuleCatalog.de.phases.golden_hour, en: sunModuleCatalog.en.phases.golden_hour },
+      blue_hour: { de: sunModuleCatalog.de.phases.blue_hour, en: sunModuleCatalog.en.phases.blue_hour },
     },
   }],
   resolveTemplateConditions: resolveConditionValues,
   resolveTemplateConditionTransitions: resolveConditionTransitions,
-  dynamicTemplateVariableNames: ["sun.set_in", "sun.rise_in"],
+  dynamicTemplateVariableNames: ["sun.set_in", "sun.rise_in", "sun.dawn_in", "sun.golden_hour_in", "sun.blue_hour_in"],
   resolveOverlayTemplateValues: resolveOverlayValues,
   routes: sunRoutes,
   panel: () => import("./panel/settings"),
