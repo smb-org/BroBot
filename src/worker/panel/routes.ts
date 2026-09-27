@@ -41,6 +41,7 @@ import { moduleRouter } from "./module-routes";
 import { variableRouter } from "./variable-routes";
 import { overlayRouter } from "./overlay-routes";
 import { overlayAccessRouter } from "./overlay-access-routes";
+import { channelLocationRouter } from "./channel-location-routes";
 import { EVENT_TONES, MANAGING_ROLES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import { auditSubjectUserId, isAuditArea } from "../../dashboard/audit/areas";
 import { apiErrorDetail } from "../../modules/contract";
@@ -229,12 +230,32 @@ panelRouter.route("/", moduleRouter);
 panelRouter.route("/", variableRouter);
 panelRouter.route("/", overlayRouter);
 panelRouter.route("/", overlayAccessRouter);
+panelRouter.route("/", channelLocationRouter);
 
 panelRouter.get("/api/channels/:channelId/settings", requireChannelAuthorization(), async (context) => {
-  const row = await context.env.DB.prepare("SELECT time_zone, time_zone_revision FROM channels WHERE channel_id = ?")
-    .bind(context.req.param("channelId")).first<{ time_zone: string; time_zone_revision: number }>();
+  const row = await context.env.DB.prepare(
+    `SELECT time_zone, time_zone_revision, location_name, location_latitude, location_longitude,
+            location_time_zone, location_revision
+       FROM channels WHERE channel_id = ?`,
+  ).bind(context.req.param("channelId")).first<{
+    time_zone: string;
+    time_zone_revision: number;
+    location_name: string | null;
+    location_latitude: number | null;
+    location_longitude: number | null;
+    location_time_zone: string | null;
+    location_revision: number;
+  }>();
   if (row === null) return context.json({ error: "channel_not_found" }, 404);
-  return context.json({ timeZone: row.time_zone, revision: row.time_zone_revision });
+  const location = row.location_name !== null && row.location_latitude !== null && row.location_longitude !== null && row.location_time_zone !== null
+    ? { name: row.location_name, latitude: row.location_latitude, longitude: row.location_longitude, timeZone: row.location_time_zone }
+    : null;
+  return context.json({
+    timeZone: row.time_zone,
+    revision: row.time_zone_revision,
+    location,
+    locationRevision: row.location_revision,
+  });
 });
 
 panelRouter.patch("/api/channels/:channelId/settings", requireChannelAuthorization(), async (context) => {

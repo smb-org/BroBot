@@ -30,6 +30,7 @@ import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from 
 import { publishOverlayChanged } from "../realtime";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
 import { readChannelVariables } from "../db/channel-variables";
+import { readChannelLocation } from "../db/channel-settings";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
 
 interface ModuleRouteEnvironment {
@@ -138,6 +139,7 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
       DB: context.env.DB,
       channelId,
       channelTimeZone: () => Promise.resolve(channel.time_zone),
+      channelLocation: () => readChannelLocation(context.env.DB, channelId),
       now,
     };
     const resolved: Record<string, string> = {};
@@ -295,6 +297,7 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
     channelInfo: () => Promise.resolve(channelInfo),
     channelGameId: () => Promise.resolve(game?.id ?? null),
     channelTimeZone: () => Promise.resolve(channelSettings === null ? DEFAULT_CHANNEL_TIME_ZONE : channelSettings.time_zone),
+    channelLocation: () => readChannelLocation(context.env.DB, channelId),
     templateValueProviders,
     registeredTemplateVariables,
     streamState: () => Promise.resolve(streamState),

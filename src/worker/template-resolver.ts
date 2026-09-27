@@ -7,7 +7,7 @@ import {
 } from "../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 import { templateLanguageText } from "../modules/template-language";
-import type { ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
+import type { ModuleChannelInfo, ModuleChannelLocation, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
 import { formatCount } from "../text";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN } from "../contracts/template-names";
@@ -36,6 +36,7 @@ export interface TemplateResolverSources {
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   channelGameId?: () => Promise<string | null>;
   channelTimeZone: () => Promise<string>;
+  channelLocation: () => Promise<ModuleChannelLocation | null>;
   templateValueProviders?: readonly TemplateValueProvider[];
   registeredTemplateVariables?: readonly TemplateVariable[];
   streamState: () => Promise<ModuleStreamState>;
@@ -319,6 +320,7 @@ export const createTemplateRenderer = (
     channelInfo: sources.channelInfo,
     ...(sources.channelGameId === undefined ? {} : { channelGameId: sources.channelGameId }),
     channelTimeZone: sources.channelTimeZone,
+    channelLocation: sources.channelLocation,
     renderTemplate: renderNestedTemplate,
     addDiagnostic,
     now,
@@ -336,6 +338,7 @@ export const createTemplateRenderer = (
             DB: sources.DB,
             channelId: event.channelId,
             channelTimeZone: sources.channelTimeZone,
+            channelLocation: sources.channelLocation,
             now,
           });
         } catch {

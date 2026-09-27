@@ -1031,6 +1031,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "channel.released": ({ actor, object }) => `${actor} gab den Kanal ${object} frei`,
         "channel.full_consent_changed": ({ actor, object, from, to }) => `${actor} änderte die Vollzustimmung für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "channel.time_zone.updated": ({ actor, object, from, to }) => `${actor} änderte die Zeitzone für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
+        "channel.location.updated": ({ actor, object, from, to }) => `${actor} änderte den Standort für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "member.added": ({ actor, object, to }) => `${actor} fügte ${object}${to === null ? "" : ` als ${to}`} hinzu`,
         "member.role_changed": ({ actor, object, from, to }) => `${actor} änderte die Rolle von ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "member.removed": ({ actor, object, from }) => `${actor} entfernte ${object}${from === null ? "" : ` mit der Rolle ${from}`}`,
@@ -1284,6 +1285,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       sentenceTemplates: {
         "channel.released": ({ actor, object }) => `${actor} released channel ${object}`,
         "channel.time_zone.updated": ({ actor, object, from, to }) => `${actor} changed the time zone for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
+        "channel.location.updated": ({ actor, object, from, to }) => `${actor} changed the location for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
         "channel.full_consent_changed": ({ actor, object, from, to }) => `${actor} changed full consent for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
         "member.added": ({ actor, object, to }) => `${actor} added ${object}${to === null ? "" : ` as ${to}`}`,
         "member.role_changed": ({ actor, object, from, to }) => `${actor} changed ${object}'s role from ${from ?? "—"} to ${to ?? "—"}`,
@@ -2163,6 +2165,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.released": "Kanal freigegeben",
     "channel.full_consent_changed": "Vollzustimmung geändert",
     "channel.time_zone.updated": "Kanalzeitzone geändert",
+    "channel.location.updated": "Kanalstandort geändert",
     "member.added": "Mitglied hinzugefügt",
     "member.role_changed": "Mitgliedsrolle geändert",
     "member.removed": "Mitglied entfernt",
@@ -2202,6 +2205,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.released": "Channel released",
     "channel.full_consent_changed": "Full consent changed",
     "channel.time_zone.updated": "Channel time zone changed",
+    "channel.location.updated": "Channel location changed",
     "member.added": "Member added",
     "member.role_changed": "Member role changed",
     "member.removed": "Member removed",
@@ -2263,7 +2267,7 @@ export const auditUnknownActionLabel = (language: DashboardLanguage = dashboardL
 
 const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> = {
   de: {
-    "channel.released": "Kanal", "channel.full_consent_changed": "Kanal", "channel.time_zone.updated": "Kanal",
+    "channel.released": "Kanal", "channel.full_consent_changed": "Kanal", "channel.time_zone.updated": "Kanal", "channel.location.updated": "Kanal",
     "member.added": "Mitglied", "member.role_changed": "Mitglied", "member.removed": "Mitglied",
     "module.enabled": "Modul", "module.disabled": "Modul",
     "text_commands.command.created": "Textbefehl", "text_commands.command.updated": "Textbefehl", "text_commands.command.removed": "Textbefehl",
@@ -2277,7 +2281,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "overlay.created": "Overlay", "overlay.updated": "Overlay", "overlay.deleted": "Overlay", "overlay.legacy.imported": "Overlay-Link",
   },
   en: {
-    "channel.released": "channel", "channel.full_consent_changed": "channel", "channel.time_zone.updated": "channel",
+    "channel.released": "channel", "channel.full_consent_changed": "channel", "channel.time_zone.updated": "channel", "channel.location.updated": "channel",
     "member.added": "member", "member.role_changed": "member", "member.removed": "member",
     "module.enabled": "module", "module.disabled": "module",
     "text_commands.command.created": "text command", "text_commands.command.updated": "text command", "text_commands.command.removed": "text command",
@@ -2325,7 +2329,7 @@ export const memberAsWord = (language: DashboardLanguage = dashboardLanguage()):
 type AuditFieldKey =
   | "role" | "enabled" | "fullConsent" | "revocationReason" | "expiresAt" | "createdAt" | "revokedAt"
   | "length" | "retryAfter" | "clipId" | "tokenId" | "login" | "displayName" | "leadSeconds" | "name"
-  | "value" | "description" | "overlayId" | "categoryId" | "timeZone" | "width" | "height" | "revision" | "elementCount";
+  | "value" | "description" | "overlayId" | "categoryId" | "timeZone" | "locationName" | "locationTimeZone" | "latitude" | "longitude" | "width" | "height" | "revision" | "elementCount";
 
 const auditFieldLabels: LocaleCatalog<Record<AuditFieldKey, string>> = {
   de: {
@@ -2333,14 +2337,16 @@ const auditFieldLabels: LocaleCatalog<Record<AuditFieldKey, string>> = {
     expiresAt: "Gültig bis", createdAt: "Erstellt am", revokedAt: "Widerrufen am", length: "Länge (Sekunden)", retryAfter: "Erneut möglich ab",
     clipId: "Clip-ID", tokenId: "Token-ID", login: "Login", displayName: "Anzeigename", leadSeconds: "Vorlaufzeit",
     name: "Objektname", value: "Wert", description: "Beschreibung", overlayId: "Overlay-ID", categoryId: "Kategorie-ID",
-    timeZone: "Kanalzeitzone", width: "Breite", height: "Höhe", revision: "Revision", elementCount: "Elemente",
+    timeZone: "Kanalzeitzone", locationName: "Standort", locationTimeZone: "Standortzeitzone", latitude: "Breitengrad", longitude: "Längengrad",
+    width: "Breite", height: "Höhe", revision: "Revision", elementCount: "Elemente",
   },
   en: {
     role: "Role", enabled: "Enabled", fullConsent: "Full consent", revocationReason: "Revocation reason",
     expiresAt: "Valid until", createdAt: "Created at", revokedAt: "Revoked at", length: "Length (seconds)", retryAfter: "Retry after",
     clipId: "Clip ID", tokenId: "Token ID", login: "Login", displayName: "Display name", leadSeconds: "lead time",
     name: "Object name", value: "Value", description: "Description", overlayId: "Overlay ID", categoryId: "Category ID",
-    timeZone: "Channel time zone", width: "Width", height: "Height", revision: "Revision", elementCount: "Elements",
+    timeZone: "Channel time zone", locationName: "Location", locationTimeZone: "Location time zone", latitude: "Latitude", longitude: "Longitude",
+    width: "Width", height: "Height", revision: "Revision", elementCount: "Elements",
   },
 };
 

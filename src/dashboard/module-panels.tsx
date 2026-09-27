@@ -436,8 +436,6 @@ export const ModuleChannelSettingsMount = ({
   language,
   canManage,
   readOnlyReason,
-  channelTimeZone,
-  saveChannelTimeZone,
 }: ModuleChannelSettingsProperties & { moduleId: string }): ReactElement | null => {
   const registeredViews = [moduleId].flatMap((id) => {
     const Panel = lazyChannelSettings.get(id);
@@ -445,7 +443,7 @@ export const ModuleChannelSettingsMount = ({
   });
   if (registeredViews.length === 0) return null;
   return <Suspense fallback={<p className="muted">{dashboardTexts().module.load}</p>}>
-    {registeredViews.map(({ Panel }) => <Panel key={moduleId} {...{ channelId, language, canManage, readOnlyReason, channelTimeZone, saveChannelTimeZone }} />)}
+    {registeredViews.map(({ Panel }) => <Panel key={moduleId} {...{ channelId, language, canManage, readOnlyReason }} />)}
   </Suspense>;
 };
 
