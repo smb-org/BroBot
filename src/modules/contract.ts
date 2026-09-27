@@ -74,13 +74,22 @@ export const validChannelTimeZone = (timeZone: string): boolean => {
   }
 };
 
+// Intl.DateTimeFormat construction is far costlier than formatToParts on an existing
+// instance, and the binary searches below call these dozens of times per lookup --
+// formatters are immutable and safe to reuse, so cache one per time zone.
+const dateKeyFormatters = new Map<string, Intl.DateTimeFormat>();
+
+const dateKeyFormatterFor = (timeZone: string): Intl.DateTimeFormat => {
+  let formatter = dateKeyFormatters.get(timeZone);
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+    dateKeyFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+};
+
 const localDateKeyInTimeZone = (instant: number, timeZone: string): string => {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(instant);
+  const parts = dateKeyFormatterFor(timeZone).formatToParts(instant);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${String(values.year)}-${String(values.month)}-${String(values.day)}`;
 };
@@ -120,6 +129,79 @@ export const nextLocalMidnightInTimeZone = (from: number, timeZone: string): num
     if (localDateKeyInTimeZone(mid, timeZone) === today) low = mid; else high = mid;
   }
   return high;
+};
+
+const wallClockFormatters = new Map<string, Intl.DateTimeFormat>();
+
+const wallClockFormatterFor = (timeZone: string): Intl.DateTimeFormat => {
+  let formatter = wallClockFormatters.get(timeZone);
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    wallClockFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+};
+
+/** The local wall-clock reading at `instant` in `timeZone`, expressed as if it were UTC. */
+const localWallClockMillis = (instant: number, timeZone: string): number => {
+  const parts = wallClockFormatterFor(timeZone).formatToParts(instant);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), Number(values.hour), Number(values.minute), Number(values.second));
+};
+
+/**
+ * Returns the UTC instant(s) at which the local wall-clock time in `timeZone` reads
+ * `time` ("HH:MM") on `localDate`. Normally exactly one instant. A DST transition can
+ * make that wall time occur twice (clocks set back, e.g. Europe/Berlin 2026-10-25
+ * 02:30) -- both instants are returned, earliest first. A transition can also skip the
+ * wall time entirely (clocks set forward, e.g. Africa/Cairo 2026-04-24 00:30) -- in that
+ * case the single returned instant is the transition itself, since that is the instant
+ * the boundary the wall time was meant to mark actually takes effect.
+ */
+export const wallTimeInstantsInTimeZone = (localDate: string, time: string, timeZone: string): readonly number[] => {
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(localDate);
+  const timeMatch = /^(\d{2}):(\d{2})$/u.exec(time);
+  if (dateMatch === null || timeMatch === null) throw new RangeError("Invalid local date or time.");
+  const [, yearText, monthText, dayText] = dateMatch;
+  const [, hourText, minuteText] = timeMatch;
+  const target = Date.UTC(Number(yearText), Number(monthText) - 1, Number(dayText), Number(hourText), Number(minuteText));
+  // Real-world UTC offsets stay within -12:00..+14:00 and a single DST shift is far
+  // narrower than a day, so this margin brackets any transition around `target`.
+  const lowBound = target - 26 * 60 * 60_000;
+  const highBound = target + 26 * 60 * 60_000;
+  // Intl only resolves to whole seconds, so probe on second boundaries: sampling at an
+  // arbitrary millisecond would leak that sub-second remainder into the offset (it
+  // reads as the previous whole second's wall clock minus the exact instant), turning
+  // this offset into a false ramp instead of the step function DST actually produces.
+  const offsetAt = (instant: number): number => {
+    const flooredSecond = Math.floor(instant / 1000) * 1000;
+    return localWallClockMillis(flooredSecond, timeZone) - flooredSecond;
+  };
+  const offsetLow = offsetAt(lowBound);
+  const offsetHigh = offsetAt(highBound);
+  if (offsetLow === offsetHigh) return [target - offsetLow];
+  let low = lowBound;
+  let high = highBound;
+  while (high - low > 1) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (offsetAt(mid) === offsetLow) low = mid; else high = mid;
+  }
+  const transition = high;
+  const candidateBefore = target - offsetLow;
+  const candidateAfter = target - offsetHigh;
+  const instants: number[] = [];
+  if (candidateBefore < transition) instants.push(candidateBefore);
+  if (candidateAfter >= transition) instants.push(candidateAfter);
+  return instants.length > 0 ? instants.sort((left, right) => left - right) : [transition];
 };
 
 export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
