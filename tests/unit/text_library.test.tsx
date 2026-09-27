@@ -80,6 +80,50 @@ describe("text library", () => {
     expect(textLibraryTexts("en").usesCount(2)).toBe("2 uses");
   });
 
+  it("shows selected weekday conditions as a visible toggle state", async () => {
+    const timestamp = new Date(NOW).toISOString();
+    stubTextLibraryPanelApi({
+      blocks: [{
+        channelId: CHANNEL_ID,
+        name: "schedule",
+        categoryId: "social",
+        games: [],
+        variants: [
+          { id: "weekdays", conditions: { stream: "online", weekdays: [0, 2] }, texts: ["Hello"] },
+          { id: "default", conditions: {}, texts: ["Fallback"] },
+        ],
+        revision: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }],
+      categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+      settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
+      usages: { schedule: [] },
+      reservedNames: ["user"],
+    });
+
+    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /\{schedule\}/u }));
+
+    const weekdays = screen.getByRole("group", { name: "Weekdays" });
+    const sunday = within(weekdays).getByRole("button", { name: "Sunday" });
+    const monday = within(weekdays).getByRole("button", { name: "Monday" });
+    expect(sunday).toHaveAttribute("aria-pressed", "true");
+    expect(sunday).toHaveAttribute("data-variant", "filled");
+    expect(monday).toHaveAttribute("aria-pressed", "false");
+    expect(monday).toHaveAttribute("data-variant", "default");
+    expect(screen.queryByRole("button", { name: "Time window in channel time zone" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add time window" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "From" })).not.toBeInTheDocument();
+
+    fireEvent.click(sunday);
+    expect(sunday).toHaveAttribute("aria-pressed", "false");
+    expect(sunday).toHaveAttribute("data-variant", "default");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add time window" }));
+    expect(screen.getByRole("textbox", { name: "From" })).toHaveValue("00:00");
+  });
+
   afterEach(() => {
     cleanup();
     Object.defineProperty(window, "innerWidth", { configurable: true, value: initialWindowWidth });

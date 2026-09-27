@@ -292,7 +292,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .sun-location-settings__result > span { min-width: 0; overflow-wrap: anywhere; }
 .sun-location-settings__current, .sun-location-settings__suggestion { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2); margin: 0; }
 .sun-location-settings__current > span { font-variant-numeric: tabular-nums; }
-.sun-location-settings__actions { display: grid; gap: var(--s2); }
+.sun-location-settings__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2); }
 .sun-location-settings__footer { display: flex; justify-content: flex-end; padding-top: var(--s2); }
 .form-actions--destructive { margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--line); }
 
@@ -362,7 +362,6 @@ form.content-section { display: grid; gap: var(--s4); }
 .text-library__game-condition .ui-game-picker__hint { display: none; }
 .text-library__game-condition .ui-game-picker__selected:empty { display: none; }
 .text-library__weekdays { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); margin: 0; padding: 0; border: 0; }
-.text-library__weekdays > button[aria-pressed="true"] { color: var(--text); background: var(--tint-1); }
 .text-library__time-window { display: flex; flex-wrap: wrap; align-items: end; gap: var(--s2); color: var(--text-2); font-size: 12px; }
 .text-library__time-window > span { flex: 1 0 100%; }
 .text-library__time-window > .config-field { flex: 1 1 128px; max-width: 160px; }
@@ -1150,6 +1149,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .inspector-content-section__body { display: grid; gap: var(--s3); min-width: 0; }
 .inspector-content-section--danger .inspector-content-section__heading { color: var(--error-text); }
 .inspector-field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); align-items: center; gap: var(--s4); min-width: 0; }
+.inspector-field-row--align-start { align-items: start; }
+.inspector-field-row--align-start .inspector-field-row__label { align-items: flex-start; }
 .inspector-field-row__label { display: flex; min-width: 0; align-items: center; gap: var(--s1); color: var(--text-2); font-size: 12px; }
 .inspector-info { position: relative; display: inline-flex; flex: none; }
 .inspector-field-row__info { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; color: var(--text-3); background: transparent; cursor: pointer; }
