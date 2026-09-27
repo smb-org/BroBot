@@ -22,6 +22,10 @@ interface ExternalLocationTarget {
 const numberForUrl = (value: number): string => String(value);
 const coordinatesForDisplay = (location: PanelChannelLocation): string =>
   `${location.latitude.toFixed(2)}, ${location.longitude.toFixed(2)}`;
+// The stored name is a full geocoded address ("Springfield, Illinois,
+// United States"); the header shows only the first segment and keeps the full
+// name as the accessible name, title, and menu heading.
+const shortLocationName = (name: string): string => name.split(",")[0]?.trim() || name;
 
 export function ChannelLocationMenu({ location, messages }: {
   location: PanelChannelLocation;
@@ -74,10 +78,14 @@ export function ChannelLocationMenu({ location, messages }: {
             variant="subtle"
             ariaHasPopup="menu"
             ariaExpanded={opened}
+            ariaLabel={location.name}
+            title={location.name}
             onClick={() => setCopyStatus(null)}
           >
-            <span className="dashboard-header__location-name">{location.name}</span>
-            <span className="dashboard-header__location-coordinates mono">· {coordinatesForDisplay(location)}</span>
+            <span className="dashboard-header__location-label">
+              <span className="dashboard-header__location-name">{shortLocationName(location.name)}</span>
+              <span className="dashboard-header__location-coordinates mono"> · {coordinatesForDisplay(location)}</span>
+            </span>
           </Button>
         </Menu.Target>
         <Menu.Dropdown>

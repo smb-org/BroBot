@@ -447,9 +447,14 @@ pre {
 .dashboard-header__channel { display: grid; grid-area: channel; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s2); min-width: 0; }
 .dashboard-header__channel-select { min-width: 0; }
 .dashboard-header__location-wrap { position: relative; min-width: 0; }
-.dashboard-header__location { display: flex; justify-content: flex-start; gap: var(--s2); width: auto; min-width: 0; max-width: 220px; min-height: 44px; height: 44px; padding: 0 var(--s2); overflow: hidden; white-space: nowrap; }
-.dashboard-header__location-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.dashboard-header__location-coordinates { flex: none; color: var(--text-3); font-size: 12px; }
+.dashboard-header__location { display: flex; align-items: center; justify-content: flex-start; width: auto; min-width: 0; max-width: 220px; min-height: 44px; height: 44px; padding: 0 var(--s2); }
+/* Mantine's own inner wrapper spans default to `min-width: auto`, which
+   blocks flex-shrink below their content size -- without this override the
+   label overflows the 220px cell and the button's own `overflow: hidden`
+   hard-clips it instead of the ellipsis below getting a chance to apply. */
+.dashboard-header__location .mantine-Button-inner, .dashboard-header__location .mantine-Button-label { min-width: 0; }
+.dashboard-header__location-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-header__location-coordinates { color: var(--text-3); font-size: 12px; }
 .dashboard-header__location-copy-status { position: absolute; z-index: 3; top: calc(100% + var(--s1)); left: 0; width: max-content; max-width: 240px; padding: var(--s2); border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--text); background: var(--surface); font-size: 12px; }
 .dashboard-header__status { grid-area: status; display: flex; align-items: center; gap: 16px; }
 .dashboard-header__stream { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 14px; font-weight: 650; }
