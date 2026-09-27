@@ -38,6 +38,8 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/text_commands/panel/locale.ts": "Bilingual DE/EN text-commands panel text catalogue; only its `de` half is German.",
   "src/modules/text_library/panel/locale.ts": "Bilingual DE/EN text-library panel text catalogue; only its `de` half is German.",
   "src/modules/text_library/catalog.ts": "Bilingual DE/EN module navigation and mandatory-state catalog; only its `de` half is German.",
+  "src/modules/timers/contracts/catalog.ts": "Bilingual DE/EN timer module navigation catalog; only its `de` half is German.",
+  "src/modules/timers/panel/locale.ts": "Bilingual DE/EN timer panel text catalogue; only its `de` half is German.",
   "src/modules/text_library/overlay/locale.ts": "Bilingual DE/EN text-block overlay editor catalogue; only its `de` half is German.",
   "src/modules/sun/contracts/catalog.ts": "Bilingual DE/EN fallback, duration and mandatory-state catalogue; only its `de` half is German.",
   "src/modules/sun/panel/locale.ts": "Bilingual DE/EN sun-settings text catalogue; only its `de` half is German.",

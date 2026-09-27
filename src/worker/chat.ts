@@ -50,6 +50,7 @@ export const truncateChatTextWithAttributions = (
 export interface ChatSendResult {
   sent: boolean;
   truncated: boolean;
+  delivery: "sent" | "rejected" | "ambiguous" | "not_attempted";
   /** Machine-readable reason when the message was not sent. */
   reason: string | null;
   detail: Readonly<Record<string, string | number | boolean | null>>;
@@ -94,9 +95,10 @@ export const sendChatMessage = async (
    */
   stillValid?: () => Promise<boolean>,
   /** Persist an idempotency claim immediately before the external POST. */
-  claimBeforePost?: () => Promise<boolean>,
+  claimBeforePost?: () => Promise<boolean | "rate_limited">,
   /** Host-appended source labels, reserved before truncation. */
   attributions: readonly string[] = [],
+  afterPost?: (delivery: ChatSendResult["delivery"], reason: string | null) => Promise<void>,
 ): Promise<ChatSendResult> => {
   const preparedText = truncateChatTextWithAttributions(text, attributions);
   const textDetail = { text: truncateTo200Chars(preparedText.text) };
@@ -110,7 +112,7 @@ export const sendChatMessage = async (
     identity = null;
   }
   if (identity === null) {
-    return { sent: false, truncated: preparedText.truncated, reason: "bot_identity_missing", detail: textDetail };
+    return { sent: false, truncated: preparedText.truncated, delivery: "not_attempted", reason: "bot_identity_missing", detail: textDetail };
   }
   let accessToken: string;
   try {
@@ -120,15 +122,24 @@ export const sendChatMessage = async (
       fetcher,
     );
   } catch {
-    return { sent: false, truncated: preparedText.truncated, reason: "app_token_unavailable", detail: textDetail };
+    return { sent: false, truncated: preparedText.truncated, delivery: "not_attempted", reason: "app_token_unavailable", detail: textDetail };
   }
 
   if (stillValid !== undefined && !(await stillValid())) {
-    return { sent: false, truncated: preparedText.truncated, reason: "stale_before_send", detail: textDetail };
+    return { sent: false, truncated: preparedText.truncated, delivery: "not_attempted", reason: "stale_before_send", detail: textDetail };
   }
 
-  if (claimBeforePost !== undefined && !(await claimBeforePost())) {
-    return { sent: false, truncated: preparedText.truncated, reason: "already_attempted", detail: textDetail };
+  if (claimBeforePost !== undefined) {
+    const claim = await claimBeforePost();
+    if (claim !== true) {
+      return {
+        sent: false,
+        truncated: preparedText.truncated,
+        delivery: "not_attempted",
+        reason: claim === "rate_limited" ? "rate_limited" : "already_attempted",
+        detail: textDetail,
+      };
+    }
   }
 
   const payload: Record<string, string | boolean> = {
@@ -149,7 +160,14 @@ export const sendChatMessage = async (
   });
 
   if (!result.ok) {
-    return { sent: false, truncated: preparedText.truncated, reason: result.reason, detail: { ...textDetail, status: result.status, twitchMessage: result.message } };
+    // A definite rejection is a response Twitch actually returned (a status
+    // code, however unwelcome). A timeout or network error can happen after
+    // Twitch already accepted the POST -- the response just never arrived --
+    // so both stay "ambiguous" and keep the occurrence claim instead of
+    // clearing it and risking a duplicate post.
+    const delivery = result.reason === "timeout" || result.reason === "network_error" ? "ambiguous" : "rejected";
+    await afterPost?.(delivery, result.reason);
+    return { sent: false, truncated: preparedText.truncated, delivery, reason: result.reason, detail: { ...textDetail, status: result.status, twitchMessage: result.message } };
   }
 
   const body = isRecord(result.data) ? result.data : {};
@@ -159,13 +177,18 @@ export const sendChatMessage = async (
   // sent here: a silent failure would be worse than a false warning.
   if (first.is_sent !== true) {
     const dropReason = isRecord(first.drop_reason) ? first.drop_reason : {};
+    const reason = readText(dropReason.code) ?? "not_sent";
+    const delivery = first.is_sent === false ? "rejected" : "ambiguous";
+    await afterPost?.(delivery, reason);
     return {
       sent: false,
       truncated: preparedText.truncated,
-      reason: readText(dropReason.code) ?? "not_sent",
+      delivery,
+      reason,
       detail: { ...textDetail, twitchMessage: readText(dropReason.message) },
     };
   }
 
-  return { sent: true, truncated: preparedText.truncated, reason: null, detail: { messageId: readText(first.message_id), ...textDetail } };
+  await afterPost?.("sent", null);
+  return { sent: true, truncated: preparedText.truncated, delivery: "sent", reason: null, detail: { messageId: readText(first.message_id), ...textDetail } };
 };

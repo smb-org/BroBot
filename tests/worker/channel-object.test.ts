@@ -895,6 +895,50 @@ describe("ChannelObject realtime path", () => {
     expect(overlay.send.mock.calls).toHaveLength(0);
   });
 
+  it("does not count chat messages while the channel is offline", async () => {
+    let streamState = "offline";
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn(() => Promise.resolve({
+        state: streamState,
+        source: "eventsub",
+        changed_at: "2026-09-27T12:00:00.000Z",
+        started_at: null,
+        stream_id: null,
+        checked_at: null,
+      })),
+    };
+    const database = { prepare: vi.fn(() => statement) } as unknown as D1Database;
+    const object = objectFor([], database);
+
+    await object.recordChatActivity();
+    expect(await object.getChatActivityCount()).toBe(0);
+
+    streamState = "online";
+    await object.recordChatActivity();
+    expect(await object.getChatActivityCount()).toBe(1);
+
+    streamState = "offline";
+    await object.recordChatActivity();
+    expect(await object.getChatActivityCount()).toBe(1);
+  });
+
+  it("rejects stale module alarm revisions after a newer schedule or clear", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-a";
+    const alarmTableKey = "channel:alarm_schedule";
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-a", 30_000, 3);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-a", 20_000, 2);
+    expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
+      [alarmKey]: { deadline: 30_000, ownerRevision: 3 },
+    });
+
+    await object.clearModuleAlarm("timers", "timer:timer-a", 4);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-a", 10_000, 3);
+    expect(storageOf(object).values.get(alarmTableKey) ?? {}).not.toHaveProperty(alarmKey);
+  });
+
   it("refreshes missing countdown schedules once per channel throttle window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
@@ -927,7 +971,10 @@ describe("ChannelObject realtime path", () => {
     expect(storage.values.get("ads:countdown_refresh_deadline")).toBe(now + 210_000);
     expect(storage.values.get("security_round")).toBe(now + 2_000);
     expect(storage.values.get("ad_prewarning")).toBe(now + 1_000);
-    expect(storage.setAlarm).toHaveBeenLastCalledWith(now + 1_000);
+    expect(storage.values.get("channel:alarm_schedule")).toMatchObject({
+      "host:schedule_inputs_changed:event_times": { deadline: now },
+    });
+    expect(storage.setAlarm).toHaveBeenLastCalledWith(now);
   });
 
   it("runs concurrent prewarning and countdown deadlines when one handler fails", async () => {
@@ -1033,7 +1080,10 @@ describe("ChannelObject realtime path", () => {
     await object.storeAdSchedule(adSchedule("2026-09-25T12:01:00.000Z"), new Date().toISOString());
 
     expect(storageOf(object).values.has("ads:countdown_refresh_deadline")).toBe(false);
-    expect(storageOf(object).setAlarm).not.toHaveBeenCalled();
+    expect(storageOf(object).values.get("channel:alarm_schedule")).toMatchObject({
+      "host:schedule_inputs_changed:event_times": { deadline: Date.now() },
+    });
+    expect(storageOf(object).setAlarm).toHaveBeenLastCalledWith(Date.now());
   });
 
   it("refreshes and publishes the new countdown schedule from its alarm", async () => {

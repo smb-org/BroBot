@@ -111,6 +111,17 @@ Migration `0022_weather_currency_data_sources.sql` legt die Anbietereinstellunge
 und getrennte Wetter- sowie Wechselkurs-Caches an und aktiviert beide Quellen
 für bestehende Kanäle.
 
+Migration `0023_timers.sql` legt kanaleigene Zeitgeber an und aktiviert das
+Modul für bestehende Kanäle. Zeitgeber planen ihre Läufe über den registrierten
+Durable-Object-Alarmhandler. Der Channel Durable Object zählt Chatnachrichten
+und speichert Ausführungsschlüssel sieben Tage lang atomar vor dem Chatversand;
+die gemeinsame Versandgrenze ergänzt Namensnennungen und begrenzt Ausgaben auf
+500 Zeichen. Ereigniszeiten kommen über den generischen
+`eventTimeSources`-Contract, den Sun- und Ads-Modul bereitstellen. Der
+Zeitgeber kennt weder deren Modulnamen noch deren Tabellen. Er rendert
+Textblöcke über die allgemeine Vorlagenpipeline und lehnt beim Speichern Blöcke
+mit chatbefehlabhängigen Variablen ab.
+
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 
 ESLint schützt die Grenze: Overlay-Ansichten importieren weder Worker-, Service-, Repository- oder Adaptercode noch Zod. Panel-Ansichten importieren weder Worker-, Repository- noch Adaptercode; Zod und der Service sind dort für Formulare und ausgelöste Anwendungsfälle erlaubt. Module importieren keine Geschwistermodule. Der Worker importiert kein React.

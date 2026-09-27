@@ -50,6 +50,7 @@ import { createClip, type CreateClipResult } from "../clip";
 import { fetchTwitchUserByLogin, sendShoutout, type ShoutoutSendResult } from "../shoutout";
 import { writeModuleAudit } from "../module-audit";
 import { publishOverlayHostEvent } from "../realtime";
+import { notifyModuleScheduleInputsChanged } from "../module-schedules";
 import { writeModuleDiagnostics } from "../event-log";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { isChannelControlInput, setChannelControl, type ChannelControlKind } from "../db/channel-controls";
@@ -287,6 +288,7 @@ panelRouter.patch("/api/channels/:channelId/settings", requireChannelAuthorizati
     "channel.time_zone.updated", { timeZone: previous.time_zone }, { timeZone });
   const result = await context.env.DB.batch([mutation, audit]);
   if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "channel_settings_conflict" }, 409);
+  await notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "channel_time_zone");
   await publishOverlayHostEvent(context.env.CHANNEL, context.env.DB, channelId, "template.data.changed");
   return context.json({ ok: true, timeZone, revision: nextRevision, defaultTimeZone: DEFAULT_CHANNEL_TIME_ZONE });
 });
@@ -314,6 +316,13 @@ panelRouter.post(
     );
     if (result.outcome === "concurrent") {
       return context.json({ error: "channel_control_changed_concurrently" }, 409);
+    }
+    // `duration === null` is the unambiguous "clear the pause" request; the
+    // computed `pause.active` alone can't tell an actual unpause apart from
+    // setting an until-stream-end pause that's still pending offline (also
+    // reported as `active: false`).
+    if (control === "pause" && duration === null && result.outcome === "changed") {
+      await notifyModuleScheduleInputsChanged(context.env.CHANNEL, context.req.param("channelId"), "activation");
     }
     return context.json({ controls: result.controls });
   },

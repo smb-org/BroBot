@@ -29,6 +29,7 @@ import { createTemplateRenderer, type TemplateChannelDetails, type TemplateStrea
 import type { ChannelVariableOperation } from "../contracts/values";
 import type { TemplateVariable } from "../template";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
+import { chatOutputSuppressionReason } from "./chat-output-gate";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -324,7 +325,8 @@ const runActions = async (
   // Order is preserved: a reply after an announcement reads as a different
   // conversation than the reverse.
   for (const action of actions) {
-    if (muted && (action.kind === "chat" || action.kind === "announcement" || action.kind === "shoutout")) {
+    if (chatOutputSuppressionReason({ moduleEnabled: true, mandatory: true, paused: false, muted }) !== null &&
+        (action.kind === "chat" || action.kind === "announcement" || action.kind === "shoutout")) {
       diagnostics.push({
         code: "host.action.suppressed" satisfies EventCode,
         detail: { action: action.kind, reason: "channel_muted" },
@@ -466,6 +468,14 @@ export const dispatchEventSubNotification = async (
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
+  if (event.subscriptionType === "channel.chat.message" && environment.CHANNEL !== undefined) {
+    try {
+      const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+      await object.recordChatActivity();
+    } catch (error: unknown) {
+      console.warn("Channel chat activity could not be counted.", error);
+    }
+  }
   // The ending stream remains current while its offline event is dispatched.
   // Capture that session's controls before the stored state moves to offline.
   const changedVariables = new Map<string, number>();
@@ -686,6 +696,7 @@ export const dispatchEventSubNotification = async (
     ));
   }
 
+  const streamStateTransitionAccepted = streamStateChanged !== null;
   for (const { module, settings } of matches) {
     const diagnostics: ModuleDiagnostic[] = [];
     let result: ModuleResult | null = null;
@@ -729,6 +740,11 @@ export const dispatchEventSubNotification = async (
             DB: environment.DB,
             authorizeMutation: authorizeModuleMutation,
             streamState,
+            streamStateTransitionAccepted,
+            chatActivityCount: async () => {
+              if (environment.CHANNEL === undefined) return 0;
+              return await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).getChatActivityCount();
+            },
             channelInfo,
             channelGameId,
             followedAt,
@@ -740,6 +756,16 @@ export const dispatchEventSubNotification = async (
             prepareVariableChange,
             channelLanguage,
             channelTimeZone,
+            scheduleAlarm: async (handlerKey, alarmKey, deadline, ownerRevision) => {
+              if (environment.CHANNEL === undefined) return;
+              const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+              await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline, ownerRevision);
+            },
+            clearAlarm: async (alarmKey, ownerRevision) => {
+              if (environment.CHANNEL === undefined) return;
+              const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+              await object.clearModuleAlarm(module.id, alarmKey, ownerRevision);
+            },
           });
     } catch (error: unknown) {
       // A module that throws doesn't take down the worker or the other

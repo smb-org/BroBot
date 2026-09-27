@@ -5,8 +5,10 @@ import { processAdBreak } from "./service";
 import { adsRoutes } from "./routes";
 import { settingsVariableReferences } from "../contract";
 import { readAdCountdownState } from "./adapters/countdown-state";
+import { readAdCountdownSnapshot } from "./adapters/countdown-state";
 import { adsOverlayElements } from "./overlay/element";
 import { adsTemplateVariableGroupLabels } from "./contracts/template-variable-catalog";
+import { adsEventTimeLabel } from "./contracts/language";
 
 const adsPanelIcon = { paths: ["M6 8h12v8H6z", "M9 8V6h6v2", "M9 12h6", "M9 16v2h6v-2"] } as const;
 
@@ -48,6 +50,15 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
     prewarningText: DEFAULT_PREWARNING_TEXT,
   },
   broadcasterScopes: ["channel:read:ads"],
+  eventTimeSources: [{
+    id: "next_ad_break",
+    label: adsEventTimeLabel,
+    resolve: async ({ DB, channelId, now }) => {
+      const snapshot = await readAdCountdownSnapshot(DB, channelId);
+      const at = snapshot?.nextAdAt;
+      return at !== null && at !== undefined && Date.parse(at) > now ? [at] : [];
+    },
+  }],
   eventSubTypes: ["stream.online", "channel.ad_break.begin"],
   routes: adsRoutes,
   panel: () => import("./panel"),

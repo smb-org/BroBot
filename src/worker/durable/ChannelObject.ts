@@ -18,7 +18,7 @@ import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protoc
 import type { AdsSchedule } from "../../modules/ads/contracts";
 import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
 import type { BotModule, HelixRequest, HelixRequestOptions } from "../../modules/contract";
-import type { ModuleAlarmContext, ModuleAlarmDefinition } from "../../modules/contract";
+import type { ModuleAlarmContext, ModuleAlarmDefinition, ModuleScheduleInputChangeReason } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
@@ -30,6 +30,17 @@ import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
+import { sendChatMessage } from "../chat";
+import { readChannelStreamState } from "../db/stream-state";
+import { readDispatchChannelState } from "../db/channel-controls";
+import { chatOutputSuppressionReason } from "../chat-output-gate";
+import { resolveModuleEventTimes } from "../module-event-times";
+import { renderScheduledTemplate } from "../scheduled-template-renderer";
+import {
+  claimModuleAlarmSend,
+  finishModuleAlarmSend,
+  readModuleAlarmSendClaim,
+} from "./module-alarm-send-claims";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -46,6 +57,9 @@ const D1_IN_PARAMETER_LIMIT = 100;
 const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
+const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
+const MODULE_ALARM_OWNER_REVISIONS_KEY = "module_alarm:owner_revisions";
+const MODULE_ALARM_OWNER_REVISION_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const SECURITY_DEADLINE_KEY = "security_round";
 const SECURITY_RETRY_KEY = "security_retry";
 const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
@@ -80,6 +94,8 @@ const SECURITY_ROUND_HANDLER = "channel.security_round";
 const SECURITY_RETRY_HANDLER = "channel.security_retry";
 const AD_PREWARNING_HANDLER = "channel.ad_prewarning";
 const AD_COUNTDOWN_REFRESH_HANDLER = "channel.ad_countdown_refresh";
+const MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER = "channel.module_schedule_inputs_changed";
+const MODULE_SCHEDULE_INPUTS_CHANGED_KEY = "host:schedule_inputs_changed";
 const LEGACY_ALARM_DEFINITIONS = [
   { key: SECURITY_DEADLINE_KEY, handler: SECURITY_ROUND_HANDLER, suppressedBy: SECURITY_RETRY_KEY },
   { key: SECURITY_RETRY_KEY, handler: SECURITY_RETRY_HANDLER },
@@ -177,6 +193,7 @@ type AlarmScheduleEntry = {
   claimUntil?: number;
   failures?: number;
   revision?: number;
+  ownerRevision?: number;
   suppressedBy?: string;
 };
 
@@ -201,6 +218,7 @@ const validAlarmScheduleEntry = (value: unknown): value is AlarmScheduleEntry =>
   (value.claimUntil === undefined || (typeof value.claimUntil === "number" && Number.isFinite(value.claimUntil))) &&
   (value.failures === undefined || (typeof value.failures === "number" && Number.isInteger(value.failures) && value.failures >= 0)) &&
   (value.revision === undefined || (typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0)) &&
+  (value.ownerRevision === undefined || (typeof value.ownerRevision === "number" && Number.isInteger(value.ownerRevision) && value.ownerRevision >= 0)) &&
   (value.suppressedBy === undefined || typeof value.suppressedBy === "string");
 
 const alarmAttemptAt = (entry: AlarmScheduleEntry): number =>
@@ -388,6 +406,7 @@ export class ChannelObject extends DurableObject<Env> {
       } catch (error: unknown) {
         console.warn("Ad countdown state snapshot could not be stored.", error);
       }
+      if (change.changed) await this.notifyScheduleInputsChanged("event_times");
       await this.reconcileAdCountdownRefresh(schedule);
       if (change.countdownChanged) {
         try {
@@ -770,17 +789,20 @@ export class ChannelObject extends DurableObject<Env> {
     handler: string,
     deadline: number,
     suppressedBy?: string,
+    ownerRevision?: number,
   ): Promise<void> {
     if (!Number.isFinite(deadline)) {
       await this.clearAlarmEntry(key);
       return;
     }
     await this.mutateAlarmSchedule(async (table, storage) => {
+      if (ownerRevision !== undefined && !await this.acceptAlarmOwnerRevision(storage, key, ownerRevision)) return;
       const current = table[key];
       table[key] = {
         deadline,
         handler,
         revision: (current?.revision ?? 0) + 1,
+        ...(ownerRevision === undefined ? {} : { ownerRevision }),
         ...(suppressedBy === undefined ? {} : { suppressedBy }),
       };
       if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
@@ -790,8 +812,27 @@ export class ChannelObject extends DurableObject<Env> {
     await this.scheduleEarliestAlarm();
   }
 
-  private async clearAlarmEntry(key: string): Promise<void> {
+  private async acceptAlarmOwnerRevision(
+    storage: AlarmStorageAccess,
+    key: string,
+    ownerRevision: number,
+  ): Promise<boolean> {
+    const now = Date.now();
+    const storedValue = await storage.get(MODULE_ALARM_OWNER_REVISIONS_KEY);
+    const stored = isRecord(storedValue) ? storedValue as Record<string, { revision: number; updatedAt: number }> : {};
+    const current = stored[key];
+    if (current !== undefined && Number.isSafeInteger(current.revision) && ownerRevision < current.revision) return false;
+    const revisions = Object.fromEntries(Object.entries(stored).filter(([, entry]) =>
+      Number.isSafeInteger(entry.revision) && Number.isFinite(entry.updatedAt) && now - entry.updatedAt <= MODULE_ALARM_OWNER_REVISION_RETENTION_MS,
+    ));
+    revisions[key] = { revision: ownerRevision, updatedAt: now };
+    await storage.put(MODULE_ALARM_OWNER_REVISIONS_KEY, revisions);
+    return true;
+  }
+
+  private async clearAlarmEntry(key: string, ownerRevision?: number): Promise<void> {
     await this.mutateAlarmSchedule(async (table, storage) => {
+      if (ownerRevision !== undefined && !await this.acceptAlarmOwnerRevision(storage, key, ownerRevision)) return;
       Reflect.deleteProperty(table, key);
       if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
         await storage.delete(key);
@@ -920,13 +961,85 @@ export class ChannelObject extends DurableObject<Env> {
         put: (key: string, value: unknown) => this.ctx.storage.put(`${storagePrefix}${key}`, value),
         delete: (key: string) => this.ctx.storage.delete(`${storagePrefix}${key}`),
       },
-      schedule: async (key, deadline) => {
-        await this.scheduleAlarmEntry(`module:${moduleId}:${key}`, handler, deadline);
+      schedule: async (key, deadline, ownerRevision) => {
+        await this.scheduleAlarmEntry(`module:${moduleId}:${key}`, handler, deadline, undefined, ownerRevision);
       },
-      clear: async (key) => {
-        await this.clearAlarmEntry(`module:${moduleId}:${key}`);
+      clear: async (key, ownerRevision) => {
+        await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision);
+      },
+      renderTemplate: async (text, now = Date.now()) => renderScheduledTemplate(this.env, channelId, text, now),
+      sendChat: async (text, idempotencyKey, attributions = [], stillValid) => {
+        const suppression = { reason: null as string | null };
+        const validateOutput = async (): Promise<boolean> => {
+          if (stillValid !== undefined && !await stillValid()) {
+            suppression.reason = "stale_before_send";
+            return false;
+          }
+          const [channelState, registration] = await Promise.all([
+            readDispatchChannelState(this.env.DB, channelId, new Date().toISOString()),
+            Promise.resolve(MODULES.find((module) => module.id === moduleId)),
+          ]);
+          const activation = channelState.activations.find((entry) => entry.moduleId === moduleId);
+          suppression.reason = chatOutputSuppressionReason({
+            moduleEnabled: registration?.mandatory === true || activation?.enabled === true,
+            mandatory: registration?.mandatory === true,
+            paused: channelState.controls.pause.active,
+            muted: channelState.controls.mute.active,
+          });
+          return suppression.reason === null;
+        };
+        const claimBeforePost = async (): Promise<boolean | "rate_limited"> => {
+          if (!await validateOutput()) return false;
+          return await claimModuleAlarmSend(this.ctx.storage, idempotencyKey, Date.now());
+        };
+        const afterPost = async (delivery: "sent" | "rejected" | "ambiguous" | "not_attempted"): Promise<void> => {
+          if (delivery !== "not_attempted") await finishModuleAlarmSend(this.ctx.storage, idempotencyKey, delivery, Date.now());
+        };
+        const result = await sendChatMessage(
+          this.env,
+          channelId,
+          text,
+          undefined,
+          fetch,
+          validateOutput,
+          claimBeforePost,
+          attributions,
+          afterPost,
+        );
+        if (result.reason === "already_attempted") {
+          const claim = await readModuleAlarmSendClaim(this.ctx.storage, idempotencyKey);
+          if (claim?.status === "sent") return { sent: true, reason: null, retryable: false };
+        }
+        const reason = suppression.reason ?? result.reason;
+        const retryable = suppression.reason === null && result.reason !== "stale_before_send" &&
+          result.reason !== "already_attempted" && result.delivery !== "ambiguous";
+        return { sent: result.sent, reason, retryable };
+      },
+      chatActivityCount: () => this.getChatActivityCount(),
+      resolveEventTimes: (now) => resolveModuleEventTimes(this.env.DB, channelId, now),
+      streamState: async () => (await readChannelStreamState(this.env.DB, channelId))?.state ?? "unknown",
+      streamStartedAt: async () => {
+        const state = await readChannelStreamState(this.env.DB, channelId);
+        return state === null ? { streamId: null, startedAt: null } : { streamId: state.streamId, startedAt: state.startedAt };
       },
     };
+  }
+
+  public async recordChatActivity(): Promise<number> {
+    if ((await readChannelStreamState(this.env.DB, this.ownChannelId() ?? ""))?.state !== "online") {
+      return await this.getChatActivityCount();
+    }
+    return await this.ctx.storage.transaction(async (transaction) => {
+      const current = await transaction.get<number>(CHAT_ACTIVITY_COUNT_KEY);
+      const next = typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current + 1 : 1;
+      await transaction.put(CHAT_ACTIVITY_COUNT_KEY, next);
+      return next;
+    });
+  }
+
+  public async getChatActivityCount(): Promise<number> {
+    const current = await this.ctx.storage.get<number>(CHAT_ACTIVITY_COUNT_KEY);
+    return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
   }
 
   private alarmHandlers(modules: readonly BotModule[] = MODULES): Map<string, AlarmHandlerRegistration> {
@@ -943,6 +1056,19 @@ export class ChannelObject extends DurableObject<Env> {
           return undefined;
         },
       }],
+      [MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER, {
+        retryDelaysMs: [5_000, 15_000, 60_000],
+        handle: async (key) => {
+          const reason = key.slice(`${MODULE_SCHEDULE_INPUTS_CHANGED_KEY}:`.length);
+          if (reason !== "event_times" && reason !== "channel_time_zone" && reason !== "activation") return;
+          for (const module of modules) {
+            for (const registration of module.alarms ?? []) {
+              if (registration.onScheduleInputsChanged === undefined) continue;
+              await registration.onScheduleInputsChanged(this.moduleAlarmContext(module.id, registration), reason);
+            }
+          }
+        },
+      }],
     ]);
     for (const module of modules) {
       for (const registration of module.alarms ?? []) {
@@ -956,6 +1082,7 @@ export class ChannelObject extends DurableObject<Env> {
               this.moduleAlarmContext(module.id, registration),
               key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
               entry.deadline,
+              entry.ownerRevision,
             );
           },
         });
@@ -1136,6 +1263,7 @@ export class ChannelObject extends DurableObject<Env> {
     handlerKey: string,
     alarmKey: string,
     deadline: number,
+    ownerRevision?: number,
   ): Promise<void> {
     const registration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === handlerKey);
     if (registration === undefined || alarmKey.length === 0) {
@@ -1145,15 +1273,26 @@ export class ChannelObject extends DurableObject<Env> {
       `module:${moduleId}:${alarmKey}`,
       `module:${moduleId}:${registration.key}`,
       deadline,
+      undefined,
+      ownerRevision,
     );
   }
 
   /** Clear one module-owned alarm key without disturbing other module deadlines. */
-  public async clearModuleAlarm(moduleId: string, alarmKey: string): Promise<void> {
+  public async clearModuleAlarm(moduleId: string, alarmKey: string, ownerRevision?: number): Promise<void> {
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) {
       throw new Error(`Unknown module alarm key ${moduleId}.${alarmKey}.`);
     }
-    await this.clearAlarmEntry(`module:${moduleId}:${alarmKey}`);
+    await this.clearAlarmEntry(`module:${moduleId}:${alarmKey}`, ownerRevision);
+  }
+
+  /** Queues a generic replan after a host or module changes schedule inputs. */
+  public async notifyScheduleInputsChanged(reason: ModuleScheduleInputChangeReason): Promise<void> {
+    await this.scheduleAlarmEntry(
+      `${MODULE_SCHEDULE_INPUTS_CHANGED_KEY}:${reason}`,
+      MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER,
+      Date.now(),
+    );
   }
 
   override async fetch(request: Request): Promise<Response> {

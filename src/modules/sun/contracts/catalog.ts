@@ -18,6 +18,7 @@ export const sunModuleCatalog: Readonly<Record<ModuleLanguage, {
   mandatoryReason: string;
   unavailableText: string;
   variableGroup: string;
+  eventTimes: Readonly<Record<"sunset" | "sunrise" | "golden_hour", string>>;
   templateVariables: Readonly<Record<SunTemplateVariableName, SunTemplateVariableText>>;
   phases: Readonly<Record<"day" | "night" | "golden_hour" | "blue_hour", string>>;
   durationUnits: {
@@ -31,6 +32,7 @@ export const sunModuleCatalog: Readonly<Record<ModuleLanguage, {
     mandatoryReason: "Die Sonnendatenquelle wird benötigt, damit Textbausteine Sonnenzeiten verwenden können.",
     unavailableText: "Sonnendaten sind derzeit nicht verfügbar.",
     variableGroup: "Sonne",
+    eventTimes: { sunset: "Sonnenuntergang", sunrise: "Sonnenaufgang", golden_hour: "Beginn der goldenen Stunde" },
     templateVariables: {
       "sun.set": { label: "Sonnenuntergang", description: "Zeit des nächsten Sonnenuntergangs.", sample: "18:42" },
       "sun.rise": { label: "Sonnenaufgang", description: "Uhrzeit des nächsten Sonnenaufgangs", sample: "06:18" },
@@ -54,6 +56,7 @@ export const sunModuleCatalog: Readonly<Record<ModuleLanguage, {
     mandatoryReason: "The sun data source is required for text blocks to use sun times.",
     unavailableText: "Sun data is currently unavailable.",
     variableGroup: "Sun",
+    eventTimes: { sunset: "Sunset", sunrise: "Sunrise", golden_hour: "Start of golden hour" },
     templateVariables: {
       "sun.set": { label: "Sunset", description: "Time of today's sunset", sample: "18:42" },
       "sun.rise": { label: "Sunrise", description: "Time of the next sunrise", sample: "06:18" },
