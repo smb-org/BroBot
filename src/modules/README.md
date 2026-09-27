@@ -88,6 +88,9 @@ aus dem ursprünglichen Text, fragt nur passende Provider ab und rendert den
 Text genau einmal. Eingefügte Werte werden dabei nie erneut als Vorlage
 eingelesen. Ein Provider liefert eine Zuordnung von Variablenname zu
 Zeichenkette; er schreibt nicht den gesamten Vorlagentext um.
+Für zeitabhängige Overlaywerte liefert `resolveOverlayTemplateValues` optional
+`nextChangeAt` pro Wert. Die Textbibliothek verwendet diese Contract-Angabe
+generisch für den nächsten Overlay-Neuaufbau; sie kennt keine Modulanamen.
 
 Neue Host- und Datenquellenvariablen verwenden einen Punkt im Namen, etwa
 `{sun.set}`, `{sun.set_in}` oder `{weather.temp}`. Ein einfacher Name wie

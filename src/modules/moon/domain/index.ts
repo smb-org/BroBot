@@ -220,6 +220,27 @@ export const calculateMoonState = (instant: number): { phase: string; illuminati
   return { phase: ["new", "waxing_crescent", "first_quarter", "waxing_gibbous", "full", "waning_gibbous", "last_quarter", "waning_crescent"][phaseIndex] ?? "new", illumination };
 };
 
+/** Find the next boundary between the broad phase labels used by template values. */
+export const nextMoonPhaseChangeAt = (instant: number): string => {
+  if (!Number.isFinite(instant)) throw new RangeError("Invalid lunar phase instant.");
+  const currentPhase = calculateMoonState(instant).phase;
+  const scanStep = 3 * 60 * 60 * 1_000;
+  let low = instant;
+  let high = instant + scanStep;
+  const latest = instant + 8 * DAY_MS;
+  while (high <= latest && calculateMoonState(high).phase === currentPhase) {
+    low = high;
+    high += scanStep;
+  }
+  if (high > latest) throw new RangeError("Could not find the next lunar phase boundary.");
+  while (high - low > 1_000) {
+    const middle = Math.floor((low + high) / 2);
+    if (calculateMoonState(middle).phase === currentPhase) low = middle;
+    else high = middle;
+  }
+  return new Date(high).toISOString();
+};
+
 const greenwichMeanSiderealTime = (instant: number): number => {
   const jd = julianDay(instant);
   const t = (jd - 2_451_545) / 36_525;

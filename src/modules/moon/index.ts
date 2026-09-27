@@ -1,11 +1,11 @@
 import { z } from "zod";
 
-import type { BotModule, ModuleChannelLocation, ModuleTemplateValueContext } from "../contract";
+import type { BotModule, ModuleChannelLocation, ModuleOverlayTemplateValue, ModuleTemplateValueContext } from "../contract";
 import { validChannelTimeZone, type TemplateVariable } from "../contract";
 import { DEFAULT_MOON_ERROR_TEXTS, readMoonSettings } from "./adapters/d1";
 import { MOON_ERROR_TEXT_MAX_LENGTH } from "./contracts";
 import { moonModuleCatalog } from "./contracts/catalog";
-import { nextMoonEvents, resolveMoonTemplateValues, type MoonLocation } from "./domain";
+import { nextMoonEvents, nextMoonPhaseChangeAt, resolveMoonTemplateValues, type MoonLocation } from "./domain";
 import { moonRoutes } from "./routes";
 
 const settingsSchema = z.object({});
@@ -54,20 +54,38 @@ const resolveValues = async (names: readonly string[], context: ModuleTemplateVa
 
 const resolveOverlayValues: NonNullable<BotModule<typeof settingsSchema>["resolveOverlayTemplateValues"]> = async (names, context) => {
   const requested = new Set(names);
+  const nextHour = new Date((Math.floor(context.now / (60 * 60 * 1_000)) + 1) * 60 * 60 * 1_000).toISOString();
+  const nextPhaseChange = requested.has("moon.phase") ? nextMoonPhaseChangeAt(context.now) : undefined;
+  const values: Record<string, ModuleOverlayTemplateValue> = Object.fromEntries(
+    ["moon.phase", "moon.illumination"].filter((name) => requested.has(name))
+      .map((name) => [name, {
+        available: true,
+        nextChangeAt: name === "moon.phase" ? nextPhaseChange ?? nextHour : nextHour,
+      }]),
+  );
   const eventNames = ["moon.rise", "moon.rise_in", "moon.set", "moon.set_in"].filter((name) => requested.has(name));
-  if (eventNames.length === 0) return {};
+  if (eventNames.length === 0) return values;
   const [locationSetting, channelTimeZone] = await Promise.all([context.channelLocation(), context.channelTimeZone()]);
   const location = validLocationFor(locationSetting, channelTimeZone);
-  if (location === null) return Object.fromEntries(eventNames.map((name) => [name, { available: false }]));
+  if (location === null) {
+    return {
+      ...values,
+      ...Object.fromEntries(eventNames.map((name) => [name, { available: false }])),
+    };
+  }
   const events = nextMoonEvents(location, context.now);
-  return Object.fromEntries(eventNames.map((name) => {
-    const targets = name.startsWith("moon.rise") ? events.riseAts : events.setAts;
-    return [name, {
-      available: targets.length > 0,
-      ...(targets[0] === undefined ? {} : { targetAt: targets[0] }),
-      ...(name.endsWith("_in") && targets.length > 0 ? { targetAts: targets } : {}),
-    }];
-  }));
+  return {
+    ...values,
+    ...Object.fromEntries(eventNames.map((name) => {
+      const targets = name.startsWith("moon.rise") ? events.riseAts : events.setAts;
+      return [name, {
+        available: targets.length > 0,
+        ...(targets[0] === undefined ? {} : { targetAt: targets[0] }),
+        ...(name.endsWith("_in") && targets.length > 0 ? { targetAts: targets } : {}),
+        ...(targets[0] === undefined ? {} : { nextChangeAt: targets[0] }),
+      }];
+    })),
+  };
 };
 
 export const moonModule: BotModule<typeof settingsSchema> = {

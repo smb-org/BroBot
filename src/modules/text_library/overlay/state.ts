@@ -250,18 +250,14 @@ export const textBlockOverlayState = async (
     const expiresAt = context.streamDetailsCacheExpiresAt();
     if (expiresAt !== null && Number.isFinite(expiresAt) && expiresAt > context.now) systemRefreshAts.push(expiresAt);
   }
-  const fixedAstronomyNames = [
-    "sun.set", "sun.rise", "sun.dusk", "sun.dawn", "sun.noon", "sun.day_length",
-    "sun.golden_hour", "sun.golden_hour_end", "sun.blue_hour", "moon.rise", "moon.set",
-  ].filter((name) => referencedTemplateNames.has(name));
-  if (fixedAstronomyNames.length > 0) {
-    const astronomyValues = await context.resolveOverlayTemplateValues(fixedAstronomyNames);
-    const astronomyRefreshAts = Object.values(astronomyValues).flatMap((value) => [
-      ...(value.targetAt === undefined ? [] : [value.targetAt]),
-      ...(value.targetAts ?? []),
-    ]).map(Date.parse).filter((at) => Number.isFinite(at) && at > context.now)
+  const overlayTemplateNames = [...referencedTemplateNames].filter((name) => context.overlayTemplateVariableNames.has(name));
+  if (overlayTemplateNames.length > 0) {
+    const overlayValues = await context.resolveOverlayTemplateValues(overlayTemplateNames);
+    const overlayRefreshAts = Object.values(overlayValues).flatMap((value) =>
+      value.nextChangeAt === undefined ? [] : [value.nextChangeAt],
+    ).map(Date.parse).filter((at) => Number.isFinite(at) && at > context.now)
       .map((at) => at + 1_000);
-    systemRefreshAts.push(...astronomyRefreshAts);
+    systemRefreshAts.push(...overlayRefreshAts);
   }
   // Checked last so it also catches a transient failure from the fixed-sun lookup above,
   // not just earlier lookups in this pass.

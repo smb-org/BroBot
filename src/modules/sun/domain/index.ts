@@ -336,7 +336,8 @@ export const calculateSunAltitudeIntervals = (
   dayCount: number,
   kind: "golden" | "blue",
 ): readonly SunAltitudeInterval[] => {
-  const intervals: SunAltitudeInterval[] = [];
+  const starts: string[] = [];
+  const ends: string[] = [];
   for (let offset = 0; offset < dayCount; offset += 1) {
     const localDate = shiftLocalDate(firstLocalDate, offset);
     const dayLocation = { ...location, localDate };
@@ -344,17 +345,26 @@ export const calculateSunAltitudeIntervals = (
     const risingEndThreshold = kind === "golden" ? 6 : -4;
     const settingStartThreshold = kind === "golden" ? 6 : -4;
     const settingEndThreshold = kind === "golden" ? -4 : -6;
-    const starts = [
+    starts.push(...[
       ...altitudeCrossings(dayLocation, risingStartThreshold).filter(({ rising }) => rising),
       ...altitudeCrossings(dayLocation, settingStartThreshold).filter(({ rising }) => !rising),
-    ].map(({ at }) => at).sort((left, right) => Date.parse(left) - Date.parse(right));
-    const ends = [
+    ].map(({ at }) => at));
+    ends.push(...[
       ...altitudeCrossings(dayLocation, risingEndThreshold).filter(({ rising }) => rising),
       ...altitudeCrossings(dayLocation, settingEndThreshold).filter(({ rising }) => !rising),
-    ].map(({ at }) => at).sort((left, right) => Date.parse(left) - Date.parse(right));
-    for (const startAt of starts) {
-      const endAt = ends.find((candidate) => Date.parse(candidate) > Date.parse(startAt));
-      if (endAt !== undefined) intervals.push({ startAt, endAt });
+    ].map(({ at }) => at));
+  }
+
+  starts.sort((left, right) => Date.parse(left) - Date.parse(right));
+  ends.sort((left, right) => Date.parse(left) - Date.parse(right));
+  const intervals: SunAltitudeInterval[] = [];
+  let endIndex = 0;
+  for (const startAt of starts) {
+    while (ends[endIndex] !== undefined && Date.parse(ends[endIndex] ?? "") <= Date.parse(startAt)) endIndex += 1;
+    const endAt = ends[endIndex];
+    if (endAt !== undefined) {
+      intervals.push({ startAt, endAt });
+      endIndex += 1;
     }
   }
   return intervals.sort((left, right) => Date.parse(left.startAt) - Date.parse(right.startAt));

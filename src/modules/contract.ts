@@ -35,8 +35,10 @@ export interface ModuleOverlayTemplateValue {
   available: boolean;
   /** UTC instant used by browser-rendered countdown values. */
   targetAt?: string;
-  /** Ordered future instants let a browser continue the countdown after the next event passes. */
+  /** Ordered countdown instants may start with a past instant to represent an ongoing interval as zero. */
   targetAts?: readonly string[];
+  /** UTC instant when this resolved value may change and its overlay should be refreshed. */
+  nextChangeAt?: string;
 }
 
 export interface ModuleTemplateConditionTransition {

@@ -4,6 +4,7 @@ import type {
   ModuleEvent,
   ModuleLanguage,
   ModuleOverlayElementContext,
+  ModuleOverlayTemplateValue,
   ModuleTemplateConditionContext,
   ModuleTemplateConditionTimelineContext,
   ModuleTextBlockConditionDefinition,
@@ -231,14 +232,14 @@ export const createOverlayElementContext = async (
     }
     return values;
   };
-  const overlayValueCache = new Map<string, Promise<Readonly<Record<string, { available: boolean; targetAt?: string; targetAts?: readonly string[] }>>>>();
+  const overlayValueCache = new Map<string, Promise<Readonly<Record<string, ModuleOverlayTemplateValue>>>>();
   const resolveOverlayTemplateValues = (names: readonly string[]) => {
     const key = [...new Set(names)].sort((left, right) => left.localeCompare(right)).join("\u0000");
     let pending = overlayValueCache.get(key);
     if (pending === undefined) {
       pending = (async () => {
         const requested = new Set(names);
-        const values: Record<string, { available: boolean; targetAt?: string; targetAts?: readonly string[] }> = {};
+        const values: Record<string, ModuleOverlayTemplateValue> = {};
         for (const module of MODULES) {
           if (!moduleIsEnabled(module, enabled) || module.resolveOverlayTemplateValues === undefined) continue;
           const moduleNames = names.filter((name) => (module.dynamicTemplateVariableNames ?? []).includes(name) ||

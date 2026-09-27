@@ -141,6 +141,20 @@ describe("on-demand sun template values", () => {
     expect(values.values["sun.set"]).not.toBe(errorText);
   });
 
+  it("resolves the golden-hour interval across Tromsø local midnight", () => {
+    const location = { latitude: 69.6492, longitude: 18.9553, timeZone: "Europe/Oslo" };
+    const now = Date.parse("2026-05-15T21:30:00.000Z");
+    const values = resolveAt("2026-05-15T21:30:00.000Z", location, location.timeZone);
+    const currentInterval = calculateSunAltitudeIntervals(location, "2026-05-14", 3, "golden")
+      .find(({ startAt, endAt }) => Date.parse(startAt) <= now && now < Date.parse(endAt));
+
+    expect(values.dataConditions["sun.phase"]).toBe("golden_hour");
+    expect(currentInterval).toBeDefined();
+    expect(values.values["sun.golden_hour"]).toBe(formatChannelTime(currentInterval?.startAt ?? "", location.timeZone));
+    expect(values.values["sun.golden_hour_in"]).toBe("0 min");
+    expect(values.values["sun.golden_hour_end"]).toBe(formatChannelTime(currentInterval?.endAt ?? "", location.timeZone));
+  });
+
   it("keeps polar phase and dusk behavior when calculated on demand", () => {
     const polarDay = resolveAt("2026-06-21T12:00:00.000Z", {
       latitude: 78.22,
@@ -213,13 +227,13 @@ describe("on-demand sun template values", () => {
     });
 
     expect(values).toEqual({
-      "sun.rise": { available: true, targetAt: day.sunriseAt },
-      "sun.set": { available: true, targetAt: day.sunsetAt },
-      "sun.dusk": { available: true, targetAt: day.duskAt },
+      "sun.rise": { available: true, targetAt: day.sunriseAt, nextChangeAt: day.sunriseAt },
+      "sun.set": { available: true, targetAt: day.sunsetAt, nextChangeAt: day.sunsetAt },
+      "sun.dusk": { available: true, targetAt: day.duskAt, nextChangeAt: day.duskAt },
     });
   });
 
-  it("refreshes golden- and blue-hour countdowns at both interval boundaries", async () => {
+  it("keeps golden- and blue-hour countdowns on their interval start and refreshes at the end", async () => {
     const location = { latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" };
     const now = Date.parse("2026-06-21T00:00:00.000Z");
     const values = await sunModule.resolveOverlayTemplateValues?.(["sun.golden_hour_in", "sun.blue_hour_in"], {
@@ -235,12 +249,37 @@ describe("on-demand sun template values", () => {
     const nextGolden = goldenIntervals.find(({ startAt }) => Date.parse(startAt) > now);
     const nextBlue = blueIntervals.find(({ startAt }) => Date.parse(startAt) > now);
 
-    expect(values?.["sun.golden_hour_in"]?.targetAts).toContain(nextGolden?.startAt);
-    expect(values?.["sun.golden_hour_in"]?.targetAts).toContain(nextGolden?.endAt);
-    expect(values?.["sun.blue_hour_in"]?.targetAts).toContain(nextBlue?.startAt);
-    expect(values?.["sun.blue_hour_in"]?.targetAts).toContain(nextBlue?.endAt);
-    expect(values?.["sun.golden_hour_in"]?.targetAts?.length).toBeGreaterThan(2);
-    expect(values?.["sun.blue_hour_in"]?.targetAts?.length).toBeGreaterThan(2);
+    expect(values?.["sun.golden_hour_in"]?.targetAts).toEqual([nextGolden?.startAt]);
+    expect(values?.["sun.golden_hour_in"]?.targetAts).not.toContain(nextGolden?.endAt);
+    expect(values?.["sun.golden_hour_in"]?.nextChangeAt).toBe(nextGolden?.endAt);
+    expect(values?.["sun.blue_hour_in"]?.targetAts).toEqual([nextBlue?.startAt]);
+    expect(values?.["sun.blue_hour_in"]?.targetAts).not.toContain(nextBlue?.endAt);
+    expect(values?.["sun.blue_hour_in"]?.nextChangeAt).toBe(nextBlue?.endAt);
+  });
+
+  it("resolves Berlin golden-hour countdown as zero while the interval is ongoing", async () => {
+    const location = { latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" };
+    const interval = calculateSunAltitudeIntervals(location, "2026-06-21", 1, "golden")[0];
+    expect(interval).toBeDefined();
+    const now = Date.parse(interval?.startAt ?? "") + 5 * 60_000;
+    const resolved = resolveAt(new Date(now).toISOString(), location, location.timeZone);
+    const values = await sunModule.resolveOverlayTemplateValues?.(["sun.golden_hour_in"], {
+      DB: {} as D1Database,
+      channelId: "sun-channel",
+      now,
+      channelTimeZone: () => Promise.resolve(location.timeZone),
+      channelLocation: () => Promise.resolve({ name: "Berlin", ...location }),
+      language: "en",
+    });
+
+    expect(resolved.dataConditions["sun.phase"]).toBe("golden_hour");
+    expect(resolved.values["sun.golden_hour_in"]).toBe("0 min");
+    expect(values?.["sun.golden_hour_in"]).toMatchObject({
+      available: true,
+      targetAts: [interval?.startAt],
+      nextChangeAt: interval?.endAt,
+    });
+    expect(values?.["sun.golden_hour_in"]?.targetAts).not.toContain(interval?.endAt);
   });
 
   it("propagates a transient location lookup failure instead of masking it as unavailable", async () => {

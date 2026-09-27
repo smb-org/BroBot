@@ -166,29 +166,37 @@ const resolveOverlayValues = async (
     intervals.find(({ startAt }) => Date.parse(startAt) > context.now);
   const golden = chooseInterval(goldenIntervals);
   const blue = chooseInterval(blueIntervals);
+  const goldenIn = golden === undefined ? [] : [golden.startAt];
+  const blueIn = blue === undefined ? [] : [blue.startAt];
+  const eventValue = (targets: string[]) => ({
+    targets,
+    ...(targets[0] === undefined ? {} : { nextChangeAt: targets[0] }),
+  });
   const nextMidnight = localMidnightInTimeZone(shiftLocalDate(today, 1), location.timeZone);
-  const events = {
-    "sun.set": future((day) => day.sunsetAt),
-    "sun.set_in": future((day) => day.sunsetAt),
-    "sun.rise": future((day) => day.sunriseAt),
-    "sun.rise_in": future((day) => day.sunriseAt),
-    "sun.dusk": future((day) => day.duskAt),
-    "sun.dawn": future((day) => day.dawnAt),
-    "sun.dawn_in": future((day) => day.dawnAt),
-    "sun.noon": future((day) => day.solarNoonAt),
-    "sun.day_length": [nextMidnight],
-    "sun.golden_hour": golden === undefined ? [] : [golden.startAt <= new Date(context.now).toISOString() ? golden.endAt : golden.startAt],
-    "sun.golden_hour_in": futureAts(goldenIntervals.flatMap(({ startAt, endAt }) => [startAt, endAt])),
-    "sun.golden_hour_end": golden === undefined ? [] : [golden.endAt],
-    "sun.blue_hour": blue === undefined ? [] : [blue.startAt <= new Date(context.now).toISOString() ? blue.endAt : blue.startAt],
-    "sun.blue_hour_in": futureAts(blueIntervals.flatMap(({ startAt, endAt }) => [startAt, endAt])),
+  const events: Readonly<Record<string, { targets: string[]; nextChangeAt?: string }>> = {
+    "sun.set": eventValue(future((day) => day.sunsetAt)),
+    "sun.set_in": eventValue(futureAts(days.flatMap((day) => day.sunsetAt === null ? [] : [day.sunsetAt]))),
+    "sun.rise": eventValue(future((day) => day.sunriseAt)),
+    "sun.rise_in": eventValue(futureAts(days.flatMap((day) => day.sunriseAt === null ? [] : [day.sunriseAt]))),
+    "sun.dusk": eventValue(future((day) => day.duskAt)),
+    "sun.dawn": eventValue(future((day) => day.dawnAt)),
+    "sun.dawn_in": eventValue(futureAts(days.flatMap((day) => day.dawnAt === null ? [] : [day.dawnAt]))),
+    "sun.noon": eventValue(future((day) => day.solarNoonAt)),
+    "sun.day_length": { targets: [nextMidnight], nextChangeAt: nextMidnight },
+    "sun.golden_hour": golden === undefined ? { targets: [] } : { targets: [golden.endAt], nextChangeAt: golden.endAt },
+    "sun.golden_hour_in": golden === undefined ? { targets: [] } : { targets: goldenIn, nextChangeAt: golden.endAt },
+    "sun.golden_hour_end": golden === undefined ? { targets: [] } : { targets: [golden.endAt], nextChangeAt: golden.endAt },
+    "sun.blue_hour": blue === undefined ? { targets: [] } : { targets: [blue.endAt], nextChangeAt: blue.endAt },
+    "sun.blue_hour_in": blue === undefined ? { targets: [] } : { targets: blueIn, nextChangeAt: blue.endAt },
   };
   return Object.fromEntries(needed.map((name) => {
-    const targets = events[name as keyof typeof events];
+    const event = events[name];
+    const targets = event?.targets ?? [];
     return [name, {
       available: targets.length > 0,
       ...(targets[0] === undefined ? {} : { targetAt: targets[0] }),
       ...(name.endsWith("_in") && targets.length > 0 ? { targetAts: targets } : {}),
+      ...(event?.nextChangeAt === undefined ? {} : { nextChangeAt: event.nextChangeAt }),
     }];
   }));
 };

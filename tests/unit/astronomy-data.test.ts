@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { panelTemplateOptions } from "../../src/dashboard/ui/template-variable-options";
-import { calculateMoonDay, calculateMoonState, localDateInTimeZone as moonLocalDate, resolveMoonTemplateValues } from "../../src/modules/moon/domain";
+import { calculateMoonDay, calculateMoonState, localDateInTimeZone as moonLocalDate, nextMoonPhaseChangeAt, resolveMoonTemplateValues } from "../../src/modules/moon/domain";
 import { moonModule } from "../../src/modules/moon";
 import { calculateSunAltitudeIntervals, calculateSunDay, localDateInTimeZone as sunLocalDate, resolveSunTemplateValues } from "../../src/modules/sun/domain";
 import { sunModule } from "../../src/modules/sun";
@@ -85,7 +85,7 @@ describe("local solar values against published almanac values", () => {
         errorText: "Configured unavailable text",
       });
       expect(values.values["sun.dawn"]).toBe("Configured unavailable text");
-      expect(values.values["sun.golden_hour"]).toBe("Configured unavailable text");
+      expect(values.values["sun.golden_hour"]).not.toBe("Configured unavailable text");
       expect(values.values["sun.blue_hour"]).toBe("Configured unavailable text");
     }
     expect(winter.dawnAt).not.toBeNull();
@@ -162,6 +162,23 @@ describe("Meeus low-precision lunar values against published almanac values", ()
     });
     expect(overlayValues?.["moon.rise_in"]?.targetAts?.length).toBeGreaterThan(1);
     expect(overlayValues?.["moon.set_in"]?.targetAt).toBeDefined();
+
+    const valueRefreshes = await moonModule.resolveOverlayTemplateValues?.(["moon.phase", "moon.illumination"], {
+      DB: {} as D1Database,
+      channelId: "moon-channel",
+      now,
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve(null),
+      language: "en",
+    });
+    const nextHour = new Date((Math.floor(now / (60 * 60 * 1_000)) + 1) * 60 * 60 * 1_000).toISOString();
+    const nextPhaseChange = nextMoonPhaseChangeAt(now);
+    expect(valueRefreshes).toEqual({
+      "moon.phase": { available: true, nextChangeAt: nextPhaseChange },
+      "moon.illumination": { available: true, nextChangeAt: nextHour },
+    });
+    expect(calculateMoonState(Date.parse(nextPhaseChange) - 1_000).phase).toBe(calculateMoonState(now).phase);
+    expect(calculateMoonState(Date.parse(nextPhaseChange) + 1_000).phase).not.toBe(calculateMoonState(now).phase);
   });
 });
 
