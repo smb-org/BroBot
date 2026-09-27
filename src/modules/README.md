@@ -110,6 +110,25 @@ die HTTP-Routen eines Geschwistermoduls aufzurufen. `{date}`, `{time}` und
 zeitabhängige Textblockbedingungen verwenden die Zeitzone aus den
 Kanal-Einstellungen.
 
+Ein Modul kann über `textBlockConditions` Bedingungen für Varianten von
+Textblöcken bereitstellen. Die Kennung ist punktgetrennt; das Modul löst den
+aktuellen Wert beim Rendern auf, während die Textbibliothek Definitionen und
+Auswahl speichert. Ein `alarmHandler` meldet die nächste Fälligkeit und
+verarbeitet sie über den Alarm des kanalgebundenen Durable Objects. Ein
+`channelSettings`-Baustein wird in den gemeinsamen Kanaleinstellungen des
+Dashboards angezeigt. Der Host reicht dort die Kanalzeitzone und deren
+Änderungsfunktion weiter, damit Module keine Host-API importieren müssen.
+
+Die Sonnendatenquelle liegt eigenständig unter `src/modules/sun/`. Sie nutzt
+Open-Meteo nur für die Standortsuche; Sonnenaufgang, Sonnenuntergang und
+bürgerliche Abenddämmerung berechnet sie lokal mit NOAA-Gleichungen nach Meeus. Das
+vermeidet einen Laufzeit-Netzwerkaufruf für Tagesdaten. Die gespeicherten
+Bei gesetztem Standort decken die gespeicherten Einträge den heutigen und den
+folgenden lokalen Kalendertag ab und werden um 00:15 Uhr in der Kanalzeitzone
+erneuert. Bei Polartag gilt die
+Sonnenphase als Tag, bei Polarnacht als Nacht; nicht auftretende Ereigniszeiten
+verwenden den konfigurierbaren zweisprachigen Fehlertext.
+
 `templateUsageSources` meldet eigene Vorlagentexte für generische
 Nutzungsanzeigen. Der Host ergänzt seine eigenen Oberflächenquellen; Module
 fragen dafür keine Tabellen anderer Module ab.

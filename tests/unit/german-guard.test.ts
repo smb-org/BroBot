@@ -38,6 +38,8 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/text_commands/panel/locale.ts": "Bilingual DE/EN text-commands panel text catalogue; only its `de` half is German.",
   "src/modules/text_library/panel/locale.ts": "Bilingual DE/EN text-library panel text catalogue; only its `de` half is German.",
   "src/modules/text_library/catalog.ts": "Bilingual DE/EN module navigation and mandatory-state catalog; only its `de` half is German.",
+  "src/modules/sun/contracts/catalog.ts": "Bilingual DE/EN fallback, duration and mandatory-state catalogue; only its `de` half is German.",
+  "src/modules/sun/panel/locale.ts": "Bilingual DE/EN sun-settings text catalogue; only its `de` half is German.",
   "src/modules/ads/contracts/chat-defaults.ts": "Default chat text the bot posts in the channel; chat templates are channel content and stay in the channel language (umbau-plan.md, section on chat templates).",
   "src/modules/ads/contracts/language.ts": "Bilingual DE/EN catalog for runtime ads wording; only its `de` half is German.",
   "src/modules/raid/contracts/chat-defaults.ts": "Default chat text the bot posts in the channel; chat templates are channel content and stay in the channel language (umbau-plan.md, section on chat templates).",

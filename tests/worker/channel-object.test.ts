@@ -326,8 +326,9 @@ describe("ChannelObject realtime path", () => {
 
     expect(response.status).toBe(101);
     expect(accepted?.deserializeAttachment()).toEqual(token);
-    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledTimes(2);
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("FROM overlay_tokens"));
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("sun_locations"));
   });
 
   it("closes a stale legacy handshake when its token is already bound", async () => {
@@ -393,7 +394,7 @@ describe("ChannelObject realtime path", () => {
 
     expect(response.status).toBe(403);
     expect(accept).not.toHaveBeenCalled();
-    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledTimes(2);
   });
 
   it("keeps stream-state refreshes away from overlay sockets", async () => {
@@ -1430,7 +1431,7 @@ describe("ChannelObject realtime path", () => {
       prepare: vi.fn((query: string) => {
         const statement = {
           bind: vi.fn((...values: unknown[]) => {
-            binds.push(values);
+            if (query.includes("auth_sessions") || query.includes("overlay_tokens")) binds.push(values);
             return {
               all: () => Promise.resolve({
                 results: query.includes("auth_sessions")
@@ -1441,6 +1442,7 @@ describe("ChannelObject realtime path", () => {
                   }))
                   : values.slice(1, -1).map((tokenId) => ({ token_id: tokenId, overlay_id: null })),
               }),
+              first: () => Promise.resolve(null),
             };
           }),
         };
@@ -1583,6 +1585,7 @@ describe("ChannelObject realtime path", () => {
       const statement = {
         bind: vi.fn(() => statement),
         all: vi.fn().mockResolvedValue({ results: [] }),
+        first: vi.fn().mockResolvedValue(null),
       };
       return statement;
     });

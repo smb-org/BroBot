@@ -52,6 +52,7 @@ export interface TextLibraryTexts {
   moveDown: string;
   removeVariant: string;
   conditions: string;
+  anyCondition: string;
   noConditions: string;
   stream: string;
   anyStream: string;
@@ -156,6 +157,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     moveDown: "Nach unten",
     removeVariant: "Variante entfernen",
     conditions: "Bedingungen – alle müssen zutreffen",
+    anyCondition: "Beliebig",
     noConditions: "Keine; diese Variante greift als letzte Möglichkeit.",
     stream: "Streamstatus",
     anyStream: "Beliebig",
@@ -279,6 +281,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     moveDown: "Move down",
     removeVariant: "Remove variant",
     conditions: "Conditions — all must match",
+    anyCondition: "Any",
     noConditions: "None; this variant is the final fallback.",
     stream: "Stream status",
     anyStream: "Any",

@@ -43,7 +43,7 @@ import {
   saveChannelTimeZone,
   setChannelModuleEnabled,
 } from "./api";
-import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleToggleList, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
+import { Led, ModuleChannelSettingsMount, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleToggleList, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
 import { ImmediateActions, WarningsAndErrorsFeed } from "./stream-manager";
 import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
@@ -1025,6 +1025,18 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
       setSettingsBusy(false);
     }
   };
+  const saveSuggestedTimeZone = async (timeZone: string): Promise<{ timeZone: string; revision: number }> => {
+    if (channelSettings === null) throw new Error("Channel settings are still loading.");
+    setSettingsBusy(true);
+    try {
+      const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZone);
+      setChannelSettings({ timeZone: saved.timeZone, revision: saved.revision });
+      setTimeZoneDraft(saved.timeZone);
+      return saved;
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
   const entries = sortBySeverity([
     broadcasterRow(overview.broadcasterConnection),
     channelBotConsentRow(overview.channelBotConsent, overview.channelId, overview.role === "broadcaster"),
@@ -1060,6 +1072,18 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
             : <p className="muted">{settingsTexts.readOnly}</p>}
         </div>
         {settingsError.length === 0 ? null : <p className="error-text" role="alert">{settingsError}</p>}
+        {channelSettings === null ? null : MODULES.flatMap((module) => module.channelSettings === undefined ? [] : [
+          <ModuleChannelSettingsMount
+            key={module.id}
+            moduleId={module.id}
+            channelId={overview.channelId}
+            language={dashboardLanguage()}
+            canManage={canManage(overview.role)}
+            readOnlyReason={settingsTexts.readOnly}
+            channelTimeZone={channelSettings.timeZone}
+            saveChannelTimeZone={saveSuggestedTimeZone}
+          />,
+        ])}
       </section>
       <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} modules={modules} />
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />

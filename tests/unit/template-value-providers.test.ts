@@ -85,6 +85,31 @@ describe("template value providers", () => {
     expect(resolveBlocks).toHaveBeenCalledWith(["welcome"], expect.any(Object));
   });
 
+  it("uses the provider's bilingual unavailable text when resolving its values fails", async () => {
+    const sources = {
+      channelLanguage: () => Promise.resolve("de" as const),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      streamState: () => Promise.resolve("offline" as const),
+      channelDetails: () => Promise.resolve(null),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve(null),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      readChannelVariables: () => Promise.resolve({}),
+      templateValueProviders: [{
+        moduleId: "weather",
+        variables: [variable("weather.temp")],
+        templateUnavailableText: { de: "Wetterdaten fehlen.", en: "Weather data is unavailable." },
+        resolveTemplateValues: () => Promise.reject(new Error("Provider unavailable.")),
+      }],
+    } as unknown as TemplateResolverSources;
+
+    const result = await createTemplateRenderer(event, "event", [], sources)("{weather.temp}", {});
+
+    expect(result.text).toBe("Wetterdaten fehlen.");
+  });
+
   it("keeps event-only raid variables from shadowing host variables in a command preview", async () => {
     const raidVariables = variablesForModuleTemplateContext(raidModule,
       Object.values(raidModule.templateFields ?? {}).flat());

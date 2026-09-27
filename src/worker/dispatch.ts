@@ -653,6 +653,9 @@ export const dispatchEventSubNotification = async (
       moduleId: provider.id,
       ...(provider.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: provider.templateVariableNamespace }),
       variables: registeredModuleVariables.get(provider.id) ?? [],
+      ...(provider.textBlockConditions === undefined ? {} : { textBlockConditions: provider.textBlockConditions }),
+      ...(provider.templateUnavailableText === undefined ? {} : { templateUnavailableText: provider.templateUnavailableText }),
+      ...(provider.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: provider.resolveTemplateConditions }),
       resolveTemplateValues,
     }];
   });

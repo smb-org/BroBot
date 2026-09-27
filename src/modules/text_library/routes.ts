@@ -8,7 +8,7 @@ import { validTextBlock } from "./domain";
 import { createTextBlockRepository } from "./adapters/d1";
 import type { TextBlockInput } from "./repository";
 import { createTextLibraryService } from "./service";
-import { MODULE_TEMPLATE_MINIMUM_TIERS, SYSTEM_TEMPLATE_VARIABLE_LIST, type ModuleRouteEnvironment } from "../contract";
+import { MODULE_TEMPLATE_MINIMUM_TIERS, SYSTEM_TEMPLATE_VARIABLE_LIST, type ModuleRouteEnvironment, type ModuleTextBlockConditionDefinition } from "../contract";
 
 const TEXT_LIBRARY_MODULE_ID = "text_library";
 
@@ -19,6 +19,7 @@ const conditionsSchema = z.object({
   minimumTier: z.enum(MODULE_TEMPLATE_MINIMUM_TIERS).optional(),
   weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
   timeWindow: z.object({ start: z.string(), end: z.string() }).optional(),
+  data: z.record(z.string().regex(/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/u), z.string().min(1).max(32)).optional(),
 });
 const variantSchema = z.object({
   id: z.string().min(1).max(80),
@@ -40,7 +41,10 @@ const readBody = async (request: Request): Promise<unknown> => request.json().ca
 const denied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "text_library_management_denied" }, 403);
 
-const parseBlock = (raw: unknown): Omit<TextBlockInput, "channelId" | "now" | "expectedGraphRevision"> | null => {
+const parseBlock = (
+  raw: unknown,
+  dataConditions: readonly ModuleTextBlockConditionDefinition[],
+): Omit<TextBlockInput, "channelId" | "now" | "expectedGraphRevision"> | null => {
   const parsed = blockSchema.safeParse(raw);
   if (!parsed.success) return null;
   const variants: TextBlock["variants"] = parsed.data.variants.map((variant) => ({
@@ -48,6 +52,10 @@ const parseBlock = (raw: unknown): Omit<TextBlockInput, "channelId" | "now" | "e
     conditions: variant.conditions as TextBlock["variants"][number]["conditions"],
     texts: variant.texts,
   }));
+  const allowedDataConditions = new Map(dataConditions.map((condition) => [condition.id, new Set(Object.keys(condition.values))]));
+  if (variants.some((variant) => Object.entries(variant.conditions.data ?? {}).some(([id, value]) =>
+    !allowedDataConditions.get(id)?.has(value),
+  ))) return null;
   const block = {
     name: parsed.data.name,
     categoryId: parsed.data.categoryId,
@@ -70,11 +78,13 @@ textLibraryRoutes.get("/library", async (context) => {
     service.list(channelId, await context.get("templateUsageSources")(channelId)),
     context.get("listRegisteredTemplateVariables")(channelId),
   ]);
+  const conditionIds = [...new Set(data.blocks.flatMap((block) => block.variants.flatMap((variant) => Object.keys(variant.conditions.data ?? {}))))];
+  const dataConditionValues = await context.get("resolveTextBlockConditions")(channelId, conditionIds, Date.now());
   const reservedNames = [...new Set([
     ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name),
     ...registeredVariables.filter(({ moduleId }) => moduleId !== TEXT_LIBRARY_MODULE_ID).map(({ name }) => name),
   ])];
-  return context.json({ ...data, reservedNames });
+  return context.json({ ...data, reservedNames, dataConditionValues });
 });
 
 textLibraryRoutes.get("/blocks", async (context) => {
@@ -93,7 +103,11 @@ textLibraryRoutes.get("/blocks/:name", async (context) => {
 
 textLibraryRoutes.post("/blocks", async (context) => {
   if (!canManage(context.get("channelRole"))) return denied(context);
-  const parsed = parseBlock(await readBody(context.req.raw));
+  const [raw, dataConditions] = await Promise.all([
+    readBody(context.req.raw),
+    context.get("listTextBlockConditions")(),
+  ]);
+  const parsed = parseBlock(raw, dataConditions);
   if (parsed === null || parsed.expectedRevision !== undefined) return context.json({ error: "text_library_block_invalid" }, 400);
   const channelId = param(context, "channelId");
   const reservedNames = new Set([
@@ -117,7 +131,11 @@ textLibraryRoutes.post("/blocks", async (context) => {
 
 textLibraryRoutes.patch("/blocks/:name", async (context) => {
   if (!canManage(context.get("channelRole"))) return denied(context);
-  const parsed = parseBlock(await readBody(context.req.raw));
+  const [raw, dataConditions] = await Promise.all([
+    readBody(context.req.raw),
+    context.get("listTextBlockConditions")(),
+  ]);
+  const parsed = parseBlock(raw, dataConditions);
   const channelId = param(context, "channelId");
   const oldName = param(context, "name");
   if (parsed === null || parsed.name !== oldName || parsed.expectedRevision === undefined) {

@@ -27,6 +27,7 @@ import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
+import { MODULES } from "../../modules/registry";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -56,6 +57,7 @@ const TWITCH_RETRY_AFTER_KEY = "twitch:retry_after";
 const AD_COUNTDOWN_REFRESH_ATTEMPT_KEY = "ads:countdown_refresh_attempt";
 const AD_COUNTDOWN_REFRESH_DEADLINE_KEY = "ads:countdown_refresh_deadline";
 const AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY = "ads:countdown_refresh_retry_count";
+const MODULE_ALARM_RETRY_KEY = "modules:alarm_retry";
 const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
 const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
@@ -565,7 +567,23 @@ export class ChannelObject extends DurableObject<Env> {
       this.ctx.storage.get(SECURITY_RETRY_KEY),
       this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),
       this.ctx.storage.get(AD_COUNTDOWN_REFRESH_DEADLINE_KEY),
+      this.ctx.storage.get(MODULE_ALARM_RETRY_KEY),
     ]);
+    const channelId = this.ownChannelId();
+    const moduleDeadlines: number[] = [];
+    if (channelId !== null) {
+      try {
+        const registered = await Promise.all(MODULES.flatMap((module) => module.alarmHandler === undefined
+          ? []
+          : [module.alarmHandler.nextDeadline(this.env.DB, channelId, Date.now())]));
+        moduleDeadlines.push(...registered.filter((deadline): deadline is number => deadline !== null && Number.isFinite(deadline)));
+      } catch (error: unknown) {
+        console.error("A registered module alarm deadline could not be read.", error);
+        const retryAt = Date.now() + SECURITY_RETRY_INTERVAL_MS;
+        moduleDeadlines.push(retryAt);
+        await this.ctx.storage.put(MODULE_ALARM_RETRY_KEY, retryAt);
+      }
+    }
     const retryDeadline = deadlines[1];
     const securityDeadline = deadlines[0];
     const validDeadlines = deadlines.filter((deadline, index): deadline is number => {
@@ -577,11 +595,44 @@ export class ChannelObject extends DurableObject<Env> {
         Number.isFinite(retryDeadline) && typeof securityDeadline === "number" &&
         securityDeadline <= Date.now());
     });
+    validDeadlines.push(...moduleDeadlines);
     if (validDeadlines.length === 0) {
       await this.ctx.storage.deleteAlarm();
       return;
     }
     await this.ctx.storage.setAlarm(Math.min(...validDeadlines));
+  }
+
+  private async runModuleAlarmHandlers(channelId: string, now: number, force: boolean): Promise<boolean> {
+    const results = await Promise.all(MODULES.flatMap((module) => {
+      const handler = module.alarmHandler;
+      if (handler === undefined) return [];
+      return [Promise.resolve().then(async (): Promise<boolean> => {
+        try {
+          if (!force) {
+            const deadline = await handler.nextDeadline(this.env.DB, channelId, now);
+            if (deadline === null || deadline > now) return false;
+          }
+          await handler.handle(this.env.DB, channelId, now);
+          return false;
+        } catch (error: unknown) {
+          console.error(`Registered module alarm ${module.id} failed.`, error);
+          return true;
+        }
+      })];
+    }));
+    const failed = results.some(Boolean);
+    if (failed) await this.ctx.storage.put(MODULE_ALARM_RETRY_KEY, now + SECURITY_RETRY_INTERVAL_MS);
+    return failed;
+  }
+
+  /** Called by the host after a channel setting or module setting changes. */
+  public async refreshModuleAlarms(): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const failed = await this.runModuleAlarmHandlers(channelId, Date.now(), true);
+    if (!failed) await this.ctx.storage.delete(MODULE_ALARM_RETRY_KEY);
+    await this.scheduleEarliestAlarm();
   }
 
   private async scheduleSecurityAlarm(): Promise<void> {
@@ -939,6 +990,8 @@ export class ChannelObject extends DurableObject<Env> {
     const securityRetryDue = typeof retryDeadline === "number" && Number.isFinite(retryDeadline) && retryDeadline <= now;
     const warningDue = typeof warningDeadline === "number" && Number.isFinite(warningDeadline) && warningDeadline <= now;
     const countdownRefreshDue = typeof countdownDeadline === "number" && Number.isFinite(countdownDeadline) && countdownDeadline <= now;
+    const moduleRetryDeadline = await this.ctx.storage.get(MODULE_ALARM_RETRY_KEY);
+    const moduleRetryDue = typeof moduleRetryDeadline === "number" && Number.isFinite(moduleRetryDeadline) && moduleRetryDeadline <= now;
     const expired = new Set<WebSocket>();
     const revoked = new Set<WebSocket>();
     const overlayBindingChanged = new Set<WebSocket>();
@@ -1113,6 +1166,11 @@ export class ChannelObject extends DurableObject<Env> {
       }
     }
     if (countdownRefreshDue) await this.refreshCountdownScheduleFromAlarm();
+    const ownChannelId = this.ownChannelId();
+    if (ownChannelId !== null) {
+      const failed = await this.runModuleAlarmHandlers(ownChannelId, now, moduleRetryDue);
+      if (moduleRetryDue && !failed) await this.ctx.storage.delete(MODULE_ALARM_RETRY_KEY);
+    }
     await this.scheduleEarliestAlarm();
   }
 

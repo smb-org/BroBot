@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type LazyExoticComponent, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
-import type { ModulePanelProperties } from "../modules/contract";
+import type { ModuleChannelSettingsProperties, ModulePanelProperties } from "../modules/contract";
 import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
@@ -14,6 +14,9 @@ import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
 const lazyPanels = new Map<string, LazyExoticComponent<ComponentType<ModulePanelProperties>>>();
+const lazyChannelSettings = new Map<string, LazyExoticComponent<ComponentType<ModuleChannelSettingsProperties>>>(
+  MODULES.flatMap((module) => module.channelSettings === undefined ? [] : [[module.id, lazy(module.channelSettings)] as const]),
+);
 
 const workspaceTexts = moduleWorkspaceTexts;
 
@@ -419,12 +422,31 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true, b
     <section className="module-stack" aria-label={dashboardTexts().module.views}>
       <Suspense fallback={<p className="muted">{dashboardTexts().module.loadingViews}</p>}>
         {registeredViews.map(({ id, Panel, module }) => <div className="module-view" key={id}>
-          {Panel === null ? null : <Panel channelId={channelId} language={dashboardLanguage()} canManage={canManage} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />}
+          {Panel === null ? null : <Panel channelId={channelId} language={dashboardLanguage()} canManage={canManage} botIsModerator={botIsModerator} textBlockConditions={MODULES.flatMap((candidate) => candidate.textBlockConditions ?? [])} {...(initialSelection === undefined ? {} : { initialSelection })} />}
           <ModuleSettingsEditor module={module} channelId={channelId} canManageContent={canManage} language={dashboardLanguage()} />
         </div>)}
       </Suspense>
     </section>
   );
+};
+
+export const ModuleChannelSettingsMount = ({
+  moduleId,
+  channelId,
+  language,
+  canManage,
+  readOnlyReason,
+  channelTimeZone,
+  saveChannelTimeZone,
+}: ModuleChannelSettingsProperties & { moduleId: string }): ReactElement | null => {
+  const registeredViews = [moduleId].flatMap((id) => {
+    const Panel = lazyChannelSettings.get(id);
+    return Panel === undefined ? [] : [{ Panel }];
+  });
+  if (registeredViews.length === 0) return null;
+  return <Suspense fallback={<p className="muted">{dashboardTexts().module.load}</p>}>
+    {registeredViews.map(({ Panel }) => <Panel key={moduleId} {...{ channelId, language, canManage, readOnlyReason, channelTimeZone, saveChannelTimeZone }} />)}
+  </Suspense>;
 };
 
 const canManageModules = canManage;

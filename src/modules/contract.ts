@@ -299,6 +299,7 @@ export interface ModuleTemplateValueContext {
   knownTemplateVariableNames: ReadonlySet<string>;
   chatStatus: readonly ModuleChatStatus[] | null;
   mode: ModuleTemplateRenderMode;
+  channelLanguage: () => Promise<ModuleLanguage>;
   streamState: () => Promise<ModuleStreamState>;
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   channelGameId?: () => Promise<string | null>;
@@ -307,6 +308,28 @@ export interface ModuleTemplateValueContext {
   renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
   addDiagnostic: (diagnostic: ModuleDiagnostic) => void;
   now: number;
+  /** Resolves declared data-source conditions only when a block uses them. */
+  resolveTemplateConditions: (ids: readonly string[]) => Promise<Readonly<Record<string, string>>>;
+}
+
+export interface ModuleTemplateConditionContext {
+  DB: D1Database;
+  channelId: string;
+  channelTimeZone: () => Promise<string>;
+  now: number;
+}
+
+/** A condition a module makes available to text block variants. */
+export interface ModuleTextBlockConditionDefinition {
+  id: string;
+  label: Readonly<Record<ModuleLanguage, string>>;
+  values: Readonly<Record<string, Readonly<Record<ModuleLanguage, string>>>>;
+}
+
+/** Generic daily or one-shot work registered with the channel Durable Object. */
+export interface ModuleAlarmHandler {
+  nextDeadline: (db: D1Database, channelId: string, now: number) => Promise<number | null>;
+  handle: (db: D1Database, channelId: string, now: number) => Promise<void>;
 }
 
 export interface ModuleVariableReferenceUsage {
@@ -394,6 +417,8 @@ export interface ModulePanelProperties {
   language?: ModuleLanguage;
   /** May the view execute management controls? */
   canManage?: boolean;
+  /** Generic data-source conditions available to text-block editors. */
+  textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
   /** Last known status of the bot's moderator role in this channel. */
   botIsModerator?: boolean | null;
   /** Called by the host when an inspector is closed. */
@@ -403,6 +428,16 @@ export interface ModulePanelProperties {
    *  mount (e.g. text_commands selects the command by name); most modules
    *  ignore it. */
   initialSelection?: string;
+}
+
+/** A module-owned field group rendered inside the channel's shared settings section. */
+export interface ModuleChannelSettingsProperties {
+  channelId: string;
+  language: ModuleLanguage;
+  canManage: boolean;
+  readOnlyReason: string;
+  channelTimeZone: string;
+  saveChannelTimeZone: (timeZone: string) => Promise<{ timeZone: string; revision: number }>;
 }
 
 /** Props for one lazily loaded card in the channel's immediate-action row. */
@@ -496,6 +531,12 @@ export interface ModuleRouteVariables {
   findChannelVariable: ModuleChannelVariableAccess["findChannelVariable"];
   templateUsageSources: (channelId: string) => Promise<readonly ModuleTemplateUsageSource[]>;
   listRegisteredTemplateVariables: (channelId: string) => Promise<readonly ModuleRegisteredTemplateVariable[]>;
+  listTextBlockConditions: () => Promise<readonly ModuleTextBlockConditionDefinition[]>;
+  resolveTextBlockConditions: (
+    channelId: string,
+    ids: readonly string[],
+    now: number,
+  ) => Promise<Readonly<Record<string, string>>>;
   writeModuleDiagnostics: (
     db: D1Database,
     channelId: string,
@@ -510,6 +551,8 @@ export interface ModuleRouteVariables {
   measureServerTiming: <T>(phase: "auth" | "d1" | "do" | "helix", run: () => Promise<T>) => Promise<T>;
   recordServerTiming: (phase: "auth" | "d1" | "do" | "helix", durationMs: number) => void;
   scheduleBackgroundWork: (work: Promise<unknown>) => void;
+  /** Reconcile registered module alarms after channel-owned settings change. */
+  refreshModuleAlarms: (channelId: string) => Promise<void>;
   getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch) => Promise<string>;
   /** Thin Helix HTTP transport (issue #163); modules never talk to `api.twitch.tv` directly. */
   helixRequest: HelixRequest;
@@ -571,6 +614,19 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     names: readonly string[],
     context: ModuleTemplateValueContext,
   ) => Promise<Readonly<Record<string, string>>>;
+  /** Bilingual generic fallback if this provider cannot resolve a declared value. */
+  templateUnavailableText?: Readonly<Record<ModuleLanguage, string>>;
+  /** Declares generic conditions that module-owned text blocks can select. */
+  textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
+  /** Resolves condition ids declared by this module for a single template render. */
+  resolveTemplateConditions?: (
+    ids: readonly string[],
+    context: ModuleTemplateConditionContext,
+  ) => Promise<Readonly<Record<string, string>>>;
+  /** The host schedules this through the channel Durable Object alarm. */
+  alarmHandler?: ModuleAlarmHandler;
+  /** Lazily rendered inside the shared channel settings section. */
+  channelSettings?: () => Promise<{ default: ComponentType<ModuleChannelSettingsProperties> }>;
   /** Channel navigation entries contributed by this module. */
   navigationEntries?: readonly ModuleNavigationEntry[];
   /** Template text contributed by this module for generic library usage views. */
