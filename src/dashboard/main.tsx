@@ -1019,7 +1019,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
     setSettingsError("");
     try {
       const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZoneDraft.trim());
-      setChannelSettings({ ...channelSettings, timeZone: saved.timeZone, revision: saved.revision });
+      setChannelSettings((current) => current === null ? null : { ...current, timeZone: saved.timeZone, revision: saved.revision });
       setTimeZoneDraft(saved.timeZone);
     } catch {
       setSettingsError(settingsTexts.saveError);
@@ -1032,7 +1032,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
     setSettingsBusy(true);
     try {
       const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZone);
-      setChannelSettings({ ...channelSettings, timeZone: saved.timeZone, revision: saved.revision });
+      setChannelSettings((current) => current === null ? null : { ...current, timeZone: saved.timeZone, revision: saved.revision });
       setTimeZoneDraft(saved.timeZone);
     } finally {
       setSettingsBusy(false);
