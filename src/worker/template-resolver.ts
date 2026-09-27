@@ -4,6 +4,7 @@ import {
   parseTemplateRange,
   renderTemplate,
   templateVariableNames,
+  TEMPLATE_VARIABLE_PATTERN,
 } from "../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 import { templateLanguageText } from "../modules/template-language";
@@ -28,10 +29,11 @@ export interface TemplateValueProvider {
   dynamicTemplateVariableNames?: readonly string[];
   resolveOverlayTemplateValues?: BotModule["resolveOverlayTemplateValues"];
   resolveTemplateConditionTransitions?: BotModule["resolveTemplateConditionTransitions"];
-  resolveTemplateValues: (
+  resolveTemplateValues?: (
     names: readonly string[],
     context: ModuleTemplateValueContext,
   ) => Promise<Readonly<Record<string, string>>>;
+  resolveTemplateParameter?: BotModule["resolveTemplateParameter"];
 }
 
 export interface TemplateResolverSources {
@@ -129,7 +131,7 @@ export const createTemplateRenderer = (
   moduleValues: Readonly<Record<string, string | number>>,
   changed?: { name: string; value: number },
   mode: ModuleTemplateRenderMode = "chat",
-): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }> => {
+): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }> => {
   const providerVariables = (sources.templateValueProviders ?? [])
     .filter((provider) => provider.templateVariableNamespace !== "text_blocks")
     .flatMap((provider) => provider.variables)
@@ -194,6 +196,16 @@ export const createTemplateRenderer = (
       : templateLanguageText[language].commandInputError;
   }
   const diagnostics: ModuleDiagnostic[] = [];
+  const attributions = new Set<string>();
+  const addAttribution = (text: string): void => {
+    let normalized = "";
+    for (const character of text) {
+      const codePoint = character.codePointAt(0) ?? 0;
+      normalized += codePoint < 32 || codePoint === 127 ? " " : character;
+    }
+    normalized = normalized.trim();
+    if (normalized.length > 0 && normalized.length <= 100) attributions.add(normalized);
+  };
   const diagnosticKeys = new Set<string>();
   const addDiagnostic = (diagnostic: ModuleDiagnostic): void => {
     const key = JSON.stringify(diagnostic);
@@ -310,12 +322,20 @@ export const createTemplateRenderer = (
     ...moduleVariables.map((variable) => variable.name),
     ...providerVariables.map((variable) => variable.name),
   ]);
+  const commandInput = context === "chat_command"
+    ? {
+      commandName: valueFrom(moduleValues.command) ?? "command",
+      arguments: args,
+      ...(valueFrom(moduleValues.usageText) === null ? {} : { usageText: valueFrom(moduleValues.usageText) as string }),
+    }
+    : undefined;
   const renderNestedTemplate = async (
     fragment: string,
     nestedMode: ModuleTemplateRenderMode = mode,
-  ): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }> => {
+  ): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }> => {
     const nested = await createTemplateRenderer(event, context, moduleVariables, sources)(fragment, moduleValues, changed, nestedMode);
     nested.diagnostics.forEach(addDiagnostic);
+    nested.attributions?.forEach(addAttribution);
     return nested;
   };
   const providerContext: ModuleTemplateValueContext = {
@@ -333,6 +353,8 @@ export const createTemplateRenderer = (
     channelLocation: sources.channelLocation,
     renderTemplate: renderNestedTemplate,
     addDiagnostic,
+    addTemplateValueAttribution: addAttribution,
+    ...(commandInput === undefined ? {} : { commandInput }),
     now,
     resolveTemplateConditions: async (ids) => {
       const requested = new Set(ids);
@@ -349,6 +371,8 @@ export const createTemplateRenderer = (
             channelId: event.channelId,
             channelTimeZone: sources.channelTimeZone,
             channelLocation: sources.channelLocation,
+            ...(commandInput === undefined ? {} : { commandInput }),
+            addTemplateValueAttribution: addAttribution,
             now,
           });
         } catch {
@@ -372,6 +396,7 @@ export const createTemplateRenderer = (
       ? renderNames.filter((name) => TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name) && !knownVariableNames.has(name))
       : renderNames.filter((name) => declaredNames.has(name));
     if (requestedNames.length === 0) continue;
+    if (provider.resolveTemplateValues === undefined) continue;
     let resolved: Readonly<Record<string, string>>;
     try {
       resolved = await provider.resolveTemplateValues(requestedNames, providerContext);
@@ -392,6 +417,40 @@ export const createTemplateRenderer = (
       else if (mode === "overlay") addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
     }
   }
+  const parameterValuesByToken = new Map<string, string>();
+  const parameterTokens = [...renderSource.matchAll(TEMPLATE_VARIABLE_PATTERN)];
+  for (const token of parameterTokens) {
+    const name = token[1];
+    const parameter = token[2];
+    if (name === undefined) continue;
+    const provider = (sources.templateValueProviders ?? []).find((candidate) =>
+      candidate.resolveTemplateParameter !== undefined && candidate.variables.some((variable) =>
+        variable.name === name && (variable.contexts?.includes(context) ?? true)),
+    );
+    if (provider?.resolveTemplateParameter === undefined) continue;
+    const declared = provider.variables.find((variable) => variable.name === name && (variable.contexts?.includes(context) ?? true));
+    if (declared?.parameters !== "currency_pair") continue;
+    try {
+      const resolvedParameter = parameter ?? "";
+      const value = await provider.resolveTemplateParameter(name, resolvedParameter, providerContext);
+      if (value !== null) parameterValuesByToken.set(`${name}\u0000${resolvedParameter}`, value);
+    } catch {
+      const unavailable = provider.templateUnavailableText?.[language];
+      if (unavailable !== undefined) parameterValuesByToken.set(`${name}\u0000${parameter ?? ""}`, unavailable);
+      else addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
+    }
+  }
+  for (const provider of sources.templateValueProviders ?? []) {
+    for (const variable of provider.variables) {
+      if (!(variable.contexts?.includes(context) ?? true)) continue;
+      if (variable.parameters !== "currency_pair" || provider.resolveTemplateParameter === undefined) continue;
+      parameterValues[variable.name] = (parameter) => parameterValuesByToken.get(`${variable.name}\u0000${parameter}`) ?? `{${variable.name} ${parameter}}`;
+    }
+  }
   const rendered = renderTemplate(renderSource, values, parameterValues, effectiveForRender);
-  return { text: rendered, diagnostics };
+  return {
+    text: rendered,
+    diagnostics,
+    ...(attributions.size === 0 ? {} : { attributions: [...attributions] }),
+  };
 };

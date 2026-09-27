@@ -1,7 +1,7 @@
 import { truncateTo200Chars } from "../modules/contract";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
-import { truncateChatText } from "./chat";
+import { truncateChatTextWithAttributions } from "./chat";
 
 const ANNOUNCEMENTS_URL = "https://api.twitch.tv/helix/chat/announcements";
 
@@ -31,8 +31,9 @@ export const sendChatAnnouncement = async (
   channelId: string,
   text: string,
   fetcher: typeof fetch = fetch,
+  attributions: readonly string[] = [],
 ): Promise<AnnouncementSendResult> => {
-  const preparedText = truncateChatText(text);
+  const preparedText = truncateChatTextWithAttributions(text, attributions);
   const detail = { text: truncateTo200Chars(preparedText.text) };
   const moderator = await environment.DB.prepare(
     `SELECT is_moderator

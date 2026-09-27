@@ -84,6 +84,7 @@ export const panelTemplateOptions = (
         ...(variable.external === undefined ? {} : { external: variable.external }),
         ...(variable.parameters === "range" ? { parameter: { value: "1-100" } } : {}),
         ...(variable.parameters === "choices" ? { parameter: { value: "a|b|c" } } : {}),
+        ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
       };
     }
     if (variable.source === "channel") {
@@ -114,6 +115,7 @@ export const panelTemplateOptions = (
       ...(pickerGroup === undefined ? {} : { pickerGroup }),
       ...(variable.external === undefined ? {} : { external: variable.external }),
       ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+      ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
     };
   });
 };

@@ -12,6 +12,59 @@ export const DEFAULT_CHANNEL_TIME_ZONE = "Europe/Berlin";
 /** How long overlay stream details stay cached before live viewer counts refresh. */
 export const OVERLAY_STREAM_DETAILS_CACHE_TTL_MS = 60_000;
 
+/** Maximum decoded size accepted for JSON responses from external providers. */
+export const PROVIDER_JSON_MAX_BYTES = 256 * 1024;
+
+/** Reads a provider JSON response while enforcing a decoded body size limit. */
+export const readBoundedJsonResponse = async <Value = unknown>(
+  response: Response,
+  maximumBytes = PROVIDER_JSON_MAX_BYTES,
+): Promise<Value> => {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+    throw new RangeError("The JSON response size limit must be a positive safe integer.");
+  }
+  const contentLength = response.headers.get("Content-Length");
+  const declaredLength = contentLength === null ? Number.NaN : Number(contentLength);
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    try { await response.body?.cancel(); } catch { /* Ignore cancellation errors after rejecting the response. */ }
+    throw new Error("JSON response exceeded the size limit.");
+  }
+  const body = response.body;
+  if (body === null) throw new Error("JSON response had no body.");
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  let done = false;
+  try {
+    while (!done) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        done = true;
+      } else {
+        byteLength += chunk.value.byteLength;
+        if (byteLength > maximumBytes) {
+          throw new Error("JSON response exceeded the size limit.");
+        }
+        chunks.push(chunk.value);
+      }
+    }
+  } catch (error) {
+    try { await reader.cancel(); } catch { /* Ignore cancellation errors while releasing the reader. */ }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const payload: unknown = JSON.parse(new TextDecoder().decode(bytes));
+  return payload as Value;
+};
+
 export const validChannelTimeZone = (timeZone: string): boolean => {
   try {
     new Intl.DateTimeFormat("en", { timeZone }).format();
@@ -106,8 +159,8 @@ export interface ModuleOverlayElementContext {
   /** Whether a host or module lookup failed during this bootstrap. */
   hasLookupFailure: () => boolean;
   channelGameId: () => Promise<string | null>;
-  renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
-  resolveTemplateConditions: (ids: readonly string[]) => Promise<Readonly<Record<string, string>>>;
+  renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
+  resolveTemplateConditions: (ids: readonly string[]) => Promise<ModuleOverlayTemplateConditions>;
   resolveTemplateConditionTransitions: (
     ids: readonly string[],
     from: number,
@@ -117,6 +170,13 @@ export interface ModuleOverlayElementContext {
   timeDependentTemplateConditionIds: ReadonlySet<string>;
   dynamicTemplateVariableNames: ReadonlySet<string>;
   overlayTemplateVariableNames: ReadonlySet<string>;
+}
+
+export interface ModuleOverlayTemplateConditions {
+  values: Readonly<Record<string, string>>;
+  attributionsByCondition: Readonly<Record<string, readonly string[]>>;
+  /** UTC instant per condition id when its resolved value may change; drives the overlay refresh schedule. */
+  nextChangeAt?: Readonly<Record<string, string>>;
 }
 
 export interface OverlayElementEditorProps {
@@ -275,6 +335,8 @@ export type ModuleAction =
 export interface ModuleResult {
   actions: readonly ModuleAction[];
   diagnostics: readonly ModuleDiagnostic[];
+  /** Source labels for template values used by this result; placement is host-owned. */
+  attributions?: readonly string[];
   /** Variable writes and their overlay recipients, returned by the write's D1 batch. */
   variableChanges?: readonly {
     name: string;
@@ -355,7 +417,7 @@ export interface ModuleExecutionContext {
     moduleValues: Readonly<Record<string, string | number>>,
     changed?: { name: string; value: number },
     mode?: ModuleTemplateRenderMode,
-  ) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
+  ) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
   prepareVariableChange: (
     channelId: string,
     change: { name: string; operation: ChannelVariableOperation; amount: number | null },
@@ -468,13 +530,17 @@ export interface ModuleTemplateValueContext {
   /** Lazily reads the host-owned channel location. */
   channelLocation: () => Promise<ModuleChannelLocation | null>;
   /** Renders a module-owned nested fragment with the same host values and channel context. */
-  renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
+  renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
   addDiagnostic: (diagnostic: ModuleDiagnostic) => void;
   now: number;
   /** Resolves declared data-source conditions only when a block uses them. */
   resolveTemplateConditions: (ids: readonly string[]) => Promise<Readonly<Record<string, string>>>;
   /** Values preserved for overlay-side countdown or other browser calculations. */
   dynamicTemplateVariableNames?: ReadonlySet<string>;
+  /** Command input is present only while resolving a chat-command template. */
+  commandInput?: { commandName: string; arguments: string; usageText?: string };
+  /** Records a source label for values used in this render; the host handles output placement. */
+  addTemplateValueAttribution?: (text: string) => void;
 }
 
 export interface ModuleTemplateConditionContext {
@@ -484,6 +550,11 @@ export interface ModuleTemplateConditionContext {
   /** Lazily reads the host-owned channel location. */
   channelLocation: () => Promise<ModuleChannelLocation | null>;
   now: number;
+  commandInput?: { commandName: string; arguments: string; usageText?: string };
+  /** Records a source label when a condition uses values from this module. */
+  addTemplateValueAttribution?: (text: string) => void;
+  /** Records the UTC instant when a resolved condition value may next change, for overlay refresh scheduling. */
+  addTemplateConditionNextChangeAt?: (at: string) => void;
 }
 
 export interface ModuleTemplateConditionTimelineContext extends ModuleTemplateConditionContext {
@@ -784,6 +855,12 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     names: readonly string[],
     context: ModuleTemplateValueContext,
   ) => Promise<Readonly<Record<string, string>>>;
+  /** Resolves a declared parameterized value; parameters are never recursively rendered. */
+  resolveTemplateParameter?: (
+    name: string,
+    parameter: string,
+    context: ModuleTemplateValueContext,
+  ) => Promise<string | null>;
   /** Bilingual generic fallback if this provider cannot resolve a declared value. */
   templateUnavailableText?: Readonly<Record<ModuleLanguage, string>>;
   /** Declares generic conditions that module-owned text blocks can select. */

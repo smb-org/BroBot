@@ -19,7 +19,8 @@ export function NavigationIcon({ kind, className = "navigation-icon" }: { kind: 
                     : kind === "variable" ? <><path d="M8 5C5 5 5 7 5 9v1c0 1.5-1 2-2 2 1 0 2 .5 2 2v1c0 2 0 4 3 4M16 5c3 0 3 2 3 4v1c0 1.5 1 2 2 2-1 0-2 .5-2 2v1c0 2 0 4-3 4" /><path d="m10 15 4-6" /><circle cx="10" cy="9" r=".8" /><circle cx="14" cy="15" r=".8" /></>
                       : kind === "platform" ? <><path d="M4 20V6l8-3 8 3v14M2 20h20M9 20v-4h6v4M8 8h1M15 8h1M8 12h1M15 12h1" /></>
                         : kind === "audit" ? <><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2M7 3l-2 2M17 3l2 2" /></>
-                          : kind === "events" ? <><path d="M5 4h14v16H5zM8 8h8M8 12h5M8 16h8" /><circle cx="16" cy="12" r="1" /></>
+                          : kind === "weather" ? <><path d="M6 15a3 3 0 0 1 .6-5.94A4.5 4.5 0 0 1 17 10h.5a2.5 2.5 0 1 1 0 5H6Z" /><path d="m9 18-1 2M14 18l-1 2M19 18l-1 2" /></>
+                            : kind === "events" ? <><path d="M5 4h14v16H5zM8 8h8M8 12h5M8 16h8" /><circle cx="16" cy="12" r="1" /></>
                             : <><path d="M6 5h12v14H6z" /><path d="M9 9h6M9 13h6M9 17h4" /></>}
     </svg>
   );

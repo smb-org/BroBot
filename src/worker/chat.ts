@@ -20,6 +20,33 @@ export const truncateChatText = (text: string): { text: string; truncated: boole
   };
 };
 
+export const truncateChatTextWithAttributions = (
+  text: string,
+  attributions: readonly string[] = [],
+): { text: string; truncated: boolean } => {
+  const labels = [...new Set(attributions.map((value) => {
+    let safe = "";
+    for (const character of value) {
+      const codePoint = character.codePointAt(0) ?? 0;
+      safe += codePoint < 32 || codePoint === 127 ? " " : character;
+    }
+    return safe.trim();
+  }).filter(Boolean))];
+  if (labels.length === 0) return truncateChatText(text);
+  const suffix = labels.map((label) => ` · ${label}`).join("");
+  if (suffix.length >= CHAT_MESSAGE_MAXIMUM_LENGTH) return { text: suffix, truncated: text.length > 0 };
+  const prefix = CHAT_MENTION_PREFIX.exec(text)?.[0] ?? "";
+  const body = text.slice(prefix.length);
+  const availableBodyLength = CHAT_MESSAGE_MAXIMUM_LENGTH - prefix.length - suffix.length;
+  const preparedBody = body.length <= availableBodyLength
+    ? body
+    : `${body.slice(0, Math.max(0, availableBodyLength - 1))}…`;
+  return {
+    text: `${prefix}${preparedBody}${suffix}`,
+    truncated: body.length > availableBodyLength,
+  };
+};
+
 export interface ChatSendResult {
   sent: boolean;
   truncated: boolean;
@@ -68,8 +95,10 @@ export const sendChatMessage = async (
   stillValid?: () => Promise<boolean>,
   /** Persist an idempotency claim immediately before the external POST. */
   claimBeforePost?: () => Promise<boolean>,
+  /** Host-appended source labels, reserved before truncation. */
+  attributions: readonly string[] = [],
 ): Promise<ChatSendResult> => {
-  const preparedText = truncateChatText(text);
+  const preparedText = truncateChatTextWithAttributions(text, attributions);
   const textDetail = { text: truncateTo200Chars(preparedText.text) };
   // Caught rather than left to propagate: an outage here (e.g. D1 unavailable)
   // is the same known, pre-POST outcome as identity simply being absent, and

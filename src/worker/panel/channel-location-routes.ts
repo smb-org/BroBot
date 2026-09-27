@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import { MANAGING_ROLES, canManage } from "../../contracts/values";
 import type { ModuleChannelLocation } from "../../modules/contract";
-import { validChannelTimeZone } from "../../modules/contract";
+import { readBoundedJsonResponse, validChannelTimeZone } from "../../modules/contract";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "../auth/guards";
 import { actorGuard, bindActorGuard } from "../db/guards";
 import { prepareAudit } from "../db/audit";
@@ -65,7 +65,7 @@ channelLocationRouter.get("/api/channels/:channelId/settings/location/geocode", 
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(5_000) });
     if (!response.ok) return context.json({ error: "channel_location_geocoding_unavailable" }, 503);
-    const payload: GeocodingResponse = await response.json();
+    const payload = await readBoundedJsonResponse<GeocodingResponse>(response);
     const results = (payload.results ?? []).flatMap((entry) => {
       const name = entry.name;
       const latitude = entry.latitude;

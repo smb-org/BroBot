@@ -58,6 +58,7 @@ const response = (
     diagnostics?: readonly ModuleDiagnostic[];
     changedVariable?: { name: string; value: number; overlayIds: readonly string[] };
     noChat?: boolean;
+    attributions?: readonly string[];
   } = {},
 ): ModuleResult => {
   const replyToMessageId = textValue(event.payload.message_id);
@@ -76,6 +77,7 @@ const response = (
       ...(options.diagnostics ?? []),
       diagnosticTriggered(input, command, text, alias, streamState, options.changedVariable),
     ],
+    ...(options.attributions === undefined || options.attributions.length === 0 ? {} : { attributions: options.attributions }),
     ...(options.changedVariable === undefined ? {} : { variableChanges: [options.changedVariable] }),
   };
 };
@@ -114,6 +116,7 @@ const moduleValuesFor = (
     ...(command.offlineText === undefined ? {} : { offlineText: command.offlineText }),
     ...(command.notFollowingText === undefined ? {} : { notFollowingText: command.notFollowingText }),
     ...(command.unavailableText === undefined ? {} : { unavailableText: command.unavailableText }),
+    ...(command.usageText === undefined ? {} : { usageText: command.usageText }),
     ...(command.legacyFallback === true ? { legacyFallback: "true" } : {}),
     ...(command.legacyKind === undefined ? {} : { legacyKind: command.legacyKind }),
   };
@@ -137,7 +140,7 @@ const render = async (
   alias: string | null,
   text: string,
   changedVariable?: { name: string; value: number },
-): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }> => {
+): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }> => {
   const values = moduleValuesFor(event, input, command, alias);
   if (context.renderTemplate !== undefined) return context.renderTemplate(text, values, changedVariable);
   const systemValues = {
@@ -264,6 +267,7 @@ const processTextCommandMessageAttempt = async (
       forceChat: true,
       prefixActions: [{ kind: "shoutout", targetLogin: target }],
       diagnostics: [...(gameUnknownDiagnostic === undefined ? [] : [gameUnknownDiagnostic]), ...rendered.diagnostics],
+      ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
       ...(changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult }),
     });
   }
@@ -274,8 +278,9 @@ const processTextCommandMessageAttempt = async (
       ...(gameUnknownDiagnostic === undefined ? [] : [gameUnknownDiagnostic]),
       ...rendered.diagnostics,
     ],
-    ...(changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult }),
-    noChat: rendered.text.length === 0,
+      ...(changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult }),
+      noChat: rendered.text.length === 0,
+      ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
   });
 };
 

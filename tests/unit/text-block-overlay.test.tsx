@@ -18,7 +18,7 @@ const contextFor = (overrides: Partial<ModuleOverlayElementContext> = {}): Modul
   hasLookupFailure: () => false,
   channelGameId: () => Promise.resolve("game-current"),
   renderTemplate: (text) => Promise.resolve({ text, diagnostics: [] }),
-  resolveTemplateConditions: () => Promise.resolve({ "sun.phase": "day" }),
+  resolveTemplateConditions: () => Promise.resolve({ values: { "sun.phase": "day" }, attributionsByCondition: {} }),
   resolveTemplateConditionTransitions: () => Promise.resolve([{ at: sunset, values: { "sun.phase": "night" } }]),
   resolveOverlayTemplateValues: () => Promise.resolve({}),
   timeDependentTemplateConditionIds: new Set(["sun.phase"]),
@@ -81,6 +81,22 @@ describe("text block overlay rendering", () => {
     expect(serialized).not.toContain("GAME_PRIVATE");
     expect(serialized).not.toContain("ROLE_PRIVATE");
     expect(serialized).toContain(sunset);
+  });
+
+  it("includes provider attribution for a condition-selected candidate", async () => {
+    const db = overlayDatabase([
+      variant("rain", "Rain is coming", { data: { "weather.condition": "rain" } }),
+    ]);
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, contextFor({
+      resolveTemplateConditions: () => Promise.resolve({
+        values: { "weather.condition": "rain" },
+        attributionsByCondition: { "weather.condition": ["Open-Meteo"] },
+      }),
+    }));
+
+    expect(state).toMatchObject({
+      candidates: [{ text: "Rain is coming", attributions: ["Open-Meteo"] }],
+    });
   });
 
   it("switches to the night candidate at sunset and ticks a countdown in the browser", () => {
@@ -228,6 +244,29 @@ describe("text block overlay rendering", () => {
     expect(resolveValues).toHaveBeenCalledWith(["moon.phase"]);
     expect(state).toMatchObject({
       candidates: [{ text: "Moon Waxing gibbous" }],
+      refreshAt: new Date(Date.parse(nextChangeAt) + 1_000).toISOString(),
+    });
+  });
+
+  it("schedules a text block refresh from a module condition's generic next-change hint", async () => {
+    const now = Date.parse("2026-06-21T19:59:58.000Z");
+    const nextChangeAt = "2026-06-21T20:15:00.000Z";
+    const db = overlayDatabase([
+      variant("rain", "Rain incoming", { data: { "weather.condition": "rain" } }),
+    ]);
+    const context = contextFor({
+      now,
+      resolveTemplateConditions: () => Promise.resolve({
+        values: { "weather.condition": "rain" },
+        attributionsByCondition: {},
+        nextChangeAt: { "weather.condition": nextChangeAt },
+      }),
+    });
+
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+
+    expect(state).toMatchObject({
+      candidates: [{ text: "Rain incoming" }],
       refreshAt: new Date(Date.parse(nextChangeAt) + 1_000).toISOString(),
     });
   });
