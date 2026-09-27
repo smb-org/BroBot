@@ -1,12 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import { calculateSunDay, nextSunRefreshAt, resolveSunTemplateValues } from "../../src/modules/sun/domain";
+import {
+  calculateSunDay,
+  localDateInTimeZone,
+  resolveSunTemplateValues,
+  shiftLocalDate,
+} from "../../src/modules/sun/domain";
 import { SUN_ERROR_TEXT_MAX_LENGTH } from "../../src/modules/sun/contracts";
 import { sunModule } from "../../src/modules/sun";
 
 const localMinute = (value: string | null, timeZone: string): string | null => value === null
   ? null
   : new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value));
+
+const formatChannelTime = (value: string, timeZone: string, language: "de" | "en" = "en"): string =>
+  new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-US", {
+    timeZone,
+    hour: language === "de" ? "2-digit" : "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
 
 const withinOneMinute = (actual: string | null, expected: string): boolean => {
   if (actual === null) return false;
@@ -17,21 +29,29 @@ const withinOneMinute = (actual: string | null, expected: string): boolean => {
   return Math.abs(minuteOfDay(actual) - minuteOfDay(expected)) <= 1;
 };
 
+const errorText = "Sun data unavailable.";
+
+const resolveAt = (
+  now: string,
+  location: { latitude: number; longitude: number; timeZone: string },
+  timeZone: string,
+  language: "de" | "en" = "en",
+) => resolveSunTemplateValues({
+  location,
+  now: Date.parse(now),
+  timeZone,
+  language,
+  errorText,
+});
+
 describe("NOAA sun calculations", () => {
-  it("calculates Berlin summer solstice events in local time", () => {
+  it("calculates Berlin summer solstice events in location-local time", () => {
     const day = calculateSunDay({ latitude: 52.52, longitude: 13.405, localDate: "2026-06-21", timeZone: "Europe/Berlin" });
 
     expect(localMinute(day.sunriseAt, "Europe/Berlin")).toBe("04:43");
     expect(localMinute(day.sunsetAt, "Europe/Berlin")).toBe("21:33");
     expect(withinOneMinute(localMinute(day.duskAt, "Europe/Berlin"), "22:23")).toBe(true);
     expect(day.polarState).toBe("normal");
-  });
-
-  it("calculates New York summer solstice events in the channel time zone", () => {
-    const day = calculateSunDay({ latitude: 40.7128, longitude: -74.006, localDate: "2026-06-21", timeZone: "America/New_York" });
-
-    expect(withinOneMinute(localMinute(day.sunriseAt, "America/New_York"), "05:24")).toBe(true);
-    expect(withinOneMinute(localMinute(day.sunsetAt, "America/New_York"), "20:30")).toBe(true);
   });
 
   it("anchors events to the requested local date across the date line", () => {
@@ -44,17 +64,8 @@ describe("NOAA sun calculations", () => {
 
     for (const location of locations) {
       const day = calculateSunDay({ ...location, localDate: "2026-01-01" });
-      const localDate = (instant: string | null): string | null => instant === null
-        ? null
-        : new Intl.DateTimeFormat("en-CA", {
-          timeZone: location.timeZone,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }).format(new Date(instant));
-
-      expect(localDate(day.sunriseAt), location.label).toBe("2026-01-01");
-      expect(localDate(day.sunsetAt), location.label).toBe("2026-01-01");
+      expect(day.sunriseAt === null ? null : localDateInTimeZone(Date.parse(day.sunriseAt), location.timeZone), location.label).toBe("2026-01-01");
+      expect(day.sunsetAt === null ? null : localDateInTimeZone(Date.parse(day.sunsetAt), location.timeZone), location.label).toBe("2026-01-01");
     }
   });
 
@@ -84,119 +95,113 @@ describe("NOAA sun calculations", () => {
   });
 });
 
-describe("channel-local refresh schedule", () => {
-  it("keeps the 00:15 refresh on the channel calendar across the spring DST switch", () => {
-    expect(nextSunRefreshAt(Date.parse("2026-03-28T23:00:00.000Z"), "Europe/Berlin"))
-      .toBe(Date.parse("2026-03-28T23:15:00.000Z"));
-    expect(nextSunRefreshAt(Date.parse("2026-03-29T00:16:00.000Z"), "Europe/Berlin"))
-      .toBe(Date.parse("2026-03-29T22:15:00.000Z"));
+describe("on-demand sun template values", () => {
+  it("uses location-local solar dates for Honolulu while formatting in Berlin", () => {
+    const location = { latitude: 21.3069, longitude: -157.8583, timeZone: "Pacific/Honolulu" };
+    const instants = [
+      { now: "2026-06-21T06:00:00.000Z", phase: "night", localDate: "2026-06-20" },
+      { now: "2026-06-21T18:00:00.000Z", phase: "day", localDate: "2026-06-21" },
+      { now: "2026-06-22T10:00:00.000Z", phase: "night", localDate: "2026-06-22" },
+    ] as const;
+
+    for (const testCase of instants) {
+      const values = resolveAt(testCase.now, location, "Europe/Berlin");
+      const days = [-1, 0, 1].map((offset) => calculateSunDay({
+        ...location,
+        localDate: shiftLocalDate(testCase.localDate, offset),
+      }));
+      const nextRise = days.flatMap((day) => day.sunriseAt === null ? [] : [day.sunriseAt])
+        .map(Date.parse).filter((instant) => instant > Date.parse(testCase.now)).sort((a, b) => a - b)[0];
+      const nextSet = days.flatMap((day) => day.sunsetAt === null ? [] : [day.sunsetAt])
+        .map(Date.parse).filter((instant) => instant > Date.parse(testCase.now)).sort((a, b) => a - b)[0];
+
+      expect(values.dataConditions["sun.phase"], testCase.now).toBe(testCase.phase);
+      expect(values.values["sun.rise"], testCase.now).toBe(formatChannelTime(new Date(nextRise ?? 0).toISOString(), "Europe/Berlin"));
+      expect(values.values["sun.set"], testCase.now).toBe(formatChannelTime(new Date(nextSet ?? 0).toISOString(), "Europe/Berlin"));
+      expect(Date.parse(new Date(nextRise ?? 0).toISOString())).toBeGreaterThan(Date.parse(testCase.now));
+      expect(Date.parse(new Date(nextSet ?? 0).toISOString())).toBeGreaterThan(Date.parse(testCase.now));
+    }
+
+    const berlinEvening = resolveAt("2026-06-21T18:00:00.000Z", location, "Europe/Berlin");
+    expect(berlinEvening.dataConditions["sun.phase"]).toBe("day");
+    expect(berlinEvening.values["sun.rise"]).not.toBe(errorText);
   });
-});
 
-describe("sun template values", () => {
-  it("declares enough template length for the longest configured fallback", async () => {
-    const variables = await sunModule.templateVariables?.({} as D1Database, "sun-channel") ?? [];
-    const fallback = "x".repeat(SUN_ERROR_TEXT_MAX_LENGTH);
-    const values = resolveSunTemplateValues({
-      days: [],
-      now: Date.parse("2026-06-21T12:00:00.000Z"),
-      timeZone: "Europe/Berlin",
-      language: "en",
-      errorText: fallback,
-      expiresAt: null,
-    }).values;
+  it("resolves Auckland daylight when Berlin is on the previous evening", () => {
+    const values = resolveAt("2026-06-21T20:00:00.000Z", {
+      latitude: -36.8485,
+      longitude: 174.7633,
+      timeZone: "Pacific/Auckland",
+    }, "Europe/Berlin");
 
-    expect(variables).toHaveLength(5);
-    expect(variables.every((variable) => variable.maxLength >= fallback.length)).toBe(true);
-    expect(Object.values(values).every((value) => value.length <= SUN_ERROR_TEXT_MAX_LENGTH)).toBe(true);
+    expect(localDateInTimeZone(Date.parse("2026-06-21T20:00:00.000Z"), "Pacific/Auckland")).toBe("2026-06-22");
+    expect(values.dataConditions["sun.phase"]).toBe("day");
+    expect(values.values["sun.rise"]).not.toBe(errorText);
+    expect(values.values["sun.set"]).not.toBe(errorText);
   });
 
-  it("uses the previous record's tomorrow as today after midnight", () => {
-    const yesterday = calculateSunDay({ latitude: 52.52, longitude: 13.405, localDate: "2026-06-20", timeZone: "Europe/Berlin" });
-    const today = calculateSunDay({ latitude: 52.52, longitude: 13.405, localDate: "2026-06-21", timeZone: "Europe/Berlin" });
-    const expiresAt = "2026-06-22T22:00:00.000Z";
+  it("keeps polar phase and dusk behavior when calculated on demand", () => {
+    const polarDay = resolveAt("2026-06-21T12:00:00.000Z", {
+      latitude: 78.22,
+      longitude: 15.65,
+      timeZone: "Arctic/Longyearbyen",
+    }, "Europe/Berlin");
+    expect(polarDay.dataConditions["sun.phase"]).toBe("day");
+    expect(polarDay.values["sun.rise"]).toBe(errorText);
+    expect(polarDay.values["sun.set"]).toBe(errorText);
 
-    const values = resolveSunTemplateValues({
-      days: [yesterday, today],
-      now: Date.parse("2026-06-21T01:00:00.000Z"),
-      timeZone: "Europe/Berlin",
-      language: "en",
-      errorText: "Sun data unavailable.",
-      expiresAt,
-    });
+    const polarNight = resolveAt("2026-12-21T12:00:00.000Z", {
+      latitude: 69.6492,
+      longitude: 18.9553,
+      timeZone: "Europe/Oslo",
+    }, "Europe/Berlin");
+    expect(polarNight.dataConditions["sun.phase"]).toBe("night");
+    expect(polarNight.values["sun.rise"]).toBe(errorText);
+    expect(polarNight.values["sun.set"]).toBe(errorText);
+    expect(polarNight.values["sun.dusk"]).not.toBe(errorText);
+  });
+
+  it("formats an on-demand sunrise across a location DST transition in the channel zone", () => {
+    const location = { latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" };
+    const now = "2026-03-29T02:00:00.000Z";
+    const values = resolveAt(now, location, "America/New_York", "de");
+    const date = localDateInTimeZone(Date.parse(now), location.timeZone);
+    const day = calculateSunDay({ ...location, localDate: date });
 
     expect(values.dataConditions["sun.phase"]).toBe("night");
-    expect(values.values["sun.rise"]).toBe("4:43 AM");
-    expect(values.values["sun.set"]).toBe("9:33 PM");
-    expect(values.values["sun.rise_in"]).toContain("hr");
+    expect(values.values["sun.rise"]).toBe(formatChannelTime(day.sunriseAt ?? "", "America/New_York", "de"));
   });
 
-  it("switches between day and night at sunrise and formats values in the channel language", () => {
-    const today = calculateSunDay({ latitude: 52.52, longitude: 13.405, localDate: "2026-06-21", timeZone: "Europe/Berlin" });
-    const tomorrow = calculateSunDay({ latitude: 52.52, longitude: 13.405, localDate: "2026-06-22", timeZone: "Europe/Berlin" });
-    const base = {
-      days: [today, tomorrow],
-      timeZone: "Europe/Berlin",
-      fetchedAt: "2026-06-21T00:15:00.000Z",
-      expiresAt: "2026-06-23T00:00:00.000Z",
-      errorText: "Sonnendaten nicht verfügbar.",
-      language: "de" as const,
-    };
+  it("selects strictly future sunrise and sunset at the rounded event boundaries", () => {
+    const location = { latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" };
+    const today = calculateSunDay({ ...location, localDate: "2026-06-21" });
+    const tomorrow = calculateSunDay({ ...location, localDate: "2026-06-22" });
 
-    const night = resolveSunTemplateValues({ ...base, now: Date.parse("2026-06-21T02:42:00.000Z") });
-    const day = resolveSunTemplateValues({ ...base, now: Date.parse("2026-06-21T02:45:00.000Z") });
+    const atSunrise = resolveAt(today.sunriseAt ?? "", location, "Europe/Berlin");
+    const atSunset = resolveAt(today.sunsetAt ?? "", location, "Europe/Berlin");
 
-    expect(night.dataConditions["sun.phase"]).toBe("night");
-    expect(day.dataConditions["sun.phase"]).toBe("day");
-    expect(night.values["sun.rise_in"]).toContain("Min.");
-    expect(day.values["sun.set_in"]).toContain("Std.");
-  });
-
-  it("uses strictly future sunrise and sunset events at the rounded boundaries", () => {
-    const today = calculateSunDay({ latitude: 52.52, longitude: 13.405, localDate: "2026-06-21", timeZone: "Europe/Berlin" });
-    const tomorrow = calculateSunDay({ latitude: 52.52, longitude: 13.405, localDate: "2026-06-22", timeZone: "Europe/Berlin" });
-    const base = {
-      days: [today, tomorrow],
-      timeZone: "Europe/Berlin",
-      expiresAt: "2026-06-23T22:00:00.000Z",
-      errorText: "Unavailable",
-      language: "en" as const,
-    };
-    const expectedTomorrowRise = new Intl.DateTimeFormat("en-US", {
-      timeZone: "Europe/Berlin", hour: "numeric", minute: "2-digit",
-    }).format(new Date(tomorrow.sunriseAt ?? ""));
-    const expectedTomorrowSet = new Intl.DateTimeFormat("en-US", {
-      timeZone: "Europe/Berlin", hour: "numeric", minute: "2-digit",
-    }).format(new Date(tomorrow.sunsetAt ?? ""));
-
-    const atSunrise = resolveSunTemplateValues({ ...base, now: Date.parse(today.sunriseAt ?? "") });
-    const atSunset = resolveSunTemplateValues({ ...base, now: Date.parse(today.sunsetAt ?? "") });
-
-    expect(atSunrise.values["sun.rise"]).toBe(expectedTomorrowRise);
+    expect(atSunrise.values["sun.rise"]).toBe(formatChannelTime(tomorrow.sunriseAt ?? "", "Europe/Berlin"));
     expect(atSunrise.values["sun.rise_in"]).not.toBe("0 min");
     expect(atSunrise.dataConditions["sun.phase"]).toBe("day");
-    expect(atSunset.values["sun.set"]).toBe(expectedTomorrowSet);
+    expect(atSunset.values["sun.set"]).toBe(formatChannelTime(tomorrow.sunsetAt ?? "", "Europe/Berlin"));
     expect(atSunset.values["sun.set_in"]).not.toBe("0 min");
     expect(atSunset.dataConditions["sun.phase"]).toBe("night");
   });
 
-  it("returns a channel override when no valid sun record covers today", () => {
+  it("uses configured fallback text when there is no location", async () => {
+    const variables = await sunModule.templateVariables?.({} as D1Database, "sun-channel") ?? [];
+    const fallback = "x".repeat(SUN_ERROR_TEXT_MAX_LENGTH);
     const values = resolveSunTemplateValues({
-      days: [],
+      location: null,
       now: Date.parse("2026-06-21T12:00:00.000Z"),
       timeZone: "Europe/Berlin",
       language: "en",
-      errorText: "My channel's sun data is offline.",
-      expiresAt: null,
+      errorText: fallback,
     });
 
-    expect(values.values).toEqual({
-      "sun.set": "My channel's sun data is offline.",
-      "sun.rise": "My channel's sun data is offline.",
-      "sun.dusk": "My channel's sun data is offline.",
-      "sun.set_in": "My channel's sun data is offline.",
-      "sun.rise_in": "My channel's sun data is offline.",
-    });
+    expect(variables).toHaveLength(5);
+    expect(variables.every((variable) => variable.maxLength >= fallback.length)).toBe(true);
+    expect(Object.values(values.values).every((value) => value.length <= SUN_ERROR_TEXT_MAX_LENGTH)).toBe(true);
     expect(values.dataConditions["sun.phase"]).toBeUndefined();
   });
 });

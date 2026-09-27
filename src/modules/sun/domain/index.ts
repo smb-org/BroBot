@@ -19,12 +19,16 @@ interface CalculateSunDayInput {
 }
 
 interface ResolveSunTemplateValuesInput {
-  days: readonly SunDay[];
+  location: {
+    latitude: number;
+    longitude: number;
+    timeZone: string;
+  } | null;
   now: number;
+  /** Channel time zone controls presentation; solar dates use location.timeZone. */
   timeZone: string;
   language: ModuleLanguage;
   errorText: string;
-  expiresAt: string | null;
 }
 
 export interface ResolvedSunTemplateValues {
@@ -71,7 +75,7 @@ const wallTimeUtc = (localDate: string, hour: number, minute: number, timeZone: 
   return candidate;
 };
 
-export const channelLocalDate = (instant: number, timeZone: string): string => {
+export const localDateInTimeZone = (instant: number, timeZone: string): string => {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -88,18 +92,6 @@ export const shiftLocalDate = (date: string, amount: number): string => {
   const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + amount));
   return `${String(shifted.getUTCFullYear())}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
 };
-
-export const localDateTimeUtc = (date: string, hour: number, minute: number, timeZone: string): number =>
-  wallTimeUtc(date, hour, minute, timeZone);
-
-export const nextSunRefreshAt = (now: number, timeZone: string): number => {
-  const today = channelLocalDate(now, timeZone);
-  const todayRefresh = localDateTimeUtc(today, 0, 15, timeZone);
-  return todayRefresh > now ? todayRefresh : localDateTimeUtc(shiftLocalDate(today, 1), 0, 15, timeZone);
-};
-
-export const sunRecordExpiryAt = (localDate: string, timeZone: string): number =>
-  localDateTimeUtc(shiftLocalDate(localDate, 2), 0, 0, timeZone);
 
 const degreesToRadians = (degrees: number): number => degrees * Math.PI / 180;
 const radiansToDegrees = (radians: number): number => radians * 180 / Math.PI;
@@ -159,7 +151,7 @@ const solarNoonForUtcMidnight = (utcMidnight: number, longitude: number): SolarN
   return { utcMidnight, solarNoon, terms: solarTerms(solarNoon) };
 };
 
-/** NOAA's Meeus-based apparent solar calculation; output is UTC instants for a channel-local calendar date. */
+/** NOAA's Meeus-based apparent solar calculation; output is UTC instants for a location-local calendar date. */
 export const calculateSunDay = (input: CalculateSunDayInput): SunDay => {
   if (!Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90 ||
       !Number.isFinite(input.longitude) || input.longitude < -180 || input.longitude > 180) {
@@ -171,7 +163,7 @@ export const calculateSunDay = (input: CalculateSunDayInput): SunDay => {
   const firstUtcMidnight = Date.UTC(localNoonUtcDay.getUTCFullYear(), localNoonUtcDay.getUTCMonth(), localNoonUtcDay.getUTCDate());
   const anchor = [-3, -2, -1, 0, 1, 2, 3]
     .map((offset) => solarNoonForUtcMidnight(firstUtcMidnight + offset * DAY_MS, input.longitude))
-    .find((candidate) => channelLocalDate(candidate.solarNoon, input.timeZone) === input.localDate);
+    .find((candidate) => localDateInTimeZone(candidate.solarNoon, input.timeZone) === input.localDate);
   if (anchor === undefined) throw new RangeError("Could not anchor solar noon to the requested local date.");
   const { utcMidnight, solarNoon, terms } = anchor;
   const sunriseAngle = hourAngleForZenith(input.latitude, terms.declination, SUNRISE_ZENITH);
@@ -242,28 +234,28 @@ const validInstant = (value: string | null): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-/** Resolve the next events from the retained two-day record; an expired record never supplies values. */
+/** Calculate adjacent location-local solar days and resolve the next future events. */
 export const resolveSunTemplateValues = (input: ResolveSunTemplateValuesInput): ResolvedSunTemplateValues => {
-  const expiry = input.expiresAt === null ? Number.NaN : Date.parse(input.expiresAt);
-  const today = channelLocalDate(input.now, input.timeZone);
-  const yesterday = shiftLocalDate(today, -1);
-  const tomorrow = shiftLocalDate(today, 1);
-  const usableDays = Number.isFinite(expiry) && expiry > input.now
-    ? input.days.filter((day) => day.localDate === yesterday || day.localDate === today || day.localDate === tomorrow)
-    : [];
-  const byDate = new Map(usableDays.map((day) => [day.localDate, day]));
-  const current = byDate.get(today);
-  if (current === undefined) {
+  const location = input.location;
+  if (location === null) {
     return {
       values: Object.fromEntries(["sun.set", "sun.rise", "sun.dusk", "sun.set_in", "sun.rise_in"].map((name) => [name, input.errorText])),
       dataConditions: {},
     };
   }
 
+  const today = localDateInTimeZone(input.now, location.timeZone);
+  const days = [-1, 0, 1].map((offset) => calculateSunDay({
+    ...location,
+    localDate: shiftLocalDate(today, offset),
+  }));
+  const current = days.find((day) => day.localDate === today);
+  if (current === undefined) throw new RangeError("Could not calculate the current location-local solar day.");
+
   const events = {
-    set: [current, byDate.get(tomorrow)].flatMap((day) => day === undefined ? [] : [day.sunsetAt]).flatMap((value) => value === null ? [] : [value]),
-    rise: [current, byDate.get(tomorrow)].flatMap((day) => day === undefined ? [] : [day.sunriseAt]).flatMap((value) => value === null ? [] : [value]),
-    dusk: [current, byDate.get(tomorrow)].flatMap((day) => day === undefined ? [] : [day.duskAt]).flatMap((value) => value === null ? [] : [value]),
+    set: days.flatMap((day) => day.sunsetAt === null ? [] : [day.sunsetAt]),
+    rise: days.flatMap((day) => day.sunriseAt === null ? [] : [day.sunriseAt]),
+    dusk: days.flatMap((day) => day.duskAt === null ? [] : [day.duskAt]),
   };
   const next = (values: readonly string[]): number | null => values
     .map((value) => Date.parse(value))

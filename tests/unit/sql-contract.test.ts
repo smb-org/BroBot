@@ -161,9 +161,9 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(35);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(32);
-      expect(objects).toHaveLength(67);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(34);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(31);
+      expect(objects).toHaveLength(65);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

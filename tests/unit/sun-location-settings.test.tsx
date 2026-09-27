@@ -22,7 +22,6 @@ describe("sun channel settings", () => {
       location: { name: "Tromsø, Norway", latitude: 69.6492, longitude: 18.9553, timeZone: "Europe/Oslo" },
       errorTexts: { de: "Eigener deutscher Fehler", en: "Custom English fallback" },
       revision: 3,
-      nextRefreshAt: "2026-12-21T23:15:00.000Z",
     };
     service.fetchSunSettings.mockResolvedValue(settings);
 

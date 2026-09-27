@@ -265,11 +265,6 @@ panelRouter.patch("/api/channels/:channelId/settings", requireChannelAuthorizati
     "channel.time_zone.updated", { timeZone: previous.time_zone }, { timeZone });
   const result = await context.env.DB.batch([mutation, audit]);
   if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "channel_settings_conflict" }, 409);
-  try {
-    await context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)).refreshModuleAlarms();
-  } catch {
-    // The channel setting is already saved; a later alarm reconciles module schedules.
-  }
   return context.json({ ok: true, timeZone, revision: nextRevision, defaultTimeZone: DEFAULT_CHANNEL_TIME_ZONE });
 });
 

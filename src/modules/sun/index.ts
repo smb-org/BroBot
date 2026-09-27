@@ -2,10 +2,9 @@ import { z } from "zod";
 
 import type { BotModule, ModuleTemplateConditionContext, ModuleTemplateValueContext } from "../contract";
 import { validChannelTimeZone, type TemplateVariable } from "../contract";
-import { DEFAULT_SUN_ERROR_TEXTS, readSunDays, readSunSettings } from "./adapters/d1";
+import { DEFAULT_SUN_ERROR_TEXTS, readSunSettings } from "./adapters/d1";
 import { SUN_ERROR_TEXT_MAX_LENGTH } from "./contracts";
 import { resolveSunTemplateValues } from "./domain";
-import { handleSunAlarm } from "./service";
 import { sunRoutes } from "./routes";
 import { sunModuleCatalog } from "./contracts/catalog";
 
@@ -18,10 +17,35 @@ const SUN_TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
   { name: "sun.rise_in", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "8 Std. 30 Min.", source: "module" },
 ];
 
-interface SunAlarmRow {
-  next_refresh_at: string | null;
-  has_location: number;
-}
+type SunSettings = Awaited<ReturnType<typeof readSunSettings>>;
+
+const resolveSettings = (
+  settings: SunSettings,
+  now: number,
+  timeZone: string,
+  language: "de" | "en",
+) => {
+  const location = validChannelTimeZone(timeZone) && settings.location !== null && validChannelTimeZone(settings.location.timeZone)
+    ? settings.location
+    : null;
+  try {
+    return resolveSunTemplateValues({
+      location,
+      now,
+      timeZone: validChannelTimeZone(timeZone) ? timeZone : "Europe/Berlin",
+      language,
+      errorText: settings.errorTexts[language],
+    });
+  } catch {
+    return resolveSunTemplateValues({
+      location: null,
+      now,
+      timeZone: validChannelTimeZone(timeZone) ? timeZone : "Europe/Berlin",
+      language,
+      errorText: settings.errorTexts[language],
+    });
+  }
+};
 
 const currentSunValues = async (
   context: Pick<ModuleTemplateValueContext, "DB" | "channelId" | "channelTimeZone" | "channelLanguage" | "now">,
@@ -31,30 +55,7 @@ const currentSunValues = async (
     context.channelTimeZone(),
     context.channelLanguage(),
   ]);
-  if (!validChannelTimeZone(timeZone) || settings.location === null) {
-    return resolveSunTemplateValues({
-      days: [], now: context.now, timeZone: validChannelTimeZone(timeZone) ? timeZone : "Europe/Berlin",
-      language, errorText: settings.errorTexts[language], expiresAt: null,
-    });
-  }
-  let storedDays;
-  try {
-    storedDays = await readSunDays(context.DB, context.channelId, timeZone, context.now);
-  } catch {
-    return resolveSunTemplateValues({
-      days: [], now: context.now, timeZone, language,
-      errorText: settings.errorTexts[language], expiresAt: null,
-    });
-  }
-  const days = storedDays.filter((day) => day.locationRevision === settings.revision);
-  return resolveSunTemplateValues({
-    days,
-    now: context.now,
-    timeZone,
-    language,
-    errorText: settings.errorTexts[language],
-    expiresAt: days[0]?.expiresAt ?? null,
-  });
+  return resolveSettings(settings, context.now, timeZone, language);
 };
 
 const resolveConditionValues = async (
@@ -63,19 +64,11 @@ const resolveConditionValues = async (
 ): Promise<Readonly<Record<string, string>>> => {
   if (!ids.includes("sun.phase")) return {};
   try {
-    const settings = await readSunSettings(context.DB, context.channelId);
-    if (settings.location === null || !validChannelTimeZone(await context.channelTimeZone())) return {};
-    const timeZone = await context.channelTimeZone();
-    const days = (await readSunDays(context.DB, context.channelId, timeZone, context.now))
-      .filter((day) => day.locationRevision === settings.revision);
-    const phase = resolveSunTemplateValues({
-      days,
-      now: context.now,
-      timeZone,
-      language: "en",
-      errorText: settings.errorTexts.en,
-      expiresAt: days[0]?.expiresAt ?? null,
-    }).dataConditions["sun.phase"];
+    const [settings, timeZone] = await Promise.all([
+      readSunSettings(context.DB, context.channelId),
+      context.channelTimeZone(),
+    ]);
+    const phase = resolveSettings(settings, context.now, timeZone, "en").dataConditions["sun.phase"];
     return phase === undefined ? {} : { "sun.phase": phase };
   } catch {
     return {};
@@ -111,26 +104,10 @@ export const sunModule: BotModule<typeof settingsSchema> = {
     },
   }],
   resolveTemplateConditions: resolveConditionValues,
-  alarmHandler: {
-    async nextDeadline(db, channelId, now) {
-      const row = await db.prepare(
-        `SELECT location.next_refresh_at,
-                CASE WHEN location.name IS NULL THEN 0 ELSE 1 END AS has_location
-           FROM channels AS channel
-           LEFT JOIN sun_locations AS location ON location.channel_id = channel.channel_id
-          WHERE channel.channel_id = ?`,
-      ).bind(channelId).first<SunAlarmRow>();
-      if (row === null || row.has_location !== 1) return null;
-      if (row.next_refresh_at === null) return now;
-      const dueAt = Date.parse(row.next_refresh_at);
-      return Number.isFinite(dueAt) ? dueAt : now;
-    },
-    handle: handleSunAlarm,
-  },
   routes: sunRoutes,
   channelSettings: () => import("./panel/location-settings"),
 };
 
 export { calculateSunDay, resolveSunTemplateValues } from "./domain";
 export type { SunDay } from "./domain";
-export type { SunLocation, SunSettings, SunStoredDay } from "./contracts";
+export type { SunLocation, SunSettings } from "./contracts";

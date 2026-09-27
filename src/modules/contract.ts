@@ -326,12 +326,6 @@ export interface ModuleTextBlockConditionDefinition {
   values: Readonly<Record<string, Readonly<Record<ModuleLanguage, string>>>>;
 }
 
-/** Generic daily or one-shot work registered with the channel Durable Object. */
-export interface ModuleAlarmHandler {
-  nextDeadline: (db: D1Database, channelId: string, now: number) => Promise<number | null>;
-  handle: (db: D1Database, channelId: string, now: number) => Promise<void>;
-}
-
 export interface ModuleVariableReferenceUsage {
   moduleId: string;
   itemName: string;
@@ -551,8 +545,6 @@ export interface ModuleRouteVariables {
   measureServerTiming: <T>(phase: "auth" | "d1" | "do" | "helix", run: () => Promise<T>) => Promise<T>;
   recordServerTiming: (phase: "auth" | "d1" | "do" | "helix", durationMs: number) => void;
   scheduleBackgroundWork: (work: Promise<unknown>) => void;
-  /** Reconcile registered module alarms after channel-owned settings change. */
-  refreshModuleAlarms: (channelId: string) => Promise<void>;
   getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch) => Promise<string>;
   /** Thin Helix HTTP transport (issue #163); modules never talk to `api.twitch.tv` directly. */
   helixRequest: HelixRequest;
@@ -623,8 +615,6 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     ids: readonly string[],
     context: ModuleTemplateConditionContext,
   ) => Promise<Readonly<Record<string, string>>>;
-  /** The host schedules this through the channel Durable Object alarm. */
-  alarmHandler?: ModuleAlarmHandler;
   /** Lazily rendered inside the shared channel settings section. */
   channelSettings?: () => Promise<{ default: ComponentType<ModuleChannelSettingsProperties> }>;
   /** Channel navigation entries contributed by this module. */

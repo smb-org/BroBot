@@ -38,7 +38,6 @@ interface ModuleRouteEnvironment {
     ModuleRouteVariables,
     "writeModuleDiagnostics" | "broadcasterHasScope" | "broadcasterScopesForChannel"
     | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
-    | "refreshModuleAlarms"
     | "listChannelVariables" | "findChannelVariable"
     | "listTextBlockConditions"
     | "resolveTextBlockConditions"
@@ -117,9 +116,6 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   context.set("measureServerTiming", (phase, run) => measureServerTiming(context, phase, run));
   context.set("recordServerTiming", (phase, durationMs) => { recordServerTiming(context, phase, durationMs); });
   context.set("scheduleBackgroundWork", (work) => { scheduleBackgroundWork(context, work); });
-  context.set("refreshModuleAlarms", async (channelId) => {
-    await context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)).refreshModuleAlarms();
-  });
   context.set("getAppAccessToken", getAppAccessToken);
   context.set("helixRequest", helixRequest);
   context.set("listChannelVariables", async (channelId): Promise<readonly ModuleChannelVariable[]> =>

@@ -326,9 +326,8 @@ describe("ChannelObject realtime path", () => {
 
     expect(response.status).toBe(101);
     expect(accepted?.deserializeAttachment()).toEqual(token);
-    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(prepare).toHaveBeenCalledOnce();
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("FROM overlay_tokens"));
-    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("sun_locations"));
   });
 
   it("closes a stale legacy handshake when its token is already bound", async () => {
@@ -394,7 +393,7 @@ describe("ChannelObject realtime path", () => {
 
     expect(response.status).toBe(403);
     expect(accept).not.toHaveBeenCalled();
-    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(prepare).toHaveBeenCalledOnce();
   });
 
   it("keeps stream-state refreshes away from overlay sockets", async () => {

@@ -98,7 +98,7 @@ sunRoutes.patch("/settings", async (context) => {
   const locationValues = location === null
     ? [null, null, null, null]
     : [location.name, location.latitude, location.longitude, location.timeZone];
-  const mutation = current.revision === 1 && current.nextRefreshAt === null && current.location === null
+  const mutation = current.revision === 1 && current.location === null
     ? context.env.DB.prepare(
       `INSERT INTO sun_locations
         (channel_id, name, latitude, longitude, location_time_zone, error_text_de, error_text_en, revision, updated_at)
@@ -109,7 +109,7 @@ sunRoutes.patch("/settings", async (context) => {
     : context.env.DB.prepare(
       `UPDATE sun_locations
           SET name = ?, latitude = ?, longitude = ?, location_time_zone = ?, error_text_de = ?, error_text_en = ?,
-              next_refresh_at = NULL, revision = revision + 1, updated_at = ?
+              revision = revision + 1, updated_at = ?
         WHERE channel_id = ? AND revision = ? ${authorization.sql}`,
     ).bind(...locationValues, normalizedErrors.de, normalizedErrors.en, changedAt, channelId, current.revision, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
@@ -133,22 +133,8 @@ sunRoutes.patch("/settings", async (context) => {
       errorTextEn: normalizedErrors.en,
     },
   }, changedAt);
-  const clearOldRecords = context.env.DB.prepare(
-    `DELETE FROM sun_times
-      WHERE channel_id = ?
-        AND changes() > 0
-        AND EXISTS (SELECT 1 FROM sun_locations WHERE channel_id = ? AND revision = ?)`,
-  ).bind(channelId, channelId, revision);
-  // The audit checks the mutation's changes(); cleanup then checks whether
-  // that gated audit inserted. A failed concurrent update therefore does
-  // neither side effect.
-  const result = await context.env.DB.batch([mutation, audit, clearOldRecords]);
+  const result = await context.env.DB.batch([mutation, audit]);
   if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "sun_settings_conflict" }, 409);
-  try {
-    await context.get("refreshModuleAlarms")(channelId);
-  } catch {
-    // The hourly scheduled reconciliation retries locations without a refresh deadline.
-  }
   const updated = await readSunSettings(context.env.DB, channelId);
   return context.json(updated);
 });

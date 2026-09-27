@@ -9,7 +9,6 @@ import { purgeOldTextCommandUserCooldowns } from "./db/text-command-user-cooldow
 import { maintainEventSubSubscriptions } from "./eventsub-subscriptions";
 import { eventSubMessageCutoff } from "./eventsub";
 import { maintainStreamStates } from "./stream-state-lookup";
-import { reconcileUnscheduledSunAlarms } from "./sun-alarm-reconciliation";
 
 export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   _controller,
@@ -28,9 +27,6 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
     maintainAppAccessToken(env, now),
     maintainEventSubSubscriptions(env, now),
     maintainStreamStates(env, now),
-    reconcileUnscheduledSunAlarms(env.DB, async (channelId) => {
-      await env.CHANNEL.get(env.CHANNEL.idFromName(channelId)).refreshModuleAlarms();
-    }),
   ];
   // The count trim is a full-table scan (see EVENT_LOG_LIMIT's comment) --
   // cheap once a day, not something every hourly tick should pay for.
