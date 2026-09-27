@@ -45,6 +45,8 @@ export interface AdScheduler {
   ) => Promise<unknown>;
   readScheduleGeneration?: () => Promise<number>;
   readSchedule?: () => Promise<AdSchedule | null>;
+  /** Claim the one external chat send for this due occurrence across alarm retries. */
+  claimPrewarningSend?: (scheduledDueAtMs: number) => Promise<boolean>;
 }
 
 const nowMsFrom = (now: string): number => {
@@ -365,15 +367,20 @@ export const processAdPrewarning = async (
       const latestSchedule = await scheduler?.readSchedule?.() ?? null;
       return latestSchedule === null || latestSchedule.nextAdAt === validatedNextAdAt;
     };
-    const sent = await sendChatMessage(environment, channelId, finalDecision.text, undefined, fetcher, stillValid);
-    if (sent.truncated) {
-      diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: finalDecision.text.length } });
+    const canSend = await scheduler?.claimPrewarningSend?.(scheduledDueAtMs) ?? true;
+    if (canSend) {
+      const sent = await sendChatMessage(environment, channelId, finalDecision.text, undefined, fetcher, stillValid);
+      if (sent.truncated) {
+        diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: finalDecision.text.length } });
+      }
+      diagnostics.push(sent.sent
+        ? { code: "host.chat.sent" satisfies EventCode, detail: sent.detail }
+        : sent.reason === "stale_before_send"
+          ? { code: "host.chat.skipped" satisfies EventCode, detail: sent.detail }
+          : { code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });
+    } else {
+      diagnostics.push({ code: "host.chat.skipped" satisfies EventCode, detail: { reason: "already_attempted" } });
     }
-    diagnostics.push(sent.sent
-      ? { code: "host.chat.sent" satisfies EventCode, detail: sent.detail }
-      : sent.reason === "stale_before_send"
-        ? { code: "host.chat.skipped" satisfies EventCode, detail: sent.detail }
-        : { code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });
   }
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 

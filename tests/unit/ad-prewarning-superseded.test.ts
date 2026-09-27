@@ -161,4 +161,64 @@ describe("ad prewarning schedule generations", () => {
       { code: "ads.prewarning.rescheduled" },
     ]);
   });
+
+  it("does not send the prewarning twice when a retry follows a diagnostics failure", async () => {
+    const dueAt = Date.parse("2026-09-24T12:04:00.000Z");
+    const schedule: AdSchedule = {
+      nextAdAt: "2026-09-24T12:05:00.000Z",
+      duration: 60,
+      lastAdAt: null,
+      prerollFreeTime: 120,
+      snoozeCount: 0,
+      snoozeRefreshAt: null,
+    };
+    mocks.getChannelModuleForChannel.mockResolvedValue({
+      channelId: "kanal-a",
+      moduleId: "ads",
+      enabled: true,
+      revision: 1,
+      settings: JSON.stringify({
+        automatic: "a",
+        manual: "m",
+        prewarning: true,
+        leadSeconds: 60,
+        prewarningText: "In {ads.seconds} Sekunden startet die Werbung.",
+      }),
+    });
+    mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
+    mocks.getAdSchedule.mockResolvedValue({ fetched: true, reason: null, detail: {}, schedule });
+    mocks.sendChatMessage.mockResolvedValue({ sent: true, truncated: false, reason: null, detail: {} });
+    mocks.writeModuleDiagnostics.mockRejectedValueOnce(new Error("diagnostics unavailable"))
+      .mockResolvedValueOnce([]);
+    let claimed = false;
+    const scheduler: AdScheduler = {
+      schedule: () => Promise.resolve(),
+      clear: () => Promise.resolve(),
+      readScheduleGeneration: () => Promise.resolve(1),
+      readSchedule: () => Promise.resolve(schedule),
+      storeSchedule: (freshSchedule) => Promise.resolve(freshSchedule),
+      claimPrewarningSend: (scheduledDueAtMs) => {
+        expect(scheduledDueAtMs).toBe(dueAt);
+        if (claimed) return Promise.resolve(false);
+        claimed = true;
+        return Promise.resolve(true);
+      },
+    };
+    const environment = {
+      DB: {} as D1Database,
+      TWITCH_CLIENT_ID: "client",
+      TWITCH_CLIENT_SECRET: "secret",
+    };
+    const args = [environment, "kanal-a", dueAt, "alarm-1", "2026-09-24T12:04:00.000Z", vi.fn() as typeof fetch, scheduler] as const;
+
+    await expect(processAdPrewarning(...args)).rejects.toThrow("diagnostics unavailable");
+    await processAdPrewarning(...args);
+
+    expect(mocks.sendChatMessage).toHaveBeenCalledOnce();
+    expect(mocks.writeModuleDiagnostics).toHaveBeenCalledTimes(2);
+    expect(mocks.writeModuleDiagnostics.mock.calls[1]?.[5]).toMatchObject([
+      { code: "ads.prewarning.announced" },
+      { code: "host.chat.skipped", detail: { reason: "already_attempted" } },
+    ]);
+  });
 });

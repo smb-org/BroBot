@@ -16,7 +16,9 @@ import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 import type { AdsSchedule } from "../../modules/ads/contracts";
-import type { HelixRequest, HelixRequestOptions } from "../../modules/contract";
+import type { BotModule, HelixRequest, HelixRequestOptions } from "../../modules/contract";
+import type { ModuleAlarmContext, ModuleAlarmDefinition } from "../../modules/contract";
+import { MODULES } from "../../modules/registry";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
 import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../../modules/ads/overlay/countdown-action";
@@ -42,13 +44,11 @@ const MAX_OVERLAY_SOCKETS_PER_CHANNEL = 384;
 const D1_IN_PARAMETER_LIMIT = 100;
 const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
-// On reset, the Durable Object class instance is discarded, so new keys are
-// safe. Without this reset, scheduleEarliestAlarm() would not find the old
-// deadlines, would silently delete the alarm, and both the security round
-// and the ad prewarning would stop firing.
+const ALARM_TABLE_KEY = "channel:alarm_schedule";
 const SECURITY_DEADLINE_KEY = "security_round";
 const SECURITY_RETRY_KEY = "security_retry";
 const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
+const AD_PREWARNING_SEND_CLAIM_KEY = "ads:prewarning_send_claim";
 const AD_SCHEDULE_CACHE_KEY = "ads:schedule";
 const AD_SCHEDULE_GENERATION_KEY = "ads:schedule_generation";
 const AD_PREWARNING_RECONCILED_KEY = "ads:prewarning_reconciled";
@@ -60,6 +60,17 @@ const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
 const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
 const AD_COUNTDOWN_REFRESH_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
+const ALARM_HANDLER_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
+const SECURITY_ROUND_HANDLER = "channel.security_round";
+const SECURITY_RETRY_HANDLER = "channel.security_retry";
+const AD_PREWARNING_HANDLER = "channel.ad_prewarning";
+const AD_COUNTDOWN_REFRESH_HANDLER = "channel.ad_countdown_refresh";
+const LEGACY_ALARM_DEFINITIONS = [
+  { key: SECURITY_DEADLINE_KEY, handler: SECURITY_ROUND_HANDLER, suppressedBy: SECURITY_RETRY_KEY },
+  { key: SECURITY_RETRY_KEY, handler: SECURITY_RETRY_HANDLER },
+  { key: AD_PREWARNING_DEADLINE_KEY, handler: AD_PREWARNING_HANDLER },
+  { key: AD_COUNTDOWN_REFRESH_DEADLINE_KEY, handler: AD_COUNTDOWN_REFRESH_HANDLER },
+] as const;
 const STREAM_REFRESH_LEASE_KEY = "stream_state_refresh_lease";
 const STREAM_REFRESH_LEASE_MS = 30_000;
 const SOCKET_EXPIRED_CODE = 4001;
@@ -111,6 +122,56 @@ type RealtimeSocketAttachment = RealtimePrincipal;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+type AlarmScheduleEntry = {
+  deadline: number;
+  handler: string;
+  failures?: number;
+  revision?: number;
+  suppressedBy?: string;
+};
+
+type AlarmScheduleTable = Record<string, AlarmScheduleEntry>;
+type AlarmHandlerResult = undefined | "retain";
+type AlarmHandler = (key: string, entry: AlarmScheduleEntry, now: number, nowIso: string) => Promise<AlarmHandlerResult>;
+type AlarmHandlerRegistration = {
+  handle: AlarmHandler;
+  retryDelaysMs?: readonly number[];
+};
+
+interface AlarmStorageAccess {
+  get(key: string): Promise<unknown>;
+  put(key: string, value: unknown): Promise<void>;
+  delete(key: string): Promise<boolean>;
+}
+
+const validAlarmScheduleEntry = (value: unknown): value is AlarmScheduleEntry =>
+  isRecord(value) && typeof value.deadline === "number" && Number.isFinite(value.deadline) &&
+  typeof value.handler === "string" && value.handler.length > 0 &&
+  (value.failures === undefined || (typeof value.failures === "number" && Number.isInteger(value.failures) && value.failures >= 0)) &&
+  (value.revision === undefined || (typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0)) &&
+  (value.suppressedBy === undefined || typeof value.suppressedBy === "string");
+
+const readAlarmScheduleTable = async (storage: AlarmStorageAccess): Promise<AlarmScheduleTable> => {
+  const saved = await storage.get(ALARM_TABLE_KEY);
+  const table: AlarmScheduleTable = {};
+  if (isRecord(saved)) {
+    for (const [key, value] of Object.entries(saved)) {
+      if (validAlarmScheduleEntry(value)) table[key] = value;
+    }
+  }
+  for (const definition of LEGACY_ALARM_DEFINITIONS) {
+    if (Object.hasOwn(table, definition.key)) continue;
+    const deadline = await storage.get(definition.key);
+    if (typeof deadline !== "number" || !Number.isFinite(deadline)) continue;
+    table[definition.key] = {
+      deadline,
+      handler: definition.handler,
+      ...( "suppressedBy" in definition ? { suppressedBy: definition.suppressedBy } : {}),
+    };
+  }
+  return table;
+};
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
@@ -458,9 +519,8 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async clearAdCountdownRefresh(clearRetries = true): Promise<void> {
-    await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_DEADLINE_KEY);
+    await this.clearAlarmEntry(AD_COUNTDOWN_REFRESH_DEADLINE_KEY);
     if (clearRetries) await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY);
-    await this.scheduleEarliestAlarm();
   }
 
   private async reconcileAdCountdownRefresh(schedule: AdsSchedule): Promise<void> {
@@ -480,11 +540,11 @@ export class ChannelObject extends DurableObject<Env> {
 
       const now = Date.now();
       if (refreshAt > now) await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY);
-      await this.ctx.storage.put(
+      await this.scheduleAlarmEntry(
         AD_COUNTDOWN_REFRESH_DEADLINE_KEY,
+        AD_COUNTDOWN_REFRESH_HANDLER,
         Math.max(refreshAt, now + AD_COUNTDOWN_REFRESH_BUFFER_MS),
       );
-      await this.scheduleEarliestAlarm();
     } catch (error: unknown) {
       console.warn("Ad countdown refresh alarm could not be reconciled.", error);
     }
@@ -500,16 +560,15 @@ export class ChannelObject extends DurableObject<Env> {
 
     const retryAt = Date.now() + retryDelay;
     await this.ctx.storage.put(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY, retryCount + 1);
-    await this.ctx.storage.put(AD_COUNTDOWN_REFRESH_DEADLINE_KEY, retryAt);
-    await this.scheduleEarliestAlarm();
+    await this.scheduleAlarmEntry(AD_COUNTDOWN_REFRESH_DEADLINE_KEY, AD_COUNTDOWN_REFRESH_HANDLER, retryAt);
   }
 
   private async refreshCountdownScheduleFromAlarm(): Promise<void> {
     const channelId = this.ownChannelId();
     if (channelId === null) return;
 
-    const existingDeadline = await this.ctx.storage.get<number>(AD_COUNTDOWN_REFRESH_DEADLINE_KEY);
-    if (typeof existingDeadline === "number" && Number.isFinite(existingDeadline) && existingDeadline > Date.now()) return;
+    const existingDeadline = await this.readAlarmDeadline(AD_COUNTDOWN_REFRESH_DEADLINE_KEY);
+    if (existingDeadline !== null && existingDeadline > Date.now()) return;
 
     let hasOverlay: boolean;
     try {
@@ -530,8 +589,7 @@ export class ChannelObject extends DurableObject<Env> {
       const nextRefreshAt = cache === null ? null : adCountdownRefreshAt(cache.schedule);
       if (nextRefreshAt !== null && nextRefreshAt > Date.now()) {
         await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY);
-        await this.ctx.storage.put(AD_COUNTDOWN_REFRESH_DEADLINE_KEY, nextRefreshAt);
-        await this.scheduleEarliestAlarm();
+        await this.scheduleAlarmEntry(AD_COUNTDOWN_REFRESH_DEADLINE_KEY, AD_COUNTDOWN_REFRESH_HANDLER, nextRefreshAt);
       } else {
         await this.retryAdCountdownRefresh();
       }
@@ -559,39 +617,248 @@ export class ChannelObject extends DurableObject<Env> {
     });
   }
 
-  private async scheduleEarliestAlarm(): Promise<void> {
-    const deadlines = await Promise.all([
-      this.ctx.storage.get(SECURITY_DEADLINE_KEY),
-      this.ctx.storage.get(SECURITY_RETRY_KEY),
-      this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),
-      this.ctx.storage.get(AD_COUNTDOWN_REFRESH_DEADLINE_KEY),
-    ]);
-    const retryDeadline = deadlines[1];
-    const securityDeadline = deadlines[0];
-    const validDeadlines = deadlines.filter((deadline, index): deadline is number => {
-      if (typeof deadline !== "number" || !Number.isFinite(deadline)) return false;
-      // A failed due round keeps its original deadline as evidence that the
-      // periodic round is still owed. The separate retry alarm avoids a tight
-      // loop on that past-due value.
-      return !(index === 0 && typeof retryDeadline === "number" &&
-        Number.isFinite(retryDeadline) && typeof securityDeadline === "number" &&
-        securityDeadline <= Date.now());
+  private async mutateAlarmSchedule(
+    mutate: (table: AlarmScheduleTable, storage: AlarmStorageAccess) => Promise<void> | void,
+  ): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      const table = await readAlarmScheduleTable(transaction);
+      await mutate(table, transaction);
+      await transaction.put(ALARM_TABLE_KEY, table);
     });
-    if (validDeadlines.length === 0) {
+  }
+
+  private async ensureAlarmScheduleTable(): Promise<AlarmScheduleTable> {
+    return await this.ctx.storage.transaction(async (transaction) => {
+      const table = await readAlarmScheduleTable(transaction);
+      if (Object.keys(table).length === 0) await transaction.delete(ALARM_TABLE_KEY);
+      else await transaction.put(ALARM_TABLE_KEY, table);
+      return table;
+    });
+  }
+
+  private async scheduleAlarmEntry(
+    key: string,
+    handler: string,
+    deadline: number,
+    suppressedBy?: string,
+  ): Promise<void> {
+    if (!Number.isFinite(deadline)) {
+      await this.clearAlarmEntry(key);
+      return;
+    }
+    await this.mutateAlarmSchedule(async (table, storage) => {
+      const current = table[key];
+      table[key] = {
+        deadline,
+        handler,
+        revision: (current?.revision ?? 0) + 1,
+        ...(suppressedBy === undefined ? {} : { suppressedBy }),
+      };
+      if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
+        await storage.put(key, deadline);
+      }
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async clearAlarmEntry(key: string): Promise<void> {
+    await this.mutateAlarmSchedule(async (table, storage) => {
+      Reflect.deleteProperty(table, key);
+      if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
+        await storage.delete(key);
+      }
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async clearAlarmEntries(keys: readonly string[]): Promise<void> {
+    await this.mutateAlarmSchedule(async (table, storage) => {
+      for (const key of keys) {
+        Reflect.deleteProperty(table, key);
+        if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
+          await storage.delete(key);
+        }
+      }
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async readAlarmDeadline(key: string): Promise<number | null> {
+    const table = await this.ensureAlarmScheduleTable();
+    const entry = table[key];
+    return entry === undefined ? null : entry.deadline;
+  }
+
+  private async claimAlarmEntry(key: string, expected: AlarmScheduleEntry): Promise<boolean> {
+    return await this.ctx.storage.transaction(async (transaction) => {
+      const table = await readAlarmScheduleTable(transaction);
+      const current = table[key];
+      if (current === undefined || JSON.stringify(current) !== JSON.stringify(expected) || current.deadline > Date.now()) {
+        await transaction.put(ALARM_TABLE_KEY, table);
+        return false;
+      }
+      Reflect.deleteProperty(table, key);
+      await transaction.put(ALARM_TABLE_KEY, table);
+      if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
+        await transaction.delete(key);
+      }
+      return true;
+    });
+  }
+
+  private async retainAlarmEntry(key: string, entry: AlarmScheduleEntry): Promise<void> {
+    await this.mutateAlarmSchedule(async (table, storage) => {
+      if (Object.hasOwn(table, key)) return;
+      table[key] = { ...entry, revision: (entry.revision ?? 0) + 1 };
+      if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
+        await storage.put(key, entry.deadline);
+      }
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async rescheduleFailedAlarm(
+    key: string,
+    expected: AlarmScheduleEntry,
+    retryDelaysMs: readonly number[] | undefined,
+  ): Promise<void> {
+    const configuredDelays = retryDelaysMs?.filter((delay) => Number.isFinite(delay) && delay >= 1);
+    const delays = configuredDelays?.length ? configuredDelays : ALARM_HANDLER_RETRY_DELAYS_MS;
+    const failures = expected.failures ?? 0;
+    const delay = delays[Math.min(failures, delays.length - 1)];
+    if (delay === undefined || !Number.isFinite(delay) || delay < 1) return;
+    await this.mutateAlarmSchedule(async (table, storage) => {
+      const current = table[key];
+      if (current !== undefined) return;
+      table[key] = {
+        ...expected,
+        deadline: Date.now() + delay,
+        failures: failures + 1,
+        revision: (expected.revision ?? 0) + 1,
+      };
+      if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
+        await storage.put(key, table[key].deadline);
+      }
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  private moduleAlarmContext(
+    moduleId: string,
+    registration: ModuleAlarmDefinition,
+  ): ModuleAlarmContext {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Module alarms require a named Durable Object.");
+    const storagePrefix = `module:${moduleId}:storage:`;
+    const handler = `module:${moduleId}:${registration.key}`;
+    return {
+      DB: this.env.DB,
+      channelId,
+      storage: {
+        get: (key: string) => this.ctx.storage.get(`${storagePrefix}${key}`),
+        put: (key: string, value: unknown) => this.ctx.storage.put(`${storagePrefix}${key}`, value),
+        delete: (key: string) => this.ctx.storage.delete(`${storagePrefix}${key}`),
+      },
+      schedule: async (key, deadline) => {
+        await this.scheduleAlarmEntry(`module:${moduleId}:${key}`, handler, deadline);
+      },
+      clear: async (key) => {
+        await this.clearAlarmEntry(`module:${moduleId}:${key}`);
+      },
+    };
+  }
+
+  private alarmHandlers(modules: readonly BotModule[] = MODULES): Map<string, AlarmHandlerRegistration> {
+    const handlers = new Map<string, AlarmHandlerRegistration>([
+      [SECURITY_ROUND_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
+      [SECURITY_RETRY_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
+      [AD_PREWARNING_HANDLER, { handle: (_key, entry, _now, nowIso) => this.runAdPrewarning(entry.deadline, nowIso) }],
+      [AD_COUNTDOWN_REFRESH_HANDLER, {
+        handle: async () => {
+          await this.refreshCountdownScheduleFromAlarm();
+          return undefined;
+        },
+      }],
+    ]);
+    for (const module of modules) {
+      for (const registration of module.alarms ?? []) {
+        const handler = `module:${module.id}:${registration.key}`;
+        if (handlers.has(handler)) throw new Error(`Duplicate alarm handler ${handler}.`);
+        const modulePrefix = `module:${module.id}:`;
+        handlers.set(handler, {
+          ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
+          handle: async (key, entry) => await registration.handle(
+            this.moduleAlarmContext(module.id, registration),
+            key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
+            entry.deadline,
+          ),
+        });
+      }
+    }
+    return handlers;
+  }
+
+  private async dispatchDueAlarmEntries(
+    now: number,
+    nowIso: string,
+    handlers: ReadonlyMap<string, AlarmHandlerRegistration>,
+  ): Promise<void> {
+    const table = await this.ensureAlarmScheduleTable();
+    const dueEntries = Object.entries(table)
+      .filter(([, entry]) => entry.deadline <= now)
+      .filter(([, entry]) => entry.suppressedBy === undefined || !Object.hasOwn(table, entry.suppressedBy))
+      .sort(([, left], [, right]) => left.deadline - right.deadline);
+
+    for (const [key, entry] of dueEntries) {
+      const currentTable = await this.ensureAlarmScheduleTable();
+      const currentEntry = currentTable[key];
+      if (currentEntry === undefined || JSON.stringify(currentEntry) !== JSON.stringify(entry) ||
+          currentEntry.deadline > Date.now()) continue;
+      if (!await this.claimAlarmEntry(key, entry)) continue;
+      const registration = handlers.get(entry.handler);
+      if (registration === undefined) {
+        console.error(`Alarm handler ${entry.handler} is not registered for ${key}.`);
+        await this.rescheduleFailedAlarm(key, entry, undefined);
+        continue;
+      }
+      try {
+        const result = await registration.handle(key, entry, now, nowIso);
+        if (result === "retain") await this.retainAlarmEntry(key, entry);
+      } catch (error: unknown) {
+        console.error(`Alarm handler ${entry.handler} failed for ${key}.`, error);
+        await this.rescheduleFailedAlarm(key, entry, registration.retryDelaysMs);
+      }
+    }
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async scheduleEarliestAlarm(): Promise<void> {
+    const table = await this.ensureAlarmScheduleTable();
+    const now = Date.now();
+    const deadlines = Object.entries(table)
+      .filter(([, entry]) => Number.isFinite(entry.deadline))
+      .filter(([, entry]) => !(entry.deadline <= now && entry.suppressedBy !== undefined &&
+        Object.hasOwn(table, entry.suppressedBy)))
+      .map(([, entry]) => entry.deadline);
+    if (deadlines.length === 0) {
       await this.ctx.storage.deleteAlarm();
       return;
     }
-    await this.ctx.storage.setAlarm(Math.min(...validDeadlines));
+    await this.ctx.storage.setAlarm(Math.min(...deadlines));
   }
 
   private async scheduleSecurityAlarm(): Promise<void> {
     if (this.ctx.getWebSockets().length === 0) {
-      await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
-      await this.ctx.storage.delete(SECURITY_RETRY_KEY);
+      await this.clearAlarmEntries([SECURITY_DEADLINE_KEY, SECURITY_RETRY_KEY]);
     } else {
-      const deadline = await this.ctx.storage.get(SECURITY_DEADLINE_KEY);
-      if (typeof deadline !== "number" || !Number.isFinite(deadline)) {
-        await this.ctx.storage.put(SECURITY_DEADLINE_KEY, Date.now() + SECURITY_ALARM_INTERVAL_MS);
+      const deadline = await this.readAlarmDeadline(SECURITY_DEADLINE_KEY);
+      if (deadline === null) {
+        await this.scheduleAlarmEntry(
+          SECURITY_DEADLINE_KEY,
+          SECURITY_ROUND_HANDLER,
+          Date.now() + SECURITY_ALARM_INTERVAL_MS,
+          SECURITY_RETRY_KEY,
+        );
       }
     }
     await this.scheduleEarliestAlarm();
@@ -599,9 +866,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   private async stopSecurityAlarmIfIdle(): Promise<void> {
     if (this.ctx.getWebSockets().length === 0) {
-      await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
-      await this.ctx.storage.delete(SECURITY_RETRY_KEY);
-      await this.scheduleEarliestAlarm();
+      await this.clearAlarmEntries([SECURITY_DEADLINE_KEY, SECURITY_RETRY_KEY]);
     }
   }
 
@@ -679,13 +944,38 @@ export class ChannelObject extends DurableObject<Env> {
       await this.clearAdPrewarning();
       return;
     }
-    await this.ctx.storage.put(AD_PREWARNING_DEADLINE_KEY, dueAtMs);
-    await this.scheduleEarliestAlarm();
+    await this.scheduleAlarmEntry(AD_PREWARNING_DEADLINE_KEY, AD_PREWARNING_HANDLER, dueAtMs);
   }
 
   public async clearAdPrewarning(): Promise<void> {
-    await this.ctx.storage.delete(AD_PREWARNING_DEADLINE_KEY);
-    await this.scheduleEarliestAlarm();
+    await this.clearAlarmEntry(AD_PREWARNING_DEADLINE_KEY);
+    await this.ctx.storage.delete(AD_PREWARNING_SEND_CLAIM_KEY);
+  }
+
+  /** Schedule one module-owned alarm key through its registered handler. */
+  public async scheduleModuleAlarm(
+    moduleId: string,
+    handlerKey: string,
+    alarmKey: string,
+    deadline: number,
+  ): Promise<void> {
+    const registration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === handlerKey);
+    if (registration === undefined || alarmKey.length === 0) {
+      throw new Error(`Unknown module alarm ${moduleId}.${handlerKey}.`);
+    }
+    await this.scheduleAlarmEntry(
+      `module:${moduleId}:${alarmKey}`,
+      `module:${moduleId}:${registration.key}`,
+      deadline,
+    );
+  }
+
+  /** Clear one module-owned alarm key without disturbing other module deadlines. */
+  public async clearModuleAlarm(moduleId: string, alarmKey: string): Promise<void> {
+    if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) {
+      throw new Error(`Unknown module alarm key ${moduleId}.${alarmKey}.`);
+    }
+    await this.clearAlarmEntry(`module:${moduleId}:${alarmKey}`);
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -898,8 +1188,11 @@ export class ChannelObject extends DurableObject<Env> {
     if (sockets.length > 0) {
       // Schedule the marker check before attempting close. This also covers a
       // DO call that times out after the durable revoke has been recorded.
-      await this.ctx.storage.put(SECURITY_RETRY_KEY, Date.now() + SECURITY_RETRY_INTERVAL_MS);
-      await this.scheduleEarliestAlarm();
+      await this.scheduleAlarmEntry(
+        SECURITY_RETRY_KEY,
+        SECURITY_RETRY_HANDLER,
+        Date.now() + SECURITY_RETRY_INTERVAL_MS,
+      );
     }
     let closed = true;
     for (const webSocket of sockets) {
@@ -924,21 +1217,8 @@ export class ChannelObject extends DurableObject<Env> {
     return closed;
   }
 
-  override async alarm(): Promise<void> {
+  private async runSecurityRound(now: number, nowIso: string): Promise<AlarmHandlerResult> {
     const webSockets = this.ctx.getWebSockets();
-    const now = Date.now();
-    const nowIso = new Date(now).toISOString();
-    await this.pruneRevokedTokenMarkers(now);
-    const [securityDeadline, warningDeadline, countdownDeadline] = await Promise.all([
-      this.ctx.storage.get(SECURITY_DEADLINE_KEY),
-      this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),
-      this.ctx.storage.get(AD_COUNTDOWN_REFRESH_DEADLINE_KEY),
-    ]);
-    const securityDue = typeof securityDeadline === "number" && Number.isFinite(securityDeadline) && securityDeadline <= now;
-    const retryDeadline = await this.ctx.storage.get(SECURITY_RETRY_KEY);
-    const securityRetryDue = typeof retryDeadline === "number" && Number.isFinite(retryDeadline) && retryDeadline <= now;
-    const warningDue = typeof warningDeadline === "number" && Number.isFinite(warningDeadline) && warningDeadline <= now;
-    const countdownRefreshDue = typeof countdownDeadline === "number" && Number.isFinite(countdownDeadline) && countdownDeadline <= now;
     const expired = new Set<WebSocket>();
     const revoked = new Set<WebSocket>();
     const overlayBindingChanged = new Set<WebSocket>();
@@ -949,12 +1229,9 @@ export class ChannelObject extends DurableObject<Env> {
     const transientAuth = new Set<WebSocket>();
     let transientFailure = false;
 
-    if (warningDue) await this.ctx.storage.delete(AD_PREWARNING_DEADLINE_KEY);
-    if (countdownRefreshDue) await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_DEADLINE_KEY);
-
     const principals = webSockets.map((webSocket) => ({ webSocket, principal: readAttachment(webSocket) }));
 
-    if ((securityDue || securityRetryDue) && webSockets.length > 0) {
+    if (webSockets.length > 0) {
       for (const { webSocket, principal } of principals) {
         if (principal === null) revoked.add(webSocket);
         else if (isExpired(principal, now)) expired.add(webSocket);
@@ -970,7 +1247,7 @@ export class ChannelObject extends DurableObject<Env> {
       }
     }
 
-    if ((securityDue || securityRetryDue) && webSockets.length > 0) try {
+    if (webSockets.length > 0) try {
       const ownChannelId = this.ownChannelId();
       if (ownChannelId === null) {
         for (const webSocket of webSockets) revoked.add(webSocket);
@@ -1064,56 +1341,74 @@ export class ChannelObject extends DurableObject<Env> {
     }
     if (closeFailure) transientFailure = true;
 
-    if (securityDue || securityRetryDue) {
-      if (this.ctx.getWebSockets().length === 0) {
-        await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
-        await this.ctx.storage.delete(SECURITY_RETRY_KEY);
-      } else if (transientFailure) {
-        await this.ctx.storage.put(SECURITY_RETRY_KEY, now + SECURITY_RETRY_INTERVAL_MS);
-      } else {
-        await this.ctx.storage.delete(SECURITY_RETRY_KEY);
-        await this.ctx.storage.put(SECURITY_DEADLINE_KEY, now + SECURITY_ALARM_INTERVAL_MS);
-      }
-    } else if (this.ctx.getWebSockets().length === 0) {
-      await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
-      await this.ctx.storage.delete(SECURITY_RETRY_KEY);
+    if (this.ctx.getWebSockets().length === 0) {
+      await this.clearAlarmEntries([SECURITY_DEADLINE_KEY, SECURITY_RETRY_KEY]);
+      return undefined;
+    } else if (transientFailure) {
+      await this.scheduleAlarmEntry(
+        SECURITY_RETRY_KEY,
+        SECURITY_RETRY_HANDLER,
+        now + SECURITY_RETRY_INTERVAL_MS,
+      );
+      return "retain";
     }
 
+    await this.clearAlarmEntry(SECURITY_RETRY_KEY);
+    await this.scheduleAlarmEntry(
+      SECURITY_DEADLINE_KEY,
+      SECURITY_ROUND_HANDLER,
+      now + SECURITY_ALARM_INTERVAL_MS,
+      SECURITY_RETRY_KEY,
+    );
+  }
+
+  private async runAdPrewarning(deadline: number, nowIso: string): Promise<undefined> {
     const ownChannel = this.ownChannelId();
-    if (warningDue && typeof warningDeadline === "number" && ownChannel !== null) {
-      try {
-        await processAdPrewarning(
-          this.env,
-          ownChannel,
-          warningDeadline,
-          undefined,
-          nowIso,
-          fetch,
-          // Own scheduler instead of a stub: a stub to this same object would
-          // be a self-call from within alarm() and would never return.
-          {
-            schedule: async (dueAtMs) => { await this.scheduleAdPrewarning(dueAtMs); },
-            clear: async () => { await this.clearAdPrewarning(); },
-            readScheduleGeneration: () => this.getAdScheduleGeneration(),
-            readSchedule: async () => (await this.getCachedAdSchedule())?.schedule ?? null,
-            storeSchedule: async (schedule, asOf, options) => {
-              return await this.storeAdSchedule(
-                schedule,
-                asOf,
-                undefined,
-                options?.expectedGeneration,
-                options?.reconcileAlarm,
-              );
-            },
-          },
-        );
-      } catch (error: unknown) {
-        // A flow or D1 error must not swallow the other deadlines that are due.
-        console.error("Ad prewarning could not be processed in the alarm.", error);
-      }
-    }
-    if (countdownRefreshDue) await this.refreshCountdownScheduleFromAlarm();
-    await this.scheduleEarliestAlarm();
+    if (ownChannel === null) return undefined;
+    await processAdPrewarning(
+      this.env,
+      ownChannel,
+      deadline,
+      undefined,
+      nowIso,
+      fetch,
+      // Own scheduler instead of a stub: a stub to this same object would
+      // be a self-call from within alarm() and would never return.
+      {
+        schedule: async (dueAtMs) => { await this.scheduleAdPrewarning(dueAtMs); },
+        clear: async () => { await this.clearAdPrewarning(); },
+        readScheduleGeneration: () => this.getAdScheduleGeneration(),
+        readSchedule: async () => (await this.getCachedAdSchedule())?.schedule ?? null,
+        claimPrewarningSend: async (scheduledDueAtMs) => await this.ctx.storage.transaction(async (transaction) => {
+          const claimedDeadline = await transaction.get<number>(AD_PREWARNING_SEND_CLAIM_KEY);
+          if (claimedDeadline === scheduledDueAtMs) return false;
+          await transaction.put(AD_PREWARNING_SEND_CLAIM_KEY, scheduledDueAtMs);
+          return true;
+        }),
+        storeSchedule: async (schedule, asOf, options) => {
+          return await this.storeAdSchedule(
+            schedule,
+            asOf,
+            undefined,
+            options?.expectedGeneration,
+            options?.reconcileAlarm,
+          );
+        },
+      },
+    );
+    await this.ctx.storage.transaction(async (transaction) => {
+      const claimedDeadline = await transaction.get<number>(AD_PREWARNING_SEND_CLAIM_KEY);
+      if (claimedDeadline === deadline) await transaction.delete(AD_PREWARNING_SEND_CLAIM_KEY);
+    });
+    return undefined;
+  }
+
+  override async alarm(): Promise<void> {
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    await this.pruneRevokedTokenMarkers(now);
+    await this.stopSecurityAlarmIfIdle();
+    await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers());
   }
 
   override webSocketMessage(webSocket: WebSocket, message: string | ArrayBuffer): void {
