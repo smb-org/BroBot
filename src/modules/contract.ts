@@ -95,7 +95,7 @@ export interface ModuleOverlayElementDefinition {
   editor?: () => Promise<{ default: ComponentType<OverlayElementEditorProps> }>;
 }
 
-export type ModuleOverlayHostEvent = "channel.game.changed" | "stream.state.changed";
+export type ModuleOverlayHostEvent = "channel.game.changed" | "stream.state.changed" | "template.data.changed";
 
 export { truncateTo200Chars, textFingerprintIfTruncated } from "../text";
 export {
@@ -633,6 +633,7 @@ export interface ModuleRouteVariables {
     payload: Readonly<Record<string, unknown>>,
     recipientConfig?: { field: string; value: string },
   ) => Promise<void>;
+  publishOverlayHostEvent: (channelId: string, event: ModuleOverlayHostEvent) => Promise<void>;
   writeModuleDiagnostics: (
     db: D1Database,
     channelId: string,

@@ -67,7 +67,8 @@ describe("module overlay element declarations", () => {
     expect(MODULE_OVERLAY_ELEMENTS.every(({ definition }) => typeof definition.load === "function")).toBe(true);
   });
 
-  it("invalidates text block overlays after live or game changes", async () => {
+  it("invalidates text block overlays after live, game, or template data changes", async () => {
+    expect(textLibraryModule.overlayElements?.[0]?.reloadStateOnHostEvents).toContain("template.data.changed");
     const handleEvent = textLibraryModule.handleEvent;
     if (handleEvent === undefined) throw new Error("Text library event handler is missing.");
     for (const subscriptionType of ["channel.update", "stream.online", "stream.offline"]) {

@@ -15,7 +15,7 @@ export const textBlockOverlayElement = {
   editorModuleLabel: { de: editorTexts.de.moduleLabel, en: editorTexts.en.moduleLabel },
   initialStateNeedsContext: true,
   reloadStateOnModuleMessages: ["modul.text_library.blocks_updated"] as const,
-  reloadStateOnHostEvents: ["channel.game.changed", "stream.state.changed"] as const,
+  reloadStateOnHostEvents: ["channel.game.changed", "stream.state.changed", "template.data.changed"] as const,
   parseConfig: (raw: unknown) => {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
     const config = raw as Record<string, unknown>;

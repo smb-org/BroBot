@@ -19,7 +19,7 @@ const createDatabase = async (): Promise<TestD1Database> => {
   return database;
 };
 
-const appFor = (database: D1Database): Hono<ModuleRouteEnvironment> => {
+const appFor = (database: D1Database, publishedHostEvents: string[] = []): Hono<ModuleRouteEnvironment> => {
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", "manager");
@@ -27,6 +27,10 @@ const appFor = (database: D1Database): Hono<ModuleRouteEnvironment> => {
     context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
     context.set("prepareModuleAudit", (entry, changedAt) =>
       prepareModuleAudit(database, ACTOR_ID, changedAt, entry));
+    context.set("publishOverlayHostEvent", (channelId, event) => {
+      publishedHostEvents.push(`${channelId}:${event}`);
+      return Promise.resolve();
+    });
     await next();
   });
   app.route("/channels/:channelId", sunRoutes);
@@ -55,7 +59,8 @@ describe("sun settings mutations", () => {
   it("stores the location time zone and audits the location and fallback texts", async () => {
     const database = await createDatabase();
     const errorTexts = { de: "D".repeat(200), en: "E".repeat(200) };
-    const app = appFor(database as unknown as D1Database);
+    const hostEvents: string[] = [];
+    const app = appFor(database as unknown as D1Database, hostEvents);
     const environment = { DB: database as unknown as D1Database };
     const response = await app.fetch(requestFor({ ...location("Honolulu", 21.3069), longitude: -157.8583, timeZone: "Pacific/Honolulu" }, 1, errorTexts), environment);
     const saved = await response.json<{ location: { timeZone: string } }>();
@@ -64,6 +69,7 @@ describe("sun settings mutations", () => {
         { de: "Updated German text", en: "Updated English text" }),
       environment,
     );
+    const removedResponse = await app.fetch(requestFor(null, 3), environment);
     const audits = await database.prepare(
       "SELECT before_json, after_json FROM audit_log WHERE channel_id = ? AND action = ? ORDER BY rowid",
     ).bind(CHANNEL_ID, "sun.settings_changed").all<{ before_json: string; after_json: string }>();
@@ -71,7 +77,13 @@ describe("sun settings mutations", () => {
     expect(response.status).toBe(200);
     expect(saved.location.timeZone).toBe("Pacific/Honolulu");
     expect(textOnlyResponse.status).toBe(200);
-    expect(audits.results).toHaveLength(2);
+    expect(removedResponse.status).toBe(200);
+    expect(hostEvents).toEqual([
+      `${CHANNEL_ID}:template.data.changed`,
+      `${CHANNEL_ID}:template.data.changed`,
+      `${CHANNEL_ID}:template.data.changed`,
+    ]);
+    expect(audits.results).toHaveLength(3);
     expect(JSON.parse(audits.results[0]?.before_json ?? "{}") as Record<string, unknown>).toMatchObject({
       errorTextDe: "Sonnendaten sind derzeit nicht verfügbar.",
       errorTextEn: "Sun data is currently unavailable.",
@@ -87,6 +99,10 @@ describe("sun settings mutations", () => {
     expect(textOnlyBefore.locationName).toBe(textOnlyAfter.locationName);
     expect(textOnlyBefore.errorTextDe).not.toBe(textOnlyAfter.errorTextDe);
     expect(textOnlyBefore.errorTextEn).not.toBe(textOnlyAfter.errorTextEn);
+    expect(JSON.parse(audits.results[2]?.after_json ?? "{}") as Record<string, unknown>).toMatchObject({
+      locationName: null,
+      locationTimeZone: null,
+    });
   });
 
   it("does not audit a losing concurrent update", async () => {

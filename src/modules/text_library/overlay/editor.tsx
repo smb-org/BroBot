@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactElement } from "react";
 
-import type { JsonObject, OverlayElementEditorProps } from "../../contract";
+import type { OverlayElementEditorProps } from "../../contract";
 import { Select } from "../../../dashboard/ui";
 import { textBlockOverlayEditorTexts } from "./locale";
+import { previewStateFor } from "./preview-state";
 
 interface TextBlockChoice {
   name: string;
@@ -19,21 +20,6 @@ interface TextBlockResponse {
 
 const sampleText = (text: string, examples: Readonly<Record<string, string>>): string => text.replace(/\{([a-z][a-z0-9_.]{0,63})\}/gu, (_token, name: string) =>
   examples[name] ?? (name.includes(".") ? "42" : name));
-
-const previewStateFor = (text: string, examples: Readonly<Record<string, string>>): JsonObject => {
-  const now = Date.now();
-  return {
-    serverNow: new Date(now).toISOString(),
-    timeZone: "Europe/Berlin",
-    dataConditions: {},
-    transitions: [],
-    countdownTargets: {
-      "sun.set_in": [new Date(now + 2 * 60 * 60 * 1_000).toISOString()],
-      "sun.rise_in": [new Date(now + 8 * 60 * 60 * 1_000).toISOString()],
-    },
-    candidates: [{ conditions: {}, text: sampleText(text, examples) }],
-  };
-};
 
 const TextBlockOverlayEditor = ({ config, onChange, channelId = "", language = "en", onPreviewState, readOnly = false }: OverlayElementEditorProps): ReactElement => {
   const [blockList, setBlockList] = useState<{ channelId: string; blocks: readonly TextBlockChoice[]; status: "ready" | "error" } | null>(null);

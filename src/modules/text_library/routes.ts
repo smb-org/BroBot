@@ -4,7 +4,7 @@ import { z } from "zod";
 import { canManage } from "../../contracts/values";
 import type { TextBlock } from "./contracts";
 import { TEXT_BLOCK_MAXIMUMS } from "./contracts";
-import { validTextBlock } from "./domain";
+import { blockReferencesInText, validTextBlock } from "./domain";
 import { createTextBlockRepository } from "./adapters/d1";
 import type { TextBlockInput } from "./repository";
 import { createTextLibraryService } from "./service";
@@ -41,6 +41,39 @@ const param = (context: { req: { param: (name: string) => string | undefined } }
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
 const denied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "text_library_management_denied" }, 403);
+
+const blocksAffectedBy = (blocks: readonly TextBlock[], changedName: string): string[] => {
+  const affected = new Set([changedName]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const block of blocks) {
+      if (affected.has(block.name)) continue;
+      const references = block.variants.flatMap((variant) => variant.texts.flatMap(blockReferencesInText));
+      if (references.some((name) => affected.has(name))) {
+        affected.add(block.name);
+        changed = true;
+      }
+    }
+  }
+  return [...affected];
+};
+
+const publishBlockInvalidations = async (
+  publish: ModuleRouteEnvironment["Variables"]["publishModuleOverlayMessage"],
+  channelId: string,
+  blocks: readonly TextBlock[],
+  changedName: string,
+): Promise<void> => {
+  await Promise.all(blocksAffectedBy(blocks, changedName).map((blockName) => publish(
+    channelId,
+    TEXT_LIBRARY_MODULE_ID,
+    "blocks_updated",
+    TEXT_BLOCK_OVERLAY_ELEMENT_KIND,
+    { blockName },
+    { field: "blockName", value: blockName },
+  )));
+};
 
 const parseBlock = (
   raw: unknown,
@@ -122,14 +155,7 @@ textLibraryRoutes.post("/blocks", async (context) => {
   const snapshot = await service.list(channelId);
   const result = await service.create({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"), snapshot);
   if (result.ok) {
-    await context.get("publishModuleOverlayMessage")(
-      channelId,
-      TEXT_LIBRARY_MODULE_ID,
-      "blocks_updated",
-      TEXT_BLOCK_OVERLAY_ELEMENT_KIND,
-      { blockName: result.block.name },
-      { field: "blockName", value: result.block.name },
-    );
+    await publishBlockInvalidations(context.get("publishModuleOverlayMessage"), channelId, [...snapshot.blocks, result.block], result.block.name);
     return context.json({ block: result.block }, 201);
   }
   if (result.reason === "already_exists") return context.json({ error: "text_library_block_exists" }, 409);
@@ -163,14 +189,8 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
   const snapshot = await service.list(channelId);
   const result = await service.change({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"), snapshot);
   if (result.ok) {
-    await context.get("publishModuleOverlayMessage")(
-      channelId,
-      TEXT_LIBRARY_MODULE_ID,
-      "blocks_updated",
-      TEXT_BLOCK_OVERLAY_ELEMENT_KIND,
-      { blockName: result.block.name },
-      { field: "blockName", value: result.block.name },
-    );
+    await publishBlockInvalidations(context.get("publishModuleOverlayMessage"), channelId,
+      snapshot.blocks.map((block) => block.name === result.block.name ? result.block : block), result.block.name);
     return context.json({ block: result.block });
   }
   return context.json({ error: `text_library_${result.reason}`, ...(result.current === undefined ? {} : { current: result.current }), ...(result.path === undefined ? {} : { path: result.path }) }, result.reason === "conflict" ? 409 : result.reason === "not_authorized" ? 403 : 400);
@@ -185,14 +205,7 @@ textLibraryRoutes.delete("/blocks/:name", async (context) => {
   const snapshot = await service.list(channelId);
   const result = await service.delete(channelId, param(context, "name"), revision, snapshot.settings.graphRevision, context.get("actor"), nowIso());
   if (result.ok) {
-    await context.get("publishModuleOverlayMessage")(
-      channelId,
-      TEXT_LIBRARY_MODULE_ID,
-      "blocks_updated",
-      TEXT_BLOCK_OVERLAY_ELEMENT_KIND,
-      { blockName: param(context, "name") },
-      { field: "blockName", value: param(context, "name") },
-    );
+    await publishBlockInvalidations(context.get("publishModuleOverlayMessage"), channelId, snapshot.blocks, param(context, "name"));
     return context.json({ ok: true });
   }
   return context.json({ error: `text_library_${result.reason}`, ...(result.current === undefined ? {} : { current: result.current }) }, result.reason === "conflict" ? 409 : result.reason === "not_authorized" ? 403 : 404);

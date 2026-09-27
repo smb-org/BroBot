@@ -11,7 +11,7 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleLanguage, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
+import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleLanguage, ModuleOverlayHostEvent, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
@@ -29,7 +29,7 @@ import { findChannelVariable } from "../db/channel-variables";
 import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from "../server-timing";
 import { publishOverlayChanged } from "../realtime";
 import { publishRealtimeMessages } from "../realtime";
-import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
+import { prepareModuleOverlayHostEventMessages, prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
 import { readChannelVariables } from "../db/channel-variables";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
@@ -44,6 +44,7 @@ interface ModuleRouteEnvironment {
     | "listTextBlockConditions"
     | "resolveTextBlockConditions"
     | "publishModuleOverlayMessage"
+    | "publishOverlayHostEvent"
     | "templateUsageSources" | "listRegisteredTemplateVariables"
   >;
 }
@@ -177,6 +178,14 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
       if (prepared.outcome === "ready") await publishRealtimeMessages(context.env.CHANNEL, [prepared.message]);
     } catch (error: unknown) {
       console.warn("Module overlay update could not be sent.", error);
+    }
+  });
+  context.set("publishOverlayHostEvent", async (channelId: string, event: ModuleOverlayHostEvent) => {
+    try {
+      const messages = await prepareModuleOverlayHostEventMessages(context.env.DB, channelId, event);
+      if (messages.length > 0) await publishRealtimeMessages(context.env.CHANNEL, messages);
+    } catch (error: unknown) {
+      console.warn("Overlay host state update could not be sent.", error);
     }
   });
   context.set("templateUsageSources", async (channelId) => {

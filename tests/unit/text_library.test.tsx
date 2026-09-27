@@ -669,16 +669,18 @@ describe("text library", () => {
     await expect(reserved.json()).resolves.toEqual({ error: "text_library_block_reserved_name" });
   });
 
-  it("publishes a typed invalidation to overlays using an edited block", async () => {
+  it("invalidates overlay blocks that transitively reference an edited or deleted block", async () => {
     const created = await createBlock("welcome", [variant("default", "Before edit")]);
     if (!created.ok) throw new Error("Could not create the realtime test block.");
+    const parent = await createBlock("parent", [variant("default", "Nested: {welcome}")]);
+    if (!parent.ok) throw new Error("Could not create the parent realtime test block.");
     await insertLoginIdentityAndSession(database, "manager-overlay-edit");
     await insertMember(database, CHANNEL_ID, "manager-overlay-edit", "manager");
     database.sqlite.exec(`
       INSERT INTO overlays (overlay_id, channel_id, name, width, height, css, revision, created_at, updated_at)
       VALUES ('overlay-welcome', '${CHANNEL_ID}', 'Welcome', 1280, 720, '', 1, '${new Date(NOW).toISOString()}', '${new Date(NOW).toISOString()}');
       INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json)
-      VALUES ('element-welcome', '${CHANNEL_ID}', 'overlay-welcome', 'text_library.block', '', NULL, '', '{"blockName":"welcome"}');
+      VALUES ('element-welcome', '${CHANNEL_ID}', 'overlay-welcome', 'text_library.block', '', NULL, '', '{"blockName":"parent"}');
     `);
     const sessionCookie = await createSessionCookie(
       { sessionId: "session-manager-overlay-edit" },
@@ -724,10 +726,31 @@ describe("text library", () => {
     expect(published).toHaveLength(1);
     expect(published[0]).toMatchObject({
       type: "modul.text_library.blocks_updated",
-      payload: { blockName: "welcome" },
+      payload: { blockName: "parent" },
       overlayIds: ["overlay-welcome"],
     });
     expect(JSON.stringify(published[0])).not.toContain("Updated private block text");
+
+    const updated = await response.json<{ block: { revision: number } }>();
+    published.length = 0;
+    const deleted = await panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome?revision=${String(updated.block.revision)}`,
+      {
+        method: "DELETE",
+        headers: {
+          "X-CSRF-Token": csrf,
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+        },
+      },
+    ), environment);
+
+    expect(deleted.status).toBe(200);
+    expect(published).toHaveLength(1);
+    expect(published[0]).toMatchObject({
+      type: "modul.text_library.blocks_updated",
+      payload: { blockName: "parent" },
+      overlayIds: ["overlay-welcome"],
+    });
   });
 
   it("measures a three-block render with ten conditional variants under the 10 ms CPU budget", async () => {

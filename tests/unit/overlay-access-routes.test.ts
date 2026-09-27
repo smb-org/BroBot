@@ -6,7 +6,7 @@ import { createSessionCookie } from "../../src/worker/auth/session";
 import { decryptJson, hashOverlayToken, parseKeyRing } from "../../src/worker/auth/crypto";
 import { overlayAccessRouter } from "../../src/worker/panel/overlay-access-routes";
 import { overlayRouter } from "../../src/worker/panel/overlay-routes";
-import { TestD1Database } from "./test-d1";
+import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const key = (byte: number): string => btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
   .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -24,6 +24,26 @@ const makeEnvironment = (database: TestD1Database): TestEnvironment => ({
   TWITCH_CLIENT_ID: "test-client-id",
   OVERLAY_TOKEN_PEPPER: key(4),
 } as TestEnvironment);
+
+const delayOverlayElementHydration = (database: TestD1Database, delayMs: number): D1Database => ({
+  prepare: (sql: string) => {
+    const statement = database.prepare(sql);
+    const wrapped = {
+      bind: (...values: Parameters<TestPreparedStatement["bind"]>) => {
+        statement.bind(...values);
+        return wrapped;
+      },
+      first: <T>() => statement.first<T>(),
+      all: async <T>(...typeHint: readonly T[]) => {
+        if (sql.includes("AND module_id IN")) await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        return statement.all<T>(...typeHint);
+      },
+      run: () => statement.run(),
+    };
+    return wrapped as unknown as D1PreparedStatement;
+  },
+  batch: database.batch.bind(database),
+} as unknown as D1Database);
 
 const insertChannelSessionAndMember = async (database: TestD1Database, role = "manager"): Promise<void> => {
   await database.prepare(
@@ -297,6 +317,38 @@ describe("overlay access routes", () => {
       snooze_count: 1,
       snooze_refresh_at: cachedSchedule.snoozeRefreshAt,
     });
+  });
+
+  it("stamps overlay server time after element hydration completes", async () => {
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('channel-a', 'ads', 1, '{}')",
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements
+        (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json)
+       VALUES ('element-countdown', 'channel-a', 'overlay-a', 'ads.countdown', 'Ads', NULL, '', '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO ads_countdown_state
+         (channel_id, next_ad_at, duration, snooze_count, snooze_refresh_at, updated_at)
+       VALUES ('channel-a', '2026-09-25T12:01:00.000Z', 90, 2, '2026-09-25T12:30:00.000Z', '2026-09-25T12:00:00.000Z')`,
+    ).run();
+    const issued = await issueAccess(environment, "OBS timestamp");
+    const delayedEnvironment = { ...environment, DB: delayOverlayElementHydration(database, 150) } as TestEnvironment;
+    const startedAt = Date.now();
+
+    const bootstrap = await authRouter.fetch(new Request("https://brobot.example/api/overlay/bootstrap", {
+      headers: { Authorization: `Bearer ${tokenFromUrl(issued.overlayUrl)}` },
+    }), delayedEnvironment);
+    const body = await bootstrap.json<{
+      overlay: { elements: Array<{ state?: Record<string, unknown> | null }> } | null;
+    }>();
+    const completedAt = Date.now();
+    const serverNow = Date.parse(String(body.overlay?.elements[0]?.state?.serverNow));
+
+    expect(bootstrap.status).toBe(200);
+    expect(serverNow).toBeGreaterThanOrEqual(startedAt + 100);
+    expect(completedAt - serverNow).toBeLessThan(100);
   });
 
   it("keeps the old access active when replacing it", async () => {

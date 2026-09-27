@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RealtimeEnvelope } from "../../src/realtime-contract";
 import type { OverlayRealtimeCallbacks } from "../../src/overlay/realtime";
+import type { OverlayBootstrapData } from "../../src/overlay/model";
 
 const realtimeMocks = vi.hoisted(() => ({ connectOverlayRealtime: vi.fn() }));
 
@@ -15,6 +16,7 @@ vi.mock("../../src/text", () => ({
 }));
 
 import { OverlayShell } from "../../src/overlay/shell";
+import { estimateOverlayStateTransit } from "../../src/overlay/server-time";
 
 const element = (
   id: string,
@@ -119,6 +121,48 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(container.querySelectorAll(".brobot-variable__value")).toHaveLength(3);
     await waitFor(() => expect(document.head.querySelector("style[data-brobot-overlay-css]")?.textContent)
       .toBe(".brobot-overlay { color: white; }"));
+  });
+
+  it("adds half the bootstrap round trip to server state timestamps", () => {
+    const now = "2026-09-27T12:00:00.000Z";
+    const bootstrap: OverlayBootstrapData = {
+      language: "en",
+      overlay: {
+        id: "overlay-fixture", revision: 1, width: 1920, height: 1080, css: "",
+        elements: [{ ...element("text-block", 0, 0, 100, 0), state: { serverNow: now } }],
+      },
+      variables: {},
+    };
+
+    expect(estimateOverlayStateTransit(bootstrap, 100).overlay?.elements[0]?.state?.serverNow)
+      .toBe("2026-09-27T12:00:00.050Z");
+  });
+
+  it("refreshes a connected source before a supplied state timeline expires", async () => {
+    vi.useFakeTimers();
+    const serverNow = "2026-09-27T12:00:00.000Z";
+    vi.setSystemTime(Date.parse(serverNow));
+    const payload = {
+      language: "en",
+      overlay: {
+        id: "overlay-fixture", revision: 1, width: 1920, height: 1080, css: "",
+        elements: [{ ...element("text-block", 0, 0, 100, 0), state: {
+          serverNow,
+          refreshAt: "2026-09-27T12:00:30.000Z",
+        } }],
+      },
+      variables: {},
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a denied bootstrap transparent when a legacy debug fragment is present", async () => {

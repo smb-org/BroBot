@@ -1,7 +1,7 @@
 import type { JsonObject, ModuleOverlayElementContext } from "../../contract";
 import type { TextBlock, TextBlockConditions, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_NAME_PATTERN } from "../contracts";
-import { textBlockConditionSwitchTimes } from "../domain";
+import { blockReferencesInText, textBlockConditionSwitchTimes } from "../domain";
 import { renderOverlayTextPreservingDynamicValues } from "./render";
 
 interface BlockRow {
@@ -52,6 +52,24 @@ const loadBlock = async (db: D1Database, channelId: string, name: string): Promi
 const dataConditionIdsFor = (block: TextBlock): string[] => [...new Set(block.variants.flatMap((variant) =>
   Object.keys(variant.conditions.data ?? {})))];
 
+const referencedBlocksFor = async (
+  db: D1Database,
+  channelId: string,
+  root: TextBlock,
+): Promise<TextBlock[]> => {
+  const found = new Map([[root.name, root]]);
+  let frontier = [root];
+  for (let depth = 1; depth < 3 && frontier.length > 0; depth += 1) {
+    const names = [...new Set(frontier.flatMap((block) => block.variants.flatMap((variant) =>
+      variant.texts.flatMap(blockReferencesInText))))]
+      .filter((name) => TEXT_BLOCK_NAME_PATTERN.test(name) && !found.has(name));
+    const loaded = await Promise.all(names.map((name) => loadBlock(db, channelId, name)));
+    frontier = loaded.filter((block): block is TextBlock => block !== null);
+    for (const block of frontier) found.set(block.name, block);
+  }
+  return [...found.values()];
+};
+
 const serverConditionsMatch = (
   conditions: TextBlockConditions,
   stream: "online" | "offline" | "unknown",
@@ -62,7 +80,6 @@ const serverConditionsMatch = (
   if (conditions.minimumTier !== undefined) return false;
   if (conditions.stream !== undefined && conditions.stream !== stream) return false;
   if (conditions.game !== undefined) {
-    if (gameId === null) return false;
     const same = gameId === conditions.game.game.id;
     if (conditions.game.mode === "is" ? !same : same) return false;
   }
@@ -93,12 +110,12 @@ const candidateText = async (
   source: string,
   context: ModuleOverlayElementContext,
 ): Promise<{ text: string; countdownTargets: Readonly<Record<string, readonly string[]>> } | null> => {
-  const templateNames = dynamicNamesIn(source, context.overlayTemplateVariableNames);
-  const dynamicNames = dynamicNamesIn(source, context.dynamicTemplateVariableNames);
-  const values = await context.resolveOverlayTemplateValues(templateNames);
-  if (templateNames.some((name) => values[name]?.available !== true)) return null;
   const rendered = await renderOverlayTextPreservingDynamicValues(source, context.dynamicTemplateVariableNames, context.renderTemplate);
   if (rendered.text.trim().length === 0) return null;
+  const templateNames = dynamicNamesIn(rendered.text, context.overlayTemplateVariableNames);
+  const dynamicNames = dynamicNamesIn(rendered.text, context.dynamicTemplateVariableNames);
+  const values = await context.resolveOverlayTemplateValues(templateNames);
+  if (templateNames.some((name) => values[name]?.available !== true)) return null;
   const countdownTargets: Record<string, readonly string[]> = {};
   for (const name of dynamicNames) {
     const targetAts = values[name]?.targetAts ?? (values[name]?.targetAt === undefined ? [] : [values[name].targetAt]);
@@ -118,6 +135,8 @@ export const textBlockOverlayState = async (
   if (typeof name !== "string" || !TEXT_BLOCK_NAME_PATTERN.test(name) || context === undefined) return null;
   const block = await loadBlock(db, channelId, name);
   if (block === null || block.variants.length === 0) return null;
+  const dependencyBlocks = await referencedBlocksFor(db, channelId, block);
+  const nestedBlocks = dependencyBlocks.filter((dependency) => dependency.name !== block.name);
 
   const needsStream = block.variants.some((variant) => variant.conditions.stream !== undefined);
   const needsGame = block.games.length > 0 || block.variants.some((variant) => variant.conditions.game !== undefined);
@@ -128,11 +147,11 @@ export const textBlockOverlayState = async (
   ]);
   if (block.games.length > 0 && (gameId === null || !block.games.some((game) => game.id === gameId))) return null;
 
-  const conditionIds = dataConditionIdsFor(block);
+  const conditionIds = [...new Set(dependencyBlocks.flatMap(dataConditionIdsFor))];
   const currentDataConditions = await context.resolveTemplateConditions(conditionIds);
   const temporalCandidates: { position: number; conditions: TextBlockConditions; text: string }[] = [];
   let fallbackCandidate: { position: number; conditions: TextBlockConditions; text: string } | null = null;
-  const countdownTargets: Record<string, string> = {};
+  const countdownTargets: Record<string, readonly string[]> = {};
   for (const [position, variant] of block.variants.entries()) {
     if (!serverConditionsMatch(variant.conditions, streamState, gameId, currentDataConditions, context.timeDependentTemplateConditionIds)) continue;
     const rawText = variant.texts[0];
@@ -154,12 +173,42 @@ export const textBlockOverlayState = async (
   ].sort((left, right) => left.position - right.position).map(({ conditions, text }) => ({ conditions, text }));
   if (candidates.length === 0) return null;
   const until = context.now + 7 * 24 * 60 * 60 * 1_000;
-  const timeConditionIds = [...new Set(candidates.flatMap(({ conditions }) =>
+  const nestedTimeConditions = nestedBlocks.flatMap((dependency) => dependency.variants.map(({ conditions }) => conditions)
+    .filter((conditions) => conditions.weekdays !== undefined || conditions.timeWindow !== undefined ||
+      Object.keys(conditions.data ?? {}).some((id) => context.timeDependentTemplateConditionIds.has(id))));
+  const nestedTimeConditionIds = [...new Set(nestedTimeConditions.flatMap((conditions) =>
     Object.keys(conditions.data ?? {}).filter((id) => context.timeDependentTemplateConditionIds.has(id)),
   ))];
+  const timeConditionIds = [...new Set([
+    ...candidates.flatMap(({ conditions }) =>
+      Object.keys(conditions.data ?? {}).filter((id) => context.timeDependentTemplateConditionIds.has(id)),
+    ),
+    ...nestedTimeConditionIds,
+  ])];
   const transitions = await context.resolveTemplateConditionTransitions(timeConditionIds, context.now, until);
+  const nestedTransitionTimes = transitions.flatMap(({ at, values }) =>
+    Object.keys(values).some((id) => nestedTimeConditionIds.includes(id)) ? [at] : [],
+  );
+  const nestedSwitchTimes = [
+    ...textBlockConditionSwitchTimes(nestedTimeConditions, timeZone, context.now, until),
+    ...nestedTransitionTimes,
+  ].filter((at) => Date.parse(at) > context.now && Date.parse(at) <= until);
+  const countdownExpiries = Object.values(countdownTargets).flatMap((targets) => targets.map(Date.parse))
+    .filter((at) => Number.isFinite(at) && at > context.now);
+  const timelineExpiry = Math.min(
+    ...(timeConditionIds.length === 0 ? [] : [until]),
+    ...(countdownExpiries.length === 0 ? [] : [Math.max(...countdownExpiries)]),
+  );
+  const timelineRefreshAt = Number.isFinite(timelineExpiry)
+    ? Math.max(context.now + 1_000, Math.min(timelineExpiry - 60 * 60 * 1_000, timelineExpiry - 5_000))
+    : Number.POSITIVE_INFINITY;
+  const nestedRefreshAt = nestedSwitchTimes.length === 0
+    ? Number.POSITIVE_INFINITY
+    : Math.max(context.now + 1_000, Math.min(...nestedSwitchTimes.map((at) => Date.parse(at))) - 5_000);
+  const refreshAt = Math.min(timelineRefreshAt, nestedRefreshAt);
   const switchTimes = [...new Set([
     ...textBlockConditionSwitchTimes(candidates.map(({ conditions }) => conditions), timeZone, context.now, until),
+    ...textBlockConditionSwitchTimes(nestedTimeConditions, timeZone, context.now, until),
     ...transitions.map(({ at }) => at).filter((at) => Date.parse(at) > context.now && Date.parse(at) <= until),
   ])].sort((left, right) => Date.parse(left) - Date.parse(right));
 
@@ -169,6 +218,7 @@ export const textBlockOverlayState = async (
     dataConditions: Object.fromEntries(timeConditionIds.flatMap((id) => currentDataConditions[id] === undefined ? [] : [[id, currentDataConditions[id]]])),
     transitions: transitions.map((transition) => ({ at: transition.at, values: transition.values })),
     switchTimes,
+    ...(Number.isFinite(refreshAt) ? { refreshAt: new Date(refreshAt).toISOString() } : {}),
     countdownTargets,
     candidates,
   } as unknown as JsonObject;

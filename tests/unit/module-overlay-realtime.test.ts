@@ -137,17 +137,17 @@ describe("module overlay realtime routing", () => {
       defaultSettings: {},
       overlayElements: [{
         ...declaration("text_library.block"),
-        reloadStateOnHostEvents: ["stream.state.changed"] as const,
+        reloadStateOnHostEvents: ["template.data.changed"] as const,
       }],
     };
     const database = databaseFor(["overlay-a"]);
 
-    const messages = await prepareModuleOverlayHostEventMessages(database.database, "kanal-a", "stream.state.changed", [module]);
+    const messages = await prepareModuleOverlayHostEventMessages(database.database, "kanal-a", "template.data.changed", [module]);
 
     expect(database.prepare.mock.calls).toHaveLength(1);
     expect(messages).toMatchObject([{
       type: "modul.text_library.state_changed",
-      payload: { reason: "stream.state.changed" },
+      payload: { reason: "template.data.changed" },
       overlayIds: ["overlay-a"],
     }]);
   });

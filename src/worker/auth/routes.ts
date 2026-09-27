@@ -286,14 +286,14 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
     await hydrateCachedAdsCountdownSnapshot(context.env, record.channelId);
   }
   const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
-  const responseNow = new Date().toISOString();
   const needsElementContext = overlay.elements.some((element) =>
     moduleOverlayElementForKind(element.kind)?.definition.initialStateNeedsContext === true,
   );
   const elementContext = needsElementContext
-    ? await createOverlayElementContext(context.env, record.channelId, record.language, Date.parse(responseNow))
+    ? await createOverlayElementContext(context.env, record.channelId, record.language, Date.now())
     : undefined;
   const elements = await hydrateModuleOverlayElements(context.env.DB, record.channelId, overlay.elements, MODULES, elementContext);
+  const responseNow = new Date().toISOString();
   return context.json({
     language: record.language,
     overlay: {
@@ -303,7 +303,7 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
       height: overlay.height,
       css: overlay.css,
       elements: elements.map((element) => {
-        const state = element.kind === ADS_COUNTDOWN_ELEMENT_KIND && element.state !== undefined && element.state !== null
+        const state = element.state !== undefined && element.state !== null && typeof element.state.serverNow === "string"
           ? { ...element.state, serverNow: responseNow }
           : element.state;
         return {

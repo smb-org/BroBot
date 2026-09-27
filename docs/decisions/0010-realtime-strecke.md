@@ -481,7 +481,7 @@ neu laden. Es gibt keine Nachricht pro Sekunde und keine D1-Schreibung pro Tick.
 
 ## Addendum #242: Textbausteine in Overlays
 
-**Status: vorgeschlagen**
+**Status: angenommen** — freigegeben durch den Product Owner am 27. September 2026.
 
 **Stand:** 27. September 2026
 
