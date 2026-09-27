@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { TemplateFields, TemplateVariable } from "../contract";
+import { raidTemplateVariableCatalog } from "./template-variable-catalog";
 
 export const raidSettingsSchema = z.object({
   shoutoutEnabled: z.boolean().default(true),
@@ -12,8 +13,8 @@ export const raidSettingsSchema = z.object({
 export type RaidSettings = z.output<typeof raidSettingsSchema>;
 
 export const RAID_VARIABLES = {
-  channel: { name: "channel", group: "event", sample: "samplechannel", maxLength: 25 },
-  viewers: { name: "viewers", group: "event", sample: "42", maxLength: 7 },
+  channel: { name: "channel", group: "event", sample: "samplechannel", maxLength: 25, picker: { de: raidTemplateVariableCatalog.de.channel, en: raidTemplateVariableCatalog.en.channel } },
+  viewers: { name: "viewers", group: "event", sample: "42", maxLength: 7, picker: { de: raidTemplateVariableCatalog.de.viewers, en: raidTemplateVariableCatalog.en.viewers } },
 } as const satisfies Record<string, TemplateVariable>;
 
 export const RAID_TEMPLATE_FIELDS = {

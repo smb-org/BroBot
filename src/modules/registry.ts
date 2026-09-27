@@ -45,13 +45,47 @@ export const variablesForModuleTemplateContext = (
   };
 });
 
+export const templateVariableGroupForModule = (
+  module: BotModule,
+  modules: readonly BotModule[] = MODULES,
+): (NonNullable<BotModule["templateVariableGroup"]> & { id: string }) | undefined => {
+  if (module.templateVariableGroup === undefined) return undefined;
+  return {
+    ...module.templateVariableGroup,
+    id: module.id,
+    order: module.templateVariableGroup.order ?? 100 + Math.max(0, modules.indexOf(module)),
+  };
+};
+
 export const validateModuleTemplateVariables = (modules: readonly BotModule[]): void => {
   for (const module of modules) {
     const templateFields = module.templateFields as Readonly<Record<string, readonly TemplateVariable[] | undefined>> | undefined;
-    const variableNames = Object.values(templateFields ?? {}).flatMap((variables) =>
-      (variables ?? []).map((variable) => variable.name),
-    );
+    if (module.templateVariables !== undefined && module.templateVariableNamespace !== "text_blocks" && module.templateVariableCatalog === undefined) {
+      throw new Error(`Module ${module.id} must declare a template variable catalog for its dynamic variables.`);
+    }
+    const variableNames = [
+      ...Object.values(templateFields ?? {}).flatMap((variables) => (variables ?? []).map((variable) => variable.name)),
+      ...(module.templateVariableCatalog ?? []).map((variable) => variable.name),
+    ];
     for (const name of variableNames) validateModuleTemplateVariable(module, name);
+    const declaredVariables = [
+      ...Object.values(templateFields ?? {}).flatMap((variables) => variables ?? []),
+      ...(module.templateVariableCatalog ?? []),
+    ];
+    if (declaredVariables.length > 0 && module.templateVariableNamespace !== "text_blocks" && module.templateVariableGroup === undefined) {
+      throw new Error(`Module ${module.id} must declare a template variable picker group.`);
+    }
+    for (const variable of declaredVariables) {
+      if (variable.picker === undefined) {
+        throw new Error(`Module template variable ${module.id}.${variable.name} needs bilingual picker copy.`);
+      }
+      for (const language of ["de", "en"] as const) {
+        const copy = variable.picker[language];
+        if (copy.label.trim().length === 0 || copy.description.trim().length === 0) {
+          throw new Error(`Module template variable ${module.id}.${variable.name} needs a label and description in ${language}.`);
+        }
+      }
+    }
   }
 };
 

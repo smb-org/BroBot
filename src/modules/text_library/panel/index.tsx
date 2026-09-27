@@ -5,8 +5,9 @@ import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
 import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Badge, Button, ChatPreview, ConfirmDialog, DangerSection, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, registerDashboardNavigationGuard, Select, SubInspector, TextArea, useDraftGuard } from "../../../dashboard/ui";
+import { Badge, Button, ChatPreview, ConfirmDialog, DangerSection, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, SubInspector, TextArea, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
+import { systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { textLibraryTexts } from "./locale";
 import { estimateEmbeddedBlockOverflow } from "./embedded-block-overflow";
 import {
@@ -98,6 +99,7 @@ const updateVariant = (variants: TextBlockVariant[], id: string, update: (varian
 
 export default function TextLibraryPanel({ channelId, language, canManage = true, textBlockConditions = [] }: ModulePanelProperties): ReactElement {
   const labels = useMemo(() => textLibraryTexts(language), [language]);
+  const resolvedLanguage = language === "en" ? "en" : "de";
   const searchGames = useCallback((query: string) => searchTextLibraryGames(channelId, query), [channelId]);
   const [data, setData] = useState<Awaited<ReturnType<typeof loadTextLibrary>> | null>(null);
   const [selectedName, setSelectedName] = useState<string | null>(null);
@@ -502,22 +504,34 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         {variant.texts.map((text, textIndex) => (
                           <div className="text-library__text-field" key={`${variant.id}-${String(textIndex)}`}>
                             <TextArea label={`${labels.text}${variant.texts.length > 1 ? ` ${String(textIndex + 1)}` : ""}`} hint={labels.textHint} value={text} onChange={(value) => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.map((current, currentIndex) => currentIndex === textIndex ? value : current) })) })} maxLength={TEXT_BLOCK_MAXIMUMS.textLength} disabled={pending} variables={[
-                              ...data.templateVariables.filter((variable) => !data.blocks.some((block) => block.name === variable.name)).flatMap((variable) => variable.group === undefined ? [] : [{
-                                name: variable.name,
-                                description: variable.name,
-                                sample: variable.sample,
-                                group: variable.group,
-                                kind: variable.moduleId === "host" ? variable.source === "channel" ? "channel" as const : "system" as const : "module" as const,
-                                ...(variable.external === undefined ? {} : { external: variable.external }),
-                                ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
-                              }]),
-                              ...data.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => ({ name: block.name, description: labels.variableDescription(block.name), sample: block.variants.flatMap((entry) => entry.texts)[0] ?? "", group: "channel" as const })),
+                              ...data.templateVariables.filter((variable) => !data.blocks.some((block) => block.name === variable.name)).flatMap((variable) => {
+                                if (variable.group === undefined) return [];
+                                const pickerCopy = variable.picker?.[resolvedLanguage];
+                                const systemCopy = variable.source === "system"
+                                  ? systemTemplateVariableLocale[resolvedLanguage][variable.name as keyof typeof systemTemplateVariableLocale.de]
+                                  : undefined;
+                                const pickerGroup = registeredTemplatePickerGroup(variable, resolvedLanguage);
+                                return [{
+                                  name: variable.name,
+                                  label: pickerCopy?.label ?? systemCopy?.label ?? variable.name,
+                                  description: pickerCopy?.description ?? systemCopy?.description ?? variable.description ?? variable.name,
+                                  sample: systemCopy?.sample ?? variable.sample,
+                                  ...(pickerCopy?.sample === undefined ? {} : { pickerSample: pickerCopy.sample }),
+                                  group: variable.group,
+                                  kind: variable.moduleId === "host" ? variable.source === "channel" ? "channel" as const : "system" as const : "module" as const,
+                                  ...(pickerGroup === undefined ? {} : { pickerGroup }),
+                                  ...(variable.external === undefined ? {} : { external: variable.external }),
+                                  ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+                                }];
+                              }),
+                              ...data.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => ({ name: block.name, label: block.name, description: labels.variableDescription(block.name), sample: "", group: "channel" as const, isTextBlock: true })),
                             ]} messages={{
                               countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
                               previewCountLabel: (count) => String(count),
                               unknownVariable: (name, suggestion) => suggestion === null ? `{${name}}` : `{${name}} → {${suggestion}}`,
                               insertSuggestionLabel: labels.insertSuggestionLabel,
                               worstCaseLength: (length, maximum) => `${String(length)} / ${String(maximum)}`,
+                              variablePicker: labels.variablePicker,
                             }} />
                             {variant.texts.length <= 1 ? null : <Button size="compact" danger="subtle" disabled={pending} onClick={() => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.filter((_entry, entryIndex) => entryIndex !== textIndex) })) })}>{labels.removeText}</Button>}
                           </div>

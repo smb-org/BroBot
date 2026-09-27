@@ -34,7 +34,9 @@ const textAreaMessages: TextAreaMessages = {
   variablePicker: {
     triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables", closeLabel: "Close variable picker",
     noResults: "No variables found.", createVariableLabel: "Create variable …", externalHelp: "Requests Twitch when the command runs",
-    groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time & random", event: "Event", channel: "Channel" },
+    groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time & random", event: "Event", channel: "Channel", text_blocks: "Text blocks" },
+    textBlockSample: "Text block",
+    keyHints: { navigate: "select", insert: "insert", close: "close" },
   },
 };
 

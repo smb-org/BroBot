@@ -12,7 +12,7 @@ import {
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
 import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleLanguage, ModuleOverlayHostEvent, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
-import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../../modules/registry";
+import { MODULES, templateVariableGroupForModule, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { moduleBroadcasterScopeState } from "../module-scopes";
@@ -102,9 +102,22 @@ export const registeredTemplateVariablesForChannel = async (
     const fields = Object.values(module.templateFields ?? {})
       .flatMap((variables) => variables ?? []) as TemplateVariable[];
     const dynamic = await module.templateVariables?.(db, channelId) ?? [];
+    const catalog = new Map((module.templateVariableCatalog ?? []).map((variable) => [variable.name, variable]));
     return variablesForModuleTemplateContext(module, [...fields, ...dynamic]).map((variable) => {
       validateModuleTemplateVariable(module, variable.name);
-      return { ...variable, moduleId: module.id, isTextBlock: module.templateVariableNamespace === "text_blocks" };
+      const pickerGroup = templateVariableGroupForModule(module);
+      const picker = variable.picker ?? catalog.get(variable.name)?.picker;
+      if (module.templateVariableNamespace !== "text_blocks" && module.templateVariableGroup !== undefined &&
+          (picker === undefined || pickerGroup === undefined)) {
+        throw new Error(`Module template variable ${module.id}.${variable.name} is missing picker copy or source group metadata.`);
+      }
+      return {
+        ...variable,
+        ...(picker === undefined ? {} : { picker }),
+        moduleId: module.id,
+        isTextBlock: module.templateVariableNamespace === "text_blocks",
+        ...(pickerGroup === undefined ? {} : { pickerGroup }),
+      };
     });
   }));
   return registrations.flat();
@@ -262,6 +275,7 @@ moduleRouter.get("/api/channels/:channelId/template-variables", async (context) 
       name: `var.${variable.name}`,
       moduleId: "host",
       isTextBlock: false,
+      description: variable.description,
       group: "channel" as const,
       sample: String(variable.value),
       maxLength: 10,

@@ -3,6 +3,9 @@ import { RAID_TEMPLATE_FIELDS, raidSettingsSchema } from "./contracts";
 import { DEFAULT_TEXT_LONG, DEFAULT_TEXT_SHORT } from "./contracts/chat-defaults";
 import { processRaid } from "./service";
 import { settingsVariableReferences } from "../contract";
+import { raidTemplateVariableGroupLabels } from "./contracts/template-variable-catalog";
+
+const raidPanelIcon = { paths: ["m4 17 5-10 3 6 2-4 6 8H4Z", "M8 19h8"] } as const;
 
 const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
   const row = await db.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?")
@@ -24,7 +27,8 @@ export type { RaidSettings } from "./contracts";
 
 export const raidModule: BotModule<typeof raidSettingsSchema> = {
   id: "raid",
-  panelIcon: { paths: ["m4 17 5-10 3 6 2-4 6 8H4Z", "M8 19h8"] },
+  panelIcon: raidPanelIcon,
+  templateVariableGroup: { label: raidTemplateVariableGroupLabels, icon: raidPanelIcon, order: 65 },
   settingsSchema: raidSettingsSchema,
   templateFields: RAID_TEMPLATE_FIELDS,
   templateContext: "event",

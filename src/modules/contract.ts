@@ -377,6 +377,14 @@ export interface ModuleIconDescriptor {
   paths: readonly string[];
 }
 
+/** A module-owned group used to present its template variables in the dashboard. */
+export interface ModuleTemplateVariableGroup {
+  label: Readonly<Record<ModuleLanguage, string>>;
+  icon: ModuleIconDescriptor;
+  /** Stable ordering relative to host groups and other module groups. */
+  order?: number;
+}
+
 /** A module-owned source of text that can contain template-variable references. */
 export interface ModuleTemplateUsageSource {
   text: string;
@@ -572,6 +580,8 @@ export const MODULE_TEMPLATE_TIER_CHAT_STATUSES: Readonly<Record<ModuleTemplateM
 export interface ModuleRegisteredTemplateVariable extends TemplateVariable {
   moduleId: string;
   isTextBlock: boolean;
+  description?: string;
+  pickerGroup?: ModuleTemplateVariableGroup & { id: string };
 }
 
 export const browserModuleLanguage = (): ModuleLanguage => {
@@ -709,6 +719,10 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   defaultSettings: z.output<SettingsSchema>;
   /** Template fields and variables used by both panel validation and worker rendering. */
   templateFields?: TemplateFields<z.output<SettingsSchema>>;
+  /** Static declarations for variables exposed through a dynamic provider. */
+  templateVariableCatalog?: readonly TemplateVariable[];
+  /** Localized source group and icon for variables provided by this module. */
+  templateVariableGroup?: ModuleTemplateVariableGroup;
   /** Dynamic template variables registered from module-owned data. */
   templateVariables?: (db: D1Database, channelId: string) => Promise<readonly TemplateVariable[]>;
   /** Which host catalog groups are available in this module's templates. */

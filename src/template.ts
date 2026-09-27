@@ -11,6 +11,14 @@ export {
 
 export type { TemplateContext, TemplateVariableSource } from "./contracts/values";
 
+export interface TemplateVariablePickerLocale {
+  label: string;
+  description: string;
+  sample?: string;
+}
+
+export type TemplateVariablePickerCatalog = Readonly<Record<"de" | "en", TemplateVariablePickerLocale>>;
+
 export interface TemplateVariable {
   readonly name: string;
   readonly group?: TemplateVariableGroup;
@@ -19,6 +27,8 @@ export interface TemplateVariable {
   readonly parameters?: "range" | "choices";
   readonly sample: string;
   readonly source?: TemplateVariableSource;
+  /** Bilingual dashboard copy for a declared variable. */
+  readonly picker?: TemplateVariablePickerCatalog;
   readonly contexts?: readonly TemplateContext[];
   /** Localized value used when this input-dependent variable is placed outside its declared context. */
   readonly unavailableContextText?: "command_input_usage" | "command_input_error";

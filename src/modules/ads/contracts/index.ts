@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { DEFAULT_PREWARNING_TEXT } from "./chat-defaults";
 import type { TemplateFields, TemplateVariable } from "../contract";
+import { adsTemplateVariableCatalog } from "./template-variable-catalog";
 
 /** Consent for control actions during a live stream; does not block the subscription. */
 export const ADS_OPTIONAL_BROADCASTER_SCOPES = ["channel:manage:ads"] as const;
@@ -17,8 +18,8 @@ export const adsSettingsSchema = z.object({
 export type AdsSettings = z.output<typeof adsSettingsSchema>;
 
 export const ADS_VARIABLES = {
-  duration: { name: "ads.duration", group: "event", contexts: ["event"], sample: "90", maxLength: 4, fallbackWhenAbsent: 15 },
-  seconds: { name: "ads.seconds", group: "event", contexts: ["event"], sample: "60", maxLength: 3 },
+  duration: { name: "ads.duration", group: "event", contexts: ["event"], sample: "90", maxLength: 4, fallbackWhenAbsent: 15, picker: { de: adsTemplateVariableCatalog.de["ads.duration"], en: adsTemplateVariableCatalog.en["ads.duration"] } },
+  seconds: { name: "ads.seconds", group: "event", contexts: ["event"], sample: "60", maxLength: 3, picker: { de: adsTemplateVariableCatalog.de["ads.seconds"], en: adsTemplateVariableCatalog.en["ads.seconds"] } },
 } as const satisfies Record<string, TemplateVariable>;
 
 export const ADS_TEMPLATE_FIELDS = {

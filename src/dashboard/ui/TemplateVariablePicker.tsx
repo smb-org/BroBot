@@ -1,45 +1,28 @@
 import { Drawer, Popover as MantinePopover, TextInput } from "@mantine/core";
 import { useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
 
-import {
-  TEMPLATE_VARIABLE_GROUPS,
-  type TemplateVariableGroup,
-  type TemplateVariableSource,
-} from "../../contracts/values";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
+import {
+  filterTemplateVariableOptions,
+  groupTemplateVariableOptions,
+  prioritizeTemplateVariableNamespace,
+  reindexGroupedTemplateVariableOptions,
+  type TemplateVariablePickerGroupPresentation,
+  type TemplateVariablePickerMessages,
+  type TemplateVariablePickerOption,
+} from "./template-variable-picker-model";
+
+export type {
+  TemplateVariablePickerGroup,
+  TemplateVariablePickerGroupKey,
+  TemplateVariablePickerGroupPresentation,
+  TemplateVariablePickerKind,
+  TemplateVariablePickerMessages,
+  TemplateVariablePickerOption,
+} from "./template-variable-picker-model";
 
 import "./TemplateVariablePicker.css";
-
-export type TemplateVariablePickerGroup = TemplateVariableGroup;
-
-export type TemplateVariablePickerKind = TemplateVariableSource;
-
-export interface TemplateVariablePickerOption {
-  /** Canonical variable name, without braces. */
-  name: string;
-  /** Short description in the active dashboard language. */
-  description: string;
-  /** Example or current channel value in the active dashboard language. */
-  sample: string;
-  group: TemplateVariablePickerGroup;
-  kind: TemplateVariablePickerKind;
-  /** Helix-backed variables make a Twitch request when the command runs. */
-  external?: boolean;
-  /** Default parameter text to select after inserting a parameterized token. */
-  parameter?: { value: string };
-}
-
-export interface TemplateVariablePickerMessages {
-  triggerLabel: string;
-  title: string;
-  searchLabel: string;
-  closeLabel: string;
-  noResults: string;
-  createVariableLabel: string;
-  externalHelp: string;
-  groupLabels: Readonly<Record<TemplateVariablePickerGroup, string>>;
-}
 
 export interface TemplateVariablePickerRange {
   start: number;
@@ -77,15 +60,34 @@ export interface TemplateVariablePickerProps {
   disabled?: boolean;
 }
 
-const groupOrder: readonly TemplateVariablePickerGroup[] = TEMPLATE_VARIABLE_GROUPS;
-
-const normalizeSearch = (value: string): string => value
-  .normalize("NFD")
-  .replace(/[\u0300-\u036f]/gu, "")
-  .toLowerCase();
-
 const tokenFor = (option: TemplateVariablePickerOption): string =>
   `{${option.name}${option.parameter === undefined ? "" : ` ${option.parameter.value}`}}`;
+
+const GroupIcon = ({ group }: { group: TemplateVariablePickerGroupPresentation }): ReactElement => {
+  if (group.iconPaths !== undefined) {
+    return (
+      <svg className="ui-variable-picker__group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+        {group.iconPaths.map((path, index) => <path key={`${group.id}-${String(index)}`} d={path} />)}
+      </svg>
+    );
+  }
+  return <Icon className="ui-variable-picker__group-icon" name={group.iconName ?? "variable"} size={16} />;
+};
+
+export const TemplateVariableGroupHeading = ({ group }: { group: TemplateVariablePickerGroupPresentation }): ReactElement => (
+  <span className="ui-variable-picker__group-title">
+    <GroupIcon group={group} />
+    <span>{group.label}</span>
+  </span>
+);
+
+export const TemplateVariableKeyboardHints = ({ messages }: { messages: TemplateVariablePickerMessages }): ReactElement => (
+  <div className="ui-variable-picker__key-hints">
+    <span className="ui-variable-picker__key-hint"><kbd>↑↓</kbd>{messages.keyHints.navigate}</span>
+    <span className="ui-variable-picker__key-hint"><kbd>Enter</kbd>{messages.keyHints.insert}</span>
+    <span className="ui-variable-picker__key-hint"><kbd>Esc</kbd>{messages.keyHints.close}</span>
+  </div>
+);
 
 export function TemplateVariablePicker({
   options,
@@ -119,23 +121,12 @@ export function TemplateVariablePicker({
     return () => media.removeEventListener("change", update);
   }, []);
 
-  const filteredOptions = useMemo(() => {
-    const normalizedQuery = normalizeSearch(query.trim());
-    if (normalizedQuery.length === 0) return options;
-    return options.filter((option) => normalizeSearch(`${option.name} ${tokenFor(option)} ${option.description}`).includes(normalizedQuery));
-  }, [options, query]);
-
-  const orderedOptions = useMemo(
-    () => groupOrder.flatMap((group) => filteredOptions.filter((option) => option.group === group)),
-    [filteredOptions],
-  );
-
-  const groups = useMemo(() => groupOrder.map((group) => ({
-    group,
-    options: orderedOptions.filter((option) => option.group === group),
-  })).filter(({ group, options: groupOptions }) =>
-    groupOptions.length > 0 || (group === "channel" && createVariableHref !== undefined),
-  ), [createVariableHref, orderedOptions]);
+  const filteredOptions = useMemo(() => filterTemplateVariableOptions(options, query), [options, query]);
+  const groups = useMemo(() => reindexGroupedTemplateVariableOptions(prioritizeTemplateVariableNamespace(
+    groupTemplateVariableOptions(filteredOptions, messages, createVariableHref !== undefined),
+    query,
+  )), [createVariableHref, filteredOptions, messages, query]);
+  const orderedOptions = useMemo(() => groups.flatMap(({ options: groupOptions }) => groupOptions), [groups]);
 
   const changeOpened = (nextOpened: boolean): void => {
     if (nextOpened !== opened) {
@@ -202,10 +193,10 @@ export function TemplateVariablePicker({
       event.preventDefault();
       setActiveIndex(orderedOptions.length - 1);
     } else if (event.key === "Enter") {
-      const option = orderedOptions[activeIndex];
-      if (option !== undefined) {
+      const entry = orderedOptions[activeIndex];
+      if (entry !== undefined) {
         event.preventDefault();
-        choose(option);
+        choose(entry.option);
       }
     }
   };
@@ -214,77 +205,82 @@ export function TemplateVariablePicker({
     const surfacePanelId = surface === "sheet" ? sheetPanelId : popoverPanelId;
     const searchId = `${surfacePanelId}-search`;
     const listId = `${surfacePanelId}-list`;
-    const activeOptionId = activeIndex < orderedOptions.length ? `${listId}-${String(activeIndex)}` : undefined;
+    const activeEntry = orderedOptions[activeIndex];
+    const activeOptionId = activeEntry === undefined ? undefined : `${listId}-${String(activeEntry.index)}`;
     return (
-    <div id={surfacePanelId} className={`ui-variable-picker${surface === "sheet" ? " ui-variable-picker--sheet" : ""}`}>
-      {isSmallScreen ? (
-        <div className="ui-variable-picker__mobile-header">
-          <span className="ui-variable-picker__handle" aria-hidden="true" />
-          <h2>{messages.title}</h2>
-          <Button icon="close" iconOnly ariaLabel={messages.closeLabel} variant="subtle" onClick={() => closeAndReturnToEditor(false)} />
-        </div>
-      ) : null}
-      <TextInput
-        ref={searchRef}
-        id={searchId}
-        className="ui-variable-picker__search"
-        aria-label={messages.searchLabel}
-        placeholder={messages.searchLabel}
-        role="combobox"
-        aria-autocomplete="list"
-        aria-expanded="true"
-        aria-controls={listId}
-        aria-activedescendant={activeOptionId}
-        leftSection={<Icon name="search" size={16} />}
-        value={query}
-        onChange={(event) => { setQuery(event.currentTarget.value); setActiveIndex(0); }}
-        onKeyDown={handleKeyDown}
-        autoComplete="off"
-      />
-      <div id={listId} className="ui-variable-picker__list" role="listbox" aria-label={messages.title}>
-        {groups.map(({ group, options: groupOptions }) => (
-          <div className="ui-variable-picker__group" role="group" aria-label={messages.groupLabels[group]} key={group}>
-            {groupOptions.length > 0 ? <h3 className="ui-variable-picker__group-title">{messages.groupLabels[group]}</h3> : null}
-            {orderedOptions.map((option, index) => option.group !== group ? null : (
-              <button
-                type="button"
-                id={`${listId}-${String(index)}`}
-                key={`${option.group}-${option.name}`}
-                ref={(element) => {
-                  if (element === null) optionRefs.current.delete(index);
-                  else optionRefs.current.set(index, element);
-                }}
-                className="ui-variable-picker__option"
-                role="option"
-                aria-selected={activeIndex === index}
-                data-kind={option.kind}
-                tabIndex={-1}
-                onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => choose(option)}
-              >
-                <span className="ui-variable-picker__option-copy">
-                  <span className="ui-variable-picker__token">{tokenFor(option)}</span>
-                  <span className="ui-variable-picker__description">{option.description}</span>
-                </span>
-                <span className="ui-variable-picker__sample">→ {option.sample}</span>
-                {option.external === true ? (
-                  <span className="ui-variable-picker__external" role="img" title={messages.externalHelp} aria-label={messages.externalHelp}>
-                    <Icon name="cause" size={16} />
-                  </span>
-                ) : null}
-              </button>
-            ))}
-            {group === "channel" && createVariableHref !== undefined ? (
-              <a className="ui-variable-picker__create" href={createVariableHref}>{messages.createVariableLabel}</a>
-            ) : null}
+      <div id={surfacePanelId} className={`ui-variable-picker${surface === "sheet" ? " ui-variable-picker--sheet" : ""}`}>
+        {isSmallScreen ? (
+          <div className="ui-variable-picker__mobile-header">
+            <span className="ui-variable-picker__handle" aria-hidden="true" />
+            <h2>{messages.title}</h2>
+            <Button icon="close" iconOnly ariaLabel={messages.closeLabel} variant="subtle" onClick={() => closeAndReturnToEditor(false)} />
           </div>
-        ))}
-        {orderedOptions.length === 0 && createVariableHref === undefined ? (
-          <p className="ui-variable-picker__empty">{messages.noResults}</p>
         ) : null}
+        <TextInput
+          ref={searchRef}
+          id={searchId}
+          className="ui-variable-picker__search"
+          aria-label={messages.searchLabel}
+          placeholder={messages.searchLabel}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded="true"
+          aria-controls={listId}
+          aria-activedescendant={activeOptionId}
+          leftSection={<Icon name="search" size={16} />}
+          value={query}
+          onChange={(event) => { setQuery(event.currentTarget.value); setActiveIndex(0); }}
+          onKeyDown={handleKeyDown}
+          autoComplete="off"
+        />
+        <div id={listId} className="ui-variable-picker__list" role="listbox" aria-label={messages.title}>
+          {groups.map(({ group, options: groupOptions }) => (
+            <div className="ui-variable-picker__group" role="group" aria-label={group.label} key={group.id}>
+              <h3 className="ui-variable-picker__group-heading"><TemplateVariableGroupHeading group={group} /></h3>
+              {groupOptions.map(({ option, index }) => (
+                <button
+                  type="button"
+                  id={`${listId}-${String(index)}`}
+                  key={`${group.id}-${option.name}`}
+                  ref={(element) => {
+                    if (element === null) optionRefs.current.delete(index);
+                    else optionRefs.current.set(index, element);
+                  }}
+                  className="ui-variable-picker__option"
+                  role="option"
+                  aria-selected={activeIndex === index}
+                  data-kind={option.kind}
+                  tabIndex={-1}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onClick={() => choose(option)}
+                >
+                  <span className="ui-variable-picker__option-copy">
+                    <span className="ui-variable-picker__label">{option.label ?? option.name}</span>
+                    <span className="ui-variable-picker__token">{tokenFor(option)}</span>
+                    {activeIndex === index ? <span className="ui-variable-picker__description">{option.description}</span> : null}
+                  </span>
+                  <span className={`ui-variable-picker__sample${option.isTextBlock ? " ui-variable-picker__sample--tag" : ""}`}>
+                    {option.isTextBlock ? messages.textBlockSample : option.sample}
+                  </span>
+                  {option.external === true ? (
+                    <span className="ui-variable-picker__external" role="img" title={messages.externalHelp} aria-label={messages.externalHelp}>
+                      <Icon name="cause" size={16} />
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+              {group.id === "host:channel" && createVariableHref !== undefined ? (
+                <a className="ui-variable-picker__create" href={createVariableHref}>{messages.createVariableLabel}</a>
+              ) : null}
+            </div>
+          ))}
+          {orderedOptions.length === 0 && createVariableHref === undefined ? (
+            <p className="ui-variable-picker__empty">{messages.noResults}</p>
+          ) : null}
+        </div>
+        <TemplateVariableKeyboardHints messages={messages} />
       </div>
-    </div>
     );
   };
 
@@ -322,9 +318,10 @@ export function TemplateVariablePicker({
         opened={opened && isSmallScreen}
         onClose={() => closeAndReturnToEditor(false)}
         position="bottom"
-        size="70vh"
         withCloseButton={false}
+        overlayProps={{ backgroundOpacity: 0.35, blur: 1 }}
         classNames={{ content: "ui-variable-picker__drawer-content", body: "ui-variable-picker__drawer-body" }}
+        withinPortal
         aria-label={messages.title}
       >
         {renderContent("sheet")}

@@ -1,6 +1,6 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
 import type { TextBlock, TextBlockUsage } from "../contracts";
-import type { GamePickerMessages } from "../../../dashboard/ui";
+import type { GamePickerMessages, TemplateVariablePickerMessages } from "../../../dashboard/ui";
 
 export interface TextLibraryTexts {
   title: string;
@@ -74,6 +74,7 @@ export interface TextLibraryTexts {
   text: string;
   textHint: string;
   variableDescription: (name: string) => string;
+  variablePicker: TemplateVariablePickerMessages;
   addText: string;
   insertSuggestionLabel: (name: string) => string;
   removeText: string;
@@ -180,6 +181,12 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     text: "Text",
     textHint: "Vorlagenvariablen wie {user} und Textbausteine wie {welcome} werden beim Senden aufgelöst.",
     variableDescription: (name) => `Textbaustein {${name}}`,
+    variablePicker: {
+      triggerLabel: "Variable einfügen", title: "Variable auswählen", searchLabel: "Variablen suchen", closeLabel: "Variablenauswahl schließen",
+      noResults: "Keine Variablen gefunden.", createVariableLabel: "Variable anlegen …", externalHelp: "Fragt Twitch live ab, wenn die Vorlage gerendert wird",
+      groupLabels: { context: "Kontext", stream: "Stream", person: "Person", command: "Befehl", time_random: "Zeit & Zufall", event: "Ereignis", channel: "Kanalvariablen", text_blocks: "Textblöcke" },
+      textBlockSample: "Textblock", keyHints: { navigate: "auswählen", insert: "einfügen", close: "schließen" },
+    },
     addText: "Zufallstext hinzufügen",
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
     removeText: "Text entfernen",
@@ -309,6 +316,12 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     text: "Text",
     textHint: "Template variables like {user} and text blocks like {welcome} are resolved when sent.",
     variableDescription: (name) => `Text block {${name}}`,
+    variablePicker: {
+      triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables", closeLabel: "Close variable picker",
+      noResults: "No variables found.", createVariableLabel: "Create variable …", externalHelp: "Looks up live data when the template runs",
+      groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time and random", event: "Event", channel: "Channel variables", text_blocks: "Text blocks" },
+      textBlockSample: "Text block", keyHints: { navigate: "select", insert: "insert", close: "close" },
+    },
     addText: "Add random text",
     insertSuggestionLabel: (name) => `Insert {${name}}`,
     removeText: "Remove text",

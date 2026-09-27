@@ -8,14 +8,32 @@ import { Button } from "./Button";
 import { ChatPreview } from "./ChatPreview";
 import { Icon } from "./Icon";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
-import { TemplateVariablePicker, type TemplateVariablePickerMessages, type TemplateVariablePickerOption, type TemplateVariablePickerRange } from "./TemplateVariablePicker";
+import {
+  TemplateVariableGroupHeading,
+  TemplateVariableKeyboardHints,
+  TemplateVariablePicker,
+  type TemplateVariablePickerGroupPresentation,
+  type TemplateVariablePickerMessages,
+  type TemplateVariablePickerOption,
+  type TemplateVariablePickerRange,
+} from "./TemplateVariablePicker";
+import {
+  filterTemplateVariableOptions,
+  groupTemplateVariableOptions,
+  prioritizeTemplateVariableNamespace,
+  reindexGroupedTemplateVariableOptions,
+} from "./template-variable-picker-model";
 
 export interface TemplateVariableOption {
   name: string;
+  label?: string;
   description: string;
   sample: string;
+  pickerSample?: string;
   group?: TemplateVariableGroup;
   kind?: "system" | "module" | "channel";
+  pickerGroup?: TemplateVariablePickerGroupPresentation;
+  isTextBlock?: boolean;
   external?: boolean;
   parameters?: NonNullable<TemplateVariable["parameters"]>;
   parameter?: { value: string };
@@ -77,9 +95,21 @@ const templateDeclarations = (options: readonly TemplateVariableOption[]): Templ
 
 const getSuggestionQuery = (value: string, caret: number): SuggestionQuery | null => {
   const prefix = value.slice(0, caret);
-  const match = /\{([A-Za-z0-9_.]*)$/u.exec(prefix);
+  const match = /\{([\p{L}\p{N}_.]*)$/u.exec(prefix);
   if (match === null) return null;
   return { fragment: match[1] ?? "", start: match.index + 1, end: caret };
+};
+
+const fallbackPickerMessages: TemplateVariablePickerMessages = {
+  triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables",
+  closeLabel: "Close variable picker", noResults: "No variables found.", createVariableLabel: "Create variable …",
+  externalHelp: "Looks up live data when the template runs",
+  groupLabels: {
+    context: "Context", stream: "Stream", person: "Person", command: "Command",
+    time_random: "Time and random", event: "Event", channel: "Channel variables", text_blocks: "Text blocks",
+  },
+  textBlockSample: "Text block",
+  keyHints: { navigate: "select", insert: "insert", close: "close" },
 };
 
 const isLegacyCompositionKey = (event: object): boolean => Reflect.get(event, "keyCode") === 229;
@@ -140,9 +170,28 @@ export function TextArea({
     ? undefined
     : preview(deferredValue, Object.fromEntries((variables ?? []).map((variable) => [variable.name, variable.sample])));
   const previewCount = previewText?.length ?? 0;
-  const suggestions = query === null || variables === undefined
-    ? []
-    : variables.filter((variable) => variable.name.toLowerCase().startsWith(query.fragment.toLowerCase()));
+  const suggestionGroups = useMemo(() => {
+    if (query === null || variables === undefined) return [];
+    const pickerMessages = messages.variablePicker ?? fallbackPickerMessages;
+    const options: TemplateVariablePickerOption[] = variables.map((variable) => ({
+      name: variable.name,
+      label: variable.label ?? variable.name,
+      description: variable.description,
+      sample: variable.pickerSample ?? variable.sample,
+      group: variable.group ?? "context",
+      kind: variable.kind ?? "module",
+      ...(variable.pickerGroup === undefined ? {} : { pickerGroup: variable.pickerGroup }),
+      ...(variable.isTextBlock === undefined ? {} : { isTextBlock: variable.isTextBlock }),
+      ...(variable.external === undefined ? {} : { external: variable.external }),
+      ...(variable.parameter === undefined ? {} : { parameter: variable.parameter }),
+    }));
+    const filtered = filterTemplateVariableOptions(options, query.fragment);
+    return reindexGroupedTemplateVariableOptions(prioritizeTemplateVariableNamespace(
+      groupTemplateVariableOptions(filtered, pickerMessages),
+      query.fragment,
+    ));
+  }, [messages.variablePicker, query, variables]);
+  const suggestions = suggestionGroups.flatMap(({ options }) => options.map(({ option }) => option));
   const suggestionOpen = !disabled && !readOnly && !composing && suggestions.length > 0;
   const activeSuggestion = suggestions[activeIndex] ?? suggestions[0];
   const unknownAdvice = useMemo(() => unknownVariables.map((tokenName) => ({
@@ -376,10 +425,13 @@ export function TextArea({
               <TemplateVariablePicker
                 options={variables.map((variable): TemplateVariablePickerOption => ({
                   name: variable.name,
+                  label: variable.label ?? variable.name,
                   description: variable.description,
-                  sample: variable.sample,
+                  sample: variable.pickerSample ?? variable.sample,
                   group: variable.group ?? "context",
                   kind: variable.kind ?? "module",
+                  ...(variable.pickerGroup === undefined ? {} : { pickerGroup: variable.pickerGroup }),
+                  ...(variable.isTextBlock === undefined ? {} : { isTextBlock: variable.isTextBlock }),
                   ...(variable.external === undefined ? {} : { external: variable.external }),
                   ...(variable.parameter === undefined ? {} : { parameter: variable.parameter }),
                 }))}
@@ -405,21 +457,34 @@ export function TextArea({
       {suggestionOpen ? (
         <Combobox.Dropdown className="ui-textarea__suggestions-dropdown">
           <Combobox.Options id={listboxId} className="ui-textarea__suggestions" role="listbox">
-            {suggestions.map((variable, index) => (
-              <Combobox.Option
-                id={`${listboxId}-${variable.name}`}
-                key={variable.name}
-                value={variable.name}
-                active={index === activeIndex}
-                className="ui-textarea__suggestion"
-                aria-selected={index === activeIndex}
-                onMouseDown={(event) => { event.preventDefault(); }}
-              >
-                <span className="ui-textarea__suggestion-name mono">{variable.name}</span>
-                <span className="ui-textarea__suggestion-description">{variable.description}</span>
-              </Combobox.Option>
+            {suggestionGroups.map(({ group, options: groupOptions }) => (
+              <Combobox.Group key={group.id} label={<TemplateVariableGroupHeading group={group} />}>
+                {groupOptions.map(({ option: variable, index }) => (
+                  <Combobox.Option
+                    id={`${listboxId}-${variable.name}`}
+                    key={variable.name}
+                    value={variable.name}
+                    active={index === activeIndex}
+                    className="ui-textarea__suggestion"
+                    aria-selected={index === activeIndex}
+                    onMouseDown={(event) => { event.preventDefault(); }}
+                  >
+                    <span className="ui-textarea__suggestion-copy">
+                      <span className="ui-textarea__suggestion-name">{variable.label ?? variable.name}</span>
+                      <span className="ui-textarea__suggestion-token">{`{${variable.name}}`}</span>
+                      {index === activeIndex ? <span className="ui-textarea__suggestion-description">{variable.description}</span> : null}
+                    </span>
+                    <span className={`ui-textarea__suggestion-sample${variable.isTextBlock ? " ui-textarea__suggestion-sample--tag" : ""}`}>
+                      {variable.isTextBlock
+                        ? (messages.variablePicker ?? fallbackPickerMessages).textBlockSample
+                        : variable.sample}
+                    </span>
+                  </Combobox.Option>
+                ))}
+              </Combobox.Group>
             ))}
           </Combobox.Options>
+          {messages.variablePicker === undefined ? null : <TemplateVariableKeyboardHints messages={messages.variablePicker} />}
         </Combobox.Dropdown>
       ) : null}
     </Combobox>
