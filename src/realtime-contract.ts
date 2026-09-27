@@ -101,15 +101,25 @@ export type RealtimeEnvelope<Type extends RealtimeMessageType = RealtimeMessageT
     : Type extends ModuleOverlayRealtimeMessageType ? ModuleOverlayRealtimeEnvelope<Type>
       : never;
 
+/**
+ * The `modul.text_library.*` types are excluded from the generic, loosely-typed
+ * envelope and re-added only via their discriminated payloads (`ModuleOverlayRealtimePayloads`),
+ * so a misspelled text_library type or a payload that does not match its type no longer
+ * type-checks here. Other modules keep the broad, undiscriminated envelope for now.
+ */
+type AnyModuleOverlayRealtimeEnvelope =
+  | ModuleOverlayRealtimeEnvelope<Exclude<KnownModuleOverlayRealtimeMessageType, keyof ModuleOverlayRealtimePayloads>>
+  | ModuleOverlayRealtimeEnvelope<keyof ModuleOverlayRealtimePayloads>;
+
 export type RealtimeMessage = { [Type in FixedRealtimeMessageType]: FixedRealtimeEnvelope<Type> }[FixedRealtimeMessageType]
-  | ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>;
+  | AnyModuleOverlayRealtimeEnvelope;
 
 export const isModuleOverlayRealtimeMessageType = (type: string): type is ModuleOverlayRealtimeMessageType =>
   /^modul\.[a-z][a-z0-9_]*\.[a-z][a-z0-9_-]*$/u.test(type);
 
 export const isModuleOverlayRealtimeEnvelope = (
   message: RealtimeMessage,
-): message is ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType> => isModuleOverlayRealtimeMessageType(message.type);
+): message is AnyModuleOverlayRealtimeEnvelope => isModuleOverlayRealtimeMessageType(message.type);
 
 export type RealtimeRecipientKind = "panel" | "overlay";
 

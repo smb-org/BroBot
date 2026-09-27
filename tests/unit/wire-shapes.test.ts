@@ -473,7 +473,38 @@ const typoTextBlockRealtimeMessage: RealtimeEnvelope<"modul.text_library.block_u
   type: "modul.text_library.block_update",
   payload: undefined as never,
 };
-void [validTextBlockRealtimeMessage, malformedTextBlockRealtimeMessage, malformedDefaultTextBlockRealtimeMessage, typoTextBlockRealtimeMessage];
+// RealtimeMessage itself must keep the same discrimination as ModuleOverlayRealtimeEnvelope,
+// not fall back to the loose generic envelope for text_library specifically.
+const validTextBlockRealtimeWireMessage: RealtimeMessage = {
+  version: 1,
+  id: "text-block-update-wire",
+  createdAt: "2026-09-27T00:00:00.000Z",
+  channelId: "kanal-a",
+  type: "modul.text_library.state_changed",
+  payload: { reason: "stream.online" },
+};
+// @ts-expect-error "bogus" is not one of the state_changed reasons.
+const malformedTextBlockRealtimeWireMessage: RealtimeMessage = {
+  version: 1,
+  id: "text-block-update-wire-invalid",
+  createdAt: "2026-09-27T00:00:00.000Z",
+  channelId: "kanal-a",
+  type: "modul.text_library.state_changed",
+  payload: { reason: "bogus" },
+};
+const typoTextBlockRealtimeWireMessage: RealtimeMessage = {
+  version: 1,
+  id: "text-block-update-wire-typo",
+  createdAt: "2026-09-27T00:00:00.000Z",
+  channelId: "kanal-a",
+  // @ts-expect-error A misspelled text_library type is excluded, not accepted via the loose default envelope.
+  type: "modul.text_library.state_changd",
+  payload: undefined as never,
+};
+void [
+  validTextBlockRealtimeMessage, malformedTextBlockRealtimeMessage, malformedDefaultTextBlockRealtimeMessage, typoTextBlockRealtimeMessage,
+  validTextBlockRealtimeWireMessage, malformedTextBlockRealtimeWireMessage, typoTextBlockRealtimeWireMessage,
+];
 const allRecipientKinds: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
 const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
 const allActionKinds: Record<ModuleAction["kind"], true> = { announcement: true, chat: true, shoutout: true, overlay: true };

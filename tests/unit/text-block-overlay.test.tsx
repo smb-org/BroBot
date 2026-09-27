@@ -130,13 +130,20 @@ describe("text block overlay rendering", () => {
     } as unknown as D1Database;
     await expect(textBlockOverlayState(missingDatabase, channelId, { blockName: "sun" }, contextFor())).resolves.toBeNull();
 
+    // A countdown with no target in its lookahead window (e.g. a polar-night sunset)
+    // drops every candidate, but the overlay still needs a refreshAt so it re-bootstraps
+    // once the target reappears, instead of staying blank forever.
     const db = overlayDatabase([variant("default", "{sun.set_in}", {})]);
     const context = contextFor({
       dynamicTemplateVariableNames: new Set(["sun.set_in"]),
       overlayTemplateVariableNames: new Set(["sun.set_in"]),
       resolveOverlayTemplateValues: () => Promise.resolve({ "sun.set_in": { available: false } }),
     });
-    await expect(textBlockOverlayState(db, channelId, { blockName: "sun" }, context)).resolves.toBeNull();
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+    expect(state).toMatchObject({ candidates: [], countdownTargets: {} });
+    const refreshAt = (state as { refreshAt?: string } | null)?.refreshAt;
+    expect(typeof refreshAt).toBe("string");
+    expect(Date.parse(refreshAt as string)).toBeGreaterThan(context.now);
   });
 
   it("matches is_not game variants when the channel has no current game", async () => {

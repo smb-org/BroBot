@@ -1,12 +1,12 @@
 import type { BotModule, ModuleAction, ModuleOverlayHostEvent } from "../modules/contract";
-import type { ModuleOverlayRealtimeEnvelope, ModuleOverlayRealtimeMessageType } from "../realtime-contract";
+import type { ModuleOverlayRealtimeEnvelope } from "../realtime-contract";
 import { MODULES } from "../modules/registry";
 
 const OVERLAY_PAYLOAD_MAXIMUM_BYTES = 4_096;
 const OVERLAY_ACTION_TYPE_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/u;
 
 export type ModuleOverlayMessageResult =
-  | { outcome: "ready"; message: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType> }
+  | { outcome: "ready"; message: ModuleOverlayRealtimeEnvelope }
   | { outcome: "no_recipients" }
   | { outcome: "rejected" };
 
@@ -16,7 +16,7 @@ export const prepareModuleOverlayHostEventMessages = async (
   channelId: string,
   event: ModuleOverlayHostEvent,
   modules: readonly BotModule[] = MODULES,
-): Promise<ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>[]> => {
+): Promise<ModuleOverlayRealtimeEnvelope[]> => {
   const declarations = modules.flatMap((module) => (module.overlayElements ?? [])
     .filter((definition) => definition.reloadStateOnHostEvents?.includes(event) === true)
     .map((definition) => ({ module, elementKind: definition.kind })));
@@ -78,6 +78,10 @@ export const prepareModuleOverlayRealtimeMessage = async (
 
   return {
     outcome: "ready",
+    // moduleId and action.type are runtime strings validated just above against the
+    // module registry, not literals the compiler can narrow to the known message
+    // types. ponytail: trust the runtime check rather than making this dispatcher
+    // generic over every module's literal action types.
     message: {
       version: 1,
       id: crypto.randomUUID(),
@@ -86,6 +90,6 @@ export const prepareModuleOverlayRealtimeMessage = async (
       type: `modul.${moduleId}.${action.type}`,
       payload: action.payload,
       overlayIds,
-    },
+    } as ModuleOverlayRealtimeEnvelope,
   };
 };

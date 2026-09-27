@@ -138,6 +138,21 @@ describe("OverlayShell and OverlayCanvas", () => {
       .toBe("2026-09-27T12:00:00.050Z");
   });
 
+  it("does not let a slow server response push state timestamps ahead", () => {
+    const now = "2026-09-27T12:00:00.000Z";
+    const bootstrap: OverlayBootstrapData = {
+      language: "en",
+      overlay: {
+        id: "overlay-fixture", revision: 1, width: 1920, height: 1080, css: "",
+        elements: [{ ...element("text-block", 0, 0, 100, 0), state: { serverNow: now } }],
+      },
+      variables: {},
+    };
+
+    expect(estimateOverlayStateTransit(bootstrap, 4_000).overlay?.elements[0]?.state?.serverNow)
+      .toBe("2026-09-27T12:00:00.050Z");
+  });
+
   it("refreshes a connected source before a supplied state timeline expires", async () => {
     vi.useFakeTimers();
     const serverNow = "2026-09-27T12:00:00.000Z";

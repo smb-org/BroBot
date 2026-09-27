@@ -171,7 +171,22 @@ export const textBlockOverlayState = async (
     ...temporalCandidates.filter(({ position }) => fallbackCandidate === null || position < fallbackCandidate.position),
     ...(fallbackCandidate === null ? [] : [fallbackCandidate]),
   ].sort((left, right) => left.position - right.position).map(({ conditions, text }) => ({ conditions, text }));
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) {
+    // No variant currently renders (e.g. a countdown target, such as a polar-night
+    // sunrise, has no occurrence in its lookahead window). Still hand back a
+    // refreshAt so an already-open overlay re-bootstraps once that may have changed,
+    // instead of staying blank forever.
+    return {
+      serverNow: new Date(context.now).toISOString(),
+      timeZone,
+      dataConditions: {},
+      transitions: [],
+      switchTimes: [],
+      refreshAt: new Date(context.now + 24 * 60 * 60 * 1_000).toISOString(),
+      countdownTargets: {},
+      candidates: [],
+    };
+  }
   const until = context.now + 7 * 24 * 60 * 60 * 1_000;
   const nestedTimeConditions = nestedBlocks.flatMap((dependency) => dependency.variants.map(({ conditions }) => conditions)
     .filter((conditions) => conditions.weekdays !== undefined || conditions.timeWindow !== undefined ||
