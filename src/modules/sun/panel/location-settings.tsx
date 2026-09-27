@@ -103,7 +103,7 @@ export default function SunLocationSettings({
           <div><dt>{labels.unavailableEn}</dt><dd>{settings?.errorTexts.en ?? "—"}</dd></div>
         </dl>
       </> : <>
-        <InspectorFieldRow label={labels.location} help={labels.locationHint}>
+        <InspectorFieldRow label={labels.location} help={labels.locationHint} className="inspector-field-row--align-start">
         <div className="sun-location-settings__controls">
           <div className="sun-location-settings__search">
             <Field label={labels.search} value={query} onChange={setQuery} disabled={searching} onKeyDown={(event) => {
@@ -133,7 +133,7 @@ export default function SunLocationSettings({
           </div>
           {locationDraft === null ? <p className="muted">—</p> : <p className="sun-location-settings__current"><strong>{locationDraft.name}</strong><span className="muted">{locationDraft.latitude.toFixed(4)}, {locationDraft.longitude.toFixed(4)}</span></p>}
           <div className="sun-location-settings__actions">
-            {locationDraft === null ? null : <Button size="compact" variant="subtle" disabled={busy} onClick={() => setLocationDraft(null)}>{labels.removeLocation}</Button>}
+            {locationDraft === null ? null : <Button size="compact" variant="secondary" danger="subtle" disabled={busy} onClick={() => setLocationDraft(null)}>{labels.removeLocation}</Button>}
             {locationDraft === null || locationDraft.timeZone === channelTimeZone ? null : <div className="sun-location-settings__suggestion">
               <span>{labels.timezoneSuggestion}: <code>{locationDraft.timeZone}</code></span>
               <Button size="compact" variant="subtle" disabled={busy} onClick={() => { void applyLocationTimeZone(); }}>{labels.useSuggestedTimeZone}</Button>

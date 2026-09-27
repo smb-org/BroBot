@@ -6,8 +6,9 @@ import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVarian
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { Badge, Button, ChatPreview, ConfirmDialog, DangerSection, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, registerDashboardNavigationGuard, Select, SubInspector, TextArea, useDraftGuard } from "../../../dashboard/ui";
-import { SYSTEM_TEMPLATE_VARIABLE_LIST, templateVariableNames } from "../../contract";
+import { templateVariableNames } from "../../contract";
 import { textLibraryTexts } from "./locale";
+import { estimateEmbeddedBlockOverflow } from "./embedded-block-overflow";
 import {
   createTextBlock,
   createTextCategory,
@@ -49,23 +50,6 @@ const draftFromBlock = (block: TextBlock): DraftBlock => ({
 
 const categoryLabel = (category: TextBlockCategory, labels: ReturnType<typeof textLibraryTexts>): string =>
   category.customName ?? (category.catalogKey === null ? category.id : labels.categoryLabels[category.catalogKey]);
-
-const formatEstimate = (
-  text: string,
-  blockNames: ReadonlySet<string>,
-  registeredVariables: readonly { name: string; maxLength: number }[] = [],
-): number => {
-  let length = text.length;
-  for (const match of text.matchAll(/\{([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)\}/gu)) {
-    const name = match[1];
-    if (name === undefined) continue;
-    const replacementLength = blockNames.has(name) ? TEXT_BLOCK_MAXIMUMS.renderedLength
-      : registeredVariables.find((variable) => variable.name === name)?.maxLength ??
-        SYSTEM_TEMPLATE_VARIABLE_LIST.find((variable) => variable.name === name)?.maxLength ?? match[0].length;
-    length += replacementLength - match[0].length;
-  }
-  return length;
-};
 
 const errorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;
 
@@ -198,7 +182,10 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     draft.variants.some((variant) => !validTextBlockConditions(variant.conditions) || variant.texts.length === 0 || variant.texts.length > TEXT_BLOCK_MAXIMUMS.textsPerVariant || variant.texts.some((text) => text.trim().length === 0 || text.length > TEXT_BLOCK_MAXIMUMS.textLength));
   const valid = draft !== null && !nameInvalid && !nameTaken && !nameReserved && !variantInvalid && draft.categoryId.length > 0;
   const dirty = draft !== null && baselineDraft !== null && JSON.stringify(draft) !== JSON.stringify(baselineDraft);
-  const blockNames = new Set(data?.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => block.name) ?? []);
+  const blockVariants = new Map((data?.blocks ?? [])
+    .filter((block) => !reservedNames.has(block.name))
+    .map((block) => [block.name, block.variants]));
+  if (draft !== null && draft.name.length > 0 && !reservedNames.has(draft.name)) blockVariants.set(draft.name, draft.variants);
   const simulatedGameId = simulatedGame[0]?.id ?? null;
   const blockUnavailableForGame = draft !== null && draft.games.length > 0 &&
     (simulatedGameId === null || !draft.games.some((game) => game.id === simulatedGameId));
@@ -233,8 +220,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     return () => { active = false; };
   }, [channelId, data, previewNow, previewTemplate, simulatedContext, simulatedGame, simulatedStream, simulatedTier]);
   const previewText = previewResult?.template === previewTemplate ? previewResult.text : previewTemplate;
-  const previewLength = matchingVariant === null ? 0 : Math.max(...matchingVariant.texts.map((text) => formatEstimate(text, blockNames, data?.templateVariables)));
-  const previewTooLong = previewLength > TEXT_BLOCK_MAXIMUMS.renderedLength;
+  const previewOverflow = matchingVariant === null ? null : estimateEmbeddedBlockOverflow(matchingVariant.texts, blockVariants, data?.templateVariables ?? []);
   const nestedVariants = (name: string, visited = new Set<string>()): TextBlockVariant[] => {
     if (visited.has(name)) return [];
     visited.add(name);
@@ -441,7 +427,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
               <InspectorSection title={labels.variants} help={labels.variantsCount(draft.variants.length)}>
                 {draft.variants.map((variant, index) => {
                   const isDefault = index === draft.variants.length - 1;
-                  const variantPreviewLength = Math.max(...variant.texts.map((text) => formatEstimate(text, blockNames, data.templateVariables)));
+                  const variantOverflow = estimateEmbeddedBlockOverflow(variant.texts, blockVariants, data.templateVariables);
                   return (
                     <article className="text-library__variant" key={variant.id}>
                       <div className="text-library__variant-heading">
@@ -484,7 +470,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         <div className="text-library__weekdays" role="group" aria-label={labels.weekdays}>
                           {labels.weekdaysLabels.map((day, dayIndex) => {
                             const selected = variant.conditions.weekdays?.includes(dayIndex) ?? false;
-                            return <Button key={day} size="compact" ariaPressed={selected} disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => {
+                            return <Button key={day} size="compact" variant={selected ? "primary" : "neutral"} ariaPressed={selected} disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => {
                               const selectedDays = new Set(conditions.weekdays ?? []);
                               if (selected) selectedDays.delete(dayIndex); else selectedDays.add(dayIndex);
                               return selectedDays.size === 0 ? withoutCondition(conditions, "weekdays") : { ...conditions, weekdays: [...selectedDays].sort((left, right) => left - right) };
@@ -493,10 +479,11 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         </div>
                         <div className="text-library__time-window">
                           <span>{labels.timeWindow}</span>
-                          <Field label={labels.startTime} value={variant.conditions.timeWindow?.start ?? "00:00"} disabled={pending} onChange={(start) => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start, end: conditions.timeWindow?.end ?? "23:59" } }))} />
-                          <Field label={labels.endTime} value={variant.conditions.timeWindow?.end ?? "23:59"} disabled={pending} onChange={(end) => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: conditions.timeWindow?.start ?? "00:00", end } }))} />
-                          {variant.conditions.timeWindow === undefined ? <Button size="compact" disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: "00:00", end: "23:59" } }))}>{labels.timeWindow}</Button> : null}
-                          {variant.conditions.timeWindow === undefined ? null : <Button size="compact" disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => withoutCondition(conditions, "timeWindow"))}>{labels.removeTimeWindow}</Button>}
+                          {variant.conditions.timeWindow === undefined ? <Button size="compact" disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: "00:00", end: "23:59" } }))}>{labels.addTimeWindow}</Button> : <>
+                            <Field label={labels.startTime} value={variant.conditions.timeWindow.start} disabled={pending} onChange={(start) => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start, end: conditions.timeWindow?.end ?? "23:59" } }))} />
+                            <Field label={labels.endTime} value={variant.conditions.timeWindow.end} disabled={pending} onChange={(end) => updateCondition(variant.id, (conditions) => ({ ...conditions, timeWindow: { start: conditions.timeWindow?.start ?? "00:00", end } }))} />
+                            <Button size="compact" disabled={pending} onClick={() => updateCondition(variant.id, (conditions) => withoutCondition(conditions, "timeWindow"))}>{labels.removeTimeWindow}</Button>
+                          </>}
                         </div>
                       </fieldset>}
                       <div className="text-library__texts">
@@ -525,7 +512,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         ))}
                         {variant.texts.length >= TEXT_BLOCK_MAXIMUMS.textsPerVariant ? null : <Button size="compact" disabled={pending} onClick={() => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: [...entry.texts, ""] })) })}>{labels.addText}</Button>}
                       </div>
-                      {variantPreviewLength > TEXT_BLOCK_MAXIMUMS.renderedLength ? <p className="text-library__warning" role="note">{labels.previewTooLong(variantPreviewLength)}</p> : null}
+                      {variantOverflow === null ? null : <p className="text-library__warning" role="note">{labels.previewTooLong(variantOverflow.blockNames)}</p>}
                     </article>
                   );
                 })}
@@ -560,7 +547,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                 {matchingVariant === null ? <p className="muted">{blockUnavailableForGame ? labels.blockUnavailableForGame : labels.noMatchingVariant}</p> : <>
                   <p className="muted">{labels.selectedVariant(isDefaultVariant(matchingVariant, draft) ? labels.defaultVariant : labels.variant(draft.variants.findIndex((variant) => variant.id === matchingVariant.id) + 1))}</p>
                   <div className="text-library__preview-output"><ChatPreview label={labels.preview} text={previewText} speaker="Bot" countLabel={String(previewText.length)} /></div>
-                  {previewTooLong ? <p className="text-library__warning" role="note">{labels.previewTooLong(previewLength)}</p> : null}
+                  {previewOverflow === null ? null : <p className="text-library__warning" role="note">{labels.previewTooLong(previewOverflow.blockNames)}</p>}
                 </>}
                 {roleConditionUsedOutsideCommand ? <p className="text-library__warning" role="note">{labels.roleConditionHint}</p> : null}
                 {inputVariableUsedOutsideCommand ? <p className="text-library__warning" role="note">{labels.inputContextWarning}</p> : null}

@@ -39,6 +39,7 @@ export interface SelectProps {
   placeholder?: string;
   disabled?: boolean;
   busy?: boolean;
+  searchable?: boolean;
   required?: boolean;
   name?: string;
   id?: string;
@@ -63,6 +64,7 @@ export function Select({
   placeholder,
   disabled = false,
   busy = false,
+  searchable = false,
   required = false,
   name,
   id,
@@ -97,6 +99,7 @@ export function Select({
       data={options}
       placeholder={placeholder}
       disabled={disabled}
+      searchable={searchable}
       aria-busy={busy}
       required={required}
       name={name}

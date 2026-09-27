@@ -67,6 +67,7 @@ export interface TextLibraryTexts {
   tierLabels: Record<string, string>;
   weekdays: string;
   timeWindow: string;
+  addTimeWindow: string;
   removeTimeWindow: string;
   startTime: string;
   endTime: string;
@@ -84,7 +85,7 @@ export interface TextLibraryTexts {
   selectedVariant: (name: string) => string;
   noMatchingVariant: string;
   blockUnavailableForGame: string;
-  previewTooLong: (length: number) => string;
+  previewTooLong: (blockNames: readonly string[]) => string;
   operatorReason: string;
   conflict: string;
   cycle: (path: readonly string[]) => string;
@@ -172,6 +173,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     tierLabels: { everyone: "Alle", subscriber: "Abonnent", vip: "VIP", moderator: "Moderator", broadcaster: "Broadcaster" },
     weekdays: "Wochentage",
     timeWindow: "Zeitfenster in der Kanalzeitzone",
+    addTimeWindow: "Zeitfenster hinzufügen",
     removeTimeWindow: "Zeitfenster entfernen",
     startTime: "Von",
     endTime: "Bis",
@@ -189,7 +191,11 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     selectedVariant: (name) => `Angewandte Variante: ${name}`,
     noMatchingVariant: "Keine Variante trifft unter diesen Bedingungen zu.",
     blockUnavailableForGame: "Der Textbaustein ist für das simulierte Spiel nicht aktiv.",
-    previewTooLong: (length) => `Diese Variante kann mit eingebetteten Textbausteinen ${String(length)} Zeichen überschreiten; Ausgaben werden bei 500 Zeichen gekürzt.`,
+    previewTooLong: (blockNames) => {
+      const names = blockNames.map((name) => `{${name}}`).join(", ");
+      const cause = blockNames.length === 1 ? `den eingebetteten Textbaustein ${names}` : `eingebettete Textbausteine ${names}`;
+      return `Diese Variante kann durch ${cause} mehr als 500 Zeichen ergeben. Chat-Ausgaben werden bei 500 Zeichen gekürzt.`;
+    },
     operatorReason: "Nur Broadcaster und Verwalter dürfen Textbausteine und Kategorien ändern.",
     conflict: "Dieser Textbaustein wurde inzwischen geändert. Lade den Serverstand neu.",
     cycle: (path) => `Zirkuläre Einbettung: ${path.join(" → ")}.`,
@@ -296,6 +302,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     tierLabels: { everyone: "Everyone", subscriber: "Subscriber", vip: "VIP", moderator: "Moderator", broadcaster: "Broadcaster" },
     weekdays: "Weekdays",
     timeWindow: "Time window in channel time zone",
+    addTimeWindow: "Add time window",
     removeTimeWindow: "Remove time window",
     startTime: "From",
     endTime: "To",
@@ -313,7 +320,11 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     selectedVariant: (name) => `Matching variant: ${name}`,
     noMatchingVariant: "No variant matches this state.",
     blockUnavailableForGame: "This text block is not active for the simulated game.",
-    previewTooLong: (length) => `This variant can exceed ${String(length)} characters with embedded blocks; output is cut at 500 characters.`,
+    previewTooLong: (blockNames) => {
+      const names = blockNames.map((name) => `{${name}}`).join(", ");
+      const cause = blockNames.length === 1 ? `text block ${names}` : `text blocks ${names}`;
+      return `This variant can exceed 500 characters because it embeds ${cause}. Chat output is truncated at 500 characters.`;
+    },
     operatorReason: "Only broadcasters and managers can change text blocks and categories.",
     conflict: "This text block has changed since you opened it. Reload the server version.",
     cycle: (path) => `Circular reference: ${path.join(" → ")}.`,
