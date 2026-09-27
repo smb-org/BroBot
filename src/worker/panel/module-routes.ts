@@ -520,6 +520,9 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       dependentMutations,
     );
   if (!changed) return context.json({ error: "module_changed_concurrently" }, 409);
+  if (enabled && existing?.enabled !== true) {
+    await notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation");
+  }
   const overlayKinds = module.overlayElements?.map(({ kind }) => kind) ?? [];
   if (overlayKinds.length > 0) {
     const placeholders = overlayKinds.map(() => "?").join(", ");

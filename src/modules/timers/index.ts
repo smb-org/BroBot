@@ -1,11 +1,20 @@
 import { z } from "zod";
 
-import type { BotModule, ModuleTemplateUsageSource } from "../contract";
+import type { BotModule, ModuleScheduleInputChangeReason, ModuleTemplateUsageSource } from "../contract";
 import type { Timer } from "./contracts";
 import { timerTriggerSchema } from "./contracts";
 import { timersModuleCatalog } from "./contracts/catalog";
 import { mapTimerRow, validateTimerTemplateMutation, type TimerRow } from "./service";
-import { isDailyTimerDeadlineCurrent, nextDailyTimerAt, nextIntervalAt, nextTimerAt, timerOccurrenceKey, triggerDelayMs } from "./domain";
+import {
+  eventTimeWindowEnd,
+  isDailyTimerDeadlineCurrent,
+  nextDailyTimerAt,
+  nextIntervalAt,
+  nextStreamStartAt,
+  nextTimerAt,
+  timerOccurrenceKey,
+  triggerDelayMs,
+} from "./domain";
 import { timerRoutes } from "./routes";
 
 const settingsSchema = z.object({});
@@ -73,14 +82,35 @@ const nextDeadlineFor = async (
   return nextTimerAt(timer.trigger, { now, timeZone, eventTimes: await context.resolveEventTimes(now) });
 };
 
+/**
+ * Plans the next run and, for a `before_event` timer whose source reports no
+ * occurrence inside its own horizon, schedules a replan check at that
+ * horizon instead of leaving the timer without any alarm at all -- an event
+ * source's horizon is bounded (e.g. a fixed number of days ahead), so a long
+ * enough gap in its occurrences would otherwise leave the timer dormant even
+ * once the source starts reporting events again.
+ */
+const scheduleNextRun = async (
+  timer: Timer,
+  context: TimerAlarmContext,
+  now: number,
+  previousDeadline = now,
+): Promise<boolean> => {
+  const deadline = await nextDeadlineFor(timer, context, now, previousDeadline);
+  const scheduled = await persistAndSchedule(timer, context, deadline);
+  if (scheduled && deadline === null && timer.trigger.type === "before_event") {
+    const horizon = eventTimeWindowEnd(now);
+    await context.schedule(eventTimeRefreshKeyFor(timer.id, horizon), horizon);
+  }
+  return scheduled;
+};
+
 const rescheduleAfterRun = async (
   timer: Timer,
   context: TimerAlarmContext,
   deadline: number,
 ): Promise<void> => {
-  const now = Date.now();
-  const nextAt = await nextDeadlineFor(timer, context, now, deadline);
-  await persistAndSchedule(timer, context, nextAt);
+  await scheduleNextRun(timer, context, Date.now(), deadline);
 };
 
 const isDueOccurrenceCurrent = async (
@@ -141,17 +171,17 @@ export const handleTimerAlarm = async (
   }
   if (isEventTimeRefresh) {
     if (timer.trigger.type === "before_event") {
-      await persistAndSchedule(timer, context, await nextDeadlineFor(timer, context, Date.now()));
+      await scheduleNextRun(timer, context, Date.now());
     }
     return;
   }
   if (alarmKey !== alarmKeyFor(timer.id)) return;
   if (ownerRevision !== undefined && ownerRevision !== timer.revision) {
-    await persistAndSchedule(timer, context, await nextDeadlineFor(timer, context, Date.now()));
+    await scheduleNextRun(timer, context, Date.now());
     return;
   }
   if (row.next_run_at === null || Date.parse(row.next_run_at) !== deadline) {
-    await persistAndSchedule(timer, context, await nextDeadlineFor(timer, context, Date.now()));
+    await scheduleNextRun(timer, context, Date.now());
     return;
   }
   const occurrence = await isDueOccurrenceCurrent(timer, context, alarmKey, deadline);
@@ -211,16 +241,39 @@ export const handleTimerAlarm = async (
   }
 };
 
+/**
+ * `activation` replans a live session's stream-scoped timers after a module
+ * gets (re-)enabled or a channel unpauses: the host only dispatches
+ * `stream.online`/`stream.offline` to a module while it is both enabled and
+ * unpaused, so a session that started during either off period leaves these
+ * timers armed with nothing. Only timers still unarmed for this session are
+ * touched -- one already scheduled (never missed the transition) keeps its
+ * existing deadline.
+ */
 const refreshSchedules = async (
   context: TimerAlarmContext,
-  reason: "event_times" | "channel_time_zone",
+  reason: ModuleScheduleInputChangeReason,
 ): Promise<void> => {
   const timers = await listTimers(context.DB, context.channelId);
   const now = Date.now();
+  if (reason === "activation") {
+    if (await context.streamState() !== "online") return;
+    const stream = await context.streamStartedAt();
+    for (const timer of timers) {
+      if (!timer.enabled || timer.nextRunAt !== null) continue;
+      if (timer.trigger.type === "interval") {
+        await persistAndSchedule(timer, context, now + triggerDelayMs(timer.trigger));
+      } else if (timer.trigger.type === "stream_start") {
+        const deadline = nextStreamStartAt(stream.startedAt, now, triggerDelayMs(timer.trigger));
+        if (deadline !== null) await persistAndSchedule(timer, context, deadline);
+      }
+    }
+    return;
+  }
   for (const timer of timers) {
     if (!timer.enabled || (timer.trigger.type !== "time_of_day" && timer.trigger.type !== "before_event") ||
         (reason === "event_times" && timer.trigger.type !== "before_event")) continue;
-    await persistAndSchedule(timer, context, await nextDeadlineFor(timer, context, now));
+    await scheduleNextRun(timer, context, now);
   }
 };
 

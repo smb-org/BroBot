@@ -105,7 +105,7 @@ describe("Helix chat", () => {
       const fetcher = vi.fn<typeof fetch>().mockRejectedValue(timeoutError);
 
       await expect(sendChatMessage(environment(database), "kanal-a", "hallo", undefined, fetcher))
-        .resolves.toMatchObject({ sent: false, reason: "timeout" });
+        .resolves.toMatchObject({ sent: false, reason: "timeout", delivery: "ambiguous" });
 
       const [, init] = fetcher.mock.calls[0] ?? [];
       expect(init?.signal).toBeInstanceOf(AbortSignal);
@@ -147,6 +147,33 @@ describe("Helix chat", () => {
 
       await expect(sendChatMessage(environment(database), "kanal-a", "hallo", undefined, fetcher))
         .resolves.toMatchObject({ sent: false, reason: "network_error" });
+    } finally {
+      database.close();
+    }
+  });
+
+  /**
+   * A network error or timeout can happen after Twitch already accepted the
+   * POST -- the response just never arrived. Treating that as a definite
+   * rejection would let a caller (e.g. a timer alarm) clear its occurrence
+   * claim and post a duplicate. Only a response Twitch actually returned
+   * (here HTTP 400) counts as a definite rejection.
+   */
+  it("keeps a network error or timeout ambiguous but a received Helix response a definite rejection", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedBot(database);
+      const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error("kein Netz"));
+
+      await expect(sendChatMessage(environment(database), "kanal-a", "hallo", undefined, fetcher))
+        .resolves.toMatchObject({ sent: false, reason: "network_error", delivery: "ambiguous" });
+
+      const rejectingFetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ message: "Missing scope" }), { status: 400 }),
+      );
+
+      await expect(sendChatMessage(environment(database), "kanal-a", "hallo", undefined, rejectingFetcher))
+        .resolves.toMatchObject({ sent: false, reason: "http_400", delivery: "rejected" });
     } finally {
       database.close();
     }

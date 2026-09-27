@@ -1060,7 +1060,7 @@ export class ChannelObject extends DurableObject<Env> {
         retryDelaysMs: [5_000, 15_000, 60_000],
         handle: async (key) => {
           const reason = key.slice(`${MODULE_SCHEDULE_INPUTS_CHANGED_KEY}:`.length);
-          if (reason !== "event_times" && reason !== "channel_time_zone") return;
+          if (reason !== "event_times" && reason !== "channel_time_zone" && reason !== "activation") return;
           for (const module of modules) {
             for (const registration of module.alarms ?? []) {
               if (registration.onScheduleInputsChanged === undefined) continue;

@@ -88,6 +88,55 @@ describe("channel control routes", () => {
     ]);
   });
 
+  it("replans schedule inputs when a channel unpauses, but not while pausing or on a no-op unpause", async () => {
+    const channelId = "kanal-a";
+    const userId = "operator-1";
+    await insertChannel(database, channelId);
+    await insertLoginIdentityAndSession(database, userId);
+    await insertMember(database, channelId, userId, "operator");
+    const cookie = await createSessionCookie(
+      { sessionId: `session-${userId}` },
+      keys.SESSION_COOKIE_KEYS,
+      keys.SESSION_ENCRYPTION_KEYS,
+    );
+    const notifyScheduleInputsChanged = vi.fn(() => Promise.resolve());
+    const environment = {
+      DB: database as unknown as D1Database,
+      ...keys,
+      CHANNEL: {
+        idFromName: vi.fn(() => "channel-object"),
+        get: vi.fn(() => ({ notifyScheduleInputsChanged })),
+      },
+    } as unknown as Env;
+    const post = async (duration: unknown): Promise<Response> => {
+      const csrfToken = await createCsrfToken(`session-${userId}`, keys.SESSION_COOKIE_KEYS, NOW);
+      return panelRouter.fetch(new Request(`https://brobot.example/api/channels/${channelId}/controls/pause`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `__Host-brobot_session=${cookie}; __Host-brobot_csrf=${csrfToken}`,
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify({ duration }),
+      }), environment);
+    };
+
+    // Redundant unpause of an already-off channel: no real transition.
+    const noopUnpause = await post(null);
+    expect(noopUnpause.status).toBe(200);
+    expect(notifyScheduleInputsChanged).not.toHaveBeenCalled();
+
+    const pause = await post("unlimited");
+    expect(pause.status).toBe(200);
+    await expect(pause.json()).resolves.toMatchObject({ controls: { pause: { active: true } } });
+    expect(notifyScheduleInputsChanged).not.toHaveBeenCalled();
+
+    const unpause = await post(null);
+    expect(unpause.status).toBe(200);
+    await expect(unpause.json()).resolves.toMatchObject({ controls: { pause: { active: false } } });
+    expect(notifyScheduleInputsChanged).toHaveBeenCalledExactlyOnceWith("activation");
+  });
+
   it("rejects an unrecognized duration with a closed API error", async () => {
     const channelId = "kanal-a";
     const userId = "operator-1";

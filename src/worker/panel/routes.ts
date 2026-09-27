@@ -317,6 +317,13 @@ panelRouter.post(
     if (result.outcome === "concurrent") {
       return context.json({ error: "channel_control_changed_concurrently" }, 409);
     }
+    // `duration === null` is the unambiguous "clear the pause" request; the
+    // computed `pause.active` alone can't tell an actual unpause apart from
+    // setting an until-stream-end pause that's still pending offline (also
+    // reported as `active: false`).
+    if (control === "pause" && duration === null && result.outcome === "changed") {
+      await notifyModuleScheduleInputsChanged(context.env.CHANNEL, context.req.param("channelId"), "activation");
+    }
     return context.json({ controls: result.controls });
   },
 );

@@ -590,7 +590,14 @@ export interface ModuleAlarmDefinition {
   ) => Promise<void>;
 }
 
-export type ModuleScheduleInputChangeReason = "event_times" | "channel_time_zone";
+/**
+ * `activation` fires when a channel control or module activation change may
+ * have left a stream-scoped schedule unarmed: the host dispatches events to
+ * a module only while it is enabled and the channel is unpaused (see
+ * `selectModulesForEvent`), so a `stream.online` notification received
+ * while either was off never reaches the module at all.
+ */
+export type ModuleScheduleInputChangeReason = "event_times" | "channel_time_zone" | "activation";
 
 export interface ModuleTemplateContentCandidate {
   name: string;

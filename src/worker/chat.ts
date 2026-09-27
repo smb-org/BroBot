@@ -160,7 +160,12 @@ export const sendChatMessage = async (
   });
 
   if (!result.ok) {
-    const delivery = result.reason === "timeout" ? "ambiguous" : "rejected";
+    // A definite rejection is a response Twitch actually returned (a status
+    // code, however unwelcome). A timeout or network error can happen after
+    // Twitch already accepted the POST -- the response just never arrived --
+    // so both stay "ambiguous" and keep the occurrence claim instead of
+    // clearing it and risking a duplicate post.
+    const delivery = result.reason === "timeout" || result.reason === "network_error" ? "ambiguous" : "rejected";
     await afterPost?.(delivery, result.reason);
     return { sent: false, truncated: preparedText.truncated, delivery, reason: result.reason, detail: { ...textDetail, status: result.status, twitchMessage: result.message } };
   }

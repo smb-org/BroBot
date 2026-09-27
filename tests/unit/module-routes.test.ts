@@ -305,6 +305,42 @@ describe("Module management in the panel", () => {
     expect(list.modules).toContainEqual(expect.objectContaining({ id: "clips", enabled: false }));
   });
 
+  it("replans schedule inputs only when a module actually transitions into being enabled", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    const notifyScheduleInputsChanged = vi.fn(() => Promise.resolve());
+    environment = {
+      ...environment,
+      CHANNEL: {
+        idFromName: vi.fn(() => "channel-object"),
+        get: vi.fn(() => ({ publish: () => Promise.resolve(), notifyScheduleInputsChanged })),
+      },
+    } as unknown as Env;
+
+    const firstEnable = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/clips", "PATCH", { enabled: true }),
+      environment,
+    );
+    expect(firstEnable.status).toBe(200);
+    expect(notifyScheduleInputsChanged).toHaveBeenCalledExactlyOnceWith("activation");
+
+    notifyScheduleInputsChanged.mockClear();
+    const reEnable = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/clips", "PATCH", { enabled: true }),
+      environment,
+    );
+    expect(reEnable.status).toBe(200);
+    expect(notifyScheduleInputsChanged).not.toHaveBeenCalled();
+
+    const disable = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/clips", "PATCH", { enabled: false }),
+      environment,
+    );
+    expect(disable.status).toBe(200);
+    expect(notifyScheduleInputsChanged).not.toHaveBeenCalled();
+  });
+
   it("rejects disabling mandatory channel events with the closed API error", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
