@@ -301,7 +301,7 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
   ]));
   const templateValueProviders: TemplateValueProvider[] = MODULES.flatMap((module) => {
     const resolveTemplateValues = module.resolveTemplateValues;
-    if (resolveTemplateValues === undefined) return [];
+    if (resolveTemplateValues === undefined && module.resolveTemplateParameter === undefined) return [];
     const variables = providerVariables.get(module.id) ?? [];
     return [{
       moduleId: module.id,
@@ -313,7 +313,8 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
       ...(module.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: module.dynamicTemplateVariableNames }),
       ...(module.resolveOverlayTemplateValues === undefined ? {} : { resolveOverlayTemplateValues: module.resolveOverlayTemplateValues }),
       ...(module.resolveTemplateConditionTransitions === undefined ? {} : { resolveTemplateConditionTransitions: module.resolveTemplateConditionTransitions }),
-      resolveTemplateValues,
+      ...(resolveTemplateValues === undefined ? {} : { resolveTemplateValues }),
+      ...(module.resolveTemplateParameter === undefined ? {} : { resolveTemplateParameter: module.resolveTemplateParameter }),
     }];
   });
   const registeredTemplateVariables = registeredVariables.filter((variable) => {

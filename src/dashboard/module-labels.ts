@@ -22,6 +22,8 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     clips: "Clips",
     sun: "Sonne",
     moon: "Mond",
+    weather: "Wetter",
+    currency: "Währung",
   },
   en: {
     host: "System",
@@ -32,6 +34,8 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     clips: "Clips",
     sun: "Sun times",
     moon: "Moon data",
+    weather: "Weather",
+    currency: "Currency",
   },
 };
 
@@ -131,6 +135,8 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     clips: "Erstellt manuell einen Clip des laufenden Streams.",
     sun: "Berechnet Sonnenaufgang, Sonnenuntergang und Dämmerung für den Kanalstandort.",
     moon: "Berechnet Mondphase, Beleuchtung sowie Mondauf- und -untergang für den Kanalstandort.",
+    weather: "Zeigt aktuelles Wetter für den Kanalstandort oder einen Ort im Chatbefehl.",
+    currency: "Wandelt Beträge mit dem aktuellen Wechselkurs um.",
   },
   en: {
     text_commands: "Replies to short commands in chat.",
@@ -140,6 +146,8 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     clips: "Creates a clip from the live stream on demand.",
     sun: "Calculates sunrise, sunset, and dusk for the channel location.",
     moon: "Calculates lunar phase, illumination, moonrise, and moonset for the channel location.",
+    weather: "Shows current weather for the channel location or a place in the chat command.",
+    currency: "Converts amounts using the current exchange rate.",
   },
 };
 

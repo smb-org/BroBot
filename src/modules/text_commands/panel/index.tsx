@@ -23,6 +23,8 @@ interface CommandDraft {
   name: string;
   text: string;
   usageText: string;
+  usageTextEnabled: boolean;
+  usageTextChanged: boolean;
   kind: TextCommandKind;
   minimumTier: TextCommandMinimumTier;
   cooldownSeconds: number | "";
@@ -37,7 +39,9 @@ interface CommandDraft {
 const draftFromCommand = (command: TextCommand): CommandDraft => ({
   name: command.name,
   text: command.text,
-  usageText: command.usageText ?? TEXT_COMMAND_DEFAULT_USAGE_TEXT,
+  usageText: command.usageText ?? (command.kind === "shoutout" ? TEXT_COMMAND_DEFAULT_USAGE_TEXT : ""),
+  usageTextEnabled: command.kind === "shoutout" || (command.usageText?.trim().length ?? 0) > 0,
+  usageTextChanged: false,
   kind: command.kind,
   minimumTier: command.minimumTier,
   cooldownSeconds: command.cooldownSeconds,
@@ -52,7 +56,9 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
 const newCommandDraft = (): CommandDraft => ({
   name: "",
   text: "",
-  usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT,
+  usageText: "",
+  usageTextEnabled: false,
+  usageTextChanged: false,
   kind: "text",
   minimumTier: "everyone",
   cooldownSeconds: 5,
@@ -172,7 +178,9 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const isCreate = command === null;
   const blockVariables: TemplateVariable[] = libraryBlocks.map((name) => ({ name, group: "channel", sample: name, maxLength: 500 }));
   const baseTemplateFields = templateFieldsForKind(draft.kind, channelVariables);
-  const templateFields = Object.fromEntries(Object.entries(baseTemplateFields).map(([field, variables]) => [field, [...variables, ...blockVariables]]));
+  const templateFields = Object.fromEntries(Object.entries(baseTemplateFields)
+    .filter(([field]) => field !== "usageText" || draft.kind === "shoutout" || draft.usageTextEnabled)
+    .map(([field, variables]) => [field, [...variables, ...blockVariables]]));
   const variableAction = draft.variableAction;
   const templateVariables = () => [
     ...panelTemplateOptions("chat_command", [], channelVariables, resolvedLanguage),
@@ -191,6 +199,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         ...(pickerGroup === undefined ? {} : { pickerGroup }),
         ...(variable.external === undefined ? {} : { external: variable.external }),
         ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+        ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
       };
     }),
   ];
@@ -205,7 +214,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const templateFieldNames = Object.keys(templateFields) as CommandTemplateField[];
   const responseInvalid = templateFieldNames.some((field) => {
     const value = templateValue(field);
-    return (value.trim().length === 0 && !(field === "text" && draft.variableAction !== null)) || value.length > 500;
+    return (value.trim().length === 0 && !(field === "text" && draft.variableAction !== null) && !(field === "usageText" && draft.kind === "text")) || value.length > 500;
   });
   const actionInvalid = draft.variableAction !== null && (!channelVariables.some((variable) => variable.name === draft.variableAction?.name) ||
     ((draft.variableAction.operation === "add" || draft.variableAction.operation === "subtract") && (draft.variableAction.amount === null || draft.variableAction.amount < 1 || draft.variableAction.amount > 1000)) ||
@@ -262,7 +271,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       name: normalizedName,
       text: draft.kind === "list" ? "" : draft.text,
       kind: draft.kind,
-      ...(draft.kind === "shoutout" ? { usageText: draft.usageText } : {}),
+      ...(draft.kind !== "list" && (draft.kind === "shoutout" || draft.usageTextEnabled || draft.usageTextChanged) ? { usageText: draft.usageText } : {}),
       minimumTier: draft.minimumTier,
       cooldownSeconds: draft.cooldownSeconds as number,
       aliases: draft.aliases,
@@ -333,7 +342,11 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         ...current,
         kind,
         text: kind === "list" ? "" : defaults?.text ?? (current.kind === "text" ? current.text : ""),
-        usageText: current.usageText || defaults?.usageText || TEXT_COMMAND_DEFAULT_USAGE_TEXT,
+        usageText: kind === "shoutout"
+          ? current.usageText || defaults?.usageText || TEXT_COMMAND_DEFAULT_USAGE_TEXT
+          : current.kind === "shoutout" ? "" : current.usageText,
+        usageTextEnabled: kind === "shoutout" ? true : current.kind === "shoutout" ? false : current.usageTextEnabled,
+        usageTextChanged: current.kind !== kind,
         ...(isCreate && kind === "shoutout" ? { minimumTier: "moderator" as const } : {}),
       };
     });
@@ -394,8 +407,8 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         disabled={!canManageContent || pending}
         messages={labels.textAreaMessages}
         createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`}
-        required={field !== "text" || draft.variableAction === null}
-        {...(attemptedSave && value.trim().length === 0 && !(field === "text" && draft.variableAction !== null) ? { error: labels.responseMissing } : {})}
+        required={field === "text" && draft.variableAction === null}
+        {...(attemptedSave && value.trim().length === 0 && field === "text" && draft.variableAction === null ? { error: labels.responseMissing } : {})}
       />
       <InspectorSection title={labels.libraryText}>
         {libraryBlocks.length === 0 ? <p className="muted">{labels.noLibraryTexts}</p> : <InspectorFieldRow label={labels.libraryText}>
@@ -459,9 +472,25 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         {draft.kind === "list"
           ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />
           : templateEditor("text", labels.response)}
-        {draft.kind === "shoutout" ? <>
+        {draft.kind === "text" ? <Switch
+          layout="inline"
+          label={labels.usageOverride}
+          hint={labels.usageOverrideHint}
+          checked={draft.usageTextEnabled}
+          disabled={!canManageContent || pending}
+          onChange={(enabled) => {
+            setValue((current) => ({
+              ...current,
+              usageTextEnabled: enabled,
+              usageTextChanged: true,
+              usageText: enabled ? current.usageText : "",
+            }));
+            setSaved(false); setError(undefined); setConcurrentConflict(false);
+          }}
+        /> : null}
+        {draft.kind === "shoutout" || (draft.kind === "text" && draft.usageTextEnabled) ? <>
           {templateEditor("usageText", labels.templateFieldLabels.usageText)}
-          <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p>
+          {draft.kind === "shoutout" ? <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p> : null}
         </> : null}
         {draft.kind === "text" ? <>
           <Switch
@@ -630,7 +659,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     <div><dt>{labels.aliases}</dt><dd className="mono">{props.aliases.length === 0 ? labels.noAliases : props.aliases.map((alias) => `!${alias}`).join(", ")}</dd></div>
     <div><dt>{labels.kind}</dt><dd>{props.kind}</dd></div>
     <div><dt>{labels.response}</dt><dd>{draft.kind === "list" ? <TemplateText value={listPreview} variables={[]} /> : templateView("text")}</dd></div>
-    {draft.kind === "shoutout" ? <div><dt>{labels.templateFieldLabels.usageText}</dt><dd>{templateView("usageText")}</dd></div> : null}
+    {draft.kind !== "list" && draft.usageText.length > 0 ? <div><dt>{labels.templateFieldLabels.usageText}</dt><dd>{templateView("usageText")}</dd></div> : null}
     <div><dt>{labels.variableAction}</dt><dd>{variableAction === null ? labels.variableNone : `${variableAction.name} ${labels.variableOperations[variableAction.operation]}${variableAction.operation === "set_argument" ? "" : String(variableAction.amount ?? 0)}`}</dd></div>
     {draft.kind === "shoutout" ? null : <div><dt>{labels.responseType}</dt><dd>{props.responseType}</dd></div>}
     <div><dt>{labels.minimumTier}</dt><dd>{props.minimumTier} · {props.minimumDescription}</dd></div>

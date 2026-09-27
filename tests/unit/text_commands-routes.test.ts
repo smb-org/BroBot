@@ -357,7 +357,7 @@ describe("Text commands panel", () => {
     const environment = environmentFor(database);
     const responses = await Promise.all([
       panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "simple", kind: "text", text: "Hello {user}", cooldownSeconds: 5,
+        name: "simple", kind: "text", text: "Hello {user}", usageText: "Try !simple 12.50", cooldownSeconds: 5,
       }), environment),
       panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
         name: "list", kind: "list", cooldownSeconds: 5,
@@ -374,7 +374,7 @@ describe("Text commands panel", () => {
       }
       return payload.command;
     }));
-    expect(commands[0]).toMatchObject({ kind: "text", text: "Hello {user}" });
+    expect(commands[0]).toMatchObject({ kind: "text", text: "Hello {user}", usageText: "Try !simple 12.50" });
     expect(commands[1]).toMatchObject({ kind: "list", text: "" });
     expect(commands[2]).toMatchObject({ kind: "shoutout", text: "Visit {target}", usageText: "Nutzung: !so <name>" });
 

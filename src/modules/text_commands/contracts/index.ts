@@ -127,7 +127,7 @@ export interface TextCommandActor {
 }
 
 export const TEXT_COMMAND_TEMPLATE_FIELDS = {
-  text: { text: [] },
+  text: { text: [], usageText: [] },
   list: {},
   shoutout: { text: [], usageText: [] },
 } as const satisfies Readonly<Record<TextCommandKind, TemplateFields<TextCommand>>>;

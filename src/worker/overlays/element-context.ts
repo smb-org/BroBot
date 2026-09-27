@@ -147,7 +147,7 @@ export const createOverlayElementContext = async (
     moduleVariables.set(module.id, variablesForModuleTemplateContext(module, [...declared, ...dynamic]));
   }));
   const templateValueProviders: TemplateValueProvider[] = MODULES.flatMap((module) => {
-    if (!moduleIsEnabled(module, enabled) || module.resolveTemplateValues === undefined) return [];
+    if (!moduleIsEnabled(module, enabled) || (module.resolveTemplateValues === undefined && module.resolveTemplateParameter === undefined)) return [];
     return [{
       moduleId: module.id,
       ...(module.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: module.templateVariableNamespace }),
@@ -158,7 +158,8 @@ export const createOverlayElementContext = async (
       ...(module.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: module.dynamicTemplateVariableNames }),
       ...(module.resolveOverlayTemplateValues === undefined ? {} : { resolveOverlayTemplateValues: module.resolveOverlayTemplateValues }),
       ...(module.resolveTemplateConditionTransitions === undefined ? {} : { resolveTemplateConditionTransitions: module.resolveTemplateConditionTransitions }),
-      resolveTemplateValues: module.resolveTemplateValues,
+      ...(module.resolveTemplateValues === undefined ? {} : { resolveTemplateValues: module.resolveTemplateValues }),
+      ...(module.resolveTemplateParameter === undefined ? {} : { resolveTemplateParameter: module.resolveTemplateParameter }),
     }];
   });
   const registeredVariables = MODULES.flatMap((module) => moduleIsEnabled(module, enabled) && module.templateVariableNamespace !== "text_blocks"

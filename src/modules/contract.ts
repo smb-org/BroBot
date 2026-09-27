@@ -106,7 +106,7 @@ export interface ModuleOverlayElementContext {
   /** Whether a host or module lookup failed during this bootstrap. */
   hasLookupFailure: () => boolean;
   channelGameId: () => Promise<string | null>;
-  renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
+  renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
   resolveTemplateConditions: (ids: readonly string[]) => Promise<Readonly<Record<string, string>>>;
   resolveTemplateConditionTransitions: (
     ids: readonly string[],
@@ -275,6 +275,8 @@ export type ModuleAction =
 export interface ModuleResult {
   actions: readonly ModuleAction[];
   diagnostics: readonly ModuleDiagnostic[];
+  /** Source labels for template values used by this result; placement is host-owned. */
+  attributions?: readonly string[];
   /** Variable writes and their overlay recipients, returned by the write's D1 batch. */
   variableChanges?: readonly {
     name: string;
@@ -355,7 +357,7 @@ export interface ModuleExecutionContext {
     moduleValues: Readonly<Record<string, string | number>>,
     changed?: { name: string; value: number },
     mode?: ModuleTemplateRenderMode,
-  ) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
+  ) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
   prepareVariableChange: (
     channelId: string,
     change: { name: string; operation: ChannelVariableOperation; amount: number | null },
@@ -468,13 +470,17 @@ export interface ModuleTemplateValueContext {
   /** Lazily reads the host-owned channel location. */
   channelLocation: () => Promise<ModuleChannelLocation | null>;
   /** Renders a module-owned nested fragment with the same host values and channel context. */
-  renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
+  renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
   addDiagnostic: (diagnostic: ModuleDiagnostic) => void;
   now: number;
   /** Resolves declared data-source conditions only when a block uses them. */
   resolveTemplateConditions: (ids: readonly string[]) => Promise<Readonly<Record<string, string>>>;
   /** Values preserved for overlay-side countdown or other browser calculations. */
   dynamicTemplateVariableNames?: ReadonlySet<string>;
+  /** Command input is present only while resolving a chat-command template. */
+  commandInput?: { commandName: string; arguments: string; usageText?: string };
+  /** Records a source label for values used in this render; the host handles output placement. */
+  addTemplateValueAttribution?: (text: string) => void;
 }
 
 export interface ModuleTemplateConditionContext {
@@ -484,6 +490,9 @@ export interface ModuleTemplateConditionContext {
   /** Lazily reads the host-owned channel location. */
   channelLocation: () => Promise<ModuleChannelLocation | null>;
   now: number;
+  commandInput?: { commandName: string; arguments: string; usageText?: string };
+  /** Records a source label when a condition uses values from this module. */
+  addTemplateValueAttribution?: (text: string) => void;
 }
 
 export interface ModuleTemplateConditionTimelineContext extends ModuleTemplateConditionContext {
@@ -784,6 +793,12 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     names: readonly string[],
     context: ModuleTemplateValueContext,
   ) => Promise<Readonly<Record<string, string>>>;
+  /** Resolves a declared parameterized value; parameters are never recursively rendered. */
+  resolveTemplateParameter?: (
+    name: string,
+    parameter: string,
+    context: ModuleTemplateValueContext,
+  ) => Promise<string | null>;
   /** Bilingual generic fallback if this provider cannot resolve a declared value. */
   templateUnavailableText?: Readonly<Record<ModuleLanguage, string>>;
   /** Declares generic conditions that module-owned text blocks can select. */

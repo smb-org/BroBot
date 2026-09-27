@@ -23,6 +23,7 @@ const collidesWithHostReservedPath = (path: string): boolean => {
 describe("module route registration", () => {
   it("collision predicate flags reserved patterns and accepts a real module path", () => {
     expect(collidesWithHostReservedPath("/settings")).toBe(true);
+    expect(collidesWithHostReservedPath("/provider-settings")).toBe(false);
     expect(collidesWithHostReservedPath("/:x")).toBe(true);
     expect(collidesWithHostReservedPath("/*")).toBe(true);
     expect(collidesWithHostReservedPath("/")).toBe(true);

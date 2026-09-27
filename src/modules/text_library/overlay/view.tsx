@@ -7,6 +7,7 @@ import { textBlockTimeConditionsMatch } from "../domain";
 interface Candidate {
   conditions: TextBlockConditions;
   text: string;
+  attributions?: readonly string[];
 }
 
 interface Transition {
@@ -32,7 +33,8 @@ const textBlockState = (value: unknown): TextBlockState | null => {
       !record(value.countdownTargets) || !Array.isArray(value.candidates)) return null;
   const transitions = value.transitions.filter((item): item is Transition => record(item) &&
     typeof item.at === "string" && Number.isFinite(Date.parse(item.at)) && record(item.values));
-  const candidates = value.candidates.filter((item): item is Candidate => record(item) && record(item.conditions) && typeof item.text === "string");
+  const candidates = value.candidates.filter((item): item is Candidate => record(item) && record(item.conditions) && typeof item.text === "string")
+    .map((item) => ({ ...item, ...(Array.isArray(item.attributions) ? { attributions: item.attributions.filter((entry): entry is string => typeof entry === "string") } : {}) }));
   const countdownTargets: Record<string, readonly string[]> = {};
   for (const [name, targets] of Object.entries(value.countdownTargets)) {
     if (Array.isArray(targets)) countdownTargets[name] = targets.filter((target): target is string => typeof target === "string" && Number.isFinite(Date.parse(target)));
@@ -101,7 +103,7 @@ export const TextBlockOverlayElement = ({ state: rawState, language = "en" }: Mo
     return next === undefined && current === undefined ? "" : remainingText(next ?? current ?? now, now, language);
   });
   if (output.trim().length === 0 || /\{[a-z][a-z0-9_.]{0,63}\}/u.test(output)) return null;
-  return <span className="brobot-module-text">{output}</span>;
+  return <span className="brobot-module-text"><span>{output}</span>{selected.attributions?.map((attribution) => <small className="brobot-module-text__attribution" key={attribution}>{attribution}</small>)}</span>;
 };
 
 export default TextBlockOverlayElement;

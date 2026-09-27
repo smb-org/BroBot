@@ -318,6 +318,7 @@ const runActions = async (
   actions: readonly ModuleAction[],
   muted: boolean,
   fetcher: typeof fetch,
+  attributions: readonly string[] = [],
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
   // Order is preserved: a reply after an announcement reads as a different
@@ -338,6 +339,9 @@ const runActions = async (
           action.text,
           action.replyToMessageId,
           fetcher,
+          undefined,
+          undefined,
+          attributions,
         );
         if (result.truncated) {
           diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
@@ -348,7 +352,7 @@ const runActions = async (
         continue;
       }
       if (action.kind === "announcement") {
-        const result = await sendChatAnnouncement(environment, channelId, action.text, fetcher);
+        const result = await sendChatAnnouncement(environment, channelId, action.text, fetcher, attributions);
         if (result.truncated) {
           diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
         }
@@ -358,7 +362,7 @@ const runActions = async (
         }
 
         try {
-          const fallback = await sendChatMessage(environment, channelId, action.text, undefined, fetcher);
+          const fallback = await sendChatMessage(environment, channelId, action.text, undefined, fetcher, undefined, undefined, attributions);
           if (fallback.truncated && !result.truncated) {
             diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
           }
@@ -654,7 +658,7 @@ export const dispatchEventSubNotification = async (
     .flatMap((module) => registeredModuleVariables.get(module.id) ?? []);
   const templateValueProviders: TemplateValueProvider[] = registry.flatMap((provider) => {
     const resolveTemplateValues = provider.resolveTemplateValues;
-    if (resolveTemplateValues === undefined) return [];
+    if (resolveTemplateValues === undefined && provider.resolveTemplateParameter === undefined) return [];
     return [{
       moduleId: provider.id,
       ...(provider.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: provider.templateVariableNamespace }),
@@ -665,7 +669,8 @@ export const dispatchEventSubNotification = async (
       ...(provider.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: provider.dynamicTemplateVariableNames }),
       ...(provider.resolveOverlayTemplateValues === undefined ? {} : { resolveOverlayTemplateValues: provider.resolveOverlayTemplateValues }),
       ...(provider.resolveTemplateConditionTransitions === undefined ? {} : { resolveTemplateConditionTransitions: provider.resolveTemplateConditionTransitions }),
-      resolveTemplateValues,
+      ...(resolveTemplateValues === undefined ? {} : { resolveTemplateValues }),
+      ...(provider.resolveTemplateParameter === undefined ? {} : { resolveTemplateParameter: provider.resolveTemplateParameter }),
     }];
   });
 
@@ -749,7 +754,7 @@ export const dispatchEventSubNotification = async (
         overlayIdsByVariable.set(change.name, change.overlayIds);
       }
       try {
-        diagnostics.push(...await runActions(environment, event.channelId, module, result.actions, dispatchState.controls.mute.active, fetcher));
+        diagnostics.push(...await runActions(environment, event.channelId, module, result.actions, dispatchState.controls.mute.active, fetcher, result.attributions));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
       }

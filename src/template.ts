@@ -25,7 +25,9 @@ export interface TemplateVariable {
   readonly group?: TemplateVariableGroup;
   readonly maxLength: number;
   readonly fallbackWhenAbsent?: number;
-  readonly parameters?: "range" | "choices";
+  readonly parameters?: "range" | "choices" | "currency_pair";
+  /** Suggested parameter inserted by the picker for provider-defined formats. */
+  readonly parameterDefault?: string;
   readonly sample: string;
   readonly source?: TemplateVariableSource;
   /** Bilingual dashboard copy for a declared variable. */
@@ -104,6 +106,7 @@ export const closestTemplateVariable = (
 const parameterIsValid = (variable: TemplateVariable, parameter: string | undefined): boolean => {
   if (parameter === undefined) return true;
   if (variable.parameters === "range") return parseTemplateRange(parameter) !== null;
+  if (variable.parameters === "currency_pair") return /^[A-Za-z]{3} [A-Za-z]{3}$/u.test(parameter);
   if (variable.parameters === "choices") {
     const options = parameter.split("|");
     return options.length >= 2 && options.length <= 20 && options.every((option) => option.trim().length > 0);

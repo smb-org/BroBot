@@ -4,7 +4,7 @@ import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import {
   upsertBotIdentity,
 } from "../../src/worker/db/bot-identity";
-import { sendChatMessage, truncateChatText } from "../../src/worker/chat";
+import { sendChatMessage, truncateChatText, truncateChatTextWithAttributions } from "../../src/worker/chat";
 import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -50,6 +50,14 @@ describe("Helix chat", () => {
     expect(result.truncated).toBe(true);
     expect(result.text).toBe(`@fictional_viewer ${"x".repeat(481)}…`);
     expect(result.text).toHaveLength(500);
+  });
+
+  it("reserves room for source labels and keeps them at the end", () => {
+    const result = truncateChatTextWithAttributions("weather ".repeat(100), ["MET Norway", "MET Norway"]);
+
+    expect(result.truncated).toBe(true);
+    expect(result.text).toHaveLength(500);
+    expect(result.text.endsWith(" · MET Norway")).toBe(true);
   });
 
   it("sends with app token, bot id, channel id, and for_source_only false", async () => {

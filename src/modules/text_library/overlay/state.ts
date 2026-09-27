@@ -116,7 +116,7 @@ const templateNamesIn = (texts: readonly string[]): ReadonlySet<string> => new S
 const candidateText = async (
   source: string,
   context: ModuleOverlayElementContext,
-): Promise<{ text: string; countdownTargets: Readonly<Record<string, readonly string[]>> } | null> => {
+): Promise<{ text: string; countdownTargets: Readonly<Record<string, readonly string[]>>; attributions?: readonly string[] } | null> => {
   const rendered = await renderOverlayTextPreservingDynamicValues(source, context.dynamicTemplateVariableNames, context.renderTemplate);
   if (rendered.text.trim().length === 0) return null;
   const templateNames = dynamicNamesIn(rendered.text, context.overlayTemplateVariableNames);
@@ -129,7 +129,7 @@ const candidateText = async (
     const validTargets = targetAts.filter((target) => Number.isFinite(Date.parse(target)));
     if (validTargets.length > 0) countdownTargets[name] = validTargets;
   }
-  return { text: rendered.text, countdownTargets };
+  return { text: rendered.text, countdownTargets, ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }) };
 };
 
 export const textBlockOverlayState = async (
@@ -171,8 +171,8 @@ export const textBlockOverlayState = async (
 
   const conditionIds = [...new Set(dependencyBlocks.flatMap(dataConditionIdsFor))];
   const currentDataConditions = await context.resolveTemplateConditions(conditionIds);
-  const temporalCandidates: { position: number; conditions: TextBlockConditions; text: string }[] = [];
-  let fallbackCandidate: { position: number; conditions: TextBlockConditions; text: string } | null = null;
+  const temporalCandidates: { position: number; conditions: TextBlockConditions; text: string; attributions?: readonly string[] }[] = [];
+  let fallbackCandidate: { position: number; conditions: TextBlockConditions; text: string; attributions?: readonly string[] } | null = null;
   const countdownTargets: Record<string, readonly string[]> = {};
   for (const [position, variant] of block.variants.entries()) {
     if (!serverConditionsMatch(variant.conditions, streamState, gameId, currentDataConditions, context.timeDependentTemplateConditionIds)) continue;
@@ -182,7 +182,7 @@ export const textBlockOverlayState = async (
     if (rendered === null) continue;
     Object.assign(countdownTargets, rendered.countdownTargets);
     const timeConditions = timeConditionsFor(variant.conditions, context.timeDependentTemplateConditionIds);
-    const candidate = { position, conditions: timeConditions, text: rendered.text };
+    const candidate = { position, conditions: timeConditions, text: rendered.text, ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }) };
     if (Object.keys(timeConditions).length === 0) {
       fallbackCandidate ??= candidate;
     } else {
@@ -192,7 +192,7 @@ export const textBlockOverlayState = async (
   const candidates = [
     ...temporalCandidates.filter(({ position }) => fallbackCandidate === null || position < fallbackCandidate.position),
     ...(fallbackCandidate === null ? [] : [fallbackCandidate]),
-  ].sort((left, right) => left.position - right.position).map(({ conditions, text }) => ({ conditions, text }));
+  ].sort((left, right) => left.position - right.position).map(({ conditions, text, attributions }) => ({ conditions, text, ...(attributions === undefined ? {} : { attributions }) }));
   if (candidates.length === 0) {
     // No variant currently renders (e.g. a countdown target, such as a polar-night
     // sunrise, has no occurrence in its lookahead window). Still hand back a

@@ -76,6 +76,24 @@ Ereigniszeiten zu schätzen. Beide Module lesen Standort und Kanalzeitzone über
 den schreibgeschützten Contract; eigene Moduleinstellungen enthalten nur die
 zweisprachigen Fehlertexte.
 
+Die Wetterdatenquelle unter `src/modules/weather/` liest den Kanalstandort über
+denselben schreibgeschützten Contract. Ein Ortsname im auslösenden Textbefehl
+überschreibt ihn und wird über Open-Meteo-Geocoding aufgelöst. Der Adapter
+normalisiert MET Norway (Standard) und Open-Meteo (pro Kanal auswählbar) auf
+dieselbe Wetterstruktur; der Cache ist nach Anbieter und auf vier
+Nachkommastellen gerundeten Koordinaten getrennt und berücksichtigt die
+Ablaufzeit des Anbieters. Die Wetterseite nennt Quellen, Lizenz und
+Nutzungsgrenze. Der Host hängt die vom Modul gemeldete Namensnennung generisch
+einmal an Chatnachrichten mit Wetterwerten an und reserviert dafür Platz im
+Nachrichtenlimit; Textblock-Overlays zeigen dieselbe Namensnennung am Element.
+
+Die Währungsdatenquelle unter `src/modules/currency/` stellt
+`{currency.convert USD EUR}` für Textbefehle bereit. Der Betrag kommt aus dem
+Befehlsargument, der Wechselkurs wird je Währungspaar zwischengespeichert und
+die Ausgabe folgt der Kanalsprache. Beide Datenquellen besitzen eigene
+Tabellen und Einstellungen; sie werden ausschließlich über den
+Modul-Contract und die Registry eingebunden.
+
 Migration `0016_text_library.sql` führte Textblöcke und zunächst eine
 Bibliothekszeitzone ein. `0017_text_library_variant_choices.sql` ergänzte den
 Zufallswahlindex je Variante. Migration `0018_template_value_providers.sql`
@@ -88,6 +106,10 @@ Standort- und Sonneneinstellungen im Modul an. Migration
 `channels`; `sun_settings` enthält danach nur noch die Fehlertexte des
 Sonnenmoduls. Migration `0021_moon_data_source.sql` aktiviert die Monddatenquelle
 für bestehende Kanäle und legt ihre Fehlertexteinstellungen an.
+
+Migration `0022_weather_currency_data_sources.sql` legt die Anbietereinstellungen
+und getrennte Wetter- sowie Wechselkurs-Caches an und aktiviert beide Quellen
+für bestehende Kanäle.
 
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 
