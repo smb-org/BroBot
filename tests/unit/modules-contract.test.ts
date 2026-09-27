@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { apiErrorDetail, localMidnightInTimeZone, nextLocalMidnightInTimeZone, type ModuleResult } from "../../src/modules/contract";
+import { apiErrorDetail, localMidnightInTimeZone, nextLocalMidnightInTimeZone, wallTimeInstantsInTimeZone, type ModuleResult } from "../../src/modules/contract";
 import { clipsModule } from "../../src/modules/clips";
 import { MODULES } from "../../src/modules/registry";
 
@@ -67,6 +67,44 @@ describe("Module contract", () => {
     it("returns the same Africa/Cairo 2026-04-24 instant as the next midnight after a moment on the previous day", () => {
       const from = Date.parse("2026-04-23T10:00:00.000Z");
       expect(nextLocalMidnightInTimeZone(from, "Africa/Cairo")).toBe(Date.parse("2026-04-23T22:00:00.000Z"));
+    });
+  });
+
+  describe("wallTimeInstantsInTimeZone", () => {
+    it("returns a single instant on a normal day", () => {
+      expect(wallTimeInstantsInTimeZone("2026-06-21", "02:30", "Europe/Berlin"))
+        .toEqual([Date.parse("2026-06-21T00:30:00.000Z")]);
+    });
+
+    it("returns the spring-forward transition itself for a wall time Europe/Berlin's clocks skip", () => {
+      // 2026-03-29: Berlin clocks jump from 01:59:59 CET straight to 03:00:00 CEST, so
+      // 02:30 never occurs; the boundary it was meant to mark takes effect at the jump.
+      expect(wallTimeInstantsInTimeZone("2026-03-29", "02:30", "Europe/Berlin"))
+        .toEqual([Date.parse("2026-03-29T01:00:00.000Z")]);
+    });
+
+    it("returns the spring-forward transition itself for a wall time Africa/Cairo's clocks skip", () => {
+      // 2026-04-24: Cairo clocks jump from 23:59:59 (Apr 23) straight to 01:00:00
+      // (Apr 24), skipping 00:00-00:59 on Apr 24 entirely; 00:30 never occurs.
+      expect(wallTimeInstantsInTimeZone("2026-04-24", "00:30", "Africa/Cairo"))
+        .toEqual([Date.parse("2026-04-23T22:00:00.000Z")]);
+    });
+
+    it("returns both instants for a wall time Europe/Berlin's fall-back replays", () => {
+      // 2026-10-25: Berlin clocks fall back from 02:59:59 CEST to 02:00:00 CET, so
+      // 02:30 occurs once under each offset.
+      expect(wallTimeInstantsInTimeZone("2026-10-25", "02:30", "Europe/Berlin")).toEqual([
+        Date.parse("2026-10-25T00:30:00.000Z"),
+        Date.parse("2026-10-25T01:30:00.000Z"),
+      ]);
+    });
+
+    it("returns both instants for a wall time America/Havana's fall-back replays", () => {
+      // 2026-11-01: Havana clocks fall back from 00:59:59 to 00:00:00, so 00:30 occurs twice.
+      expect(wallTimeInstantsInTimeZone("2026-11-01", "00:30", "America/Havana")).toEqual([
+        Date.parse("2026-11-01T04:30:00.000Z"),
+        Date.parse("2026-11-01T05:30:00.000Z"),
+      ]);
     });
   });
 });
