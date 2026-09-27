@@ -18,6 +18,7 @@ import type {
 } from "../../src/realtime-contract";
 import { OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON } from "../../src/realtime-contract";
 import type { AdsSchedule } from "../../src/modules/ads/contracts";
+import type { BotModule } from "../../src/modules/contract";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
 
@@ -91,8 +92,11 @@ type StorageDouble = {
 const storageOf = (object: ChannelObject): StorageDouble =>
   (object as unknown as { ctx: { storage: StorageDouble } }).ctx.storage;
 
-const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObject => {
-  const values = new Map<string, unknown>();
+const objectFor = (
+  sockets: SocketDouble[],
+  database?: D1Database,
+  values = new Map<string, unknown>(),
+): ChannelObject => {
   let transactionQueue = Promise.resolve();
   const storage: StorageDouble = {
     values,
@@ -884,6 +888,101 @@ describe("ChannelObject realtime path", () => {
     expect(storage.setAlarm).toHaveBeenLastCalledWith(now + 1_000);
   });
 
+  it("runs concurrent prewarning and countdown deadlines when one handler fails", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-25T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([], databaseWithCountdownOverlay());
+    const storage = storageOf(object);
+    const nextSchedule = adSchedule("2026-09-25T12:15:00.000Z");
+    mocks.getAdSchedule.mockResolvedValue({ fetched: true, reason: null, detail: {}, schedule: nextSchedule });
+    await object.storeAdSchedule({ ...adSchedule(new Date(now).toISOString()), duration: 0 }, new Date(now).toISOString());
+    await object.scheduleAdPrewarning(now + 30_000);
+    mocks.processAdPrewarning.mockRejectedValueOnce(new Error("prewarning store unavailable"));
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      vi.setSystemTime(now + 30_000);
+      await object.alarm();
+
+      expect(mocks.processAdPrewarning).toHaveBeenCalledOnce();
+      expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
+      // Ad prewarning uses its own short backoff (not the generic 60s default):
+      // a retry that slow would itself consume the prewarning lead time.
+      expect(storage.values.get("ad_prewarning")).toBe(now + 35_000);
+      expect(storage.values.get("ads:countdown_refresh_deadline")).toBe(
+        Date.parse(nextSchedule.nextAdAt as string) + (nextSchedule.duration ?? 0) * 1_000 + 30_000,
+      );
+      expect(storage.values.get("channel:alarm_schedule")).toMatchObject({
+        ad_prewarning: { deadline: now + 30_000, nextAttemptAt: now + 35_000, failures: 1 },
+      });
+      expect(errorLog).toHaveBeenCalled();
+
+      vi.setSystemTime(now + 35_000);
+      await object.alarm();
+      expect(mocks.processAdPrewarning).toHaveBeenCalledTimes(2);
+      expect(mocks.processAdPrewarning.mock.calls[1]?.[2]).toBe(now + 30_000);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("uses each registered module handler's backoff and keeps sibling deadlines", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-25T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([]);
+    const storage = storageOf(object);
+    const completed = vi.fn();
+    const shortDeadlines: number[] = [];
+    let shortAttempts = 0;
+    const module = {
+      id: "timers",
+      alarms: [
+        { key: "short", retryDelaysMs: [1_000], handle: (_context: unknown, _key: string, deadline: number) => {
+          shortDeadlines.push(deadline);
+          shortAttempts += 1;
+          return shortAttempts === 1 ? Promise.reject(new Error("short failure")) : Promise.resolve();
+        } },
+        { key: "long", retryDelaysMs: [5_000], handle: () => Promise.reject(new Error("long failure")) },
+        { key: "complete", handle: () => { completed(); return Promise.resolve(undefined); } },
+      ],
+    } as unknown as BotModule;
+    type HandlerMap = ReadonlyMap<string, {
+      handle: (key: string, entry: { deadline: number; handler: string }, now: number, nowIso: string) => Promise<undefined | "retain">;
+      retryDelaysMs?: readonly number[];
+    }>;
+    const internal = object as unknown as {
+      alarmHandlers: (modules: readonly BotModule[]) => HandlerMap;
+      dispatchDueAlarmEntries: (at: number, atIso: string, handlers: HandlerMap) => Promise<void>;
+    };
+    storage.values.set("channel:alarm_schedule", {
+      "module:timers:short:timer-a": { deadline: now - 1, handler: "module:timers:short" },
+      "module:timers:long:timer-b": { deadline: now - 1, handler: "module:timers:long" },
+      "module:timers:complete:timer-c": { deadline: now - 1, handler: "module:timers:complete" },
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await internal.dispatchDueAlarmEntries(now, new Date(now).toISOString(), internal.alarmHandlers([module]));
+
+      const table = storage.values.get("channel:alarm_schedule") as Record<string, { deadline: number; failures?: number }>;
+      expect(table["module:timers:short:timer-a"]).toMatchObject({ deadline: now - 1, nextAttemptAt: now + 1_000, failures: 1 });
+      expect(table["module:timers:long:timer-b"]).toMatchObject({ deadline: now - 1, nextAttemptAt: now + 5_000, failures: 1 });
+      expect(table["module:timers:complete:timer-c"]).toBeUndefined();
+      expect(completed).toHaveBeenCalledOnce();
+      expect(errorLog).toHaveBeenCalledTimes(2);
+      expect(storage.setAlarm).toHaveBeenLastCalledWith(now + 1_000);
+
+      vi.setSystemTime(now + 1_000);
+      await internal.dispatchDueAlarmEntries(now + 1_000, new Date(now + 1_000).toISOString(), internal.alarmHandlers([module]));
+      expect(shortDeadlines).toEqual([now - 1, now - 1]);
+      expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown>)["module:timers:short:timer-a"]).toBeUndefined();
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   it("does not schedule countdown refreshes without a countdown overlay", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
@@ -1353,7 +1452,7 @@ describe("ChannelObject realtime path", () => {
       // re-authorized on handshake, instead of staying subscribed.
       expect(panel.close.mock.calls).toEqual([[4008, "authorization check unavailable"]]);
       expect(socket.close.mock.calls).toEqual([[4003, "Authorization revoked"]]);
-      expect(storage.values.get("security_round")).toBe(now - 1);
+      expect(storage.values.get("security_round")).toBe(now + 60_000);
       expect(storage.values.get("security_retry")).toBe(now + 60_000);
       expect(errorLog).toHaveBeenCalled();
 
@@ -1563,8 +1662,8 @@ describe("ChannelObject realtime path", () => {
     vi.setSystemTime(jetzt + 2_000);
     await object.alarm();
     expect(mocks.processAdPrewarning).not.toHaveBeenCalled();
-    expect(storage.values.size).toBe(1);
-    expect([...storage.values.values()]).toEqual([jetzt + 4_000]);
+    expect(storage.values.get("ad_prewarning")).toBe(jetzt + 4_000);
+    expect(Object.keys(storage.values.get("channel:alarm_schedule") as object)).toEqual(["ad_prewarning"]);
     expect(storage.setAlarm).toHaveBeenLastCalledWith(jetzt + 4_000);
 
     vi.setSystemTime(jetzt + 4_000);
@@ -1572,6 +1671,73 @@ describe("ChannelObject realtime path", () => {
     expect(mocks.processAdPrewarning).toHaveBeenCalledTimes(1);
     expect(storage.values.size).toBe(0);
     expect(storage.deleteAlarm).toHaveBeenCalled();
+  });
+
+  it("recovers a claimed alarm after the Durable Object restarts", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-21T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const firstInstance = objectFor([]);
+    const storage = storageOf(firstInstance);
+    const dueAt = now - 1;
+    await firstInstance.scheduleAdPrewarning(dueAt);
+    const entry = (storage.values.get("channel:alarm_schedule") as Record<string, {
+      deadline: number;
+      handler: string;
+      revision?: number;
+    }>).ad_prewarning;
+    const internals = firstInstance as unknown as {
+      claimAlarmEntry: (key: string, expected: typeof entry) => Promise<{
+        deadline: number;
+        claimUntil?: number;
+      } | null>;
+    };
+
+    const claimed = await internals.claimAlarmEntry("ad_prewarning", entry);
+    expect(claimed).toMatchObject({ deadline: dueAt, claimUntil: now + 60_000 });
+    expect(storage.values.get("ad_prewarning")).toBe(now + 60_000);
+
+    // A new instance sees the durable claim and waits for its recovery lease.
+    const restarted = objectFor([], undefined, storage.values);
+    await restarted.alarm();
+    expect(mocks.processAdPrewarning).not.toHaveBeenCalled();
+    expect(storageOf(restarted).setAlarm).toHaveBeenLastCalledWith(now + 60_000);
+
+    vi.setSystemTime(now + 60_000);
+    await restarted.alarm();
+
+    expect(mocks.processAdPrewarning).toHaveBeenCalledOnce();
+    expect(mocks.processAdPrewarning.mock.calls[0]?.[2]).toBe(dueAt);
+    expect(storage.values.has("ad_prewarning")).toBe(false);
+    expect(storage.values.get("channel:alarm_schedule")).toBeUndefined();
+  });
+
+  it("reconciles legacy deadline changes and deletions after a rollback", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-21T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const firstUpgrade = objectFor([]);
+    const sharedDurableStorage = storageOf(firstUpgrade).values;
+    await firstUpgrade.scheduleAdPrewarning(now + 10_000);
+
+    // The old implementation changes only its legacy mirror during rollback.
+    sharedDurableStorage.set("ad_prewarning", now + 20_000);
+    const secondUpgrade = objectFor([], undefined, sharedDurableStorage);
+    const ensureTable = (secondUpgrade as unknown as {
+      ensureAlarmScheduleTable: () => Promise<Record<string, { deadline: number }>>;
+    }).ensureAlarmScheduleTable;
+    await expect(ensureTable.call(secondUpgrade)).resolves.toMatchObject({
+      ad_prewarning: { deadline: now + 20_000 },
+    });
+
+    // A subsequent old-version clear must remove the stale table occurrence.
+    await secondUpgrade.scheduleAdPrewarning(now + 30_000);
+    sharedDurableStorage.delete("ad_prewarning");
+    const thirdUpgrade = objectFor([], undefined, sharedDurableStorage);
+    const thirdTable = await (thirdUpgrade as unknown as {
+      ensureAlarmScheduleTable: () => Promise<Record<string, unknown>>;
+    }).ensureAlarmScheduleTable();
+    expect(thirdTable.ad_prewarning).toBeUndefined();
   });
 
   it("runs the security round even with an open pre-warning deadline", async () => {
@@ -1600,6 +1766,8 @@ describe("ChannelObject realtime path", () => {
     expect(prepare).toHaveBeenCalled();
     const close = Reflect.get(socket, "close") as ReturnType<typeof vi.fn>;
     expect(close).toHaveBeenCalledWith(4003, "Authorization revoked");
-    expect([...storage.values.values()]).toEqual([jetzt + 60_000]);
+    expect([...storage.values.entries()]
+      .filter(([key]) => key !== "channel:alarm_schedule")
+      .map(([, value]) => value)).toEqual([jetzt + 60_000]);
   });
 });

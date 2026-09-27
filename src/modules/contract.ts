@@ -252,6 +252,35 @@ export interface ModuleExecutionContext {
   channelTimeZone: () => Promise<string>;
 }
 
+/** Durable storage and alarm access given to a module alarm handler. */
+export interface ModuleAlarmContext {
+  DB: D1Database;
+  channelId: string;
+  storage: {
+    get(key: string): Promise<unknown>;
+    put(key: string, value: unknown): Promise<void>;
+    delete(key: string): Promise<boolean>;
+  };
+  /** Schedule or clear another key owned by this module and handled by this registration. */
+  schedule: (key: string, deadline: number) => Promise<void>;
+  clear: (key: string) => Promise<void>;
+}
+
+/**
+ * A module-owned alarm handler, registered once and selected by stable key.
+ * Handlers must be idempotent because the host retries failures using this backoff.
+ */
+export interface ModuleAlarmDefinition {
+  key: string;
+  /** Milliseconds between retries after consecutive failures. The last delay is reused. */
+  retryDelaysMs?: readonly number[];
+  handle: (
+    context: ModuleAlarmContext,
+    alarmKey: string,
+    deadline: number,
+  ) => Promise<void>;
+}
+
 export type ModuleFollowedAt = (string & {}) | null | "unavailable";
 
 export type ModuleStreamState = "online" | "offline" | "unknown";
@@ -632,6 +661,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   routes?: Hono<ModuleRouteEnvironment>;
   /** Overlay presentation declarations, with view and editor chunks loaded on demand. */
   overlayElements?: readonly ModuleOverlayElementDefinition[];
+  /** Durable alarm handlers registered through the shared host contract. */
+  alarms?: readonly ModuleAlarmDefinition[];
   /**
    * The business entry point. A pure function: it describes what should
    * happen and executes nothing. The host executes the actions and logs

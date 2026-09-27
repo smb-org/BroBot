@@ -66,10 +66,20 @@ export const sendChatMessage = async (
    * warning.
    */
   stillValid?: () => Promise<boolean>,
+  /** Persist an idempotency claim immediately before the external POST. */
+  claimBeforePost?: () => Promise<boolean>,
 ): Promise<ChatSendResult> => {
   const preparedText = truncateChatText(text);
   const textDetail = { text: truncateTo200Chars(preparedText.text) };
-  const identity = await getBotIdentity(environment.DB);
+  // Caught rather than left to propagate: an outage here (e.g. D1 unavailable)
+  // is the same known, pre-POST outcome as identity simply being absent, and
+  // callers decide retryability off `reason`, not off whether this threw.
+  let identity: Awaited<ReturnType<typeof getBotIdentity>>;
+  try {
+    identity = await getBotIdentity(environment.DB);
+  } catch {
+    identity = null;
+  }
   if (identity === null) {
     return { sent: false, truncated: preparedText.truncated, reason: "bot_identity_missing", detail: textDetail };
   }
@@ -86,6 +96,10 @@ export const sendChatMessage = async (
 
   if (stillValid !== undefined && !(await stillValid())) {
     return { sent: false, truncated: preparedText.truncated, reason: "stale_before_send", detail: textDetail };
+  }
+
+  if (claimBeforePost !== undefined && !(await claimBeforePost())) {
+    return { sent: false, truncated: preparedText.truncated, reason: "already_attempted", detail: textDetail };
   }
 
   const payload: Record<string, string | boolean> = {

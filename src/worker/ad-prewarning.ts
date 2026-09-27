@@ -45,6 +45,8 @@ export interface AdScheduler {
   ) => Promise<unknown>;
   readScheduleGeneration?: () => Promise<number>;
   readSchedule?: () => Promise<AdSchedule | null>;
+  /** Claim the one external chat send for this due occurrence immediately before POST. */
+  claimPrewarningSend?: (scheduledDueAtMs: number) => Promise<boolean>;
 }
 
 const nowMsFrom = (now: string): number => {
@@ -213,6 +215,19 @@ const decisionDetail = (decision: AdPrewarningDecision): Readonly<Record<string,
 const shouldReplan = (decision: AdPrewarningDecision): boolean =>
   decision.kind === "skip" && (decision.reason === "rescheduled" || decision.reason === "break_started");
 
+/**
+ * Failures that happen before the claim/POST (identity or app token
+ * unavailable, whether from `sendChatMessage` or from the schedule fetch in
+ * `processAdPrewarning`) never touched the external send, so retrying is
+ * safe -- callers throw for these to get a short retry instead of
+ * ChannelObject's much longer default backoff, which would burn through the
+ * (short) prewarning lead time. Anything at or after the claim
+ * (`stale_before_send`, `already_attempted`) or an actual Twitch outcome is
+ * excluded: that send may already be in flight or done.
+ */
+const isRetryablePrePostFailure = (reason: string | null): boolean =>
+  reason === "bot_identity_missing" || reason === "app_token_unavailable";
+
 const replanFromSchedule = async (
   scheduler: AdScheduler | null,
   settings: { leadSeconds: number },
@@ -311,6 +326,13 @@ export const processAdPrewarning = async (
       await scopeMissing(environment, channelId, triggerId, now, scheduler);
     } else {
       await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);
+      // Same short-retry treatment as the pre-POST failures below: this
+      // fetch never reached the ad break's chat send, so retrying is safe
+      // until the planned ad break starts; after that a warning is pointless.
+      const adStartsAtMs = scheduledDueAtMs + configured.settings.leadSeconds * 1000;
+      if (result.reason !== null && isRetryablePrePostFailure(result.reason) && Date.parse(now) < adStartsAtMs) {
+        throw new Error(`ad prewarning retryable failure: ${result.reason}`);
+      }
     }
     return;
   }
@@ -354,6 +376,7 @@ export const processAdPrewarning = async (
     code: decisionCode(finalDecision),
     detail: decisionDetail(finalDecision),
   }];
+  let retryableFailureReason: string | null = null;
   if (finalDecision.kind === "announce") {
     // sendChatMessage still awaits bot identity and an access token before
     // its own POST, so a snooze can land after the recheck above but before
@@ -365,20 +388,42 @@ export const processAdPrewarning = async (
       const latestSchedule = await scheduler?.readSchedule?.() ?? null;
       return latestSchedule === null || latestSchedule.nextAdAt === validatedNextAdAt;
     };
-    const sent = await sendChatMessage(environment, channelId, finalDecision.text, undefined, fetcher, stillValid);
+    const sent = await sendChatMessage(
+      environment,
+      channelId,
+      finalDecision.text,
+      undefined,
+      fetcher,
+      stillValid,
+      async () => await scheduler?.claimPrewarningSend?.(scheduledDueAtMs) ?? true,
+    );
     if (sent.truncated) {
       diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: finalDecision.text.length } });
     }
-    diagnostics.push(sent.sent
-      ? { code: "host.chat.sent" satisfies EventCode, detail: sent.detail }
-      : sent.reason === "stale_before_send"
-        ? { code: "host.chat.skipped" satisfies EventCode, detail: sent.detail }
-        : { code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });
+    if (sent.sent) {
+      diagnostics.push({ code: "host.chat.sent" satisfies EventCode, detail: sent.detail });
+    } else if (sent.reason === "stale_before_send") {
+      diagnostics.push({ code: "host.chat.skipped" satisfies EventCode, detail: sent.detail });
+    } else if (sent.reason === "already_attempted") {
+      diagnostics.push({ code: "host.chat.skipped" satisfies EventCode, detail: { reason: sent.reason } });
+    } else {
+      diagnostics.push({ code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });
+      if (isRetryablePrePostFailure(sent.reason)) retryableFailureReason = sent.reason;
+    }
   }
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 
   if (shouldReplan(finalDecision)) {
     await replanFromSchedule(scheduler, configured.settings, (freshSchedule ?? currentSchedule).nextAdAt);
+  }
+
+  // Throwing (rather than just logging above) gets ChannelObject's alarm
+  // dispatcher to retry this occurrence through its short prewarning-specific
+  // backoff. A retry re-runs this whole function, including the `too_late`
+  // check inside `decideAdPrewarning` above -- so retries stop by themselves
+  // once the ad has actually started, with no separate attempt counter needed.
+  if (retryableFailureReason !== null) {
+    throw new Error(`ad prewarning retryable failure: ${retryableFailureReason}`);
   }
 };
 
