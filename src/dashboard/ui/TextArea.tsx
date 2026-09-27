@@ -371,6 +371,7 @@ export function TextArea({
       position="bottom-start"
       middlewares={{ flip: true, shift: true }}
       shadow="xs"
+      width={400}
     >
       <Input.Wrapper
         className="ui-textarea"
