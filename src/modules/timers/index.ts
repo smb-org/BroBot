@@ -6,6 +6,8 @@ import { timerTriggerSchema } from "./contracts";
 import { timersModuleCatalog } from "./contracts/catalog";
 import { mapTimerRow, validateTimerTemplateMutation, type TimerRow } from "./service";
 import {
+  alarmKeyFor,
+  eventTimeRefreshKeyFor,
   eventTimeWindowEnd,
   isDailyTimerDeadlineCurrent,
   nextDailyTimerAt,
@@ -21,8 +23,6 @@ const settingsSchema = z.object({});
 const TIMER_MODULE_ID = "timers";
 const TIMER_ALARM_HANDLER = "run";
 const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
-const alarmKeyFor = (timerId: string): string => `timer:${timerId}`;
-const eventTimeRefreshKeyFor = (timerId: string, eventAt: number): string => `${alarmKeyFor(timerId)}:refresh:${String(eventAt)}`;
 
 const listTimers = async (db: D1Database, channelId: string): Promise<Timer[]> => {
   const result = await db.prepare(
@@ -246,9 +246,15 @@ export const handleTimerAlarm = async (
  * gets (re-)enabled or a channel unpauses: the host only dispatches
  * `stream.online`/`stream.offline` to a module while it is both enabled and
  * unpaused, so a session that started during either off period leaves these
- * timers armed with nothing. Only timers still unarmed for this session are
- * touched -- one already scheduled (never missed the transition) keeps its
- * existing deadline.
+ * timers armed with nothing -- or, if the module missed both the offline and
+ * a following online notification, still armed with a deadline left over
+ * from the previous stream. A leftover deadline can never precede the
+ * current stream's start (every legitimate deadline is derived from it), so
+ * that comparison tells stale apart from already-armed without needing to
+ * store which stream armed a timer. A timer treated as unarmed is rearmed
+ * exactly like the accepted `stream.online` path, including its chat
+ * baseline reset, so leftover previous-stream chat cannot satisfy
+ * `minimumMessages` for the new session.
  */
 const refreshSchedules = async (
   context: TimerAlarmContext,
@@ -259,11 +265,19 @@ const refreshSchedules = async (
   if (reason === "activation") {
     if (await context.streamState() !== "online") return;
     const stream = await context.streamStartedAt();
+    const streamStartedAt = stream.startedAt === null ? null : Date.parse(stream.startedAt);
+    const isArmedForThisStream = (nextRunAt: string | null): boolean =>
+      nextRunAt !== null && (streamStartedAt === null || Date.parse(nextRunAt) >= streamStartedAt);
     for (const timer of timers) {
-      if (!timer.enabled || timer.nextRunAt !== null) continue;
+      if (!timer.enabled || (timer.trigger.type !== "interval" && timer.trigger.type !== "stream_start") ||
+          isArmedForThisStream(timer.nextRunAt)) continue;
       if (timer.trigger.type === "interval") {
-        await persistAndSchedule(timer, context, now + triggerDelayMs(timer.trigger));
-      } else if (timer.trigger.type === "stream_start") {
+        if (await persistAndSchedule(timer, context, now + triggerDelayMs(timer.trigger))) {
+          const activityCount = await context.chatActivityCount();
+          await context.DB.prepare("UPDATE timers SET last_chat_activity_count = ? WHERE channel_id = ? AND timer_id = ?")
+            .bind(activityCount, context.channelId, timer.id).run();
+        }
+      } else {
         const deadline = nextStreamStartAt(stream.startedAt, now, triggerDelayMs(timer.trigger));
         if (deadline !== null) await persistAndSchedule(timer, context, deadline);
       }

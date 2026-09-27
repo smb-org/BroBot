@@ -301,7 +301,7 @@ export default function TimersPanel({ channelId, language, canManage = true, can
                 const checked = allDays || draft.weekdays.includes(index);
                 return <Switch key={day} label={day} checked={checked} onChange={() => {
                   const days = allDays ? labels.weekdaysNames.map((_, dayIndex) => dayIndex).filter((dayIndex) => dayIndex !== index)
-                    : checked ? draft.weekdays.filter((selected) => selected !== index) : [...draft.weekdays, index].sort();
+                    : checked ? draft.weekdays.filter((selected) => selected !== index) : [...draft.weekdays, index].sort((left, right) => left - right);
                   patchDraft({ weekdays: days.length === 7 ? [] : days });
                 }} />;
               })}

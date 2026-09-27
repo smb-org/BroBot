@@ -138,3 +138,10 @@ export const nextStreamStartAt = (startedAt: string | null, now: number, delayMs
 };
 
 export const eventTimeWindowEnd = (now: number): number => now + 14 * DAY_MS;
+
+export const alarmKeyFor = (timerId: string): string => `timer:${timerId}`;
+
+/** Shared by every before_event scheduling path (alarm replan, create, edit, enable) so the
+ * horizon-replan alarm they all schedule shares one key format and deadline formula. */
+export const eventTimeRefreshKeyFor = (timerId: string, eventAt: number): string =>
+  `${alarmKeyFor(timerId)}:refresh:${String(eventAt)}`;

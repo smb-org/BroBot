@@ -2,14 +2,21 @@ import { Hono, type Context } from "hono";
 import { canManage } from "../../contracts/values";
 import type { AuditAction } from "../../contracts/values";
 import type { ModuleRouteEnvironment, ModuleRouteVariables } from "../contract";
-import { nextDailyTimerAt, nextStreamStartAt, nextTimerAt, triggerDelayMs } from "./domain";
+import {
+  alarmKeyFor,
+  eventTimeRefreshKeyFor,
+  eventTimeWindowEnd,
+  nextDailyTimerAt,
+  nextStreamStartAt,
+  nextTimerAt,
+  triggerDelayMs,
+} from "./domain";
 import { TIMER_MAXIMUM_COUNT, timerTriggerSchema } from "./contracts";
 import type { Timer } from "./contracts";
 import { mapTimerRow, timerMutationInput, validateTimerBlock, type TimerRow } from "./service";
 
 const MODULE_ID = "timers";
 const ALARM_HANDLER = "run";
-const alarmKeyFor = (timerId: string): string => `timer:${timerId}`;
 const nowIso = (): string => new Date().toISOString();
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
@@ -79,6 +86,15 @@ const setScheduledAlarm = async (
   const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
   if (deadline === null) await stub.clearModuleAlarm(MODULE_ID, key, revision);
   else await stub.scheduleModuleAlarm(MODULE_ID, ALARM_HANDLER, key, deadline, revision);
+  // A before_event timer whose source reports no occurrence within its own
+  // horizon must not go dormant (e.g. a sunrise timer created during polar
+  // night): schedule the same horizon-replan check the alarm handler's own
+  // replan path uses (scheduleNextRun in ./index), so create, edit and
+  // enable keep looking instead of leaving the timer without any alarm.
+  if (enabled && deadline === null && trigger.type === "before_event") {
+    const horizon = eventTimeWindowEnd(now);
+    await stub.scheduleModuleAlarm(MODULE_ID, ALARM_HANDLER, eventTimeRefreshKeyFor(timerId, horizon), horizon);
+  }
 };
 
 const inputDependentError = (reason: "missing" | "input_dependent"): string =>
