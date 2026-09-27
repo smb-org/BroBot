@@ -2496,10 +2496,14 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => { expect(screen.getByRole("switch", { name: "Textbefehle" })).toBeChecked(); });
     expect(window.location.pathname).toBe("/channels/kanal-a");
 
-    // Immediate actions section is present and reachable.
-    expect(await screen.findByRole("button", { name: "Clip erstellen" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Shoutout senden" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /Werbung jetzt/ })).toBeInTheDocument();
+    // Immediate actions section is present and reachable. Each button comes
+    // from its own module's `lazy(() => import(...))` behind a `Suspense`
+    // boundary, so the wait is for a real dynamic import to resolve, not just
+    // a state update -- under CI load that can outrun findBy's default
+    // 1000 ms, so give it real headroom.
+    expect(await screen.findByRole("button", { name: "Clip erstellen" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Shoutout senden" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Werbung jetzt/ }, { timeout: 5000 })).toBeInTheDocument();
 
     // Warnings/errors feed needs no interaction to show.
     expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
