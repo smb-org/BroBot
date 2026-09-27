@@ -1,3 +1,5 @@
+export const SUN_ERROR_TEXT_MAX_LENGTH = 200;
+
 export interface SunLocation {
   name: string;
   latitude: number;
@@ -28,4 +30,3 @@ export interface SunStoredDay {
   channelTimeZone: string;
   locationRevision: number;
 }
-

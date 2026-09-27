@@ -139,6 +139,26 @@ const hourAngleForZenith = (latitude: number, declination: number, zenith: numbe
 
 const roundedIso = (instant: number): string => new Date(Math.round(instant / 60_000) * 60_000).toISOString();
 
+interface SolarNoonAnchor {
+  utcMidnight: number;
+  solarNoon: number;
+  terms: { equationOfTime: number; declination: number };
+}
+
+const solarNoonForUtcMidnight = (utcMidnight: number, longitude: number): SolarNoonAnchor => {
+  let solarNoon = utcMidnight + (720 - 4 * longitude) * 60_000;
+  for (let index = 0; index < 4; index += 1) {
+    const terms = solarTerms(solarNoon);
+    const updated = utcMidnight + (720 - 4 * longitude - terms.equationOfTime) * 60_000;
+    if (Math.abs(updated - solarNoon) < 1_000) {
+      solarNoon = updated;
+      return { utcMidnight, solarNoon, terms: solarTerms(solarNoon) };
+    }
+    solarNoon = updated;
+  }
+  return { utcMidnight, solarNoon, terms: solarTerms(solarNoon) };
+};
+
 /** NOAA's Meeus-based apparent solar calculation; output is UTC instants for a channel-local calendar date. */
 export const calculateSunDay = (input: CalculateSunDayInput): SunDay => {
   if (!Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90 ||
@@ -147,18 +167,15 @@ export const calculateSunDay = (input: CalculateSunDayInput): SunDay => {
   }
   if (dateParts(input.localDate) === null) throw new RangeError("Invalid local calendar date.");
   const localNoon = wallTimeUtc(input.localDate, 12, 0, input.timeZone);
-  const terms = solarTerms(localNoon);
-  const noonUtcMinutes = 720 - 4 * input.longitude - terms.equationOfTime;
-  const utcDay = new Date(localNoon);
-  const utcMidnight = Date.UTC(utcDay.getUTCFullYear(), utcDay.getUTCMonth(), utcDay.getUTCDate());
-  const solarNoon = utcMidnight + noonUtcMinutes * 60_000;
+  const localNoonUtcDay = new Date(localNoon);
+  const firstUtcMidnight = Date.UTC(localNoonUtcDay.getUTCFullYear(), localNoonUtcDay.getUTCMonth(), localNoonUtcDay.getUTCDate());
+  const anchor = [-3, -2, -1, 0, 1, 2, 3]
+    .map((offset) => solarNoonForUtcMidnight(firstUtcMidnight + offset * DAY_MS, input.longitude))
+    .find((candidate) => channelLocalDate(candidate.solarNoon, input.timeZone) === input.localDate);
+  if (anchor === undefined) throw new RangeError("Could not anchor solar noon to the requested local date.");
+  const { utcMidnight, solarNoon, terms } = anchor;
   const sunriseAngle = hourAngleForZenith(input.latitude, terms.declination, SUNRISE_ZENITH);
   const duskAngle = hourAngleForZenith(input.latitude, terms.declination, CIVIL_DUSK_ZENITH);
-
-  if (sunriseAngle === null) {
-    const isPolarDay = Math.sin(input.latitude * Math.PI / 180) * Math.sin(terms.declination) > 0;
-    return { localDate: input.localDate, sunriseAt: null, sunsetAt: null, duskAt: null, polarState: isPolarDay ? "day" : "night" };
-  }
 
   const solveEvent = (direction: -1 | 1, zenith: number, initialAngle: number): string | null => {
     let candidate = solarNoon + direction * initialAngle * 4 * 60_000;
@@ -176,6 +193,17 @@ export const calculateSunDay = (input: CalculateSunDayInput): SunDay => {
     }
     return roundedIso(candidate);
   };
+
+  if (sunriseAngle === null) {
+    const isPolarDay = Math.sin(input.latitude * Math.PI / 180) * Math.sin(terms.declination) > 0;
+    return {
+      localDate: input.localDate,
+      sunriseAt: null,
+      sunsetAt: null,
+      duskAt: duskAngle === null ? null : solveEvent(1, CIVIL_DUSK_ZENITH, duskAngle),
+      polarState: isPolarDay ? "day" : "night",
+    };
+  }
 
   return {
     localDate: input.localDate,
@@ -239,7 +267,7 @@ export const resolveSunTemplateValues = (input: ResolveSunTemplateValuesInput): 
   };
   const next = (values: readonly string[]): number | null => values
     .map((value) => Date.parse(value))
-    .filter((value) => Number.isFinite(value) && value >= input.now)
+    .filter((value) => Number.isFinite(value) && value > input.now)
     .sort((left, right) => left - right)[0] ?? null;
   const set = next(events.set);
   const rise = next(events.rise);

@@ -54,4 +54,29 @@ describe("sun data persistence", () => {
 
     expect(rows.results.map((row) => row.local_date)).toEqual(["2026-06-20", "2026-06-21"]);
   });
+
+  it("persists civil dusk for a polar-night day", async () => {
+    const database = await createDatabase();
+    await database.prepare("UPDATE channels SET time_zone = ? WHERE channel_id = ?")
+      .bind("Europe/Oslo", "sun-channel").run();
+    await database.prepare(
+      `UPDATE sun_locations
+          SET name = ?, latitude = ?, longitude = ?, location_time_zone = ?
+        WHERE channel_id = ?`,
+    ).bind("Tromsø", 69.6492, 18.9553, "Europe/Oslo", "sun-channel").run();
+
+    const result = await refreshSunRecord(database as unknown as D1Database, "sun-channel", Date.parse("2026-12-21T12:00:00.000Z"));
+    const today = await database.prepare(
+      "SELECT sunrise_at, sunset_at, dusk_at, polar_state FROM sun_times WHERE channel_id = ? AND local_date = ?",
+    ).bind("sun-channel", "2026-12-21").first<{
+      sunrise_at: string | null;
+      sunset_at: string | null;
+      dusk_at: string | null;
+      polar_state: string;
+    }>();
+
+    expect(result.refreshed).toBe(true);
+    expect(today).toMatchObject({ sunrise_at: null, sunset_at: null, polar_state: "night" });
+    expect(today?.dusk_at).not.toBeNull();
+  });
 });

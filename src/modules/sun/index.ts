@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { BotModule, ModuleTemplateConditionContext, ModuleTemplateValueContext } from "../contract";
 import { validChannelTimeZone, type TemplateVariable } from "../contract";
 import { DEFAULT_SUN_ERROR_TEXTS, readSunDays, readSunSettings } from "./adapters/d1";
+import { SUN_ERROR_TEXT_MAX_LENGTH } from "./contracts";
 import { resolveSunTemplateValues } from "./domain";
 import { handleSunAlarm } from "./service";
 import { sunRoutes } from "./routes";
@@ -10,11 +11,11 @@ import { sunModuleCatalog } from "./contracts/catalog";
 
 const settingsSchema = z.object({});
 const SUN_TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
-  { name: "sun.set", group: "time_random", maxLength: 8, sample: "18:42", source: "module" },
-  { name: "sun.rise", group: "time_random", maxLength: 8, sample: "06:18", source: "module" },
-  { name: "sun.dusk", group: "time_random", maxLength: 8, sample: "19:24", source: "module" },
-  { name: "sun.set_in", group: "time_random", maxLength: 40, sample: "2 Std. 15 Min.", source: "module" },
-  { name: "sun.rise_in", group: "time_random", maxLength: 40, sample: "8 Std. 30 Min.", source: "module" },
+  { name: "sun.set", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "18:42", source: "module" },
+  { name: "sun.rise", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "06:18", source: "module" },
+  { name: "sun.dusk", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "19:24", source: "module" },
+  { name: "sun.set_in", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "2 Std. 15 Min.", source: "module" },
+  { name: "sun.rise_in", group: "time_random", maxLength: SUN_ERROR_TEXT_MAX_LENGTH, sample: "8 Std. 30 Min.", source: "module" },
 ];
 
 interface SunAlarmRow {

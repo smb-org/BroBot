@@ -5,6 +5,7 @@ import { canManage } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { validChannelTimeZone } from "../contract";
 import { DEFAULT_SUN_ERROR_TEXTS, readSunSettings } from "./adapters/d1";
+import { SUN_ERROR_TEXT_MAX_LENGTH } from "./contracts";
 
 const locationSchema = z.object({
   name: z.string().trim().min(1).max(160),
@@ -15,7 +16,7 @@ const locationSchema = z.object({
 const updateSchema = z.object({
   revision: z.number().int().min(1),
   location: locationSchema.nullable(),
-  errorTexts: z.object({ de: z.string().max(200), en: z.string().max(200) }),
+  errorTexts: z.object({ de: z.string().max(SUN_ERROR_TEXT_MAX_LENGTH), en: z.string().max(SUN_ERROR_TEXT_MAX_LENGTH) }),
 });
 
 interface GeocodingResponse {
@@ -108,7 +109,7 @@ sunRoutes.patch("/settings", async (context) => {
     : context.env.DB.prepare(
       `UPDATE sun_locations
           SET name = ?, latitude = ?, longitude = ?, location_time_zone = ?, error_text_de = ?, error_text_en = ?,
-              revision = revision + 1, updated_at = ?
+              next_refresh_at = NULL, revision = revision + 1, updated_at = ?
         WHERE channel_id = ? AND revision = ? ${authorization.sql}`,
     ).bind(...locationValues, normalizedErrors.de, normalizedErrors.en, changedAt, channelId, current.revision, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
@@ -120,25 +121,33 @@ sunRoutes.patch("/settings", async (context) => {
       latitude: current.location?.latitude ?? null,
       longitude: current.location?.longitude ?? null,
       locationTimeZone: current.location?.timeZone ?? null,
+      errorTextDe: current.errorTexts.de,
+      errorTextEn: current.errorTexts.en,
     },
     after: {
       locationName: location?.name ?? null,
       latitude: location?.latitude ?? null,
       longitude: location?.longitude ?? null,
       locationTimeZone: location?.timeZone ?? null,
+      errorTextDe: normalizedErrors.de,
+      errorTextEn: normalizedErrors.en,
     },
   }, changedAt);
   const clearOldRecords = context.env.DB.prepare(
     `DELETE FROM sun_times
       WHERE channel_id = ?
+        AND changes() > 0
         AND EXISTS (SELECT 1 FROM sun_locations WHERE channel_id = ? AND revision = ?)`,
   ).bind(channelId, channelId, revision);
-  const result = await context.env.DB.batch([mutation, clearOldRecords, audit]);
+  // The audit checks the mutation's changes(); cleanup then checks whether
+  // that gated audit inserted. A failed concurrent update therefore does
+  // neither side effect.
+  const result = await context.env.DB.batch([mutation, audit, clearOldRecords]);
   if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "sun_settings_conflict" }, 409);
   try {
     await context.get("refreshModuleAlarms")(channelId);
   } catch {
-    // Keep the saved setting; the Durable Object retries its registered module work.
+    // The hourly scheduled reconciliation retries locations without a refresh deadline.
   }
   const updated = await readSunSettings(context.env.DB, channelId);
   return context.json(updated);
