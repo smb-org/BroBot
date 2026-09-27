@@ -123,7 +123,7 @@ variableRouter.post("/api/channels/:channelId/variables", async (context) => {
     now, now, channelId, parsed.data.name, channelId, CHANNEL_VARIABLE_MAXIMUM_COUNT, ...authorization.values);
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, now, channelId, null,
     "channel.variable.created", null,
-    { name: parsed.data.name, value: parsed.data.value, description: parsed.data.description });
+    { name: parsed.data.name, value: parsed.data.value, description: parsed.data.description, resetOnStreamStart: parsed.data.resetOnStreamStart === true });
   const references = prepareChannelVariableOverlayReferences(context.env.DB, channelId, [parsed.data.name]);
   const results = await context.env.DB.batch([mutation, audit, references]);
   if ((results[0]?.meta.changes ?? 0) > 0) {
@@ -252,7 +252,7 @@ variableRouter.post("/api/channels/:channelId/variables/:name/value", async (con
     : Math.max(CHANNEL_VARIABLE_MINIMUM_VALUE, Math.min(CHANNEL_VARIABLE_MAXIMUM_VALUE,
       before.value + (parsed.data.operation === "add" ? parsed.data.amount : -parsed.data.amount)));
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, now, channelId, null,
-    "channel.variable.value_changed", recordSnapshot(before), { name, value: nextValue, description: before.description });
+    "channel.variable.value_changed", recordSnapshot(before), recordSnapshot({ ...before, value: nextValue }));
   const references = prepareChannelVariableOverlayReferences(context.env.DB, channelId, [name]);
   const results = await context.env.DB.batch([mutation, audit, references]);
   const mutationResult = results[0];

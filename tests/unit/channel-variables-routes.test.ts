@@ -457,4 +457,43 @@ describe("Channel variable routes", () => {
       after: { name: "points", description: "final description", resetOnStreamStart: true },
     });
   });
+
+  it("carries resetOnStreamStart in the channel.variable.value_changed audit snapshot (#254 review)", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 4, description: "Score", resetOnStreamStart: true,
+    });
+
+    const changed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score/value", "POST", {
+      operation: "add", amount: 1,
+    });
+    expect(changed.status).toBe(200);
+
+    const row = await database.prepare(
+      "SELECT before_json, after_json FROM audit_log WHERE action = 'channel.variable.value_changed' ORDER BY created_at DESC LIMIT 1",
+    ).first<{ before_json: string; after_json: string }>();
+    const before = JSON.parse(row?.before_json ?? "null") as { value: unknown; resetOnStreamStart: unknown };
+    const after = JSON.parse(row?.after_json ?? "null") as { value: unknown; resetOnStreamStart: unknown };
+    expect(before).toMatchObject({ value: 4, resetOnStreamStart: true });
+    expect(after).toMatchObject({ value: 5, resetOnStreamStart: true });
+  });
+
+  it("carries resetOnStreamStart in the channel.variable.created audit snapshot", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+
+    const created = await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 4, description: "Score", resetOnStreamStart: true,
+    });
+    expect(created.status).toBe(201);
+
+    const row = await database.prepare(
+      "SELECT after_json FROM audit_log WHERE action = 'channel.variable.created' ORDER BY created_at DESC LIMIT 1",
+    ).first<{ after_json: string }>();
+    const after = JSON.parse(row?.after_json ?? "null") as { resetOnStreamStart: unknown };
+    expect(after).toMatchObject({ resetOnStreamStart: true });
+  });
 });
