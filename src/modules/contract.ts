@@ -49,6 +49,12 @@ export interface ModuleOverlayElementContext {
   language: ModuleLanguage;
   channelTimeZone: () => Promise<string>;
   streamState: () => Promise<ModuleStreamState>;
+  /** Latest stream start used while rendering uptime, if the lookup supplied one. */
+  streamStartedAt: () => string | null;
+  /** Expiration of the stream-details cache consulted during this bootstrap. */
+  streamDetailsCacheExpiresAt: () => number | null;
+  /** Whether a host or module lookup failed during this bootstrap. */
+  hasLookupFailure: () => boolean;
   channelGameId: () => Promise<string | null>;
   renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
   resolveTemplateConditions: (ids: readonly string[]) => Promise<Readonly<Record<string, string>>>;
@@ -380,6 +386,14 @@ export interface ModuleTemplateUsageSource {
 
 export type ModuleTemplateRenderMode = "chat" | "preview" | "overlay";
 
+/** Host-owned channel location shared read-only with modules. */
+export interface ModuleChannelLocation {
+  readonly name: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly timeZone: string;
+}
+
 /** Host services available to a module while resolving its declared template values. */
 export interface ModuleTemplateValueContext {
   DB: D1Database;
@@ -393,6 +407,8 @@ export interface ModuleTemplateValueContext {
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   channelGameId?: () => Promise<string | null>;
   channelTimeZone: () => Promise<string>;
+  /** Lazily reads the host-owned channel location. */
+  channelLocation: () => Promise<ModuleChannelLocation | null>;
   /** Renders a module-owned nested fragment with the same host values and channel context. */
   renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
   addDiagnostic: (diagnostic: ModuleDiagnostic) => void;
@@ -407,6 +423,8 @@ export interface ModuleTemplateConditionContext {
   DB: D1Database;
   channelId: string;
   channelTimeZone: () => Promise<string>;
+  /** Lazily reads the host-owned channel location. */
+  channelLocation: () => Promise<ModuleChannelLocation | null>;
   now: number;
 }
 
@@ -527,8 +545,6 @@ export interface ModuleChannelSettingsProperties {
   language: ModuleLanguage;
   canManage: boolean;
   readOnlyReason: string;
-  channelTimeZone: string;
-  saveChannelTimeZone: (timeZone: string) => Promise<{ timeZone: string; revision: number }>;
 }
 
 /** Props for one lazily loaded card in the channel's immediate-action row. */
@@ -731,7 +747,14 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   /** Resolves overlay-only availability and target instants without changing template state. */
   resolveOverlayTemplateValues?: (
     names: readonly string[],
-    context: { DB: D1Database; channelId: string; now: number; channelTimeZone: () => Promise<string>; language: ModuleLanguage },
+    context: {
+      DB: D1Database;
+      channelId: string;
+      now: number;
+      channelTimeZone: () => Promise<string>;
+      channelLocation: () => Promise<ModuleChannelLocation | null>;
+      language: ModuleLanguage;
+    },
   ) => Promise<Readonly<Record<string, ModuleOverlayTemplateValue>>>;
   /** Lazily rendered inside the shared channel settings section. */
   channelSettings?: () => Promise<{ default: ComponentType<ModuleChannelSettingsProperties> }>;

@@ -145,6 +145,11 @@ interface CachedOverlayStreamDetails {
   details: OverlayStreamDetails | null;
 }
 
+interface OverlayStreamDetailsCache {
+  details: OverlayStreamDetails | null;
+  expiresAt: number;
+}
+
 const revokedTokenKey = (tokenId: string): string => `overlay_revoked:${tokenId}`;
 
 type SessionValidityRow = {
@@ -317,7 +322,7 @@ const envelopeFor = (
  * alarm, and the authorization data lives in D1.
  */
 export class ChannelObject extends DurableObject<Env> {
-  private overlayStreamDetailsRefreshes = new Map<string, Promise<OverlayStreamDetails | null>>();
+  private overlayStreamDetailsRefreshes = new Map<string, Promise<OverlayStreamDetailsCache>>();
   private adScheduleRefresh: Promise<AdScheduleRefreshResult> | null = null;
   private adScheduleRefreshStartedAt = 0;
   private adScheduleRefreshGeneration = 0;
@@ -451,7 +456,7 @@ export class ChannelObject extends DurableObject<Env> {
     expectedStartedAt: string | null,
     expectedStreamId: string | null,
     now: number,
-  ): Promise<OverlayStreamDetails | null> {
+  ): Promise<OverlayStreamDetailsCache | null> {
     const channelId = this.ownChannelId();
     if (channelId === null) return null;
     const cached = await this.ctx.storage.get<CachedOverlayStreamDetails>(OVERLAY_STREAM_DETAILS_CACHE_KEY);
@@ -459,7 +464,7 @@ export class ChannelObject extends DurableObject<Env> {
         cached.expectedStreamId === expectedStreamId &&
         Number.isFinite(cached.checkedAt) && cached.checkedAt <= now &&
         now - cached.checkedAt < OVERLAY_STREAM_DETAILS_CACHE_TTL_MS) {
-      return cached.details;
+      return { details: cached.details, expiresAt: cached.checkedAt + OVERLAY_STREAM_DETAILS_CACHE_TTL_MS };
     }
 
     const cacheIdentity = JSON.stringify([expectedStartedAt, expectedStreamId]);
@@ -498,7 +503,7 @@ export class ChannelObject extends DurableObject<Env> {
           checkedAt: now,
           details,
         } satisfies CachedOverlayStreamDetails);
-        return details;
+        return { details, expiresAt: now + OVERLAY_STREAM_DETAILS_CACHE_TTL_MS };
       })();
       refreshes.set(cacheIdentity, refresh);
     }

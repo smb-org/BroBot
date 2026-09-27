@@ -159,6 +159,21 @@ export const publishRealtimeMessages = async (
   await object.publish(messages);
 };
 
+/** Publishes a declared host-state hint without making the host mutation depend on overlays. */
+export const publishOverlayHostEvent = async (
+  namespace: Env["CHANNEL"] | undefined,
+  database: D1Database,
+  channelId: string,
+  event: Parameters<typeof prepareModuleOverlayHostEventMessages>[2],
+): Promise<void> => {
+  try {
+    const messages = await prepareModuleOverlayHostEventMessages(database, channelId, event);
+    await publishRealtimeMessages(namespace, messages);
+  } catch (error: unknown) {
+    console.warn("Overlay host state update could not be sent.", error);
+  }
+};
+
 export const overlayChangedMessage = (
   channelId: string,
   overlayId: string,
@@ -248,7 +263,11 @@ export const publishStreamStateChanged = async (
       type: "stream.state.changed",
       payload: { state, startedAt, changedAt, checkedAt, controls },
     }];
-    messages.push(...await prepareModuleOverlayHostEventMessages(database, channelId, "stream.state.changed"));
+    try {
+      messages.push(...await prepareModuleOverlayHostEventMessages(database, channelId, "stream.state.changed"));
+    } catch (error: unknown) {
+      console.warn("Realtime stream overlay hint could not be prepared.", error);
+    }
     await publishRealtimeMessages(namespace, messages);
   } catch (error: unknown) {
     console.warn("Realtime stream state hint could not be sent.", error);

@@ -14,6 +14,7 @@ import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import type { TemplateVariable } from "../../template";
 import { getAppAccessToken } from "../app-token";
 import { readChannelVariables } from "../db/channel-variables";
+import { readChannelLocation } from "../db/channel-settings";
 import { readChannelStreamState } from "../db/stream-state";
 import { helixRequest } from "../twitch/helix";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
@@ -38,6 +39,9 @@ export const createOverlayElementContext = async (
   const enabled = new Map(moduleRows.results.map(({ module_id, enabled: value }) => [module_id, value === 1]));
   const channelTimeZone = (): Promise<string> => Promise.resolve(channel?.time_zone ?? "Europe/Berlin");
   const streamState = (): Promise<"online" | "offline" | "unknown"> => Promise.resolve(stream?.state ?? "unknown");
+  let lookupFailure = false;
+  let latestStreamStartedAt: string | null = stream?.state === "online" ? stream.startedAt : null;
+  let streamDetailsCacheExpiresAt: number | null = null;
   let appAccessTokenPromise: Promise<string> | undefined;
   const appAccessToken = (): Promise<string> => {
     appAccessTokenPromise ??= getAppAccessToken(env, new Date(now).toISOString());
@@ -47,43 +51,48 @@ export const createOverlayElementContext = async (
   const cachedStreamDetails = (): Promise<{ startedAt: string | null; viewerCount: number } | null> => {
     streamDetailsPromise ??= (async () => {
       try {
-        const details = await env.CHANNEL.get(env.CHANNEL.idFromName(channelId))
+        const cache = await env.CHANNEL.get(env.CHANNEL.idFromName(channelId))
           .getOverlayStreamDetails(
             stream?.state === "online" ? stream.startedAt : null,
             stream?.state === "online" ? stream.streamId : null,
             now,
           );
-        if (details === null) return null;
+        if (cache === null) {
+          lookupFailure = true;
+          return null;
+        }
+        streamDetailsCacheExpiresAt = cache.expiresAt;
+        if (cache.details === null) {
+          lookupFailure = true;
+          return null;
+        }
+        latestStreamStartedAt = stream?.state === "online" ? stream.startedAt ?? cache.details.startedAt : cache.details.startedAt;
         return {
-          startedAt: stream?.state === "online" ? stream.startedAt ?? details.startedAt : details.startedAt,
-          viewerCount: details.viewerCount,
+          startedAt: latestStreamStartedAt,
+          viewerCount: cache.details.viewerCount,
         };
       } catch {
+        lookupFailure = true;
         return null;
       }
     })();
     return streamDetailsPromise;
   };
   const streamDetails = (): Promise<{ startedAt: string | null; viewerCount: number } | null> => {
-    if (stream?.state === "offline") return Promise.resolve({ startedAt: null, viewerCount: 0 });
     if (stream?.state === "online" && stream.startedAt !== null) {
+      latestStreamStartedAt = stream.startedAt;
       return Promise.resolve({ startedAt: stream.startedAt, viewerCount: 0 });
     }
     return cachedStreamDetails();
   };
   const viewerCount = async (): Promise<number | null> => {
-    if (stream?.state === "offline") return 0;
     return (await cachedStreamDetails())?.viewerCount ?? null;
   };
-  let channelInfoPromise: Promise<ModuleChannelInfo | null> | undefined;
-  const channelInfo = (): Promise<ModuleChannelInfo | null> => {
-    channelInfoPromise ??= (async () => {
+  let channelDetailsPromise: Promise<Omit<ModuleChannelInfo, "startedAt" | "viewerCount"> | null> | undefined;
+  const channelDetails = (): Promise<Omit<ModuleChannelInfo, "startedAt" | "viewerCount"> | null> => {
+    channelDetailsPromise ??= (async () => {
       try {
-        const [accessToken, details] = await Promise.all([
-          appAccessToken(),
-          stream?.state === "offline" ? streamDetails() : cachedStreamDetails(),
-        ]);
-        if (details === null) return null;
+        const accessToken = await appAccessToken();
         const result = await helixRequest<{ data?: readonly Record<string, unknown>[] }>({
           url: "https://api.twitch.tv/helix/channels",
           query: { broadcaster_id: channelId },
@@ -91,17 +100,35 @@ export const createOverlayElementContext = async (
           clientId: env.TWITCH_CLIENT_ID,
         });
         const item = result.ok ? result.data.data?.[0] : undefined;
-        if (item === undefined || typeof item.title !== "string" || typeof item.game_name !== "string") return null;
+        if (item === undefined || typeof item.title !== "string" || typeof item.game_name !== "string") {
+          lookupFailure = true;
+          return null;
+        }
         return {
           title: item.title,
           gameName: item.game_name,
           gameId: typeof item.game_id === "string" ? item.game_id : "",
-          startedAt: details.startedAt,
-          viewerCount: details.viewerCount,
         };
       } catch {
+        lookupFailure = true;
         return null;
       }
+    })();
+    return channelDetailsPromise;
+  };
+  let channelInfoPromise: Promise<ModuleChannelInfo | null> | undefined;
+  const channelInfo = (): Promise<ModuleChannelInfo | null> => {
+    channelInfoPromise ??= (async () => {
+      const [details, streamCache] = await Promise.all([channelDetails(), cachedStreamDetails()]);
+      if (details === null) return null;
+      const streamDetailsValue = streamCache === null ? null : await streamDetails();
+      const startedAt = stream?.state === "online" ? stream.startedAt ?? streamDetailsValue?.startedAt ?? null : streamDetailsValue?.startedAt ?? null;
+      latestStreamStartedAt = startedAt;
+        return {
+          ...details,
+          startedAt,
+          viewerCount: streamCache?.viewerCount ?? 0,
+        };
     })();
     return channelInfoPromise;
   };
@@ -112,6 +139,7 @@ export const createOverlayElementContext = async (
     try {
       dynamic = await module.templateVariables?.(env.DB, channelId) ?? [];
     } catch {
+      lookupFailure = true;
       dynamic = [];
     }
     const declared = Object.values(module.templateFields ?? {}).flatMap((variables) => (variables ?? []) as readonly TemplateVariable[]);
@@ -160,18 +188,16 @@ export const createOverlayElementContext = async (
   const render = createTemplateRenderer(event, "system", [], {
     DB: env.DB,
     channelInfo,
-    channelGameId: async () => (await channelInfo())?.gameId || null,
+    channelGameId: async () => (await channelDetails())?.gameId || null,
     channelTimeZone,
+    channelLocation: () => readChannelLocation(env.DB, channelId),
     templateValueProviders,
     registeredTemplateVariables: [
       ...SYSTEM_TEMPLATE_VARIABLE_LIST,
       ...registeredVariables,
     ],
     streamState,
-    channelDetails: async () => {
-      const info = await channelInfo();
-      return info === null ? null : { title: info.title, gameName: info.gameName, gameId: info.gameId };
-    },
+    channelDetails,
     streamDetails,
     viewerCount,
     followedAt: () => Promise.resolve("unavailable"),
@@ -186,13 +212,22 @@ export const createOverlayElementContext = async (
   const resolveTemplateConditions = async (ids: readonly string[]): Promise<Readonly<Record<string, string>>> => {
     const requested = new Set(ids);
     const values: Record<string, string> = {};
-    const context: ModuleTemplateConditionContext = { DB: env.DB, channelId, channelTimeZone, now };
+    const context: ModuleTemplateConditionContext = {
+      DB: env.DB,
+      channelId,
+      channelTimeZone,
+      channelLocation: () => readChannelLocation(env.DB, channelId),
+      now,
+    };
     for (const module of MODULES) {
       if (!moduleIsEnabled(module, enabled) || module.resolveTemplateConditions === undefined) continue;
       const declared = new Set((module.textBlockConditions ?? []).map(({ id }) => id));
       const moduleIds = ids.filter((id) => requested.has(id) && declared.has(id));
       if (moduleIds.length === 0) continue;
-      try { Object.assign(values, await module.resolveTemplateConditions(moduleIds, context)); } catch { /* missing provider data leaves conditions unmatched */ }
+      try { Object.assign(values, await module.resolveTemplateConditions(moduleIds, context)); } catch {
+        lookupFailure = true;
+        /* Missing provider data leaves conditions unmatched. */
+      }
     }
     return values;
   };
@@ -210,9 +245,17 @@ export const createOverlayElementContext = async (
             (moduleVariables.get(module.id) ?? []).some((variable) => variable.name === name));
           if (moduleNames.length === 0) continue;
           try {
-            const resolved = await module.resolveOverlayTemplateValues(moduleNames, { DB: env.DB, channelId, now, channelTimeZone, language });
+            const resolved = await module.resolveOverlayTemplateValues(moduleNames, {
+              DB: env.DB,
+              channelId,
+              now,
+              channelTimeZone,
+              channelLocation: () => readChannelLocation(env.DB, channelId),
+              language,
+            });
             for (const [name, value] of Object.entries(resolved)) if (requested.has(name)) values[name] = value;
           } catch {
+            lookupFailure = true;
             for (const name of moduleNames) values[name] = { available: false };
           }
         }
@@ -227,8 +270,15 @@ export const createOverlayElementContext = async (
     language,
     channelTimeZone,
     streamState,
-    channelGameId: async () => (await channelInfo())?.gameId || null,
-    renderTemplate: (text, mode = "overlay") => render(text, {}, undefined, mode),
+    streamStartedAt: () => latestStreamStartedAt,
+    streamDetailsCacheExpiresAt: () => streamDetailsCacheExpiresAt,
+    hasLookupFailure: () => lookupFailure,
+    channelGameId: async () => (await channelDetails())?.gameId || null,
+    renderTemplate: async (text, mode = "overlay") => {
+      const result = await render(text, {}, undefined, mode);
+      if (result.diagnostics.some(({ code }) => code === "template.lookup_unavailable")) lookupFailure = true;
+      return result;
+    },
     resolveTemplateConditions,
     resolveTemplateConditionTransitions: async (ids, from, until) => {
       const requested = new Set(ids);
@@ -238,8 +288,18 @@ export const createOverlayElementContext = async (
         const declared = new Set((module.textBlockConditions ?? []).map(({ id }) => id));
         const moduleIds = ids.filter((id) => requested.has(id) && declared.has(id));
         if (moduleIds.length === 0) continue;
-        const context: ModuleTemplateConditionTimelineContext = { DB: env.DB, channelId, channelTimeZone, now: from, until };
-        try { transitions.push(...await module.resolveTemplateConditionTransitions(moduleIds, context)); } catch { /* provider failure leaves that timeline unavailable */ }
+        const context: ModuleTemplateConditionTimelineContext = {
+          DB: env.DB,
+          channelId,
+          channelTimeZone,
+          channelLocation: () => readChannelLocation(env.DB, channelId),
+          now: from,
+          until,
+        };
+        try { transitions.push(...await module.resolveTemplateConditionTransitions(moduleIds, context)); } catch {
+          lookupFailure = true;
+          /* Provider failure leaves that timeline unavailable. */
+        }
       }
       return transitions.sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
     },

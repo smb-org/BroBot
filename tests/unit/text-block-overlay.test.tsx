@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS, type ModuleOverlayElementContext } from "../../src/modules/contract";
+import { type ModuleOverlayElementContext } from "../../src/modules/contract";
 import { textBlockOverlayState } from "../../src/modules/text_library/overlay/state";
 import TextBlockOverlayElement from "../../src/modules/text_library/overlay/view";
 
@@ -13,6 +13,9 @@ const contextFor = (overrides: Partial<ModuleOverlayElementContext> = {}): Modul
   language: "en",
   channelTimeZone: () => Promise.resolve("UTC"),
   streamState: () => Promise.resolve("offline"),
+  streamStartedAt: () => null,
+  streamDetailsCacheExpiresAt: () => null,
+  hasLookupFailure: () => false,
   channelGameId: () => Promise.resolve("game-current"),
   renderTemplate: (text) => Promise.resolve({ text, diagnostics: [] }),
   resolveTemplateConditions: () => Promise.resolve({ "sun.phase": "day" }),
@@ -231,18 +234,29 @@ describe("text block overlay rendering", () => {
     expect(refreshAt - context.now).toBeGreaterThan(29 * 60 * 1_000);
   });
 
-  it("refreshes viewer counts at the cache TTL only while the stream is live", async () => {
+  it("refreshes viewer counts at the cache expiry regardless of the stored stream state", async () => {
     const db = overlayDatabase([variant("default", "Live viewers: {viewers}", {})]);
-    const liveContext = contextFor({ streamState: () => Promise.resolve("online") });
-    const offlineContext = contextFor({ streamState: () => Promise.resolve("offline") });
+    const now = contextFor().now;
+    const liveContext = contextFor({
+      streamState: () => Promise.resolve("online"),
+      streamDetailsCacheExpiresAt: () => now + 5_000,
+    });
+    const offlineContext = contextFor({
+      streamState: () => Promise.resolve("offline"),
+      streamDetailsCacheExpiresAt: () => now + 5_000,
+    });
+    const unknownContext = contextFor({
+      streamState: () => Promise.resolve("unknown"),
+      streamDetailsCacheExpiresAt: () => now + 5_000,
+    });
 
     const liveState = await textBlockOverlayState(db, channelId, { blockName: "sun" }, liveContext);
     const offlineState = await textBlockOverlayState(db, channelId, { blockName: "sun" }, offlineContext);
+    const unknownState = await textBlockOverlayState(db, channelId, { blockName: "sun" }, unknownContext);
 
-    expect(liveState).toMatchObject({
-      refreshAt: new Date(liveContext.now + OVERLAY_STREAM_DETAILS_CACHE_TTL_MS).toISOString(),
-    });
-    expect(offlineState).not.toHaveProperty("refreshAt");
+    for (const state of [liveState, offlineState, unknownState]) {
+      expect(state).toMatchObject({ refreshAt: new Date(now + 5_000).toISOString() });
+    }
   });
 
   it("schedules refreshed template values at their displayed time boundaries", async () => {
@@ -260,6 +274,51 @@ describe("text block overlay rendering", () => {
     });
     const dateState = await textBlockOverlayState(dateDatabase, channelId, { blockName: "sun" }, dateContext);
     expect(dateState).toMatchObject({ refreshAt: "2026-06-21T22:00:00.000Z" });
+  });
+
+  it("refreshes uptime at the stream-start minute phase", async () => {
+    const now = Date.parse("2026-06-21T19:31:00.000Z");
+    const db = overlayDatabase([variant("default", "Uptime {uptime}", {})]);
+    const context = contextFor({
+      now,
+      streamStartedAt: () => "2026-06-21T19:00:20.000Z",
+    });
+
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+
+    expect(state).toMatchObject({ refreshAt: "2026-06-21T19:31:20.000Z" });
+  });
+
+  it("retries a failed title or game lookup instead of freezing its output", async () => {
+    const db = overlayDatabase([variant("default", "{title}", {})]);
+    const context = contextFor({
+      renderTemplate: () => Promise.resolve({
+        text: "?",
+        diagnostics: [{ code: "template.lookup_unavailable", detail: { name: "title" } }],
+      }),
+      hasLookupFailure: () => true,
+    });
+
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+
+    expect(state).toMatchObject({ refreshAt: new Date(context.now + 30_000).toISOString() });
+  });
+
+  it("retries an unavailable game filter without rendering it as a confirmed mismatch", async () => {
+    const db = overlayDatabase([variant("game", "Game scoped", {
+      game: { mode: "is", game: { id: "game-current", name: "Current game" } },
+    })]);
+    const context = contextFor({
+      channelGameId: () => Promise.resolve(null),
+      hasLookupFailure: () => true,
+    });
+
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+
+    expect(state).toMatchObject({
+      candidates: [],
+      refreshAt: new Date(context.now + 30_000).toISOString(),
+    });
   });
 
   it("schedules a refresh after fixed sun times advance to their next event", async () => {

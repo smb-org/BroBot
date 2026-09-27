@@ -4296,4 +4296,87 @@ describe("Dashboard skeleton", () => {
     expect(replaceState).not.toHaveBeenCalledWith({}, "", expect.stringMatching(/^\/channels\//));
     replaceState.mockRestore();
   });
+
+  it("keeps a newly saved location when an unrelated, slower time zone save resolves after it", async () => {
+    // #268 review: the time zone save's response used to spread a channelSettings
+    // snapshot captured before the call, wiping out a location save that finished
+    // first and reverting `locationRevision` -- the next location edit then
+    // conflicted with the server until reload.
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const initialSettings = { timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 };
+    const geocodeResult = {
+      name: "Tromsø",
+      admin1: "Troms og Finnmark",
+      country: "Norway",
+      latitude: 69.6492,
+      longitude: 18.9553,
+      timeZone: "Europe/Oslo",
+    };
+    const savedLocation = { name: "Tromsø, Troms og Finnmark, Norway", latitude: 69.6492, longitude: 18.9553, timeZone: "Europe/Oslo" };
+    const settingsPath = `/api/channels/${channel.channelId}/settings`;
+    const locationPath = `${settingsPath}/location`;
+
+    let resolveLocationSave: (() => void) | undefined;
+    const locationSavePromise = new Promise<Response>((resolve) => {
+      resolveLocationSave = () => resolve(jsonResponse({ ok: true, location: savedLocation, locationRevision: 2 }));
+    });
+    let resolveTimeZoneSave: (() => void) | undefined;
+    const timeZoneSavePromise = new Promise<Response>((resolve) => {
+      resolveTimeZoneSave = () => resolve(jsonResponse({ ok: true, timeZone: "Europe/Vienna", revision: 2 }));
+    });
+
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
+      if (url.pathname === `/api/channels/${channel.channelId}/overview`) return jsonResponse(overview(channel));
+      if (url.pathname === `/api/channels/${channel.channelId}/modules`) return jsonResponse({ modules: [] });
+      if (url.pathname === `${locationPath}/geocode`) return jsonResponse({ results: [geocodeResult] });
+      if (url.pathname === locationPath) return locationSavePromise;
+      if (url.pathname === settingsPath) return method === "PATCH" ? timeZoneSavePromise : jsonResponse(initialSettings);
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    window.history.replaceState({}, "", `/channels/${channel.channelId}/overview`);
+    render(<DashboardApp />);
+    expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
+
+    // Pick and save a new location; its PATCH is held back deliberately.
+    fireEvent.change(await screen.findByRole("textbox", { name: "Ort suchen" }), { target: { value: "Tromsø" } });
+    fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Auswählen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Standort speichern" }));
+
+    // While that save is still in flight, save an unrelated time zone change too.
+    const timeZoneField = screen.getByRole("combobox", { name: "Kanalzeitzone" });
+    fireEvent.click(timeZoneField);
+    fireEvent.change(timeZoneField, { target: { value: "Europe/Vienna" } });
+    await waitFor(() => expect(document.querySelector('[data-combobox-option="true"][value="Europe/Vienna"]')).not.toBeNull());
+    fireEvent.click(document.querySelector('[data-combobox-option="true"][value="Europe/Vienna"]') as Element);
+    fireEvent.click(screen.getByRole("button", { name: "Zeitzone speichern" }));
+
+    // The location save resolves first ...
+    resolveLocationSave?.();
+    await screen.findByText("Der Standort wurde gespeichert.");
+
+    // ... and only afterwards does the (slower) time zone response arrive. It
+    // must not restore the pre-save location snapshot.
+    resolveTimeZoneSave?.();
+    await waitFor(() => expect(timeZoneField).toHaveValue("Europe/Vienna"));
+
+    // A further location edit must use the fresh revision (2), not the one from
+    // before the race (1) -- otherwise the server would reject it as a conflict.
+    fireEvent.click(screen.getByRole("button", { name: "Standort entfernen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Standort speichern" }));
+    await waitFor(() => {
+      const patchCalls = fetcher.mock.calls.filter(([callInput, callInit]) =>
+        requestUrl(callInput).pathname === locationPath && callInit?.method === "PATCH");
+      expect(patchCalls).toHaveLength(2);
+    });
+    const secondLocationSave = fetcher.mock.calls.filter(([callInput, callInit]) =>
+      requestUrl(callInput).pathname === locationPath && callInit?.method === "PATCH")[1];
+    expect(JSON.parse(secondLocationSave?.[1]?.body as string)).toEqual({ revision: 2, location: null });
+  });
 });

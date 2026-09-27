@@ -27,11 +27,11 @@ import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { listChannelVariables } from "../db/channel-variables";
 import { findChannelVariable } from "../db/channel-variables";
 import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from "../server-timing";
-import { publishOverlayChanged } from "../realtime";
-import { publishRealtimeMessages } from "../realtime";
-import { prepareModuleOverlayHostEventMessages, prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
+import { publishOverlayChanged, publishOverlayHostEvent as publishOverlayHostEventHint, publishRealtimeMessages } from "../realtime";
+import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
 import { readChannelVariables } from "../db/channel-variables";
+import { readChannelLocation } from "../db/channel-settings";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
 
 interface ModuleRouteEnvironment {
@@ -142,6 +142,7 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
       DB: context.env.DB,
       channelId,
       channelTimeZone: () => Promise.resolve(channel.time_zone),
+      channelLocation: () => readChannelLocation(context.env.DB, channelId),
       now,
     };
     const resolved: Record<string, string> = {};
@@ -181,12 +182,7 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     }
   });
   context.set("publishOverlayHostEvent", async (channelId: string, event: ModuleOverlayHostEvent) => {
-    try {
-      const messages = await prepareModuleOverlayHostEventMessages(context.env.DB, channelId, event);
-      if (messages.length > 0) await publishRealtimeMessages(context.env.CHANNEL, messages);
-    } catch (error: unknown) {
-      console.warn("Overlay host state update could not be sent.", error);
-    }
+    await publishOverlayHostEventHint(context.env.CHANNEL, context.env.DB, channelId, event);
   });
   context.set("templateUsageSources", async (channelId) => {
     const moduleSources = await Promise.all(MODULES.map((module) =>
@@ -332,6 +328,7 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
     channelInfo: () => Promise.resolve(channelInfo),
     channelGameId: () => Promise.resolve(game?.id ?? null),
     channelTimeZone: () => Promise.resolve(channelSettings === null ? DEFAULT_CHANNEL_TIME_ZONE : channelSettings.time_zone),
+    channelLocation: () => readChannelLocation(context.env.DB, channelId),
     templateValueProviders,
     registeredTemplateVariables,
     streamState: () => Promise.resolve(streamState),

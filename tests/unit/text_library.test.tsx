@@ -161,6 +161,7 @@ describe("text library", () => {
     channelInfo: () => Promise.resolve(null),
     channelGameId: () => Promise.resolve(null),
     channelTimeZone: () => Promise.resolve(DEFAULT_CHANNEL_TIME_ZONE),
+    channelLocation: () => Promise.resolve(null),
     templateValueProviders: [await blockProvider()],
     streamState: () => Promise.resolve("offline"),
     channelDetails: () => Promise.resolve(null),

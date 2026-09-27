@@ -341,6 +341,20 @@ export const fetchChannelOverview = (
 export interface PanelChannelSettings {
   timeZone: string;
   revision: number;
+  location: PanelChannelLocation | null;
+  locationRevision: number;
+}
+
+export interface PanelChannelLocation {
+  name: string;
+  latitude: number;
+  longitude: number;
+  timeZone: string;
+}
+
+export interface PanelChannelLocationResult extends PanelChannelLocation {
+  country: string;
+  admin1: string | null;
 }
 
 export const fetchChannelSettings = (channelId: string): Promise<PanelChannelSettings> =>
@@ -352,6 +366,24 @@ export const saveChannelTimeZone = (
   timeZone: string,
 ): Promise<{ ok: boolean; timeZone: string; revision: number }> =>
   requestMutation(channelPath(channelId, "settings"), "PATCH", { revision, timeZone });
+
+export const searchChannelLocations = (
+  channelId: string,
+  query: string,
+  language: "de" | "en",
+): Promise<readonly PanelChannelLocationResult[]> => {
+  const search = new URLSearchParams({ q: query, language });
+  return requestJson<{ results: PanelChannelLocationResult[] }>(
+    `${channelPath(channelId, "settings/location/geocode")}?${search}`,
+  ).then(({ results }) => results);
+};
+
+export const saveChannelLocation = (
+  channelId: string,
+  revision: number,
+  location: PanelChannelLocation | null,
+): Promise<{ ok: boolean; location: PanelChannelLocation | null; locationRevision: number }> =>
+  requestMutation(channelPath(channelId, "settings/location"), "PATCH", { revision, location });
 
 export const fetchSystemOverview = (
   channelId: string,

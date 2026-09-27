@@ -114,18 +114,23 @@ Ein Modul kann über `textBlockConditions` Bedingungen für Varianten von
 Textblöcken bereitstellen. Die Kennung ist punktgetrennt; das Modul löst den
 aktuellen Wert beim Rendern auf, während die Textbibliothek Definitionen und
 Auswahl speichert. Ein `channelSettings`-Baustein wird in den gemeinsamen
-Kanaleinstellungen des Dashboards angezeigt. Der Host reicht dort die
-Kanalzeitzone und deren Änderungsfunktion weiter, damit Module keine Host-API
-importieren müssen.
+Kanaleinstellungen des Dashboards angezeigt. Der Baustein erhält nur seine
+Modulkennung, Sprache und Berechtigungsinformationen. Host-Einstellungen wie
+Kanalzeitzone und Standort bearbeitet der Host selbst; Module bekommen diese
+Werte bei Bedarf über den schreibgeschützten Contract.
 
 Die Sonnendatenquelle liegt eigenständig unter `src/modules/sun/`. Sie nutzt
-Open-Meteo nur für die Standortsuche; Sonnenaufgang, Sonnenuntergang und
-bürgerliche Abenddämmerung berechnet sie bei jeder Auflösung lokal mit
-NOAA-Gleichungen nach Meeus. Dafür verwendet sie den vorherigen, aktuellen und
-folgenden Kalendertag in der Zeitzone des Standorts. Die Ausgabezeiten folgen
-weiterhin der Kanalzeitzone. Bei Polartag gilt die Sonnenphase als Tag, bei
-Polarnacht als Nacht; nicht auftretende Ereigniszeiten verwenden den
-konfigurierbaren zweisprachigen Fehlertext.
+Open-Meteo-Geocoding über den Host für die Standortsuche. Der Host speichert
+Name, Koordinaten und Standortzeitzone in `channels` und stellt sie Sun über
+`ModuleTemplateValueContext.channelLocation` und
+`ModuleTemplateConditionContext.channelLocation` schreibgeschützt bereit.
+Sonnenaufgang, Sonnenuntergang und bürgerliche Abenddämmerung berechnet das
+Modul bei jeder Auflösung lokal mit NOAA-Gleichungen nach Meeus. Dafür
+verwendet es den vorherigen, aktuellen und folgenden Kalendertag in der
+Zeitzone des Standorts. Die Ausgabezeiten folgen weiterhin der Kanalzeitzone.
+Bei Polartag gilt die Sonnenphase als Tag, bei Polarnacht als Nacht; nicht
+auftretende Ereigniszeiten verwenden den konfigurierbaren zweisprachigen
+Fehlertext. Das Modulschema enthält nur diese Fehlertexte.
 
 `templateUsageSources` meldet eigene Vorlagentexte für generische
 Nutzungsanzeigen. Der Host ergänzt seine eigenen Oberflächenquellen; Module

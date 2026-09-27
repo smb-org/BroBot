@@ -272,7 +272,7 @@ describe("ChannelObject realtime path", () => {
       object.getOverlayStreamDetails(startedAt, "stream-1", now),
       object.getOverlayStreamDetails(startedAt, "stream-1", now),
     ]);
-    expect(first).toEqual({ startedAt, viewerCount: 42 });
+    expect(first).toEqual({ details: { startedAt, viewerCount: 42 }, expiresAt: now + 60_000 });
     expect(overlapping).toEqual(first);
     expect(mocks.helixRequest).toHaveBeenCalledTimes(1);
 

@@ -195,10 +195,6 @@ describe("on-demand sun template values", () => {
     const database = {
       prepare: () => ({
         bind: () => ({ first: () => Promise.resolve({
-          name: "Berlin",
-          latitude: location.latitude,
-          longitude: location.longitude,
-          location_time_zone: location.timeZone,
           error_text_de: "Nicht verfügbar.",
           error_text_en: errorText,
           revision: 1,
@@ -211,6 +207,7 @@ describe("on-demand sun template values", () => {
       channelId: "sun-channel",
       now,
       channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve({ name: "Berlin", ...location }),
       language: "en",
     });
 

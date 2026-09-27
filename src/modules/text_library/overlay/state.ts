@@ -1,9 +1,10 @@
 import type { JsonObject, ModuleOverlayElementContext } from "../../contract";
-import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../contract";
 import type { TextBlock, TextBlockConditions, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_NAME_PATTERN } from "../contracts";
 import { blockReferencesInText, nextTextBlockLocalMidnight, textBlockConditionSwitchTimes } from "../domain";
 import { renderOverlayTextPreservingDynamicValues } from "./render";
+
+const TEMPLATE_LOOKUP_RETRY_MS = 30_000;
 
 interface BlockRow {
   block_name: string;
@@ -154,6 +155,18 @@ export const textBlockOverlayState = async (
     needsGame ? context.channelGameId() : Promise.resolve(null),
     context.channelTimeZone(),
   ]);
+  if (block.games.length > 0 && gameId === null && context.hasLookupFailure()) {
+    return {
+      serverNow: new Date(context.now).toISOString(),
+      timeZone,
+      dataConditions: {},
+      transitions: [],
+      switchTimes: [],
+      refreshAt: new Date(context.now + TEMPLATE_LOOKUP_RETRY_MS).toISOString(),
+      countdownTargets: {},
+      candidates: [],
+    };
+  }
   if (block.games.length > 0 && (gameId === null || !block.games.some((game) => game.id === gameId))) return null;
 
   const conditionIds = [...new Set(dependencyBlocks.flatMap(dataConditionIdsFor))];
@@ -191,7 +204,7 @@ export const textBlockOverlayState = async (
       dataConditions: {},
       transitions: [],
       switchTimes: [],
-      refreshAt: new Date(context.now + 24 * 60 * 60 * 1_000).toISOString(),
+      refreshAt: new Date(context.now + (context.hasLookupFailure() ? TEMPLATE_LOOKUP_RETRY_MS : 24 * 60 * 60 * 1_000)).toISOString(),
       countdownTargets: {},
       candidates: [],
     };
@@ -220,14 +233,25 @@ export const textBlockOverlayState = async (
   const countdownExpiries = Object.values(countdownTargets).flatMap((targets) => targets.map(Date.parse))
     .filter((at) => Number.isFinite(at) && at > context.now);
   const systemRefreshAts: number[] = [];
-  if (referencedTemplateNames.has("time") || referencedTemplateNames.has("uptime")) {
+  if (referencedTemplateNames.has("time")) {
     systemRefreshAts.push((Math.floor(context.now / 60_000) + 1) * 60_000);
+  }
+  if (referencedTemplateNames.has("uptime")) {
+    const startedAt = Date.parse(context.streamStartedAt() ?? "");
+    if (Number.isFinite(startedAt)) {
+      const elapsed = Math.max(0, context.now - startedAt);
+      systemRefreshAts.push(startedAt + (Math.floor(elapsed / 60_000) + 1) * 60_000);
+    }
   }
   if (referencedTemplateNames.has("date")) {
     systemRefreshAts.push(nextTextBlockLocalMidnight(context.now, timeZone));
   }
-  if (referencedTemplateNames.has("viewers") && streamState === "online") {
-    systemRefreshAts.push(context.now + OVERLAY_STREAM_DETAILS_CACHE_TTL_MS);
+  if (referencedTemplateNames.has("viewers")) {
+    const expiresAt = context.streamDetailsCacheExpiresAt();
+    if (expiresAt !== null && Number.isFinite(expiresAt) && expiresAt > context.now) systemRefreshAts.push(expiresAt);
+  }
+  if (context.hasLookupFailure()) {
+    systemRefreshAts.push(context.now + TEMPLATE_LOOKUP_RETRY_MS);
   }
   const fixedSunNames = ["sun.set", "sun.rise", "sun.dusk"].filter((name) => referencedTemplateNames.has(name));
   if (fixedSunNames.length > 0) {
