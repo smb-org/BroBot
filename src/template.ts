@@ -21,6 +21,7 @@ export type TemplateVariablePickerCatalog = Readonly<Record<"de" | "en", Templat
 
 export interface TemplateVariable {
   readonly name: string;
+  readonly localizedDescription?: Readonly<Record<"de" | "en", string>>;
   readonly group?: TemplateVariableGroup;
   readonly maxLength: number;
   readonly fallbackWhenAbsent?: number;

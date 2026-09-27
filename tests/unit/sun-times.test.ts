@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  calculateSunAltitudeIntervals,
   calculateSunDay,
   localDateInTimeZone,
+  localMidnightInTimeZone,
   resolveSunTemplateValues,
   shiftLocalDate,
 } from "../../src/modules/sun/domain";
@@ -95,6 +97,27 @@ describe("NOAA sun calculations", () => {
   });
 });
 
+describe("localMidnightInTimeZone", () => {
+  it("returns local midnight on a normal day", () => {
+    expect(localMidnightInTimeZone("2026-06-21", "Europe/Berlin")).toBe("2026-06-20T22:00:00.000Z");
+    expect(localDateInTimeZone(Date.parse("2026-06-20T22:00:00.000Z"), "Europe/Berlin")).toBe("2026-06-21");
+  });
+
+  it("returns local midnight across a normal Europe/Berlin daylight-saving change", () => {
+    expect(localMidnightInTimeZone("2026-03-29", "Europe/Berlin")).toBe("2026-03-28T23:00:00.000Z");
+    expect(localDateInTimeZone(Date.parse("2026-03-28T23:00:00.000Z"), "Europe/Berlin")).toBe("2026-03-29");
+  });
+
+  it("returns the first instant of the day when Africa/Cairo's 2026 spring change skips local midnight", () => {
+    // Cairo's DST switches clocks from 00:00 to 01:00, so 00:00 never occurs on this date.
+    const midnight = localMidnightInTimeZone("2026-04-24", "Africa/Cairo");
+    expect(midnight).toBe("2026-04-23T22:00:00.000Z");
+    expect(localDateInTimeZone(Date.parse(midnight), "Africa/Cairo")).toBe("2026-04-24");
+    // The instant one minute earlier must still belong to the previous local date.
+    expect(localDateInTimeZone(Date.parse(midnight) - 60_000, "Africa/Cairo")).toBe("2026-04-23");
+  });
+});
+
 describe("on-demand sun template values", () => {
   it("uses location-local solar dates for Honolulu while formatting in Berlin", () => {
     const location = { latitude: 21.3069, longitude: -157.8583, timeZone: "Pacific/Honolulu" };
@@ -135,9 +158,23 @@ describe("on-demand sun template values", () => {
     }, "Europe/Berlin");
 
     expect(localDateInTimeZone(Date.parse("2026-06-21T20:00:00.000Z"), "Pacific/Auckland")).toBe("2026-06-22");
-    expect(values.dataConditions["sun.phase"]).toBe("day");
+    expect(values.dataConditions["sun.phase"]).toBe("golden_hour");
     expect(values.values["sun.rise"]).not.toBe(errorText);
     expect(values.values["sun.set"]).not.toBe(errorText);
+  });
+
+  it("resolves the golden-hour interval across Tromsø local midnight", () => {
+    const location = { latitude: 69.6492, longitude: 18.9553, timeZone: "Europe/Oslo" };
+    const now = Date.parse("2026-05-15T21:30:00.000Z");
+    const values = resolveAt("2026-05-15T21:30:00.000Z", location, location.timeZone);
+    const currentInterval = calculateSunAltitudeIntervals(location, "2026-05-14", 3, "golden")
+      .find(({ startAt, endAt }) => Date.parse(startAt) <= now && now < Date.parse(endAt));
+
+    expect(values.dataConditions["sun.phase"]).toBe("golden_hour");
+    expect(currentInterval).toBeDefined();
+    expect(values.values["sun.golden_hour"]).toBe(formatChannelTime(currentInterval?.startAt ?? "", location.timeZone));
+    expect(values.values["sun.golden_hour_in"]).toBe("0 min");
+    expect(values.values["sun.golden_hour_end"]).toBe(formatChannelTime(currentInterval?.endAt ?? "", location.timeZone));
   });
 
   it("keeps polar phase and dusk behavior when calculated on demand", () => {
@@ -155,7 +192,7 @@ describe("on-demand sun template values", () => {
       longitude: 18.9553,
       timeZone: "Europe/Oslo",
     }, "Europe/Berlin");
-    expect(polarNight.dataConditions["sun.phase"]).toBe("night");
+    expect(polarNight.dataConditions["sun.phase"]).toBe("blue_hour");
     expect(polarNight.values["sun.rise"]).toBe(errorText);
     expect(polarNight.values["sun.set"]).toBe(errorText);
     expect(polarNight.values["sun.dusk"]).not.toBe(errorText);
@@ -182,10 +219,10 @@ describe("on-demand sun template values", () => {
 
     expect(atSunrise.values["sun.rise"]).toBe(formatChannelTime(tomorrow.sunriseAt ?? "", "Europe/Berlin"));
     expect(atSunrise.values["sun.rise_in"]).not.toBe("0 min");
-    expect(atSunrise.dataConditions["sun.phase"]).toBe("day");
+    expect(atSunrise.dataConditions["sun.phase"]).toBe("golden_hour");
     expect(atSunset.values["sun.set"]).toBe(formatChannelTime(tomorrow.sunsetAt ?? "", "Europe/Berlin"));
     expect(atSunset.values["sun.set_in"]).not.toBe("0 min");
-    expect(atSunset.dataConditions["sun.phase"]).toBe("night");
+    expect(atSunset.dataConditions["sun.phase"]).toBe("golden_hour");
   });
 
   it("exposes the next fixed sun event as an overlay refresh target", async () => {
@@ -212,10 +249,59 @@ describe("on-demand sun template values", () => {
     });
 
     expect(values).toEqual({
-      "sun.rise": { available: true, targetAt: day.sunriseAt },
-      "sun.set": { available: true, targetAt: day.sunsetAt },
-      "sun.dusk": { available: true, targetAt: day.duskAt },
+      "sun.rise": { available: true, targetAt: day.sunriseAt, nextChangeAt: day.sunriseAt },
+      "sun.set": { available: true, targetAt: day.sunsetAt, nextChangeAt: day.sunsetAt },
+      "sun.dusk": { available: true, targetAt: day.duskAt, nextChangeAt: day.duskAt },
     });
+  });
+
+  it("keeps golden- and blue-hour countdowns on their interval start and refreshes at the end", async () => {
+    const location = { latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" };
+    const now = Date.parse("2026-06-21T00:00:00.000Z");
+    const values = await sunModule.resolveOverlayTemplateValues?.(["sun.golden_hour_in", "sun.blue_hour_in"], {
+      DB: {} as D1Database,
+      channelId: "sun-channel",
+      now,
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve({ name: "Berlin", ...location }),
+      language: "en",
+    });
+    const goldenIntervals = calculateSunAltitudeIntervals(location, "2026-06-20", 2, "golden");
+    const blueIntervals = calculateSunAltitudeIntervals(location, "2026-06-20", 2, "blue");
+    const nextGolden = goldenIntervals.find(({ startAt }) => Date.parse(startAt) > now);
+    const nextBlue = blueIntervals.find(({ startAt }) => Date.parse(startAt) > now);
+
+    expect(values?.["sun.golden_hour_in"]?.targetAts).toEqual([nextGolden?.startAt]);
+    expect(values?.["sun.golden_hour_in"]?.targetAts).not.toContain(nextGolden?.endAt);
+    expect(values?.["sun.golden_hour_in"]?.nextChangeAt).toBe(nextGolden?.endAt);
+    expect(values?.["sun.blue_hour_in"]?.targetAts).toEqual([nextBlue?.startAt]);
+    expect(values?.["sun.blue_hour_in"]?.targetAts).not.toContain(nextBlue?.endAt);
+    expect(values?.["sun.blue_hour_in"]?.nextChangeAt).toBe(nextBlue?.endAt);
+  });
+
+  it("resolves Berlin golden-hour countdown as zero while the interval is ongoing", async () => {
+    const location = { latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" };
+    const interval = calculateSunAltitudeIntervals(location, "2026-06-21", 1, "golden")[0];
+    expect(interval).toBeDefined();
+    const now = Date.parse(interval?.startAt ?? "") + 5 * 60_000;
+    const resolved = resolveAt(new Date(now).toISOString(), location, location.timeZone);
+    const values = await sunModule.resolveOverlayTemplateValues?.(["sun.golden_hour_in"], {
+      DB: {} as D1Database,
+      channelId: "sun-channel",
+      now,
+      channelTimeZone: () => Promise.resolve(location.timeZone),
+      channelLocation: () => Promise.resolve({ name: "Berlin", ...location }),
+      language: "en",
+    });
+
+    expect(resolved.dataConditions["sun.phase"]).toBe("golden_hour");
+    expect(resolved.values["sun.golden_hour_in"]).toBe("0 min");
+    expect(values?.["sun.golden_hour_in"]).toMatchObject({
+      available: true,
+      targetAts: [interval?.startAt],
+      nextChangeAt: interval?.endAt,
+    });
+    expect(values?.["sun.golden_hour_in"]?.targetAts).not.toContain(interval?.endAt);
   });
 
   it("propagates a transient location lookup failure instead of masking it as unavailable", async () => {
@@ -251,7 +337,7 @@ describe("on-demand sun template values", () => {
       errorText: fallback,
     });
 
-    expect(variables).toHaveLength(5);
+    expect(variables).toHaveLength(14);
     expect(variables.every((variable) => variable.maxLength >= fallback.length)).toBe(true);
     expect(Object.values(values.values).every((value) => value.length <= SUN_ERROR_TEXT_MAX_LENGTH)).toBe(true);
     expect(values.dataConditions["sun.phase"]).toBeUndefined();

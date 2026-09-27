@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { textBlockConditionsMatch } from "../../src/modules/text_library/domain";
+import { nextTextBlockLocalMidnight, textBlockConditionsMatch } from "../../src/modules/text_library/domain";
 import type { TextBlockConditions } from "../../src/modules/text_library/contracts";
 
 const baseState = {
@@ -19,5 +19,12 @@ describe("module-provided text block conditions", () => {
     expect(textBlockConditionsMatch(nightCondition, { ...baseState, dataConditions: { "sun.phase": "night" } })).toBe(true);
     expect(textBlockConditionsMatch(nightCondition, { ...baseState, dataConditions: { "sun.phase": "day" } })).toBe(false);
     expect(textBlockConditionsMatch(nightCondition, { ...baseState, dataConditions: {} })).toBe(false);
+  });
+});
+
+describe("nextTextBlockLocalMidnight", () => {
+  it("resolves the overlay refresh instant across Africa/Cairo's 2026 spring change, which skips local midnight", () => {
+    const from = Date.parse("2026-04-23T10:00:00.000Z");
+    expect(nextTextBlockLocalMidnight(from, "Africa/Cairo")).toBe(Date.parse("2026-04-23T22:00:00.000Z"));
   });
 });

@@ -250,15 +250,14 @@ export const textBlockOverlayState = async (
     const expiresAt = context.streamDetailsCacheExpiresAt();
     if (expiresAt !== null && Number.isFinite(expiresAt) && expiresAt > context.now) systemRefreshAts.push(expiresAt);
   }
-  const fixedSunNames = ["sun.set", "sun.rise", "sun.dusk"].filter((name) => referencedTemplateNames.has(name));
-  if (fixedSunNames.length > 0) {
-    const sunValues = await context.resolveOverlayTemplateValues(fixedSunNames);
-    const sunRefreshAts = Object.values(sunValues).flatMap((value) => [
-      ...(value.targetAt === undefined ? [] : [value.targetAt]),
-      ...(value.targetAts ?? []),
-    ]).map(Date.parse).filter((at) => Number.isFinite(at) && at > context.now)
+  const overlayTemplateNames = [...referencedTemplateNames].filter((name) => context.overlayTemplateVariableNames.has(name));
+  if (overlayTemplateNames.length > 0) {
+    const overlayValues = await context.resolveOverlayTemplateValues(overlayTemplateNames);
+    const overlayRefreshAts = Object.values(overlayValues).flatMap((value) =>
+      value.nextChangeAt === undefined ? [] : [value.nextChangeAt],
+    ).map(Date.parse).filter((at) => Number.isFinite(at) && at > context.now)
       .map((at) => at + 1_000);
-    systemRefreshAts.push(...sunRefreshAts);
+    systemRefreshAts.push(...overlayRefreshAts);
   }
   // Checked last so it also catches a transient failure from the fixed-sun lookup above,
   // not just earlier lookups in this pass.

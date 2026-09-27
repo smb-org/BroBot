@@ -302,6 +302,9 @@ form.content-section { display: grid; gap: var(--s4); }
 .sun-settings { width: 100%; padding-top: var(--s4); }
 .sun-settings__fields { display: grid; gap: var(--s3); min-width: 0; }
 .sun-settings__footer { display: flex; justify-content: flex-end; padding-top: var(--s2); }
+.moon-settings { width: 100%; padding-top: var(--s4); }
+.moon-settings__fields { display: grid; gap: var(--s3); min-width: 0; }
+.moon-settings__footer { display: flex; justify-content: flex-end; padding-top: var(--s2); }
 .form-actions--destructive { margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--line); }
 
 /* Place the reason beside the effect rather than in a distant notice. */

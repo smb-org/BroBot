@@ -106,7 +106,7 @@ export const panelTemplateOptions = (
     return {
       name: variable.name,
       label: pickerCopy?.label ?? localized?.label ?? variable.name,
-      description: pickerCopy?.description ?? localized?.description ?? variable.name,
+      description: pickerCopy?.description ?? variable.localizedDescription?.[language] ?? localized?.description ?? variable.name,
       sample: localized?.sample ?? variable.sample,
       ...(pickerCopy?.sample === undefined ? {} : { pickerSample: pickerCopy.sample }),
       group: variable.group ?? "context",

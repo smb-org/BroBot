@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { apiErrorDetail, type ModuleResult } from "../../src/modules/contract";
+import { apiErrorDetail, localMidnightInTimeZone, nextLocalMidnightInTimeZone, type ModuleResult } from "../../src/modules/contract";
 import { clipsModule } from "../../src/modules/clips";
 import { MODULES } from "../../src/modules/registry";
 
@@ -50,6 +50,23 @@ describe("Module contract", () => {
     it("leaves detail untouched when message is already present, twitchMessage included", () => {
       const detail = { message: "already set", twitchMessage: "ignored" };
       expect(apiErrorDetail(detail)).toBe(detail);
+    });
+  });
+
+  describe("localMidnightInTimeZone", () => {
+    it("returns the first instant of the day when Africa/Cairo's 2026 spring change skips local midnight", () => {
+      // Cairo's DST switches clocks from 00:00 to 01:00 on this date, so 00:00 never occurs;
+      // sun, moon, and text_library all route through this one helper for their local-midnight
+      // math, so the DST fix here applies to every caller.
+      const midnight = localMidnightInTimeZone("2026-04-24", "Africa/Cairo");
+      expect(midnight).toBe("2026-04-23T22:00:00.000Z");
+    });
+  });
+
+  describe("nextLocalMidnightInTimeZone", () => {
+    it("returns the same Africa/Cairo 2026-04-24 instant as the next midnight after a moment on the previous day", () => {
+      const from = Date.parse("2026-04-23T10:00:00.000Z");
+      expect(nextLocalMidnightInTimeZone(from, "Africa/Cairo")).toBe(Date.parse("2026-04-23T22:00:00.000Z"));
     });
   });
 });

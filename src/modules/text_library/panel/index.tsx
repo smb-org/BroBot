@@ -514,7 +514,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                                 return [{
                                   name: variable.name,
                                   label: pickerCopy?.label ?? systemCopy?.label ?? variable.name,
-                                  description: pickerCopy?.description ?? systemCopy?.description ?? variable.description ?? variable.name,
+                                  description: pickerCopy?.description ?? systemCopy?.description ?? variable.localizedDescription?.[resolvedLanguage] ?? variable.description ?? variable.name,
                                   sample: systemCopy?.sample ?? variable.sample,
                                   ...(pickerCopy?.sample === undefined ? {} : { pickerSample: pickerCopy.sample }),
                                   group: variable.group,
@@ -524,7 +524,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                                   ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
                                 }];
                               }),
-                              ...data.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => ({ name: block.name, label: block.name, description: labels.variableDescription(block.name), sample: "", group: "channel" as const, isTextBlock: true })),
+                              ...data.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => ({ name: block.name, label: block.name, description: labels.variableDescription(block.name), sample: block.variants.flatMap((entry) => entry.texts)[0] ?? "", group: "channel" as const, isTextBlock: true })),
                             ]} messages={{
                               countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
                               previewCountLabel: (count) => String(count),

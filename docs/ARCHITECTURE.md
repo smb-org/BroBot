@@ -57,20 +57,24 @@ Picker und Twitch-Kategoriesuche verwenden die Host-Routen
 Module auf. Die Kanalzeitzone liegt in der Host-Tabelle `channels` und gilt
 für `{date}`, `{time}` sowie zeitabhängige Textblockbedingungen.
 
-Die Sonnendatenquelle `src/modules/sun/` ergänzt den Contract um eigene
-Templatewerte, eine Tag-/Nachtbedingung und einen Alarm-Handler. Der Standort
+Die Sonnendatenquellen `src/modules/sun/` und `src/modules/moon/` ergänzen den
+Contract um eigene Templatewerte. Der Standort
 ist eine Host-Kanaleinstellung in `channels`; der Host stellt ihn Modulen über
 den Contract schreibgeschützt bereit. Die Standortsuche verwendet Open-Meteo-
 Geocoding; der Dialog zeigt dazu die von der CC-BY-4.0-Lizenz geforderte
-Namensnennung neben den Suchergebnissen. Sonnenaufgang, Sonnenuntergang und bürgerliche Abenddämmerung
-berechnet die Worker-Logik mit den NOAA-Gleichungen nach Meeus, sodass tägliche
+Namensnennung neben den Suchergebnissen. Sonnenaufgang, Sonnenuntergang,
+Morgendämmerung, Sonnenhöchststand, Tageslänge sowie goldene und blaue Stunde
+berechnet das Sun-Modul lokal mit den NOAA-Gleichungen nach Meeus. Das Moon-Modul
+berechnet Mondphase, Beleuchtung und Mondauf- sowie -untergang lokal mit den
+niedrigpräzisen Meeus-Reihen, sodass tägliche
 Berechnungen keinen externen Dienst benötigen. D1 hält je Kanal genau die
 beiden lokalen Datumszeilen für heute und morgen. Der Durable-Object-Alarm
 erneuert sie um 00:15 Uhr in der Kanalzeitzone; ein vorhandener gültiger
 Eintrag bleibt bei einem Fehler bis zu seinem Ablauf nutzbar. Polartag und
 Polarnacht sind als Zustände gespeichert, statt nicht existierende
-Ereigniszeiten zu schätzen. Das Sun-Modul speichert nur seine zweisprachigen
-Fehlertexte.
+Ereigniszeiten zu schätzen. Beide Module lesen Standort und Kanalzeitzone über
+den schreibgeschützten Contract; eigene Moduleinstellungen enthalten nur die
+zweisprachigen Fehlertexte.
 
 Migration `0016_text_library.sql` führte Textblöcke und zunächst eine
 Bibliothekszeitzone ein. `0017_text_library_variant_choices.sql` ergänzte den
@@ -82,7 +86,8 @@ aktiviert die Sonnendatenquelle für bestehende Kanäle und legte zunächst
 Standort- und Sonneneinstellungen im Modul an. Migration
 `0020_channel_location.sql` verschiebt den Standort in die Host-Tabelle
 `channels`; `sun_settings` enthält danach nur noch die Fehlertexte des
-Sonnenmoduls.
+Sonnenmoduls. Migration `0021_moon_data_source.sql` aktiviert die Monddatenquelle
+für bestehende Kanäle und legt ihre Fehlertexteinstellungen an.
 
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 

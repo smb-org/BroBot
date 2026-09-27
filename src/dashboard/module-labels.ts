@@ -21,6 +21,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     raid: "Shoutout",
     clips: "Clips",
     sun: "Sonne",
+    moon: "Mond",
   },
   en: {
     host: "System",
@@ -30,6 +31,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     raid: "Shoutout",
     clips: "Clips",
     sun: "Sun times",
+    moon: "Moon data",
   },
 };
 
@@ -128,6 +130,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     raid: "Begrüßt eingehende Raids und ermöglicht manuelle Shoutouts.",
     clips: "Erstellt manuell einen Clip des laufenden Streams.",
     sun: "Berechnet Sonnenaufgang, Sonnenuntergang und Dämmerung für den Kanalstandort.",
+    moon: "Berechnet Mondphase, Beleuchtung sowie Mondauf- und -untergang für den Kanalstandort.",
   },
   en: {
     text_commands: "Replies to short commands in chat.",
@@ -136,6 +139,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     raid: "Greets incoming raids and lets you send manual shoutouts.",
     clips: "Creates a clip from the live stream on demand.",
     sun: "Calculates sunrise, sunset, and dusk for the channel location.",
+    moon: "Calculates lunar phase, illumination, moonrise, and moonset for the channel location.",
   },
 };
 

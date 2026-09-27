@@ -127,6 +127,22 @@ describe("text block overlay rendering", () => {
     expect(screen.getByText("Sunset in 23 hr 59 min")).toBeInTheDocument();
   });
 
+  it("shows zero for an ongoing phase countdown instead of counting down to its end", () => {
+    const now = Date.parse("2026-06-21T03:00:00.000Z");
+    const state = {
+      serverNow: new Date(now).toISOString(),
+      timeZone: "Europe/Berlin",
+      dataConditions: {},
+      transitions: [],
+      countdownTargets: { "sun.golden_hour_in": ["2026-06-21T02:40:00.000Z"] },
+      candidates: [{ conditions: {}, text: "Golden hour in {sun.golden_hour_in}" }],
+    };
+
+    render(<TextBlockOverlayElement config={{ blockName: "sun" }} state={state} now={now} language="en" />);
+
+    expect(screen.getByText("Golden hour in 0 min")).toBeInTheDocument();
+  });
+
   it("hides a deleted block and blocks with unavailable data output", async () => {
     const missingDatabase = {
       prepare: () => ({ bind: () => ({ first: () => Promise.resolve(null) }) }),
@@ -192,6 +208,27 @@ describe("text block overlay rendering", () => {
       transitions: [{ at: sunset, values: { "sun.phase": "night" } }],
       candidates: [{ text: "Sunset {sun.set_in}" }],
       refreshAt: "2026-06-21T19:59:59.000Z",
+    });
+  });
+
+  it("schedules a text block refresh from a module value's generic next-change hint", async () => {
+    const now = Date.parse("2026-06-21T19:59:58.000Z");
+    const nextChangeAt = "2026-06-21T20:30:00.000Z";
+    const db = overlayDatabase([variant("default", "Moon {moon.phase}", {})]);
+    const resolveValues = vi.fn(() => Promise.resolve({ "moon.phase": { available: true, nextChangeAt } }));
+    const context = contextFor({
+      now,
+      renderTemplate: (text) => Promise.resolve({ text: text.replace("{moon.phase}", "Waxing gibbous"), diagnostics: [] }),
+      overlayTemplateVariableNames: new Set(["moon.phase"]),
+      resolveOverlayTemplateValues: resolveValues,
+    });
+
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+
+    expect(resolveValues).toHaveBeenCalledWith(["moon.phase"]);
+    expect(state).toMatchObject({
+      candidates: [{ text: "Moon Waxing gibbous" }],
+      refreshAt: new Date(Date.parse(nextChangeAt) + 1_000).toISOString(),
     });
   });
 
@@ -329,9 +366,9 @@ describe("text block overlay rendering", () => {
     const context = contextFor({
       overlayTemplateVariableNames: new Set(["sun.rise", "sun.set", "sun.dusk"]),
       resolveOverlayTemplateValues: () => Promise.resolve({
-        "sun.rise": { available: true, targetAt: sunrise },
-        "sun.set": { available: true, targetAt: sunset },
-        "sun.dusk": { available: true, targetAt: dusk },
+        "sun.rise": { available: true, targetAt: sunrise, nextChangeAt: sunrise },
+        "sun.set": { available: true, targetAt: sunset, nextChangeAt: sunset },
+        "sun.dusk": { available: true, targetAt: dusk, nextChangeAt: dusk },
       }),
     });
 
