@@ -21,6 +21,7 @@ import {
 } from "./db/stream-state";
 import { lookupAndRefreshStreamState } from "./stream-state-lookup";
 import { readChannelControls, readDispatchChannelState } from "./db/channel-controls";
+import { readChannelLocation } from "./db/channel-settings";
 import { getBotIdentity } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { readChannelVariables, prepareChannelVariableChange, prepareResetChannelVariablesForStream } from "./db/channel-variables";
@@ -557,6 +558,7 @@ export const dispatchEventSubNotification = async (
   let appAccessTokenPromise: Promise<string> | undefined;
   let channelLanguagePromise: Promise<ModuleLanguage> | undefined;
   let channelTimeZonePromise: Promise<string> | undefined;
+  let channelLocationPromise: ReturnType<typeof readChannelLocation> | undefined;
   let followerTotalPromise: Promise<number | null> | undefined;
   let chattersTotalPromise: Promise<number | null> | undefined;
   const followedAtPromises = new Map<string, Promise<ModuleFollowedAt>>();
@@ -600,6 +602,10 @@ export const dispatchEventSubNotification = async (
   const channelTimeZone = (): Promise<string> => {
     channelTimeZonePromise ??= channelTimeZoneFor(environment.DB, event.channelId);
     return channelTimeZonePromise;
+  };
+  const channelLocation = () => {
+    channelLocationPromise ??= readChannelLocation(environment.DB, event.channelId);
+    return channelLocationPromise;
   };
   const followerTotal = (): Promise<number | null> => {
     followerTotalPromise ??= totalFor(environment, event.channelId, "followers", fetcher);
@@ -696,6 +702,7 @@ export const dispatchEventSubNotification = async (
         channelInfo,
         channelGameId,
         channelTimeZone,
+        channelLocation,
         templateValueProviders,
         registeredTemplateVariables,
         streamState,

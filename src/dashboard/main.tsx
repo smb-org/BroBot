@@ -42,6 +42,7 @@ import {
   setChannelControl,
   saveChannelTimeZone,
   setChannelModuleEnabled,
+  type PanelChannelSettings,
 } from "./api";
 import { Led, ModuleChannelSettingsMount, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleToggleList, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
 import { ImmediateActions, WarningsAndErrorsFeed } from "./stream-manager";
@@ -67,6 +68,7 @@ import { emptyAuditFilter, auditFilterIsActive } from "./audit/model";
 import { useRealtimePanelMessages } from "./realtime";
 import { channelSettingsTexts } from "./channel-settings-locale";
 import { ChannelTimeZoneField } from "./ChannelTimeZoneField";
+import { ChannelLocationField } from "./ChannelLocationField";
 import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
 import "./styles.css";
 
@@ -994,7 +996,7 @@ const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; chi
 
 const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, onModulesChanged }: ChannelOverviewPageProperties): ReactElement => {
   const settingsTexts = channelSettingsTexts(dashboardLanguage());
-  const [channelSettings, setChannelSettings] = useState<{ timeZone: string; revision: number } | null>(null);
+  const [channelSettings, setChannelSettings] = useState<PanelChannelSettings | null>(null);
   const [timeZoneDraft, setTimeZoneDraft] = useState("");
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsError, setSettingsError] = useState("");
@@ -1017,7 +1019,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
     setSettingsError("");
     try {
       const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZoneDraft.trim());
-      setChannelSettings({ timeZone: saved.timeZone, revision: saved.revision });
+      setChannelSettings({ ...channelSettings, timeZone: saved.timeZone, revision: saved.revision });
       setTimeZoneDraft(saved.timeZone);
     } catch {
       setSettingsError(settingsTexts.saveError);
@@ -1025,17 +1027,19 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
       setSettingsBusy(false);
     }
   };
-  const saveSuggestedTimeZone = async (timeZone: string): Promise<{ timeZone: string; revision: number }> => {
+  const saveSuggestedTimeZone = async (timeZone: string): Promise<void> => {
     if (channelSettings === null) throw new Error("Channel settings are still loading.");
     setSettingsBusy(true);
     try {
       const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZone);
-      setChannelSettings({ timeZone: saved.timeZone, revision: saved.revision });
+      setChannelSettings({ ...channelSettings, timeZone: saved.timeZone, revision: saved.revision });
       setTimeZoneDraft(saved.timeZone);
-      return saved;
     } finally {
       setSettingsBusy(false);
     }
+  };
+  const locationSaved = (location: PanelChannelSettings["location"], revision: number): void => {
+    setChannelSettings((current) => current === null ? null : { ...current, location, locationRevision: revision });
   };
   const entries = sortBySeverity([
     broadcasterRow(overview.broadcasterConnection),
@@ -1072,6 +1076,17 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
             : <p className="muted">{settingsTexts.readOnly}</p>}
         </div>
         {settingsError.length === 0 ? null : <p className="error-text" role="alert">{settingsError}</p>}
+        {channelSettings === null ? null : <ChannelLocationField
+          channelId={overview.channelId}
+          language={dashboardLanguage()}
+          value={channelSettings.location}
+          revision={channelSettings.locationRevision}
+          onSaved={locationSaved}
+          channelTimeZone={channelSettings.timeZone}
+          onSaveChannelTimeZone={saveSuggestedTimeZone}
+          canEdit={canManage(overview.role)}
+          disabled={settingsBusy}
+        />}
         {channelSettings === null ? null : MODULES.flatMap((module) => module.channelSettings === undefined ? [] : [
           <ModuleChannelSettingsMount
             key={module.id}
@@ -1080,8 +1095,6 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
             language={dashboardLanguage()}
             canManage={canManage(overview.role)}
             readOnlyReason={settingsTexts.readOnly}
-            channelTimeZone={channelSettings.timeZone}
-            saveChannelTimeZone={saveSuggestedTimeZone}
           />,
         ])}
       </section>

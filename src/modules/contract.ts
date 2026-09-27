@@ -320,6 +320,14 @@ export interface ModuleTemplateUsageSource {
 
 export type ModuleTemplateRenderMode = "chat" | "preview" | "overlay";
 
+/** Host-owned channel location shared read-only with modules. */
+export interface ModuleChannelLocation {
+  readonly name: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly timeZone: string;
+}
+
 /** Host services available to a module while resolving its declared template values. */
 export interface ModuleTemplateValueContext {
   DB: D1Database;
@@ -333,6 +341,8 @@ export interface ModuleTemplateValueContext {
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   channelGameId?: () => Promise<string | null>;
   channelTimeZone: () => Promise<string>;
+  /** Lazily reads the host-owned channel location. */
+  channelLocation: () => Promise<ModuleChannelLocation | null>;
   /** Renders a module-owned nested fragment with the same host values and channel context. */
   renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
   addDiagnostic: (diagnostic: ModuleDiagnostic) => void;
@@ -345,6 +355,8 @@ export interface ModuleTemplateConditionContext {
   DB: D1Database;
   channelId: string;
   channelTimeZone: () => Promise<string>;
+  /** Lazily reads the host-owned channel location. */
+  channelLocation: () => Promise<ModuleChannelLocation | null>;
   now: number;
 }
 
@@ -459,8 +471,6 @@ export interface ModuleChannelSettingsProperties {
   language: ModuleLanguage;
   canManage: boolean;
   readOnlyReason: string;
-  channelTimeZone: string;
-  saveChannelTimeZone: (timeZone: string) => Promise<{ timeZone: string; revision: number }>;
 }
 
 /** Props for one lazily loaded card in the channel's immediate-action row. */

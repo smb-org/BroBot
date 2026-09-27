@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { BotModule, ModuleTemplateConditionContext, ModuleTemplateValueContext } from "../contract";
+import type { BotModule, ModuleChannelLocation, ModuleTemplateConditionContext, ModuleTemplateValueContext } from "../contract";
 import { validChannelTimeZone, type TemplateVariable } from "../contract";
 import { DEFAULT_SUN_ERROR_TEXTS, readSunSettings } from "./adapters/d1";
 import { SUN_ERROR_TEXT_MAX_LENGTH } from "./contracts";
@@ -21,16 +21,17 @@ type SunSettings = Awaited<ReturnType<typeof readSunSettings>>;
 
 const resolveSettings = (
   settings: SunSettings,
+  location: ModuleChannelLocation | null,
   now: number,
   timeZone: string,
   language: "de" | "en",
 ) => {
-  const location = validChannelTimeZone(timeZone) && settings.location !== null && validChannelTimeZone(settings.location.timeZone)
-    ? settings.location
+  const resolvedLocation = validChannelTimeZone(timeZone) && location !== null && validChannelTimeZone(location.timeZone)
+    ? location
     : null;
   try {
     return resolveSunTemplateValues({
-      location,
+      location: resolvedLocation,
       now,
       timeZone: validChannelTimeZone(timeZone) ? timeZone : "Europe/Berlin",
       language,
@@ -48,14 +49,15 @@ const resolveSettings = (
 };
 
 const currentSunValues = async (
-  context: Pick<ModuleTemplateValueContext, "DB" | "channelId" | "channelTimeZone" | "channelLanguage" | "now">,
+  context: Pick<ModuleTemplateValueContext, "DB" | "channelId" | "channelTimeZone" | "channelLocation" | "channelLanguage" | "now">,
 ) => {
-  const [settings, timeZone, language] = await Promise.all([
+  const [settings, location, timeZone, language] = await Promise.all([
     readSunSettings(context.DB, context.channelId),
+    context.channelLocation(),
     context.channelTimeZone(),
     context.channelLanguage(),
   ]);
-  return resolveSettings(settings, context.now, timeZone, language);
+  return resolveSettings(settings, location, context.now, timeZone, language);
 };
 
 const resolveConditionValues = async (
@@ -64,11 +66,12 @@ const resolveConditionValues = async (
 ): Promise<Readonly<Record<string, string>>> => {
   if (!ids.includes("sun.phase")) return {};
   try {
-    const [settings, timeZone] = await Promise.all([
+    const [settings, location, timeZone] = await Promise.all([
       readSunSettings(context.DB, context.channelId),
+      context.channelLocation(),
       context.channelTimeZone(),
     ]);
-    const phase = resolveSettings(settings, context.now, timeZone, "en").dataConditions["sun.phase"];
+    const phase = resolveSettings(settings, location, context.now, timeZone, "en").dataConditions["sun.phase"];
     return phase === undefined ? {} : { "sun.phase": phase };
   } catch {
     return {};
@@ -105,9 +108,9 @@ export const sunModule: BotModule<typeof settingsSchema> = {
   }],
   resolveTemplateConditions: resolveConditionValues,
   routes: sunRoutes,
-  channelSettings: () => import("./panel/location-settings"),
+  channelSettings: () => import("./panel/settings"),
 };
 
 export { calculateSunDay, resolveSunTemplateValues } from "./domain";
 export type { SunDay } from "./domain";
-export type { SunLocation, SunSettings } from "./contracts";
+export type { SunSettings } from "./contracts";

@@ -23,6 +23,7 @@ const renderAge = async (
     DB: {} as D1Database,
     channelInfo: () => Promise.resolve(null),
     channelTimeZone: () => Promise.resolve("UTC"),
+    channelLocation: () => Promise.resolve(null),
     streamState: () => Promise.resolve("unknown"),
     channelDetails: () => Promise.resolve(null),
     streamDetails: () => Promise.resolve(null),

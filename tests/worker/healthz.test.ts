@@ -3,6 +3,9 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { OVERLAY_TOKEN_SUBPROTOCOL_PREFIX, REALTIME_PROTOCOL } from "../../src/realtime-contract";
 import { hashOverlayToken } from "../../src/worker/auth/crypto";
+import type { ModuleTemplateValueContext } from "../../src/modules/contract";
+import { sunModule, resolveSunTemplateValues } from "../../src/modules/sun";
+import { readChannelLocation } from "../../src/worker/db/channel-settings";
 
 /**
  * The worker test environment starts with an empty database. Since #43, the
@@ -21,6 +24,13 @@ const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
 const applyMigrations = async (): Promise<void> => {
   const database = (env as unknown as { DB: D1Database }).DB;
   for (const path of Object.keys(migrationSources).sort()) {
+    const filename = path.split("/").pop();
+    if (filename === "0019_sun_data_source.sql") {
+      await database.prepare(
+        `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind(MIGRATION_CHANNEL_ID, MIGRATION_CHANNEL_ID, "Migration channel", "2026-09-27T00:00:00.000Z", "2026-09-27T00:00:00.000Z").run();
+    }
     // Strip line comments first: a semicolon inside a comment would otherwise
     // split the statement mid-sentence, and D1 would get a fragment with no
     // statement ("SQL code did not contain a statement").
@@ -34,10 +44,41 @@ const applyMigrations = async (): Promise<void> => {
     for (const statement of statements) {
       await database.prepare(statement).run();
     }
+    if (filename === "0019_sun_data_source.sql") {
+      await database.prepare(
+        `INSERT INTO sun_locations
+          (channel_id, name, latitude, longitude, location_time_zone, error_text_de, error_text_en, revision)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(MIGRATION_CHANNEL_ID, "Tromsø, Norway", 69.6492, 18.9553, "Europe/Oslo", "Fehler DE", "Error EN", 4).run();
+    }
     await database.prepare(
       "INSERT INTO d1_migrations (name, applied_at) VALUES (?, ?)",
     ).bind(path.split("/").pop(), new Date().toISOString()).run();
   }
+};
+
+const MIGRATION_CHANNEL_ID = `migration-${crypto.randomUUID()}`;
+
+const sunSetForHostLocation = async (DB: D1Database, channelId: string, now: number): Promise<string | undefined> => {
+  const context: ModuleTemplateValueContext = {
+    DB,
+    channelId,
+    templateContext: "chat_command",
+    knownTemplateVariableNames: new Set(["sun.set"]),
+    chatStatus: null,
+    mode: "chat",
+    channelLanguage: () => Promise.resolve("en"),
+    streamState: () => Promise.resolve("offline"),
+    channelInfo: () => Promise.resolve(null),
+    channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+    channelLocation: () => readChannelLocation(DB, channelId),
+    renderTemplate: (text) => Promise.resolve({ text, diagnostics: [] }),
+    addDiagnostic: () => undefined,
+    now,
+    resolveTemplateConditions: () => Promise.resolve({}),
+  };
+  const values = await sunModule.resolveTemplateValues?.(["sun.set"], context);
+  return values?.["sun.set"];
 };
 
 describe("worker skeleton", () => {
@@ -86,6 +127,50 @@ describe("worker skeleton", () => {
       expect(body.missingBindings).toEqual([]);
     });
 
+    it("moves a legacy sun location into the host channel row", async () => {
+      const database = (env as unknown as { DB: D1Database }).DB;
+      try {
+        const channel = await database.prepare(
+          `SELECT location_name, location_latitude, location_longitude, location_time_zone, location_revision
+             FROM channels WHERE channel_id = ?`,
+        ).bind(MIGRATION_CHANNEL_ID).first();
+        const settings = await database.prepare(
+          "SELECT error_text_de, error_text_en, revision FROM sun_settings WHERE channel_id = ?",
+        ).bind(MIGRATION_CHANNEL_ID).first();
+        const oldTable = await database.prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sun_locations'",
+        ).first<{ name: string }>();
+
+        expect(channel).toEqual({
+          location_name: "Tromsø, Norway",
+          location_latitude: 69.6492,
+          location_longitude: 18.9553,
+          location_time_zone: "Europe/Oslo",
+          location_revision: 4,
+        });
+        expect(settings).toEqual({ error_text_de: "Fehler DE", error_text_en: "Error EN", revision: 4 });
+        expect(oldTable).toBeNull();
+        const now = Date.UTC(2026, 0, 15, 12, 0, 0);
+        const output = await sunSetForHostLocation(database, MIGRATION_CHANNEL_ID, now);
+        const expected = resolveSunTemplateValues({
+          location: {
+            latitude: 69.6492,
+            longitude: 18.9553,
+            timeZone: "Europe/Oslo",
+          },
+          now,
+          timeZone: "Europe/Berlin",
+          language: "en",
+          errorText: "Error EN",
+        }).values["sun.set"];
+
+        expect(output).toBe(expected);
+        expect(output).not.toBe("Error EN");
+      } finally {
+        await database.prepare("DELETE FROM channels WHERE channel_id = ?").bind(MIGRATION_CHANNEL_ID).run();
+      }
+    });
+
     it("performs the public overlay WebSocket handshake with only brobot.v1 selected", async () => {
       const bindings = env as unknown as Env;
       const database = bindings.DB;
@@ -120,5 +205,6 @@ describe("worker skeleton", () => {
       clientSocket.accept();
       clientSocket.close(1000, "test complete");
     });
+
   });
 });
