@@ -249,7 +249,10 @@ test("ListDetail uses the shared desktop grid and mobile overlay inspector", asy
   // beside it.
   await page.setViewportSize({ width: 900, height: 900 });
   await expect(inspector).toBeVisible();
-  const listBoxNarrow = await list.boundingBox();
+  // The modal drawer makes the list behind it inert and hidden from the
+  // accessibility tree, so it is only reachable with includeHidden.
+  const hiddenList = page.getByRole("region", { name: "Befehle", exact: true, includeHidden: true });
+  const listBoxNarrow = await hiddenList.boundingBox();
   const inspectorBoxNarrow = await inspector.boundingBox();
   expect(listBoxNarrow).not.toBeNull();
   expect(inspectorBoxNarrow).not.toBeNull();
