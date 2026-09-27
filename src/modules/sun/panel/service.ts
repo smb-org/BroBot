@@ -19,7 +19,7 @@ const readJson = async <T,>(response: Response): Promise<T> => {
 };
 
 export const fetchSunSettings = async (channelId: string): Promise<SunSettings> =>
-  readJson<SunSettings>(await fetch(`${modulePath(channelId)}/settings`));
+  readJson<SunSettings>(await fetch(`${modulePath(channelId)}/location`));
 
 export const searchSunLocations = async (
   channelId: string,
@@ -35,7 +35,7 @@ export const saveSunSettings = async (
   input: { revision: number; location: SunLocation | null; errorTexts: SunSettings["errorTexts"] },
 ): Promise<SunSettings> => {
   const csrf = await readJson<{ token: string }>(await fetch("/api/csrf"));
-  return readJson<SunSettings>(await fetch(`${modulePath(channelId)}/settings`, {
+  return readJson<SunSettings>(await fetch(`${modulePath(channelId)}/location`, {
     method: "PATCH",
     headers: { "X-CSRF-Token": csrf.token, "Content-Type": "application/json" },
     body: JSON.stringify(input),
