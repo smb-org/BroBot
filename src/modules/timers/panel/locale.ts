@@ -38,6 +38,7 @@ export interface TimersTexts {
   deleteError: string;
   blockMissing: string;
   inputDependentBlock: string;
+  limitReached: string;
   noBlocks: string;
   roleLocked: string;
   noNextRun: string;
@@ -84,6 +85,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     deleteError: "Der Zeitgeber konnte nicht entfernt werden.",
     blockMissing: "Der ausgewählte Textbaustein existiert nicht mehr.",
     inputDependentBlock: "Dieser Textbaustein benötigt Eingaben aus einem Chatbefehl und kann nicht geplant werden.",
+    limitReached: "Ein Kanal kann höchstens 50 Zeitgeber haben.",
     noBlocks: "Lege zuerst einen Textbaustein in der Textbibliothek an.",
     roleLocked: "Nur Broadcaster und Verwalter dürfen Zeitgeber bearbeiten.",
     noNextRun: "Kein Lauf geplant",
@@ -128,6 +130,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     deleteError: "The timer could not be removed.",
     blockMissing: "The selected text block no longer exists.",
     inputDependentBlock: "This text block needs input from a chat command and cannot be scheduled.",
+    limitReached: "A channel can have up to 50 timers.",
     noBlocks: "Create a text block in the text library first.",
     roleLocked: "Only broadcasters and managers can edit timers.",
     noNextRun: "No run scheduled",

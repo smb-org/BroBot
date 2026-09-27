@@ -165,6 +165,11 @@ textLibraryRoutes.post("/blocks", async (context) => {
       .map(({ name }) => name),
   ]);
   if (reservedNames.has(parsed.name)) return context.json({ error: "text_library_block_reserved_name" }, 400);
+  const templateIssues = await context.get("validateTemplateContentMutation")(channelId, {
+    name: parsed.name,
+    texts: parsed.variants.flatMap((variant) => variant.texts),
+  });
+  if (templateIssues.length > 0) return context.json({ error: "text_library_template_usage_invalid", issues: templateIssues }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const snapshot = await service.list(channelId);
   const result = await service.create({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"), snapshot);
@@ -199,6 +204,11 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
       .map(({ name }) => name),
   ]);
   if (reservedNames.has(parsed.name)) return context.json({ error: "text_library_block_reserved_name" }, 400);
+  const templateIssues = await context.get("validateTemplateContentMutation")(channelId, {
+    name: parsed.name,
+    texts: parsed.variants.flatMap((variant) => variant.texts),
+  });
+  if (templateIssues.length > 0) return context.json({ error: "text_library_template_usage_invalid", issues: templateIssues }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const snapshot = await service.list(channelId);
   const result = await service.change({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"), snapshot);

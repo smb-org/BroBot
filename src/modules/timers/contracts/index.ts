@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const TIMER_NAME_MAX_LENGTH = 60;
-export const TIMER_MAXIMUM_COUNT = 100;
+export const TIMER_MAXIMUM_COUNT = 50;
 export const TIMER_MINUTES_MAXIMUM = 24 * 60;
 export const TIMER_BLOCK_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 

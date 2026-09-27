@@ -162,6 +162,14 @@ und Registry eingebunden.
 Nutzungsanzeigen. Der Host ergänzt seine eigenen Oberflächenquellen; Module
 fragen dafür keine Tabellen anderer Module ab.
 
+Module, die Textblöcke ausführen, können `validateTemplateContent` bereitstellen.
+Der Host ruft diese Prüfung beim Anlegen und Bearbeiten eines Textblocks mit
+dem vorgeschlagenen Inhalt auf. Das Modul liefert maschinenlesbare Gründe und
+den Namen des betroffenen Eintrags; die Textbibliothek zeigt daraus eine
+lokalisierte Fehlermeldung. So bleiben auch spätere Änderungen an bereits
+verwendeten Blöcken validiert, ohne dass ein Modul sein konsumierendes Modul
+importiert oder dessen Tabellen kennt.
+
 Das erste Modul ist `src/modules/text_commands/`. Es ist in der Registry als
 `text_commands` eingetragen, abonniert `channel.chat.message` und definiert
 seine Tabellen in der zentralen D1-Kette unter `migrations/`. Der D1-Adapter

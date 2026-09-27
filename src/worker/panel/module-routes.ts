@@ -34,6 +34,7 @@ import { readChannelVariables } from "../db/channel-variables";
 import { readChannelLocation } from "../db/channel-settings";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
 import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event-times";
+import { notifyModuleScheduleInputsChanged } from "../module-schedules";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -44,6 +45,7 @@ interface ModuleRouteEnvironment {
     | "listChannelVariables" | "findChannelVariable"
     | "listTextBlockConditions"
     | "listEventTimeSources" | "resolveEventTimes"
+    | "notifyScheduleInputsChanged" | "validateTemplateContentMutation"
     | "resolveTextBlockConditions"
     | "publishModuleOverlayMessage"
     | "publishOverlayHostEvent"
@@ -150,6 +152,16 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   context.set("listTextBlockConditions", () => Promise.resolve(MODULES.flatMap((module) => module.textBlockConditions ?? [])));
   context.set("listEventTimeSources", moduleEventTimeOptions);
   context.set("resolveEventTimes", (channelId, now) => resolveModuleEventTimes(context.env.DB, channelId, now));
+  context.set("notifyScheduleInputsChanged", (channelId, reason) =>
+    notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, reason));
+  context.set("validateTemplateContentMutation", async (channelId, candidate) => {
+    const registeredVariables = await registeredTemplateVariablesForChannel(context.env.DB, channelId);
+    const validationContext = { DB: context.env.DB, channelId, candidate, registeredVariables };
+    const issues = await Promise.all(MODULES.map((module) =>
+      module.validateTemplateContent?.(validationContext) ?? Promise.resolve([]),
+    ));
+    return issues.flat();
+  });
   context.set("resolveTextBlockConditions", async (channelId, ids, now) => {
     const requested = new Set(ids);
     const channel = await context.env.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")

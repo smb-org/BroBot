@@ -401,7 +401,11 @@ export type AuthorizeModuleMutation = (
 export interface ModuleExecutionContext {
   DB: D1Database;
   authorizeMutation: AuthorizeModuleMutation;
+  /** True only when this EventSub notification committed a real stream-state transition. */
+  streamStateTransitionAccepted?: boolean;
   streamState: () => Promise<ModuleStreamState>;
+  /** Monotonic count of accepted chat messages kept in this channel object. */
+  chatActivityCount: () => Promise<number>;
   /** Lazily loads the current channel's public Helix fields and live start time. */
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   /** Lazily loads only the current channel game, independently of stream details. */
@@ -429,8 +433,8 @@ export interface ModuleExecutionContext {
   /** Lazily reads the channel's configured time zone for date/time and module conditions. */
   channelTimeZone: () => Promise<string>;
   /** Schedules or clears an alarm registered by this module. */
-  scheduleAlarm: (handlerKey: string, alarmKey: string, deadline: number) => Promise<void>;
-  clearAlarm: (alarmKey: string) => Promise<void>;
+  scheduleAlarm: (handlerKey: string, alarmKey: string, deadline: number, ownerRevision?: number) => Promise<void>;
+  clearAlarm: (alarmKey: string, ownerRevision?: number) => Promise<void>;
 }
 
 /** Durable storage and alarm access given to a module alarm handler. */
@@ -443,8 +447,8 @@ export interface ModuleAlarmContext {
     delete(key: string): Promise<boolean>;
   };
   /** Schedule or clear another key owned by this module and handled by this registration. */
-  schedule: (key: string, deadline: number) => Promise<void>;
-  clear: (key: string) => Promise<void>;
+  schedule: (key: string, deadline: number, ownerRevision?: number) => Promise<void>;
+  clear: (key: string, ownerRevision?: number) => Promise<void>;
   /** Renders a host template in the channel's event context. */
   renderTemplate: (text: string, now?: number) => Promise<{ text: string; attributions?: readonly string[] }>;
   /** Sends through the host's bounded chat boundary with an occurrence claim. */
@@ -452,7 +456,8 @@ export interface ModuleAlarmContext {
     text: string,
     idempotencyKey: string,
     attributions?: readonly string[],
-  ) => Promise<{ sent: boolean; reason: string | null }>;
+    stillValid?: () => Promise<boolean>,
+  ) => Promise<{ sent: boolean; reason: string | null; retryable: boolean }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
   /** Resolves all registered module event-time sources without exposing module identity. */
@@ -494,7 +499,33 @@ export interface ModuleAlarmDefinition {
     context: ModuleAlarmContext,
     alarmKey: string,
     deadline: number,
+    ownerRevision?: number,
   ) => Promise<void>;
+  /** Replans durable schedules after an input owned by the host or another module changes. */
+  onScheduleInputsChanged?: (
+    context: ModuleAlarmContext,
+    reason: ModuleScheduleInputChangeReason,
+  ) => Promise<void>;
+}
+
+export type ModuleScheduleInputChangeReason = "event_times" | "channel_time_zone";
+
+export interface ModuleTemplateContentCandidate {
+  name: string;
+  texts: readonly string[];
+}
+
+/** A generic reason a module consumer rejects a proposed template-content edit. */
+export interface ModuleTemplateContentIssue {
+  reason: "input_dependent";
+  consumerName: string;
+}
+
+export interface ModuleTemplateContentValidationContext {
+  DB: D1Database;
+  channelId: string;
+  candidate: ModuleTemplateContentCandidate;
+  registeredVariables: readonly ModuleRegisteredTemplateVariable[];
 }
 
 export type ModuleFollowedAt = (string & {}) | null | "unavailable";
@@ -804,6 +835,11 @@ export interface ModuleRouteVariables {
   listTextBlockConditions: () => Promise<readonly ModuleTextBlockConditionDefinition[]>;
   listEventTimeSources: () => readonly { id: string; label: Readonly<Record<ModuleLanguage, string>> }[];
   resolveEventTimes: (channelId: string, now: number) => Promise<readonly ResolvedModuleEventTime[]>;
+  notifyScheduleInputsChanged: (channelId: string, reason: ModuleScheduleInputChangeReason) => Promise<void>;
+  validateTemplateContentMutation: (
+    channelId: string,
+    candidate: ModuleTemplateContentCandidate,
+  ) => Promise<readonly ModuleTemplateContentIssue[]>;
   resolveTextBlockConditions: (
     channelId: string,
     ids: readonly string[],
@@ -938,6 +974,10 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     db: D1Database,
     channelId: string,
   ) => Promise<readonly ModuleTemplateUsageSource[]>;
+  /** Validates edits to shared template content against this module's consumers. */
+  validateTemplateContent?: (
+    context: ModuleTemplateContentValidationContext,
+  ) => Promise<readonly ModuleTemplateContentIssue[]>;
   /** Optional references to channel variables stored in module-owned data. */
   variableReferences?: ModuleVariableReferences;
   /** Broadcaster consent the host verifies before the EventSub subscription. */

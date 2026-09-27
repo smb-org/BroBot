@@ -63,6 +63,7 @@ const setScheduledAlarm = async (
   trigger: Timer["trigger"],
   enabled: boolean,
   now: number,
+  revision: number,
 ): Promise<void> => {
   const key = alarmKeyFor(timerId);
   let deadline = enabled ? await nextRunFor(context.env.DB, context.get("resolveEventTimes"), channelId, trigger, now) : null;
@@ -71,15 +72,13 @@ const setScheduledAlarm = async (
       .bind(channelId).first<{ state: string }>();
     deadline = state?.state === "online" ? now + trigger.minutes * 60_000 : null;
   }
-  if (deadline === null) {
-    const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-    await stub.clearModuleAlarm(MODULE_ID, key);
-  } else {
-    const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-    await stub.scheduleModuleAlarm(MODULE_ID, ALARM_HANDLER, key, deadline);
-  }
-  await context.env.DB.prepare("UPDATE timers SET next_run_at = ? WHERE channel_id = ? AND timer_id = ?")
-    .bind(deadline === null ? null : new Date(deadline).toISOString(), channelId, timerId).run();
+  const result = await context.env.DB.prepare(
+    "UPDATE timers SET next_run_at = ? WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = ?",
+  ).bind(deadline === null ? null : new Date(deadline).toISOString(), channelId, timerId, revision, enabled ? 1 : 0).run();
+  if (result.meta.changes === 0) return;
+  const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+  if (deadline === null) await stub.clearModuleAlarm(MODULE_ID, key, revision);
+  else await stub.scheduleModuleAlarm(MODULE_ID, ALARM_HANDLER, key, deadline, revision);
 };
 
 const inputDependentError = (reason: "missing" | "input_dependent"): string =>
@@ -130,8 +129,10 @@ timerRoutes.post("/timers", async (context) => {
     `INSERT INTO timers
       (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision,
        next_run_at, last_run_at, last_chat_activity_count, created_at, updated_at)
-     SELECT ?, ?, ?, 1, ?, ?, ?, 1, NULL, NULL, ?, ?, ? WHERE 1 = 1 ${authorization.sql}`,
-  ).bind(timerId, channelId, input.name, input.blockName, input.trigger.type, triggerJson, activityCount, now, now, ...authorization.values);
+     SELECT ?, ?, ?, 1, ?, ?, ?, 1, NULL, NULL, ?, ?, ?
+       WHERE (SELECT COUNT(*) FROM timers WHERE channel_id = ?) < ? ${authorization.sql}`,
+  ).bind(timerId, channelId, input.name, input.blockName, input.trigger.type, triggerJson,
+    activityCount, now, now, channelId, TIMER_MAXIMUM_COUNT, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: MODULE_ID,
@@ -140,8 +141,14 @@ timerRoutes.post("/timers", async (context) => {
     after: { timerId, name: input.name, blockName: input.blockName, triggerType: input.trigger.type },
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);
-  if (results[0]?.meta.changes === 0) return context.json({ error: "timer_management_denied" }, 403);
-  await setScheduledAlarm(context, channelId, timerId, input.trigger, true, Date.parse(now));
+  if (results[0]?.meta.changes === 0) {
+    const currentCount = await context.env.DB.prepare("SELECT COUNT(*) AS count FROM timers WHERE channel_id = ?")
+      .bind(channelId).first<{ count: number }>();
+    return (currentCount?.count ?? 0) >= TIMER_MAXIMUM_COUNT
+      ? context.json({ error: "timer_limit_reached" }, 409)
+      : context.json({ error: "timer_management_denied" }, 403);
+  }
+  await setScheduledAlarm(context, channelId, timerId, input.trigger, true, Date.parse(now), 1);
   const timer = await readTimer(context.env.DB, channelId, timerId);
   return context.json({ timer }, 201);
 });
@@ -184,7 +191,7 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
     const current = await readTimer(context.env.DB, channelId, timerId);
     return context.json({ error: current === null ? "timer_not_found" : "timer_conflict", ...(current === null ? {} : { timer: current }) }, 409);
   }
-  await setScheduledAlarm(context, channelId, timerId, input.trigger, existing.enabled, Date.parse(now));
+  await setScheduledAlarm(context, channelId, timerId, input.trigger, existing.enabled, Date.parse(now), existing.revision + 1);
   const timer = await readTimer(context.env.DB, channelId, timerId);
   return context.json({ timer });
 });
@@ -221,7 +228,7 @@ timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
       ? context.json({ error: "timer_not_found" }, 404)
       : current.revision !== revision ? context.json({ error: "timer_conflict", timer: current }, 409) : context.json({ timer: current });
   }
-  await setScheduledAlarm(context, channelId, timerId, existing.trigger, enabled, Date.parse(now));
+  await setScheduledAlarm(context, channelId, timerId, existing.trigger, enabled, Date.parse(now), existing.revision + 1);
   const timer = await readTimer(context.env.DB, channelId, timerId);
   return context.json({ timer });
 });
@@ -249,7 +256,7 @@ timerRoutes.delete("/timers/:timerId", async (context) => {
   const results = await context.env.DB.batch([mutation, audit]);
   if (results[0]?.meta.changes === 0) return context.json({ error: "timer_conflict" }, 409);
   const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-  await stub.clearModuleAlarm(MODULE_ID, alarmKeyFor(timerId));
+  await stub.clearModuleAlarm(MODULE_ID, alarmKeyFor(timerId), revision + 1);
   return context.body(null, 204);
 });
 

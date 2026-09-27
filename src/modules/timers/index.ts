@@ -4,13 +4,14 @@ import type { BotModule, ModuleTemplateUsageSource } from "../contract";
 import type { Timer } from "./contracts";
 import { timerTriggerSchema } from "./contracts";
 import { timersModuleCatalog } from "./contracts/catalog";
-import { mapTimerRow, type TimerRow } from "./service";
-import { nextDailyTimerAt, nextIntervalAt, nextTimerAt, timerOccurrenceKey, triggerDelayMs } from "./domain";
+import { mapTimerRow, validateTimerTemplateMutation, type TimerRow } from "./service";
+import { isDailyTimerDeadlineCurrent, nextDailyTimerAt, nextIntervalAt, nextTimerAt, timerOccurrenceKey, triggerDelayMs } from "./domain";
 import { timerRoutes } from "./routes";
 
 const settingsSchema = z.object({});
 const TIMER_MODULE_ID = "timers";
 const TIMER_ALARM_HANDLER = "run";
+const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
 const alarmKeyFor = (timerId: string): string => `timer:${timerId}`;
 const eventTimeRefreshKeyFor = (timerId: string, eventAt: number): string => `${alarmKeyFor(timerId)}:refresh:${String(eventAt)}`;
 
@@ -23,69 +24,87 @@ const listTimers = async (db: D1Database, channelId: string): Promise<Timer[]> =
   return result.results.map(mapTimerRow);
 };
 
-const saveNextRunAt = async (db: D1Database, channelId: string, timerId: string, at: number | null): Promise<void> => {
-  await db.prepare("UPDATE timers SET next_run_at = ? WHERE channel_id = ? AND timer_id = ?")
-    .bind(at === null ? null : new Date(at).toISOString(), channelId, timerId).run();
+type TimerAlarmContext = Parameters<NonNullable<BotModule["alarms"]>[number]["handle"]>[0];
+
+const saveNextRunAt = async (
+  db: D1Database,
+  channelId: string,
+  timer: Timer,
+  at: number | null,
+): Promise<boolean> => {
+  const result = await db.prepare(
+    "UPDATE timers SET next_run_at = ? WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = 1",
+  ).bind(at === null ? null : new Date(at).toISOString(), channelId, timer.id, timer.revision).run();
+  return result.meta.changes > 0;
+};
+
+const persistAndSchedule = async (
+  timer: Timer,
+  context: TimerAlarmContext,
+  nextAt: number | null,
+): Promise<boolean> => {
+  if (!await saveNextRunAt(context.DB, context.channelId, timer, nextAt)) return false;
+  const key = alarmKeyFor(timer.id);
+  if (nextAt === null) await context.clear(key, timer.revision);
+  else await context.schedule(key, nextAt, timer.revision);
+  return true;
+};
+
+const timeZoneFor = async (context: TimerAlarmContext): Promise<string> => {
+  const row = await context.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")
+    .bind(context.channelId).first<{ time_zone: string }>();
+  return row?.time_zone ?? "Europe/Berlin";
+};
+
+const nextDeadlineFor = async (
+  timer: Timer,
+  context: TimerAlarmContext,
+  now: number,
+  previousDeadline = now,
+): Promise<number | null> => {
+  if (timer.trigger.type === "interval") {
+    return await context.streamState() === "online"
+      ? nextIntervalAt(previousDeadline, now, timer.trigger.minutes)
+      : null;
+  }
+  if (timer.trigger.type === "stream_start") return null;
+  const timeZone = await timeZoneFor(context);
+  if (timer.trigger.type === "time_of_day") return nextDailyTimerAt(timer.trigger, now, timeZone);
+  return nextTimerAt(timer.trigger, { now, timeZone, eventTimes: await context.resolveEventTimes(now) });
 };
 
 const rescheduleAfterRun = async (
   timer: Timer,
-  context: Parameters<NonNullable<BotModule["alarms"]>[number]["handle"]>[0],
+  context: TimerAlarmContext,
   deadline: number,
 ): Promise<void> => {
   const now = Date.now();
-  let nextAt: number | null = null;
-  if (timer.trigger.type === "interval") {
-    if (await context.streamState() === "online") {
-      nextAt = nextIntervalAt(deadline, now, timer.trigger.minutes);
-    }
-  } else if (timer.trigger.type === "time_of_day") {
-    const row = await context.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")
-      .bind(context.channelId).first<{ time_zone: string }>();
-    nextAt = nextDailyTimerAt(timer.trigger, now, row?.time_zone ?? "Europe/Berlin");
-  } else if (timer.trigger.type === "before_event") {
-    const channel = await context.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")
-      .bind(context.channelId).first<{ time_zone: string }>();
-    nextAt = nextTimerAt(timer.trigger, {
-      now,
-      timeZone: channel?.time_zone ?? "Europe/Berlin",
-      eventTimes: await context.resolveEventTimes(now),
-    });
-  }
-
-  const alarmKey = alarmKeyFor(timer.id);
-  if (nextAt === null) {
-    await context.clear(alarmKey);
-  } else {
-    await context.schedule(alarmKey, nextAt);
-  }
-  await context.DB.prepare(
-    "UPDATE timers SET next_run_at = ? WHERE channel_id = ? AND timer_id = ?",
-  ).bind(
-    nextAt === null ? null : new Date(nextAt).toISOString(),
-    context.channelId,
-    timer.id,
-  ).run();
+  const nextAt = await nextDeadlineFor(timer, context, now, deadline);
+  await persistAndSchedule(timer, context, nextAt);
 };
 
 const isDueOccurrenceCurrent = async (
   timer: Timer,
-  context: Parameters<NonNullable<BotModule["alarms"]>[number]["handle"]>[0],
+  context: TimerAlarmContext,
   alarmKey: string,
   deadline: number,
-): Promise<{ current: boolean; eventAt?: number }> => {
+): Promise<{ current: boolean; eventAt?: number; streamId?: string }> => {
   if (alarmKey !== alarmKeyFor(timer.id)) return { current: false };
   if (timer.trigger.type === "interval") {
     return { current: await context.streamState() === "online" };
   }
   if (timer.trigger.type === "time_of_day") {
-    return { current: timer.trigger.alsoOffline || await context.streamState() === "online" };
+    const [timeZone, state] = await Promise.all([timeZoneFor(context), context.streamState()]);
+    return {
+      current: isDailyTimerDeadlineCurrent(timer.trigger, deadline, timeZone) &&
+        (timer.trigger.alsoOffline || state === "online"),
+    };
   }
   if (timer.trigger.type === "stream_start") {
     const [state, stream] = await Promise.all([context.streamState(), context.streamStartedAt()]);
     if (state !== "online" || stream.startedAt === null || stream.streamId === null) return { current: false };
     const expected = Date.parse(stream.startedAt) + triggerDelayMs(timer.trigger);
-    return { current: expected === deadline };
+    return { current: expected === deadline, streamId: stream.streamId };
   }
   const events = await context.resolveEventTimes(Date.now());
   const leadMs = timer.trigger.minutes * 60_000;
@@ -98,9 +117,10 @@ const isDueOccurrenceCurrent = async (
 };
 
 export const handleTimerAlarm = async (
-  context: Parameters<NonNullable<BotModule["alarms"]>[number]["handle"]>[0],
+  context: TimerAlarmContext,
   alarmKey: string,
   deadline: number,
+  ownerRevision?: number,
 ): Promise<void> => {
   const refreshMarker = ":refresh:";
   const refreshAt = alarmKey.indexOf(refreshMarker);
@@ -115,14 +135,34 @@ export const handleTimerAlarm = async (
   ).bind(context.channelId, timerId).first<TimerRow>();
   if (row === null) return;
   const timer = mapTimerRow(row);
-  if (!timer.enabled) return;
-  if (isEventTimeRefresh) {
-    if (timer.trigger.type === "before_event") await rescheduleAfterRun(timer, context, deadline);
+  if (!timer.enabled) {
+    await context.clear(alarmKeyFor(timer.id), timer.revision);
     return;
   }
-  if (alarmKey !== alarmKeyFor(timer.id) || row.next_run_at === null || Date.parse(row.next_run_at) !== deadline) return;
+  if (isEventTimeRefresh) {
+    if (timer.trigger.type === "before_event") {
+      await persistAndSchedule(timer, context, await nextDeadlineFor(timer, context, Date.now()));
+    }
+    return;
+  }
+  if (alarmKey !== alarmKeyFor(timer.id)) return;
+  if (ownerRevision !== undefined && ownerRevision !== timer.revision) {
+    await persistAndSchedule(timer, context, await nextDeadlineFor(timer, context, Date.now()));
+    return;
+  }
+  if (row.next_run_at === null || Date.parse(row.next_run_at) !== deadline) {
+    await persistAndSchedule(timer, context, await nextDeadlineFor(timer, context, Date.now()));
+    return;
+  }
   const occurrence = await isDueOccurrenceCurrent(timer, context, alarmKey, deadline);
   const now = Date.now();
+  const graceEndsAt = timer.trigger.type === "before_event"
+    ? occurrence.eventAt ?? deadline
+    : deadline + TIMER_OCCURRENCE_GRACE_MS;
+  if (now > graceEndsAt) {
+    await rescheduleAfterRun(timer, context, deadline);
+    return;
+  }
   let sent = false;
   if (occurrence.current) {
     let shouldSend = true;
@@ -142,10 +182,16 @@ export const handleTimerAlarm = async (
     }
     if (shouldSend) {
       const rendered = await context.renderTemplate(`{${timer.blockName}}`, now);
-      const idempotencyKey = timerOccurrenceKey(timer.id, deadline);
-      const result = await context.sendChat(rendered.text, idempotencyKey, rendered.attributions);
+      const idempotencyKey = timerOccurrenceKey(timer.id, deadline, occurrence.streamId);
+      const result = await context.sendChat(rendered.text, idempotencyKey, rendered.attributions, async () => {
+        const current = await context.DB.prepare(
+          `SELECT enabled, revision, next_run_at FROM timers WHERE channel_id = ? AND timer_id = ?`,
+        ).bind(context.channelId, timer.id).first<{ enabled: number; revision: number; next_run_at: string | null }>();
+        return current?.enabled === 1 && current.revision === timer.revision &&
+          current.next_run_at !== null && Date.parse(current.next_run_at) === deadline && Date.now() <= graceEndsAt;
+      });
       sent = result.sent;
-      if (!result.sent && result.reason !== "already_attempted") {
+      if (!result.sent && result.retryable) {
         throw new Error(`Timer chat send failed: ${result.reason ?? "unknown"}.`);
       }
       if (sent && activityCount !== null) {
@@ -162,6 +208,19 @@ export const handleTimerAlarm = async (
   if (sent) {
     await context.DB.prepare("UPDATE timers SET last_run_at = ? WHERE channel_id = ? AND timer_id = ?")
       .bind(new Date(completedAt).toISOString(), context.channelId, timer.id).run();
+  }
+};
+
+const refreshSchedules = async (
+  context: TimerAlarmContext,
+  reason: "event_times" | "channel_time_zone",
+): Promise<void> => {
+  const timers = await listTimers(context.DB, context.channelId);
+  const now = Date.now();
+  for (const timer of timers) {
+    if (!timer.enabled || (timer.trigger.type !== "time_of_day" && timer.trigger.type !== "before_event") ||
+        (reason === "event_times" && timer.trigger.type !== "before_event")) continue;
+    await persistAndSchedule(timer, context, await nextDeadlineFor(timer, context, now));
   }
 };
 
@@ -182,6 +241,7 @@ export const timersModule: BotModule<typeof settingsSchema> = {
   settingsSchema,
   defaultSettings: {},
   templateUsageSources,
+  validateTemplateContent: validateTimerTemplateMutation,
   navigationEntries: [{
     id: "timers",
     label: { de: timersModuleCatalog.de.label, en: timersModuleCatalog.en.label },
@@ -191,19 +251,26 @@ export const timersModule: BotModule<typeof settingsSchema> = {
     keywords: ["timer", "timers", "schedule", "zeitplan", "zeitgeber"],
   }],
   eventSubTypes: ["stream.online", "stream.offline"],
-  alarms: [{ key: TIMER_ALARM_HANDLER, retryDelaysMs: [5_000, 15_000, 60_000], handle: handleTimerAlarm }],
+  alarms: [{
+    key: TIMER_ALARM_HANDLER,
+    retryDelaysMs: [5_000, 15_000, 60_000],
+    handle: handleTimerAlarm,
+    onScheduleInputsChanged: refreshSchedules,
+  }],
   routes: timerRoutes,
   panel: () => import("./panel"),
   handleEvent: async (event, context) => {
     if (event.subscriptionType !== "stream.online" && event.subscriptionType !== "stream.offline") {
       return { actions: [], diagnostics: [] };
     }
+    if (context.streamStateTransitionAccepted !== true) return { actions: [], diagnostics: [] };
     const timers = await listTimers(context.DB, event.channelId);
     if (event.subscriptionType === "stream.offline") {
       for (const timer of timers) {
         if (timer.trigger.type !== "interval" && timer.trigger.type !== "stream_start") continue;
-        await context.clearAlarm(alarmKeyFor(timer.id));
-        await saveNextRunAt(context.DB, event.channelId, timer.id, null);
+        if (await saveNextRunAt(context.DB, event.channelId, timer, null)) {
+          await context.clearAlarm(alarmKeyFor(timer.id), timer.revision);
+        }
       }
       return { actions: [], diagnostics: [] };
     }
@@ -211,11 +278,15 @@ export const timersModule: BotModule<typeof settingsSchema> = {
     if (!Number.isFinite(startedAt)) return { actions: [], diagnostics: [] };
     const streamId = typeof event.payload.id === "string" ? event.payload.id : null;
     if (streamId === null || streamId.length === 0) return { actions: [], diagnostics: [] };
+    const activityCount = await context.chatActivityCount();
+    await context.DB.prepare("UPDATE timers SET last_chat_activity_count = ? WHERE channel_id = ? AND trigger_type = 'interval'")
+      .bind(activityCount, event.channelId).run();
     for (const timer of timers) {
       if (!timer.enabled || (timer.trigger.type !== "interval" && timer.trigger.type !== "stream_start")) continue;
       const deadline = startedAt + triggerDelayMs(timer.trigger);
-      await context.scheduleAlarm(TIMER_ALARM_HANDLER, alarmKeyFor(timer.id), deadline);
-      await saveNextRunAt(context.DB, event.channelId, timer.id, deadline);
+      if (await saveNextRunAt(context.DB, event.channelId, timer, deadline)) {
+        await context.scheduleAlarm(TIMER_ALARM_HANDLER, alarmKeyFor(timer.id), deadline, timer.revision);
+      }
     }
     return { actions: [], diagnostics: [] };
   },

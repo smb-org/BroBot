@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ModuleRegisteredTemplateVariable } from "../../src/modules/contract";
-import { nextDailyTimerAt, nextBeforeEventAt, nextIntervalAt, nextStreamStartAt, timerOccurrenceKey } from "../../src/modules/timers/domain";
-import { validateTimerBlock } from "../../src/modules/timers/service";
+import { isDailyTimerDeadlineCurrent, nextDailyTimerAt, nextBeforeEventAt, nextIntervalAt, nextStreamStartAt, timerOccurrenceKey } from "../../src/modules/timers/domain";
+import { validateTimerBlock, validateTimerTemplateMutation } from "../../src/modules/timers/service";
 import { TestD1Database } from "./test-d1";
 
 const berlin = "Europe/Berlin";
@@ -35,11 +35,27 @@ describe("timer scheduling", () => {
     expect(next).toBe(Date.parse("2026-03-30T00:30:00.000Z"));
   });
 
-  it("creates a distinct stable due-time key for each sunset in a multi-day stream", () => {
-    const trigger = { type: "before_event" as const, sourceId: "sun.sunset", minutes: 10 };
+  it("rejects daily deadlines calculated for an old channel time zone", () => {
+    const trigger = { type: "time_of_day" as const, time: "13:00", weekdays: [], alsoOffline: false };
+    const oldZoneDeadline = Date.parse("2026-09-27T11:00:00.000Z");
+    const currentZoneDeadline = Date.parse("2026-09-27T17:00:00.000Z");
+
+    expect(isDailyTimerDeadlineCurrent(trigger, oldZoneDeadline, "Europe/Berlin")).toBe(true);
+    expect(isDailyTimerDeadlineCurrent(trigger, oldZoneDeadline, "America/New_York")).toBe(false);
+    expect(isDailyTimerDeadlineCurrent(trigger, currentZoneDeadline, "America/New_York")).toBe(true);
+  });
+
+  it("creates distinct occurrence keys for stream IDs with the same start time", () => {
+    const dueAt = Date.parse("2026-06-21T19:23:00.000Z");
+    expect(timerOccurrenceKey("timer-1", dueAt, "stream-first"))
+      .not.toBe(timerOccurrenceKey("timer-1", dueAt, "stream-second"));
+  });
+
+  it("creates a distinct stable due-time key for each event occurrence", () => {
+    const trigger = { type: "before_event" as const, sourceId: "schedule.sunset", minutes: 10 };
     const events = [
-      { id: "sun.sunset", label: { de: "Sonnenuntergang", en: "Sunset" }, at: "2026-06-21T19:33:00.000Z" },
-      { id: "sun.sunset", label: { de: "Sonnenuntergang", en: "Sunset" }, at: "2026-06-22T19:34:00.000Z" },
+      { id: "schedule.sunset", label: { de: "Ereignis", en: "Event" }, at: "2026-06-21T19:33:00.000Z" },
+      { id: "schedule.sunset", label: { de: "Ereignis", en: "Event" }, at: "2026-06-22T19:34:00.000Z" },
     ];
     const firstDue = nextBeforeEventAt(trigger, events, Date.parse("2026-06-21T18:00:00.000Z"));
     const secondDue = nextBeforeEventAt(trigger, events, (firstDue ?? 0) + 1);
@@ -88,5 +104,21 @@ describe("scheduled text block validation", () => {
 
     await expect(validateTimerBlock(database as unknown as D1Database, "channel-1", "welcome", [nestedVariable]))
       .resolves.toEqual({ ok: false, reason: "input_dependent" });
+  });
+
+  it("rejects a text-block edit that would make an existing timer depend on command input", async () => {
+    const database = await databaseWithBlocks({ welcome: ["Welcome, {date}."] });
+    await database.prepare(
+      `INSERT INTO timers
+        (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision, created_at, updated_at)
+       VALUES ('timer-1', 'channel-1', 'Community reminder', 1, 'welcome', 'interval', ?, 1, ?, ?)`,
+    ).bind(JSON.stringify({ type: "interval", minutes: 10 }), "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z").run();
+
+    await expect(validateTimerTemplateMutation({
+      DB: database as unknown as D1Database,
+      channelId: "channel-1",
+      candidate: { name: "welcome", texts: ["Hello {args}"] },
+      registeredVariables: [],
+    })).resolves.toEqual([{ reason: "input_dependent", consumerName: "Community reminder" }]);
   });
 });

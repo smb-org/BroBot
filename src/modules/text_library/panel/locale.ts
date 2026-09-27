@@ -92,6 +92,7 @@ export interface TextLibraryTexts {
   cycle: (path: readonly string[]) => string;
   depth: (path: readonly string[]) => string;
   saveError: string;
+  templateInputDependent: (consumerName: string) => string;
   uses: string;
   usesCount: (count: number) => string;
   noUsages: string;
@@ -208,6 +209,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     cycle: (path) => `Zirkuläre Einbettung: ${path.join(" → ")}.`,
     depth: (path) => `Die Einbettung überschreitet die maximale Tiefe von 3: ${path.join(" → ")}.`,
     saveError: "Der Textbaustein konnte nicht gespeichert werden.",
+    templateInputDependent: (consumerName) => `Diese Änderung würde „${consumerName}“ von Chatbefehl-Eingaben abhängig machen.`,
     uses: "Verwendet in",
     usesCount: (count) => `${String(count)} ${count === 1 ? "Verwendung" : "Verwendungen"}`,
     noUsages: "Noch keine Verwendungen.",
@@ -235,6 +237,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
       text_library_block_conflict: "Dieser Textbaustein wurde inzwischen geändert.",
       text_library_block_limit: "Der Kanal hat bereits 200 Textbausteine.",
       text_library_block_invalid: "Prüfe Name, Kategorien, Bedingungen und Texte des Textbausteins.",
+      text_library_template_usage_invalid: "Diese Änderung ist mit mindestens einer verwendeten Vorlage nicht vereinbar.",
       text_library_reference_cycle: "Zirkuläre Einbettung erkannt.",
       text_library_reference_depth_exceeded: "Die Einbettung überschreitet die maximale Tiefe von 3.",
       text_library_category_not_found: "Diese Kategorie gibt es nicht mehr.",
@@ -343,6 +346,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     cycle: (path) => `Circular reference: ${path.join(" → ")}.`,
     depth: (path) => `Nesting exceeds the maximum depth of 3: ${path.join(" → ")}.`,
     saveError: "The text block could not be saved.",
+    templateInputDependent: (consumerName) => `This change would make “${consumerName}” depend on chat command input.`,
     uses: "Used in",
     usesCount: (count) => `${String(count)} ${count === 1 ? "use" : "uses"}`,
     noUsages: "No usages yet.",
@@ -370,6 +374,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
       text_library_block_conflict: "This text block has changed since you opened it.",
       text_library_block_limit: "This channel already has 200 text blocks.",
       text_library_block_invalid: "Check the text block name, category, conditions, and texts.",
+      text_library_template_usage_invalid: "This change is incompatible with at least one template that uses this text block.",
       text_library_reference_cycle: "A circular reference was detected.",
       text_library_reference_depth_exceeded: "Nesting exceeds the maximum depth of 3.",
       text_library_category_not_found: "This category no longer exists.",

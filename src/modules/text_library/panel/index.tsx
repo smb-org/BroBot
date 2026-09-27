@@ -59,6 +59,18 @@ const errorPath = (error: unknown): string[] => {
   return error.details.path.filter((part): part is string => typeof part === "string");
 };
 
+const templateContentIssues = (error: unknown, labels: ReturnType<typeof textLibraryTexts>): string[] => {
+  if (!(error instanceof PanelApiError) || typeof error.details !== "object" || error.details === null ||
+      !("issues" in error.details) || !Array.isArray(error.details.issues)) return [];
+  return error.details.issues.flatMap((issue: unknown) => {
+    if (typeof issue !== "object" || issue === null) return [];
+    const record = issue as Record<string, unknown>;
+    return record.reason === "input_dependent" && typeof record.consumerName === "string"
+      ? [labels.templateInputDependent(record.consumerName)]
+      : [];
+  });
+};
+
 const conditionSummary = (
   variant: TextBlockVariant,
   labels: ReturnType<typeof textLibraryTexts>,
@@ -296,9 +308,11 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     } catch (caught: unknown) {
       const code = errorCode(caught);
       const path = errorPath(caught);
+      const contentIssues = templateContentIssues(caught, labels);
       const message = code === "text_library_reference_cycle" ? labels.cycle(path)
         : code === "text_library_reference_depth_exceeded" ? labels.depth(path)
-          : code === null ? labels.saveError : labels.errors[code] ?? (caught instanceof PanelApiError && caught.status === 409 ? labels.conflict : labels.saveError);
+          : code === "text_library_template_usage_invalid" && contentIssues.length > 0 ? contentIssues.join(" ")
+            : code === null ? labels.saveError : labels.errors[code] ?? (caught instanceof PanelApiError && caught.status === 409 ? labels.conflict : labels.saveError);
       setError(message);
       return message;
     } finally {

@@ -180,7 +180,8 @@ export default function TimersPanel({ channelId, language, canManage = true, can
     } catch (failure: unknown) {
       const code = timerErrorCode(failure);
       setError(code === "timer_block_input_dependent" ? labels.inputDependentBlock
-        : code === "timer_block_missing" ? labels.blockMissing : labels.saveError);
+        : code === "timer_block_missing" ? labels.blockMissing
+          : code === "timer_limit_reached" ? labels.limitReached : labels.saveError);
     } finally { setPending(false); }
   };
 

@@ -244,7 +244,10 @@ describe("ad prewarning retry through ChannelObject.alarm()", () => {
       vi.setSystemTime(dueAt + 5_000);
       await object.alarm();
       expect(fetchMock).toHaveBeenCalledOnce();
-      expect(storage.values.get("channel:alarm_schedule")).toBeUndefined();
+      expect(storage.values.get("channel:alarm_schedule")).toMatchObject({
+        "host:schedule_inputs_changed:event_times": { handler: "channel.module_schedule_inputs_changed" },
+      });
+      expect(storage.values.get("channel:alarm_schedule")).not.toHaveProperty("ad_prewarning");
       expect(mocks.writeModuleDiagnostics.mock.calls.at(-1)?.[5]).toMatchObject([
         { code: "ads.prewarning.announced" },
         { code: "host.chat.sent" },

@@ -1,5 +1,9 @@
 import { templateVariableNames, SYSTEM_TEMPLATE_VARIABLE_LIST, type TemplateVariable } from "../contract";
-import type { ModuleRegisteredTemplateVariable } from "../contract";
+import type {
+  ModuleRegisteredTemplateVariable,
+  ModuleTemplateContentValidationContext,
+  ModuleTemplateContentIssue,
+} from "../contract";
 import type { Timer, TimerMutationInput } from "./contracts";
 import { TIMER_BLOCK_NAME_PATTERN, timerTriggerSchema } from "./contracts";
 
@@ -47,6 +51,7 @@ export const validateTimerBlock = async (
   channelId: string,
   blockName: string,
   registeredVariables: readonly ModuleRegisteredTemplateVariable[],
+  candidate?: { name: string; texts: readonly string[] },
 ): Promise<TimerBlockValidation> => {
   if (!TIMER_BLOCK_NAME_PATTERN.test(blockName)) return { ok: false, reason: "missing" };
   const inputVariables = new Set<string>();
@@ -68,6 +73,19 @@ export const validateTimerBlock = async (
     if (visited.has(name)) return { ok: true };
     if (depth > 3) return { ok: false, reason: "missing" };
     visited.add(name);
+    if (candidate?.name === name) {
+      for (const text of candidate.texts) {
+        if (templateVariableNames(text).some((variable) => inputVariables.has(variable))) {
+          return { ok: false, reason: "input_dependent" };
+        }
+        const nested = [...new Set(bareReferences(text).filter((reference) => !knownNames.has(reference)))];
+        for (const nestedName of nested) {
+          const result = await visit(nestedName, depth + 1);
+          if (!result.ok) return result;
+        }
+      }
+      return { ok: true };
+    }
     const block = await db.prepare(
       `SELECT variant.texts_json
          FROM text_block_variants AS variant
@@ -94,6 +112,29 @@ export const validateTimerBlock = async (
     return { ok: true };
   };
   return await visit(blockName, 1);
+};
+
+export const validateTimerTemplateMutation = async (
+  context: ModuleTemplateContentValidationContext,
+): Promise<readonly ModuleTemplateContentIssue[]> => {
+  const rows = await context.DB.prepare(
+    "SELECT timer_id, name, block_name FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id",
+  ).bind(context.channelId).all<{ timer_id: string; name: string; block_name: string }>();
+  const issues: ModuleTemplateContentIssue[] = [];
+  const candidate = { name: context.candidate.name, texts: context.candidate.texts };
+  for (const row of rows.results) {
+    const validation = await validateTimerBlock(
+      context.DB,
+      context.channelId,
+      row.block_name,
+      context.registeredVariables,
+      candidate,
+    );
+    if (!validation.ok && validation.reason === "input_dependent") {
+      issues.push({ reason: "input_dependent", consumerName: row.name });
+    }
+  }
+  return issues;
 };
 
 export const timerMutationInput = (value: unknown): TimerMutationInput | null => {

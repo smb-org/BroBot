@@ -82,6 +82,16 @@ export const nextDailyTimerAt = (
   return null;
 };
 
+export const isDailyTimerDeadlineCurrent = (
+  trigger: Extract<TimerTrigger, { type: "time_of_day" }>,
+  deadline: number,
+  timeZone: string,
+): boolean => {
+  const localDate = localDateInTimeZone(deadline, timeZone);
+  return (trigger.weekdays.length === 0 || trigger.weekdays.includes(weekdayFor(localDate))) &&
+    wallTimeInTimeZone(localDate, trigger.time, timeZone) === deadline;
+};
+
 export const nextBeforeEventAt = (
   trigger: Extract<TimerTrigger, { type: "before_event" }>,
   events: readonly ResolvedModuleEventTime[],
@@ -114,8 +124,8 @@ export const nextTimerAt = (
   return null;
 };
 
-export const timerOccurrenceKey = (timerId: string, dueAt: number): string =>
-  `${timerId}:${String(Math.trunc(dueAt))}`;
+export const timerOccurrenceKey = (timerId: string, dueAt: number, streamId?: string): string =>
+  `${timerId}:${String(Math.trunc(dueAt))}${streamId === undefined ? "" : `:${encodeURIComponent(streamId)}`}`;
 
 export const triggerDelayMs = (trigger: Extract<TimerTrigger, { type: "interval" | "stream_start" }>): number =>
   trigger.minutes * 60_000;
