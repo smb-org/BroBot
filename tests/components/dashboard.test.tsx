@@ -4343,11 +4343,11 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
 
-    // Pick and save a new location; its PATCH is held back deliberately.
+    // Pick a location from the dialog; its PATCH is held back deliberately.
+    fireEvent.click(await screen.findByRole("button", { name: "Standort ändern" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Ort suchen" }), { target: { value: "Tromsø" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Auswählen" }));
-    fireEvent.click(screen.getByRole("button", { name: "Standort speichern" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Tromsø/u }));
 
     // While that save is still in flight, save an unrelated time zone change too.
     const timeZoneField = screen.getByRole("combobox", { name: "Kanalzeitzone" });
@@ -4369,7 +4369,7 @@ describe("Dashboard skeleton", () => {
     // A further location edit must use the fresh revision (2), not the one from
     // before the race (1) -- otherwise the server would reject it as a conflict.
     fireEvent.click(screen.getByRole("button", { name: "Standort entfernen" }));
-    fireEvent.click(screen.getByRole("button", { name: "Standort speichern" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Standort entfernen?" })).getByRole("button", { name: "Standort entfernen" }));
     await waitFor(() => {
       const patchCalls = fetcher.mock.calls.filter(([callInput, callInit]) =>
         requestUrl(callInput).pathname === locationPath && callInit?.method === "PATCH");

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Button, ConfirmDialog, EditorShell, Field, FieldPair, NumberField, SettingsEditor, TagInput, TemplateText, TextArea, UiProvider, type SettingsEditorSpec, type TextAreaMessages, type TemplateVariableOption } from "../../src/dashboard/ui";
+import { Button, ConfirmDialog, EditorShell, Field, FieldPair, GamePicker, NumberField, SettingsEditor, TagInput, TemplateText, TextArea, UiProvider, type GamePickerGame, type GamePickerMessages, type SettingsEditorSpec, type TextAreaMessages, type TemplateVariableOption } from "../../src/dashboard/ui";
 import { ChoiceCards } from "../../src/dashboard/ui/ChoiceCards";
 import { SegmentedControl } from "../../src/dashboard/ui/SegmentedControl";
 import { Switch } from "../../src/dashboard/ui/Switch";
@@ -57,6 +57,44 @@ afterEach(() => {
 });
 
 describe("editor field seam", () => {
+  it("shows lazy Twitch box art beside a selected game", async () => {
+    const game: GamePickerGame = {
+      id: "123",
+      name: "Example Game",
+      boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/123-{width}x{height}.jpg",
+    };
+    const messages: GamePickerMessages = {
+      label: "Games",
+      hint: "Filter this text by game.",
+      search: "Search Twitch games",
+      searchHint: "Search for a game.",
+      loading: "Searching…",
+      empty: "No games found.",
+      error: "Search failed.",
+      remove: (name) => `Remove ${name}`,
+    };
+    const searchGames = vi.fn().mockResolvedValue([game]);
+    function Harness() {
+      const [value, setValue] = useState<GamePickerGame[]>([]);
+      return <GamePicker searchGames={searchGames} value={value} onChange={setValue} messages={messages} />;
+    }
+
+    renderUi(<Harness />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Games" }), { target: { value: "Example" } });
+    const option = await screen.findByRole("option", { name: /Example Game/u });
+    const optionImage = option.querySelector("img");
+    expect(optionImage).toHaveAttribute("loading", "lazy");
+    expect(optionImage).toHaveAttribute("alt", "");
+    expect(optionImage).toHaveAttribute("width", "28");
+    expect(optionImage).toHaveAttribute("height", "38");
+
+    fireEvent.click(option);
+    const selectedImage = document.querySelector(".ui-game-picker__chip img");
+    expect(selectedImage).toHaveAttribute("src", "https://static-cdn.jtvnw.net/ttv-boxart/123-20x27.jpg");
+    expect(selectedImage).toHaveAttribute("width", "20");
+    expect(selectedImage).toHaveAttribute("height", "27");
+  });
+
   it("keeps a visual prefix out of the value, normalizes input, and gives icon fields only their label", () => {
     const onChange = vi.fn();
     renderUi(
@@ -303,6 +341,31 @@ describe("template field", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(input).toHaveValue("{viewers}");
+  });
+
+  it("suggests dotted module variables after a namespace prefix and replaces the whole token", async () => {
+    const variables: readonly TemplateVariableOption[] = [
+      { name: "sun.set", description: "Sunset", sample: "20:30" },
+      { name: "sun.rise", description: "Sunrise", sample: "06:15" },
+      { name: "weather.temp", description: "Temperature", sample: "18" },
+    ];
+    function Harness() {
+      const [value, setValue] = useState("");
+      return <TextArea label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={textAreaMessages} />;
+    }
+
+    renderUi(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Reply" });
+    fireEvent.change(input, { target: { value: "{sun.", selectionStart: 5 } });
+
+    await waitFor(() => expect(input).toHaveAttribute("aria-expanded", "true"));
+    const options = screen.getAllByRole("option", { hidden: true });
+    expect(options.some((option) => option.textContent.includes("sun.set"))).toBe(true);
+    expect(options.some((option) => option.textContent.includes("sun.rise"))).toBe(true);
+    expect(options.some((option) => option.textContent.includes("weather.temp"))).toBe(false);
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).toHaveValue("{sun.set}");
   });
 
   it("does not accept a variable suggestion with Enter during IME composition", () => {

@@ -15,7 +15,7 @@ import SunSettingsPanel from "../../src/modules/sun/panel/settings";
 
 afterEach(() => vi.clearAllMocks());
 
-describe("sun channel settings", () => {
+describe("sun module settings", () => {
   it("shows operators the read-only error texts", async () => {
     const settings: SunSettings = {
       errorTexts: { de: "Eigener deutscher Fehler", en: "Custom English fallback" },
@@ -29,17 +29,16 @@ describe("sun channel settings", () => {
           channelId="sun-channel"
           language="en"
           canManage={false}
-          readOnlyReason="Only managers can edit these settings."
         />
       </UiProvider>,
     );
 
-    expect(await screen.findByText("Only managers can edit these settings.")).toBeInTheDocument();
-    expect(screen.getAllByText("Only managers can edit these settings.")).toHaveLength(1);
-    expect(screen.getByText("Eigener deutscher Fehler")).toBeInTheDocument();
-    expect(screen.getByText("Custom English fallback")).toBeInTheDocument();
-    expect(container.querySelector("dl.properties")).not.toBeNull();
-    expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(await screen.findByText("Operators can read this setting but cannot change it.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "German" })).toHaveValue("Eigener deutscher Fehler");
+    expect(screen.getByRole("textbox", { name: "English" })).toHaveValue("Custom English fallback");
+    expect(container.querySelector("dl.properties")).toBeNull();
+    expect(screen.getAllByRole("textbox")).toHaveLength(2);
+    expect(screen.getAllByRole("textbox").every((field) => field.hasAttribute("disabled"))).toBe(true);
+    expect(screen.getByRole("button", { name: "Save error texts" })).toBeDisabled();
   });
 });

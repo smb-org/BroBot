@@ -37,6 +37,12 @@ const headersFile = readFileSync(
 const rules = parseHeadersFile(headersFile);
 
 describe("Cloudflare static asset headers", () => {
+  it.each(["/", "/channels/*", "/platform", "/platform/*"])("allows Twitch game art in the dashboard image policy for %s only", (path) => {
+    const policy = rules.get(path)?.get("content-security-policy");
+    expect(policy).toBe("img-src 'self' https://static-cdn.jtvnw.net");
+    expect(policy?.split(";")).toHaveLength(1);
+  });
+
   it.each(["/_app/*", "/fonts/*"])("allows opaque-origin reads for %s", (path) => {
     const headers = rules.get(path);
 

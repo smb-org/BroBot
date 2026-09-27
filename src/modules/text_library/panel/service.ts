@@ -56,6 +56,16 @@ export const searchTextLibraryGames = async (channelId: string, query: string): 
   return (await readJson<{ games: TwitchGame[] }>(response)).games;
 };
 
+let previewCsrfToken: Promise<string> | null = null;
+
+const readPreviewCsrfToken = (): Promise<string> => {
+  previewCsrfToken ??= fetch("/api/csrf").then((response) => readJson<{ token: string }>(response)).then(({ token }) => token).catch((error: unknown) => {
+    previewCsrfToken = null;
+    throw error;
+  });
+  return previewCsrfToken;
+};
+
 export const renderTextLibraryPreview = async (
   channelId: string,
   input: {
@@ -66,10 +76,10 @@ export const renderTextLibraryPreview = async (
     chatStatus: readonly ("viewer" | "subscriber" | "vip" | "moderator" | "broadcaster")[] | null;
   },
 ): Promise<{ text: string; diagnostics: readonly { code: string }[] }> => {
-  const csrf = await readJson<{ token: string }>(await fetch("/api/csrf"));
+  const csrfToken = await readPreviewCsrfToken();
   return readJson(await fetch(`/api/channels/${encodeURIComponent(channelId)}/template-preview`, {
     method: "POST",
-    headers: { "X-CSRF-Token": csrf.token, "Content-Type": "application/json" },
+    headers: { "X-CSRF-Token": csrfToken, "Content-Type": "application/json" },
     body: JSON.stringify(input),
   }));
 };

@@ -61,7 +61,8 @@ Die Sonnendatenquelle `src/modules/sun/` ergänzt den Contract um eigene
 Templatewerte, eine Tag-/Nachtbedingung und einen Alarm-Handler. Der Standort
 ist eine Host-Kanaleinstellung in `channels`; der Host stellt ihn Modulen über
 den Contract schreibgeschützt bereit. Die Standortsuche verwendet Open-Meteo-
-Geocoding. Sonnenaufgang, Sonnenuntergang und bürgerliche Abenddämmerung
+Geocoding; der Dialog zeigt dazu die von der CC-BY-4.0-Lizenz geforderte
+Namensnennung neben den Suchergebnissen. Sonnenaufgang, Sonnenuntergang und bürgerliche Abenddämmerung
 berechnet die Worker-Logik mit den NOAA-Gleichungen nach Meeus, sodass tägliche
 Berechnungen keinen externen Dienst benötigen. D1 hält je Kanal genau die
 beiden lokalen Datumszeilen für heute und morgen. Der Durable-Object-Alarm

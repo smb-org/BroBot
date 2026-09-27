@@ -44,7 +44,7 @@ import {
   setChannelModuleEnabled,
   type PanelChannelSettings,
 } from "./api";
-import { Led, ModuleChannelSettingsMount, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleToggleList, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
+import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleToggleList, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
 import { ImmediateActions, WarningsAndErrorsFeed } from "./stream-manager";
 import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
@@ -57,7 +57,7 @@ import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { dashboardNavEntries, navPageGroupHeading, registeredModuleNavEntries } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ControlDurationDialog, Icon, InspectorSection, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, Icon, InspectorSection, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
 import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
@@ -597,14 +597,15 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, onNavigate,
     <div className="dashboard-header">
       <a className="brand-mark dashboard-header__brand" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
       {activeChannel === undefined ? null : (
-        <div className="dashboard-header__channel">
-          <UiSelect
+      <div className="dashboard-header__channel">
+        <div className="dashboard-header__channel-select"><UiSelect
             value={activeChannel.channelId}
             onChange={(channelId) => { if (channelId !== null) onNavigate({ kind: "channel", channelId, section: "overview" }); }}
             options={channels.map((channel) => ({ value: channel.channelId, label: `${channel.displayName} — ${channel.channelId}` }))}
             ariaLabel={texts.navigation.selectChannel}
             id="dashboard-channel-select"
-          />
+          /></div>
+        {activeChannel.location == null ? null : <ChannelLocationMenu location={activeChannel.location} messages={texts.header.locationMenu} />}
         </div>
       )}
       <div className="dashboard-header__status">
@@ -970,6 +971,7 @@ interface ChannelOverviewPageProperties {
   /** Stream Manager: every module, switchable without a page change. */
   modules: PanelModuleState[];
   onModulesChanged: () => Promise<void>;
+  onLocationChanged: (channelId: string, location: NonNullable<PanelChannelOverview["location"]> | null) => void;
 }
 
 const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; children?: ReactNode }): ReactElement => {
@@ -994,7 +996,7 @@ const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; chi
   );
 };
 
-const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, onModulesChanged }: ChannelOverviewPageProperties): ReactElement => {
+const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, onModulesChanged, onLocationChanged }: ChannelOverviewPageProperties): ReactElement => {
   const settingsTexts = channelSettingsTexts(dashboardLanguage());
   const [channelSettings, setChannelSettings] = useState<PanelChannelSettings | null>(null);
   const [timeZoneDraft, setTimeZoneDraft] = useState("");
@@ -1040,6 +1042,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
   };
   const locationSaved = (location: PanelChannelSettings["location"], revision: number): void => {
     setChannelSettings((current) => current === null ? null : { ...current, location, locationRevision: revision });
+    onLocationChanged(overview.channelId, location);
   };
   const entries = sortBySeverity([
     broadcasterRow(overview.broadcasterConnection),
@@ -1087,16 +1090,6 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
           canEdit={canManage(overview.role)}
           disabled={settingsBusy}
         />}
-        {channelSettings === null ? null : MODULES.flatMap((module) => module.channelSettings === undefined ? [] : [
-          <ModuleChannelSettingsMount
-            key={module.id}
-            moduleId={module.id}
-            channelId={overview.channelId}
-            language={dashboardLanguage()}
-            canManage={canManage(overview.role)}
-            readOnlyReason={settingsTexts.readOnly}
-          />,
-        ])}
       </section>
       <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} modules={modules} />
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
@@ -2041,7 +2034,16 @@ export const DashboardApp = (): ReactElement => {
         /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel?.modules ?? overview.data.modules ?? modules.data?.modules ?? []} onModulesChanged={reloadModules} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel?.modules ?? overview.data.modules ?? modules.data?.modules ?? []} onModulesChanged={reloadModules} onLocationChanged={(channelId, location) => {
+          setChannels((current) => current.data === null ? current : {
+            ...current,
+            data: current.data.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),
+          });
+          setOverview((current) => current.data?.channelId !== channelId ? current : {
+            ...current,
+            data: { ...current.data, location },
+          });
+        }} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null && (members.data !== null || members.status !== "idle") ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection(name); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onOpenOverlay={(overlayId, initialVariable, initialOverlayName) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId, ...(initialVariable === undefined ? {} : { initialVariable }), ...(overlayId === "new" && initialOverlayName !== undefined ? { initialOverlayName } : {}) }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "overlays" && selectedChannel !== null

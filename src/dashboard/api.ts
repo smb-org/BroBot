@@ -5,6 +5,7 @@ import type {
   PanelPlatformAuditResponse,
   PanelPlatformOverviewResponse,
   PanelChannelOverview,
+  PanelChannelLocation,
   PanelChannelControls,
   PanelChannelsResponse,
   PanelEventsResponse,
@@ -345,12 +346,7 @@ export interface PanelChannelSettings {
   locationRevision: number;
 }
 
-export interface PanelChannelLocation {
-  name: string;
-  latitude: number;
-  longitude: number;
-  timeZone: string;
-}
+export type { PanelChannelLocation } from "../panel-contract";
 
 export interface PanelChannelLocationResult extends PanelChannelLocation {
   country: string;

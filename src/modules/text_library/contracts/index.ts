@@ -21,6 +21,8 @@ export const TEXT_BLOCK_MAXIMUMS = {
 export interface TwitchGame {
   id: string;
   name: string;
+  /** Helix box_art_url template; absent on older persisted game entries. */
+  boxArtUrlTemplate?: string;
 }
 
 export interface TextBlockConditions {

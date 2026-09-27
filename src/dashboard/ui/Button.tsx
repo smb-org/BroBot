@@ -23,6 +23,8 @@ interface ButtonBaseProps {
   /** Adds row-specific context to a repeated text action without changing its visible label. */
   ariaLabel?: string;
   ariaPressed?: boolean;
+  ariaHasPopup?: "menu";
+  ariaExpanded?: boolean;
   onClick?: () => void;
   type?: "button" | "submit";
   /** Initial focus inside a `ConfirmDialog`: Mantine honors the focus target. */
@@ -94,6 +96,8 @@ export function Button(props: ButtonProps) {
     className,
     describedBy,
     ariaPressed,
+    ariaHasPopup,
+    ariaExpanded,
   } = props;
   const iconOnly = props.iconOnly === true;
   const icon = props.icon;
@@ -129,7 +133,9 @@ export function Button(props: ButtonProps) {
       type={type}
       aria-label={props.ariaLabel}
       aria-describedby={describedBy}
-      aria-pressed={ariaPressed}
+    aria-pressed={ariaPressed}
+    aria-haspopup={ariaHasPopup}
+    aria-expanded={ariaExpanded}
       title={title}
       data-autofocus={autoFocus ? true : undefined}
       className={buttonClassName}

@@ -83,12 +83,21 @@ export interface PanelLastError {
   subscriptionVariant?: string | undefined;
 }
 
+export interface PanelChannelLocation {
+  name: string;
+  latitude: number;
+  longitude: number;
+  timeZone: string;
+}
+
 export interface PanelChannelState {
   channelId: string;
   login: string;
   displayName: string;
   language: "de" | "en";
   role: ChannelRole;
+  /** Host-owned location shown in the dashboard header when configured. */
+  location?: PanelChannelLocation | null;
   broadcasterConnection: PanelBroadcasterConnectionStatus;
   channelBotConsent: PanelChannelBotConsentStatus;
   bot: PanelBotStatus | null;

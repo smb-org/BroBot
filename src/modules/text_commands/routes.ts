@@ -19,6 +19,21 @@ import { textCommandDefaultsFor } from "./contracts/chat-defaults";
 const aliasesSchema = z.array(z.string().regex(COMMAND_NAME_PATTERN))
   .max(TEXT_COMMAND_MAX_ALIASES)
   .refine((aliases) => new Set(aliases).size === aliases.length);
+const boxArtUrlTemplateSchema = z.string().max(500).refine((value) => {
+  try {
+    const url = new URL(value.replaceAll("{width}", "100").replaceAll("{height}", "100"));
+    return url.protocol === "https:" && url.hostname === "static-cdn.jtvnw.net";
+  } catch {
+    return false;
+  }
+}, "Invalid Twitch box art URL");
+const gameSchema = z.object({
+  id: z.string().regex(/^[0-9]{1,20}$/u),
+  name: z.string().trim().min(1).max(100),
+  boxArtUrlTemplate: boxArtUrlTemplateSchema.optional(),
+}).transform(({ boxArtUrlTemplate, ...game }) => boxArtUrlTemplate === undefined
+  ? game
+  : { ...game, boxArtUrlTemplate });
 
 const bodySchema = z.object({
   name: z.string(),
@@ -33,7 +48,7 @@ const bodySchema = z.object({
   aliases: aliasesSchema.default([]),
   userCooldownSeconds: z.number().int().min(0).max(86400).default(0),
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).default("any"),
-  games: z.array(z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().min(1).max(100) })).max(50).default([]),
+  games: z.array(gameSchema).max(50).default([]),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).default("say"),
   variableAction: z.object({
     name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
@@ -57,7 +72,7 @@ const editBodySchema = z.object({
   aliases: aliasesSchema.optional(),
   userCooldownSeconds: z.number().int().min(0).max(86400).optional(),
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).optional(),
-  games: z.array(z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().min(1).max(100) })).max(50).optional(),
+  games: z.array(gameSchema).max(50).optional(),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).optional(),
   variableAction: z.object({
     name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),

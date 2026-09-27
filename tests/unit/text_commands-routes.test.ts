@@ -140,6 +140,28 @@ describe("Text commands panel", () => {
     ]));
   });
 
+  it("persists Twitch box art with a command game filter", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const game = {
+      id: "123",
+      name: "Example Game",
+      boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/123-{width}x{height}.jpg",
+    };
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "game", text: "Game response", cooldownSeconds: 0, games: [game],
+      }),
+      environmentFor(database),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(database.prepare(
+      "SELECT games_json FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'game'",
+    ).first<{ games_json: string }>()).resolves.toEqual({ games_json: JSON.stringify([game]) });
+  });
+
   it("returns the current command when a second editor saves an old revision", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");

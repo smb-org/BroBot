@@ -13,7 +13,21 @@ import { MODULE_TEMPLATE_MINIMUM_TIERS, SYSTEM_TEMPLATE_VARIABLE_LIST, type Modu
 
 const TEXT_LIBRARY_MODULE_ID = "text_library";
 
-const gameSchema = z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().min(1).max(100) });
+const boxArtUrlTemplateSchema = z.string().max(500).refine((value) => {
+  try {
+    const url = new URL(value.replaceAll("{width}", "100").replaceAll("{height}", "100"));
+    return url.protocol === "https:" && url.hostname === "static-cdn.jtvnw.net";
+  } catch {
+    return false;
+  }
+}, "Invalid Twitch box art URL");
+const gameSchema = z.object({
+  id: z.string().regex(/^[0-9]{1,20}$/u),
+  name: z.string().trim().min(1).max(100),
+  boxArtUrlTemplate: boxArtUrlTemplateSchema.optional(),
+}).transform(({ boxArtUrlTemplate, ...game }) => boxArtUrlTemplate === undefined
+  ? game
+  : { ...game, boxArtUrlTemplate });
 const conditionsSchema = z.object({
   stream: z.enum(["online", "offline"]).optional(),
   game: z.object({ mode: z.enum(["is", "is_not"]), game: gameSchema }).optional(),
