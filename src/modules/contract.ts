@@ -21,6 +21,54 @@ export const validChannelTimeZone = (timeZone: string): boolean => {
   }
 };
 
+const localDateKeyInTimeZone = (instant: number, timeZone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(instant);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${String(values.year)}-${String(values.month)}-${String(values.day)}`;
+};
+
+/**
+ * Returns the first instant (ISO string) whose local calendar date in `timeZone` is
+ * `localDate`. Solves for the date boundary directly (binary search) instead of the
+ * wall-clock time "00:00", which a DST change can skip (spring-forward at midnight,
+ * e.g. Africa/Cairo) or repeat (fall-back at midnight) -- a fixed-point search on that
+ * wall-clock time then resolves to the wrong day. Shared by every module that needs a
+ * location- or channel-local midnight, so the fix lives in one place.
+ */
+export const localMidnightInTimeZone = (localDate: string, timeZone: string): string => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(localDate);
+  if (match === null) throw new RangeError("Invalid local calendar date.");
+  const [, yearText, monthText, dayText] = match;
+  const naiveUtcMidnight = Date.UTC(Number(yearText), Number(monthText) - 1, Number(dayText));
+  // Real-world UTC offsets stay within -12:00..+14:00; this margin brackets the date
+  // boundary on both sides regardless of offset or DST at the boundary.
+  let low = naiveUtcMidnight - 26 * 60 * 60_000;
+  let high = naiveUtcMidnight + 26 * 60 * 60_000;
+  while (high - low > 1) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (localDateKeyInTimeZone(mid, timeZone) < localDate) low = mid; else high = mid;
+  }
+  return new Date(high).toISOString();
+};
+
+/** Returns the next local midnight strictly after `from`, as a UTC epoch instant. */
+export const nextLocalMidnightInTimeZone = (from: number, timeZone: string): number => {
+  const today = localDateKeyInTimeZone(from, timeZone);
+  let low = from;
+  let high = from + 26 * 60 * 60_000;
+  for (let guard = 0; localDateKeyInTimeZone(high, timeZone) === today && guard < 3; guard += 1) high += 24 * 60 * 60_000;
+  while (high - low > 1) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (localDateKeyInTimeZone(mid, timeZone) === today) low = mid; else high = mid;
+  }
+  return high;
+};
+
 export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonObject = Readonly<Record<string, JsonValue>>;
 

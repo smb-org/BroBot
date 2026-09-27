@@ -1,6 +1,9 @@
 import type { ModuleLanguage } from "../../contract";
 import { sunModuleCatalog } from "../contracts/catalog";
 
+// Shared with moon and text_library so a DST-at-midnight fix lives in one place.
+export { localMidnightInTimeZone } from "../../contract";
+
 export type SolarPolarState = "normal" | "day" | "night";
 
 export interface SunDay {
@@ -77,9 +80,6 @@ const wallTimeUtc = (localDate: string, hour: number, minute: number, timeZone: 
   }
   return candidate;
 };
-
-export const localMidnightInTimeZone = (localDate: string, timeZone: string): string =>
-  new Date(wallTimeUtc(localDate, 0, 0, timeZone)).toISOString();
 
 export const localDateInTimeZone = (instant: number, timeZone: string): string => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -359,6 +359,10 @@ export const calculateSunAltitudeIntervals = (
   ends.sort((left, right) => Date.parse(left) - Date.parse(right));
   const intervals: SunAltitudeInterval[] = [];
   let endIndex = 0;
+  // ponytail: a start whose matching end falls beyond the scanned window (near the poles,
+  // a golden/blue-hour interval can run for days) has no `endAt` here and is silently
+  // dropped, so the phase reports unavailable instead of an open-ended interval. Upgrade
+  // path: extend the scan window when a phase is still ongoing at the window edge.
   for (const startAt of starts) {
     while (ends[endIndex] !== undefined && Date.parse(ends[endIndex] ?? "") <= Date.parse(startAt)) endIndex += 1;
     const endAt = ends[endIndex];

@@ -4,6 +4,7 @@ import {
   calculateSunAltitudeIntervals,
   calculateSunDay,
   localDateInTimeZone,
+  localMidnightInTimeZone,
   resolveSunTemplateValues,
   shiftLocalDate,
 } from "../../src/modules/sun/domain";
@@ -93,6 +94,27 @@ describe("NOAA sun calculations", () => {
     expect(day.sunsetAt).toBeNull();
     expect(day.duskAt).not.toBeNull();
     expect(localMinute(day.duskAt, "Europe/Oslo")).not.toBeNull();
+  });
+});
+
+describe("localMidnightInTimeZone", () => {
+  it("returns local midnight on a normal day", () => {
+    expect(localMidnightInTimeZone("2026-06-21", "Europe/Berlin")).toBe("2026-06-20T22:00:00.000Z");
+    expect(localDateInTimeZone(Date.parse("2026-06-20T22:00:00.000Z"), "Europe/Berlin")).toBe("2026-06-21");
+  });
+
+  it("returns local midnight across a normal Europe/Berlin daylight-saving change", () => {
+    expect(localMidnightInTimeZone("2026-03-29", "Europe/Berlin")).toBe("2026-03-28T23:00:00.000Z");
+    expect(localDateInTimeZone(Date.parse("2026-03-28T23:00:00.000Z"), "Europe/Berlin")).toBe("2026-03-29");
+  });
+
+  it("returns the first instant of the day when Africa/Cairo's 2026 spring change skips local midnight", () => {
+    // Cairo's DST switches clocks from 00:00 to 01:00, so 00:00 never occurs on this date.
+    const midnight = localMidnightInTimeZone("2026-04-24", "Africa/Cairo");
+    expect(midnight).toBe("2026-04-23T22:00:00.000Z");
+    expect(localDateInTimeZone(Date.parse(midnight), "Africa/Cairo")).toBe("2026-04-24");
+    // The instant one minute earlier must still belong to the previous local date.
+    expect(localDateInTimeZone(Date.parse(midnight) - 60_000, "Africa/Cairo")).toBe("2026-04-23");
   });
 });
 

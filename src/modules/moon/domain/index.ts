@@ -1,4 +1,5 @@
 import type { ModuleLanguage } from "../../contract";
+import { localMidnightInTimeZone } from "../../contract";
 import { moonModuleCatalog } from "../contracts/catalog";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -94,29 +95,6 @@ const dateParts = (date: string): { year: number; month: number; day: number } |
   return check.getUTCFullYear() === year && check.getUTCMonth() === month - 1 && check.getUTCDate() === day
     ? { year, month, day }
     : null;
-};
-
-const wallTimeUtc = (localDate: string, hour: number, minute: number, timeZone: string): number => {
-  const parts = dateParts(localDate);
-  if (parts === null) throw new RangeError("Invalid local calendar date.");
-  const targetWallTime = Date.UTC(parts.year, parts.month - 1, parts.day, hour, minute);
-  let candidate = targetWallTime;
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
-  for (let index = 0; index < 3; index += 1) {
-    const values = Object.fromEntries(formatter.formatToParts(candidate).map((part) => [part.type, part.value]));
-    const seenWallTime = Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), Number(values.hour), Number(values.minute), Number(values.second));
-    candidate = targetWallTime - (seenWallTime - candidate);
-  }
-  return candidate;
 };
 
 export const localDateInTimeZone = (instant: number, timeZone: string): string => {
@@ -271,8 +249,8 @@ export const calculateMoonDay = (location: MoonLocation, localDate: string): Moo
       !Number.isFinite(location.longitude) || location.longitude < -180 || location.longitude > 180 || dateParts(localDate) === null) {
     throw new RangeError("Invalid lunar coordinates or local date.");
   }
-  const start = wallTimeUtc(localDate, 0, 0, location.timeZone);
-  const end = wallTimeUtc(shiftLocalDate(localDate, 1), 0, 0, location.timeZone);
+  const start = Date.parse(localMidnightInTimeZone(localDate, location.timeZone));
+  const end = Date.parse(localMidnightInTimeZone(shiftLocalDate(localDate, 1), location.timeZone));
   const step = 10 * 60_000;
   const crossings: { at: string; rising: boolean }[] = [];
   let left = start;

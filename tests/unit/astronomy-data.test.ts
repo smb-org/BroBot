@@ -90,6 +90,31 @@ describe("local solar values against published almanac values", () => {
     }
     expect(winter.dawnAt).not.toBeNull();
   });
+
+  it("reports a multi-day golden hour near 87°N as unavailable instead of throwing", () => {
+    // Near the equinox this far north the sun crosses the golden-hour band once and stays
+    // there for days (here 2026-03-18T00:36Z to 2026-03-28T11:09Z), longer than the scan
+    // window resolveSunTemplateValues uses. The interval's start has no matching end within
+    // that window, so it is dropped: the documented ceiling from the ponytail comment on
+    // calculateSunAltitudeIntervals, not a regression to fix here.
+    const location = { latitude: 87, longitude: 0, timeZone: "UTC" };
+    const midInterval = Date.parse("2026-03-22T12:00:00.000Z");
+    expect(() => resolveSunTemplateValues({
+      location,
+      now: midInterval,
+      timeZone: location.timeZone,
+      language: "en",
+      errorText: "Configured unavailable text",
+    })).not.toThrow();
+    const values = resolveSunTemplateValues({
+      location,
+      now: midInterval,
+      timeZone: location.timeZone,
+      language: "en",
+      errorText: "Configured unavailable text",
+    });
+    expect(values.values["sun.golden_hour"]).toBe("Configured unavailable text");
+  });
 });
 
 describe("Meeus low-precision lunar values against published almanac values", () => {
@@ -120,6 +145,19 @@ describe("Meeus low-precision lunar values against published almanac values", ()
     expect(moonLocalDate(Date.parse(day.riseAt ?? ""), location.timeZone)).toBe("2026-01-13");
     expect(withinMinutes(localMinute(day.riseAt, location.timeZone), "01:37", 5)).toBe(true);
     expect(withinMinutes(localMinute(day.setAt, location.timeZone), "13:53", 5)).toBe(true);
+  });
+
+  it("does not duplicate a moonrise into the next day across Africa/Cairo's 2026 spring change", () => {
+    // Cairo's DST switches clocks from 00:00 to 01:00 on 2026-04-24, so that local day is
+    // only 23 hours long. The old local-midnight math started this day's scan window an
+    // hour too early, so a crossing right before the change (here 2026-04-23T21:37Z) was
+    // counted on both days; the shared helper now starts the window at the DST instant
+    // itself, so the crossing belongs to 2026-04-23 only.
+    const location = { latitude: 50, longitude: -172, timeZone: "Africa/Cairo" };
+    const previousDay = calculateMoonDay(location, "2026-04-23");
+    const dstDay = calculateMoonDay(location, "2026-04-24");
+    expect(previousDay.riseAt).toBe("2026-04-23T21:37:00.000Z");
+    expect(dstDay.riseAt).toBeNull();
   });
 
   it("marks Tromsø days without crossings as continuously below or above the horizon", () => {
