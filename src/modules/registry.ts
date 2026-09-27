@@ -9,13 +9,14 @@ import { sunModule } from "./sun";
 import { moonModule } from "./moon";
 import { weatherModule } from "./weather";
 import { currencyModule } from "./currency";
+import { timersModule } from "./timers";
 import type { ModuleOverlayElementDefinition } from "./contract";
 import type { TemplateVariable } from "../template";
 import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN, TEMPLATE_DOTTED_VARIABLE_NAME_PATTERN } from "../contracts/template-names";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 // This is the only place that knows all modules.
-export const MODULES: readonly BotModule[] = [textCommandModule, textLibraryModule, sunModule, moonModule, weatherModule, currencyModule, channelEventsModule, adsModule, raidModule, clipsModule];
+export const MODULES: readonly BotModule[] = [textCommandModule, textLibraryModule, timersModule, sunModule, moonModule, weatherModule, currencyModule, channelEventsModule, adsModule, raidModule, clipsModule];
 
 const HOST_TEMPLATE_VARIABLE_NAMES = new Set(SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name));
 const EXISTING_BARE_MODULE_VARIABLES: Readonly<Record<string, ReadonlySet<string>>> = {
@@ -107,6 +108,25 @@ export const validateModuleOverlayElements = (modules: readonly BotModule[]): vo
   }
 };
 
+export const validateModuleEventTimeSources = (modules: readonly BotModule[]): void => {
+  const ids = new Set<string>();
+  for (const module of modules) {
+    for (const source of module.eventTimeSources ?? []) {
+      if (!/^[a-z][a-z0-9_]*$/u.test(source.id)) {
+        throw new Error(`Module event-time source ${module.id}.${source.id} has an invalid id.`);
+      }
+      const id = `${module.id}.${source.id}`;
+      if (ids.has(id)) throw new Error(`Duplicate module event-time source ${id}.`);
+      ids.add(id);
+      for (const language of ["de", "en"] as const) {
+        if (source.label[language].trim().length === 0) {
+          throw new Error(`Module event-time source ${id} needs a label in ${language}.`);
+        }
+      }
+    }
+  }
+};
+
 export const moduleOverlayElementForKind = (
   kind: string,
   modules: readonly BotModule[] = MODULES,
@@ -120,3 +140,4 @@ export const moduleOverlayElementForKind = (
 
 validateModuleOverlayElements(MODULES);
 validateModuleTemplateVariables(MODULES);
+validateModuleEventTimeSources(MODULES);

@@ -383,6 +383,7 @@ const expectedModuleSettings = {
   },
   text_commands: {},
   text_library: {},
+  timers: {},
   sun: {},
   moon: {},
   weather: {},
@@ -776,6 +777,7 @@ describe("serialized contract shapes", () => {
         "sun",
         "text_commands",
         "text_library",
+        "timers",
         "weather",
       ]);
       expect(Object.fromEntries(MODULES.map((module) => [module.id, JSON.parse(JSON.stringify(module.defaultSettings))]))).toEqual(expectedModuleSettings);

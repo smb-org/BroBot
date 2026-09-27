@@ -125,6 +125,28 @@ const resolveConditionTransitions = async (
   }));
 };
 
+const upcomingSunEvents = async (
+  context: Parameters<NonNullable<BotModule["eventTimeSources"]>[number]["resolve"]>[0],
+  kind: "sunrise" | "sunset" | "golden_hour",
+): Promise<readonly string[]> => {
+  const [locationSetting, channelTimeZone] = await Promise.all([context.channelLocation(), context.channelTimeZone()]);
+  const location = validLocationFor(locationSetting, channelTimeZone);
+  if (location === null) return [];
+  const today = localDateInTimeZone(context.now, location.timeZone);
+  if (kind === "golden_hour") {
+    return calculateSunAltitudeIntervals(location, shiftLocalDate(today, -1), 16, "golden")
+      .map(({ startAt }) => startAt)
+      .filter((at) => Date.parse(at) > context.now);
+  }
+  return Array.from({ length: 16 }, (_, index) => calculateSunDay({
+    ...location,
+    localDate: shiftLocalDate(today, index - 1),
+  })).flatMap((day) => {
+    const at = kind === "sunset" ? day.sunsetAt : day.sunriseAt;
+    return at !== null && Date.parse(at) > context.now ? [at] : [];
+  });
+};
+
 const resolveOverlayValues = async (
   names: readonly string[],
   context: {
@@ -216,6 +238,11 @@ export const sunModule: BotModule<typeof settingsSchema> = {
   defaultSettings: {},
   templateVariables: () => Promise.resolve(SUN_TEMPLATE_VARIABLES),
   templateUnavailableText: DEFAULT_SUN_ERROR_TEXTS,
+  eventTimeSources: [
+    { id: "sunset", label: { de: sunModuleCatalog.de.eventTimes.sunset, en: sunModuleCatalog.en.eventTimes.sunset }, resolve: (context) => upcomingSunEvents(context, "sunset") },
+    { id: "sunrise", label: { de: sunModuleCatalog.de.eventTimes.sunrise, en: sunModuleCatalog.en.eventTimes.sunrise }, resolve: (context) => upcomingSunEvents(context, "sunrise") },
+    { id: "golden_hour", label: { de: sunModuleCatalog.de.eventTimes.golden_hour, en: sunModuleCatalog.en.eventTimes.golden_hour }, resolve: (context) => upcomingSunEvents(context, "golden_hour") },
+  ],
   resolveTemplateValues: async (names, context) => {
     const resolved = await currentSunValues(context);
     return Object.fromEntries(names.flatMap((name) => {

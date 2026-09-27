@@ -167,6 +167,7 @@ interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
   canManage?: boolean;
+  canOperate?: boolean;
   botIsModerator?: boolean | null;
   /** Deep-link target from Spotlight (#164); passed through to the panel unchanged. */
   initialSelection?: string;
@@ -403,7 +404,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   </>;
 };
 
-export const ModulePanelMount = ({ channelId, activeModules, canManage = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -425,7 +426,7 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true, b
     <section className="module-stack" aria-label={dashboardTexts().module.views}>
       <Suspense fallback={<p className="muted">{dashboardTexts().module.loadingViews}</p>}>
         {registeredViews.map(({ id, Panel, module }) => <div className="module-view" key={id}>
-          {Panel === null ? null : <Panel channelId={channelId} language={dashboardLanguage()} canManage={canManage} botIsModerator={botIsModerator} textBlockConditions={MODULES.flatMap((candidate) => candidate.textBlockConditions ?? [])} {...(initialSelection === undefined ? {} : { initialSelection })} />}
+          {Panel === null ? null : <Panel channelId={channelId} language={dashboardLanguage()} canManage={canManage} canOperate={canOperate} botIsModerator={botIsModerator} textBlockConditions={MODULES.flatMap((candidate) => candidate.textBlockConditions ?? [])} {...(initialSelection === undefined ? {} : { initialSelection })} />}
           <ModuleSettingsEditor module={module} channelId={channelId} canManageContent={canManage} language={dashboardLanguage()} />
         </div>)}
       </Suspense>
@@ -690,7 +691,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {stateMessage === null ? (
           registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount channelId={channelId} activeModules={[activeModule]} canManage={ownRole !== "operator"} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
+              <ModulePanelMount channelId={channelId} activeModules={[activeModule]} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
             </section>
           )
         ) : (

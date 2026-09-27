@@ -33,6 +33,7 @@ import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
 import { readChannelVariables } from "../db/channel-variables";
 import { readChannelLocation } from "../db/channel-settings";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
+import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event-times";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -42,6 +43,7 @@ interface ModuleRouteEnvironment {
     | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
     | "listChannelVariables" | "findChannelVariable"
     | "listTextBlockConditions"
+    | "listEventTimeSources" | "resolveEventTimes"
     | "resolveTextBlockConditions"
     | "publishModuleOverlayMessage"
     | "publishOverlayHostEvent"
@@ -146,6 +148,8 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     return registeredTemplateVariablesForChannel(context.env.DB, channelId);
   });
   context.set("listTextBlockConditions", () => Promise.resolve(MODULES.flatMap((module) => module.textBlockConditions ?? [])));
+  context.set("listEventTimeSources", moduleEventTimeOptions);
+  context.set("resolveEventTimes", (channelId, now) => resolveModuleEventTimes(context.env.DB, channelId, now));
   context.set("resolveTextBlockConditions", async (channelId, ids, now) => {
     const requested = new Set(ids);
     const channel = await context.env.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")

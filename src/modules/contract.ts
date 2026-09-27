@@ -428,6 +428,9 @@ export interface ModuleExecutionContext {
   channelLanguage: () => Promise<ModuleLanguage>;
   /** Lazily reads the channel's configured time zone for date/time and module conditions. */
   channelTimeZone: () => Promise<string>;
+  /** Schedules or clears an alarm registered by this module. */
+  scheduleAlarm: (handlerKey: string, alarmKey: string, deadline: number) => Promise<void>;
+  clearAlarm: (alarmKey: string) => Promise<void>;
 }
 
 /** Durable storage and alarm access given to a module alarm handler. */
@@ -442,6 +445,41 @@ export interface ModuleAlarmContext {
   /** Schedule or clear another key owned by this module and handled by this registration. */
   schedule: (key: string, deadline: number) => Promise<void>;
   clear: (key: string) => Promise<void>;
+  /** Renders a host template in the channel's event context. */
+  renderTemplate: (text: string, now?: number) => Promise<{ text: string; attributions?: readonly string[] }>;
+  /** Sends through the host's bounded chat boundary with an occurrence claim. */
+  sendChat: (
+    text: string,
+    idempotencyKey: string,
+    attributions?: readonly string[],
+  ) => Promise<{ sent: boolean; reason: string | null }>;
+  /** Monotonic count of accepted chat messages kept in this channel object. */
+  chatActivityCount: () => Promise<number>;
+  /** Resolves all registered module event-time sources without exposing module identity. */
+  resolveEventTimes: (now: number) => Promise<readonly ResolvedModuleEventTime[]>;
+  streamState: () => Promise<ModuleStreamState>;
+  streamStartedAt: () => Promise<{ streamId: string | null; startedAt: string | null }>;
+}
+
+export interface ModuleEventTimeContext {
+  DB: D1Database;
+  channelId: string;
+  now: number;
+  channelTimeZone: () => Promise<string>;
+  channelLocation: () => Promise<ModuleChannelLocation | null>;
+}
+
+export interface ModuleEventTimeSource {
+  /** Local to the declaring module; the host adds a stable namespace. */
+  id: string;
+  label: Readonly<Record<ModuleLanguage, string>>;
+  resolve: (context: ModuleEventTimeContext) => Promise<readonly string[]>;
+}
+
+export interface ResolvedModuleEventTime {
+  id: string;
+  label: Readonly<Record<ModuleLanguage, string>>;
+  at: string;
 }
 
 /**
@@ -655,6 +693,8 @@ export interface ModulePanelProperties {
   language?: ModuleLanguage;
   /** May the view execute management controls? */
   canManage?: boolean;
+  /** May the view execute operational controls available to every channel role? */
+  canOperate?: boolean;
   /** Generic data-source conditions available to text-block editors. */
   textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
   /** Last known status of the bot's moderator role in this channel. */
@@ -762,6 +802,8 @@ export interface ModuleRouteVariables {
   templateUsageSources: (channelId: string) => Promise<readonly ModuleTemplateUsageSource[]>;
   listRegisteredTemplateVariables: (channelId: string) => Promise<readonly ModuleRegisteredTemplateVariable[]>;
   listTextBlockConditions: () => Promise<readonly ModuleTextBlockConditionDefinition[]>;
+  listEventTimeSources: () => readonly { id: string; label: Readonly<Record<ModuleLanguage, string>> }[];
+  resolveEventTimes: (channelId: string, now: number) => Promise<readonly ResolvedModuleEventTime[]>;
   resolveTextBlockConditions: (
     channelId: string,
     ids: readonly string[],
@@ -906,6 +948,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   overlayElements?: readonly ModuleOverlayElementDefinition[];
   /** Durable alarm handlers registered through the shared host contract. */
   alarms?: readonly ModuleAlarmDefinition[];
+  /** Generic event-time sources that scheduled modules may select. */
+  eventTimeSources?: readonly ModuleEventTimeSource[];
   /**
    * The business entry point. A pure function: it describes what should
    * happen and executes nothing. The host executes the actions and logs

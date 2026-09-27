@@ -466,6 +466,14 @@ export const dispatchEventSubNotification = async (
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
+  if (event.subscriptionType === "channel.chat.message" && environment.CHANNEL !== undefined) {
+    try {
+      const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+      await object.recordChatActivity();
+    } catch (error: unknown) {
+      console.warn("Channel chat activity could not be counted.", error);
+    }
+  }
   // The ending stream remains current while its offline event is dispatched.
   // Capture that session's controls before the stored state moves to offline.
   const changedVariables = new Map<string, number>();
@@ -740,6 +748,16 @@ export const dispatchEventSubNotification = async (
             prepareVariableChange,
             channelLanguage,
             channelTimeZone,
+            scheduleAlarm: async (handlerKey, alarmKey, deadline) => {
+              if (environment.CHANNEL === undefined) return;
+              const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+              await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline);
+            },
+            clearAlarm: async (alarmKey) => {
+              if (environment.CHANNEL === undefined) return;
+              const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+              await object.clearModuleAlarm(module.id, alarmKey);
+            },
           });
     } catch (error: unknown) {
       // A module that throws doesn't take down the worker or the other

@@ -30,6 +30,10 @@ import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
+import { sendChatMessage } from "../chat";
+import { readChannelStreamState } from "../db/stream-state";
+import { resolveModuleEventTimes } from "../module-event-times";
+import { renderScheduledTemplate } from "../scheduled-template-renderer";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -46,6 +50,9 @@ const D1_IN_PARAMETER_LIMIT = 100;
 const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
+const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
+const TIMER_EXECUTION_CLAIMS_KEY = "timers:executed_runs";
+const TIMER_EXECUTION_CLAIM_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const SECURITY_DEADLINE_KEY = "security_round";
 const SECURITY_RETRY_KEY = "security_retry";
 const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
@@ -926,7 +933,44 @@ export class ChannelObject extends DurableObject<Env> {
       clear: async (key) => {
         await this.clearAlarmEntry(`module:${moduleId}:${key}`);
       },
+      renderTemplate: async (text, now = Date.now()) => renderScheduledTemplate(this.env, channelId, text, now),
+      sendChat: async (text, idempotencyKey, attributions = []) => {
+        const claimBeforePost = async (): Promise<boolean> => await this.ctx.storage.transaction(async (transaction) => {
+          const stored = await transaction.get<Record<string, number>>(TIMER_EXECUTION_CLAIMS_KEY);
+          const cutoff = Date.now() - TIMER_EXECUTION_CLAIM_RETENTION_MS;
+          const claims = Object.fromEntries(Object.entries(stored ?? {}).filter(([, claimedAt]) =>
+            Number.isFinite(claimedAt) && claimedAt >= cutoff,
+          ));
+          if (Object.hasOwn(claims, idempotencyKey)) return false;
+          claims[idempotencyKey] = Date.now();
+          await transaction.put(TIMER_EXECUTION_CLAIMS_KEY, claims);
+          return true;
+        });
+        const result = await sendChatMessage(this.env, channelId, text, undefined, fetch, undefined, claimBeforePost, attributions);
+        return { sent: result.sent, reason: result.reason };
+      },
+      chatActivityCount: () => this.getChatActivityCount(),
+      resolveEventTimes: (now) => resolveModuleEventTimes(this.env.DB, channelId, now),
+      streamState: async () => (await readChannelStreamState(this.env.DB, channelId))?.state ?? "unknown",
+      streamStartedAt: async () => {
+        const state = await readChannelStreamState(this.env.DB, channelId);
+        return state === null ? { streamId: null, startedAt: null } : { streamId: state.streamId, startedAt: state.startedAt };
+      },
     };
+  }
+
+  public async recordChatActivity(): Promise<number> {
+    return await this.ctx.storage.transaction(async (transaction) => {
+      const current = await transaction.get<number>(CHAT_ACTIVITY_COUNT_KEY);
+      const next = typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current + 1 : 1;
+      await transaction.put(CHAT_ACTIVITY_COUNT_KEY, next);
+      return next;
+    });
+  }
+
+  public async getChatActivityCount(): Promise<number> {
+    const current = await this.ctx.storage.get<number>(CHAT_ACTIVITY_COUNT_KEY);
+    return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
   }
 
   private alarmHandlers(modules: readonly BotModule[] = MODULES): Map<string, AlarmHandlerRegistration> {
