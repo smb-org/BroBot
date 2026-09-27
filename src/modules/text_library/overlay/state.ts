@@ -250,9 +250,6 @@ export const textBlockOverlayState = async (
     const expiresAt = context.streamDetailsCacheExpiresAt();
     if (expiresAt !== null && Number.isFinite(expiresAt) && expiresAt > context.now) systemRefreshAts.push(expiresAt);
   }
-  if (context.hasLookupFailure()) {
-    systemRefreshAts.push(context.now + TEMPLATE_LOOKUP_RETRY_MS);
-  }
   const fixedSunNames = ["sun.set", "sun.rise", "sun.dusk"].filter((name) => referencedTemplateNames.has(name));
   if (fixedSunNames.length > 0) {
     const sunValues = await context.resolveOverlayTemplateValues(fixedSunNames);
@@ -262,6 +259,11 @@ export const textBlockOverlayState = async (
     ]).map(Date.parse).filter((at) => Number.isFinite(at) && at > context.now)
       .map((at) => at + 1_000);
     systemRefreshAts.push(...sunRefreshAts);
+  }
+  // Checked last so it also catches a transient failure from the fixed-sun lookup above,
+  // not just earlier lookups in this pass.
+  if (context.hasLookupFailure()) {
+    systemRefreshAts.push(context.now + TEMPLATE_LOOKUP_RETRY_MS);
   }
   const conditionTimelineRefreshAt = timeConditionIds.length === 0
     ? Number.POSITIVE_INFINITY

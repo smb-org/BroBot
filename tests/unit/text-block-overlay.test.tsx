@@ -339,4 +339,24 @@ describe("text block overlay rendering", () => {
 
     expect(state).toMatchObject({ refreshAt: "2026-06-21T20:30:01.000Z" });
   });
+
+  it("retries when the fixed-sun lookup fails after an earlier lookup for the same block already succeeded", async () => {
+    const db = overlayDatabase([variant("default", "Sunset {sun.set}", {})]);
+    let lookupCalls = 0;
+    let failed = false;
+    const context = contextFor({
+      overlayTemplateVariableNames: new Set(["sun.set"]),
+      hasLookupFailure: () => failed,
+      resolveOverlayTemplateValues: () => {
+        lookupCalls += 1;
+        if (lookupCalls === 1) return Promise.resolve({ "sun.set": { available: true, targetAt: sunset } });
+        failed = true;
+        return Promise.resolve({ "sun.set": { available: false } });
+      },
+    });
+
+    const state = await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+
+    expect(state).toMatchObject({ refreshAt: new Date(context.now + 30_000).toISOString() });
+  });
 });
