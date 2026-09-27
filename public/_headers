@@ -1,3 +1,15 @@
+/
+  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net
+
+/channels/*
+  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net
+
+/platform
+  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net
+
+/platform/*
+  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net
+
 # Vite assets are static Cloudflare assets. CORS lets the sandboxed overlay
 # iframe load JS, CSS, and fonts from its opaque origin without invoking Worker.
 /_app/*

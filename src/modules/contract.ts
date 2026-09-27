@@ -539,14 +539,6 @@ export interface ModulePanelProperties {
   initialSelection?: string;
 }
 
-/** A module-owned field group rendered inside the channel's shared settings section. */
-export interface ModuleChannelSettingsProperties {
-  channelId: string;
-  language: ModuleLanguage;
-  canManage: boolean;
-  readOnlyReason: string;
-}
-
 /** Props for one lazily loaded card in the channel's immediate-action row. */
 export interface ModuleImmediateActionProperties {
   channelId: string;
@@ -756,8 +748,6 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
       language: ModuleLanguage;
     },
   ) => Promise<Readonly<Record<string, ModuleOverlayTemplateValue>>>;
-  /** Lazily rendered inside the shared channel settings section. */
-  channelSettings?: () => Promise<{ default: ComponentType<ModuleChannelSettingsProperties> }>;
   /** Channel navigation entries contributed by this module. */
   navigationEntries?: readonly ModuleNavigationEntry[];
   /** Template text contributed by this module for generic library usage views. */

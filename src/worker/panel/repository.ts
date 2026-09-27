@@ -43,6 +43,10 @@ interface ChannelStateRow {
   display_name: string;
   language: "de" | "en";
   role: ChannelRole;
+  location_name: string | null;
+  location_latitude: number | null;
+  location_longitude: number | null;
+  location_time_zone: string | null;
   broadcaster_connection: number;
   full_consent: number;
   broadcaster_scopes_json: string | null;
@@ -143,6 +147,7 @@ export const decodeLogCursor = (serialized: string): LogCursor | null => decodeC
 
 export const channelStateQuery = `
     SELECT channel.channel_id, channel.login, channel.display_name, channel.language, member.role,
+           channel.location_name, channel.location_latitude, channel.location_longitude, channel.location_time_zone,
            CASE WHEN broadcaster_identity.status = 'connected' THEN 1 ELSE 0 END AS broadcaster_connection,
            channel.full_consent AS full_consent,
            broadcaster_identity.scopes_json AS broadcaster_scopes_json,
@@ -362,6 +367,15 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   displayName: row.display_name,
   language: row.language,
   role: row.role,
+  location: row.location_name === null || row.location_latitude === null ||
+      row.location_longitude === null || row.location_time_zone === null
+    ? null
+    : {
+      name: row.location_name,
+      latitude: row.location_latitude,
+      longitude: row.location_longitude,
+      timeZone: row.location_time_zone,
+    },
   broadcasterConnection: row.broadcaster_connection === 1 ? "connected" : "not_connected",
   channelBotConsent: row.channel_bot_consent === 1 ? "granted" : "missing",
   bot: mapBotStatus(row),

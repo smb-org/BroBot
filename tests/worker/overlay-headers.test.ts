@@ -23,16 +23,17 @@ describe("overlay document security headers", () => {
     const response = await exports.default.fetch(new Request(`http://localhost${path}`));
 
     expect(response.headers.get("content-security-policy")).toBe(overlayCspFor(publicOrigin));
+    expect(response.headers.get("content-security-policy")).not.toContain("static-cdn.jtvnw.net");
     expect(response.headers.get("content-security-policy")).not.toContain("frame-ancestors");
     expect(response.headers.get("x-frame-options")).toBeNull();
     expect(response.headers.get("content-type")).toContain("text/html");
   });
 
-  it("leaves dashboard assets and API responses unchanged", async () => {
+  it("allows Twitch images on the dashboard without widening the overlay or API policy", async () => {
     const dashboard = await exports.default.fetch(new Request("http://localhost/"));
     const api = await exports.default.fetch(new Request("http://localhost/api/overlay/bootstrap"));
 
-    expect(dashboard.headers.get("content-security-policy")).toBeNull();
+    expect(dashboard.headers.get("content-security-policy")).toBe("img-src 'self' https://static-cdn.jtvnw.net");
     expect(dashboard.headers.get("x-frame-options")).toBeNull();
     expect(api.status).toBe(401);
     expect(api.headers.get("content-security-policy")).toBeNull();

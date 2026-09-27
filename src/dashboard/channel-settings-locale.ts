@@ -15,8 +15,14 @@ export interface ChannelSettingsTexts {
   locationSelect: string;
   locationResults: string;
   locationNoResults: string;
+  locationAttribution: string;
+  locationChange: string;
   locationRemove: string;
-  locationSave: string;
+  locationRemoveTitle: string;
+  locationRemoveDescription: string;
+  locationNotSet: string;
+  locationRemoved: string;
+  cancel: string;
   locationSaved: string;
   locationSaveFailed: string;
   locationSearchFailed: string;
@@ -44,8 +50,14 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     locationSelect: "Auswählen",
     locationResults: "Standortsuche",
     locationNoResults: "Keine passenden Orte gefunden.",
+    locationAttribution: "Ortssuche von Open-Meteo.com",
+    locationChange: "Standort ändern",
     locationRemove: "Standort entfernen",
-    locationSave: "Standort speichern",
+    locationRemoveTitle: "Standort entfernen?",
+    locationRemoveDescription: "Der gespeicherte Standort wird dauerhaft aus den Kanaleinstellungen entfernt.",
+    locationNotSet: "Es ist kein Standort zum Entfernen gespeichert.",
+    locationRemoved: "Der Standort wurde entfernt.",
+    cancel: "Abbrechen",
     locationSaved: "Der Standort wurde gespeichert.",
     locationSaveFailed: "Der Standort konnte nicht gespeichert werden.",
     locationSearchFailed: "Orte konnten nicht gesucht werden.",
@@ -71,8 +83,14 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     locationSelect: "Select",
     locationResults: "Location search results",
     locationNoResults: "No matching locations found.",
+    locationAttribution: "Location search by Open-Meteo.com",
+    locationChange: "Change location",
     locationRemove: "Remove location",
-    locationSave: "Save location",
+    locationRemoveTitle: "Remove location?",
+    locationRemoveDescription: "The saved location will be permanently removed from channel settings.",
+    locationNotSet: "There is no saved location to remove.",
+    locationRemoved: "Location removed.",
+    cancel: "Cancel",
     locationSaved: "Location saved.",
     locationSaveFailed: "Location could not be saved.",
     locationSearchFailed: "Locations could not be searched.",

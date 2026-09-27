@@ -3,6 +3,7 @@
 // in docs/input/DESIGN-neu.md.
 
 export { UiProvider } from "./Provider";
+export { Dialog } from "./Dialog";
 export { theme, colors, luminanceThreshold } from "./theme";
 export type { StateToken, FamilyToken } from "./theme";
 
@@ -25,6 +26,8 @@ export { Sidebar } from "./Sidebar";
 export type { SidebarProps, SidebarEntry, SidebarGroup, SidebarModulesGroup } from "./Sidebar";
 
 export { Field } from "./Field";
+export { ChannelLocationMenu } from "./ChannelLocationMenu";
+export type { ChannelLocationMenuMessages } from "./ChannelLocationMenu";
 export { GamePicker, type GamePickerGame, type GamePickerMessages } from "./GamePicker";
 export type { FieldProps } from "./Field";
 

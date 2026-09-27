@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from "react";
 
-import type { ModuleChannelSettingsProperties } from "../../contract";
+import type { ModulePanelProperties } from "../../contract";
 import { SUN_ERROR_TEXT_MAX_LENGTH, type SunSettings } from "../contracts";
 import { Button, Field, InspectorFieldRow } from "../../../dashboard/ui";
 import { sunSettingsTexts } from "./locale";
@@ -10,9 +10,9 @@ export default function SunSettingsPanel({
   channelId,
   language,
   canManage,
-  readOnlyReason,
-}: ModuleChannelSettingsProperties): ReactElement {
-  const labels = sunSettingsTexts(language);
+}: ModulePanelProperties): ReactElement {
+  const labels = sunSettingsTexts(language ?? "de");
+  const canEdit = canManage ?? false;
   const [settings, setSettings] = useState<SunSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -31,7 +31,7 @@ export default function SunSettingsPanel({
   }, [channelId, labels.loadFailed]);
 
   const save = async (): Promise<void> => {
-    if (settings === null || !canManage) return;
+    if (settings === null || !canEdit) return;
     setBusy(true);
     setError("");
     setNotice("");
@@ -55,11 +55,8 @@ export default function SunSettingsPanel({
     <div className="module-stack sun-settings" aria-label={labels.errorTexts}>
       {error.length === 0 ? null : <p className="form-error" role="alert">{error}</p>}
       {notice.length === 0 ? null : <p className="muted" role="status">{notice}</p>}
-      {!canManage ? <p className="lock-reason">{readOnlyReason || labels.readOnlyReason}</p> : null}
-      {!canManage ? <dl className="properties">
-        <div><dt>{labels.unavailableDe}</dt><dd>{settings?.errorTexts.de ?? "—"}</dd></div>
-        <div><dt>{labels.unavailableEn}</dt><dd>{settings?.errorTexts.en ?? "—"}</dd></div>
-      </dl> : <>
+      {!canEdit ? <p className="lock-reason" id="sun-settings-read-only">{labels.readOnlyReason}</p> : null}
+      <>
         <InspectorFieldRow label={labels.errorTexts} help={labels.errorTextsHint}>
           <div className="sun-settings__fields">
           <Field
@@ -68,8 +65,8 @@ export default function SunSettingsPanel({
             onChange={(value) => setSettings((current) => current === null ? current : { ...current, errorTexts: { ...current.errorTexts, de: value } })}
             maxLength={SUN_ERROR_TEXT_MAX_LENGTH}
             countLabel={(count, max) => `${String(count)} / ${String(max)}`}
-            readOnly={!canManage}
-            disabled={settings === null || busy}
+            readOnly={!canEdit}
+            disabled={settings === null || busy || !canEdit}
           />
           <Field
             label={labels.unavailableEn}
@@ -77,15 +74,20 @@ export default function SunSettingsPanel({
             onChange={(value) => setSettings((current) => current === null ? current : { ...current, errorTexts: { ...current.errorTexts, en: value } })}
             maxLength={SUN_ERROR_TEXT_MAX_LENGTH}
             countLabel={(count, max) => `${String(count)} / ${String(max)}`}
-            readOnly={!canManage}
-            disabled={settings === null || busy}
+            readOnly={!canEdit}
+            disabled={settings === null || busy || !canEdit}
           />
           </div>
         </InspectorFieldRow>
         <div className="sun-settings__footer">
-        <Button variant="primary" disabled={settings === null || busy} onClick={() => { void save(); }}>{labels.save}</Button>
+        <Button
+          variant="primary"
+          disabled={settings === null || busy || !canEdit}
+          {...(!canEdit ? { describedBy: "sun-settings-read-only" } : {})}
+          onClick={() => { void save(); }}
+        >{labels.save}</Button>
         </div>
-      </>}
+      </>
     </div>
   );
 }

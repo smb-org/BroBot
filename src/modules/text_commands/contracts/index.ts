@@ -17,6 +17,8 @@ export const TEXT_COMMAND_MAX_ALIASES = 10;
 export interface TextCommandGame {
   id: string;
   name: string;
+  /** Helix box_art_url template; absent on older persisted game entries. */
+  boxArtUrlTemplate?: string;
 }
 
 export interface TextCommand {

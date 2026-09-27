@@ -192,7 +192,7 @@ export const sunModule: BotModule<typeof settingsSchema> = {
   dynamicTemplateVariableNames: ["sun.set_in", "sun.rise_in"],
   resolveOverlayTemplateValues: resolveOverlayValues,
   routes: sunRoutes,
-  channelSettings: () => import("./panel/settings"),
+  panel: () => import("./panel/settings"),
 };
 
 export { calculateSunDay, resolveSunTemplateValues } from "./domain";

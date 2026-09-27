@@ -218,7 +218,7 @@ moduleRouter.get("/api/channels/:channelId/games", async (context) => {
       context.get("getAppAccessToken")(context.env, nowIso()),
     );
     const result = await context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{
-      data?: readonly { id?: unknown; name?: unknown }[];
+      data?: readonly { id?: unknown; name?: unknown; box_art_url?: unknown }[];
     }>({
       url: "https://api.twitch.tv/helix/search/categories",
       query: { query, first: "20" },
@@ -227,13 +227,21 @@ moduleRouter.get("/api/channels/:channelId/games", async (context) => {
     }));
     if (!result.ok || !Array.isArray(result.data.data)) return context.json({ error: "games_unavailable" }, 503);
     const entries = result.data.data as unknown as readonly unknown[];
-    const games = entries.flatMap((entry): { id: string; name: string }[] => {
+    const games = entries.flatMap((entry): { id: string; name: string; boxArtUrlTemplate?: string }[] => {
       if (typeof entry !== "object" || entry === null) return [];
       const record = entry as Record<string, unknown>;
       const id = record.id;
       const name = record.name;
       if (typeof id !== "string" || typeof name !== "string") return [];
-      return [{ id, name }];
+      const boxArtUrlTemplate = record.box_art_url;
+      if (typeof boxArtUrlTemplate !== "string") return [{ id, name }];
+      try {
+        const parsedUrl = new URL(boxArtUrlTemplate.replaceAll("{width}", "100").replaceAll("{height}", "100"));
+        if (parsedUrl.protocol !== "https:" || parsedUrl.hostname !== "static-cdn.jtvnw.net") return [{ id, name }];
+      } catch {
+        return [{ id, name }];
+      }
+      return [{ id, name, boxArtUrlTemplate }];
     });
     return context.json({ games });
   } catch {

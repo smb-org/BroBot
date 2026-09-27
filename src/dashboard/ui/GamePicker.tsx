@@ -3,6 +3,7 @@ import { useEffect, useId, useState, type ReactElement } from "react";
 export interface GamePickerGame {
   id: string;
   name: string;
+  boxArtUrlTemplate?: string;
 }
 
 export interface GamePickerMessages {
@@ -15,6 +16,34 @@ export interface GamePickerMessages {
   error: string;
   remove: (name: string) => string;
 }
+
+const coverUrl = (game: GamePickerGame, width: number, height: number): string | null => {
+  if (game.boxArtUrlTemplate === undefined) return null;
+  const url = game.boxArtUrlTemplate.replaceAll("{width}", String(width)).replaceAll("{height}", String(height));
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === "static-cdn.jtvnw.net" ? url : null;
+  } catch {
+    return null;
+  }
+};
+
+const GameCover = ({ game, width, height }: { game: GamePickerGame; width: number; height: number }): ReactElement => {
+  const [failed, setFailed] = useState(false);
+  const src = failed ? null : coverUrl(game, width, height);
+  return src === null
+    ? <span className="ui-game-picker__cover-placeholder" aria-hidden="true" style={{ width, height }} />
+    : <img
+      className="ui-game-picker__cover"
+      src={src}
+      width={width}
+      height={height}
+      loading="lazy"
+      decoding="async"
+      alt=""
+      onError={() => setFailed(true)}
+    />;
+};
 
 interface GameSearchState {
   query: string;
@@ -66,6 +95,7 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
       <div className="ui-game-picker__selected" aria-live="polite">
         {value.map((game) => (
           <span className="ui-game-picker__chip" key={game.id}>
+            <GameCover game={game} width={20} height={27} />
             <span>{game.name}</span>
             <button type="button" disabled={disabled} aria-label={messages.remove(game.name)} onClick={() => onChange(value.filter((entry) => entry.id !== game.id))}>×</button>
           </span>
@@ -90,6 +120,7 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
           {currentSearch.results.map((game) => (
             <li key={game.id}>
               <button type="button" role="option" aria-selected={value.some((entry) => entry.id === game.id)} disabled={disabled || value.some((entry) => entry.id === game.id)} onClick={() => add(game)}>
+                <GameCover game={game} width={28} height={38} />
                 {game.name}
               </button>
             </li>

@@ -113,11 +113,10 @@ Kanal-Einstellungen.
 Ein Modul kann über `textBlockConditions` Bedingungen für Varianten von
 Textblöcken bereitstellen. Die Kennung ist punktgetrennt; das Modul löst den
 aktuellen Wert beim Rendern auf, während die Textbibliothek Definitionen und
-Auswahl speichert. Ein `channelSettings`-Baustein wird in den gemeinsamen
-Kanaleinstellungen des Dashboards angezeigt. Der Baustein erhält nur seine
-Modulkennung, Sprache und Berechtigungsinformationen. Host-Einstellungen wie
-Kanalzeitzone und Standort bearbeitet der Host selbst; Module bekommen diese
-Werte bei Bedarf über den schreibgeschützten Contract.
+Auswahl speichert. Die gemeinsamen Kanaleinstellungen enthalten ausschließlich
+Host-Einstellungen wie Kanalzeitzone und Standort. Eigene Moduleinstellungen
+gehören auf die Seite des Moduls (`panel` oder `settingsEditor`). Module
+bekommen Host-Werte bei Bedarf über den schreibgeschützten Contract.
 
 Die Sonnendatenquelle liegt eigenständig unter `src/modules/sun/`. Sie nutzt
 Open-Meteo-Geocoding über den Host für die Standortsuche. Der Host speichert

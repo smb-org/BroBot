@@ -77,7 +77,7 @@ const templateDeclarations = (options: readonly TemplateVariableOption[]): Templ
 
 const getSuggestionQuery = (value: string, caret: number): SuggestionQuery | null => {
   const prefix = value.slice(0, caret);
-  const match = /\{([A-Za-z0-9_]*)$/u.exec(prefix);
+  const match = /\{([A-Za-z0-9_.]*)$/u.exec(prefix);
   if (match === null) return null;
   return { fragment: match[1] ?? "", start: match.index + 1, end: caret };
 };

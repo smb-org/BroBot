@@ -569,6 +569,15 @@ export interface DashboardTexts {
     streamOffline: string;
     streamUnknown: string;
     streamChecked: (relativeTime: string) => string;
+    locationMenu: {
+      openIn: string;
+      openStreetMap: string;
+      googleMaps: string;
+      appleMaps: string;
+      copyCoordinates: string;
+      coordinatesCopied: string;
+      copyCoordinatesFailed: string;
+    };
   };
   status: {
     connected: string;
@@ -946,6 +955,15 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       streamOffline: "Offline",
       streamUnknown: "Status unbekannt",
       streamChecked: (relativeTime) => `Zustand geprüft ${relativeTime}`,
+      locationMenu: {
+        openIn: "Öffnen in",
+        openStreetMap: "OpenStreetMap",
+        googleMaps: "Google Maps",
+        appleMaps: "Apple Karten",
+        copyCoordinates: "Koordinaten kopieren",
+        coordinatesCopied: "Koordinaten kopiert",
+        copyCoordinatesFailed: "Koordinaten konnten nicht kopiert werden.",
+      },
     },
     status: {
       connected: "Verbunden", revoked: "Widerrufen", error: "Fehler",
@@ -1206,6 +1224,15 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       streamOffline: "Offline",
       streamUnknown: "Status unknown",
       streamChecked: (relativeTime) => `State checked ${relativeTime}`,
+      locationMenu: {
+        openIn: "Open in",
+        openStreetMap: "OpenStreetMap",
+        googleMaps: "Google Maps",
+        appleMaps: "Apple Maps",
+        copyCoordinates: "Copy coordinates",
+        coordinatesCopied: "Coordinates copied",
+        copyCoordinatesFailed: "Coordinates could not be copied.",
+      },
     },
     status: {
       connected: "Connected", revoked: "Revoked", error: "Error", loginIdentityMissing: "Login identity missing",
