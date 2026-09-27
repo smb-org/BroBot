@@ -7,7 +7,7 @@ import {
 } from "../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 import { templateLanguageText } from "../modules/template-language";
-import type { ModuleChannelInfo, ModuleChannelLocation, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
+import type { BotModule, ModuleChannelInfo, ModuleChannelLocation, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
 import { formatCount } from "../text";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN } from "../contracts/template-names";
@@ -25,6 +25,9 @@ export interface TemplateValueProvider {
     ids: readonly string[],
     context: ModuleTemplateConditionContext,
   ) => Promise<Readonly<Record<string, string>>>;
+  dynamicTemplateVariableNames?: readonly string[];
+  resolveOverlayTemplateValues?: BotModule["resolveOverlayTemplateValues"];
+  resolveTemplateConditionTransitions?: BotModule["resolveTemplateConditionTransitions"];
   resolveTemplateValues: (
     names: readonly string[],
     context: ModuleTemplateValueContext,
@@ -42,6 +45,7 @@ export interface TemplateResolverSources {
   streamState: () => Promise<ModuleStreamState>;
   channelDetails: () => Promise<TemplateChannelDetails | null>;
   streamDetails: () => Promise<TemplateStreamDetails | null>;
+  viewerCount?: () => Promise<number | null>;
   followedAt: (userId: string) => Promise<ModuleFollowedAt>;
   followerTotal: () => Promise<number | null>;
   chattersTotal: () => Promise<number | null>;
@@ -163,10 +167,13 @@ export const createTemplateRenderer = (
   const requiresStreamDetails = ["uptime", "viewers"].some((name) => requiredSystem.has(name));
   const requiresLanguage = ["game", "title", "uptime", "followage", "accountage", "date", "time", "followers", "viewers", "var"].some((name) => requiredSystem.has(name)) || channelNames.length > 0 || inputFallbacks.length > 0;
   const requiresTimeZone = requiredSystem.has("date") || requiredSystem.has("time");
-  const [language, channelDetails, streamDetails, streamState, followedAt, followerTotal, chattersTotal, channelValues, channelTimeZone] = await Promise.all([
+  const [language, channelDetails, streamDetails, viewerCount, streamState, followedAt, followerTotal, chattersTotal, channelValues, channelTimeZone] = await Promise.all([
     requiresLanguage ? sources.channelLanguage() : Promise.resolve("de" as const),
     requiresChannelDetails ? sources.channelDetails() : Promise.resolve(null),
     requiresStreamDetails ? sources.streamDetails() : Promise.resolve(null),
+    requiredSystem.has("viewers") && sources.viewerCount !== undefined
+      ? sources.viewerCount()
+      : Promise.resolve(null),
     requiredSystem.has("live") ? sources.streamState() : Promise.resolve("unknown" as const),
     requiredSystem.has("followage") ? (() => {
       const userId = event.actor?.userId ?? payloadString(event, "chatter_user_id");
@@ -203,6 +210,9 @@ export const createTemplateRenderer = (
   const channelLogin = payloadString(event, "broadcaster_user_login") ?? event.channelId;
   const target = valueFrom(moduleValues.target) ?? userLogin;
   const args = valueFrom(moduleValues.args) ?? "";
+  const resolvedViewerCount = sources.viewerCount === undefined
+    ? streamDetails?.viewerCount ?? null
+    : viewerCount;
 
   for (const name of requiredSystem) {
     if (name === "user") values[name] = userLogin;
@@ -216,9 +226,9 @@ export const createTemplateRenderer = (
     else if (name === "uptime") values[name] = streamDetails === null
       ? missing(name)
       : streamDetails.startedAt === null ? valueFrom(moduleValues.offlineText) ?? templateLanguageText[language].offline : formatDuration(streamDetails.startedAt, now, language);
-    else if (name === "viewers") values[name] = streamDetails === null
+    else if (name === "viewers") values[name] = streamDetails === null || resolvedViewerCount === null
       ? missing(name)
-      : formatCount(streamDetails.startedAt === null ? 0 : streamDetails.viewerCount, language);
+      : formatCount(streamDetails.startedAt === null ? 0 : resolvedViewerCount, language);
     else if (name === "live") values[name] = streamState === "unknown" ? missing(name) : streamState;
     else if (name === "followers") values[name] = followerTotal === null ? missing(name) : formatCount(followerTotal, language);
     else if (name === "chatters") values[name] = chattersTotal === null ? missing(name) : formatCount(chattersTotal, language);
@@ -269,7 +279,7 @@ export const createTemplateRenderer = (
     ...effective.filter((variable) => variableNames.has(variable.name)),
     ...inputFallbacks.filter((variable) => requested.has(variable.name) && !variableNames.has(variable.name)),
   ];
-  const randomIndex = sources.random ?? secureRandomInteger;
+  const randomIndex = mode === "overlay" ? () => 0 : sources.random ?? secureRandomInteger;
   const parameterValues: Record<string, (parameter: string) => string> = {
     random: (parameter) => {
       const range = parseTemplateRange(parameter || "1-100");
@@ -351,6 +361,8 @@ export const createTemplateRenderer = (
       }
       return resolved;
     },
+    dynamicTemplateVariableNames: new Set((sources.templateValueProviders ?? [])
+      .flatMap((provider) => provider.dynamicTemplateVariableNames ?? [])),
   };
   for (const provider of sources.templateValueProviders ?? []) {
     const declaredNames = new Set(provider.variables
@@ -364,14 +376,20 @@ export const createTemplateRenderer = (
     try {
       resolved = await provider.resolveTemplateValues(requestedNames, providerContext);
     } catch {
+      if (mode === "overlay") {
+        requestedNames.forEach((name) => { addDiagnostic({ code: "template.lookup_unavailable", detail: { name } }); });
+      }
       if (provider.templateVariableNamespace === "text_blocks" || provider.templateUnavailableText === undefined) continue;
       for (const name of requestedNames) values[name] = provider.templateUnavailableText[language];
-      requestedNames.forEach((name) => { addDiagnostic({ code: "template.lookup_unavailable", detail: { name } }); });
+      if (mode !== "overlay") {
+        requestedNames.forEach((name) => { addDiagnostic({ code: "template.lookup_unavailable", detail: { name } }); });
+      }
       continue;
     }
     for (const name of requestedNames) {
       const value: unknown = resolved[name];
       if (typeof value === "string") values[name] = value;
+      else if (mode === "overlay") addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
     }
   }
   const rendered = renderTemplate(renderSource, values, parameterValues, effectiveForRender);

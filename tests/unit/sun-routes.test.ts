@@ -22,7 +22,7 @@ const createDatabase = async (): Promise<TestD1Database> => {
   return database;
 };
 
-const appFor = (database: D1Database): Hono<ModuleRouteEnvironment> => {
+const appFor = (database: D1Database, publishedHostEvents: string[] = []): Hono<ModuleRouteEnvironment> => {
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", "manager");
@@ -30,6 +30,10 @@ const appFor = (database: D1Database): Hono<ModuleRouteEnvironment> => {
     context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
     context.set("prepareModuleAudit", (entry, changedAt) =>
       prepareModuleAudit(database, ACTOR_ID, changedAt, entry));
+    context.set("publishOverlayHostEvent", (channelId, event) => {
+      publishedHostEvents.push(`${channelId}:${event}`);
+      return Promise.resolve();
+    });
     await next();
   });
   app.route("/channels/:channelId", sunRoutes);
@@ -52,9 +56,11 @@ afterEach(() => {
 describe("sun error text settings", () => {
   it("stores and audits only the module-owned error texts", async () => {
     const database = await createDatabase();
-    const app = appFor(database as unknown as D1Database);
+    const errorTexts = { de: "D".repeat(200), en: "E".repeat(200) };
+    const hostEvents: string[] = [];
+    const app = appFor(database as unknown as D1Database, hostEvents);
     const environment = { DB: database as unknown as D1Database };
-    const response = await app.fetch(requestFor(1), environment);
+    const response = await app.fetch(requestFor(1, errorTexts), environment);
     const saved = await response.json<{ errorTexts: { de: string; en: string }; revision: number }>();
     const audits = await database.prepare(
       "SELECT before_json, after_json FROM audit_log WHERE channel_id = ? AND action = ? ORDER BY rowid",
@@ -63,6 +69,7 @@ describe("sun error text settings", () => {
     expect(response.status).toBe(200);
     expect(saved).toEqual({ errorTexts, revision: 2 });
     expect(await readSunSettings(database as unknown as D1Database, CHANNEL_ID)).toEqual(saved);
+    expect(hostEvents).toEqual([`${CHANNEL_ID}:template.data.changed`]);
     expect(audits.results).toHaveLength(1);
     expect(JSON.parse(audits.results[0]?.before_json ?? "{}") as Record<string, unknown>).toEqual({
       errorTextDe: "Sonnendaten sind derzeit nicht verfügbar.",

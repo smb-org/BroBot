@@ -6,6 +6,7 @@ import type {
   RealtimeOverlayPrincipal,
   RealtimePrincipal,
 } from "../realtime-contract";
+import { prepareModuleOverlayHostEventMessages } from "./module-overlay-realtime";
 import { OVERLAY_TOKEN_SUBPROTOCOL_PREFIX } from "../realtime-contract";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "./auth/guards";
 import { authenticateOverlayToken } from "./auth/overlay-token-service";
@@ -158,6 +159,21 @@ export const publishRealtimeMessages = async (
   await object.publish(messages);
 };
 
+/** Publishes a declared host-state hint without making the host mutation depend on overlays. */
+export const publishOverlayHostEvent = async (
+  namespace: Env["CHANNEL"] | undefined,
+  database: D1Database,
+  channelId: string,
+  event: Parameters<typeof prepareModuleOverlayHostEventMessages>[2],
+): Promise<void> => {
+  try {
+    const messages = await prepareModuleOverlayHostEventMessages(database, channelId, event);
+    await publishRealtimeMessages(namespace, messages);
+  } catch (error: unknown) {
+    console.warn("Overlay host state update could not be sent.", error);
+  }
+};
+
 export const overlayChangedMessage = (
   channelId: string,
   overlayId: string,
@@ -193,6 +209,7 @@ export const publishOverlayChanged = async (
 /** Sends a channel-variable hint best-effort; D1 remains the authoritative state. */
 export const publishVariablesChanged = async (
   namespace: Env["CHANNEL"] | undefined,
+  database: D1Database,
   channelId: string,
   set: RealtimeEnvelope<"variables.changed">["payload"]["set"],
   removed: RealtimeEnvelope<"variables.changed">["payload"]["removed"],
@@ -200,7 +217,15 @@ export const publishVariablesChanged = async (
   additionalMessages: readonly RealtimeMessage[] = [],
 ): Promise<void> => {
   if (set.length === 0 && removed.length === 0 && additionalMessages.length === 0) return;
-  const messages: RealtimeMessage[] = [...additionalMessages];
+  let templateStateMessages: RealtimeMessage[] = [];
+  if (namespace !== undefined && (set.length > 0 || removed.length > 0)) {
+    try {
+      templateStateMessages = await prepareModuleOverlayHostEventMessages(database, channelId, "template.data.changed");
+    } catch (error: unknown) {
+      console.warn("Module overlay state refresh hint could not be prepared.", error);
+    }
+  }
+  const messages: RealtimeMessage[] = [...additionalMessages, ...templateStateMessages];
   if (set.length > 0 || removed.length > 0) {
     messages.push({
       version: 1,
@@ -230,14 +255,20 @@ export const publishStreamStateChanged = async (
 ): Promise<void> => {
   try {
     const controls = await readChannelControls(database, channelId, checkedAt);
-    await publishRealtimeMessages(namespace, [{
+    const messages: RealtimeMessage[] = [{
       version: 1,
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       channelId,
       type: "stream.state.changed",
       payload: { state, startedAt, changedAt, checkedAt, controls },
-    }]);
+    }];
+    try {
+      messages.push(...await prepareModuleOverlayHostEventMessages(database, channelId, "stream.state.changed"));
+    } catch (error: unknown) {
+      console.warn("Realtime stream overlay hint could not be prepared.", error);
+    }
+    await publishRealtimeMessages(namespace, messages);
   } catch (error: unknown) {
     console.warn("Realtime stream state hint could not be sent.", error);
   }

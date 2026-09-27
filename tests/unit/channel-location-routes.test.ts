@@ -13,7 +13,15 @@ const keys = {
 
 let database: TestD1Database;
 
-const environmentFor = (DB: D1Database): Env => ({ DB, ...keys, TWITCH_CLIENT_ID: "client-id" } as unknown as Env);
+const environmentFor = (
+  DB: D1Database,
+  publish: (messages: readonly unknown[]) => Promise<void> = () => Promise.resolve(),
+): Env => ({
+  DB,
+  ...keys,
+  TWITCH_CLIENT_ID: "client-id",
+  CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ publish }) },
+} as unknown as Env);
 
 const locationRequest = async (location: unknown, revision: number): Promise<Request> => {
   const cookie = await createSessionCookie({ sessionId: "session-manager" }, keys.SESSION_COOKIE_KEYS, keys.SESSION_ENCRYPTION_KEYS);
@@ -41,7 +49,22 @@ describe("channel location setting route", () => {
 
   it("stores the host location, leaves channel time zone unchanged, and records a host audit entry", async () => {
     const location = { name: "Honolulu, Hawaii", latitude: 21.3069, longitude: -157.8583, timeZone: "Pacific/Honolulu" };
-    const response = await panelRouter.fetch(await locationRequest(location, 1), environmentFor(database as unknown as D1Database));
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-a', 'channel-a', 'Blocks', '2026-09-27T00:00:00.000Z', '2026-09-27T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, config_json)
+       VALUES ('element-a', 'channel-a', 'overlay-a', 'text_library.block', '{}')`,
+    ).run();
+    const published: unknown[][] = [];
+    const response = await panelRouter.fetch(await locationRequest(location, 1), environmentFor(
+      database as unknown as D1Database,
+      (messages) => {
+        published.push([...messages]);
+        return Promise.resolve();
+      },
+    ));
     const channel = await database.prepare(
       `SELECT time_zone, location_name, location_latitude, location_longitude, location_time_zone, location_revision
          FROM channels WHERE channel_id = 'channel-a'`,
@@ -74,6 +97,11 @@ describe("channel location setting route", () => {
       longitude: location.longitude,
       locationTimeZone: location.timeZone,
     });
+    expect(published.flat()).toMatchObject([{
+      type: "modul.text_library.state_changed",
+      payload: { reason: "template.data.changed" },
+      overlayIds: ["overlay-a"],
+    }]);
   });
 
   it("rejects an out-of-date location revision without an audit entry", async () => {

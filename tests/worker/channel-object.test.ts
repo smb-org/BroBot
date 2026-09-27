@@ -4,11 +4,15 @@ const mocks = vi.hoisted(() => ({
   processAdPrewarning: vi.fn().mockResolvedValue(undefined),
   refreshAdPrewarningAlarm: vi.fn().mockResolvedValue(undefined),
   getAdSchedule: vi.fn(),
+  getAppAccessToken: vi.fn(),
+  helixRequest: vi.fn(),
 }));
 
 vi.mock("../../src/worker/ad-prewarning", () => mocks);
 vi.mock("../../src/modules/ads/adapters/prewarning-alarm", () => ({ refreshAdPrewarningAlarm: mocks.refreshAdPrewarningAlarm }));
 vi.mock("../../src/modules/ads/adapters/ad-schedule", () => ({ getAdSchedule: mocks.getAdSchedule }));
+vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAccessToken }));
+vi.mock("../../src/worker/twitch/helix", () => ({ helixRequest: mocks.helixRequest }));
 
 import type {
   RealtimeEnvelope,
@@ -167,7 +171,11 @@ const objectFor = (
   } as unknown as DurableObjectState;
   const object = Object.create(ChannelObject.prototype) as ChannelObject;
   (object as unknown as { ctx: DurableObjectState }).ctx = state;
-  (object as unknown as { env: Env }).env = { DB: database ?? ({ prepare: () => prepared } as unknown as D1Database) } as Env;
+  (object as unknown as { env: Env }).env = {
+    DB: database ?? ({ prepare: () => prepared } as unknown as D1Database),
+    TWITCH_CLIENT_ID: "client-id",
+  } as Env;
+  (object as unknown as { overlayStreamDetailsRefreshes: Map<string, Promise<unknown>> }).overlayStreamDetailsRefreshes = new Map();
   (object as unknown as { adScheduleRefresh: Promise<unknown> | null }).adScheduleRefresh = null;
   (object as unknown as { adScheduleRefreshStartedAt: number }).adScheduleRefreshStartedAt = 0;
   (object as unknown as { adScheduleRefreshGeneration: number }).adScheduleRefreshGeneration = 0;
@@ -235,6 +243,8 @@ describe("ChannelObject realtime path", () => {
     mocks.processAdPrewarning.mockReset().mockResolvedValue(undefined);
     mocks.refreshAdPrewarningAlarm.mockReset().mockResolvedValue(undefined);
     mocks.getAdSchedule.mockReset();
+    mocks.getAppAccessToken.mockReset();
+    mocks.helixRequest.mockReset();
   });
 
   const adSchedule = (nextAdAt: string | null): AdsSchedule => ({
@@ -244,6 +254,38 @@ describe("ChannelObject realtime path", () => {
     prerollFreeTime: 120,
     snoozeCount: 1,
     snoozeRefreshAt: null,
+  });
+
+  it("shares overlay stream lookups across requests for the channel cache TTL", async () => {
+    const values = new Map<string, unknown>();
+    const now = Date.parse("2026-09-27T12:30:00.000Z");
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    mocks.getAppAccessToken.mockResolvedValue("app-token");
+    mocks.helixRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { data: [{ started_at: startedAt, viewer_count: 42 }] },
+    });
+    const object = objectFor([], undefined, values);
+
+    const [first, overlapping] = await Promise.all([
+      object.getOverlayStreamDetails(startedAt, "stream-1", now),
+      object.getOverlayStreamDetails(startedAt, "stream-1", now),
+    ]);
+    expect(first).toEqual({ details: { startedAt, viewerCount: 42 }, expiresAt: now + 60_000 });
+    expect(overlapping).toEqual(first);
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(1);
+
+    const afterWake = objectFor([], undefined, values);
+    await expect(afterWake.getOverlayStreamDetails(startedAt, "stream-1", now + 59_999)).resolves.toEqual(first);
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(1);
+
+    await afterWake.getOverlayStreamDetails(startedAt, "stream-1", now + 60_000);
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(2);
+    expect(mocks.helixRequest).toHaveBeenLastCalledWith(expect.objectContaining({
+      url: "https://api.twitch.tv/helix/streams",
+      query: { user_id: "kanal-a", type: "live" },
+    }));
   });
 
   it("rejects a connection without a principal with 403", () => {

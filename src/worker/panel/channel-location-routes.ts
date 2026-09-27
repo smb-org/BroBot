@@ -7,6 +7,7 @@ import { requireChannelAuthorization, type ChannelAuthorizationVariables } from 
 import { actorGuard, bindActorGuard } from "../db/guards";
 import { prepareAudit } from "../db/audit";
 import { readChannelLocation } from "../db/channel-settings";
+import { publishOverlayHostEvent } from "../realtime";
 
 interface ChannelLocationEnvironment {
   Bindings: Env;
@@ -134,5 +135,6 @@ channelLocationRouter.patch("/api/channels/:channelId/settings/location", async 
     "channel.location.updated", locationSnapshot(previous), locationSnapshot(location));
   const result = await context.env.DB.batch([mutation, audit]);
   if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "channel_location_conflict" }, 409);
+  await publishOverlayHostEvent(context.env.CHANNEL, context.env.DB, channelId, "template.data.changed");
   return context.json({ ok: true, location, locationRevision: nextRevision });
 });

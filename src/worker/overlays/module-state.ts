@@ -1,5 +1,5 @@
 import { moduleOverlayElementForKind, MODULES } from "../../modules/registry";
-import type { BotModule, JsonObject } from "../../modules/contract";
+import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../../modules/contract";
 
 interface ModuleOverlayStateInput {
   id: string;
@@ -12,11 +12,15 @@ interface EnabledModuleRow {
   enabled: number;
 }
 
+/** Matches the lookup-failure retry delay text blocks use (see modules/text_library/overlay/state.ts). */
+const TRANSIENT_INITIAL_STATE_RETRY_MS = 30_000;
+
 export const hydrateModuleOverlayElements = async <Element extends ModuleOverlayStateInput>(
   db: D1Database,
   channelId: string,
   elements: readonly Element[],
   modules: readonly BotModule[] = MODULES,
+  context?: ModuleOverlayElementContext,
 ): Promise<(Element & { moduleEnabled?: boolean; state?: JsonObject | null })[]> => {
   const moduleElements = elements.flatMap((element) => {
     const declaration = moduleOverlayElementForKind(element.kind, modules);
@@ -40,9 +44,17 @@ export const hydrateModuleOverlayElements = async <Element extends ModuleOverlay
       const config = item.definition.parseConfig(item.element.config);
       if (config !== null) {
         try {
-          state = await item.definition.initialState(db, channelId, config);
+          state = await item.definition.initialState(db, channelId, config, context);
         } catch (error: unknown) {
           console.warn(`Module overlay initial state failed for ${item.definition.kind}.`, error);
+          // Don't blank the element on a transient error: keep a short retry
+          // refreshAt so the client re-bootstraps soon instead of staying
+          // blank with no scheduled refresh.
+          const now = context?.now ?? Date.now();
+          state = {
+            serverNow: new Date(now).toISOString(),
+            refreshAt: new Date(now + TRANSIENT_INITIAL_STATE_RETRY_MS).toISOString(),
+          };
         }
       }
     }

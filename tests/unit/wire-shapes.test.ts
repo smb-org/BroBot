@@ -53,6 +53,8 @@ import type {
 } from "../../src/modules/contract";
 import type {
   RealtimeEnvelope,
+  ModuleOverlayRealtimeEnvelope,
+  RealtimeMessage,
   RealtimeEventLogHint,
   RealtimeOverlayPrincipal,
   RealtimePanelPrincipal,
@@ -433,7 +435,76 @@ const allMessageTypes: Record<RealtimeMessageType, true> = {
   "overlay.changed": true,
   "ads.schedule.updated": true,
   "stream.state.changed": true,
+  "modul.text_library.blocks_updated": true,
+  "modul.text_library.state_changed": true,
 };
+const validTextBlockRealtimeMessage: RealtimeEnvelope<"modul.text_library.blocks_updated"> = {
+  version: 1,
+  id: "text-block-update",
+  createdAt: "2026-09-27T00:00:00.000Z",
+  channelId: "kanal-a",
+  type: "modul.text_library.blocks_updated",
+  payload: { blockName: "welcome" },
+};
+const malformedTextBlockRealtimeMessage: RealtimeEnvelope<"modul.text_library.blocks_updated"> = {
+  version: 1,
+  id: "text-block-update-invalid",
+  createdAt: "2026-09-27T00:00:00.000Z",
+  channelId: "kanal-a",
+  type: "modul.text_library.blocks_updated",
+  // @ts-expect-error The text-library update payload requires a block name.
+  payload: {},
+};
+// @ts-expect-error The default module envelope remains discriminated by message type.
+const malformedDefaultTextBlockRealtimeMessage: ModuleOverlayRealtimeEnvelope = {
+  version: 1,
+  id: "text-block-update-default-invalid",
+  createdAt: "2026-09-27T00:00:00.000Z",
+  channelId: "kanal-a",
+  type: "modul.text_library.blocks_updated",
+  payload: {},
+};
+// @ts-expect-error Unknown text-library message names are excluded from the wire contract.
+const typoTextBlockRealtimeMessage: RealtimeEnvelope<"modul.text_library.block_update"> = {
+  version: 1,
+  id: "text-block-update-typo",
+  createdAt: "2026-09-27T00:00:00.000Z",
+  channelId: "kanal-a",
+  type: "modul.text_library.block_update",
+  payload: undefined as never,
+};
+// RealtimeMessage itself must keep the same discrimination as ModuleOverlayRealtimeEnvelope,
+// not fall back to the loose generic envelope for text_library specifically.
+const validTextBlockRealtimeWireMessage: RealtimeMessage = {
+  version: 1,
+  id: "text-block-update-wire",
+  createdAt: "2026-09-27T00:00:00.000Z",
+  channelId: "kanal-a",
+  type: "modul.text_library.state_changed",
+  payload: { reason: "stream.online" },
+};
+// @ts-expect-error "bogus" is not one of the state_changed reasons.
+const malformedTextBlockRealtimeWireMessage: RealtimeMessage = {
+  version: 1,
+  id: "text-block-update-wire-invalid",
+  createdAt: "2026-09-27T00:00:00.000Z",
+  channelId: "kanal-a",
+  type: "modul.text_library.state_changed",
+  payload: { reason: "bogus" },
+};
+const typoTextBlockRealtimeWireMessage: RealtimeMessage = {
+  version: 1,
+  id: "text-block-update-wire-typo",
+  createdAt: "2026-09-27T00:00:00.000Z",
+  channelId: "kanal-a",
+  // @ts-expect-error A misspelled text_library type is excluded, not accepted via the loose default envelope.
+  type: "modul.text_library.state_changd",
+  payload: undefined as never,
+};
+void [
+  validTextBlockRealtimeMessage, malformedTextBlockRealtimeMessage, malformedDefaultTextBlockRealtimeMessage, typoTextBlockRealtimeMessage,
+  validTextBlockRealtimeWireMessage, malformedTextBlockRealtimeWireMessage, typoTextBlockRealtimeWireMessage,
+];
 const allRecipientKinds: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
 const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
 const allActionKinds: Record<ModuleAction["kind"], true> = { announcement: true, chat: true, shoutout: true, overlay: true };
@@ -478,7 +549,7 @@ describe("serialized contract shapes", () => {
           CHANNEL: {
             idFromName: () => "channel-object-id",
             get: () => ({
-              publish: (messages: readonly RealtimeEnvelope[]) => {
+              publish: (messages: readonly RealtimeMessage[]) => {
                 const message = messages.find((entry) => entry.type === "event_log.new");
                 if (message?.type === "event_log.new") eventEnvelope = message;
                 return Promise.resolve();
@@ -711,7 +782,8 @@ describe("serialized contract shapes", () => {
       // and the assertion below freezes the spelling.
       expect(Object.keys(allRoles).sort()).toEqual(["broadcaster", "manager", "operator"]);
       expect(Object.keys(allMessageTypes).sort()).toEqual([
-        "ads.schedule.updated", "event_log.new", "overlay.changed", "stream.state.changed", "system.hello", "variables.changed",
+        "ads.schedule.updated", "event_log.new", "modul.text_library.blocks_updated", "modul.text_library.state_changed",
+        "overlay.changed", "stream.state.changed", "system.hello", "variables.changed",
       ]);
       expect(Object.keys(allRecipientKinds).sort()).toEqual(["overlay", "panel"]);
       expect(Object.keys(REALTIME_RECIPIENTS).sort()).toEqual([...REALTIME_MESSAGE_TYPES].sort());

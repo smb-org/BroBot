@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { BotModule, ModuleOverlayElementDefinition } from "../../src/modules/contract";
 import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../../src/modules/ads/overlay/countdown-action";
-import { prepareModuleOverlayRealtimeMessage } from "../../src/worker/module-overlay-realtime";
+import { prepareModuleOverlayHostEventMessages, prepareModuleOverlayRealtimeMessage } from "../../src/worker/module-overlay-realtime";
 
 const databaseFor = (overlayIds: readonly string[]) => {
   const statement = {
@@ -58,7 +58,7 @@ describe("module overlay realtime routing", () => {
 
     expect(database.prepare.mock.calls[0]?.[0]).toContain("element.kind = ?");
     expect(database.prepare.mock.calls[0]?.[0]).not.toContain("element.kind LIKE ?");
-    expect(database.statement.bind.mock.calls[0]).toEqual(["kanal-a", "ads.countdown", 0, "ads"]);
+    expect(database.statement.bind.mock.calls[0]).toEqual(["kanal-a", "ads.countdown", 1, null, null, 0, "ads"]);
     expect(result).toMatchObject({
       outcome: "ready",
       message: {
@@ -93,8 +93,63 @@ describe("module overlay realtime routing", () => {
     }, false, [module]);
 
     expect(database.prepare.mock.calls[0]?.[0]).toContain("element.kind = ?");
-    expect(database.statement.bind.mock.calls[0]).toEqual(["kanal-a", "ads_beta.countdown", 0, "ads_beta"]);
+    expect(database.statement.bind.mock.calls[0]).toEqual(["kanal-a", "ads_beta.countdown", 1, null, null, 0, "ads_beta"]);
     expect(result).toMatchObject({ outcome: "ready", message: { type: "modul.ads_beta.countdown" } });
+  });
+
+  it("routes block invalidations only to overlays selecting that block", async () => {
+    const module: BotModule = {
+      id: "text_library",
+      mandatory: true,
+      settingsSchema: { parse: (value: unknown) => value } as never,
+      defaultSettings: {},
+      overlayElements: [declaration("text_library.block")],
+    };
+    const database = databaseFor(["overlay-sun"]);
+
+    const result = await prepareModuleOverlayRealtimeMessage(database.database, "kanal-a", "text_library", {
+      kind: "overlay",
+      type: "blocks_updated",
+      elementKind: "text_library.block",
+      payload: { blockName: "sun" },
+      recipientConfig: { field: "blockName", value: "sun" },
+    }, true, [module]);
+
+    expect(database.prepare.mock.calls[0]?.[0]).toContain("json_extract(element.config_json, ?)");
+    expect(database.statement.bind.mock.calls[0]).toEqual([
+      "kanal-a", "text_library.block", 0, "$.blockName", "sun", 1, "text_library",
+    ]);
+    expect(result).toMatchObject({
+      outcome: "ready",
+      message: {
+        type: "modul.text_library.blocks_updated",
+        payload: { blockName: "sun" },
+        overlayIds: ["overlay-sun"],
+      },
+    });
+  });
+
+  it("routes host state changes through module-declared overlay events", async () => {
+    const module: BotModule = {
+      id: "text_library",
+      mandatory: true,
+      settingsSchema: { parse: (value: unknown) => value } as never,
+      defaultSettings: {},
+      overlayElements: [{
+        ...declaration("text_library.block"),
+        reloadStateOnHostEvents: ["template.data.changed"] as const,
+      }],
+    };
+    const database = databaseFor(["overlay-a"]);
+
+    const messages = await prepareModuleOverlayHostEventMessages(database.database, "kanal-a", "template.data.changed", [module]);
+
+    expect(database.prepare.mock.calls).toHaveLength(1);
+    expect(messages).toMatchObject([{
+      type: "modul.text_library.state_changed",
+      payload: { reason: "template.data.changed" },
+      overlayIds: ["overlay-a"],
+    }]);
   });
 
   it("rejects actions targeting undeclared element kinds", async () => {

@@ -662,6 +662,9 @@ export const dispatchEventSubNotification = async (
       ...(provider.textBlockConditions === undefined ? {} : { textBlockConditions: provider.textBlockConditions }),
       ...(provider.templateUnavailableText === undefined ? {} : { templateUnavailableText: provider.templateUnavailableText }),
       ...(provider.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: provider.resolveTemplateConditions }),
+      ...(provider.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: provider.dynamicTemplateVariableNames }),
+      ...(provider.resolveOverlayTemplateValues === undefined ? {} : { resolveOverlayTemplateValues: provider.resolveOverlayTemplateValues }),
+      ...(provider.resolveTemplateConditionTransitions === undefined ? {} : { resolveTemplateConditionTransitions: provider.resolveTemplateConditionTransitions }),
       resolveTemplateValues,
     }];
   });
@@ -784,6 +787,7 @@ export const dispatchEventSubNotification = async (
   if (changedVariables.size > 0) {
     await publishVariablesChanged(
       environment.CHANNEL,
+      environment.DB,
       event.channelId,
       [...changedVariables].map(([name, value]) => ({ name, value })),
       [],

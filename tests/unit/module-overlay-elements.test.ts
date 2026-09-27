@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { BotModule, JsonObject, ModuleOverlayElementDefinition } from "../../src/modules/contract";
 import { adsModule } from "../../src/modules/ads";
+import { textLibraryModule } from "../../src/modules/text_library";
 import { MODULES, validateModuleOverlayElements } from "../../src/modules/registry";
-import { MODULE_OVERLAY_ELEMENTS } from "../../src/modules/overlay-element-registry";
+import { MODULE_OVERLAY_ELEMENTS, moduleOverlayMessageRequiresStateReload } from "../../src/modules/overlay-element-registry";
 
 const moduleWithElements = (id: string, kinds: readonly string[]): BotModule => ({
   id,
@@ -64,5 +65,35 @@ describe("module overlay element declarations", () => {
 
     expect(clientElements).toEqual(serverElements);
     expect(MODULE_OVERLAY_ELEMENTS.every(({ definition }) => typeof definition.load === "function")).toBe(true);
+  });
+
+  it("invalidates text block overlays after live, game, or template data changes", async () => {
+    expect(textLibraryModule.overlayElements?.[0]?.reloadStateOnHostEvents).toContain("template.data.changed");
+    const handleEvent = textLibraryModule.handleEvent;
+    if (handleEvent === undefined) throw new Error("Text library event handler is missing.");
+    for (const subscriptionType of ["channel.update", "stream.online", "stream.offline"]) {
+      const result = await handleEvent({
+        channelId: "fictional-channel",
+        subscriptionType,
+        triggerId: "fictional-trigger",
+        payload: {},
+        settings: {},
+        receivedAt: "2026-09-27T12:00:00.000Z",
+        actor: null,
+        chatStatus: null,
+      }, {} as never);
+      expect(result.actions).toEqual([{
+        kind: "overlay",
+        type: "state_changed",
+        elementKind: "text_library.block",
+        payload: { reason: subscriptionType },
+      }]);
+    }
+  });
+
+  it("declares bootstrap reloads through the generic element registry", () => {
+    expect(moduleOverlayMessageRequiresStateReload("modul.text_library.blocks_updated")).toBe(true);
+    expect(moduleOverlayMessageRequiresStateReload("modul.text_library.state_changed")).toBe(true);
+    expect(moduleOverlayMessageRequiresStateReload("modul.unknown.changed")).toBe(false);
   });
 });

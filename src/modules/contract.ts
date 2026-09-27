@@ -9,6 +9,9 @@ export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../pane
 /** The default channel timezone used by host template values and channel settings. */
 export const DEFAULT_CHANNEL_TIME_ZONE = "Europe/Berlin";
 
+/** How long overlay stream details stay cached before live viewer counts refresh. */
+export const OVERLAY_STREAM_DETAILS_CACHE_TTL_MS = 60_000;
+
 export const validChannelTimeZone = (timeZone: string): boolean => {
   try {
     new Intl.DateTimeFormat("en", { timeZone }).format();
@@ -28,9 +31,49 @@ export interface ModuleOverlayElementProps {
   language?: "de" | "en";
 }
 
+export interface ModuleOverlayTemplateValue {
+  available: boolean;
+  /** UTC instant used by browser-rendered countdown values. */
+  targetAt?: string;
+  /** Ordered future instants let a browser continue the countdown after the next event passes. */
+  targetAts?: readonly string[];
+}
+
+export interface ModuleTemplateConditionTransition {
+  at: string;
+  values: Readonly<Record<string, string>>;
+}
+
+export interface ModuleOverlayElementContext {
+  now: number;
+  language: ModuleLanguage;
+  channelTimeZone: () => Promise<string>;
+  streamState: () => Promise<ModuleStreamState>;
+  /** Latest stream start used while rendering uptime, if the lookup supplied one. */
+  streamStartedAt: () => string | null;
+  /** Expiration of the stream-details cache consulted during this bootstrap. */
+  streamDetailsCacheExpiresAt: () => number | null;
+  /** Whether a host or module lookup failed during this bootstrap. */
+  hasLookupFailure: () => boolean;
+  channelGameId: () => Promise<string | null>;
+  renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
+  resolveTemplateConditions: (ids: readonly string[]) => Promise<Readonly<Record<string, string>>>;
+  resolveTemplateConditionTransitions: (
+    ids: readonly string[],
+    from: number,
+    until: number,
+  ) => Promise<readonly ModuleTemplateConditionTransition[]>;
+  resolveOverlayTemplateValues: (names: readonly string[]) => Promise<Readonly<Record<string, ModuleOverlayTemplateValue>>>;
+  timeDependentTemplateConditionIds: ReadonlySet<string>;
+  dynamicTemplateVariableNames: ReadonlySet<string>;
+  overlayTemplateVariableNames: ReadonlySet<string>;
+}
+
 export interface OverlayElementEditorProps {
   config: JsonObject;
   onChange: (config: JsonObject) => void;
+  channelId?: string;
+  onPreviewState?: (state: JsonObject | null) => void;
   language?: "de" | "en";
   readOnly?: boolean;
   readOnlyReason?: string;
@@ -41,11 +84,27 @@ export interface ModuleOverlayElementDefinition {
   configVersion: number;
   defaultSize: { width: number; height: number };
   defaultConfig: JsonObject;
+  editorLabel?: Readonly<Record<ModuleLanguage, string>>;
+  editorAddLabel?: Readonly<Record<ModuleLanguage, string>>;
+  editorModuleLabel?: Readonly<Record<ModuleLanguage, string>>;
   parseConfig: (raw: unknown) => JsonObject | null;
-  initialState?: (db: D1Database, channelId: string, config: JsonObject) => Promise<JsonObject>;
+  /** The module initial state uses host template, condition, or channel context. */
+  initialStateNeedsContext?: boolean;
+  /** Module realtime message types that require the host to reload this element's state. */
+  reloadStateOnModuleMessages?: readonly string[];
+  /** Host state changes that cause a generic module state message for this element. */
+  reloadStateOnHostEvents?: readonly ModuleOverlayHostEvent[];
+  initialState?: (
+    db: D1Database,
+    channelId: string,
+    config: JsonObject,
+    context?: ModuleOverlayElementContext,
+  ) => Promise<JsonObject | null>;
   load: () => Promise<{ default: ComponentType<ModuleOverlayElementProps> }>;
   editor?: () => Promise<{ default: ComponentType<OverlayElementEditorProps> }>;
 }
+
+export type ModuleOverlayHostEvent = "channel.game.changed" | "stream.state.changed" | "template.data.changed";
 
 export { truncateTo200Chars, textFingerprintIfTruncated } from "../text";
 export {
@@ -143,7 +202,14 @@ export type ModuleAction =
   | { kind: "announcement"; text: string }
   | { kind: "shoutout"; targetChannelId: string }
   | { kind: "shoutout"; targetLogin: string }
-  | { kind: "overlay"; type: string; elementKind: string; payload: Readonly<Record<string, unknown>> };
+  | {
+    kind: "overlay";
+    type: string;
+    elementKind: string;
+    payload: Readonly<Record<string, unknown>>;
+    /** Optional JSON config match resolved to overlay ids before publish. */
+    recipientConfig?: { field: string; value: string };
+  };
 
 /**
  * What a module describes as the result of processing. It executes nothing
@@ -349,6 +415,8 @@ export interface ModuleTemplateValueContext {
   now: number;
   /** Resolves declared data-source conditions only when a block uses them. */
   resolveTemplateConditions: (ids: readonly string[]) => Promise<Readonly<Record<string, string>>>;
+  /** Values preserved for overlay-side countdown or other browser calculations. */
+  dynamicTemplateVariableNames?: ReadonlySet<string>;
 }
 
 export interface ModuleTemplateConditionContext {
@@ -360,11 +428,17 @@ export interface ModuleTemplateConditionContext {
   now: number;
 }
 
+export interface ModuleTemplateConditionTimelineContext extends ModuleTemplateConditionContext {
+  until: number;
+}
+
 /** A condition a module makes available to text block variants. */
 export interface ModuleTextBlockConditionDefinition {
   id: string;
   label: Readonly<Record<ModuleLanguage, string>>;
   values: Readonly<Record<string, Readonly<Record<ModuleLanguage, string>>>>;
+  /** The value can change with time without a server-side mutation. */
+  timeDependent?: boolean;
 }
 
 export interface ModuleVariableReferenceUsage {
@@ -570,6 +644,15 @@ export interface ModuleRouteVariables {
     ids: readonly string[],
     now: number,
   ) => Promise<Readonly<Record<string, string>>>;
+  publishModuleOverlayMessage: (
+    channelId: string,
+    moduleId: string,
+    type: string,
+    elementKind: string,
+    payload: Readonly<Record<string, unknown>>,
+    recipientConfig?: { field: string; value: string },
+  ) => Promise<void>;
+  publishOverlayHostEvent: (channelId: string, event: ModuleOverlayHostEvent) => Promise<void>;
   writeModuleDiagnostics: (
     db: D1Database,
     channelId: string,
@@ -654,6 +737,25 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     ids: readonly string[],
     context: ModuleTemplateConditionContext,
   ) => Promise<Readonly<Record<string, string>>>;
+  /** Returns value changes for time-dependent text block conditions over an interval. */
+  resolveTemplateConditionTransitions?: (
+    ids: readonly string[],
+    context: ModuleTemplateConditionTimelineContext,
+  ) => Promise<readonly ModuleTemplateConditionTransition[]>;
+  /** Declares values the overlay browser formats from target instants. */
+  dynamicTemplateVariableNames?: readonly string[];
+  /** Resolves overlay-only availability and target instants without changing template state. */
+  resolveOverlayTemplateValues?: (
+    names: readonly string[],
+    context: {
+      DB: D1Database;
+      channelId: string;
+      now: number;
+      channelTimeZone: () => Promise<string>;
+      channelLocation: () => Promise<ModuleChannelLocation | null>;
+      language: ModuleLanguage;
+    },
+  ) => Promise<Readonly<Record<string, ModuleOverlayTemplateValue>>>;
   /** Lazily rendered inside the shared channel settings section. */
   channelSettings?: () => Promise<{ default: ComponentType<ModuleChannelSettingsProperties> }>;
   /** Channel navigation entries contributed by this module. */

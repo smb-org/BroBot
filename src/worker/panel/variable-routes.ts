@@ -132,7 +132,7 @@ variableRouter.post("/api/channels/:channelId/variables", async (context) => {
       const overlayIdsByVariable = channelVariableOverlayIdsByName(
         [variable.name], (results[2]?.results ?? []) as ChannelVariableOverlayReference[],
       );
-      await publishVariablesChanged(context.env.CHANNEL, channelId,
+      await publishVariablesChanged(context.env.CHANNEL, context.env.DB, channelId,
         [{ name: variable.name, value: variable.value }], [], overlayIdsByVariable);
     }
     return context.json({ variable, usages: [] }, 201);
@@ -211,7 +211,7 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
   );
   const renamedOverlayIds = referencesByOldName[name] ?? [];
   const overlayIdsByVariable = { [name]: renamedOverlayIds, [newName]: renamedOverlayIds };
-  await publishVariablesChanged(context.env.CHANNEL, channelId,
+  await publishVariablesChanged(context.env.CHANNEL, context.env.DB, channelId,
     [{ name: newName, value: before.value }], newName === name ? [] : [name], overlayIdsByVariable, overlayMessages);
   return context.json({ variable, usages: await referencesFor(context.env.DB, channelId, newName) });
 });
@@ -285,7 +285,7 @@ variableRouter.post("/api/channels/:channelId/variables/:name/value", async (con
     const overlayIdsByVariable = channelVariableOverlayIdsByName(
       [variable.name], (results[2]?.results ?? []) as ChannelVariableOverlayReference[],
     );
-    await publishVariablesChanged(context.env.CHANNEL, channelId,
+    await publishVariablesChanged(context.env.CHANNEL, context.env.DB, channelId,
       [{ name: variable.name, value: variable.value }], [], overlayIdsByVariable);
   }
   return context.json({ variable });
@@ -349,7 +349,7 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
       const overlayIdsByVariable = channelVariableOverlayIdsByName(
         [name], overlayRows.map((row) => ({ variable_name: name, overlay_id: row.overlay_id })),
       );
-      await publishVariablesChanged(context.env.CHANNEL, channelId, [], [name], overlayIdsByVariable, overlayMessages);
+      await publishVariablesChanged(context.env.CHANNEL, context.env.DB, channelId, [], [name], overlayIdsByVariable, overlayMessages);
       return new Response(null, { status: 204 });
     }
   } catch {

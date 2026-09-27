@@ -1,10 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
-import type { ModuleOverlayRealtimeEnvelope, RealtimeEnvelope } from "../realtime-contract";
+import type { ModuleOverlayRealtimeEnvelope, ModuleOverlayRealtimeMessageType, RealtimeEnvelope } from "../realtime-contract";
 import { sanitizeOverlayCss } from "../contracts/overlay-css";
 import { connectOverlayRealtime } from "./realtime";
 import { OverlayCanvas } from "./canvas";
 import type { OverlayBootstrapData, OverlayElementData, OverlayLanguage } from "./model";
+import { moduleOverlayMessageRequiresStateReload } from "../modules/overlay-element-registry";
+import { estimateOverlayStateTransit } from "./server-time";
 
 const LazyLegacyOverlayEntry = lazy(async () => {
   const module = await import("./legacy");
@@ -110,7 +112,7 @@ const applyVariableMessage = (
 
 const applyModuleMessage = (
   bootstrap: OverlayBootstrapData,
-  message: ModuleOverlayRealtimeEnvelope,
+  message: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>,
 ): OverlayBootstrapData => {
   if (bootstrap.overlay === null) return bootstrap;
   const kind = message.type.slice("modul.".length);
@@ -123,6 +125,18 @@ const applyModuleMessage = (
         : element),
     },
   };
+};
+
+const refreshDelayFor = (bootstrap: OverlayBootstrapData): number | null => {
+  const delays = bootstrap.overlay?.elements.flatMap((element) => {
+    const state = element.state;
+    const refreshAt = state?.refreshAt;
+    const serverNow = state?.serverNow;
+    if (typeof refreshAt !== "string" || !Number.isFinite(Date.parse(refreshAt)) ||
+        typeof serverNow !== "string" || !Number.isFinite(Date.parse(serverNow))) return [];
+    return [Date.parse(refreshAt) - Date.parse(serverNow)];
+  }) ?? [];
+  return delays.length === 0 ? null : Math.max(0, Math.min(...delays));
 };
 
 const applyPendingVariableChanges = (
@@ -172,9 +186,10 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
     let reloadTimer: number | null = null;
     let maximumReloadTimer: number | null = null;
     let retryTimer: number | null = null;
+    let timelineRefreshTimer: number | null = null;
     let retryAttempt = 0;
     const pendingVariableChanges = new Map<string, number | null>();
-    const pendingModuleMessages: ModuleOverlayRealtimeEnvelope[] = [];
+    const pendingModuleMessages: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>[] = [];
 
     const install = (next: OverlayBootstrapData | null, nextState: LoadState): void => {
       bootstrapRef.current = next;
@@ -186,6 +201,22 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
       if (retryTimer === null) return;
       window.clearTimeout(retryTimer);
       retryTimer = null;
+    };
+
+    const stopTimelineRefreshTimer = (): void => {
+      if (timelineRefreshTimer === null) return;
+      window.clearTimeout(timelineRefreshTimer);
+      timelineRefreshTimer = null;
+    };
+
+    const scheduleTimelineRefresh = (current: OverlayBootstrapData): void => {
+      stopTimelineRefreshTimer();
+      const delay = refreshDelayFor(current);
+      if (delay === null || lifecycle.disposed || lifecycle.revoked) return;
+      timelineRefreshTimer = window.setTimeout(() => {
+        timelineRefreshTimer = null;
+        void load();
+      }, delay);
     };
 
     const stopReloadTimer = (): void => {
@@ -220,6 +251,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
       const controller = new AbortController();
       activeController = controller;
       loadInFlight = true;
+      const requestStartedAt = performance.now();
       try {
         const response = await fetch("/api/overlay/bootstrap", {
           headers: { Authorization: `Bearer ${token}` },
@@ -241,8 +273,9 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
         } catch {
           throw new Error("Overlay bootstrap response was not valid JSON.");
         }
-        const parsed = parseBootstrap(payload);
-        if (parsed === null) throw new Error("Overlay bootstrap response had an invalid shape.");
+        const parsedBootstrap = parseBootstrap(payload);
+        if (parsedBootstrap === null) throw new Error("Overlay bootstrap response had an invalid shape.");
+        const parsed = estimateOverlayStateTransit(parsedBootstrap, performance.now() - requestStartedAt);
         const next = pendingModuleMessages.reduce(
           (current, message) => applyModuleMessage(current, message),
           applyPendingVariableChanges(parsed, pendingVariableChanges),
@@ -252,6 +285,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
         pendingModuleMessages.length = 0;
         document.documentElement.lang = next.language;
         install(next, next.overlay === null ? "unbound" : "ready");
+        scheduleTimelineRefresh(next);
         if (next.overlay !== null) startRealtime();
         retryAttempt = 0;
         stopRetryTimer();
@@ -331,6 +365,11 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
           if (message.payload.overlayId === current.overlay?.id) scheduleReload();
         },
         onModuleMessage: (message) => {
+          if (moduleOverlayMessageRequiresStateReload(message.type)) {
+            if (bootstrapRef.current === null) lifecycle.reloadPending = true;
+            else scheduleReload();
+            return;
+          }
           const current = bootstrapRef.current;
           if (loadInFlight || current === null) pendingModuleMessages.push(message);
           if (current === null) return;
@@ -349,6 +388,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
       stopReloadTimer();
       stopMaximumReloadTimer();
       stopRetryTimer();
+      stopTimelineRefreshTimer();
       stopRealtime();
     };
   }, [bindingVersion, token]);

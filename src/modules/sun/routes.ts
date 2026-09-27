@@ -63,5 +63,7 @@ sunRoutes.patch("/error-texts", async (context) => {
   }, changedAt);
   const result = await context.env.DB.batch([mutation, audit]);
   if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "sun_settings_conflict" }, 409);
-  return context.json(await readSunSettings(context.env.DB, channelId));
+  const updated = await readSunSettings(context.env.DB, channelId);
+  await context.get("publishOverlayHostEvent")(channelId, "template.data.changed");
+  return context.json(updated);
 });

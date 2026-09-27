@@ -61,7 +61,7 @@ import { maintainBotIdentity } from "../bot-maintenance";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { revokeRealtimeSessionForUser } from "../realtime";
 import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
-import { MODULES } from "../../modules/registry";
+import { MODULES, moduleOverlayElementForKind } from "../../modules/registry";
 import {
   listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUserAndModule,
@@ -73,6 +73,7 @@ import { getOverlayForChannel, getOverlayVariableValues } from "../db/overlays";
 import { hydrateModuleOverlayElements } from "../overlays/module-state";
 import { hydrateCachedAdsCountdownSnapshot } from "../overlays/ads-countdown-cache";
 import { ADS_COUNTDOWN_ELEMENT_KIND } from "../../modules/ads/overlay/kinds";
+import { createOverlayElementContext } from "../overlays/element-context";
 
 const nowIso = (): string => new Date().toISOString();
 const OVERLAY_VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
@@ -285,7 +286,13 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
     await hydrateCachedAdsCountdownSnapshot(context.env, record.channelId);
   }
   const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
-  const elements = await hydrateModuleOverlayElements(context.env.DB, record.channelId, overlay.elements);
+  const needsElementContext = overlay.elements.some((element) =>
+    moduleOverlayElementForKind(element.kind)?.definition.initialStateNeedsContext === true,
+  );
+  const elementContext = needsElementContext
+    ? await createOverlayElementContext(context.env, record.channelId, record.language, Date.now())
+    : undefined;
+  const elements = await hydrateModuleOverlayElements(context.env.DB, record.channelId, overlay.elements, MODULES, elementContext);
   const responseNow = new Date().toISOString();
   return context.json({
     language: record.language,
@@ -296,7 +303,7 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
       height: overlay.height,
       css: overlay.css,
       elements: elements.map((element) => {
-        const state = element.kind === ADS_COUNTDOWN_ELEMENT_KIND && element.state !== undefined && element.state !== null
+        const state = element.state !== undefined && element.state !== null && typeof element.state.serverNow === "string"
           ? { ...element.state, serverNow: responseNow }
           : element.state;
         return {

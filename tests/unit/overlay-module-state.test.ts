@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { BotModule } from "../../src/modules/contract";
+import type { BotModule, ModuleOverlayElementContext } from "../../src/modules/contract";
 import { hydrateModuleOverlayElements } from "../../src/worker/overlays/module-state";
 
 const moduleWithInitialState = (initialState: NonNullable<NonNullable<BotModule["overlayElements"]>[number]["initialState"]>): BotModule => ({
@@ -44,6 +44,27 @@ describe("module overlay bootstrap state", () => {
     expect(enabled[0]).toMatchObject({ moduleEnabled: true, state: { nextAdAt: "2026-09-25T12:00:00.000Z", duration: 90 } });
     expect(disabled[0]).toMatchObject({ moduleEnabled: false, state: null });
     expect(initialState.mock.calls).toHaveLength(1);
+  });
+
+  it("keeps a short retry refreshAt instead of blanking state when initial state lookup throws", async () => {
+    const initialState = vi.fn(() => Promise.reject(new Error("transient lookup failure")));
+    const module = moduleWithInitialState(initialState);
+    const elements = [{ id: "element-a", kind: "ads.countdown", config: {} }];
+    const database = databaseWithEnabledModules([{ module_id: "ads", enabled: 1 }]);
+    const now = Date.parse("2026-09-25T12:00:00.000Z");
+    const context = { now } as unknown as ModuleOverlayElementContext;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const hydrated = await hydrateModuleOverlayElements(database.database, "kanal-a", elements, [module], context);
+
+    warn.mockRestore();
+    expect(hydrated[0]).toMatchObject({
+      moduleEnabled: true,
+      state: {
+        serverNow: new Date(now).toISOString(),
+        refreshAt: new Date(now + 30_000).toISOString(),
+      },
+    });
   });
 
   it("does not query D1 for overlays without module elements", async () => {

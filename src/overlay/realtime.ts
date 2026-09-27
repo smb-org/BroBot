@@ -19,7 +19,7 @@ export interface OverlayRealtimeCallbacks {
   onOpen?: (reconnected: boolean) => void;
   onMessage?: (message: RealtimeEnvelope<"variables.changed">) => void;
   onOverlayChanged?: (message: RealtimeEnvelope<"overlay.changed">) => void;
-  onModuleMessage?: (message: ModuleOverlayRealtimeEnvelope) => void;
+  onModuleMessage?: (message: ModuleOverlayRealtimeEnvelope<`modul.${string}.${string}`>) => void;
   onTokenBound?: () => void;
 }
 
@@ -177,7 +177,7 @@ export const connectOverlayRealtime = (
       } else if (parsed.type === "overlay.changed" && isOverlayChangedPayload(parsed.payload)) {
         callbacks.onOverlayChanged?.(parsed as RealtimeEnvelope<"overlay.changed">);
       } else if (typeof parsed.type === "string" && isModuleOverlayRealtimeMessageType(parsed.type) && isRecord(parsed.payload)) {
-        callbacks.onModuleMessage?.(parsed as ModuleOverlayRealtimeEnvelope);
+        callbacks.onModuleMessage?.(parsed as ModuleOverlayRealtimeEnvelope<`modul.${string}.${string}`>);
       }
     });
 

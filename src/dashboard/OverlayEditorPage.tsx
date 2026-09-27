@@ -7,6 +7,7 @@ import type { PanelModuleState } from "../panel-contract";
 import { OverlayCanvas } from "../overlay/canvas";
 import type { BoundOverlayData, OverlayLanguage } from "../overlay/model";
 import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
+import type { JsonObject } from "../modules/contract";
 import { ModuleOverlayElementEditor } from "./ModuleOverlayElementEditor";
 import variableViewCss from "../overlay/variable.css?inline";
 import { clampOverlayEditorPosition, overlayEditorPositionLimits, UNMEASURED_ELEMENT_FALLBACK_SIZE } from "./overlay-editor-model";
@@ -229,9 +230,9 @@ interface ModuleElementOption {
   defaultSize: { width: number; height: number };
   defaultConfig: EditorJsonObject;
   parseConfig: (raw: unknown) => EditorJsonObject | null;
-  label: (labels: ReturnType<typeof overlaysTexts>) => string;
-  addLabel: (labels: ReturnType<typeof overlaysTexts>) => string;
-  moduleName: (labels: ReturnType<typeof overlaysTexts>) => string;
+  label: (language: "de" | "en") => string;
+  addLabel: (language: "de" | "en", labels: ReturnType<typeof overlaysTexts>) => string;
+  moduleName: (language: "de" | "en") => string;
 }
 
 const MODULE_ELEMENT_OPTIONS: readonly ModuleElementOption[] = MODULE_OVERLAY_ELEMENTS.map(({ moduleId, definition }) => ({
@@ -240,9 +241,9 @@ const MODULE_ELEMENT_OPTIONS: readonly ModuleElementOption[] = MODULE_OVERLAY_EL
   defaultSize: definition.defaultSize,
   defaultConfig: definition.defaultConfig,
   parseConfig: definition.parseConfig,
-  label: (labels) => definition.kind === "ads.countdown" ? labels.editorAdCountdown : definition.kind,
-  addLabel: (labels) => definition.kind === "ads.countdown" ? labels.editorAddAdCountdown : `Add ${definition.kind}`,
-  moduleName: (labels) => moduleId === "ads" ? labels.editorAdsModule : moduleId,
+  label: (language) => definition.editorLabel?.[language] ?? definition.kind,
+  addLabel: (language, labels) => definition.editorAddLabel?.[language] ?? `${labels.editorAdd} ${definition.editorLabel?.[language] ?? definition.kind}`,
+  moduleName: (language) => definition.editorModuleLabel?.[language] ?? moduleId,
 }));
 
 const moduleElementOption = (kind: string): ModuleElementOption | undefined =>
@@ -256,7 +257,7 @@ const createModuleElement = (
 ): PanelOverlayElement => ({
   id: crypto.randomUUID(),
   kind: option.kind,
-  label: option.label(overlaysTexts(dashboardLanguage())),
+  label: option.label(dashboardLanguage()),
   variableName: null,
   text: "",
   config: option.defaultConfig,
@@ -413,6 +414,7 @@ function OverlayEditorWorkspace({
   const [conflictAtRevision, setConflictAtRevision] = useState<number | null>(null);
   const [persistedOverlayId, setPersistedOverlayId] = useState<string | null>(null);
   const [previewZoom, setPreviewZoom] = useState(100);
+  const [modulePreviewStates, setModulePreviewStates] = useState<Readonly<Record<string, JsonObject>>>({});
   const [editorTab, setEditorTab] = useState<"properties" | "style" | "css">("properties");
   const [styleTargetId, setStyleTargetId] = useState("overlay");
   const [styleDocument, setStyleDocument] = useState<OverlayStyleDocument>(() => {
@@ -437,6 +439,15 @@ function OverlayEditorWorkspace({
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline.draft);
   const canEdit = canManage && !saving;
   const selectedElement = draft.elements.find((element) => element.id === selectedElementId) ?? null;
+  const updateSelectedPreviewState = useCallback((state: JsonObject | null): void => {
+    if (selectedElementId === null) return;
+    setModulePreviewStates((current) => {
+      if (state === null) {
+        return Object.fromEntries(Object.entries(current).filter(([id]) => id !== selectedElementId));
+      }
+      return { ...current, [selectedElementId]: state };
+    });
+  }, [selectedElementId]);
   const selectedModuleOption = selectedElement === null ? undefined : moduleElementOption(selectedElement.kind);
   const selectedElementScalePercent = selectedElement?.scalePercent;
   const selectedElementText = selectedElement?.text;
@@ -466,7 +477,7 @@ function OverlayEditorWorkspace({
           snoozeRefreshAt: null,
           serverNow: sampleServerNow,
           isSample: true,
-        } : null,
+        } : modulePreviewStates[element.id] ?? null,
       };
     }),
   };
@@ -1014,11 +1025,11 @@ function OverlayEditorWorkspace({
             <button type="button" aria-pressed={element.id === selectedElementId} onClick={() => { setSelectedElementId(element.id); }}>
               <span>{element.kind === "variable"
                 ? element.label || element.variableName || labels.editorVariable
-                : moduleElementOption(element.kind)?.label(labels) ?? (element.label || element.kind)}</span>
+                : moduleElementOption(element.kind)?.label(language) ?? (element.label || element.kind)}</span>
               {element.kind === "variable"
                 ? <small>{element.variableName ?? element.missingVariableName ?? "—"}</small>
                 : <small role="note">{moduleElementOption(element.kind) !== undefined && !moduleIsEnabled(moduleElementOption(element.kind)?.moduleId ?? "")
-                  ? labels.editorModuleDisabled(moduleElementOption(element.kind)?.moduleName(labels) ?? element.kind)
+                  ? labels.editorModuleDisabled(moduleElementOption(element.kind)?.moduleName(language) ?? element.kind)
                   : labels.editorModuleElement}</small>}
             </button>
           </li>)}
@@ -1039,7 +1050,7 @@ function OverlayEditorWorkspace({
             {enabledModuleElementOptions.map((option) => <Button key={option.kind} variant="neutral"
               disabled={!canEdit || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT}
               {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
-              onClick={() => { insertModuleElement(option); }}>{option.addLabel(labels)}</Button>)}
+              onClick={() => { insertModuleElement(option); }}>{option.addLabel(language, labels)}</Button>)}
             {enabledModuleElementOptions.length === 0 ? <p className="muted">{labels.editorNoEnabledModuleElements}</p> : null}
           </div>
           {draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT ? <p className="form-hint">{labels.editorElementLimit}</p> : null}
@@ -1089,13 +1100,15 @@ function OverlayEditorWorkspace({
                 : labels.missingVariable(selectedElement.missingVariableName)}</p>
               : <Field id="overlay-editor-variable-name" label={labels.editorVariable} value={selectedElement.variableName} readOnly onChange={() => undefined} />
             : <p className="muted" role="note">{moduleElementOption(selectedElement.kind) !== undefined && !moduleIsEnabled(moduleElementOption(selectedElement.kind)?.moduleId ?? "")
-              ? labels.editorModuleDisabled(moduleElementOption(selectedElement.kind)?.moduleName(labels) ?? selectedElement.kind)
+              ? labels.editorModuleDisabled(moduleElementOption(selectedElement.kind)?.moduleName(language) ?? selectedElement.kind)
               : labels.editorModuleElement}</p>}
           {selectedModuleOption === undefined ? null : (
             <ModuleOverlayElementEditor
               kind={selectedModuleOption.kind}
               config={selectedModuleOption.parseConfig(selectedElement.config) ?? selectedModuleOption.defaultConfig}
+              channelId={channelId}
               language={language}
+              onPreviewState={updateSelectedPreviewState}
               readOnly={!canManage}
               {...(canManage ? {} : { readOnlyReason: labels.editorReadOnly })}
               onChange={(config) => { updateElement(selectedElement.id, { config }); }}

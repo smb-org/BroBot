@@ -22,10 +22,24 @@ const readJson = async <T,>(response: Response): Promise<T> => {
 
 export const loadTextLibrary = async (channelId: string): Promise<TextLibraryPanelData> => {
   const encodedChannelId = encodeURIComponent(channelId);
+  // The three requests are started together first and only then read as JSON.
+  // Awaiting each `fetch` inside the `Promise.all([...])` array (as written
+  // before) evaluates the array elements one at a time: the second and third
+  // `fetch` calls do not even start until the previous one's `await` resolves.
+  // Worse, if an earlier response turns out to be an error, `readJson` starts
+  // rejecting for it *before* the array literal finishes evaluating -- at
+  // that point nothing has attached a handler to that rejection yet (`Promise.all`
+  // only runs once all three elements are known), so it surfaces as an
+  // unhandled rejection instead of the caller's `catch`.
+  const [libraryResponse, registeredResponse, settingsResponse] = await Promise.all([
+    fetch(`${basePath(channelId)}${TEXT_LIBRARY_LIBRARY_PATH}`),
+    fetch(`/api/channels/${encodedChannelId}/template-variables`),
+    fetch(`/api/channels/${encodedChannelId}/settings`),
+  ]);
   const [library, registered, channelSettings] = await Promise.all([
-    readJson<TextLibraryData>(await fetch(`${basePath(channelId)}${TEXT_LIBRARY_LIBRARY_PATH}`)),
-    readJson<{ variables: ModuleRegisteredTemplateVariable[] }>(await fetch(`/api/channels/${encodedChannelId}/template-variables`)),
-    readJson<{ timeZone: string; revision: number }>(await fetch(`/api/channels/${encodedChannelId}/settings`)),
+    readJson<TextLibraryData>(libraryResponse),
+    readJson<{ variables: ModuleRegisteredTemplateVariable[] }>(registeredResponse),
+    readJson<{ timeZone: string; revision: number }>(settingsResponse),
   ]);
   return {
     ...library,
