@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { AUDIT_ACTIONS } from "../../src/contracts/values";
 import type { PanelAuditEntry } from "../../src/panel-contract";
 import { textFingerprintIfTruncated, truncateTo200Chars } from "../../src/text";
 import { auditFieldLabel } from "../../src/dashboard/locale";
@@ -12,7 +13,7 @@ import {
   auditDiffValueText,
   auditFilterIsActive,
   auditRowLabel,
-  auditSentenceAction,
+  auditSentenceText,
   auditSubjectText,
   emptyAuditFilter,
 } from "../../src/dashboard/audit/model";
@@ -62,10 +63,10 @@ describe("overlay-token audit labels", () => {
     expect(auditFieldLabel("revocationReason", "en")).toBe("Revocation reason");
   });
 
-  it("humanizes unknown field keys in both dashboard languages", () => {
-    expect(auditFieldLabel("futureField_name", "de")).toBe("future field name");
-    expect(auditFieldLabel("futureField_name", "en")).toBe("future field name");
-    expect(auditFieldLabel("Name", "en")).toBe("name");
+  it("uses an opaque localized label for unknown field keys", () => {
+    expect(auditFieldLabel("futureField_name", "de")).toBe("Unbekanntes Feld");
+    expect(auditFieldLabel("futureField_name", "en")).toBe("Unknown field");
+    expect(auditFieldLabel("Name", "en")).toBe("Unknown field");
     expect(auditFieldLabel("name", "en")).toBe("Object name");
   });
 });
@@ -81,11 +82,57 @@ describe("stored overlay audit labels", () => {
 });
 
 describe("audit sentence action templates", () => {
-  it("maps action codes to concise bilingual sentence verbs", () => {
-    expect(auditSentenceAction("member.role_changed", "de")).toBe("änderte die Rolle von");
-    expect(auditSentenceAction("member.role_changed", "en")).toBe("changed the role of");
-    expect(auditSentenceAction("text_commands.command.updated", "de")).toBe("änderte");
-    expect(auditSentenceAction("text_commands.command.updated", "en")).toBe("updated");
+  it("has a localized, non-raw template for every defined audit action", () => {
+    for (const action of AUDIT_ACTIONS) {
+      const entry = baseEntry({
+        action,
+        actorDisplayName: "Alice",
+        moduleId: action === "module.enabled" || action === "module.disabled" ? "ads" : null,
+        subjectUserId: action.startsWith("member.") ? "user-2" : null,
+        subjectLogin: action.startsWith("member.") ? "bob" : null,
+        subjectDisplayName: action.startsWith("member.") ? "Bob" : null,
+        before: JSON.stringify({ name: "before_name", role: "manager", value: 4, fullConsent: false, timeZone: "Europe/Berlin" }),
+        after: JSON.stringify({ name: "after_name", role: "operator", value: 5, fullConsent: true, length: 60, displayName: "Alpha", timeZone: "UTC" }),
+      });
+      for (const language of ["de", "en"] as const) {
+        const sentence = auditSentenceText(entry, language);
+        expect(sentence, `${action} (${language})`).toContain("Alice");
+        expect(sentence, `${action} (${language})`).not.toContain(action);
+        expect(sentence, `${action} (${language})`).not.toMatch(/unbekannte Aktion|unrecognized action/iu);
+      }
+    }
+  });
+
+  it("names the affected member and localizes both role values", () => {
+    const roleChanged = baseEntry({
+      action: "member.role_changed",
+      actorDisplayName: "Alice",
+      subjectUserId: "user-2",
+      subjectLogin: "bob",
+      subjectDisplayName: "Bob",
+      before: JSON.stringify({ role: "manager" }),
+      after: JSON.stringify({ role: "operator" }),
+    });
+    expect(auditSentenceText(roleChanged, "de")).toContain("Bob von Verwalter zu Bediener");
+    expect(auditSentenceText(roleChanged, "en")).toContain("Bob's role from Manager to Operator");
+    const added = { ...roleChanged, action: "member.added", before: "null" };
+    const removed = { ...roleChanged, action: "member.removed", after: "null" };
+    expect(auditSentenceText(added, "de")).toContain("Bob als Bediener");
+    expect(auditSentenceText(removed, "en")).toContain("Bob with the Manager role");
+  });
+
+  it("uses the module name for settings and a neutral sentence for unknown actions", () => {
+    const moduleSettings = baseEntry({ action: "ads.settings_changed", moduleId: "ads", actorDisplayName: "Alice", before: JSON.stringify({ settings: JSON.stringify({ prewarning: false }) }), after: JSON.stringify({ settings: JSON.stringify({ prewarning: true }) }) });
+    expect(auditSentenceText(moduleSettings, "de")).toBe("Alice änderte die Einstellungen von Werbung");
+    expect(auditSentenceText(moduleSettings, "en")).toBe("Alice changed settings for Ad breaks");
+    expect(auditSentenceText(moduleSettings, "en")).not.toContain("prewarning");
+
+    const unknown = baseEntry({ action: "beta-erster", actorDisplayName: "Alice" });
+    const fakeKnownSuffix = baseEntry({ action: "future.created", actorDisplayName: "Alice", after: JSON.stringify({ name: "operator" }) });
+    expect(auditSentenceText(unknown, "de")).toBe("Alice führte eine nicht erkannte Aktion aus");
+    expect(auditSentenceText(unknown, "en")).toBe("Alice performed an unrecognized action");
+    expect(auditSentenceText(fakeKnownSuffix, "en")).toBe("Alice performed an unrecognized action");
+    expect(auditRowLabel(fakeKnownSuffix, "en")).not.toMatch(/created|future\.created/iu);
   });
 });
 

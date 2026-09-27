@@ -1,7 +1,13 @@
 import "@testing-library/jest-dom/vitest";
+import { beforeEach } from "vitest";
 
 if (typeof window !== "undefined") {
   Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+  // Most component tests exercise the desktop side-by-side inspector layout.
+  // Narrow-screen modal behavior is covered by tests that set this explicitly.
+  beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1440 });
+  });
 
   // jsdom doesn't implement ResizeObserver; Mantine's `ScrollArea` (used
   // inside a `Select` dropdown, among others) observes with it.

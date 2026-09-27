@@ -9,6 +9,7 @@ const settingsSchema = z.object({});
 
 export const textLibraryModule: BotModule<typeof settingsSchema> = {
   id: "text_library",
+  panelIcon: { paths: ["M5 5h14v14H5z", "M8 9h8", "M8 12h8", "M8 15h5"] },
   mandatory: true,
   mandatoryReason: {
     de: textLibraryModuleCatalog.de.mandatoryReason,

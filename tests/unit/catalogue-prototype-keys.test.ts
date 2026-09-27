@@ -16,7 +16,7 @@ describe("external catalogue keys", () => {
   it.each(["__proto__", "constructor", "toString"])("does not treat %s as a catalogue entry", (key) => {
     expect(apiErrorText(key, "fallback", "en")).toBe("fallback");
     expect(maintenanceReasonText(key, "en")).toBe(key);
-    expect(platformActionLabel(key, "en")).toBe(key);
+    expect(platformActionLabel(key, "en")).toBe("Unknown action");
     expect(eventText(key, "en")).toBe(key);
     expect(eventMetadata(key)).toBeNull();
     expect(eventTone(key)).toBeNull();

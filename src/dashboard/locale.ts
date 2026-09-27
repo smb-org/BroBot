@@ -5,6 +5,13 @@ import type { SystemVariableName } from "../template-variables";
 export type DashboardLanguage = ModuleLanguage;
 export type LocaleCatalog<T> = Record<DashboardLanguage, T>;
 
+export interface AuditSentenceParts {
+  actor: string;
+  object: string;
+  from: string | null;
+  to: string | null;
+}
+
 export const catalogString = (catalog: object, key: string): string | undefined => {
   if (!Object.hasOwn(catalog, key)) return undefined;
   const value = (catalog as Record<string, unknown>)[key];
@@ -86,7 +93,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
  */
 export const dashboardLanguage = (): DashboardLanguage => browserModuleLanguage();
 
-export const dashboardCommonTexts = (): DashboardCommonTexts => commonTexts[dashboardLanguage()];
+export const dashboardCommonTexts = (language: DashboardLanguage = dashboardLanguage()): DashboardCommonTexts => commonTexts[language];
 
 export interface SystemTemplateVariableLocale {
   description: string;
@@ -196,7 +203,6 @@ export interface ChannelVariablesTexts {
   deleteCancel: string;
   inUseReason: (usages: string) => string;
   managementLocked: string;
-  valueLocked: string;
   limitReached: string;
   newVariable: string;
   save: string;
@@ -241,7 +247,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     deleteConfirm: (name) => `${name} endgültig löschen`, deleteCancel: "Abbrechen",
     inUseReason: (usages) => `Wird von ${usages} verwendet. Entferne zuerst die Befehlsaktion.`,
     managementLocked: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen, beschreiben oder löschen.",
-    valueLocked: "Nur Broadcaster und Verwalter dürfen Variablenwerte ändern.", limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
+    limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
     conflict: "Die Variable wurde inzwischen geändert.", created: "Variable angelegt.", updated: "Variable gespeichert.",
     useInOverlay: "In Overlay verwenden", useOverlayHint: "Wähle ein Overlay. Die Variable wird im Editor als ungespeicherter Entwurf eingefügt.",
     chooseOverlay: "Overlay auswählen", createOverlay: "Neues Overlay", newOverlayName: "Name des neuen Overlays",
@@ -272,7 +278,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     deleteConfirm: (name) => `Delete ${name} permanently`, deleteCancel: "Cancel",
     inUseReason: (usages) => `Used by ${usages}. Remove the command action first.`,
     managementLocked: "Only broadcasters and managers may create, rename, describe, or delete variables.",
-    valueLocked: "Only broadcasters and managers may change variable values.", limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
+    limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
     conflict: "This variable has changed since it was loaded.", created: "Variable created.", updated: "Variable saved.",
     useInOverlay: "Use in overlay", useOverlayHint: "Choose an overlay. The variable is added as an unsaved draft in the editor.",
     chooseOverlay: "Choose an overlay", createOverlay: "New overlay", newOverlayName: "New overlay name",
@@ -724,19 +730,9 @@ export interface DashboardTexts {
     removedValue: string;
     changedTruncated: string;
     changesHeading: string;
-    sentenceFrom: string;
-    sentenceFieldOfModule: (field: string, module: string) => string;
-    sentenceObject: (kind: "variable" | "overlay" | "command" | "member" | "module" | "channel", name: string) => string;
-    sentenceActions: {
-      roleChanged: string;
-      changed: string;
-      created: string;
-      updated: string;
-      removed: string;
-      enabled: string;
-      disabled: string;
-      issued: string;
-    };
+    sentenceTemplates: Record<AuditAction, (parts: AuditSentenceParts) => string>;
+    sentenceSettingsChanged: (actor: string, module: string) => string;
+    sentenceUnknownAction: (actor: string) => string;
     filter: string;
     person: string;
     personHint: string;
@@ -1026,10 +1022,47 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       load: "Audit-Log wird geladen …", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
       before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loadingOlderEntries: "Ältere Einträge werden geladen …",
       yes: "Ja", no: "Nein", newValue: "neu", removedValue: "entfernt",
-      changedTruncated: "geändert (Text länger als die Vorschau)", changesHeading: "Änderungen", sentenceFrom: "von",
-      sentenceFieldOfModule: (field, module) => `die ${field} bei ${module}`,
-      sentenceObject: (kind, name) => `${kind === "variable" ? "die Variable" : kind === "overlay" ? "das Overlay" : kind === "command" ? "den Befehl" : kind === "member" ? "das Mitglied" : kind === "module" ? "das Modul" : "den Kanal"} ${name}`,
-      sentenceActions: { roleChanged: "änderte die Rolle von", changed: "änderte", created: "erstellte", updated: "änderte", removed: "entfernte", enabled: "aktivierte", disabled: "deaktivierte", issued: "gab frei" },
+      changedTruncated: "geändert (Text länger als die Vorschau)", changesHeading: "Änderungen",
+      sentenceTemplates: {
+        "channel.released": ({ actor, object }) => `${actor} gab den Kanal ${object} frei`,
+        "channel.full_consent_changed": ({ actor, object, from, to }) => `${actor} änderte die Vollzustimmung für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
+        "member.added": ({ actor, object, to }) => `${actor} fügte ${object}${to === null ? "" : ` als ${to}`} hinzu`,
+        "member.role_changed": ({ actor, object, from, to }) => `${actor} änderte die Rolle von ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
+        "member.removed": ({ actor, object, from }) => `${actor} entfernte ${object}${from === null ? "" : ` mit der Rolle ${from}`}`,
+        "module.enabled": ({ actor, object }) => `${actor} aktivierte das Modul ${object}`,
+        "module.disabled": ({ actor, object }) => `${actor} deaktivierte das Modul ${object}`,
+        "text_commands.command.created": ({ actor, object }) => `${actor} erstellte den Textbefehl ${object}`,
+        "text_commands.command.updated": ({ actor, object }) => `${actor} änderte den Textbefehl ${object}`,
+        "text_commands.command.removed": ({ actor, object }) => `${actor} entfernte den Textbefehl ${object}`,
+        "text_library.block.created": ({ actor, object }) => `${actor} erstellte den Textbaustein ${object}`,
+        "text_library.block.updated": ({ actor, object }) => `${actor} änderte den Textbaustein ${object}`,
+        "text_library.block.removed": ({ actor, object }) => `${actor} entfernte den Textbaustein ${object}`,
+        "text_library.category.created": ({ actor, object }) => `${actor} erstellte die Textkategorie ${object}`,
+        "text_library.category.renamed": ({ actor, from, to, object }) => `${actor} benannte die Textkategorie ${from ?? object} in ${to ?? object} um`,
+        "text_library.category.removed": ({ actor, object }) => `${actor} entfernte die Textkategorie ${object}`,
+        "text_library.settings.updated": ({ actor, object, from, to }) => `${actor} änderte die Einstellungen der ${object}${from === null || to === null ? "" : ` von ${from} zu ${to}`}`,
+        "channel.variable.created": ({ actor, object }) => `${actor} legte die Kanalvariable ${object} an`,
+        "channel.variable.renamed": ({ actor, from, to, object }) => `${actor} benannte die Kanalvariable ${from ?? object} in ${to ?? object} um`,
+        "channel.variable.removed": ({ actor, object }) => `${actor} löschte die Kanalvariable ${object}`,
+        "channel.variable.value_changed": ({ actor, object, from, to }) => `${actor} änderte den Wert der Kanalvariable ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
+        "ads.commercial_started": ({ actor, object, to }) => `${actor} startete ${object}${to === null ? "" : ` für ${to}`}`,
+        "clip.created": ({ actor, object }) => `${actor} erstellte ${object}`,
+        "channel.mute.enabled": ({ actor, object }) => `${actor} schaltete ${object} stumm`,
+        "channel.mute.disabled": ({ actor, object }) => `${actor} hob die Stummschaltung für ${object} auf`,
+        "channel.pause.enabled": ({ actor, object }) => `${actor} pausierte automatische Aktionen für ${object}`,
+        "channel.pause.disabled": ({ actor, object }) => `${actor} setzte automatische Aktionen für ${object} fort`,
+        "overlay.token.issued": ({ actor, object }) => `${actor} stellte ${object} aus`,
+        "overlay.token.revoked": ({ actor, object }) => `${actor} widerrief ${object}`,
+        "overlay.access.issued": ({ actor, object }) => `${actor} stellte ${object} aus`,
+        "overlay.access.revealed": ({ actor, object }) => `${actor} zeigte ${object} an`,
+        "overlay.access.revoked": ({ actor, object }) => `${actor} widerrief ${object}`,
+        "overlay.created": ({ actor, object }) => `${actor} erstellte das Overlay ${object}`,
+        "overlay.updated": ({ actor, object }) => `${actor} änderte das Overlay ${object}`,
+        "overlay.deleted": ({ actor, object }) => `${actor} löschte das Overlay ${object}`,
+        "overlay.legacy.imported": ({ actor, object }) => `${actor} importierte den alten Overlay-Link ${object}`,
+      },
+      sentenceSettingsChanged: (actor, module) => `${actor} änderte die Einstellungen von ${module}`,
+      sentenceUnknownAction: (actor) => `${actor} führte eine nicht erkannte Aktion aus`,
       filter: "Filter", person: "Person",
       personHint: "Wer die Aktion ausgeführt hat, nicht wer betroffen war.",
       personPlaceholder: "Login oder ID, z. B. beispielnutzer",
@@ -1240,10 +1273,47 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       load: "Loading audit log …", empty: "No audit entries saved yet.", changeData: "Change data",
       before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
       yes: "Yes", no: "No", newValue: "new", removedValue: "removed",
-      changedTruncated: "changed (text longer than preview)", changesHeading: "Changes", sentenceFrom: "from",
-      sentenceFieldOfModule: (field, module) => `the ${field} of ${module}`,
-      sentenceObject: (kind, name) => `the ${kind} ${name}`,
-      sentenceActions: { roleChanged: "changed the role of", changed: "changed", created: "created", updated: "updated", removed: "removed", enabled: "enabled", disabled: "disabled", issued: "issued" },
+      changedTruncated: "changed (text longer than preview)", changesHeading: "Changes",
+      sentenceTemplates: {
+        "channel.released": ({ actor, object }) => `${actor} released channel ${object}`,
+        "channel.full_consent_changed": ({ actor, object, from, to }) => `${actor} changed full consent for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
+        "member.added": ({ actor, object, to }) => `${actor} added ${object}${to === null ? "" : ` as ${to}`}`,
+        "member.role_changed": ({ actor, object, from, to }) => `${actor} changed ${object}'s role from ${from ?? "—"} to ${to ?? "—"}`,
+        "member.removed": ({ actor, object, from }) => `${actor} removed ${object}${from === null ? "" : ` with the ${from} role`}`,
+        "module.enabled": ({ actor, object }) => `${actor} enabled the ${object} module`,
+        "module.disabled": ({ actor, object }) => `${actor} disabled the ${object} module`,
+        "text_commands.command.created": ({ actor, object }) => `${actor} created text command ${object}`,
+        "text_commands.command.updated": ({ actor, object }) => `${actor} updated text command ${object}`,
+        "text_commands.command.removed": ({ actor, object }) => `${actor} removed text command ${object}`,
+        "text_library.block.created": ({ actor, object }) => `${actor} created text block ${object}`,
+        "text_library.block.updated": ({ actor, object }) => `${actor} updated text block ${object}`,
+        "text_library.block.removed": ({ actor, object }) => `${actor} removed text block ${object}`,
+        "text_library.category.created": ({ actor, object }) => `${actor} created text category ${object}`,
+        "text_library.category.renamed": ({ actor, from, to, object }) => `${actor} renamed text category ${from ?? object} to ${to ?? object}`,
+        "text_library.category.removed": ({ actor, object }) => `${actor} removed text category ${object}`,
+        "text_library.settings.updated": ({ actor, object, from, to }) => `${actor} changed ${object} settings${from === null || to === null ? "" : ` from ${from} to ${to}`}`,
+        "channel.variable.created": ({ actor, object }) => `${actor} created channel variable ${object}`,
+        "channel.variable.renamed": ({ actor, from, to, object }) => `${actor} renamed channel variable ${from ?? object} to ${to ?? object}`,
+        "channel.variable.removed": ({ actor, object }) => `${actor} deleted channel variable ${object}`,
+        "channel.variable.value_changed": ({ actor, object, from, to }) => `${actor} changed the value of channel variable ${object} from ${from ?? "—"} to ${to ?? "—"}`,
+        "ads.commercial_started": ({ actor, object, to }) => `${actor} started ${object}${to === null ? "" : ` for ${to}`}`,
+        "clip.created": ({ actor, object }) => `${actor} created ${object}`,
+        "channel.mute.enabled": ({ actor, object }) => `${actor} muted ${object}`,
+        "channel.mute.disabled": ({ actor, object }) => `${actor} unmuted ${object}`,
+        "channel.pause.enabled": ({ actor, object }) => `${actor} paused automatic actions for ${object}`,
+        "channel.pause.disabled": ({ actor, object }) => `${actor} resumed automatic actions for ${object}`,
+        "overlay.token.issued": ({ actor, object }) => `${actor} issued ${object}`,
+        "overlay.token.revoked": ({ actor, object }) => `${actor} revoked ${object}`,
+        "overlay.access.issued": ({ actor, object }) => `${actor} issued ${object}`,
+        "overlay.access.revealed": ({ actor, object }) => `${actor} revealed ${object}`,
+        "overlay.access.revoked": ({ actor, object }) => `${actor} revoked ${object}`,
+        "overlay.created": ({ actor, object }) => `${actor} created overlay ${object}`,
+        "overlay.updated": ({ actor, object }) => `${actor} updated overlay ${object}`,
+        "overlay.deleted": ({ actor, object }) => `${actor} deleted overlay ${object}`,
+        "overlay.legacy.imported": ({ actor, object }) => `${actor} imported legacy overlay link ${object}`,
+      },
+      sentenceSettingsChanged: (actor, module) => `${actor} changed settings for ${module}`,
+      sentenceUnknownAction: (actor) => `${actor} performed an unrecognized action`,
       filter: "Filters", person: "Person",
       personHint: "Who performed the action, not who was affected by it.",
       personPlaceholder: "Login or ID, e.g. example_user",
@@ -2171,7 +2241,62 @@ export const moduleSettingsChangedText = (
 export const auditActionLabel = (
   action: string,
   language: DashboardLanguage = dashboardLanguage(),
-): string => catalogString(auditActionTexts[language], action) ?? action;
+): string => catalogString(auditActionTexts[language], action) ?? auditUnknownActionLabel(language);
+
+export const auditUnknownActionLabel = (language: DashboardLanguage = dashboardLanguage()): string =>
+  language === "de" ? "Unbekannte Aktion" : "Unknown action";
+
+const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> = {
+  de: {
+    "channel.released": "Kanal", "channel.full_consent_changed": "Kanal",
+    "member.added": "Mitglied", "member.role_changed": "Mitglied", "member.removed": "Mitglied",
+    "module.enabled": "Modul", "module.disabled": "Modul",
+    "text_commands.command.created": "Textbefehl", "text_commands.command.updated": "Textbefehl", "text_commands.command.removed": "Textbefehl",
+    "text_library.block.created": "Textbaustein", "text_library.block.updated": "Textbaustein", "text_library.block.removed": "Textbaustein",
+    "text_library.category.created": "Textkategorie", "text_library.category.renamed": "Textkategorie", "text_library.category.removed": "Textkategorie", "text_library.settings.updated": "Textbibliothek",
+    "channel.variable.created": "Kanalvariable", "channel.variable.renamed": "Kanalvariable", "channel.variable.removed": "Kanalvariable", "channel.variable.value_changed": "Kanalvariable",
+    "ads.commercial_started": "die Werbepause", "clip.created": "den Clip",
+    "channel.mute.enabled": "den Kanal", "channel.mute.disabled": "den Kanal", "channel.pause.enabled": "den Kanal", "channel.pause.disabled": "den Kanal",
+    "overlay.token.issued": "den Overlay-Token", "overlay.token.revoked": "den Overlay-Token",
+    "overlay.access.issued": "den Overlay-Zugang", "overlay.access.revealed": "den Overlay-Zugang", "overlay.access.revoked": "den Overlay-Zugang",
+    "overlay.created": "Overlay", "overlay.updated": "Overlay", "overlay.deleted": "Overlay", "overlay.legacy.imported": "Overlay-Link",
+  },
+  en: {
+    "channel.released": "channel", "channel.full_consent_changed": "channel",
+    "member.added": "member", "member.role_changed": "member", "member.removed": "member",
+    "module.enabled": "module", "module.disabled": "module",
+    "text_commands.command.created": "text command", "text_commands.command.updated": "text command", "text_commands.command.removed": "text command",
+    "text_library.block.created": "text block", "text_library.block.updated": "text block", "text_library.block.removed": "text block",
+    "text_library.category.created": "text category", "text_library.category.renamed": "text category", "text_library.category.removed": "text category", "text_library.settings.updated": "text library",
+    "channel.variable.created": "channel variable", "channel.variable.renamed": "channel variable", "channel.variable.removed": "channel variable", "channel.variable.value_changed": "channel variable",
+    "ads.commercial_started": "the commercial break", "clip.created": "the clip",
+    "channel.mute.enabled": "the channel", "channel.mute.disabled": "the channel", "channel.pause.enabled": "the channel", "channel.pause.disabled": "the channel",
+    "overlay.token.issued": "the overlay token", "overlay.token.revoked": "the overlay token",
+    "overlay.access.issued": "the overlay access", "overlay.access.revealed": "the overlay access", "overlay.access.revoked": "the overlay access",
+    "overlay.created": "overlay", "overlay.updated": "overlay", "overlay.deleted": "overlay", "overlay.legacy.imported": "legacy overlay link",
+  },
+};
+
+export const auditObjectFallback = (action: string, language: DashboardLanguage = dashboardLanguage()): string => {
+  const value = catalogString(auditObjectFallbacks[language], action);
+  return value ?? (language === "de" ? "Eintrag" : "item");
+};
+
+export const auditSentenceForAction = (
+  action: string,
+  parts: AuditSentenceParts,
+  language: DashboardLanguage = dashboardLanguage(),
+): string => {
+  const templates = dashboardTexts(language).audit.sentenceTemplates;
+  if (!Object.hasOwn(templates, action)) return dashboardTexts(language).audit.sentenceUnknownAction(parts.actor);
+  return templates[action as AuditAction](parts);
+};
+
+export const auditSettingsChangedSentence = (
+  actor: string,
+  module: string,
+  language: DashboardLanguage = dashboardLanguage(),
+): string => dashboardTexts(language).audit.sentenceSettingsChanged(actor, module);
 
 const memberAsWords: LocaleCatalog<string> = { de: "als", en: "as" };
 
@@ -2179,23 +2304,28 @@ const memberAsWords: LocaleCatalog<string> = { de: "als", en: "as" };
 export const memberAsWord = (language: DashboardLanguage = dashboardLanguage()): string => memberAsWords[language];
 
 /**
- * Fallback labels for common audit diff fields. Unknown keys are converted
- * to readable words so new audit fields never expose storage names.
+ * Bilingual labels for known audit diff fields. Unknown keys stay opaque so
+ * a new storage field cannot leak into either language as a guessed label.
  */
-const auditFieldLabels: LocaleCatalog<Record<string, string>> = {
+type AuditFieldKey =
+  | "role" | "enabled" | "fullConsent" | "revocationReason" | "expiresAt" | "createdAt" | "revokedAt"
+  | "length" | "retryAfter" | "clipId" | "tokenId" | "login" | "displayName" | "leadSeconds" | "name"
+  | "value" | "description" | "overlayId" | "categoryId" | "timeZone" | "width" | "height" | "revision" | "elementCount";
+
+const auditFieldLabels: LocaleCatalog<Record<AuditFieldKey, string>> = {
   de: {
     role: "Rolle", enabled: "Aktiv", fullConsent: "Vollzustimmung", revocationReason: "Widerrufsgrund",
     expiresAt: "Gültig bis", createdAt: "Erstellt am", revokedAt: "Widerrufen am", length: "Länge (Sekunden)", retryAfter: "Erneut möglich ab",
     clipId: "Clip-ID", tokenId: "Token-ID", login: "Login", displayName: "Anzeigename", leadSeconds: "Vorlaufzeit",
-    name: "Objektname", value: "Wert", description: "Beschreibung", overlayId: "Overlay-ID",
-    width: "Breite", height: "Höhe", revision: "Revision", elementCount: "Elemente",
+    name: "Objektname", value: "Wert", description: "Beschreibung", overlayId: "Overlay-ID", categoryId: "Kategorie-ID",
+    timeZone: "Kanalzeitzone", width: "Breite", height: "Höhe", revision: "Revision", elementCount: "Elemente",
   },
   en: {
     role: "Role", enabled: "Enabled", fullConsent: "Full consent", revocationReason: "Revocation reason",
     expiresAt: "Valid until", createdAt: "Created at", revokedAt: "Revoked at", length: "Length (seconds)", retryAfter: "Retry after",
     clipId: "Clip ID", tokenId: "Token ID", login: "Login", displayName: "Display name", leadSeconds: "lead time",
-    name: "Object name", value: "Value", description: "Description", overlayId: "Overlay ID",
-    width: "Width", height: "Height", revision: "Revision", elementCount: "Elements",
+    name: "Object name", value: "Value", description: "Description", overlayId: "Overlay ID", categoryId: "Category ID",
+    timeZone: "Channel time zone", width: "Width", height: "Height", revision: "Revision", elementCount: "Elements",
   },
 };
 
@@ -2205,13 +2335,7 @@ export const auditFieldLabel = (
 ): string => {
   const knownLabel = catalogString(auditFieldLabels[language], key);
   if (knownLabel !== undefined) return knownLabel;
-  const humanized = key
-    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
-    .replace(/[_-]+/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim()
-    .toLocaleLowerCase(language);
-  return humanized.length > 0 ? humanized : language === "de" ? "unbekanntes Feld" : "unknown field";
+  return language === "de" ? "Unbekanntes Feld" : "Unknown field";
 };
 
 /**

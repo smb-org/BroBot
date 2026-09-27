@@ -1,15 +1,17 @@
 import type { ReactElement } from "react";
 
-export interface AuditSentenceProps {
+export type AuditSentenceProps = { sentence: string } | {
   who: string;
   action: string;
   what?: string | null;
   fromLabel: string;
   from?: string | null;
   to?: string | null;
-}
+};
 
-export function AuditSentence({ who, action, what, fromLabel, from, to }: AuditSentenceProps): ReactElement {
+export function AuditSentence(props: AuditSentenceProps): ReactElement {
+  if ("sentence" in props) return <span className="audit-sentence">{props.sentence}</span>;
+  const { who, action, what, fromLabel, from, to } = props;
   return (
     <span className="audit-sentence">
       <span className="audit-sentence__chip audit-sentence__chip--who">{who}</span>

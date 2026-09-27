@@ -262,6 +262,11 @@ export interface ModuleNavigationEntry {
   keywords?: readonly string[];
 }
 
+/** Path data for the module's dashboard glyph; the host renders every descriptor through the same SVG frame. */
+export interface ModuleIconDescriptor {
+  paths: readonly string[];
+}
+
 /** A module-owned source of text that can contain template-variable references. */
 export interface ModuleTemplateUsageSource {
   text: string;
@@ -532,6 +537,7 @@ export interface ModuleEvent<Settings = unknown> {
 
 export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
+  panelIcon?: ModuleIconDescriptor;
   /** The module is always enabled for every released channel and cannot be disabled. */
   mandatory?: boolean;
   /** Localized explanation shown when this module cannot be disabled. */

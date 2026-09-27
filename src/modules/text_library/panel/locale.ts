@@ -18,6 +18,11 @@ export interface TextLibraryTexts {
   save: string;
   create: string;
   discard: string;
+  draftGuardTitle: string;
+  draftGuardDescription: string;
+  continueEditing: string;
+  discardAndSwitch: string;
+  saveAndSwitch: string;
   close: string;
   delete: string;
   deleteConfirm: (name: string) => string;
@@ -53,6 +58,7 @@ export interface TextLibraryTexts {
   online: string;
   offline: string;
   gameCondition: string;
+  gameMatch: string;
   gameIs: string;
   gameIsNot: string;
   minimumTier: string;
@@ -119,6 +125,11 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     save: "Änderungen speichern",
     create: "Anlegen",
     discard: "Verwerfen",
+    draftGuardTitle: "Ungespeicherte Änderungen",
+    draftGuardDescription: "Dieser Textbaustein enthält ungespeicherte Änderungen. Was möchtest du tun?",
+    continueEditing: "Weiter bearbeiten",
+    discardAndSwitch: "Verwerfen und wechseln",
+    saveAndSwitch: "Speichern und wechseln",
     close: "Schließen",
     delete: "Textbaustein löschen",
     deleteConfirm: (name) => `Textbaustein „${name}“ dauerhaft löschen?`,
@@ -154,6 +165,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     online: "Live",
     offline: "Offline",
     gameCondition: "Aktuelles Spiel",
+    gameMatch: "Spielbedingung",
     gameIs: "ist",
     gameIsNot: "ist nicht",
     minimumTier: "Aufrufer mindestens",
@@ -241,6 +253,11 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     save: "Save changes",
     create: "Create",
     discard: "Discard",
+    draftGuardTitle: "Unsaved changes",
+    draftGuardDescription: "This text block has unsaved changes. What would you like to do?",
+    continueEditing: "Continue editing",
+    discardAndSwitch: "Discard and switch",
+    saveAndSwitch: "Save and switch",
     close: "Close",
     delete: "Delete text block",
     deleteConfirm: (name) => `Delete text block “${name}” permanently?`,
@@ -276,6 +293,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     online: "Live",
     offline: "Offline",
     gameCondition: "Current game",
+    gameMatch: "Game match",
     gameIs: "is",
     gameIsNot: "is not",
     minimumTier: "Caller role at least",

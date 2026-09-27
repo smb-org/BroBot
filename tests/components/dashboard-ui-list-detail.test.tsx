@@ -1,14 +1,17 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ListDetail, SubInspector } from "../../src/dashboard/ui";
 
 const list = <section role="region" aria-label="Liste">Liste</section>;
 const inspector = <section role="region" aria-label="Details">Details</section>;
+const initialWidth = window.innerWidth;
 
 describe("ListDetail", () => {
   afterEach(() => {
     cleanup();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: initialWidth });
   });
 
   it("renders only the list when there is no selection -- no waiting dock", () => {
@@ -63,5 +66,43 @@ describe("ListDetail", () => {
     expect(container.querySelector(".list-detail__backdrop")).not.toBeInTheDocument();
     expect(container.querySelector(".list-detail__inspector")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Details" })).not.toBeInTheDocument();
+  });
+
+  it("treats the narrow inspector as a modal, traps focus, and restores it to the opened row", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    function InteractiveListDetail() {
+      const [open, setOpen] = useState(false);
+      return <>
+        <button type="button">Page header action</button>
+        <ListDetail
+          list={<section><button type="button" onClick={() => setOpen(true)}>Open row</button><button type="button">Background action</button></section>}
+          inspector={open ? <SubInspector ariaLabel="Details" title="Selected row" closeLabel="Close" onClose={() => setOpen(false)}><button type="button">Inspector action</button></SubInspector> : null}
+          onCloseInspector={() => setOpen(false)}
+        />
+      </>;
+    }
+    render(<InteractiveListDetail />);
+    const row = screen.getByRole("button", { name: "Open row" });
+    row.focus();
+    fireEvent.click(row);
+
+    const dialog = screen.getByRole("dialog", { name: "Details" });
+    const close = within(dialog).getByRole("button", { name: "Close" });
+    const action = within(dialog).getByRole("button", { name: "Inspector action" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(row.closest(".list-detail__list")).toHaveAttribute("inert");
+    expect(screen.getByText("Page header action").closest("button")).toHaveProperty("inert", true);
+    expect(document.activeElement).toBe(close);
+
+    action.focus();
+    fireEvent.keyDown(action, { key: "Tab" });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(action);
+
+    fireEvent.keyDown(action, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Details" })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(row);
+    expect(screen.getByText("Page header action").closest("button")).not.toHaveAttribute("inert");
   });
 });

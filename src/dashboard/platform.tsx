@@ -236,7 +236,7 @@ const ChannelInspector = ({
           <DangerSection title={common.dangerZone}>
             <Button danger="subtle" disabled={selectedMember.role === "broadcaster" || busyUserId === selectedMember.userId}
               {...(selectedMember.role === "broadcaster" ? { title: texts.removeBroadcasterHint } : {})}
-              {...(selectedMember.role === "broadcaster" ? { "aria-describedby": `platform-remove-broadcaster-reason-${selectedMember.userId}` } : {})}
+              {...(selectedMember.role === "broadcaster" ? { describedBy: `platform-remove-broadcaster-reason-${selectedMember.userId}` } : {})}
               onClick={() => { setPendingRemoval(selectedMember); }}>{texts.remove}</Button>
           </DangerSection>
         </>}

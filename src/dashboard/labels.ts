@@ -1,5 +1,5 @@
 import type { ChannelRole } from "../contracts/values";
-import { auditActionLabel as fixedAuditActionLabel, catalogString, dashboardCommonTexts, dashboardLanguage, moduleSettingsChangedText, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { auditActionLabel as fixedAuditActionLabel, auditUnknownActionLabel, catalogString, dashboardCommonTexts, dashboardLanguage, moduleSettingsChangedText, type DashboardLanguage, type LocaleCatalog } from "./locale";
 import { moduleName } from "./module-labels";
 
 /**
@@ -7,8 +7,8 @@ import { moduleName } from "./module-labels";
  * not the enum value — the same one in both places, so the panel and the
  * member list don't drift apart.
  */
-export const roleLabel = (role: ChannelRole): string => {
-  return dashboardCommonTexts().roles[role];
+export const roleLabel = (role: ChannelRole, language: DashboardLanguage = dashboardLanguage()): string => {
+  return dashboardCommonTexts(language).roles[role];
 };
 
 /** What the role is allowed to do (ADR 0006) -- the description on a role `ChoiceCards` option. */
@@ -291,13 +291,13 @@ export const auditActionLabel = (
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {
   const fixedLabel = fixedAuditActionLabel(action, language);
-  if (fixedLabel !== action) return fixedLabel;
+  if (fixedLabel !== auditUnknownActionLabel(language)) return fixedLabel;
 
   const suffix = ".settings_changed";
-  if (!action.endsWith(suffix)) return action;
+  if (!action.endsWith(suffix)) return auditUnknownActionLabel(language);
   const moduleId = action.slice(0, -suffix.length);
   const name = moduleName(moduleId, language);
-  if (name === moduleId) return action;
+  if (name === moduleId) return auditUnknownActionLabel(language);
   return moduleSettingsChangedText(name, language);
 };
 

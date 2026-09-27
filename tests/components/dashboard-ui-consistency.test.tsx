@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AuditSentence, Badge, DangerSection, FilterBar, InspectorActions, InspectorFieldRow, InspectorSection, PageHeader } from "../../src/dashboard/ui";
@@ -44,6 +44,25 @@ describe("shared dashboard consistency components", () => {
     expect(container.querySelector(".inspector-field-row__control")).toContainElement(screen.getByRole("textbox", { name: "Name" }));
     expect(container.querySelector(".inspector-actions")).toContainElement(screen.getByRole("button", { name: "Save" }));
     expect(container.querySelector(".inspector-content-section--danger")).toContainElement(screen.getByRole("button", { name: "Delete" }));
+  });
+
+  it("opens inspector help on keyboard focus and activation, and dismisses it with Escape", () => {
+    render(<InspectorFieldRow label="Name" help="Use a short name."><input aria-label="Name" /></InspectorFieldRow>);
+    const info = screen.getByRole("button", { name: "Name: Use a short name." });
+    fireEvent.focus(info);
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Use a short name.");
+    expect(info).toHaveAttribute("aria-describedby", tooltip.id);
+    expect(info).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.keyDown(info, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(info).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(info);
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
   it("renders badge and audit sentence chips with a localized from-to transition", () => {

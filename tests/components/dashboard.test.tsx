@@ -175,6 +175,7 @@ class TestWebSocket {
 
 describe("Dashboard skeleton", () => {
   beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1440 });
     window.history.replaceState({}, "", "/");
     Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
     TestWebSocket.reset();
@@ -1399,9 +1400,8 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await screen.findByText("Alice")).toBeInTheDocument();
-    expect(await screen.findByText("gelöscht")).toBeInTheDocument();
-    const row = screen.getByRole("button", { name: /Alice aktivierte Werbung/ });
+    const row = await screen.findByRole("button", { name: /Alice aktivierte das Modul Werbung/ });
+    expect(await screen.findByRole("button", { name: /gelöscht deaktivierte das Modul Werbung/ })).toBeInTheDocument();
     expect(row.querySelector("time")).toBeInTheDocument();
     expect(row).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(row);
@@ -1419,7 +1419,7 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(within(inspector).getByText("Technische Details"));
     const rawBlocks = inspector.querySelectorAll("pre");
     expect(Array.from(rawBlocks).map((pre) => pre.textContent.trim())).toEqual(['{\n  "enabled": false\n}', '{\n  "enabled": true\n}']);
-    const secondRow = screen.getByRole("button", { name: /deaktivierte Werbung/ });
+    const secondRow = screen.getByRole("button", { name: /deaktivierte das Modul Werbung/ });
     fireEvent.click(secondRow);
     expect(secondRow).toHaveAttribute("aria-pressed", "true");
     expect(row).toHaveAttribute("aria-pressed", "false");
@@ -1452,7 +1452,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = await screen.findByRole("button", { name: /Alice aktivierte Werbung/ });
+    const row = await screen.findByRole("button", { name: /Alice aktivierte das Modul Werbung/ });
     fireEvent.click(row);
     const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
     expect(await within(inspector).findByText("Vorlaufzeit")).toBeInTheDocument();
@@ -3594,7 +3594,7 @@ describe("Dashboard skeleton", () => {
       window.history.pushState({}, "", "/channels/kanal-b/audit");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    await screen.findByText("beta-erster");
+    const unknownRow = await screen.findByRole("button", { name: /nicht erkannte Aktion|unrecognized action/i });
 
     await act(async () => {
       resolveAlphaAudit?.(jsonResponse({
@@ -3603,7 +3603,8 @@ describe("Dashboard skeleton", () => {
       }));
       await Promise.resolve();
     });
-    expect(screen.getByText("beta-erster")).toBeInTheDocument();
+    expect(unknownRow).toBeInTheDocument();
+    expect(unknownRow).not.toHaveTextContent("beta-erster");
     expect(screen.queryByText("alpha-verspätet")).not.toBeInTheDocument();
   });
 
@@ -3762,8 +3763,8 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await screen.findByRole("button", { name: /Kanal B änderte die Vorlaufzeit bei Werbung von 45 s → 60 s/ })).toBeInTheDocument();
-    const variableRow = await screen.findByRole("button", { name: /Kanal B erstellte die Variable support_goal/ });
+    expect(await screen.findByRole("button", { name: /Kanal B änderte die Einstellungen von Werbung/ })).toBeInTheDocument();
+    const variableRow = await screen.findByRole("button", { name: /Kanal B legte die Kanalvariable \{var\.support_goal\} an/ });
     const overlayRow = await screen.findByRole("button", { name: /Esembe erstellte das Overlay Stream Studio/ });
     expect(variableRow).not.toHaveTextContent("Name");
     expect(overlayRow).not.toHaveTextContent("Name");
@@ -3796,7 +3797,7 @@ describe("Dashboard skeleton", () => {
     const list = await screen.findByRole("region", { name: "Audit-Log" });
     expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
 
-    const row = await screen.findByRole("button", { name: /Alice aktivierte Werbung/ });
+    const row = await screen.findByRole("button", { name: /Alice aktivierte das Modul Werbung/ });
     fireEvent.click(row);
 
     expect(list).toBeInTheDocument();
@@ -3833,7 +3834,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = await screen.findByRole("button", { name: /Alice aktivierte Werbung/ });
+    const row = await screen.findByRole("button", { name: /Alice aktivierte das Modul Werbung/ });
     fireEvent.click(row);
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("link", { name: "System" }));
@@ -3843,7 +3844,7 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(auditRequests).toBe(2));
     resolveReload?.(jsonResponse({ entries: [entry], nextCursor: null }));
 
-    const restoredRow = (await screen.findAllByRole("button", { name: /Alice aktivierte Werbung/ }))[0];
+    const restoredRow = (await screen.findAllByRole("button", { name: /Alice aktivierte das Modul Werbung/ }))[0];
     expect(restoredRow).toBeDefined();
     expect(restoredRow).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
@@ -4032,7 +4033,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = await screen.findByRole("button", { name: /Alice aktivierte Werbung/ });
+    const row = await screen.findByRole("button", { name: /Alice aktivierte das Modul Werbung/ });
     row.focus();
     fireEvent.click(row);
     expect(row).toHaveFocus();

@@ -4,7 +4,6 @@ import type { PanelAuditEntry, PanelAuditFilters, PanelAuditResponse } from "../
 import { AUDIT_AREAS } from "../../contracts/values";
 import { MODULES } from "../../modules/registry";
 import { auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
-import { moduleName } from "../module-labels";
 import { ModuleHeading } from "../module-panels";
 import { formatEventDetail } from "../events/model";
 import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
@@ -17,8 +16,7 @@ import {
   auditDiffValueText,
   auditFilterIsActive,
   auditRowLabel,
-  auditSentenceAction,
-  auditSubjectText,
+  auditSentenceText,
   emptyAuditFilter,
   type AuditDiffRow,
 } from "./model";
@@ -75,58 +73,6 @@ const AuditFilterBar = ({
         onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
       />
   </FilterBar>;
-};
-
-interface AuditSentenceContent {
-  who: string;
-  action: string;
-  what: string | null;
-  fromLabel: string;
-  from: string | null;
-  to: string | null;
-}
-
-const auditSentenceContent = (entry: PanelAuditEntry): AuditSentenceContent => {
-  const language = dashboardLanguage();
-  const texts = dashboardTexts();
-  const rows = auditDiffRows(entry.before, entry.after);
-  const firstChange = rows.find((row) => row.kind === "changed") ?? rows.find((row) => row.kind === "added" || row.kind === "removed");
-  const createdName = rows.find((row) => row.key === "name" && row.kind === "added")?.newValue;
-  const createdObjectKind = entry.action.startsWith("channel.variable.") ? "variable"
-    : entry.action.startsWith("overlay.") ? "overlay"
-      : entry.action.startsWith("text_commands.command.") ? "command"
-        : entry.action.startsWith("member.") ? "member"
-          : entry.action.startsWith("module.") ? "module"
-            : entry.action.startsWith("channel.") ? "channel" : null;
-  const createdObject = (entry.action.endsWith(".created") || entry.action.endsWith(".added"))
-    && createdObjectKind !== null && typeof createdName === "string"
-    ? texts.audit.sentenceObject(createdObjectKind, createdName)
-    : null;
-  const isMemberRole = entry.action === "member.role_changed";
-  const subject = isMemberRole && entry.subjectUserId != null
-    ? auditActorLabel({ actorUserId: entry.subjectUserId, actorLogin: entry.subjectLogin ?? null, actorDisplayName: entry.subjectDisplayName ?? null })
-    : null;
-  const isModuleStatusAction = entry.action === "module.enabled" || entry.action === "module.disabled";
-  const moduleSubject = (entry.action.endsWith(".settings_changed") || isModuleStatusAction) && entry.moduleId !== null ? moduleName(entry.moduleId, language) : null;
-  const what = isModuleStatusAction
-    ? moduleSubject ?? auditSubjectText(entry, language)
-    : createdObject
-    ? createdObject
-    : firstChange === undefined
-    ? subject ?? (moduleSubject === null ? auditSubjectText(entry, language) : moduleSubject)
-    : isMemberRole ? subject
-      : entry.action.endsWith(".settings_changed") && moduleSubject !== null
-        ? texts.audit.sentenceFieldOfModule(auditFieldLabel(firstChange.key, language), moduleSubject)
-        : auditFieldLabel(firstChange.key, language);
-  const sentenceValue = (row: AuditDiffRow, value: unknown): string => {
-    const text = auditDiffValueText(value, { on: texts.audit.yes, off: texts.audit.no });
-    return row.key === "leadSeconds" && typeof value === "number" ? `${text} s` : text;
-  };
-  const from = createdObject !== null ? null : firstChange?.kind === "changed" ? sentenceValue(firstChange, firstChange.oldValue) : null;
-  const to = createdObject !== null ? null : firstChange?.kind === "changed" ? sentenceValue(firstChange, firstChange.newValue)
-    : firstChange?.kind === "added" ? sentenceValue(firstChange, firstChange.newValue)
-      : firstChange?.kind === "removed" ? sentenceValue(firstChange, firstChange.oldValue) : null;
-  return { who: auditActorLabel(entry), action: auditSentenceAction(entry.action, language), what, fromLabel: texts.audit.sentenceFrom, from, to };
 };
 
 /** Field label + boolean words for a diff row: the module's own settings catalogue when it's loaded and matches, the generic fallback otherwise. */
@@ -228,18 +174,14 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
                     <h3 className="event-day__heading">{day.label}</h3>
                     <div className="audit-sentence-list">
                       {day.entries.map((entry) => {
-                        const sentence = auditSentenceContent(entry);
+                        const sentence = auditSentenceText(entry, dashboardLanguage());
                         const area = texts.audit.areaLabels[auditAreaForAction(entry.action)];
                         const time = formatClockTime(entry.createdAt);
                         const accessibleName = [
-                          sentence.who,
-                          sentence.action,
-                          sentence.what,
-                          sentence.from === null ? null : `${sentence.fromLabel} ${sentence.from}`,
-                          sentence.to === null ? null : `→ ${sentence.to}`,
+                          sentence,
                           area,
                           time,
-                        ].filter((part): part is string => part !== null && part.length > 0).join(" ");
+                        ].join(" ");
                         return <button
                           key={entry.auditId}
                           type="button"
@@ -249,7 +191,7 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
                           aria-label={accessibleName}
                           onClick={() => { selectAudit(entry.auditId); }}
                         >
-                          <span className="audit-sentence-row__sentence"><AuditSentence {...sentence} /></span>
+                          <span className="audit-sentence-row__sentence"><AuditSentence sentence={sentence} /></span>
                           <span className="audit-sentence-row__meta">
                             <Badge>{area}</Badge>
                             <time className="mono" dateTime={entry.createdAt} title={entry.createdAt}>{time}</time>

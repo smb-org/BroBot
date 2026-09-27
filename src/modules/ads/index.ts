@@ -30,6 +30,7 @@ export { ADS_COUNTDOWN_ELEMENT_KIND } from "./overlay/kinds";
 
 export const adsModule: BotModule<typeof adsSettingsSchema> = {
   id: "ads",
+  panelIcon: { paths: ["M6 8h12v8H6z", "M9 8V6h6v2", "M9 12h6", "M9 16v2h6v-2"] },
   settingsSchema: adsSettingsSchema,
   templateFields: ADS_TEMPLATE_FIELDS,
   templateContext: "system",

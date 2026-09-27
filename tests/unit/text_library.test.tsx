@@ -20,7 +20,7 @@ import { firstMatchingTextBlockVariant, textBlockConditionsMatch } from "../../s
 import TextLibraryPanel from "../../src/modules/text_library/panel/index";
 import { textLibraryTexts } from "../../src/modules/text_library/panel/locale";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
-import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "esembe";
@@ -40,6 +40,7 @@ describe("text library", () => {
   let database: TestD1Database;
   let repository: ReturnType<typeof createTextBlockRepository>;
   let service: ReturnType<typeof createTextLibraryService>;
+  const initialWindowWidth = window.innerWidth;
 
   beforeEach(async () => {
     database = new TestD1Database();
@@ -66,6 +67,7 @@ describe("text library", () => {
 
   afterEach(() => {
     cleanup();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: initialWindowWidth });
     vi.unstubAllGlobals();
     database.close();
   });
@@ -682,6 +684,71 @@ describe("text library", () => {
     expect(screen.getAllByRole("note")).toHaveLength(2);
     expect(document.querySelectorAll(".text-library__read-only-properties")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Add text block" })).not.toBeInTheDocument();
+  });
+
+  it("guards close, Escape, backdrop, and row changes when a text draft is dirty", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const timestamp = new Date(NOW).toISOString();
+    let blocks = ["welcome", "faq"].map((name, index) => ({
+      channelId: CHANNEL_ID,
+      name,
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: [index === 0 ? "Hello" : "FAQ"] }],
+      revision: 1,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }));
+    const patchBodies: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname.endsWith("/library")) return Promise.resolve(jsonResponse({
+        blocks,
+        categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+        settings: { timeZone: "Europe/Berlin", revision: 1, graphRevision: 1, updatedAt: timestamp },
+        usages: { welcome: [], faq: [] },
+        reservedNames: ["user"],
+      }));
+      if (url.pathname.endsWith("/blocks/welcome") && init?.method === "PATCH") {
+        if (typeof init.body !== "string") throw new Error("Text block PATCH body is missing.");
+        const body = JSON.parse(init.body) as { variants: Array<{ id: string; conditions: Record<string, unknown>; texts: string[] }> };
+        patchBodies.push(body);
+        blocks = blocks.map((block) => block.name === "welcome" ? { ...block, variants: body.variants, revision: block.revision + 1 } : block);
+        return Promise.resolve(jsonResponse({ block: blocks[0] }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Updated" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    let guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(guard).getByRole("button", { name: "Continue editing" }));
+    expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("Updated");
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Text" }), { key: "Escape" });
+    guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(guard).getByRole("button", { name: "Continue editing" }));
+
+    const backdrop = document.querySelector(".list-detail__backdrop");
+    if (!(backdrop instanceof HTMLElement)) throw new Error("Text library backdrop is missing.");
+    fireEvent.click(backdrop);
+    guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(guard).getByRole("button", { name: "Continue editing" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /\{faq\}/u }));
+    guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(guard).getByRole("button", { name: "Save and switch" }));
+    await waitFor(() => expect(patchBodies).toHaveLength(1));
+    expect(patchBodies[0]).toMatchObject({ name: "welcome", variants: [{ texts: ["Updated"] }] });
+    expect(await screen.findByRole("heading", { name: "Name: faq" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(document.querySelector(".list-detail__inspector")).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /\{faq\}/u }));
   });
 
   it("does not offer or save a reserved host variable name as a text block", async () => {

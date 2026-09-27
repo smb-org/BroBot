@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 
@@ -56,6 +56,10 @@ afterEach(() => {
 });
 
 describe("Platform level", () => {
+  beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1440 });
+  });
+
   it("shows neither navigation nor the platform route without platform access", async () => {
     setUpPlatform(false);
     window.history.replaceState({}, "", "/betreiber");
@@ -156,6 +160,9 @@ describe("Platform level", () => {
 
     expect(remove).toBeDisabled();
     expect(remove).toHaveAttribute("title", "Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
+    const reasonId = remove.getAttribute("aria-describedby");
+    expect(reasonId).toBeTruthy();
+    expect(document.getElementById(reasonId ?? "")).toHaveTextContent("Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
     expect(remove).toHaveAccessibleDescription("Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
   });
 
@@ -304,10 +311,12 @@ describe("Platform level", () => {
     expect(bereich.children[0]).toHaveClass("list-detail--open");
 
     const row = await screen.findByRole("row", { name: /alpha_login/ });
+    row.focus();
     fireEvent.click(row);
     expect(screen.queryByRole("region", { name: "Kanal freigeben" })).not.toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" })).toBeInTheDocument();
 
+    plus.focus();
     fireEvent.click(plus);
     expect(screen.queryByRole("region", { name: "Kanal bearbeiten: Alpha" })).not.toBeInTheDocument();
     const reopenedFreigabe = await screen.findByRole("region", { name: "Kanal freigeben" });

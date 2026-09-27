@@ -22,12 +22,13 @@ interface GameSearchState {
   results: GamePickerGame[];
 }
 
-export function GamePicker({ searchGames, value, onChange, messages, disabled = false }: {
+export function GamePicker({ searchGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false }: {
   searchGames: (query: string) => Promise<readonly GamePickerGame[]>;
   value: readonly GamePickerGame[];
   onChange: (games: GamePickerGame[]) => void;
   messages: GamePickerMessages;
   disabled?: boolean;
+  visuallyHiddenLabel?: boolean;
 }): ReactElement {
   const id = useId();
   const [query, setQuery] = useState("");
@@ -60,7 +61,7 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
 
   return (
     <div className="ui-game-picker">
-      <label className="ui-game-picker__label" htmlFor={id}>{messages.label}</label>
+      <label className={`ui-game-picker__label${visuallyHiddenLabel ? " sr-only" : ""}`} htmlFor={id}>{messages.label}</label>
       <p className="ui-game-picker__hint">{messages.hint}</p>
       <div className="ui-game-picker__selected" aria-live="polite">
         {value.map((game) => (

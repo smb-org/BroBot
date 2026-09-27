@@ -31,7 +31,7 @@ describe("Channel variables page", () => {
     setBrowserLanguage("de-DE");
   });
 
-  it("shows a spaced table, reset indicator, and reasoned value controls for operators", async () => {
+  it("shows a spaced table and lets operators change values while management actions stay locked", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({
       variables: [variable], count: 1, maximum: 25,
     })));
@@ -67,11 +67,10 @@ describe("Channel variables page", () => {
     const increase = await controls.findByRole("button", { name: "+1" });
     const decrease = controls.getByRole("button", { name: "−1" });
     const editValue = controls.getByRole("button", { name: "Wert bearbeiten" });
-    expect(increase).toBeDisabled();
-    expect(decrease).toBeDisabled();
-    expect(editValue).toBeDisabled();
-    expect(increase).toHaveAttribute("aria-describedby", "channel-variable-value-permission-reason");
-    expect(controls.getByText("Nur Broadcaster und Verwalter dürfen Variablenwerte ändern.")).toBeInTheDocument();
+    expect(increase).toBeEnabled();
+    expect(decrease).toBeEnabled();
+    expect(editValue).toBeEnabled();
+    expect(controls.queryByText("Nur Broadcaster und Verwalter dürfen Variablenwerte ändern.")).not.toBeInTheDocument();
     expect(controls.queryByRole("spinbutton", { name: "Setzen auf" })).not.toBeInTheDocument();
     expect(controls.getByRole("button", { name: "Speichern" })).toBeDisabled();
     expect(controls.getByRole("button", { name: "Speichern" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
@@ -102,8 +101,10 @@ describe("Channel variables page", () => {
     fireEvent.click(await screen.findByRole("row", { name: /score/i }));
     fireEvent.click(screen.getByRole("button", { name: "Wert bearbeiten" }));
     const input = screen.getByRole("spinbutton", { name: "Wert" });
+    expect(document.activeElement).toBe(input);
     fireEvent.change(input, { target: { value: "456" } });
     fireEvent.keyDown(input, { key: "Escape" });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Wert bearbeiten" }));
     expect(screen.queryByRole("spinbutton", { name: "Wert" })).not.toBeInTheDocument();
     expect(document.querySelector(".channel-variable-value-controls__value")).toHaveTextContent("1.234");
 
@@ -114,6 +115,7 @@ describe("Channel variables page", () => {
     await waitFor(() => expect(currentValue).toBe(456));
     expect(requests.find(({ method, body }) => method === "POST" && body?.includes('"operation":"set"'))?.body).toBe(JSON.stringify({ operation: "set", amount: 456 }));
     await waitFor(() => expect(document.querySelector(".channel-variable-value-controls__value")).toHaveTextContent("456"));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Wert bearbeiten" }));
 
     fireEvent.click(screen.getByRole("button", { name: "+1" }));
     await waitFor(() => expect(currentValue).toBe(457));

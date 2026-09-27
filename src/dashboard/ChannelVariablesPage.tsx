@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import {
   changeChannelVariableValue,
@@ -61,6 +61,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [draftSetValue, setDraftSetValue] = useState<number | "">(0);
   const [editingValue, setEditingValue] = useState(false);
   const [inlineValue, setInlineValue] = useState<number | "">(0);
+  const editValueButtonRef = useRef<HTMLButtonElement>(null);
+  const wasEditingValue = useRef(false);
   const [pending, setPending] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [useOverlayOpen, setUseOverlayOpen] = useState(false);
@@ -110,6 +112,11 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   useRealtimeVariableUpdates({ channelId, refresh });
 
   const selected = useMemo(() => variables.find((variable) => variable.name === selectedName) ?? null, [selectedName, variables]);
+  useLayoutEffect(() => {
+    if (editingValue) document.getElementById("channel-variable-inline-value")?.focus();
+    else if (wasEditingValue.current) editValueButtonRef.current?.focus();
+    wasEditingValue.current = editingValue;
+  }, [editingValue]);
   const hasLegacyLinks = legacyLinkStatus?.channelId === channelId && legacyLinkStatus.hasLinks;
   const selectedUsages = selected?.usages ?? [];
   const overlayUsageLabel = (usage: PanelChannelVariable["usages"][number]): string =>
@@ -212,7 +219,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     }
   };
   const changeValue = async (operation: "add" | "subtract" | "set", amount: number): Promise<boolean> => {
-    if (selected === null || !canManageContent || pending) return false;
+    if (selected === null || pending) return false;
     setPending(true);
     setError(null);
     try {
@@ -389,31 +396,27 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
                   <strong className="channel-variable-value-controls__value number" aria-live="polite">{new Intl.NumberFormat(language).format(selected.value)}</strong>
                   <Button
                     variant="neutral"
-                    disabled={!canManageContent || pending || selected.value <= CHANNEL_VARIABLE_MINIMUM_VALUE}
-                    {...(!canManageContent
-                      ? { title: labels.valueLocked, describedBy: "channel-variable-value-permission-reason" }
-                      : selected.value <= CHANNEL_VARIABLE_MINIMUM_VALUE ? { title: labels.minimumValueReached } : {})}
+                    disabled={pending || selected.value <= CHANNEL_VARIABLE_MINIMUM_VALUE}
+                    {...(selected.value <= CHANNEL_VARIABLE_MINIMUM_VALUE ? { title: labels.minimumValueReached } : {})}
                     onClick={() => { void changeValue("subtract", 1); }}
                   >{labels.decrease}</Button>
                   <Button
                     variant="neutral"
-                    disabled={!canManageContent || pending || selected.value >= CHANNEL_VARIABLE_MAXIMUM_VALUE}
-                    {...(!canManageContent
-                      ? { title: labels.valueLocked, describedBy: "channel-variable-value-permission-reason" }
-                      : selected.value >= CHANNEL_VARIABLE_MAXIMUM_VALUE ? { title: labels.maximumValueReached } : {})}
+                    disabled={pending || selected.value >= CHANNEL_VARIABLE_MAXIMUM_VALUE}
+                    {...(selected.value >= CHANNEL_VARIABLE_MAXIMUM_VALUE ? { title: labels.maximumValueReached } : {})}
                     onClick={() => { void changeValue("add", 1); }}
                   >{labels.increase}</Button>
                   <Button
                     icon="edit"
                     iconOnly
                     ariaLabel={labels.editValue}
-                    disabled={!canManageContent || pending}
-                    {...(!canManageContent ? { title: labels.valueLocked, describedBy: "channel-variable-value-permission-reason" } : { title: labels.editValue })}
+                    ref={editValueButtonRef}
+                    disabled={pending}
+                    title={labels.editValue}
                     onClick={() => { setInlineValue(selected.value); setEditingValue(true); }}
                   />
                 </>}
               </div>
-              {!canManageContent ? <p className="lock-reason" id="channel-variable-value-permission-reason" role="note">{labels.valueLocked}</p> : null}
             </InspectorFieldRow>
           </InspectorSection>
           <InspectorSection title={labels.usages}>
