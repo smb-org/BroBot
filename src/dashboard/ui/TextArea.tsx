@@ -97,7 +97,8 @@ const getSuggestionQuery = (value: string, caret: number): SuggestionQuery | nul
   const prefix = value.slice(0, caret);
   const match = /\{([\p{L}\p{N}_.]*)$/u.exec(prefix);
   if (match === null) return null;
-  return { fragment: match[1] ?? "", start: match.index + 1, end: caret };
+  const suffixMatch = /^[\p{L}\p{N}_.]*\}?/u.exec(value.slice(caret));
+  return { fragment: match[1] ?? "", start: match.index + 1, end: caret + (suffixMatch?.[0].length ?? 0) };
 };
 
 const fallbackPickerMessages: TemplateVariablePickerMessages = {

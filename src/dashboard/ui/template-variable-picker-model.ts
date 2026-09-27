@@ -83,11 +83,27 @@ export const filterTemplateVariableOptions = (
 ): TemplateVariablePickerOption[] => {
   const normalizedQuery = normalizeSearch(query.trim());
   if (normalizedQuery.length === 0) return [...options];
-  return options.filter((option) => normalizeSearch([
-    option.name,
-    option.label ?? option.name,
-    option.pickerGroup?.label ?? "",
-  ].join(" ")).includes(normalizedQuery));
+  return options
+    .map((option, index) => {
+      const name = normalizeSearch(option.name);
+      const label = normalizeSearch(option.label ?? option.name);
+      const description = normalizeSearch(option.description);
+      const groupLabel = normalizeSearch(option.pickerGroup?.label ?? "");
+      const nameOrLabel = [name, label];
+      const isNameOrLabelPrefix = nameOrLabel.some((value) => value.startsWith(normalizedQuery));
+      const matchesNameOrLabel = nameOrLabel.some((value) => value.includes(normalizedQuery));
+      const rank = isNameOrLabelPrefix
+        ? 0
+        : matchesNameOrLabel
+          ? 1
+          : description.includes(normalizedQuery)
+            ? 2
+            : groupLabel.includes(normalizedQuery) ? 3 : -1;
+      return { option, index, rank };
+    })
+    .filter(({ rank }) => rank >= 0)
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map(({ option }) => option);
 };
 
 export const resolveTemplateVariablePickerGroup = (

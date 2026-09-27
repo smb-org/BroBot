@@ -77,4 +77,14 @@ describe("template variable picker catalogs", () => {
     const groups = groupTemplateVariableOptions(options, { groupLabels });
     expect(prioritizeTemplateVariableNamespace(groups, "sun.")[0]?.group.id).toBe("sun");
   });
+
+  it("matches localized descriptions and ranks name or label prefixes first", () => {
+    const options: TemplateVariablePickerOption[] = [
+      { name: "raid_audience", label: "Raid audience", description: "Current viewer count during a raid", sample: "42" },
+      { name: "viewer_total", label: "Viewer total", description: "Total viewers", sample: "42" },
+    ];
+
+    expect(filterTemplateVariableOptions(options, "current viewer count").map(({ name }) => name)).toEqual(["raid_audience"]);
+    expect(filterTemplateVariableOptions(options, "viewer").map(({ name }) => name)).toEqual(["viewer_total", "raid_audience"]);
+  });
 });
