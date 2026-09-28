@@ -399,7 +399,13 @@ export function TextArea({
             onSelectionChange={handleSelectionChange}
             onSelect={(event) => {
               rememberSelection(event.currentTarget);
-              updateSuggestionQuery(value, event.currentTarget.selectionStart);
+              // Reads the DOM's live value, not the closed-over `value` prop:
+              // the browser can fire `select` for the caret move a keystroke
+              // causes before React has re-rendered with that keystroke's
+              // value, and recomputing the query against the stale prop then
+              // finds no match (wrong string/caret pairing) and closes a
+              // suggestion dropdown that just opened.
+              updateSuggestionQuery(event.currentTarget.value, event.currentTarget.selectionStart);
             }}
             onClick={(event) => { rememberSelection(event.currentTarget); }}
             onKeyDown={handleKeyDown}
