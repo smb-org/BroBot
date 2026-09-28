@@ -370,6 +370,65 @@ describe("timer alarm execution", () => {
     expect(deadlines).toEqual([Date.parse("2026-09-27T17:00:00.000Z")]);
   });
 
+  describe("stream-id mismatch when an alarm fires (short inter-stream gap)", () => {
+    it("rearms an interval timer for the new stream instead of firing it on a deadline left over from the previous one", async () => {
+      await prepareDatabase();
+      await database.prepare("UPDATE timers SET next_run_stream_id = ? WHERE timer_id = ?").bind("stream-1", timerId).run();
+      const sends: string[] = [];
+      const deadlines: number[] = [];
+      // The new stream started only two minutes before the stale alarm fires
+      // -- too short a gap for a start-time comparison to distinguish from
+      // "already armed for this stream".
+      const context = contextFor(() => 50, sends, deadlines, {
+        streamState: () => Promise.resolve("online"),
+        streamStartedAt: () => Promise.resolve({ streamId: "stream-2", startedAt: new Date(firstDueAt - 2 * 60_000).toISOString() }),
+      });
+      vi.useFakeTimers();
+      vi.setSystemTime(firstDueAt);
+
+      await handleTimerAlarm(context, `timer:${timerId}`, firstDueAt);
+
+      expect(sends).toEqual([]);
+      expect(deadlines).toEqual([firstDueAt + 10 * 60_000]);
+      expect(await database.prepare(
+        "SELECT next_run_stream_id, last_chat_activity_count FROM timers WHERE timer_id = ?",
+      ).bind(timerId).first()).toEqual({ next_run_stream_id: "stream-2", last_chat_activity_count: 50 });
+    });
+
+    it("rearms a stream-start timer for the new stream instead of firing it on a deadline left over from the previous one", async () => {
+      await insertChannel();
+      await insertTimer({
+        id: "stream-start-timer",
+        triggerType: "stream_start",
+        trigger: { type: "stream_start", minutes: 10 },
+        nextRunAt: firstDueAt,
+        activityCount: null,
+      });
+      await database.prepare("UPDATE timers SET next_run_stream_id = ? WHERE timer_id = ?").bind("stream-1", "stream-start-timer").run();
+      const sends: string[] = [];
+      const deadlines: number[] = [];
+      const newStreamStartedAt = new Date(firstDueAt - 2 * 60_000).toISOString();
+      const context = contextFor(() => 0, sends, deadlines, {
+        streamState: () => Promise.resolve("online"),
+        streamStartedAt: () => Promise.resolve({ streamId: "stream-2", startedAt: newStreamStartedAt }),
+      });
+      vi.useFakeTimers();
+      vi.setSystemTime(firstDueAt);
+
+      await handleTimerAlarm(context, "timer:stream-start-timer", firstDueAt);
+
+      expect(sends).toEqual([]);
+      const expectedDeadline = Date.parse(newStreamStartedAt) + 10 * 60_000;
+      expect(deadlines).toEqual([expectedDeadline]);
+      expect(await database.prepare(
+        "SELECT next_run_at, next_run_stream_id FROM timers WHERE timer_id = ?",
+      ).bind("stream-start-timer").first()).toEqual({
+        next_run_at: new Date(expectedDeadline).toISOString(),
+        next_run_stream_id: "stream-2",
+      });
+    });
+  });
+
   describe("activation replan (module re-enable / channel unpause)", () => {
     const now = Date.parse("2026-09-27T12:00:00.000Z");
     // Two minutes before "now": the stream-start timer's 5-minute delay is
@@ -466,6 +525,71 @@ describe("timer alarm execution", () => {
       expect(await database.prepare("SELECT next_run_at, last_chat_activity_count FROM timers WHERE timer_id = ?")
         .bind("interval-timer").first())
         .toEqual({ next_run_at: new Date(now + 15 * 60_000).toISOString(), last_chat_activity_count: 99 });
+    });
+
+    it("rearms an interval timer whose stale deadline falls after the new stream's start (short inter-stream gap)", async () => {
+      await insertChannel();
+      // After this stream's own start: a start-time comparison alone would
+      // call this "already armed for this stream", even though the stored
+      // stream id shows it is a leftover from the previous one.
+      const staleDeadline = Date.parse(streamStartedAt) + 2 * 60_000;
+      await insertTimer({
+        id: "interval-timer",
+        triggerType: "interval",
+        trigger: { type: "interval", minutes: 15, minimumMessages: 3 },
+        nextRunAt: staleDeadline,
+        activityCount: 50,
+      });
+      await database.prepare("UPDATE timers SET next_run_stream_id = ? WHERE timer_id = ?").bind("stream-1", "interval-timer").run();
+      const deadlines: number[] = [];
+      const context = contextFor(() => 99, [], deadlines, {
+        streamState: () => Promise.resolve("online"),
+        streamStartedAt: () => Promise.resolve({ streamId: "stream-2", startedAt: streamStartedAt }),
+      });
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+
+      await onInputsChangedOf()(context, "activation" satisfies ModuleScheduleInputChangeReason);
+
+      expect(deadlines).toEqual([now + 15 * 60_000]);
+      expect(await database.prepare(
+        "SELECT next_run_at, next_run_stream_id, last_chat_activity_count FROM timers WHERE timer_id = ?",
+      ).bind("interval-timer").first()).toEqual({
+        next_run_at: new Date(now + 15 * 60_000).toISOString(),
+        next_run_stream_id: "stream-2",
+        last_chat_activity_count: 99,
+      });
+    });
+
+    it("rearms a stream-start timer whose stale deadline falls after the new stream's start (short inter-stream gap)", async () => {
+      await insertChannel();
+      const staleDeadline = Date.parse(streamStartedAt) + 1 * 60_000;
+      await insertTimer({
+        id: "stream-start-timer",
+        triggerType: "stream_start",
+        trigger: { type: "stream_start", minutes: 5 },
+        nextRunAt: staleDeadline,
+        activityCount: null,
+      });
+      await database.prepare("UPDATE timers SET next_run_stream_id = ? WHERE timer_id = ?").bind("stream-1", "stream-start-timer").run();
+      const deadlines: number[] = [];
+      const context = contextFor(() => 0, [], deadlines, {
+        streamState: () => Promise.resolve("online"),
+        streamStartedAt: () => Promise.resolve({ streamId: "stream-2", startedAt: streamStartedAt }),
+      });
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+
+      await onInputsChangedOf()(context, "activation" satisfies ModuleScheduleInputChangeReason);
+
+      const expectedDeadline = Date.parse(streamStartedAt) + 5 * 60_000;
+      expect(deadlines).toEqual([expectedDeadline]);
+      expect(await database.prepare(
+        "SELECT next_run_at, next_run_stream_id FROM timers WHERE timer_id = ?",
+      ).bind("stream-start-timer").first()).toEqual({
+        next_run_at: new Date(expectedDeadline).toISOString(),
+        next_run_stream_id: "stream-2",
+      });
     });
 
     it("rearms a stream-start timer whose schedule belongs to a previous stream", async () => {

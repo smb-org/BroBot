@@ -27,7 +27,7 @@ const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
 const listTimers = async (db: D1Database, channelId: string): Promise<Timer[]> => {
   const result = await db.prepare(
     `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, revision,
-            next_run_at, last_run_at, created_at, updated_at
+            next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
   ).bind(channelId).all<TimerRow>();
   return result.results.map(mapTimerRow);
@@ -35,15 +35,23 @@ const listTimers = async (db: D1Database, channelId: string): Promise<Timer[]> =
 
 type TimerAlarmContext = Parameters<NonNullable<BotModule["alarms"]>[number]["handle"]>[0];
 
+/**
+ * `streamId` tags `next_run_at` with the stream it was armed for -- interval
+ * and stream_start triggers are the only stream-scoped kinds, everything
+ * else always stores a null stream id. Clearing the deadline (`at === null`)
+ * always clears the stream id with it, so a cleared schedule can never look
+ * armed for a stream it no longer belongs to.
+ */
 const saveNextRunAt = async (
   db: D1Database,
   channelId: string,
   timer: Timer,
   at: number | null,
+  streamId: string | null = null,
 ): Promise<boolean> => {
   const result = await db.prepare(
-    "UPDATE timers SET next_run_at = ? WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = 1",
-  ).bind(at === null ? null : new Date(at).toISOString(), channelId, timer.id, timer.revision).run();
+    "UPDATE timers SET next_run_at = ?, next_run_stream_id = ? WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = 1",
+  ).bind(at === null ? null : new Date(at).toISOString(), at === null ? null : streamId, channelId, timer.id, timer.revision).run();
   return result.meta.changes > 0;
 };
 
@@ -51,8 +59,9 @@ const persistAndSchedule = async (
   timer: Timer,
   context: TimerAlarmContext,
   nextAt: number | null,
+  streamId: string | null = null,
 ): Promise<boolean> => {
-  if (!await saveNextRunAt(context.DB, context.channelId, timer, nextAt)) return false;
+  if (!await saveNextRunAt(context.DB, context.channelId, timer, nextAt, streamId)) return false;
   const key = alarmKeyFor(timer.id);
   if (nextAt === null) await context.clear(key, timer.revision);
   else await context.schedule(key, nextAt, timer.revision);
@@ -70,16 +79,16 @@ const nextDeadlineFor = async (
   context: TimerAlarmContext,
   now: number,
   previousDeadline = now,
-): Promise<number | null> => {
+): Promise<{ at: number | null; streamId: string | null }> => {
   if (timer.trigger.type === "interval") {
-    return await context.streamState() === "online"
-      ? nextIntervalAt(previousDeadline, now, timer.trigger.minutes)
-      : null;
+    if (await context.streamState() !== "online") return { at: null, streamId: null };
+    const stream = await context.streamStartedAt();
+    return { at: nextIntervalAt(previousDeadline, now, timer.trigger.minutes), streamId: stream.streamId };
   }
-  if (timer.trigger.type === "stream_start") return null;
+  if (timer.trigger.type === "stream_start") return { at: null, streamId: null };
   const timeZone = await timeZoneFor(context);
-  if (timer.trigger.type === "time_of_day") return nextDailyTimerAt(timer.trigger, now, timeZone);
-  return nextTimerAt(timer.trigger, { now, timeZone, eventTimes: await context.resolveEventTimes(now) });
+  if (timer.trigger.type === "time_of_day") return { at: nextDailyTimerAt(timer.trigger, now, timeZone), streamId: null };
+  return { at: nextTimerAt(timer.trigger, { now, timeZone, eventTimes: await context.resolveEventTimes(now) }), streamId: null };
 };
 
 /**
@@ -96,8 +105,8 @@ const scheduleNextRun = async (
   now: number,
   previousDeadline = now,
 ): Promise<boolean> => {
-  const deadline = await nextDeadlineFor(timer, context, now, previousDeadline);
-  const scheduled = await persistAndSchedule(timer, context, deadline);
+  const { at: deadline, streamId } = await nextDeadlineFor(timer, context, now, previousDeadline);
+  const scheduled = await persistAndSchedule(timer, context, deadline, streamId);
   if (scheduled && deadline === null && timer.trigger.type === "before_event") {
     const horizon = eventTimeWindowEnd(now);
     await context.schedule(eventTimeRefreshKeyFor(timer.id, horizon), horizon);
@@ -111,6 +120,34 @@ const rescheduleAfterRun = async (
   deadline: number,
 ): Promise<void> => {
   await scheduleNextRun(timer, context, Date.now(), deadline);
+};
+
+/**
+ * Rearms a stream-scoped timer (interval, stream_start) for `stream` and
+ * resets its chat baseline, exactly like the accepted `stream.online` path,
+ * so leftover chat from whatever stream the previous schedule belonged to
+ * cannot satisfy `minimumMessages` for this one. Shared by the activation
+ * replan and by the alarm handler's own stream-id mismatch check below,
+ * since both rearm a stale schedule the same way.
+ */
+const rearmStreamScopedTimer = async (
+  timer: Timer,
+  context: TimerAlarmContext,
+  now: number,
+  stream: { streamId: string; startedAt: string | null },
+): Promise<void> => {
+  if (timer.trigger.type === "interval") {
+    if (await persistAndSchedule(timer, context, now + triggerDelayMs(timer.trigger), stream.streamId)) {
+      const activityCount = await context.chatActivityCount();
+      await context.DB.prepare(
+        "UPDATE timers SET last_chat_activity_count = ?, chat_baseline_stream_id = ? WHERE channel_id = ? AND timer_id = ?",
+      ).bind(activityCount, stream.streamId, context.channelId, timer.id).run();
+    }
+    return;
+  }
+  if (timer.trigger.type !== "stream_start") return;
+  const deadline = nextStreamStartAt(stream.startedAt, now, triggerDelayMs(timer.trigger));
+  if (deadline !== null) await persistAndSchedule(timer, context, deadline, stream.streamId);
 };
 
 const isDueOccurrenceCurrent = async (
@@ -160,7 +197,7 @@ export const handleTimerAlarm = async (
   const isEventTimeRefresh = refreshAt >= 0;
   const row = timerId.length === 0 ? null : await context.DB.prepare(
     `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, revision,
-            next_run_at, last_run_at, created_at, updated_at
+            next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(context.channelId, timerId).first<TimerRow>();
   if (row === null) return;
@@ -183,6 +220,20 @@ export const handleTimerAlarm = async (
   if (row.next_run_at === null || Date.parse(row.next_run_at) !== deadline) {
     await scheduleNextRun(timer, context, Date.now());
     return;
+  }
+  // The alarm fired on a deadline that still matches the stored row, but a
+  // short gap between streams can leave that deadline armed for a stream
+  // that already ended (see `refreshSchedules`'s activation replan for the
+  // same scenario). Treat a stream-id mismatch as unarmed here too, instead
+  // of relying on the due-occurrence check below to merely suppress the
+  // send -- that would strand the timer without a fresh deadline until the
+  // next `stream.online` notification, missing the entire current stream.
+  if (timer.trigger.type === "interval" || timer.trigger.type === "stream_start") {
+    const [state, stream] = await Promise.all([context.streamState(), context.streamStartedAt()]);
+    if (state === "online" && stream.streamId !== null && stream.streamId !== row.next_run_stream_id) {
+      await rearmStreamScopedTimer(timer, context, Date.now(), { streamId: stream.streamId, startedAt: stream.startedAt });
+      return;
+    }
   }
   const occurrence = await isDueOccurrenceCurrent(timer, context, alarmKey, deadline);
   const now = Date.now();
@@ -248,13 +299,14 @@ export const handleTimerAlarm = async (
  * unpaused, so a session that started during either off period leaves these
  * timers armed with nothing -- or, if the module missed both the offline and
  * a following online notification, still armed with a deadline left over
- * from the previous stream. A leftover deadline can never precede the
- * current stream's start (every legitimate deadline is derived from it), so
- * that comparison tells stale apart from already-armed without needing to
- * store which stream armed a timer. A timer treated as unarmed is rearmed
- * exactly like the accepted `stream.online` path, including its chat
- * baseline reset, so leftover previous-stream chat cannot satisfy
- * `minimumMessages` for the new session.
+ * from the previous stream. A leftover deadline is not reliably before the
+ * current stream's start: a short gap between streams can leave it after,
+ * so comparing timestamps cannot tell stale apart from already-armed. The
+ * stored stream id can, and does not depend on the gap's length. A timer
+ * whose stream id doesn't match the current stream is rearmed exactly like
+ * the accepted `stream.online` path, including its chat baseline reset, so
+ * leftover previous-stream chat cannot satisfy `minimumMessages` for the new
+ * session.
  */
 const refreshSchedules = async (
   context: TimerAlarmContext,
@@ -265,22 +317,11 @@ const refreshSchedules = async (
   if (reason === "activation") {
     if (await context.streamState() !== "online") return;
     const stream = await context.streamStartedAt();
-    const streamStartedAt = stream.startedAt === null ? null : Date.parse(stream.startedAt);
-    const isArmedForThisStream = (nextRunAt: string | null): boolean =>
-      nextRunAt !== null && (streamStartedAt === null || Date.parse(nextRunAt) >= streamStartedAt);
+    if (stream.streamId === null) return;
     for (const timer of timers) {
       if (!timer.enabled || (timer.trigger.type !== "interval" && timer.trigger.type !== "stream_start") ||
-          isArmedForThisStream(timer.nextRunAt)) continue;
-      if (timer.trigger.type === "interval") {
-        if (await persistAndSchedule(timer, context, now + triggerDelayMs(timer.trigger))) {
-          const activityCount = await context.chatActivityCount();
-          await context.DB.prepare("UPDATE timers SET last_chat_activity_count = ? WHERE channel_id = ? AND timer_id = ?")
-            .bind(activityCount, context.channelId, timer.id).run();
-        }
-      } else {
-        const deadline = nextStreamStartAt(stream.startedAt, now, triggerDelayMs(timer.trigger));
-        if (deadline !== null) await persistAndSchedule(timer, context, deadline);
-      }
+          timer.nextRunStreamId === stream.streamId) continue;
+      await rearmStreamScopedTimer(timer, context, now, { streamId: stream.streamId, startedAt: stream.startedAt });
     }
     return;
   }
@@ -346,12 +387,13 @@ export const timersModule: BotModule<typeof settingsSchema> = {
     const streamId = typeof event.payload.id === "string" ? event.payload.id : null;
     if (streamId === null || streamId.length === 0) return { actions: [], diagnostics: [] };
     const activityCount = await context.chatActivityCount();
-    await context.DB.prepare("UPDATE timers SET last_chat_activity_count = ? WHERE channel_id = ? AND trigger_type = 'interval'")
-      .bind(activityCount, event.channelId).run();
+    await context.DB.prepare(
+      "UPDATE timers SET last_chat_activity_count = ?, chat_baseline_stream_id = ? WHERE channel_id = ? AND trigger_type = 'interval'",
+    ).bind(activityCount, streamId, event.channelId).run();
     for (const timer of timers) {
       if (!timer.enabled || (timer.trigger.type !== "interval" && timer.trigger.type !== "stream_start")) continue;
       const deadline = startedAt + triggerDelayMs(timer.trigger);
-      if (await saveNextRunAt(context.DB, event.channelId, timer, deadline)) {
+      if (await saveNextRunAt(context.DB, event.channelId, timer, deadline, streamId)) {
         await context.scheduleAlarm(TIMER_ALARM_HANDLER, alarmKeyFor(timer.id), deadline, timer.revision);
       }
     }
