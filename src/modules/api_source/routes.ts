@@ -38,8 +38,8 @@ apiSourceRoutes.post("/sources", async (context) => {
     return context.json({ error: "api_source_invalid" }, 400);
   }
   const expressionError = inspectApiSourceExpression(parsed.data.expression);
-  if (expressionError?.kind === "function_not_allowed") {
-    return context.json({ error: "api_source_function_not_allowed", functionName: expressionError.functionName }, 400);
+  if (expressionError?.kind === "construct_not_allowed") {
+    return context.json({ error: "api_source_construct_not_allowed", constructName: expressionError.constructName }, 400);
   }
   if (expressionError !== null) return context.json({ error: "api_source_invalid" }, 400);
   const channelId = channelIdOf(context);
@@ -77,8 +77,8 @@ apiSourceRoutes.patch("/sources/:name", async (context) => {
     return context.json({ error: "api_source_invalid" }, 400);
   }
   const expressionError = inspectApiSourceExpression(parsed.data.expression);
-  if (expressionError?.kind === "function_not_allowed") {
-    return context.json({ error: "api_source_function_not_allowed", functionName: expressionError.functionName }, 400);
+  if (expressionError?.kind === "construct_not_allowed") {
+    return context.json({ error: "api_source_construct_not_allowed", constructName: expressionError.constructName }, 400);
   }
   if (expressionError !== null) return context.json({ error: "api_source_invalid" }, 400);
   const channelId = channelIdOf(context);

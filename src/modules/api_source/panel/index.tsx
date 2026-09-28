@@ -18,10 +18,10 @@ const emptyDraft = (): SourceDraft => ({ name: "", url: "", expression: "" });
 const apiErrorCode = (error: unknown): string | null =>
   error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : null;
 
-const disallowedFunctionName = (error: unknown): string | null => {
+const disallowedConstructName = (error: unknown): string | null => {
   if (!(error instanceof PanelApiError) || typeof error.details !== "object" || error.details === null || Array.isArray(error.details)) return null;
-  const functionName = (error.details as { functionName?: unknown }).functionName;
-  return typeof functionName === "string" ? functionName : null;
+  const constructName = (error.details as { constructName?: unknown }).constructName;
+  return typeof constructName === "string" ? constructName : null;
 };
 
 export default function ApiSourcePanel({ channelId, language, canManage }: ModulePanelProperties): ReactElement {
@@ -85,8 +85,8 @@ export default function ApiSourcePanel({ channelId, language, canManage }: Modul
       setEditingName(null);
     } catch (failure: unknown) {
       const code = apiErrorCode(failure);
-      const functionName = disallowedFunctionName(failure);
-      setError(code === "api_source_function_not_allowed" && functionName !== null ? labels.functionNotAllowed(functionName)
+      const constructName = disallowedConstructName(failure);
+      setError(code === "api_source_construct_not_allowed" && constructName !== null ? labels.constructNotAllowed(constructName)
         : code === "api_source_invalid" ? labels.invalid
         : code === "api_source_conflict" ? labels.conflict
           : code === "api_source_management_denied" ? labels.denied

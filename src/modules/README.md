@@ -174,23 +174,38 @@ Beispiele ohne JavaScript:
   `https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&daily=sunset&timezone=Europe%2FBerlin`, Ausdruck
   `$fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]')`, Quelle `sunset`.
 - **USD nach EUR:** URL
-  `https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR`, Ausdruck
-  `$formatNumber($.rates.EUR, '#,##0.0000') & ' EUR je USD'`, Quelle `usd_eur`.
+  bei einer JSON-Antwort mit `rates.EUR` und `amount` zum Beispiel
+  `$formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'`, Quelle
+  `usd_eur`.
 
 JSONata 2.2.2 ist als exakte Abhängigkeit festgeschrieben. Ausdrücke sind auf
 512 Zeichen begrenzt; ihr AST wird beim Speichern und erneut vor jeder
-Auswertung geprüft. Erlaubt ist nur eine feste Liste aus skalaren JSONata-
-Funktionen. Regexliterale, `$eval`, `$pad`, Sortierung mit benutzerdefinierten
-Funktionen, höherwertige Funktionen, Lambdas und Funktionsdefinitionen werden
-abgewiesen. Damit können JSON-Antworten nicht als neue Ausdrücke ausgewertet
-werden und der synchrone Regex-Pfad steht nicht zur Verfügung. Es gibt keine
-vom Nutzer bereitgestellten Funktionen oder Bindings. Die JSON-Eingabe ist
+Auswertung geprüft. Die Sicherheitsgrenze ist eine AST-Knotentyp-Allowlist:
+erlaubt sind Feldpfade mit optionalen nichtnegativen Ganzzahlindizes wie
+`$.daily.sunset[0]`, Zeichenketten-, Zahlen-, Boolesche- und Null-Literale,
+`+`, `-`, `*`, `/`, `%`, Vergleiche, `and`, `or`, `&`, `?:` und direkte Aufrufe
+der festgelegten Funktionen `$string`, `$number`, `$boolean`, `$not`, `$exists`,
+`$length`, `$substring`, `$substringBefore`, `$substringAfter`, `$uppercase`,
+`$lowercase`, `$trim`, `$contains`, `$join`, `$sum`, `$max`, `$min`, `$average`,
+`$count`, `$round`, `$floor`, `$ceil`, `$abs`, `$formatNumber`, `$fromMillis`,
+`$toMillis`, `$now`, `$split` und `$replace`. Die Prozedur eines Aufrufs muss
+ein unverziertes allowlistiertes `$name` sein; alle Argumente werden rekursiv
+geprüft. Es sind höchstens 64 AST-Knoten und 12 Ebenen erlaubt. Arrays und
+Objekte, andere Prädikate, Wildcards, `**`, Sortierung, Gruppierung,
+Transformationen, Blöcke, Bindings, Lambdas, partielle Anwendung,
+Funktionsverkettung, Regexliterale und alle nicht ausdrücklich freigegebenen
+Knotentypen oder Eigenschaften werden zurückgewiesen. Eine Funktions-Blockliste
+reicht nicht: sie übersieht Konstrukte und Kind-Eigenschaften außerhalb der
+Funktionsargumente, etwa das Prädikat an `$join` in `$join[$pad(...)](...)`.
+Damit können JSON-Antworten nicht als neue Ausdrücke ausgewertet werden und der
+synchrone Regex-Pfad steht nicht zur Verfügung. Es gibt keine vom Nutzer
+bereitgestellten Funktionen oder Bindings. Die JSON-Eingabe ist
 höchstens 64 KiB, 64 Ebenen und 20.000 Knoten groß; Sequenzen sind auf 1.000
 Elemente begrenzt. `$split` liefert höchstens 1.000 Teile. `$join` und
 `$replace` begrenzen erzeugte Zeichenketten bereits beim Aufbau auf 2.000
-Zeichen. `$replace` erfordert ein festes Ganzzahllimit von höchstens zehn
-Treffern. Die fertige Vorlagenausgabe bleibt ebenfalls auf 2.000 Zeichen
-begrenzt.
+Zeichen. `$replace` erfordert ein Zeichenkettenmuster und ein festes
+Ganzzahllimit von höchstens zehn Treffern. Die fertige Vorlagenausgabe bleibt
+ebenfalls auf 2.000 Zeichen begrenzt.
 
 Die JSONata-Option für ein 10-ms-Timeout wird nicht verwendet: Sie prüft nur
 zwischen Auswertungsschritten und kann dadurch auch einfache Ausdrücke unter

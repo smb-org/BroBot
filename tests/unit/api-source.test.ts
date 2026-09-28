@@ -154,7 +154,7 @@ describe("API source outbound fetch", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("rejects a regex expression when saving and names the blocked function", async () => {
+  it("rejects a regex expression when saving and names the rejected construct", async () => {
     const database = await createDatabase();
     const app = new Hono<ModuleRouteEnvironment>();
     app.use("*", async (context, next) => {
@@ -174,7 +174,7 @@ describe("API source outbound fetch", () => {
     }), { DB: database as unknown as D1Database });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "api_source_function_not_allowed", functionName: "$contains" });
+    expect(await response.json()).toEqual({ error: "api_source_construct_not_allowed", constructName: "regex literal" });
     expect(await database.prepare("SELECT COUNT(*) AS count FROM api_sources WHERE channel_id = ?")
       .bind(CHANNEL_ID).first<{ count: number }>()).toEqual({ count: 0 });
   });
@@ -258,25 +258,86 @@ describe("API source outbound fetch", () => {
 });
 
 describe("API source JSONata", () => {
-  it("supports path selection, arithmetic, date formatting, and boolean conditions", async () => {
+  it("accepts a table of allowlisted syntax and renders sunset and USD-to-EUR examples", async () => {
+    const allowedExamples = [
+      "$.profile.name",
+      "$.items[0]",
+      "'text'",
+      "42",
+      "true",
+      "null",
+      "1 + 2",
+      "1 - 2",
+      "2 * 3",
+      "4 / 2",
+      "5 % 2",
+      "1 = 1",
+      "1 != 2",
+      "1 < 2",
+      "1 <= 2",
+      "2 > 1",
+      "2 >= 2",
+      "true and false",
+      "true or false",
+      "'api' & ' source'",
+      "$.enabled ? 'yes' : 'no'",
+      "$string($.value)",
+      "$number($.value)",
+      "$boolean($.value)",
+      "$not($.enabled)",
+      "$exists($.value)",
+      "$length($.value)",
+      "$substring($.value, 1, 2)",
+      "$substringBefore($.value, '-')",
+      "$substringAfter($.value, '-')",
+      "$uppercase($.value)",
+      "$lowercase($.value)",
+      "$trim($.value)",
+      "$contains($.value, 'x')",
+      "$join($.items, ',')",
+      "$sum($.items)",
+      "$max($.items)",
+      "$min($.items)",
+      "$average($.items)",
+      "$count($.items)",
+      "$round($.value)",
+      "$floor($.value)",
+      "$ceil($.value)",
+      "$abs($.value)",
+      "$formatNumber($.rates.EUR * $.amount, '#,##0.00')",
+      "$fromMillis(0, '[H01]:[m01]')",
+      "$toMillis($.value)",
+      "$now()",
+      "$split($.value, ',')",
+      "$replace($.text, 'old', 'new', 2)",
+    ];
+    for (const expression of allowedExamples) {
+      expect(validateJsonataExpression(expression), expression).toBe(true);
+    }
+
     const payload = {
       rates: { USD: 1, EUR: 0.92 },
+      amount: 100,
       sunset: "2099-06-21T18:42:00.000Z",
     };
-
     await expect(evaluateApiSourceExpression("$.rates.USD / $.rates.EUR", payload)).resolves.toBeCloseTo(1.0869565);
     await expect(evaluateApiSourceExpression("$fromMillis($toMillis($.sunset), '[H01]:[m01]')", payload)).resolves.toBe("18:42");
+    await expect(evaluateApiSourceExpression("$formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'", payload)).resolves.toBe("92.00 EUR");
     await expect(evaluateApiSourceExpression("$.rates.USD > $.rates.EUR", payload)).resolves.toBe(true);
-    await expect(evaluateApiSourceExpression("$hostSecret()", payload)).rejects.toThrow();
-    expect(JSONATA_LIMITS).toMatchObject({ stackDepth: 64, maximumSequenceLength: 1_000 });
+    expect(JSONATA_LIMITS).toMatchObject({
+      stackDepth: 64,
+      maximumSequenceLength: 1_000,
+      maximumAstNodes: 64,
+      maximumAstDepth: 12,
+    });
   });
 
-  it("rejects regex patterns, unbounded string functions, and response-supplied expressions on save and evaluation", async () => {
+  it("rejects regexes, unbounded functions, and response-supplied expressions on save and evaluation", async () => {
     const redosExpression = "$contains($.value, /(a+)+$/)";
     expect(validateJsonataExpression(redosExpression)).toBe(false);
-    expect(inspectApiSourceExpression(redosExpression)).toEqual({ kind: "function_not_allowed", functionName: "$contains" });
+    expect(inspectApiSourceExpression(redosExpression)).toEqual({ kind: "construct_not_allowed", constructName: "regex literal" });
     await expect(evaluateApiSourceExpression(redosExpression, { value: `${"a".repeat(25)}!` }))
-      .rejects.toThrow("JSONata function $contains is not allowed");
+      .rejects.toThrow("JSONata construct regex literal is not allowed");
 
     for (const expression of ["$pad('x', 10000000)", "$eval($.expr)"]) {
       expect(validateJsonataExpression(expression)).toBe(false);
@@ -284,10 +345,60 @@ describe("API source JSONata", () => {
         .rejects.toThrow("is not allowed");
     }
     const aliasedDisallowedFunction = "($join := $pad; $join('x', 10000000))";
-    expect(inspectApiSourceExpression(aliasedDisallowedFunction)).toEqual({ kind: "function_not_allowed", functionName: "$pad" });
-    await expect(evaluateApiSourceExpression(aliasedDisallowedFunction, {})).rejects.toThrow("JSONata function $pad is not allowed");
-    expect(apiSourcePanelTexts("de").functionNotAllowed("$eval")).toBe("Die JSONata-Funktion $eval ist nicht erlaubt.");
-    expect(apiSourcePanelTexts("en").functionNotAllowed("$eval")).toBe("The JSONata function $eval is not allowed.");
+    expect(inspectApiSourceExpression(aliasedDisallowedFunction)).toEqual({ kind: "construct_not_allowed", constructName: "block expression" });
+    await expect(evaluateApiSourceExpression(aliasedDisallowedFunction, {})).rejects.toThrow("JSONata construct block expression is not allowed");
+    expect(apiSourcePanelTexts("de").constructNotAllowed("$eval")).toBe("Das JSONata-Konstrukt $eval ist nicht erlaubt.");
+    expect(apiSourcePanelTexts("en").constructNotAllowed("$eval")).toBe("The JSONata construct $eval is not allowed.");
+  });
+
+  it("rejects function-reference predicates, nested constructors, and range predicates", async () => {
+    const rejectedExpressions = [
+      '$join[$pad("x",100000)](["x"])',
+      '$join[$eval("true")]( ["x"] )',
+      '$join[function($x) {$x}]( ["x"] )',
+      '$join[/x/]( ["x"] )',
+      "$" + ".[[$,$]]".repeat(20),
+      "$.items[[1..100]][[1..100]][[1..100]][[1..100]]",
+      "$.items[$.position]",
+      "$.items[*]",
+      "$.items.**",
+      "$.items^(>value)",
+      "$.items{key: value}",
+    ];
+    for (const expression of rejectedExpressions) {
+      expect(validateJsonataExpression(expression), expression).toBe(false);
+      await expect(evaluateApiSourceExpression(expression, { items: Array.from({ length: 100 }, (_, index) => index) }))
+        .rejects.toThrow("JSONata construct");
+    }
+    expect(inspectApiSourceExpression('$join[$pad("x",100000)](["x"])')).toEqual({
+      kind: "construct_not_allowed",
+      constructName: "$join predicate",
+    });
+  });
+
+  it("rejects deterministic random nestings of disallowed AST constructs", () => {
+    const wrappers = [
+      (expression: string) => `[${expression}]`,
+      (expression: string) => `{"value": ${expression}}`,
+      (expression: string) => `function($item) { ${expression} }`,
+      (expression: string) => `($temp := ${expression}; $temp)`,
+      (expression: string) => `$join[${expression}](['x'])`,
+      (expression: string) => `$.items[${expression}]`,
+      (expression: string) => `(${expression} ~> $string)`,
+      (expression: string) => `$.items{key: ${expression}}`,
+    ];
+    let seed = 0x2860013;
+    const next = (maximum: number): number => {
+      seed = (seed * 1_664_525 + 1_013_904_223) >>> 0;
+      return seed % maximum;
+    };
+
+    for (let sample = 0; sample < 100; sample += 1) {
+      let expression = "'leaf'";
+      const depth = 1 + next(5);
+      for (let level = 0; level < depth; level += 1) expression = wrappers[next(wrappers.length)]?.(expression) ?? expression;
+      expect(validateJsonataExpression(expression), expression).toBe(false);
+    }
   });
 
   it("caps JSONata input and string output while join and replace build their result", async () => {

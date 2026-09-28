@@ -23,7 +23,7 @@ export interface ApiSourcePanelTexts {
   loadFailed: string;
   saveFailed: string;
   invalid: string;
-  functionNotAllowed: (functionName: string) => string;
+  constructNotAllowed: (constructName: string) => string;
   conflict: string;
   denied: string;
   limit: string;
@@ -45,7 +45,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     url: "HTTPS-URL",
     urlHint: "Keine Zugangsdaten in der URL. Anfragen senden keine Cookies oder Zugangsdaten.",
     expression: "JSONata-Ausdruck (optional)",
-    expressionHint: "Zum Beispiel $.daily.sunrise oder $formatNumber($.rates.EUR, '#,##0.00'). Bedingungen müssen true oder false liefern.",
+    expressionHint: "Erlaubt: Feldpfade mit [nichtnegativem Ganzzahlindex], String-/Zahlen-/Boolesche-/Null-Literale, + - * / %, Vergleiche, and/or, &, ?: sowie direkte Aufrufe von $string $number $boolean $not $exists $length $substring $substringBefore $substringAfter $uppercase $lowercase $trim $contains $join $sum $max $min $average $count $round $floor $ceil $abs $formatNumber $fromMillis $toMillis $now $split $replace. Keine freien Prädikate oder Array-/Objektkonstruktoren. Beispiele: $fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]') · $formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'.",
     save: "Speichern",
     cancel: "Abbrechen",
     delete: "Quelle löschen",
@@ -56,7 +56,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     loadFailed: "Die API-Quellen konnten nicht geladen werden.",
     saveFailed: "Die API-Quelle konnte nicht gespeichert werden.",
     invalid: "Name, HTTPS-URL oder JSONata-Ausdruck ist ungültig oder nicht erlaubt.",
-    functionNotAllowed: (functionName) => `Die JSONata-Funktion ${functionName} ist nicht erlaubt.`,
+    constructNotAllowed: (constructName) => `Das JSONata-Konstrukt ${constructName} ist nicht erlaubt.`,
     conflict: "Die Quelle wurde zwischenzeitlich geändert. Bitte neu laden.",
     denied: "Nur Broadcaster und Verwalter dürfen API-Quellen ändern.",
     limit: "Pro Kanal sind höchstens 20 API-Quellen erlaubt.",
@@ -76,7 +76,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     url: "HTTPS URL",
     urlHint: "Do not put credentials in the URL. Requests send no cookies or credentials.",
     expression: "JSONata expression (optional)",
-    expressionHint: "For example $.daily.sunrise or $formatNumber($.rates.EUR, '#,##0.00'). Conditions must return true or false.",
+    expressionHint: "Allowed: field paths with [non-negative integer indexes], string/number/boolean/null literals, + - * / %, comparisons, and/or, &, ?:, and direct calls to $string $number $boolean $not $exists $length $substring $substringBefore $substringAfter $uppercase $lowercase $trim $contains $join $sum $max $min $average $count $round $floor $ceil $abs $formatNumber $fromMillis $toMillis $now $split $replace. No free predicates or array/object constructors. Examples: $fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]') · $formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'.",
     save: "Save",
     cancel: "Cancel",
     delete: "Delete source",
@@ -87,7 +87,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     loadFailed: "API sources could not be loaded.",
     saveFailed: "The API source could not be saved.",
     invalid: "The name, HTTPS URL, or JSONata expression is invalid or not allowed.",
-    functionNotAllowed: (functionName) => `The JSONata function ${functionName} is not allowed.`,
+    constructNotAllowed: (constructName) => `The JSONata construct ${constructName} is not allowed.`,
     conflict: "The source changed in another session. Reload and try again.",
     denied: "Only the broadcaster and managers may change API sources.",
     limit: "A channel can define at most 20 API sources.",

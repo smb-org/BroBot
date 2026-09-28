@@ -30,7 +30,7 @@ anzusprechen. Er könnte IPv4- oder IPv6-Literale, IPv4-mapped-IPv6-Schreibweise
 alternative IPv4-Schreibweisen, URL-Zugangsdaten, einen fremden Port oder eine
 Weiterleitung zu einem gesperrten Ziel nutzen. Eine externe Antwort kann groß,
 verschachtelt oder für eine sehr teure JSONata-Auswertung gebaut sein. Deshalb
-ist JSONata auf eine statisch geprüfte Funktionsliste beschränkt; die
+ist JSONata durch eine statisch geprüfte AST-Knotentyp-Allowlist begrenzt; die
 kooperative Zeitoption allein gilt nicht als CPU-Grenze.
 
 Auch ein öffentlich aussehender DNS-Name kann seine Antwort ändern. Die URL
@@ -64,22 +64,39 @@ Lücke.
   Ein Vorlagenlauf darf höchstens drei Aufrufe ausführen; Weiterleitungen
   verbrauchen dasselbe Budget.
 - JSONata ist exakt auf Version 2.2.2 festgelegt. Ausdrücke sind höchstens 512
-  Zeichen lang. Ihr AST wird beim Speichern und vor jeder Auswertung geprüft;
-  nur `$string`, `$number`, `$boolean`, `$not`, `$exists`, `$length`,
-  `$substring`, `$substringBefore`, `$substringAfter`, `$uppercase`,
-  `$lowercase`, `$trim`, `$contains`, `$join`, `$sum`, `$max`, `$min`,
-  `$average`, `$count`, `$round`, `$floor`, `$ceil`, `$abs`, `$formatNumber`,
-  `$keys`, `$lookup`, `$fromMillis`, `$toMillis`, `$now`, `$split` und
-  `$replace` sind zulässig. Regexliterale und alle anderen Funktionen,
-  insbesondere `$eval`, `$pad`, `$sort`, `$map`, `$filter` und `$reduce`,
-  werden abgewiesen. Das sperrt synchrone Regexauswertung, das Parsen eines
-  zweiten Ausdrucks aus Antwortdaten, Lambda-Auswertung und benutzerdefinierte
-  Funktionsdefinitionen. `$contains` und `$split` nehmen dadurch nur
-  Zeichenkettenmuster an. `$replace` erfordert ein festes Ganzzahllimit von
-  höchstens zehn Treffern. `$join` und `$replace` begrenzen Zeichenketten
-  bereits während des Aufbaus auf 2.000 Zeichen; `$split` liefert höchstens
-  1.000 Teile. Auch die fertige Ausgabe wird auf 2.000 Zeichen gekürzt. Das
-  Ergebnis eines Vorlagenlaufs wird je
+  Zeichen lang. Derselbe AST-Validator prüft sie beim Speichern und vor jeder
+  Auswertung. Seine Sicherheitsgrenze ist eine Allowlist aus Knotentypen und
+  ihren ausdrücklich erlaubten Eigenschaften: Pfade aus Feldnamen sowie
+  numerische Array-Indizes mit nichtnegativem Ganzzahlliteral, Zeichenketten-,
+  Zahlen-, Boolesche- und Null-Literale, `+`, `-`, `*`, `/`, `%`, Vergleiche,
+  `and`, `or`, Zeichenkettenverkettung `&`, Bedingungsausdrücke `?:` und
+  Funktionsaufrufe mit einem direkten, unverzierten `$name` als Prozedur.
+  Zulässige Funktionen sind `$string`, `$number`, `$boolean`, `$not`,
+  `$exists`, `$length`, `$substring`, `$substringBefore`, `$substringAfter`,
+  `$uppercase`, `$lowercase`, `$trim`, `$contains`, `$join`, `$sum`, `$max`,
+  `$min`, `$average`, `$count`, `$round`, `$floor`, `$ceil`, `$abs`,
+  `$formatNumber`, `$fromMillis`, `$toMillis`, `$now`, `$split` und `$replace`.
+  `$replace` erfordert ein Zeichenkettenmuster und ein festes Ganzzahllimit von
+  höchstens zehn Treffern. Jeder Knoten und jede Kind-Eigenschaft wird geprüft,
+  auch Prädikate an Funktionsreferenzen, Pfadstufen, Argumente, Gruppen und
+  beide Seiten binärer Ausdrücke. Höchstens 64 AST-Knoten und 12 Ebenen sind
+  zulässig.
+
+  Eine Funktions-Blockliste wäre keine Sicherheitsgrenze: Sie betrachtet nur
+  bekannte Funktionsnamen und kann unbekannte Knotentypen, neu eingeführte
+  JSONata-Konstrukte oder Eigenschaften außerhalb des üblichen Arguments
+  übersehen. Zum Beispiel trägt `$join[$pad(...)](...)` sein Prädikat an der
+  Prozedurvariable; ein Walk, der nur Funktionsargumente untersucht, sieht es
+  nicht. Die Allowlist weist alle Konstrukte und Eigenschaften zurück, die
+  nicht einzeln freigegeben wurden, darunter Regexliterale, Array- und
+  Objektkonstruktoren, freie Prädikate, Wildcards, Nachfahrenzugriffe, Sortieren,
+  Gruppieren, Transformieren, Blöcke, Bindings, Lambdas, partielle Anwendung,
+  Funktionsverkettung und Bereiche. Dadurch sind synchrone Regexauswertung, das
+  Parsen eines zweiten Ausdrucks aus Antwortdaten, Lambda-Auswertung und
+  benutzerdefinierte Funktionsdefinitionen ausgeschlossen. `$join` und
+  `$replace` begrenzen Zeichenketten bereits während des Aufbaus auf 2.000
+  Zeichen; `$split` liefert höchstens 1.000 Teile. Auch die fertige Ausgabe
+  wird auf 2.000 Zeichen gekürzt. Das Ergebnis eines Vorlagenlaufs wird je
   Quellen-Ausdruck-Paar höchstens einmal berechnet; höchstens zehn verschiedene
   Paare werden ausgewertet. JSONatas 10-ms-Option wird nicht verwendet: Sie
   prüft nur zwischen Auswertungsschritten, kann unter Last einfache Ausdrücke

@@ -5,6 +5,8 @@ import { API_SOURCE_MAXIMUMS } from "../contracts";
 export const JSONATA_LIMITS = {
   stackDepth: 64,
   maximumSequenceLength: 1_000,
+  maximumAstNodes: 64,
+  maximumAstDepth: 12,
   maximumInputDepth: 64,
   maximumInputNodes: 20_000,
   maximumInputBytes: 64 * 1024,
@@ -12,25 +14,211 @@ export const JSONATA_LIMITS = {
 } as const;
 
 type JsonataNode = {
-  type?: string;
+  type?: unknown;
   value?: unknown;
-  procedure?: unknown;
-  arguments?: unknown;
-  steps?: unknown;
   [key: string]: unknown;
 };
 
 export type ApiSourceExpressionValidationError =
   | { kind: "too_long" }
   | { kind: "syntax" }
-  | { kind: "function_not_allowed"; functionName: string };
+  | { kind: "construct_not_allowed"; constructName: string };
 
 const allowedFunctions = new Set([
   "string", "number", "boolean", "not", "exists", "length", "substring", "substringBefore",
   "substringAfter", "uppercase", "lowercase", "trim", "contains", "join", "sum", "max", "min",
-  "average", "count", "round", "floor", "ceil", "abs", "formatNumber", "keys", "lookup",
-  "fromMillis", "toMillis", "now", "split", "replace",
+  "average", "count", "round", "floor", "ceil", "abs", "formatNumber", "fromMillis", "toMillis",
+  "now", "split", "replace",
 ]);
+
+type AstRole = "expression" | "path_step" | "path_stage" | "array_index" | "function_procedure";
+
+const propertySets: Readonly<Record<string, readonly string[]>> = {
+  binary: ["type", "value", "position", "lhs", "rhs"],
+  condition: ["type", "position", "condition", "then", "else"],
+  filter: ["type", "expr", "position"],
+  function: ["type", "name", "value", "position", "arguments", "procedure"],
+  name: ["type", "value", "position", "stages"],
+  number: ["type", "value", "position"],
+  path: ["type", "steps", "group"],
+  string: ["type", "value", "position"],
+  variable: ["type", "value", "position"],
+  value: ["type", "value", "position"],
+};
+
+const binaryOperators = new Set([
+  "+", "-", "*", "/", "%", "=", "!=", "<", "<=", ">", ">=", "and", "or", "&",
+]);
+
+const isNode = (value: unknown): value is JsonataNode =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isAstNode = (value: unknown): value is JsonataNode => isNode(value) && typeof value.type === "string";
+
+const ownKeysAreAllowed = (node: JsonataNode, allowed: readonly string[]): boolean =>
+  Object.keys(node).every((key) => allowed.includes(key));
+
+const positionIsValid = (node: JsonataNode): boolean =>
+  typeof node.position === "number" && Number.isSafeInteger(node.position) && node.position > 0;
+
+const functionNameOf = (procedure: unknown): string =>
+  isAstNode(procedure) && procedure.type === "variable" && typeof procedure.value === "string" && procedure.value.length > 0
+    ? `$${procedure.value}`
+    : "$<dynamic>";
+
+const disallowedNodeName = (node: JsonataNode): string => {
+  switch (node.type) {
+    case "apply": return "function chaining (~>)";
+    case "bind": return "variable binding (:=)";
+    case "block": return "block expression";
+    case "descendant": return "descendant lookup (**)";
+    case "lambda": return "lambda";
+    case "partial": return "partial application";
+    case "regex": return "regex literal";
+    case "sort": return "sort";
+    case "transform": return "transform";
+    case "unary": return node.value === "[" ? "array constructor" : node.value === "{" ? "object constructor" : "unary expression";
+    case "wildcard": return "wildcard";
+    case "function": return functionNameOf(node.procedure);
+    case "filter": return "predicate";
+    default: return typeof node.type === "string" ? `AST node ${node.type}` : "unknown AST node";
+  }
+};
+
+const inspectAst = (root: unknown): string | null => {
+  let nodeCount = 0;
+  let rejected: string | null = null;
+  const reject = (constructName: string): void => { rejected ??= constructName; };
+
+  const walkValue = (value: unknown, depth: number, role: AstRole = "expression"): void => {
+    if (Array.isArray(value)) {
+      for (const entry of value) walkValue(entry, depth, role);
+      return;
+    }
+    if (!isNode(value)) return;
+    if (!isAstNode(value)) {
+      for (const child of Object.values(value)) walkValue(child, depth, "expression");
+      return;
+    }
+
+    nodeCount += 1;
+    if (nodeCount > JSONATA_LIMITS.maximumAstNodes) {
+      reject("AST node limit");
+      return;
+    }
+    if (depth > JSONATA_LIMITS.maximumAstDepth) {
+      reject("AST depth limit");
+      return;
+    }
+
+    const type = value.type as string;
+    const allowedProperties = propertySets[type];
+    if (allowedProperties === undefined) {
+      reject(disallowedNodeName(value));
+      for (const child of Object.values(value)) walkValue(child, depth + 1, "expression");
+      return;
+    }
+
+    if (!ownKeysAreAllowed(value, allowedProperties)) {
+      const property = Object.keys(value).find((key) => !allowedProperties.includes(key));
+      if (type === "path" && property === "group") reject("group-by");
+      else if (type === "variable" && property === "predicate") reject(`${functionNameOf(value)} predicate`);
+      else reject(`${type} property ${property ?? "<unknown>"}`);
+    }
+
+    switch (type) {
+      case "binary":
+        if (role !== "expression" || !positionIsValid(value) || !binaryOperators.has(String(value.value))) {
+          reject(`operator ${String(value.value)}`);
+        }
+        break;
+      case "condition":
+        if (role !== "expression" || !positionIsValid(value)) reject("conditional expression");
+        break;
+      case "filter":
+        if (role !== "path_stage" || !positionIsValid(value)) reject("predicate");
+        break;
+      case "function": {
+        const procedure = value.procedure;
+        const functionName = functionNameOf(procedure);
+        const functionValue = isAstNode(procedure) && procedure.type === "variable" ? procedure.value : null;
+        if (role !== "expression" || value.name !== undefined || value.value !== "(" || !positionIsValid(value)) {
+          reject("function call syntax");
+        }
+        if (typeof functionValue !== "string" || !allowedFunctions.has(functionValue)) reject(functionName);
+        if (isAstNode(procedure) && (procedure.type !== "variable" || !ownKeysAreAllowed(procedure, propertySets.variable ?? []))) {
+          reject(procedure.type === "variable" ? `${functionName} predicate` : `${functionName} function reference`);
+        }
+        if (!Array.isArray(value.arguments)) reject(`${functionName} arguments`);
+        const args: unknown[] = Array.isArray(value.arguments) ? value.arguments as unknown[] : [];
+        if (functionValue === "replace") {
+          const pattern = args[1];
+          const limit = args[3];
+          if (args.length !== 4 || !isAstNode(pattern) || pattern.type !== "string" ||
+              !isAstNode(limit) || limit.type !== "number" || typeof limit.value !== "number" ||
+              !Number.isSafeInteger(limit.value) || limit.value < 0 || limit.value > JSONATA_LIMITS.maximumReplaceLimit) {
+            reject("$replace (string pattern and bounded limit required)");
+          }
+        }
+        break;
+      }
+      case "name":
+        if (role !== "path_step" || typeof value.value !== "string" || value.value.length === 0 || !positionIsValid(value)) {
+          reject("path field name");
+        }
+        if (value.stages !== undefined && !Array.isArray(value.stages)) reject("path stages");
+        break;
+      case "number":
+        if ((role !== "expression" && role !== "array_index") || typeof value.value !== "number" || !Number.isFinite(value.value) ||
+            (role === "array_index" && (!Number.isSafeInteger(value.value) || value.value < 0)) || !positionIsValid(value)) {
+          reject(role === "array_index" ? "array index predicate (non-negative integer literal required)" : "number literal");
+        }
+        break;
+      case "path":
+        if (role !== "expression" || !Array.isArray(value.steps) || value.steps.length === 0) {
+          reject("path expression");
+        }
+        if (Object.hasOwn(value, "group")) reject("group-by");
+        break;
+      case "string":
+        if (role !== "expression" || typeof value.value !== "string" || !positionIsValid(value)) reject("string literal");
+        break;
+      case "value":
+        if (role !== "expression" && role !== "array_index") reject("literal");
+        if ((value.value !== null && typeof value.value !== "boolean") || !positionIsValid(value)) {
+          reject(role === "array_index" ? "array index predicate (non-negative integer literal required)" : "boolean or null literal");
+        } else if (role === "array_index") {
+          reject("array index predicate (non-negative integer literal required)");
+        }
+        break;
+      case "variable":
+        if (!positionIsValid(value)) reject("variable reference");
+        if (role === "function_procedure") {
+          if (typeof value.value !== "string" || !allowedFunctions.has(value.value)) reject(functionNameOf(value));
+        } else if ((role === "expression" || role === "path_step") && value.value === "") {
+          // The empty variable name is JSONata's current-input reference ($).
+        } else {
+          reject(typeof value.value === "string" && value.value.length > 0 ? `$${value.value}` : "variable reference");
+        }
+        break;
+      default:
+        reject(disallowedNodeName(value));
+    }
+
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "type" || key === "position" || key === "name" || key === "value") continue;
+      let childRole: AstRole = "expression";
+      if (type === "path" && key === "steps") childRole = "path_step";
+      else if (type === "name" && key === "stages") childRole = "path_stage";
+      else if (type === "filter" && key === "expr") childRole = "array_index";
+      else if (type === "function" && key === "procedure") childRole = "function_procedure";
+      walkValue(child, depth + 1, childRole);
+    }
+  };
+
+  walkValue(root, 1);
+  return rejected;
+};
 
 const validatedInputs = new WeakSet<object>();
 
@@ -58,79 +246,6 @@ const assertJsonDepth = (value: unknown): void => {
   if (typeof value === "object" && value !== null) validatedInputs.add(value);
 };
 
-const isNode = (value: unknown): value is JsonataNode => typeof value === "object" && value !== null && !Array.isArray(value);
-
-const functionNameOf = (procedure: unknown): string => {
-  if (isNode(procedure) && procedure.type === "variable" && typeof procedure.value === "string") {
-    return `$${procedure.value}`;
-  }
-  if (isNode(procedure) && procedure.type === "path" && Array.isArray(procedure.steps)) {
-    const names = procedure.steps
-      .filter(isNode)
-      .map((step) => step.value)
-      .filter((value): value is string => typeof value === "string" && value.length > 0);
-    return `$${names.join(".") || "<dynamic>"}`;
-  }
-  return "$<dynamic>";
-};
-
-const containsRegexNode = (value: unknown): boolean => {
-  if (Array.isArray(value)) return value.some(containsRegexNode);
-  if (!isNode(value)) return false;
-  if (value.type === "regex") return true;
-  return Object.values(value).some(containsRegexNode);
-};
-
-const findDisallowedFunction = (value: unknown, seen = new WeakSet<object>()): string | null => {
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      const disallowed = findDisallowedFunction(entry, seen);
-      if (disallowed !== null) return disallowed;
-    }
-    return null;
-  }
-  if (!isNode(value) || seen.has(value)) return null;
-  seen.add(value);
-
-  if (value.type === "regex") return "$regex";
-  if (value.type === "lambda") return "$function";
-  if (value.type === "partial" || value.type === "transform") return "$function";
-  if (value.type === "bind") {
-    const rhs = value.rhs;
-    if (isNode(rhs) && rhs.type === "variable" && typeof rhs.value === "string") return `$${rhs.value}`;
-    return "$function";
-  }
-  if (value.type === "variable" && typeof value.value === "string" && value.value.length > 0) return `$${value.value}`;
-  if (value.type === "function") {
-    const functionName = functionNameOf(value.procedure);
-    const bareName = functionName.startsWith("$") ? functionName.slice(1) : functionName;
-    if (!allowedFunctions.has(bareName)) return functionName;
-    const args: unknown[] = Array.isArray(value.arguments) ? value.arguments as unknown[] : [];
-    if (bareName === "contains" || bareName === "split" || bareName === "replace") {
-      if (args.some(containsRegexNode)) return functionName;
-    }
-    if (bareName === "replace") {
-      const limit = args[3];
-      if (args.length !== 4 || !isNode(limit) || limit.type !== "number" ||
-          typeof limit.value !== "number" || !Number.isInteger(limit.value) ||
-          limit.value < 0 || limit.value > JSONATA_LIMITS.maximumReplaceLimit) {
-        return functionName;
-      }
-    }
-    for (const argument of args) {
-      const disallowed = findDisallowedFunction(argument, seen);
-      if (disallowed !== null) return disallowed;
-    }
-    return null;
-  }
-
-  for (const child of Object.values(value)) {
-    const disallowed = findDisallowedFunction(child, seen);
-    if (disallowed !== null) return disallowed;
-  }
-  return null;
-};
-
 export const inspectApiSourceExpression = (expression: string): ApiSourceExpressionValidationError | null => {
   if (expression.length > API_SOURCE_MAXIMUMS.expressionLength) return { kind: "too_long" };
   if (expression.trim().length === 0) return null;
@@ -139,8 +254,8 @@ export const inspectApiSourceExpression = (expression: string): ApiSourceExpress
       stack: JSONATA_LIMITS.stackDepth,
       sequence: JSONATA_LIMITS.maximumSequenceLength,
     });
-    const disallowedFunction = findDisallowedFunction(compiled.ast());
-    return disallowedFunction === null ? null : { kind: "function_not_allowed", functionName: disallowedFunction };
+    const disallowedConstruct = inspectAst(compiled.ast());
+    return disallowedConstruct === null ? null : { kind: "construct_not_allowed", constructName: disallowedConstruct };
   } catch {
     return { kind: "syntax" };
   }
@@ -211,8 +326,8 @@ export const evaluateApiSourceExpression = async (expression: string, input: unk
   if (expression.trim().length === 0) return input;
   const validationError = inspectApiSourceExpression(expression);
   if (validationError !== null) {
-    if (validationError.kind === "function_not_allowed") {
-      throw new Error(`JSONata function ${validationError.functionName} is not allowed.`);
+    if (validationError.kind === "construct_not_allowed") {
+      throw new Error(`JSONata construct ${validationError.constructName} is not allowed.`);
     }
     throw new Error("API source JSONata expression is invalid or exceeds the evaluation limits.");
   }
@@ -223,7 +338,7 @@ export const evaluateApiSourceExpression = async (expression: string, input: unk
   compiled.registerFunction("join", safeJoin);
   compiled.registerFunction("split", safeSplit);
   compiled.registerFunction("replace", safeReplace);
-  // The AST allowlist leaves only deterministic JSONata functions; these
+  // The AST allowlist leaves only approved JSONata functions; these
   // wrappers also cap output while it is being constructed.
   return await compiled.evaluate(input);
 };
