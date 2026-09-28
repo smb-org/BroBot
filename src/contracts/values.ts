@@ -1,6 +1,10 @@
 export const CHANNEL_ROLES = ["broadcaster", "manager", "operator"] as const;
 export type ChannelRole = (typeof CHANNEL_ROLES)[number];
 
+/** Generic destinations for host-executed chat output actions. */
+export const CHAT_OUTPUT_TARGETS = ["all_chats", "source_only", "where_asked"] as const;
+export type ChatOutputTarget = (typeof CHAT_OUTPUT_TARGETS)[number];
+
 /**
  * Named role thresholds per docs/decisions/0006-rollenschwellen.md, so a
  * threshold is written once and not as a scattered `role !== "operator"` or

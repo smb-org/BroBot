@@ -50,6 +50,7 @@ const bodySchema = z.object({
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).default("any"),
   games: z.array(gameSchema).max(50).default([]),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).default("say"),
+  chatTarget: z.enum(["all_chats", "source_only", "where_asked"]).default("source_only"),
   variableAction: z.object({
     name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
     operation: z.enum(["add", "subtract", "set", "set_argument"]),
@@ -74,6 +75,7 @@ const editBodySchema = z.object({
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).optional(),
   games: z.array(gameSchema).max(50).optional(),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).optional(),
+  chatTarget: z.enum(["all_chats", "source_only", "where_asked"]).optional(),
   variableAction: z.object({
     name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
     operation: z.enum(["add", "subtract", "set", "set_argument"]),
@@ -130,6 +132,7 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
     streamCondition: parsed.data.streamCondition,
     games: parsed.data.games,
     responseType: parsed.data.responseType,
+    chatTarget: parsed.data.chatTarget,
     variableAction,
     text,
     ...(offlineText === undefined ? {} : { offlineText }),
@@ -227,6 +230,7 @@ textCommandRoutes.post("/commands", async (context) => {
       streamCondition: body.streamCondition,
       games: body.games,
       responseType: body.responseType,
+      chatTarget: body.chatTarget,
       variableAction: body.variableAction,
       useCount: 0,
       lastUsedAt: null,
@@ -295,6 +299,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const streamCondition = body.streamCondition ?? before.streamCondition;
   const games = body.games ?? before.games ?? [];
   const responseType = body.responseType ?? before.responseType;
+  const chatTarget = body.chatTarget ?? before.chatTarget;
   const [channelVariables, registeredVariables] = await Promise.all([
     context.get("listChannelVariables")(channelId),
     context.get("listRegisteredTemplateVariables")(channelId),
@@ -325,6 +330,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     streamCondition,
     games,
     responseType,
+    chatTarget,
     variableAction,
     ...(before.legacyFallback === undefined ? {} : { legacyFallback: before.legacyFallback }),
     expectedRevision: body.revision,
@@ -346,6 +352,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
       streamCondition,
       games,
       responseType,
+      chatTarget,
       variableAction,
       useCount: before.useCount,
       enabled: body.enabled ?? before.enabled,

@@ -1,4 +1,5 @@
 import type { ChannelVariableOperation } from "../../../contracts/values";
+import type { ChatOutputTarget } from "../../contract";
 import { MODULE_TEMPLATE_MINIMUM_TIERS, MODULE_TEMPLATE_TIER_CHAT_STATUSES, type ModuleTemplateMinimumTier } from "../../contract";
 import type { TemplateFields } from "../contract";
 
@@ -42,6 +43,7 @@ export interface TextCommand {
   streamCondition: TextCommandStreamCondition;
   games?: readonly TextCommandGame[];
   responseType: TextCommandResponseType;
+  chatTarget: ChatOutputTarget;
   variableAction: TextCommandVariableAction | null;
   useCount: number;
   lastUsedAt: string | null;
@@ -81,6 +83,7 @@ export interface NewTextCommand {
   streamCondition?: TextCommandStreamCondition;
   games?: readonly TextCommandGame[];
   responseType?: TextCommandResponseType;
+  chatTarget?: ChatOutputTarget;
   variableAction?: TextCommandVariableAction | null;
   now: string;
 }
@@ -106,6 +109,7 @@ export interface TextCommandChange {
   streamCondition: TextCommandStreamCondition;
   games?: readonly TextCommandGame[];
   responseType: TextCommandResponseType;
+  chatTarget?: ChatOutputTarget;
   variableAction?: TextCommandVariableAction | null;
   expectedRevision?: number;
   now: string;

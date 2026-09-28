@@ -3,7 +3,9 @@ import type { ReactElement } from "react";
 import { worstCaseTemplateLength } from "../../template";
 import type { PanelTemplateWarning } from "../../panel-contract";
 import type { IconName } from "./Icon";
+import type { ChatOutputTarget } from "../../contracts/values";
 import { ChoiceCards } from "./ChoiceCards";
+import { ChatOutputTargetControl } from "./ChatOutputTargetControl";
 import { Field } from "./Field";
 import { InspectorFieldRow, InspectorSection } from "./InspectorParts";
 import { NumberField } from "./NumberField";
@@ -16,6 +18,7 @@ export type SettingsFieldSpec<Settings> =
   | { kind: "number"; key: keyof Settings & string; unit?: string; min: number; max: number; step: number }
   | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
+  | { kind: "chatTarget"; key: keyof Settings & string; includeWhereAsked?: boolean }
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string }[] }
   | { kind: "choice"; key: keyof Settings & string; options: readonly { value: string; icon?: IconName }[] }
   | { kind: "switchCard"; key: keyof Settings & string; children?: readonly SettingsFieldSpec<Settings>[] };
@@ -120,6 +123,18 @@ export function SettingsEditor<Settings extends object>({
     const fieldValue = settings[field.key];
     if (readOnly) return renderReadOnlyField(field, copy, fieldValue, enabledLabel, disabledLabel);
     const error = fieldErrors[field.key];
+    if (field.kind === "chatTarget") {
+      return (
+        <ChatOutputTargetControl
+          key={field.key}
+          label={copy.label}
+          value={String(fieldValue ?? "source_only") as ChatOutputTarget}
+          onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+          {...(field.includeWhereAsked === undefined ? {} : { includeWhereAsked: field.includeWhereAsked })}
+          disabled={disabled}
+        />
+      );
+    }
     if (field.kind === "number") {
       return (
         <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
@@ -274,5 +289,6 @@ const renderReadOnlyField = <Settings extends object>(
   if (field.kind === "switchCard") return <>{value === true ? enabledLabel : disabledLabel}</>;
   if (field.kind === "number") return <>{String(value)}{copy.unit === undefined ? "" : ` ${copy.unit}`}</>;
   if (field.kind === "text") return <>{field.prefix ?? ""}{String(value)}</>;
+  if (field.kind === "chatTarget") return <>{copy.options?.[String(value)]?.label ?? String(value)}</>;
   return <>{copy.options?.[String(value)]?.label ?? String(value)}</>;
 };

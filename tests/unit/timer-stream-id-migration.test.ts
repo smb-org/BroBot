@@ -12,9 +12,10 @@ describe("timer stream id migration", () => {
   it("adds null-defaulted stream id columns without disturbing existing timer rows", () => {
     const database = new DatabaseSync(":memory:");
     try {
-      const latest = migrationFiles.at(-1);
-      const priorMigrations = migrationFiles.slice(0, -1);
-      expect(latest).toBe("0024_timer_stream_id.sql");
+      const target = "0024_timer_stream_id.sql";
+      const targetIndex = migrationFiles.indexOf(target);
+      expect(targetIndex).toBeGreaterThanOrEqual(0);
+      const priorMigrations = migrationFiles.slice(0, targetIndex);
       for (const file of priorMigrations) database.exec(migration(file));
 
       database.exec(`
@@ -29,7 +30,7 @@ describe("timer stream id migration", () => {
            '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       `);
 
-      database.exec(migration(latest ?? ""));
+      database.exec(migration(target));
 
       expect(database.prepare(
         `SELECT timer_id, next_run_at, next_run_stream_id, last_chat_activity_count, chat_baseline_stream_id

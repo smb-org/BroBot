@@ -51,6 +51,9 @@ describe("ad setting defaults", () => {
       prewarning: true,
       leadSeconds: 60,
       prewarningText: "Werbung in {ads.seconds} Sekunden. Bin gleich zurück!",
+      automaticTarget: "source_only",
+      manualTarget: "source_only",
+      prewarningTarget: "source_only",
     });
   });
 });

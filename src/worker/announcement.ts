@@ -1,7 +1,8 @@
 import { truncateTo200Chars } from "../modules/contract";
+import type { ChatOutputTarget } from "../modules/contract";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
-import { truncateChatTextWithAttributions } from "./chat";
+import { forSourceOnlyForChatTarget, truncateChatTextWithAttributions } from "./chat";
 
 const ANNOUNCEMENTS_URL = "https://api.twitch.tv/helix/chat/announcements";
 
@@ -32,6 +33,8 @@ export const sendChatAnnouncement = async (
   text: string,
   fetcher: typeof fetch = fetch,
   attributions: readonly string[] = [],
+  target: ChatOutputTarget = "source_only",
+  sourceBroadcasterUserId?: string | null,
 ): Promise<AnnouncementSendResult> => {
   const preparedText = truncateChatTextWithAttributions(text, attributions);
   const detail = { text: truncateTo200Chars(preparedText.text) };
@@ -67,7 +70,11 @@ export const sendChatAnnouncement = async (
   const result = await helixRequest({
     method: "POST",
     url: ANNOUNCEMENTS_URL,
-    query: { broadcaster_id: channelId, moderator_id: identity.user_id },
+    query: {
+      broadcaster_id: channelId,
+      moderator_id: identity.user_id,
+      for_source_only: String(forSourceOnlyForChatTarget(target, channelId, sourceBroadcasterUserId)),
+    },
     body: { message: preparedText.text },
     accessToken,
     clientId: environment.TWITCH_CLIENT_ID,

@@ -122,6 +122,21 @@ Zeitgeber kennt weder deren Modulnamen noch deren Tabellen. Er rendert
 Textblöcke über die allgemeine Vorlagenpipeline und lehnt beim Speichern Blöcke
 mit chatbefehlabhängigen Variablen ab.
 
+Migration `0025_chat_output_targets.sql` ergänzt Textbefehle und Zeitgeber um
+ein Chat-Ausgabeziel; bestehende Zeilen erhalten `source_only`. Auch neue
+Ereignistexte verwenden standardmäßig dieses Ziel. Der gemeinsame
+`ChatOutputTarget`-Contract kennt `all_chats`, `source_only` und für
+Antwortaktionen `where_asked`. Der Host übersetzt das Ziel für Chatnachrichten
+und Ankündigungen in `for_source_only`. Bei `where_asked` entscheidet
+`source_broadcaster_user_id`: eine eigene Nachricht bleibt im eigenen Chat,
+eine Nachricht aus einem Partnerkanal wird an alle Teilnehmer gespiegelt.
+Fehlender Herkunftskanal gilt als eigener Chat. Außerhalb von Shared Chat hat
+die Einstellung keine Wirkung. Ziele sind je Textbefehl, Ereignistext,
+Raid-/Werbetext und Zeitgeber konfigurierbar; Wetter- und Währungsantworten
+verwenden das Ziel des Textbefehls. Änderungen an gespeicherten Zielen werden
+mit den jeweiligen Modulmutationen auditiert. Auto-Antworten (#245) können
+denselben Contract und dieselbe Host-Versandgrenze verwenden.
+
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 
 ESLint schützt die Grenze: Overlay-Ansichten importieren weder Worker-, Service-, Repository- oder Adaptercode noch Zod. Panel-Ansichten importieren weder Worker-, Repository- noch Adaptercode; Zod und der Service sind dort für Formulare und ausgelöste Anwendungsfälle erlaubt. Module importieren keine Geschwistermodule. Der Worker importiert kein React.

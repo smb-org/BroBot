@@ -30,7 +30,7 @@ type TimerRouteContext = Context<ModuleRouteEnvironment>;
 
 const readTimer = async (db: D1Database, channelId: string, timerId: string): Promise<Timer | null> => {
   const row = await db.prepare(
-    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, revision,
+    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
             next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(channelId, timerId).first<TimerRow>();
@@ -113,7 +113,7 @@ export const timerRoutes = new Hono<ModuleRouteEnvironment>();
 timerRoutes.get("/timers", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const result = await context.env.DB.prepare(
-    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, revision,
+    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
             next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
   ).bind(channelId).all<TimerRow>();
@@ -151,18 +151,18 @@ timerRoutes.post("/timers", async (context) => {
   try { activityCount = await stub.getChatActivityCount(); } catch { /* A missing baseline is initialized on first run. */ }
   const mutation = context.env.DB.prepare(
     `INSERT INTO timers
-      (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision,
+      (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
        next_run_at, last_run_at, last_chat_activity_count, created_at, updated_at)
-     SELECT ?, ?, ?, 1, ?, ?, ?, 1, NULL, NULL, ?, ?, ?
+     SELECT ?, ?, ?, 1, ?, ?, ?, ?, 1, NULL, NULL, ?, ?, ?
        WHERE (SELECT COUNT(*) FROM timers WHERE channel_id = ?) < ? ${authorization.sql}`,
-  ).bind(timerId, channelId, input.name, input.blockName, input.trigger.type, triggerJson,
+  ).bind(timerId, channelId, input.name, input.blockName, input.trigger.type, triggerJson, input.chatTarget,
     activityCount, now, now, channelId, TIMER_MAXIMUM_COUNT, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: MODULE_ID,
     action: "timers.timer.created" satisfies AuditAction,
     before: null,
-    after: { timerId, name: input.name, blockName: input.blockName, triggerType: input.trigger.type },
+    after: { timerId, name: input.name, blockName: input.blockName, triggerType: input.trigger.type, chatTarget: input.chatTarget },
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);
   if (results[0]?.meta.changes === 0) {
@@ -199,17 +199,17 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE timers
-        SET name = ?, block_name = ?, trigger_type = ?, trigger_json = ?,
+        SET name = ?, block_name = ?, trigger_type = ?, trigger_json = ?, chat_target = ?,
             next_run_at = NULL, next_run_stream_id = NULL, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND timer_id = ? AND revision = ? ${authorization.sql}`,
-  ).bind(input.name, input.blockName, input.trigger.type, JSON.stringify(input.trigger), now,
+  ).bind(input.name, input.blockName, input.trigger.type, JSON.stringify(input.trigger), input.chatTarget, now,
     channelId, timerId, revision, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: MODULE_ID,
     action: "timers.timer.updated" satisfies AuditAction,
-    before: { timerId, name: existing.name, blockName: existing.blockName, triggerType: existing.trigger.type },
-    after: { timerId, name: input.name, blockName: input.blockName, triggerType: input.trigger.type },
+    before: { timerId, name: existing.name, blockName: existing.blockName, triggerType: existing.trigger.type, chatTarget: existing.chatTarget },
+    after: { timerId, name: input.name, blockName: input.blockName, triggerType: input.trigger.type, chatTarget: input.chatTarget },
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);
   if (results[0]?.meta.changes === 0) {
@@ -275,7 +275,7 @@ timerRoutes.delete("/timers/:timerId", async (context) => {
     channelId,
     moduleId: MODULE_ID,
     action: "timers.timer.removed" satisfies AuditAction,
-    before: { timerId, name: existing.name, blockName: existing.blockName, triggerType: existing.trigger.type },
+    before: { timerId, name: existing.name, blockName: existing.blockName, triggerType: existing.trigger.type, chatTarget: existing.chatTarget },
     after: null,
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);
