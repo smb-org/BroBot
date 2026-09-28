@@ -22,9 +22,11 @@ export function ChatOutputTargetControl({
 }: ChatOutputTargetControlProps) {
   const texts = chatOutputTargetTexts[dashboardLanguage()];
   const options = [
-    { value: "all_chats", label: texts.allChats },
-    { value: "source_only", label: texts.onlyOurChat },
-    ...(includeWhereAsked ? [{ value: "where_asked", label: texts.whereAsked }] : []),
+    { value: "all_chats", label: texts.allChats, description: texts.allChatsDescription },
+    { value: "source_only", label: texts.onlyOurChat, description: texts.onlyOurChatDescription },
+    ...(includeWhereAsked
+      ? [{ value: "where_asked", label: texts.automatic, description: texts.automaticDescription }]
+      : []),
   ];
   return (
     <InspectorFieldRow label={label} help={texts.sharedChatInfo}>

@@ -190,7 +190,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     },
     tierHelp: "Moderatoren und Broadcaster dürfen immer.",
     responseType: "Antwortart", responseTypeLabels: { say: "Nachricht", reply: "Antwort", announcement: "Ankündigung" },
-    chatTarget: "Chat-Ziel", chatTargetLabels: { all_chats: "Alle Chats", source_only: "Nur unser Chat", where_asked: "Wo gefragt" },
+    chatTarget: "Chat-Ziel", chatTargetLabels: { all_chats: "Alle Chats", source_only: "Nur unser Chat", where_asked: "Automatisch" },
     responseTypeHints: {
       say: "Schreibt eine normale Nachricht in den Chat.",
       reply: "Antwortet sichtbar auf die Nachricht, die den Befehl ausgelöst hat.",
@@ -275,7 +275,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     },
     tierHelp: "Moderators and broadcasters can always use it.",
     responseType: "Response type", responseTypeLabels: { say: "Message", reply: "Reply", announcement: "Announcement" },
-    chatTarget: "Chat target", chatTargetLabels: { all_chats: "All chats", source_only: "Only our chat", where_asked: "Where it was asked" },
+    chatTarget: "Chat target", chatTargetLabels: { all_chats: "All chats", source_only: "Only our chat", where_asked: "Automatic" },
     responseTypeHints: {
       say: "Sends a normal chat message.",
       reply: "Visibly replies to the message that triggered the command.",
