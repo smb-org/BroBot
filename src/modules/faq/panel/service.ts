@@ -9,8 +9,10 @@ export interface FaqPanelData {
 export interface FaqTestResult {
   matches: boolean;
   reason: "matched" | "no_match" | "command_prefix";
+  gameId: string | null;
   entry?: { id: string; name: string };
   matchedPattern?: string;
+  skippedByGame: readonly { entryId: string; entryName: string; matchedPattern: string; games: readonly string[] }[];
 }
 
 const basePath = (channelId: string): string => `/api/channels/${encodeURIComponent(channelId)}/modules/faq`;
@@ -79,7 +81,7 @@ export const deleteFaqEntry = async (channelId: string, entry: FaqEntry): Promis
   await readJson<unknown>(response);
 };
 
-export const testFaqMessage = async (channelId: string, message: string): Promise<FaqTestResult> =>
-  mutate<FaqTestResult>(channelId, "/test", "POST", { message });
+export const testFaqMessage = async (channelId: string, message: string, gameId?: string | null): Promise<FaqTestResult> =>
+  mutate<FaqTestResult>(channelId, "/test", "POST", { message, ...(gameId === undefined ? {} : { gameId }) });
 
 export const faqErrorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;

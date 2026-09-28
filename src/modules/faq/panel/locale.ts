@@ -30,6 +30,9 @@ export interface FaqTexts {
   testNoMatch: string;
   testCommand: string;
   testMatch: (entry: string, pattern: string) => string;
+  testGame: string;
+  testGameHint: string;
+  testSkippedByGame: (entry: string, games: string) => string;
   enabledState: string;
   noEntries: string;
   noBlocks: string;
@@ -44,6 +47,7 @@ export interface FaqTexts {
   testEmpty: string;
   textAreaMessages: TextAreaMessages;
   gamePickerMessages: GamePickerMessages;
+  testGamePickerMessages: GamePickerMessages;
 }
 
 const countTextAreaMessages: TextAreaMessages = {
@@ -65,6 +69,8 @@ const catalog: LocaleCatalog<FaqTexts> = {
     deleteConfirm: "Diesen FAQ-Eintrag wirklich entfernen?", moveUp: "In der Reihenfolge nach oben", moveDown: "In der Reihenfolge nach unten",
     testHeading: "Treffer testen", testMessage: "Chatnachricht", testButton: "Nachricht prüfen", testNoMatch: "Kein aktivierter Eintrag passt.",
     testCommand: "Nachrichten mit Befehlspräfix werden übersprungen.", testMatch: (entry, pattern) => `Treffer: ${entry} · passt wegen „${pattern}“.`,
+    testGame: "Spiel simulieren", testGameHint: "Ohne Auswahl wird das aktuelle Spiel des Kanals verwendet.",
+    testSkippedByGame: (entry, games) => `${entry} passt ebenfalls, ist aber auf ${games} beschränkt und wird beim simulierten Spiel übersprungen.`,
     enabledState: "FAQ aktivieren", noEntries: "Noch keine FAQ-Einträge.", noBlocks: "Lege zuerst einen Textbaustein in der Textbibliothek an.",
     loadError: "FAQ-Einträge konnten nicht geladen werden.", saveError: "Der FAQ-Eintrag konnte nicht gespeichert werden.",
     deleteError: "Der FAQ-Eintrag konnte nicht entfernt werden.", missingBlock: "Der ausgewählte Textbaustein existiert nicht mehr.",
@@ -73,6 +79,11 @@ const catalog: LocaleCatalog<FaqTexts> = {
     termCount: (count, max) => `${String(count)}/${String(max)} Wortgruppen`, testEmpty: "Gib eine Nachricht ein, um den Treffer zu prüfen.", textAreaMessages: countTextAreaMessages,
     gamePickerMessages: {
       label: "Spiele", hint: "Ohne Auswahl gilt der Eintrag für jedes Spiel.", search: "Spiele suchen",
+      searchHint: "Mindestens 2 Zeichen eingeben", loading: "Spiele werden geladen …", empty: "Keine Spiele gefunden.",
+      error: "Spiele konnten nicht geladen werden.", remove: (name) => `${name} entfernen`,
+    },
+    testGamePickerMessages: {
+      label: "Spiel simulieren", hint: "Ohne Auswahl wird das aktuelle Spiel des Kanals verwendet.", search: "Spiele suchen",
       searchHint: "Mindestens 2 Zeichen eingeben", loading: "Spiele werden geladen …", empty: "Keine Spiele gefunden.",
       error: "Spiele konnten nicht geladen werden.", remove: (name) => `${name} entfernen`,
     },
@@ -86,6 +97,8 @@ const catalog: LocaleCatalog<FaqTexts> = {
     cancel: "Cancel", delete: "Delete", deleteConfirm: "Remove this FAQ entry?", moveUp: "Move earlier in the order", moveDown: "Move later in the order",
     testHeading: "Test a match", testMessage: "Chat message", testButton: "Check message", testNoMatch: "No enabled entry matches.",
     testCommand: "Messages with the command prefix are skipped.", testMatch: (entry, pattern) => `Match: ${entry} · matched because of “${pattern}”.`,
+    testGame: "Simulate game", testGameHint: "Leave empty to use the channel's current game.",
+    testSkippedByGame: (entry, games) => `${entry} also matches, but is restricted to ${games} and was skipped for the simulated game.`,
     enabledState: "Enable FAQ entry", noEntries: "No FAQ entries yet.", noBlocks: "Create a text block in the text library first.",
     loadError: "FAQ entries could not be loaded.", saveError: "The FAQ entry could not be saved.", deleteError: "The FAQ entry could not be deleted.",
     missingBlock: "The selected text block no longer exists.",
@@ -94,6 +107,11 @@ const catalog: LocaleCatalog<FaqTexts> = {
     termCount: (count, max) => `${String(count)}/${String(max)} phrases`, testEmpty: "Enter a message to check for a match.", textAreaMessages: countTextAreaMessages,
     gamePickerMessages: {
       label: "Games", hint: "Leave empty to use this entry for every game.", search: "Search games",
+      searchHint: "Enter at least 2 characters", loading: "Loading games…", empty: "No games found.",
+      error: "Games could not be loaded.", remove: (name) => `Remove ${name}`,
+    },
+    testGamePickerMessages: {
+      label: "Simulate game", hint: "Leave empty to use the channel's current game.", search: "Search games",
       searchHint: "Enter at least 2 characters", loading: "Loading games…", empty: "No games found.",
       error: "Games could not be loaded.", remove: (name) => `Remove ${name}`,
     },

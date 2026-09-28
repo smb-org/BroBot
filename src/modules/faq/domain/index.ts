@@ -7,6 +7,16 @@ import {
   type FaqMutationMatcher,
 } from "../contracts";
 
+/** An entry whose pattern matched the text but was excluded by the game filter. */
+export interface FaqSkippedMatch {
+  entry: FaqEntry;
+  matchedPattern: string;
+}
+
+export interface FaqSelection extends FaqMatchResult {
+  skippedByGame: readonly FaqSkippedMatch[];
+}
+
 export interface PreparedFaqMatcher {
   entry: FaqEntry;
   patterns: readonly { source: string; normalized: string }[];
@@ -82,6 +92,37 @@ export const firstFaqMatch = (prepared: readonly PreparedFaqMatcher[], message: 
     }
   }
   return { match: null, reason: "no_match" };
+};
+
+const isEligibleForGame = (entry: FaqEntry, gameId: string | null): boolean =>
+  entry.games.length === 0 || (gameId !== null && entry.games.some((game) => game.id === gameId));
+
+/**
+ * The one place both live chat (`processFaqMessage`) and the panel tester
+ * pick a match, so a restricted entry can never match in the tester and stay
+ * silent in chat (or the reverse). Unlike `firstFaqMatch`, an entry whose
+ * pattern matched but was excluded by the game filter is recorded rather
+ * than silently skipped, so the tester can explain why it didn't win.
+ */
+export const selectFaqMatch = (
+  prepared: readonly PreparedFaqMatcher[],
+  message: string,
+  gameId: string | null,
+): FaqSelection => {
+  if (hasCommandPrefix(message)) return { match: null, reason: "command_prefix", skippedByGame: [] };
+  const normalizedMessage = normalizeFaqText(message);
+  const skippedByGame: FaqSkippedMatch[] = [];
+  for (const matcher of prepared) {
+    for (const pattern of matcher.patterns) {
+      if (!hasWholeWordOccurrence(normalizedMessage, pattern.normalized)) continue;
+      if (isEligibleForGame(matcher.entry, gameId)) {
+        return { match: { entry: matcher.entry, matchedPattern: pattern.source }, reason: "matched", skippedByGame };
+      }
+      skippedByGame.push({ entry: matcher.entry, matchedPattern: pattern.source });
+      break;
+    }
+  }
+  return { match: null, reason: "no_match", skippedByGame };
 };
 
 export const validFaqMatcher = (value: unknown): value is FaqMutationMatcher => {

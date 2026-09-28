@@ -43,7 +43,6 @@ import {
 } from "./module-alarm-send-claims";
 import {
   claimAutomatedChatOutput,
-  claimAutomatedChatOutputInTransaction,
   isRecentBotChatMessage,
   recordRecentBotChatMessage,
 } from "./automated-chat-output";
@@ -1725,7 +1724,13 @@ export class ChannelObject extends DurableObject<Env> {
           const claims = typeof stored === "number" ? { [String(stored)]: stored } : stored ?? {};
           const key = String(scheduledDueAtMs);
           if (Object.hasOwn(claims, key)) return false;
-          if (!await claimAutomatedChatOutputInTransaction(transaction, Date.now())) return false;
+          // Exempt from the shared automated-output limit: an ad prewarning
+          // is time-critical (it must land before the ad break starts) and
+          // infrequent, unlike timers/FAQ, which yield to each other on that
+          // shared slot. Gating it the same way meant a timer or FAQ reply
+          // that took the slot within the last 5s made this occurrence
+          // "already_attempted" with no retry (see ad-prewarning.ts's
+          // isRetryablePrePostFailure, which deliberately excludes it).
           const pruned = prunePrewarningClaims(claims, Date.now());
           pruned[key] = scheduledDueAtMs;
           await transaction.put(AD_PREWARNING_SEND_CLAIM_KEY, pruned);

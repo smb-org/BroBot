@@ -5,7 +5,8 @@ import { validateEventTextBlock } from "../contracts/text-block-validation";
 import { createFaqRepository, mapFaqEntryRow, type FaqEntryRow } from "./adapters/d1";
 import { FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_MAXIMUM_COUNT, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_GAME_MAXIMUM_COUNT, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_MODULE_ID } from "./contracts";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "./contracts";
-import { firstFaqMatch, validFaqMatcher } from "./domain";
+import { validFaqMatcher } from "./domain";
+import { testFaqMessage } from "./service";
 
 const BLOCK_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 const nowIso = (): string => new Date().toISOString();
@@ -95,6 +96,27 @@ const validateAnswer = async (
 
 const authorizationFor = (context: FaqRouteContext, channelId: string, now: string) =>
   context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
+
+/** Live-fetched fallback when the tester's request omits a simulated game. */
+const currentChannelGameId = async (context: FaqRouteContext, channelId: string): Promise<string | null> => {
+  try {
+    const token = await context.get("measureServerTiming")("helix", () =>
+      context.get("getAppAccessToken")(context.env, nowIso()),
+    );
+    const result = await context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{
+      data?: readonly { game_id?: unknown }[];
+    }>({
+      url: "https://api.twitch.tv/helix/channels",
+      query: { broadcaster_id: channelId },
+      accessToken: token,
+      clientId: context.env.TWITCH_CLIENT_ID,
+    }));
+    const gameId = result.ok ? result.data.data?.[0]?.game_id : undefined;
+    return typeof gameId === "string" && gameId.length > 0 ? gameId : null;
+  } catch {
+    return null;
+  }
+};
 
 const cooldownTooShort = (value: unknown): boolean =>
   isRecord(value) && Number.isSafeInteger(value.cooldownSeconds) &&
@@ -295,14 +317,26 @@ faqRoutes.delete("/entries/:entryId", async (context) => {
 faqRoutes.post("/test", async (context) => {
   const body = await readBody(context.req.raw);
   if (!isRecord(body) || typeof body.message !== "string" || body.message.length > 500) return context.json({ error: "faq_test_invalid" }, 400);
+  const rawGameId = body.gameId;
+  if (rawGameId !== undefined && rawGameId !== null && typeof rawGameId !== "string") return context.json({ error: "faq_test_invalid" }, 400);
   const channelId = context.req.param("channelId") ?? "";
-  const result = firstFaqMatch(await createFaqRepository(context.env.DB).matchers(channelId), body.message);
+  // Same selection as live chat (testFaqMessage/selectFaqMatch): a restricted
+  // entry can never match here and stay silent in chat, or the reverse.
+  const gameId = rawGameId === undefined ? await currentChannelGameId(context, channelId) : rawGameId;
+  const selection = await testFaqMessage(createFaqRepository(context.env.DB), channelId, body.message, gameId);
   return context.json({
-    matches: result.match !== null,
-    reason: result.reason,
-    ...(result.match === null ? {} : {
-      entry: { id: result.match.entry.id, name: result.match.entry.name },
-      matchedPattern: result.match.matchedPattern,
+    matches: selection.match !== null,
+    reason: selection.reason,
+    gameId,
+    ...(selection.match === null ? {} : {
+      entry: { id: selection.match.entry.id, name: selection.match.entry.name },
+      matchedPattern: selection.match.matchedPattern,
     }),
+    skippedByGame: selection.skippedByGame.map(({ entry, matchedPattern }) => ({
+      entryId: entry.id,
+      entryName: entry.name,
+      matchedPattern,
+      games: entry.games.map((game) => game.name),
+    })),
   });
 });

@@ -18,6 +18,7 @@ vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAc
 
 import type { AdSchedule } from "../../src/modules/ads/adapters/ad-schedule";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
+import { AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY } from "../../src/worker/durable/automated-chat-output";
 
 type StorageDouble = {
   values: Map<string, unknown>;
@@ -327,6 +328,57 @@ describe("ad prewarning retry through ChannelObject.alarm()", () => {
     } finally {
       errorLog.mockRestore();
     }
+  });
+
+  it("still sends when a timer/FAQ send just claimed the shared automated-output slot", async () => {
+    vi.useFakeTimers();
+    const timerSendAt = Date.parse("2026-09-24T12:03:00.000Z");
+    const dueAt = timerSendAt + 1_000; // within the 5s shared automated-output window
+    vi.setSystemTime(dueAt);
+    const schedule: AdSchedule = {
+      nextAdAt: "2026-09-24T12:04:00.000Z",
+      duration: 60,
+      lastAdAt: null,
+      prerollFreeTime: 120,
+      snoozeCount: 0,
+      snoozeRefreshAt: null,
+    };
+    mocks.getChannelModuleForChannel.mockResolvedValue({
+      channelId: "kanal-a",
+      moduleId: "ads",
+      enabled: true,
+      revision: 1,
+      settings: JSON.stringify({
+        automatic: "Automatic ad message",
+        manual: "Manual ad message",
+        prewarning: true,
+        leadSeconds: 60,
+        prewarningText: "Ad in {ads.seconds}",
+      }),
+    });
+    mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
+    mocks.getAdSchedule.mockResolvedValue({ fetched: true, reason: null, detail: {}, schedule });
+    mocks.writeModuleDiagnostics.mockResolvedValue([]);
+    mocks.getBotIdentity.mockResolvedValue({ userId: "bot-1" });
+    mocks.getAppAccessToken.mockResolvedValue("app-token");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [{ is_sent: true, message_id: "message-1" }],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const object = objectFor("kanal-a");
+    const storage = storageOf(object);
+    // A timer (or FAQ) send claimed the shared automated-output slot 1s ago.
+    storage.values.set(AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY, timerSendAt);
+
+    await object.scheduleAdPrewarning(dueAt);
+    await object.alarm();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(mocks.writeModuleDiagnostics.mock.calls.at(-1)?.[5]).toMatchObject([
+      { code: "ads.prewarning.announced" },
+      { code: "host.chat.sent" },
+    ]);
   });
 
   it("keeps a sent occurrence's send claim across clear+re-arm, but still sends a genuinely new occurrence", async () => {

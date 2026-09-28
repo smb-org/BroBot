@@ -73,6 +73,7 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
   const [deleteTarget, setDeleteTarget] = useState<FaqEntry | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [testMessage, setTestMessage] = useState("");
+  const [testGame, setTestGame] = useState<FaqGame | null>(null);
   const [testResult, setTestResult] = useState<FaqTestResult | null>(null);
   const [testBusy, setTestBusy] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
@@ -154,7 +155,7 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
     if (testMessage.trim().length === 0) { setTestError(labels.testEmpty); setTestResult(null); return; }
     setTestBusy(true);
     setTestError(null);
-    try { setTestResult(await testFaqMessage(channelId, testMessage)); }
+    try { setTestResult(await testFaqMessage(channelId, testMessage, testGame === null ? undefined : testGame.id)); }
     catch { setTestError(labels.loadError); }
     finally { setTestBusy(false); }
   };
@@ -200,9 +201,22 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
       <InspectorSection title={labels.testHeading}>
         <div className="module-stack">
           <Field label={labels.testMessage} value={testMessage} onChange={setTestMessage} maxLength={500} countLabel={(count, max) => `${String(count)}/${String(max)}`} />
+          <GamePicker
+            searchGames={searchGames}
+            value={testGame === null ? [] : [testGame]}
+            onChange={(games) => setTestGame(games.at(-1) ?? null)}
+            messages={labels.testGamePickerMessages}
+          />
           <Button variant="neutral" disabled={testBusy || loading} onClick={() => { void runTest(); }}>{labels.testButton}</Button>
           {testError === null ? null : <p className="form-error" role="alert">{testError}</p>}
           {testResult === null ? null : <p role="status">{matchCopy(testResult, labels)}</p>}
+          {testResult === null || testResult.skippedByGame.length === 0 ? null : (
+            <ul>
+              {testResult.skippedByGame.map((skipped) => (
+                <li key={skipped.entryId}>{labels.testSkippedByGame(skipped.entryName, skipped.games.join(", "))}</li>
+              ))}
+            </ul>
+          )}
         </div>
       </InspectorSection>
 

@@ -1,6 +1,6 @@
 import type { ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
-import type { FaqMatchResult } from "./contracts";
-import { firstFaqMatch, hasCommandPrefix } from "./domain";
+import { hasCommandPrefix, selectFaqMatch } from "./domain";
+import type { FaqSelection } from "./domain";
 import type { FaqRepository } from "./repository";
 
 const messageText = (event: ModuleEvent): string | null => {
@@ -14,7 +14,8 @@ export const testFaqMessage = async (
   repository: FaqRepository,
   channelId: string,
   message: string,
-): Promise<FaqMatchResult> => firstFaqMatch(await repository.matchers(channelId), message);
+  gameId: string | null,
+): Promise<FaqSelection> => selectFaqMatch(await repository.matchers(channelId), message, gameId);
 
 export const processFaqMessage = async (
   event: ModuleEvent,
@@ -36,10 +37,7 @@ export const processFaqMessage = async (
   const currentGameId = needsGame
     ? await (context.channelGameId ?? (() => Promise.resolve(null)))()
     : null;
-  const eligible = prepared.filter(({ entry }) => entry.games.length === 0 ||
-    (currentGameId !== null && entry.games.some((game) => game.id === currentGameId)));
-  const result = firstFaqMatch(eligible, text);
-  const match = result.match;
+  const match = selectFaqMatch(prepared, text, currentGameId).match;
   if (match === null) return { actions: [], diagnostics: [] };
   const rendered = await context.renderTemplate(`{${match.entry.answerBlock}}`, {});
   if (rendered.text.length === 0) return { actions: [], diagnostics: rendered.diagnostics };
