@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { Button, ChatOutputTargetControl, ConfirmDialog, Dialog, Field, GamePicker, InspectorSection, NumberField, Select, Switch, TextArea } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
-import { FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH } from "../contracts";
+import { FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH } from "../contracts";
 import { faqTexts } from "./locale";
 import {
   createFaqEntry,
@@ -28,7 +28,7 @@ interface FaqDraft {
   chatTarget: FaqEntry["chatTarget"];
 }
 
-const emptyDraft = (): FaqDraft => ({ name: "", patterns: "", answerBlock: "", cooldownSeconds: 0, games: [], chatTarget: "source_only" });
+const emptyDraft = (): FaqDraft => ({ name: "", patterns: "", answerBlock: "", cooldownSeconds: FAQ_COOLDOWN_MINIMUM_SECONDS, games: [], chatTarget: "source_only" });
 
 const draftFromEntry = (entry: FaqEntry): FaqDraft => ({
   name: entry.name,
@@ -44,7 +44,7 @@ const inputFromDraft = (draft: FaqDraft): FaqMutationInput | null => {
   if (draft.name.trim().length === 0 || draft.answerBlock.length === 0 || patterns.length === 0 ||
       patterns.length > FAQ_PATTERN_MAXIMUM_COUNT || patterns.some((pattern) => pattern.length > FAQ_PATTERN_MAX_LENGTH) ||
       typeof draft.cooldownSeconds !== "number" || !Number.isInteger(draft.cooldownSeconds) ||
-      draft.cooldownSeconds < 0 || draft.cooldownSeconds > FAQ_COOLDOWN_MAXIMUM_SECONDS) return null;
+      draft.cooldownSeconds < FAQ_COOLDOWN_MINIMUM_SECONDS || draft.cooldownSeconds > FAQ_COOLDOWN_MAXIMUM_SECONDS) return null;
   return {
     name: draft.name.trim(),
     matcher: { type: "keywords", patterns },
@@ -102,6 +102,10 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
 
   const save = async (): Promise<void> => {
     if (draft === null) return;
+    if (typeof draft.cooldownSeconds === "number" && draft.cooldownSeconds < FAQ_COOLDOWN_MINIMUM_SECONDS) {
+      setError(labels.cooldownMinError);
+      return;
+    }
     const input = inputFromDraft(draft);
     if (input === null) { setError(labels.saveError); return; }
     setPending(true);
@@ -114,7 +118,8 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
       await reload();
     } catch (failure: unknown) {
       const code = faqErrorCode(failure);
-      setError(code === "faq_block_input_dependent" ? labels.inputDependentBlock
+      setError(code === "faq_cooldown_too_short" ? labels.cooldownMinError
+        : code === "faq_block_input_dependent" ? labels.inputDependentBlock
         : code === "faq_block_missing" ? labels.missingBlock
           : code === "faq_entry_limit_reached" ? labels.entryLimit : labels.saveError);
     } finally { setPending(false); }
@@ -178,7 +183,7 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
                 <Switch
                   ariaLabel={`${entry.name}: ${entry.enabled ? labels.enabled : labels.disabled}`}
                   checked={entry.enabled}
-                  disabled={!canManage}
+                  disabled={busyEntryId !== null && busyEntryId !== entry.id}
                   pending={busyEntryId === entry.id}
                   onChange={(enabled) => { void toggle(entry, enabled); }}
                 />
@@ -230,7 +235,7 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
             hint={labels.cooldownHint}
             value={draft.cooldownSeconds}
             onChange={(cooldownSeconds) => patchDraft({ cooldownSeconds })}
-            min={0}
+            min={FAQ_COOLDOWN_MINIMUM_SECONDS}
             max={FAQ_COOLDOWN_MAXIMUM_SECONDS}
             unit="s"
             disabled={pending}

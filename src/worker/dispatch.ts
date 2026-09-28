@@ -1,5 +1,5 @@
 import type { EventCode } from "../contracts/values";
-import type { BotModule, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState } from "../modules/contract";
+import type { BotModule, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatDelivery, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState } from "../modules/contract";
 import type { RealtimeMessage } from "../realtime-contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../modules/registry";
 import {
@@ -328,8 +328,17 @@ const runActions = async (
   // Order is preserved: a reply after an announcement reads as a different
   // conversation than the reverse.
   for (const action of actions) {
+    const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
+      if (action.kind !== "chat" || action.onDelivery === undefined) return;
+      try {
+        await action.onDelivery(delivery);
+      } catch (error: unknown) {
+        diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
+      }
+    };
     if (chatOutputSuppressionReason({ moduleEnabled: true, mandatory: true, paused: false, muted }) !== null &&
         (action.kind === "chat" || action.kind === "announcement" || action.kind === "shoutout")) {
+      await reportDelivery("not_attempted");
       diagnostics.push({
         code: "host.action.suppressed" satisfies EventCode,
         detail: { action: action.kind, reason: "channel_muted" },
@@ -338,6 +347,22 @@ const runActions = async (
     }
     try {
       if (action.kind === "chat") {
+        let outputClaimed = false;
+        const claimBeforePost = action.automated === false ? undefined : async (): Promise<boolean | "rate_limited"> => {
+          if (outputClaimed) return true;
+          if (environment.CHANNEL === undefined) {
+            outputClaimed = true;
+            return true;
+          }
+          try {
+            outputClaimed = await environment.CHANNEL
+              .get(environment.CHANNEL.idFromName(channelId))
+              .claimAutomatedChatOutput();
+            return outputClaimed ? true : "rate_limited";
+          } catch {
+            return "rate_limited";
+          }
+        };
         const result = await sendChatMessage(
           environment,
           channelId,
@@ -345,28 +370,57 @@ const runActions = async (
           action.replyToMessageId,
           fetcher,
           undefined,
-          undefined,
+          claimBeforePost,
           attributions,
           undefined,
           action.target ?? "source_only",
           sourceBroadcasterUserId,
         );
+        await reportDelivery(result.delivery);
         if (result.truncated) {
           diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
         }
         diagnostics.push(result.sent
           ? { code: "host.chat.sent" satisfies EventCode, detail: result.detail }
-          : { code: "host.chat.failed" satisfies EventCode, detail: { reason: result.reason, ...result.detail } });
+          : result.reason === "rate_limited"
+            ? { code: "host.chat.skipped" satisfies EventCode, detail: { reason: "automated_output_rate_limited", ...result.detail } }
+            : { code: "host.chat.failed" satisfies EventCode, detail: { reason: result.reason, ...result.detail } });
         continue;
       }
       if (action.kind === "announcement") {
         const target = action.target ?? "source_only";
-        const result = await sendChatAnnouncement(environment, channelId, action.text, fetcher, attributions, target, sourceBroadcasterUserId);
+        let outputClaimed = false;
+        const claimBeforePost = action.automated === false ? undefined : async (): Promise<boolean> => {
+          if (outputClaimed) return true;
+          if (environment.CHANNEL === undefined) {
+            outputClaimed = true;
+            return true;
+          }
+          try {
+            outputClaimed = await environment.CHANNEL
+              .get(environment.CHANNEL.idFromName(channelId))
+              .claimAutomatedChatOutput();
+            return outputClaimed;
+          } catch {
+            return false;
+          }
+        };
+        const result = await sendChatAnnouncement(
+          environment, channelId, action.text, fetcher, attributions, target, sourceBroadcasterUserId, claimBeforePost,
+        );
         if (result.truncated) {
           diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
         }
         if (result.sent) {
           diagnostics.push({ code: "host.announcement.sent" satisfies EventCode, detail: result.detail });
+          continue;
+        }
+
+        if (result.reason === "rate_limited") {
+          diagnostics.push({
+            code: "host.chat.skipped" satisfies EventCode,
+            detail: { reason: "automated_output_rate_limited", ...result.detail },
+          });
           continue;
         }
 
@@ -378,7 +432,7 @@ const runActions = async (
             undefined,
             fetcher,
             undefined,
-            undefined,
+            claimBeforePost === undefined ? undefined : async () => outputClaimed || await claimBeforePost(),
             attributions,
             undefined,
             target,
@@ -458,6 +512,7 @@ const runActions = async (
         await publishRealtimeMessages(environment.CHANNEL, [prepared.message]);
       }
     } catch (error: unknown) {
+      await reportDelivery("ambiguous");
       // A failed action must not suppress the subsequent ordered actions,
       // e.g. the chat message after a shoutout.
       diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
@@ -608,6 +663,11 @@ export const dispatchEventSubNotification = async (
   const botUserId = (): Promise<string | null> => {
     botUserIdPromise ??= getCachedBotUserId(environment.DB);
     return botUserIdPromise;
+  };
+  const isRecentBotMessage = async (senderId: string | null, text: string): Promise<boolean> => {
+    if (environment.CHANNEL === undefined) return false;
+    const channelObject = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+    return await channelObject.isRecentBotChatMessage(senderId, text);
   };
   const channelDetails = (): Promise<TemplateChannelDetails | null> => {
     channelDetailsPromise ??= channelDetailsFor(environment, event.channelId, appAccessToken, fetcher);
@@ -764,6 +824,7 @@ export const dispatchEventSubNotification = async (
             DB: environment.DB,
             authorizeMutation: authorizeModuleMutation,
             botUserId,
+            isRecentBotMessage,
             streamState,
             streamStateTransitionAccepted,
             chatActivityCount: async () => {

@@ -6,7 +6,7 @@ CREATE TABLE faq_entries (
   matcher_type TEXT NOT NULL DEFAULT 'keywords' CHECK (matcher_type IN ('keywords', 'regex')),
   matcher_json TEXT NOT NULL CHECK (json_valid(matcher_json) AND json_type(matcher_json) = 'object'),
   answer_block TEXT NOT NULL CHECK (answer_block NOT GLOB '*[^a-z0-9_]*' AND length(answer_block) BETWEEN 1 AND 32),
-  cooldown_seconds INTEGER NOT NULL DEFAULT 0 CHECK (cooldown_seconds BETWEEN 0 AND 86400),
+  cooldown_seconds INTEGER NOT NULL DEFAULT 30 CHECK (cooldown_seconds BETWEEN 30 AND 86400),
   games_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(games_json) AND json_type(games_json) = 'array'),
   chat_target TEXT NOT NULL DEFAULT 'source_only' CHECK (chat_target IN ('all_chats', 'source_only', 'where_asked')),
   sort_order INTEGER NOT NULL DEFAULT 0,

@@ -1,7 +1,13 @@
+import {
+  AUTOMATED_CHAT_OUTPUT_INTERVAL_MS,
+  AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY,
+  claimAutomatedChatOutputInTransaction,
+} from "./automated-chat-output";
+
 export const MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY = "module_alarm:send_claims";
-export const MODULE_ALARM_SEND_LAST_ATTEMPT_STORAGE_KEY = "module_alarm:last_chat_attempt";
+export const MODULE_ALARM_SEND_LAST_ATTEMPT_STORAGE_KEY = AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY;
 export const MODULE_ALARM_SEND_CLAIM_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
-export const MODULE_ALARM_SEND_INTERVAL_MS = 5_000;
+export const MODULE_ALARM_SEND_INTERVAL_MS = AUTOMATED_CHAT_OUTPUT_INTERVAL_MS;
 
 export type ModuleAlarmDelivery = "sent" | "rejected" | "ambiguous";
 export type ModuleAlarmSendClaim = { status: "sending" | "sent"; at: number };
@@ -33,11 +39,9 @@ export const claimModuleAlarmSend = async (
   const cutoff = now - MODULE_ALARM_SEND_CLAIM_RETENTION_MS;
   const claims = Object.fromEntries(Object.entries(previousClaims).filter(([, value]) => timestampOf(value) >= cutoff));
   if (Object.hasOwn(claims, occurrenceKey)) return false;
-  const lastAttemptAt = await transaction.get(MODULE_ALARM_SEND_LAST_ATTEMPT_STORAGE_KEY);
-  if (typeof lastAttemptAt === "number" && now - lastAttemptAt < MODULE_ALARM_SEND_INTERVAL_MS) return "rate_limited";
+  if (!await claimAutomatedChatOutputInTransaction(transaction, now)) return "rate_limited";
   claims[occurrenceKey] = { status: "sending", at: now } satisfies ModuleAlarmSendClaim;
   await transaction.put(MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY, claims);
-  await transaction.put(MODULE_ALARM_SEND_LAST_ATTEMPT_STORAGE_KEY, now);
   return true;
 });
 

@@ -1907,7 +1907,11 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.action.suppressed": (detail) => `Aktion unterdrückt: ${detail.action === "chat" ? "Chatnachricht" : detail.action === "announcement" ? "Ankündigung" : "Shoutout"} wegen Kanal-Stummschaltung`,
     "host.chat.failed": "Chat-Nachricht fehlgeschlagen",
     "host.chat.sent": "Chat-Nachricht gesendet",
-    "host.chat.skipped": "Chat-Nachricht übersprungen: Zeitplan hat sich in letzter Sekunde geändert",
+    "host.chat.skipped": (detail) => detail.reason === "automated_output_rate_limited"
+      ? "Automatische Chat-Ausgabe wegen des 5-Sekunden-Limits übersprungen"
+      : detail.reason === "stale_before_send"
+        ? "Chat-Nachricht übersprungen: Zeitplan hat sich in letzter Sekunde geändert"
+        : "Chat-Nachricht vor dem Senden übersprungen",
     "host.announcement.sent": (detail) => `Chat-Ankündigung gesendet: ${detailText(detail, "text", "ohne Text")}`,
     "host.announcement.failed": (detail) => {
       const reason = eventCauseText("host.announcement.failed", detail, "de") ?? "unbekannter Grund";
@@ -2007,7 +2011,11 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.action.suppressed": (detail) => `Action suppressed: ${detail.action === "chat" ? "chat message" : detail.action === "announcement" ? "announcement" : "shoutout"} while the channel is muted`,
     "host.chat.failed": "Chat message failed",
     "host.chat.sent": "Chat message sent",
-    "host.chat.skipped": "Chat message skipped: schedule changed at the last moment",
+    "host.chat.skipped": (detail) => detail.reason === "automated_output_rate_limited"
+      ? "Automated chat output skipped by the five-second channel limit"
+      : detail.reason === "stale_before_send"
+        ? "Chat message skipped: schedule changed at the last moment"
+        : "Chat message skipped before sending",
     "host.announcement.sent": (detail) => `Chat announcement sent: ${detailText(detail, "text", "no text")}`,
     "host.announcement.failed": (detail) => {
       const reason = eventCauseText("host.announcement.failed", detail, "en") ?? "unknown reason";

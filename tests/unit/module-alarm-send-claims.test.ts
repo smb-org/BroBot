@@ -6,6 +6,7 @@ import {
   readModuleAlarmSendClaim,
   type ClaimStorage,
 } from "../../src/worker/durable/module-alarm-send-claims";
+import { claimAutomatedChatOutput } from "../../src/worker/durable/automated-chat-output";
 
 const storageFor = (): ClaimStorage => {
   const values = new Map<string, unknown>();
@@ -48,11 +49,13 @@ describe("module alarm send claims", () => {
     expect(await claimModuleAlarmSend(storage, "occurrence-b", 25_000)).toBe(false);
   });
 
-  it("limits timer alarm posts to one attempt per channel every five seconds", async () => {
+  it("shares the five-second channel limit with other automated chat outputs", async () => {
     const storage = storageFor();
 
     expect(await claimModuleAlarmSend(storage, "first", 10_000)).toBe(true);
-    expect(await claimModuleAlarmSend(storage, "second", 14_999)).toBe("rate_limited");
-    expect(await claimModuleAlarmSend(storage, "second", 15_000)).toBe(true);
+    expect(await claimAutomatedChatOutput(storage, 14_999)).toBe(false);
+    expect(await claimAutomatedChatOutput(storage, 15_000)).toBe(true);
+    expect(await claimModuleAlarmSend(storage, "second", 19_999)).toBe("rate_limited");
+    expect(await claimModuleAlarmSend(storage, "second", 20_000)).toBe(true);
   });
 });

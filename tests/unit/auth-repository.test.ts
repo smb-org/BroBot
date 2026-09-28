@@ -23,6 +23,7 @@ import {
 } from "../../src/worker/db/sessions";
 import {
   getBotIdentity,
+  getCachedBotUserId,
   getBotIdentityStatus,
   rotateBotTokens as rotateBotTokensBase,
   setBotIdentityStatusIfCurrent,
@@ -687,6 +688,30 @@ describe("auth D1 repository", () => {
         accessTokenCiphertext: "access-ciphertext",
         refreshTokenCiphertext: "refresh-ciphertext",
       });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("checks the D1 identity revision before reusing an isolate-local bot id", async () => {
+    const database = new TestD1Database();
+    try {
+      await upsertBotIdentity(database as unknown as D1Database, {
+        id: 1,
+        userId: "first-bot",
+        login: "firstbot",
+        scopesJson: "[]",
+        accessTokenCiphertext: "first-access",
+        refreshTokenCiphertext: "first-refresh",
+        expiresAt: "2026-09-18T02:00:00.000Z",
+        createdAt: "2026-09-18T00:00:00.000Z",
+        updatedAt: "2026-09-18T00:00:00.000Z",
+      });
+      await expect(getCachedBotUserId(database as unknown as D1Database)).resolves.toBe("first-bot");
+
+      await database.prepare("UPDATE bot_identity SET user_id = ?, updated_at = ? WHERE id = 1")
+        .bind("second-bot", "2026-09-18T00:00:01.000Z").run();
+      await expect(getCachedBotUserId(database as unknown as D1Database)).resolves.toBe("second-bot");
     } finally {
       database.close();
     }

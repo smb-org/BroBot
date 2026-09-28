@@ -19,6 +19,7 @@ export const normalizeFaqText = (value: string): string => value
   .normalize("NFD")
   .replace(combiningMarks, "")
   .toLowerCase()
+  .replace(/\u00DF/gu, "ss")
   .replace(/\s+/gu, " ")
   .trim();
 
@@ -38,13 +39,17 @@ const codePointAfter = (value: string, offset: number): string => {
 };
 
 const hasWholeWordOccurrence = (message: string, pattern: string): boolean => {
+  const needsLeftBoundary = /^[\p{L}\p{N}]/u.test(pattern);
+  const needsRightBoundary = /[\p{L}\p{N}]$/u.test(pattern);
   let from = 0;
   while (from <= message.length - pattern.length) {
     const index = message.indexOf(pattern, from);
     if (index < 0) return false;
     const before = codePointBefore(message, index);
     const after = codePointAfter(message, index + pattern.length);
-    if ((!wordCharacter.test(before) || before.length === 0) && (!wordCharacter.test(after) || after.length === 0)) return true;
+    const leftMatches = !needsLeftBoundary || before.length === 0 || !wordCharacter.test(before);
+    const rightMatches = !needsRightBoundary || after.length === 0 || !wordCharacter.test(after);
+    if (leftMatches && rightMatches) return true;
     from = index + 1;
   }
   return false;

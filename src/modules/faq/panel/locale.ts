@@ -10,6 +10,7 @@ export interface FaqTexts {
   answer: string;
   cooldown: string;
   cooldownHint: string;
+  cooldownMinError: string;
   games: string;
   gamesHint: string;
   chatTarget: string;
@@ -57,7 +58,8 @@ const catalog: LocaleCatalog<FaqTexts> = {
   de: {
     title: "FAQ & Auto-Antworten", add: "FAQ-Eintrag anlegen", name: "Name", patterns: "Schlüsselwörter und Wortgruppen",
     patternsHint: "Ein Eintrag pro Zeile. Groß-/Kleinschreibung und Akzente werden ignoriert; Wörter müssen vollständig übereinstimmen.",
-    answer: "Antwort-Textbaustein", cooldown: "Abkühlzeit", cooldownHint: "0 = keine Abkühlzeit; höchstens 86.400 Sekunden.",
+    answer: "Antwort-Textbaustein", cooldown: "Abkühlzeit", cooldownHint: "Mindestens 30 Sekunden; höchstens 86.400 Sekunden.",
+    cooldownMinError: "Die Abkühlzeit muss mindestens 30 Sekunden betragen.",
     games: "Spiele", gamesHint: "Ohne Auswahl gilt der Eintrag für jedes Spiel.", chatTarget: "Chat-Ziel", enabled: "Aktiviert", disabled: "Deaktiviert",
     create: "Eintrag anlegen", edit: "Eintrag bearbeiten", save: "Speichern", cancel: "Abbrechen", delete: "Entfernen",
     deleteConfirm: "Diesen FAQ-Eintrag wirklich entfernen?", moveUp: "In der Reihenfolge nach oben", moveDown: "In der Reihenfolge nach unten",
@@ -78,7 +80,8 @@ const catalog: LocaleCatalog<FaqTexts> = {
   en: {
     title: "FAQ & Auto replies", add: "Create FAQ entry", name: "Name", patterns: "Keywords and phrases",
     patternsHint: "One per line. Case and accents are ignored; words must match in full.", answer: "Answer text block", cooldown: "Cooldown",
-    cooldownHint: "0 = no cooldown; up to 86,400 seconds.", games: "Games", gamesHint: "Leave empty to use this entry for every game.",
+    cooldownHint: "At least 30 seconds; up to 86,400 seconds.", cooldownMinError: "Cooldown must be at least 30 seconds.",
+    games: "Games", gamesHint: "Leave empty to use this entry for every game.",
     chatTarget: "Chat target", enabled: "Enabled", disabled: "Disabled", create: "Create entry", edit: "Edit entry", save: "Save",
     cancel: "Cancel", delete: "Delete", deleteConfirm: "Remove this FAQ entry?", moveUp: "Move earlier in the order", moveDown: "Move later in the order",
     testHeading: "Test a match", testMessage: "Chat message", testButton: "Check message", testNoMatch: "No enabled entry matches.",

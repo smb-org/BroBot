@@ -124,10 +124,10 @@ export const createFaqRepository = (db: D1Database): FaqRepository => ({
           SET last_used_at = ?
         WHERE channel_id = ? AND faq_id = ? AND enabled = 1 AND revision = ?
           AND matcher_type = 'keywords'
-          AND (cooldown_seconds = 0 OR last_used_at IS NULL OR
+          AND (last_used_at IS NULL OR
                julianday(last_used_at) <= julianday(?) - cooldown_seconds / 86400.0)`,
     ).bind(now, channelId, entry.id, entry.revision, now).run();
-    if (result.meta.changes > 0) return { claimed: true };
+    if (result.meta.changes > 0) return { claimed: true, claimedAt: now };
     const current = await db.prepare(
       "SELECT last_used_at, cooldown_seconds, enabled, revision FROM faq_entries WHERE channel_id = ? AND faq_id = ?",
     ).bind(channelId, entry.id).first<{ last_used_at: string | null; cooldown_seconds: number; enabled: number; revision: number }>();
@@ -137,6 +137,13 @@ export const createFaqRepository = (db: D1Database): FaqRepository => ({
       reason: "cooldown",
       remainingSeconds: remainingCooldown(current.last_used_at, now, current.cooldown_seconds),
     };
+  },
+  async releaseClaim(channelId, entry, claimedAt) {
+    await db.prepare(
+      `UPDATE faq_entries
+          SET last_used_at = ?
+        WHERE channel_id = ? AND faq_id = ? AND last_used_at = ?`,
+    ).bind(entry.lastUsedAt, channelId, entry.id, claimedAt).run();
   },
   invalidate(channelId) {
     cacheByDatabase.get(db)?.delete(channelId);

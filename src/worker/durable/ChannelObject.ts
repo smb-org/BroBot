@@ -41,6 +41,12 @@ import {
   finishModuleAlarmSend,
   readModuleAlarmSendClaim,
 } from "./module-alarm-send-claims";
+import {
+  claimAutomatedChatOutput,
+  claimAutomatedChatOutputInTransaction,
+  isRecentBotChatMessage,
+  recordRecentBotChatMessage,
+} from "./automated-chat-output";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -1006,6 +1012,8 @@ export class ChannelObject extends DurableObject<Env> {
           attributions,
           afterPost,
           target,
+          undefined,
+          (senderId, messageText) => this.recordBotChatMessage(senderId, messageText),
         );
         if (result.reason === "already_attempted") {
           const claim = await readModuleAlarmSendClaim(this.ctx.storage, idempotencyKey);
@@ -1036,6 +1044,18 @@ export class ChannelObject extends DurableObject<Env> {
       await transaction.put(CHAT_ACTIVITY_COUNT_KEY, next);
       return next;
     });
+  }
+
+  public async claimAutomatedChatOutput(): Promise<boolean> {
+    return claimAutomatedChatOutput(this.ctx.storage, Date.now());
+  }
+
+  public async isRecentBotChatMessage(senderId: string | null, text: string): Promise<boolean> {
+    return isRecentBotChatMessage(this.ctx.storage, senderId, text, Date.now());
+  }
+
+  public async recordBotChatMessage(senderId: string, text: string): Promise<void> {
+    await recordRecentBotChatMessage(this.ctx.storage, senderId, text, Date.now());
   }
 
   public async getChatActivityCount(): Promise<number> {
@@ -1705,11 +1725,13 @@ export class ChannelObject extends DurableObject<Env> {
           const claims = typeof stored === "number" ? { [String(stored)]: stored } : stored ?? {};
           const key = String(scheduledDueAtMs);
           if (Object.hasOwn(claims, key)) return false;
+          if (!await claimAutomatedChatOutputInTransaction(transaction, Date.now())) return false;
           const pruned = prunePrewarningClaims(claims, Date.now());
           pruned[key] = scheduledDueAtMs;
           await transaction.put(AD_PREWARNING_SEND_CLAIM_KEY, pruned);
           return true;
         }),
+        recordSentChatMessage: (senderId, text) => this.recordBotChatMessage(senderId, text),
         storeSchedule: async (schedule, asOf, options) => {
           return await this.storeAdSchedule(
             schedule,

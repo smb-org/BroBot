@@ -923,6 +923,27 @@ describe("ChannelObject realtime path", () => {
     expect(await object.getChatActivityCount()).toBe(1);
   });
 
+  it("shares automated output claims and remembers recent bot messages per channel", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(20_000);
+    const object = objectFor([]);
+
+    expect(await object.claimAutomatedChatOutput()).toBe(true);
+    expect(await object.claimAutomatedChatOutput()).toBe(false);
+    await object.recordBotChatMessage("previous-bot", "The answer is 42.");
+    expect(await object.isRecentBotChatMessage("previous-bot", "A different message")).toBe(true);
+    expect(await object.isRecentBotChatMessage("viewer", "The answer is 42.")).toBe(true);
+    for (let index = 0; index < 21; index += 1) {
+      await object.recordBotChatMessage("current-bot", `Current answer ${String(index)}.`);
+    }
+    expect(await object.isRecentBotChatMessage("previous-bot", "A different message")).toBe(true);
+    expect(await object.isRecentBotChatMessage("viewer", "The answer is 42.")).toBe(false);
+
+    vi.setSystemTime(20_000 + 10 * 60_000 + 1);
+    expect(await object.isRecentBotChatMessage("previous-bot", "A different message")).toBe(false);
+    expect(await object.isRecentBotChatMessage("viewer", "The answer is 42.")).toBe(false);
+  });
+
   it("rejects stale module alarm revisions after a newer schedule or clear", async () => {
     const object = objectFor([]);
     const alarmKey = "module:timers:timer:timer-a";

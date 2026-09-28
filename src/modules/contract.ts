@@ -391,9 +391,20 @@ export const apiErrorDetail = (
 };
 
 /** A semantically well-named module action for the host to execute. */
+export type ModuleChatDelivery = "sent" | "rejected" | "ambiguous" | "not_attempted";
+
 export type ModuleAction =
-  | { kind: "chat"; text: string; target?: ChatOutputTarget; replyToMessageId?: string }
-  | { kind: "announcement"; text: string; target?: ChatOutputTarget }
+  | {
+    kind: "chat";
+    text: string;
+    target?: ChatOutputTarget;
+    replyToMessageId?: string;
+    /** Chat outputs are automated by default; direct command responses set this false. */
+    automated?: boolean;
+    /** Lets a module finalize a claim after the host knows the delivery outcome. */
+    onDelivery?: (delivery: ModuleChatDelivery) => Promise<void>;
+  }
+  | { kind: "announcement"; text: string; target?: ChatOutputTarget; automated?: boolean }
   | { kind: "shoutout"; targetChannelId: string }
   | { kind: "shoutout"; targetLogin: string }
   | {
@@ -487,6 +498,8 @@ export interface ModuleExecutionContext {
   authorizeMutation: AuthorizeModuleMutation;
   /** Lazily resolves the connected bot identity so modules can ignore its own chat messages. */
   botUserId?: () => Promise<string | null>;
+  /** Checks the channel's recent bot send history for an identity or exact text match. */
+  isRecentBotMessage?: (senderId: string | null, text: string) => Promise<boolean>;
   /** True only when this EventSub notification committed a real stream-state transition. */
   streamStateTransitionAccepted?: boolean;
   streamState: () => Promise<ModuleStreamState>;
@@ -537,7 +550,7 @@ export interface ModuleAlarmContext {
   clear: (key: string, ownerRevision?: number) => Promise<void>;
   /** Renders a host template in the channel's event context. */
   renderTemplate: (text: string, now?: number) => Promise<{ text: string; attributions?: readonly string[] }>;
-  /** Sends through the host's bounded chat boundary with an occurrence claim. */
+  /** Sends scheduled automated output through the shared channel limit with an occurrence claim. */
   sendChat: (
     text: string,
     idempotencyKey: string,

@@ -6,6 +6,7 @@ export const FAQ_ENTRY_NAME_MAX_LENGTH = 60;
 export const FAQ_PATTERN_MAXIMUM_COUNT = 20;
 export const FAQ_PATTERN_MAX_LENGTH = 80;
 export const FAQ_COOLDOWN_MAXIMUM_SECONDS = 86_400;
+export const FAQ_COOLDOWN_MINIMUM_SECONDS = 30;
 export const FAQ_GAME_MAXIMUM_COUNT = 10;
 
 export type FaqMatcher =

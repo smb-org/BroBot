@@ -45,7 +45,17 @@ const environment = (database: TestD1Database, publish = vi.fn()) => ({
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
   TOKEN_ENCRYPTION_KEYS: keyRing,
-  CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ publish }) } as unknown as Env["CHANNEL"],
+  CHANNEL: {
+    idFromName: (channelId: string) => channelId,
+    get: () => ({
+      publish,
+      recordChatActivity: vi.fn().mockResolvedValue(0),
+      claimAutomatedChatOutput: vi.fn().mockResolvedValue(true),
+      recordBotChatMessage: vi.fn().mockResolvedValue(undefined),
+      isRecentBotChatMessage: vi.fn().mockResolvedValue(false),
+      getChatActivityCount: vi.fn().mockResolvedValue(0),
+    }),
+  } as unknown as Env["CHANNEL"],
 });
 
 const chatResponse = (body: unknown, status = 200) =>
@@ -185,6 +195,65 @@ describe("dispatch and execution", () => {
       });
 
       expect(bodyOf(fetcher)).toMatchObject({ for_source_only: forSourceOnly });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("drops automated chat output when the shared channel limit is occupied", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      const deliveryOutcomes: string[] = [];
+      const module = fakeModule("automated-module", () => ({
+        actions: [{
+          kind: "chat",
+          text: "Automatic response",
+          automated: true,
+          onDelivery: (delivery) => {
+            deliveryOutcomes.push(delivery);
+            return Promise.resolve();
+          },
+        }],
+        diagnostics: [],
+      }));
+      await activate(database, "kanal-a", module.id);
+      const baseEnvironment = environment(database);
+      const claimAutomatedChatOutput = vi.fn().mockResolvedValue(false);
+      const runtime = {
+        ...baseEnvironment,
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: () => ({
+            publish: vi.fn(),
+            recordChatActivity: vi.fn().mockResolvedValue(0),
+            claimAutomatedChatOutput,
+            recordBotChatMessage: vi.fn().mockResolvedValue(undefined),
+            isRecentBotChatMessage: vi.fn().mockResolvedValue(false),
+            getChatActivityCount: vi.fn().mockResolvedValue(0),
+          }),
+        },
+      } as unknown as Env;
+      const fetcher = sent();
+
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "automated-output-limited",
+        payload: {
+          message: { text: "A viewer message" },
+          chatter_user_id: "viewer-1",
+          chatter_user_login: "alice",
+        },
+        receivedAt: NOW,
+      }, fetcher, [module]);
+
+      expect(claimAutomatedChatOutput).toHaveBeenCalledOnce();
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(deliveryOutcomes).toEqual(["not_attempted"]);
+      await expect(eventLog(database)).resolves.toMatchObject([
+        { module_id: module.id, code: "host.chat.skipped" },
+      ]);
     } finally {
       database.close();
     }

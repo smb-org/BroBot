@@ -29,22 +29,34 @@ export const processFaqMessage = async (
   const senderId = typeof event.payload.chatter_user_id === "string" ? event.payload.chatter_user_id : null;
   const botUserId = await context.botUserId?.() ?? null;
   if (botUserId === null || senderId === botUserId) return { actions: [], diagnostics: [] };
+  if (await context.isRecentBotMessage?.(senderId, text)) return { actions: [], diagnostics: [] };
 
-  const result = await testFaqMessage(repository, event.channelId, text);
+  const prepared = await repository.matchers(event.channelId);
+  const needsGame = prepared.some(({ entry }) => entry.games.length > 0);
+  const currentGameId = needsGame
+    ? await (context.channelGameId ?? (() => Promise.resolve(null)))()
+    : null;
+  const eligible = prepared.filter(({ entry }) => entry.games.length === 0 ||
+    (currentGameId !== null && entry.games.some((game) => game.id === currentGameId)));
+  const result = firstFaqMatch(eligible, text);
   const match = result.match;
   if (match === null) return { actions: [], diagnostics: [] };
-  if (match.entry.games.length > 0) {
-    const currentGameId = await (context.channelGameId ?? (() => Promise.resolve(null)))();
-    if (currentGameId !== null && !match.entry.games.some((game) => game.id === currentGameId)) {
-      return { actions: [], diagnostics: [] };
-    }
-  }
-
-  const claim = await repository.claim(event.channelId, match.entry, event.receivedAt);
-  if (!claim.claimed) return { actions: [], diagnostics: [] };
   const rendered = await context.renderTemplate(`{${match.entry.answerBlock}}`, {});
+  if (rendered.text.length === 0) return { actions: [], diagnostics: rendered.diagnostics };
+  const claim = await repository.claim(event.channelId, match.entry, new Date().toISOString());
+  if (!claim.claimed) return { actions: [], diagnostics: [] };
   return {
-    actions: rendered.text.length === 0 ? [] : [{ kind: "chat", text: rendered.text, target: match.entry.chatTarget }],
+    actions: [{
+      kind: "chat",
+      text: rendered.text,
+      target: match.entry.chatTarget,
+      automated: true,
+      onDelivery: async (delivery) => {
+        if (delivery === "rejected" || delivery === "not_attempted") {
+          await repository.releaseClaim(event.channelId, match.entry, claim.claimedAt);
+        }
+      },
+    }],
     diagnostics: rendered.diagnostics,
     ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
   };

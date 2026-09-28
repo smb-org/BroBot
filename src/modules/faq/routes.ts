@@ -3,7 +3,7 @@ import { canManage, type AuditAction } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { validateEventTextBlock } from "../contracts/text-block-validation";
 import { createFaqRepository, mapFaqEntryRow, type FaqEntryRow } from "./adapters/d1";
-import { FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_ENTRY_MAXIMUM_COUNT, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_GAME_MAXIMUM_COUNT, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_MODULE_ID } from "./contracts";
+import { FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_MAXIMUM_COUNT, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_GAME_MAXIMUM_COUNT, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_MODULE_ID } from "./contracts";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "./contracts";
 import { firstFaqMatch, validFaqMatcher } from "./domain";
 
@@ -41,7 +41,7 @@ const parseMutation = (value: unknown): FaqMutationInput | null => {
   if (!isRecord(value) || typeof value.name !== "string" || value.name.trim().length < 1 ||
       value.name.trim().length > FAQ_ENTRY_NAME_MAX_LENGTH || !validFaqMatcher(value.matcher) ||
       typeof value.answerBlock !== "string" || !BLOCK_NAME_PATTERN.test(value.answerBlock) ||
-      !Number.isSafeInteger(value.cooldownSeconds) || (value.cooldownSeconds as number) < 0 ||
+      !Number.isSafeInteger(value.cooldownSeconds) || (value.cooldownSeconds as number) < FAQ_COOLDOWN_MINIMUM_SECONDS ||
       (value.cooldownSeconds as number) > FAQ_COOLDOWN_MAXIMUM_SECONDS ||
       (value.chatTarget !== "all_chats" && value.chatTarget !== "source_only" && value.chatTarget !== "where_asked")) return null;
   const games = parseGames(value.games);
@@ -96,6 +96,10 @@ const validateAnswer = async (
 const authorizationFor = (context: FaqRouteContext, channelId: string, now: string) =>
   context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
 
+const cooldownTooShort = (value: unknown): boolean =>
+  isRecord(value) && Number.isSafeInteger(value.cooldownSeconds) &&
+  (value.cooldownSeconds as number) < FAQ_COOLDOWN_MINIMUM_SECONDS;
+
 export const faqRoutes = new Hono<ModuleRouteEnvironment>();
 
 faqRoutes.get("/entries", async (context) => {
@@ -106,7 +110,9 @@ faqRoutes.get("/entries", async (context) => {
 faqRoutes.post("/entries", async (context) => {
   if (!canManage(context.get("channelRole"))) return denied(context);
   const channelId = context.req.param("channelId") ?? "";
-  const input = parseMutation(await readBody(context.req.raw));
+  const body = await readBody(context.req.raw);
+  if (cooldownTooShort(body)) return context.json({ error: "faq_cooldown_too_short" }, 400);
+  const input = parseMutation(body);
   if (input === null) return context.json({ error: "faq_entry_invalid" }, 400);
   const invalidBlock = await validateAnswer(context, channelId, input.answerBlock);
   if (invalidBlock !== null) return context.json({ error: invalidBlock }, 400);
@@ -157,6 +163,7 @@ faqRoutes.patch("/entries/:entryId", async (context) => {
   if (!isRecord(body) || !Number.isSafeInteger(body.revision) || (body.revision as number) < 1) {
     return context.json({ error: "faq_entry_invalid" }, 400);
   }
+  if (cooldownTooShort(body)) return context.json({ error: "faq_cooldown_too_short" }, 400);
   const input = parseMutation(body);
   if (input === null) return context.json({ error: "faq_entry_invalid" }, 400);
   const invalidBlock = await validateAnswer(context, channelId, input.answerBlock);
@@ -187,7 +194,6 @@ faqRoutes.patch("/entries/:entryId", async (context) => {
 });
 
 faqRoutes.patch("/entries/:entryId/enabled", async (context) => {
-  if (!canManage(context.get("channelRole"))) return denied(context);
   const channelId = context.req.param("channelId") ?? "";
   const entryId = context.req.param("entryId");
   const existing = await readEntry(context, channelId, entryId);
@@ -198,7 +204,7 @@ faqRoutes.patch("/entries/:entryId/enabled", async (context) => {
   }
   if (body.enabled === existing.enabled) return context.json({ entry: existing });
   const now = nowIso();
-  const authorization = authorizationFor(context, channelId, now);
+  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE faq_entries SET enabled = ?, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND faq_id = ? AND revision = ? ${authorization.sql}`,

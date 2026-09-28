@@ -28,6 +28,7 @@ export const sendChatAnnouncement = async (
     TWITCH_CLIENT_SECRET: string;
     TOKEN_ENCRYPTION_KEYS?: string;
     SESSION_ENCRYPTION_KEYS?: string;
+    CHANNEL?: Env["CHANNEL"];
   },
   channelId: string,
   text: string,
@@ -35,6 +36,7 @@ export const sendChatAnnouncement = async (
   attributions: readonly string[] = [],
   target: ChatOutputTarget = "source_only",
   sourceBroadcasterUserId?: string | null,
+  claimBeforePost?: () => Promise<boolean>,
 ): Promise<AnnouncementSendResult> => {
   const preparedText = truncateChatTextWithAttributions(text, attributions);
   const detail = { text: truncateTo200Chars(preparedText.text) };
@@ -67,6 +69,10 @@ export const sendChatAnnouncement = async (
     return { sent: false, truncated: preparedText.truncated, reason: "app_token_unavailable", detail };
   }
 
+  if (claimBeforePost !== undefined && !await claimBeforePost()) {
+    return { sent: false, truncated: preparedText.truncated, reason: "rate_limited", detail };
+  }
+
   const result = await helixRequest({
     method: "POST",
     url: ANNOUNCEMENTS_URL,
@@ -87,6 +93,14 @@ export const sendChatAnnouncement = async (
       reason: result.reason,
       detail: { ...detail, status: result.status, twitchMessage: result.message },
     };
+  }
+  if (environment.CHANNEL !== undefined) {
+    try {
+      const channelObject = environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId));
+      await channelObject.recordBotChatMessage(identity.user_id, preparedText.text);
+    } catch (error: unknown) {
+      console.warn("Recent bot chat output could not be recorded.", error);
+    }
   }
   return { sent: true, truncated: preparedText.truncated, reason: null, detail };
 };

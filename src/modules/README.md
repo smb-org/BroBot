@@ -175,14 +175,17 @@ Registry aufgeführt und nutzt denselben Chat-Event-Typ. Die Dispatch-Reihenfolg
 folgt der Registry, damit Befehle vor automatischen Antworten verarbeitet
 werden. Das Modul ignoriert jede Nachricht mit Befehlspräfix und vergleicht
 Schlüsselwörter und Wortgruppen ohne Beachtung von Groß-/Kleinschreibung oder
-Akzenten, aber nur an Unicode-Wortgrenzen. Der erste Treffer in der expliziten
-Eintragsreihenfolge gewinnt. Ein kurzer pro-Kanal-Cache hält die vorbereiteten,
-normalisierten Matcher; lokale Schreibvorgänge leeren ihn sofort, und Cache-
-Einträge laufen nach fünf Sekunden ab. Die Abkühlzeit wird nicht aus dem Cache
-übernommen, sondern je Eintrag atomar in D1 beansprucht.
+Akzenten, mit `ß`/`ẞ` als `ss`. Buchstaben- und Ziffernseiten müssen an einer
+Unicode-Wortgrenze liegen; Symbolseiten wie Emojis dürfen überall stehen. Vor
+der Auswahl des ersten Treffers werden Spieleignung und bekannter Spielstatus
+geprüft. Ein kurzer pro-Kanal-Cache hält die vorbereiteten, normalisierten
+Matcher; lokale Schreibvorgänge leeren ihn sofort, und Cache-Einträge laufen
+nach fünf Sekunden ab. Die Abkühlzeit beträgt mindestens 30 Sekunden. D1
+reserviert sie vor dem Senden; bei Erfolg oder unklarem Ausgang bleibt sie
+bestehen, bei sicherem Nichtversand wird sie freigegeben.
 
 FAQ-Einträge wählen einen Textbaustein, eine optionale Spielauswahl, eine
-Abkühlzeit und eines der drei gemeinsamen Chat-Ziele. `source_only` bleibt der
+Abkühlzeit (mindestens 30 Sekunden) und eines der drei gemeinsamen Chat-Ziele. `source_only` bleibt der
 Standard. Antwortbausteine werden beim Speichern sowie über den generischen
 `validateTemplateContent`-Contract bei späteren Textbibliotheksänderungen auf
 Befehls-Eingabevariablen geprüft. Panel-Test, Aktivierung und Reihenfolge sind
@@ -329,6 +332,12 @@ Chatnachricht generisch vom Host an den Sender weitergereicht. Module kennen
 weder Twitchs `for_source_only`-Parameter noch implementieren sie eigene
 Shared-Chat-Versandlogik. Auto-Antworten (#245) können denselben
 `ModuleAction`-Contract verwenden.
+
+Automatische Chat-Ausgaben laufen durch eine gemeinsame Kanalbegrenzung von
+höchstens einer Nachricht je fünf Sekunden. Die Begrenzung gilt über Worker-
+Isolate hinweg; Ausgaben, die gerade keinen Platz haben, werden verworfen und
+nicht vorgemerkt. Direkt angeforderte Befehlsantworten kennzeichnet das Modul
+im Contract als nicht automatisch.
 
 Zusätzlich meldet ein Modul eine fachliche Entscheidung über das Feld
 `diagnostics`. Das gilt auch dann, wenn es keine Aktion erzeugt. So kann der
