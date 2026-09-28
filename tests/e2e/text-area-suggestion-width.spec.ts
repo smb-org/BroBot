@@ -95,17 +95,21 @@ test("the template variable suggestion dropdown is wide enough on desktop and fi
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await openSuggestions();
-  const desktopBox = await dropdown.boundingBox();
-  expect(desktopBox).not.toBeNull();
-  expect(desktopBox?.width ?? 0).toBeGreaterThanOrEqual(300);
+  // `toBeVisible()` above can observe the dropdown between a spurious
+  // close-and-reopen (a TextArea suggestion-query recompute racing the
+  // dropdown's own open); poll the measurement itself instead of taking a
+  // single snapshot, so a still-closing dropdown gets a retry instead of a
+  // null/undersized bounding box.
+  await expect.poll(async () => (await dropdown.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(300);
 
   // Fresh navigation resets the command's text, so the phone check starts
   // from the same pristine "Hallo {user}" instead of layering onto whatever
   // the desktop check typed.
   await page.setViewportSize({ width: 390, height: 844 });
   await openSuggestions();
-  const phoneBox = await dropdown.boundingBox();
-  expect(phoneBox).not.toBeNull();
-  expect(phoneBox?.x ?? 0).toBeGreaterThanOrEqual(0);
-  expect((phoneBox?.x ?? 0) + (phoneBox?.width ?? 0)).toBeLessThanOrEqual(390);
+  await expect.poll(async () => {
+    const box = await dropdown.boundingBox();
+    if (box === null) return null;
+    return box.x >= 0 && box.x + box.width <= 390;
+  }).toBe(true);
 });

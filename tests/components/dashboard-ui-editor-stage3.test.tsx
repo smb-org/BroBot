@@ -430,6 +430,32 @@ describe("template field", () => {
     expect(parentKeyDown).not.toHaveBeenCalledWith(expect.objectContaining({ key: "Escape" }));
   });
 
+  it("computes the suggestion query from the live DOM value on a native selection event, not a stale value prop", () => {
+    // Regression: a browser can fire the native `select` event for a
+    // keystroke's caret move before React re-renders with that keystroke's
+    // value. `onSelect` used to recompute the query against the closed-over
+    // `value` prop (still the pre-keystroke text) paired with the event's
+    // post-keystroke caret -- a mismatched pair that finds no unclosed "{"
+    // and closes/never opens the dropdown a correctly-paired computation
+    // would have opened.
+    function Harness() {
+      const [value] = useState("Hallo {user}");
+      return <TextArea label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={() => {}} messages={textAreaMessages} />;
+    }
+    renderUi(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Reply" });
+    if (!(input instanceof HTMLTextAreaElement)) throw new TypeError("Expected a template textarea.");
+    expect(input).toHaveAttribute("aria-expanded", "false");
+
+    // Mutate the DOM directly (as a real browser already has by the time it
+    // fires `select`) without going through `fireEvent.change`, so the React
+    // `value` prop stays one render behind the DOM's live text.
+    input.value = "Hallo {user}{";
+    input.setSelectionRange(13, 13);
+    fireEvent.select(input);
+    expect(input).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("keeps read-only text selectable and disables the variable picker", () => {
     renderUi(<TextArea label="Reply" hint="What the bot writes." value="Hi {user}" variables={templateOptions} readOnly onChange={() => {}} messages={textAreaMessages} />);
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAttribute("readonly");
