@@ -92,8 +92,12 @@ export const isRecentBotChatMessage = async (
   now: number,
 ): Promise<boolean> => {
   const stored = await storage.get(RECENT_BOT_CHAT_MESSAGES_STORAGE_KEY);
-  const messages = recentMessagesFrom(stored, now);
   const identities = recentIdentitiesFrom(stored, now);
-  return messages.some((message) => message.text === text) ||
-    (senderId !== null && identities.some((identity) => identity.senderId === senderId));
+  const isBotIdentity = senderId !== null && identities.some((identity) => identity.senderId === senderId);
+  if (isBotIdentity) return true;
+  // An ordinary viewer, identified by user id, cannot be the bot echoing its
+  // own output: only an unverified sender (no id) still needs the text guard.
+  if (senderId !== null) return false;
+  const messages = recentMessagesFrom(stored, now);
+  return messages.some((message) => message.text === text);
 };

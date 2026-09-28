@@ -211,6 +211,44 @@ describe("FAQ literal matcher", () => {
     }
   });
 
+  it("only resolves the current game for a keyword hit against a game-bound entry, never for a miss", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "channel-a");
+      await database.prepare(
+        `INSERT INTO faq_entries
+          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+           games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
+         VALUES
+          ('any-game', 'channel-a', 'Any game', 1, 'keywords', ?, 'sun', 30, '[]', 'source_only', 0, 1, NULL, ?, ?),
+          ('boss-fight', 'channel-a', 'Boss fight', 1, 'keywords', ?, 'night', 30, ?, 'source_only', 1, 1, NULL, ?, ?)`,
+      ).bind(
+        JSON.stringify({ type: "keywords", patterns: ["get dark"] }), NOW, NOW,
+        JSON.stringify({ type: "keywords", patterns: ["boss fight"] }), JSON.stringify([{ id: "77", name: "Game" }]), NOW, NOW,
+      ).run();
+      const repository = createFaqRepository(database as unknown as D1Database);
+      const context = contextFor(database, "77");
+
+      // A hundred unrelated messages: no keyword matches at all, so no
+      // channel lookup is ever needed.
+      for (let index = 0; index < 100; index += 1) {
+        await processFaqMessage({ ...eventFor("just chatting, nothing to see"), triggerId: `miss-${String(index)}` }, repository, context);
+      }
+      expect(context.channelGameId).not.toHaveBeenCalled();
+
+      // Matches an unrestricted entry: still no lookup needed.
+      await processFaqMessage({ ...eventFor("When does it get dark?"), triggerId: "unrestricted" }, repository, context);
+      expect(context.channelGameId).not.toHaveBeenCalled();
+
+      // Matches only the game-bound entry: exactly one lookup, only now.
+      const result = await processFaqMessage({ ...eventFor("any boss fight tips?"), triggerId: "game-bound" }, repository, context);
+      expect(result.actions).toMatchObject([{ kind: "chat", text: "{night}" }]);
+      expect(context.channelGameId).toHaveBeenCalledTimes(1);
+    } finally {
+      database.close();
+    }
+  });
+
   it("tries the next phrase match when the earlier entry is bound to another game", async () => {
     const database = new TestD1Database();
     try {

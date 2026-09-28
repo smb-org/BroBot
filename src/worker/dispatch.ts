@@ -685,8 +685,12 @@ export const dispatchEventSubNotification = async (
     return channelInfoPromise;
   };
   const channelGameId = async (): Promise<string | null> => {
-    const details = await channelDetails();
-    return details === null || details.gameId.length === 0 ? null : details.gameId;
+    if (environment.CHANNEL === undefined) {
+      const details = await channelDetails();
+      return details === null || details.gameId.length === 0 ? null : details.gameId;
+    }
+    const channelObject = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+    return await channelObject.getCachedChannelGameId(Date.now());
   };
   const followedAt = (userId: string): Promise<ModuleFollowedAt> => {
     let pending = followedAtPromises.get(userId);

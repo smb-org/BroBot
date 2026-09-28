@@ -33,11 +33,15 @@ export const processFaqMessage = async (
   if (await context.isRecentBotMessage?.(senderId, text)) return { actions: [], diagnostics: [] };
 
   const prepared = await repository.matchers(event.channelId);
-  const needsGame = prepared.some(({ entry }) => entry.games.length > 0);
-  const currentGameId = needsGame
-    ? await (context.channelGameId ?? (() => Promise.resolve(null)))()
-    : null;
-  const match = selectFaqMatch(prepared, text, currentGameId).match;
+  // Cheap keyword scan first, with no game resolved: a hit against an
+  // unrestricted entry needs no Helix lookup at all, and a total miss rules
+  // the message out without any I/O. Only a keyword hit against a
+  // game-bound entry (recorded in skippedByGame) needs the current game.
+  const withoutGame = selectFaqMatch(prepared, text, null);
+  const selection = withoutGame.match !== null || withoutGame.skippedByGame.length === 0
+    ? withoutGame
+    : selectFaqMatch(prepared, text, await (context.channelGameId ?? (() => Promise.resolve(null)))());
+  const match = selection.match;
   if (match === null) return { actions: [], diagnostics: [] };
   const rendered = await context.renderTemplate(`{${match.entry.answerBlock}}`, {});
   if (rendered.text.length === 0) return { actions: [], diagnostics: rendered.diagnostics };

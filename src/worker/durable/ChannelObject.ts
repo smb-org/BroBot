@@ -78,6 +78,7 @@ const AD_COUNTDOWN_REFRESH_ATTEMPT_KEY = "ads:countdown_refresh_attempt";
 const AD_COUNTDOWN_REFRESH_DEADLINE_KEY = "ads:countdown_refresh_deadline";
 const AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY = "ads:countdown_refresh_retry_count";
 const OVERLAY_STREAM_DETAILS_CACHE_KEY = "overlay:stream_details";
+const CHANNEL_GAME_ID_CACHE_KEY = "channel:game_id";
 const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
 const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
@@ -170,6 +171,11 @@ interface CachedOverlayStreamDetails {
 interface OverlayStreamDetailsCache {
   details: OverlayStreamDetails | null;
   expiresAt: number;
+}
+
+interface CachedChannelGameId {
+  checkedAt: number;
+  gameId: string | null;
 }
 
 const revokedTokenKey = (tokenId: string): string => `overlay_revoked:${tokenId}`;
@@ -347,6 +353,7 @@ const envelopeFor = (
  */
 export class ChannelObject extends DurableObject<Env> {
   private overlayStreamDetailsRefreshes = new Map<string, Promise<OverlayStreamDetailsCache>>();
+  private channelGameIdRefresh: Promise<CachedChannelGameId> | null = null;
   private adScheduleRefresh: Promise<AdScheduleRefreshResult> | null = null;
   private adScheduleRefreshStartedAt = 0;
   private adScheduleRefreshGeneration = 0;
@@ -536,6 +543,52 @@ export class ChannelObject extends DurableObject<Env> {
       return await refresh;
     } finally {
       if (refreshes.get(cacheIdentity) === refresh) refreshes.delete(cacheIdentity);
+    }
+  }
+
+  /**
+   * Shares the channel's current game across chat modules (FAQ and text
+   * commands game filters) so a busy chat cannot turn every message into a
+   * Helix channel lookup. Reuses the overlay stream-details TTL: game
+   * changes are not time-critical enough to warrant their own constant.
+   */
+  public async getCachedChannelGameId(now: number): Promise<string | null> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return null;
+    const cached = await this.ctx.storage.get<CachedChannelGameId>(CHANNEL_GAME_ID_CACHE_KEY);
+    if (cached !== undefined && Number.isFinite(cached.checkedAt) && cached.checkedAt <= now &&
+        now - cached.checkedAt < OVERLAY_STREAM_DETAILS_CACHE_TTL_MS) {
+      return cached.gameId;
+    }
+
+    let refresh = this.channelGameIdRefresh;
+    if (refresh === null) {
+      refresh = (async () => {
+        let gameId: string | null = null;
+        try {
+          const accessToken = await getAppAccessToken(this.env, new Date(now).toISOString());
+          const result = await helixRequest<{ data?: unknown }>({
+            url: "https://api.twitch.tv/helix/channels",
+            query: { broadcaster_id: channelId },
+            accessToken,
+            clientId: this.env.TWITCH_CLIENT_ID,
+          });
+          if (result.ok && isRecord(result.data) && Array.isArray(result.data.data)) {
+            const item: unknown = result.data.data[0];
+            if (isRecord(item) && typeof item.game_id === "string" && item.game_id.length > 0) gameId = item.game_id;
+          }
+        } catch {
+          // Cache the miss briefly too, so an API outage cannot multiply lookups per message.
+        }
+        await this.ctx.storage.put(CHANNEL_GAME_ID_CACHE_KEY, { checkedAt: now, gameId } satisfies CachedChannelGameId);
+        return { checkedAt: now, gameId } satisfies CachedChannelGameId;
+      })();
+      this.channelGameIdRefresh = refresh;
+    }
+    try {
+      return (await refresh).gameId;
+    } finally {
+      if (this.channelGameIdRefresh === refresh) this.channelGameIdRefresh = null;
     }
   }
 
