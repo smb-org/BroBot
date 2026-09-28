@@ -4,7 +4,7 @@ import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import {
   upsertBotIdentity,
 } from "../../src/worker/db/bot-identity";
-import { sendChatMessage, truncateChatText, truncateChatTextWithAttributions } from "../../src/worker/chat";
+import { forSourceOnlyForChatTarget, sendChatMessage, truncateChatText, truncateChatTextWithAttributions } from "../../src/worker/chat";
 import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -60,7 +60,7 @@ describe("Helix chat", () => {
     expect(result.text.endsWith(" · MET Norway")).toBe(true);
   });
 
-  it("sends with app token, bot id, channel id, and for_source_only false", async () => {
+  it("defaults chat output to only the source channel", async () => {
     const database = new TestD1Database();
     try {
       await seedBot(database);
@@ -85,8 +85,43 @@ describe("Helix chat", () => {
         broadcaster_id: "kanal-a",
         sender_id: "bot-1",
         message: "hallo",
-        for_source_only: false,
+        for_source_only: true,
       });
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([
+    ["all_chats", undefined, false],
+    ["source_only", undefined, true],
+    ["where_asked", null, true],
+    ["where_asked", "kanal-a", true],
+    ["where_asked", "partner-channel", false],
+  ] as const)("maps chat target %s from source broadcaster %s to for_source_only=%s", (target, sourceBroadcasterUserId, expected) => {
+    expect(forSourceOnlyForChatTarget(target, "kanal-a", sourceBroadcasterUserId)).toBe(expected);
+  });
+
+  it.each([
+    ["all_chats", undefined, false],
+    ["source_only", undefined, true],
+    ["where_asked", null, true],
+    ["where_asked", "partner-channel", false],
+  ] as const)("sends %s output with the resolved shared-chat flag", async (target, sourceBroadcasterUserId, expected) => {
+    const database = new TestD1Database();
+    try {
+      await seedBot(database);
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        data: [{ is_sent: true, message_id: "nachricht-1" }],
+      }), { status: 200 }));
+
+      await sendChatMessage(
+        environment(database), "kanal-a", "hallo", undefined, fetcher,
+        undefined, undefined, [], undefined, target, sourceBroadcasterUserId,
+      );
+
+      const [, init] = fetcher.mock.calls[0] ?? [];
+      expect(JSON.parse(typeof init?.body === "string" ? init.body : "{}")).toMatchObject({ for_source_only: expected });
     } finally {
       database.close();
     }

@@ -119,22 +119,22 @@ describe("Text commands panel", () => {
         module_id: "text_commands",
         action: "text_commands.command.created",
         before_json: "null",
-        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, textHash: longTextHash, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
+        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, textHash: longTextHash, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only" }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
         action: "text_commands.command.updated",
-        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, textHash: longTextHash, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
-        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
+        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, textHash: longTextHash, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only" }),
+        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only" }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
         action: "text_commands.command.removed",
-        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
+        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only" }),
         after_json: "null",
       }),
     ]));
@@ -575,8 +575,8 @@ describe("Text commands panel", () => {
       "SELECT action, before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
     ).first()).resolves.toEqual({
       action: "text_commands.command.updated",
-      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
-      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
+      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only" }),
+      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only" }),
     });
   });
 
@@ -709,8 +709,8 @@ describe("Text commands panel", () => {
     await expect(database.prepare(
       "SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
     ).first()).resolves.toEqual({
-      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
-      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "moderator", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say" }),
+      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only" }),
+      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "moderator", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only" }),
     });
   });
 });

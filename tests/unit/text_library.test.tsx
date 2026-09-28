@@ -442,7 +442,7 @@ describe("text library", () => {
       renderTemplate: (text) => Promise.resolve({ text, diagnostics: [] }),
     });
 
-    expect(result.actions).toContainEqual({ kind: "chat", text: "Guide text" });
+    expect(result.actions).toContainEqual({ kind: "chat", text: "Guide text", target: "source_only" });
   });
 
   it("keeps role and time conditions tied to command context and channel time", () => {

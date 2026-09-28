@@ -44,6 +44,7 @@ const auditValues = async (command: TextCommand) => ({
   streamCondition: command.streamCondition,
   games: (command.games ?? []).map((game) => `${game.id}:${game.name}`),
   responseType: command.responseType,
+  chatTarget: command.chatTarget,
   ...(command.variableAction === null ? {} : {
     variableName: command.variableAction.name,
     variableOperation: command.variableAction.operation,
@@ -70,6 +71,7 @@ const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
   left.streamCondition === right.streamCondition &&
   JSON.stringify(left.games ?? []) === JSON.stringify(right.games ?? []) &&
   left.responseType === right.responseType &&
+  left.chatTarget === right.chatTarget &&
   JSON.stringify(left.variableAction) === JSON.stringify(right.variableAction) &&
   left.legacyFallback === right.legacyFallback &&
   left.legacyKind === right.legacyKind &&
@@ -147,6 +149,7 @@ interface TextCommandRow {
   user_cooldown_seconds: number;
   stream_condition: TextCommandStreamCondition;
   response_type: TextCommandResponseType;
+  chat_target: TextCommand["chatTarget"];
   games_json: string;
   template_fields_json: string;
   last_used_at: string | null;
@@ -173,6 +176,7 @@ const mapTextCommand = (row: TextCommandRow): TextCommand => ({
   streamCondition: row.stream_condition,
   games: JSON.parse(row.games_json) as NonNullable<TextCommand["games"]>,
   responseType: row.response_type,
+  chatTarget: row.chat_target,
   variableAction: row.variable_name === null || row.variable_operation === null || row.variable_amount === null
     ? null
     : { name: row.variable_name, operation: row.variable_operation, amount: row.variable_amount },
@@ -224,7 +228,7 @@ const aliasConflict = async (
 
 export const textCommandSelectColumns = `channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
                                        aliases_json, user_cooldown_seconds, stream_condition, response_type,
-                                       games_json, template_fields_json, last_used_at, created_at, updated_at, revision,
+                                       chat_target, games_json, template_fields_json, last_used_at, created_at, updated_at, revision,
                                        use_count, variable_name, variable_operation, variable_amount`;
 
 export const createTextCommandRepository = (
@@ -256,6 +260,7 @@ export const createTextCommandRepository = (
       `SELECT command.channel_id, command.command_name, command.response_text, command.kind, command.enabled,
               command.minimum_level, command.cooldown_seconds, command.aliases_json,
               command.user_cooldown_seconds, command.stream_condition, command.response_type,
+              command.chat_target,
               command.games_json, command.template_fields_json, command.last_used_at, command.created_at, command.updated_at,
               command.revision, command.use_count, command.variable_name, command.variable_operation, command.variable_amount
          FROM text_command_aliases AS alias
@@ -274,15 +279,16 @@ export const createTextCommandRepository = (
     const userCooldownSeconds = input.userCooldownSeconds ?? 0;
     const streamCondition = input.streamCondition ?? "any";
     const responseType = input.responseType ?? "say";
+    const chatTarget = input.chatTarget ?? "source_only";
     const aliasesJson = JSON.stringify(aliases);
     const extraTemplatesJson = JSON.stringify(extraTemplatesOf(input));
     const mutation = db.prepare(
       `INSERT INTO text_commands
         (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
-         aliases_json, user_cooldown_seconds, stream_condition, response_type,
+         aliases_json, user_cooldown_seconds, stream_condition, response_type, chat_target,
          games_json, template_fields_json, variable_name, variable_operation, variable_amount,
          last_used_at, created_at, updated_at, revision)
-       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
+       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
         WHERE NOT EXISTS (
           SELECT 1 FROM text_commands AS other
            WHERE other.channel_id = ? AND other.command_name = ?
@@ -309,6 +315,7 @@ export const createTextCommandRepository = (
       userCooldownSeconds,
       streamCondition,
       responseType,
+      chatTarget,
       JSON.stringify(input.games ?? []),
       extraTemplatesJson,
       input.variableAction?.name ?? null,
@@ -341,6 +348,7 @@ export const createTextCommandRepository = (
       streamCondition,
       games: input.games ?? [],
       responseType,
+      chatTarget,
       variableAction: input.variableAction ?? null,
       useCount: 0,
       lastUsedAt: null,
@@ -376,6 +384,7 @@ export const createTextCommandRepository = (
     }
     const authorization = authorizeMutation(input.channelId, actor, input.now);
     const minimumTier = input.minimumTier ?? before.minimumTier;
+    const chatTarget = input.chatTarget ?? before.chatTarget;
     const extraTemplates = extraTemplatesOf({ ...before, ...input });
     const extraTemplatesJson = JSON.stringify(extraTemplates);
     const mutation = input.onlyToggle === true
@@ -395,7 +404,7 @@ export const createTextCommandRepository = (
       : db.prepare(
         `UPDATE text_commands
             SET command_name = ?, response_text = ?, kind = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?,
-              aliases_json = ?, user_cooldown_seconds = ?, stream_condition = ?, response_type = ?, games_json = ?,
+              aliases_json = ?, user_cooldown_seconds = ?, stream_condition = ?, response_type = ?, chat_target = ?, games_json = ?,
                 template_fields_json = ?, variable_name = ?, variable_operation = ?, variable_amount = ?,
                 updated_at = ?, revision = revision + 1
           WHERE channel_id = ? AND command_name = ? AND revision = ?
@@ -425,6 +434,7 @@ export const createTextCommandRepository = (
         input.userCooldownSeconds,
         input.streamCondition,
         input.responseType,
+        chatTarget,
         JSON.stringify(input.games ?? before.games ?? []),
         extraTemplatesJson,
         input.variableAction?.name ?? null,
@@ -462,6 +472,7 @@ export const createTextCommandRepository = (
         streamCondition: input.streamCondition,
         games: input.games ?? before.games ?? [],
         responseType: input.responseType,
+        chatTarget,
         variableAction: input.variableAction ?? null,
         useCount: before.useCount,
         ...extraTemplates,

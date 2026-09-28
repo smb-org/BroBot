@@ -21,6 +21,8 @@ export type { AuditSentenceProps } from "./AuditSentence";
 export { Badge } from "./Badge";
 export type { BadgeTone } from "./Badge";
 export { InspectorSection, InspectorFieldRow, InspectorActions, DangerSection } from "./InspectorParts";
+export { ChatOutputTargetControl } from "./ChatOutputTargetControl";
+export type { ChatOutputTargetControlProps } from "./ChatOutputTargetControl";
 
 export { Sidebar } from "./Sidebar";
 export type { SidebarProps, SidebarEntry, SidebarGroup, SidebarModulesGroup } from "./Sidebar";

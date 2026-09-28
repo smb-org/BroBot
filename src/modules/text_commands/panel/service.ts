@@ -75,7 +75,7 @@ const mutation = async (
 
 export const createTextCommand = async (
   channelId: string,
-  command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "games" | "responseType" | "variableAction">,
+  command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "games" | "responseType" | "chatTarget" | "variableAction">,
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "POST", command);
 
 export const saveTextCommand = async (
@@ -97,6 +97,7 @@ export const saveTextCommand = async (
     streamCondition: TextCommandStreamCondition;
     games?: TextCommand["games"];
     responseType: TextCommandResponseType;
+    chatTarget: TextCommand["chatTarget"];
     variableAction: TextCommand["variableAction"];
 },
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", {
@@ -115,6 +116,7 @@ export const saveTextCommand = async (
   streamCondition: command.streamCondition,
   games: command.games ?? [],
   responseType: command.responseType,
+  chatTarget: command.chatTarget,
   variableAction: command.variableAction,
 }, command.oldName);
 

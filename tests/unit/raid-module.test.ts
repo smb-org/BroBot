@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { raidModule, processRaid } from "../../src/modules/raid";
 import { raidSettingsSchema } from "../../src/modules/raid/contracts";
+import type { RaidSettings } from "../../src/modules/raid/contracts";
 import type { ModuleEvent } from "../../src/modules/contract";
 
 const event = (
   payload: Record<string, unknown>,
-  settings = raidModule.defaultSettings,
+  settings: RaidSettings = raidModule.defaultSettings,
   subscriptionVariant = "incoming",
-): ModuleEvent<typeof settings> => ({
+): ModuleEvent<RaidSettings> => ({
   channelId: "kanal-a",
   subscriptionType: "channel.raid",
   subscriptionVariant,
@@ -38,7 +39,9 @@ describe("Raid module", () => {
       shoutoutThreshold: 3,
       textThreshold: 3,
       textLong: "full",
+      textLongTarget: "source_only",
       textShort: "klein",
+      textShortTarget: "source_only",
     });
   });
 
@@ -58,7 +61,7 @@ describe("Raid module", () => {
 
     expect(result.actions).toEqual([
       { kind: "shoutout", targetChannelId: "quelle-1" },
-      { kind: "chat", text: "Willkommen quelle mit 8 Zuschauern!" },
+      { kind: "chat", text: "Willkommen quelle mit 8 Zuschauern!", target: "source_only" },
     ]);
   });
 
@@ -72,7 +75,7 @@ describe("Raid module", () => {
     }));
 
     expect(result.actions).toEqual([
-      { kind: "chat", text: "Voll quelle 8" },
+      { kind: "chat", text: "Voll quelle 8", target: "source_only" },
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.suppressed",
@@ -90,7 +93,7 @@ describe("Raid module", () => {
     }));
 
     expect(result.actions).toEqual([
-      { kind: "chat", text: "Danke quelle für 2!" },
+      { kind: "chat", text: "Danke quelle für 2!", target: "source_only" },
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.suppressed",
@@ -108,7 +111,7 @@ describe("Raid module", () => {
     }));
 
     expect(result.actions).toEqual([
-      { kind: "chat", text: "Voll quelle 10" },
+      { kind: "chat", text: "Voll quelle 10", target: "source_only" },
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.suppressed",
@@ -141,7 +144,7 @@ describe("Raid module", () => {
 
     expect(result.actions).toEqual([
       { kind: "shoutout", targetChannelId: "quelle-1" },
-      { kind: "chat", text: "quelle/0" },
+      { kind: "chat", text: "quelle/0", target: "source_only" },
     ]);
   });
 
@@ -169,6 +172,6 @@ describe("Raid module", () => {
       textShort: "klein",
     }));
 
-    expect(result.actions).toEqual([{ kind: "chat", text: "{kanal} {zuschauer}" }]);
+    expect(result.actions).toEqual([{ kind: "chat", text: "{kanal} {zuschauer}", target: "source_only" }]);
   });
 });

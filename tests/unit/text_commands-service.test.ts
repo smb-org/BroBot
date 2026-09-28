@@ -18,6 +18,7 @@ const command = (name: string, text: string, lastUsedAt: string | null = null): 
   userCooldownSeconds: 0,
   streamCondition: "any",
   responseType: "reply",
+  chatTarget: "source_only",
   variableAction: null,
   useCount: 0,
   lastUsedAt,
@@ -66,11 +67,25 @@ describe("Text commands service", () => {
     expect(result.actions).toEqual([{
       kind: "chat",
       text: "Hallo alice in kanal-a-login",
+      target: "source_only",
       replyToMessageId: "twitch-message-1",
     }]);
     expect(result.diagnostics).toEqual([{
       code: "text_commands.triggered",
       detail: { name: "hallo", response: "Hallo alice in kanal-a-login" },
+    }]);
+  });
+
+  it("carries the where-asked target on a configured viewer reply", async () => {
+    const entry = { ...command("hello", "Hi {user}"), chatTarget: "where_asked" as const };
+    const event = eventFor("!hello");
+    const result = await processTextCommandMessage(event, repositoryFor([entry]));
+
+    expect(result.actions).toEqual([{
+      kind: "chat",
+      text: "Hi alice",
+      target: "where_asked",
+      replyToMessageId: "twitch-message-1",
     }]);
   });
 
@@ -103,9 +118,9 @@ describe("Text commands service", () => {
 
     expect(shoutout.actions).toEqual([
       { kind: "shoutout", targetLogin: "streamerin" },
-      { kind: "chat", text: "Hey alice, folgt streamerin!" },
+      { kind: "chat", text: "Hey alice, folgt streamerin!", target: "source_only" },
     ]);
-    expect(usage.actions).toEqual([{ kind: "chat", text: "Nutzung: !so <name>" }]);
+    expect(usage.actions).toEqual([{ kind: "chat", text: "Nutzung: !so <name>", target: "source_only" }]);
     expect(usage.diagnostics).toContainEqual({ code: "text_commands.argument_missing", detail: { name: "so" } });
   });
 
@@ -203,6 +218,7 @@ describe("Text commands service", () => {
     expect(result.actions).toEqual([{
       kind: "chat",
       text: "Befehle: !aktiv, !befehle",
+      target: "source_only",
       replyToMessageId: "twitch-message-1",
     }]);
   });
@@ -227,7 +243,7 @@ describe("Text commands service", () => {
 
     expect(findByAlias).toHaveBeenCalledWith("kanal-a", "hi");
     expect(claim).toHaveBeenCalledWith("kanal-a", "hallo", NOW, "user-1", 0, undefined, undefined, entry);
-    expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", replyToMessageId: "twitch-message-1" }]);
+    expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", target: "source_only", replyToMessageId: "twitch-message-1" }]);
     expect(result.diagnostics).toEqual([{
       code: "text_commands.triggered",
       detail: { name: "hallo", alias: "hi", response: "Antwort" },
@@ -303,7 +319,7 @@ describe("Text commands service", () => {
       { streamState: () => Promise.resolve("unknown") },
     );
 
-    expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", replyToMessageId: "twitch-message-1" }]);
+    expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", target: "source_only", replyToMessageId: "twitch-message-1" }]);
     expect(result.diagnostics[0]?.detail).toMatchObject({ name: "hallo", streamState: "unknown" });
   });
 
@@ -315,7 +331,7 @@ describe("Text commands service", () => {
       { channelGameId: () => Promise.resolve(null) },
     );
 
-    expect(result.actions).toEqual([{ kind: "chat", text: "Guide text", replyToMessageId: "twitch-message-1" }]);
+    expect(result.actions).toEqual([{ kind: "chat", text: "Guide text", target: "source_only", replyToMessageId: "twitch-message-1" }]);
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       "text_commands.game_unknown",
       "text_commands.triggered",
@@ -338,12 +354,12 @@ describe("Text commands service", () => {
   });
 
   it.each([
-    ["text", "say", { kind: "chat", text: "Antwort" }],
-    ["text", "reply", { kind: "chat", text: "Antwort", replyToMessageId: "twitch-message-1" }],
-    ["text", "announcement", { kind: "announcement", text: "Antwort" }],
-    ["list", "say", { kind: "chat", text: "Befehle: !befehle" }],
-    ["list", "reply", { kind: "chat", text: "Befehle: !befehle", replyToMessageId: "twitch-message-1" }],
-    ["list", "announcement", { kind: "announcement", text: "Befehle: !befehle" }],
+    ["text", "say", { kind: "chat", text: "Antwort", target: "source_only" }],
+    ["text", "reply", { kind: "chat", text: "Antwort", target: "source_only", replyToMessageId: "twitch-message-1" }],
+    ["text", "announcement", { kind: "announcement", text: "Antwort", target: "source_only" }],
+    ["list", "say", { kind: "chat", text: "Befehle: !befehle", target: "source_only" }],
+    ["list", "reply", { kind: "chat", text: "Befehle: !befehle", target: "source_only", replyToMessageId: "twitch-message-1" }],
+    ["list", "announcement", { kind: "announcement", text: "Befehle: !befehle", target: "source_only" }],
   ] as const)("maps %s commands with response type %s to the matching action", async (kind, responseType, expected) => {
     const entry = { ...command("befehle", kind === "list" ? "" : "Antwort"), kind, responseType, aliases: ["hi"] };
     const result = await processTextCommandMessage(eventFor("!befehle"), repositoryFor([entry]));
@@ -365,14 +381,14 @@ describe("Text commands service", () => {
     const claim = vi.spyOn(repository, "claim");
 
     const invalid = await processTextCommandMessage(eventFor("!score nope 5"), repository);
-    expect(invalid.actions).toEqual([{ kind: "chat", text: "Usage: !score <number>" }]);
+    expect(invalid.actions).toEqual([{ kind: "chat", text: "Usage: !score <number>", target: "source_only" }]);
     expect(invalid.diagnostics).toContainEqual({ code: "text_commands.argument_invalid", detail: { name: "score" } });
     expect(claim).not.toHaveBeenCalled();
 
     const valid = await processTextCommandMessage(eventFor("!score 5 add a note"), repository);
     expect(claim).toHaveBeenCalledTimes(1);
     expect(claim.mock.calls[0]?.[6]).toBe(5);
-    expect(valid.actions).toEqual([{ kind: "chat", text: "Score updated", replyToMessageId: "twitch-message-1" }]);
+    expect(valid.actions).toEqual([{ kind: "chat", text: "Score updated", target: "source_only", replyToMessageId: "twitch-message-1" }]);
   });
 
   it.each([

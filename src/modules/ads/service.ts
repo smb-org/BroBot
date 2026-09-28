@@ -46,8 +46,9 @@ export function processAdBreak(
   }
 
   const template = decision.event.automatic ? event.settings.automatic : event.settings.manual;
+  const target = (decision.event.automatic ? event.settings.automaticTarget : event.settings.manualTarget) ?? "source_only";
   const makeResult = (text: string, templateDiagnostics: readonly ModuleDiagnostic[] = []): ModuleResult => ({
-    actions: [{ kind: "chat", text }],
+    actions: [{ kind: "chat", text, target }],
     diagnostics: [...templateDiagnostics, { code: diagnosticCode(decision), detail: diagnoseDetail(decision) }],
   });
   if (render !== undefined) {

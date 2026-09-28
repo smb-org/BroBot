@@ -396,6 +396,9 @@ export const processAdPrewarning = async (
       fetcher,
       stillValid,
       async () => await scheduler?.claimPrewarningSend?.(scheduledDueAtMs) ?? true,
+      [],
+      undefined,
+      configured.settings.prewarningTarget,
     );
     if (sent.truncated) {
       diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: finalDecision.text.length } });

@@ -26,7 +26,7 @@ const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
 
 const listTimers = async (db: D1Database, channelId: string): Promise<Timer[]> => {
   const result = await db.prepare(
-    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, revision,
+    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
             next_run_at, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
   ).bind(channelId).all<TimerRow>();
@@ -159,7 +159,7 @@ export const handleTimerAlarm = async (
     : "";
   const isEventTimeRefresh = refreshAt >= 0;
   const row = timerId.length === 0 ? null : await context.DB.prepare(
-    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, revision,
+    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
             next_run_at, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(context.channelId, timerId).first<TimerRow>();
@@ -219,7 +219,7 @@ export const handleTimerAlarm = async (
         ).bind(context.channelId, timer.id).first<{ enabled: number; revision: number; next_run_at: string | null }>();
         return current?.enabled === 1 && current.revision === timer.revision &&
           current.next_run_at !== null && Date.parse(current.next_run_at) === deadline && Date.now() <= graceEndsAt;
-      });
+      }, timer.chatTarget);
       sent = result.sent;
       if (!result.sent && result.retryable) {
         throw new Error(`Timer chat send failed: ${result.reason ?? "unknown"}.`);

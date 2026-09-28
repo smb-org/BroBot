@@ -23,6 +23,7 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
   userCooldownSeconds: 15,
   streamCondition: "online",
   responseType: "reply",
+  chatTarget: "source_only",
   variableAction: null,
   useCount: 0,
   lastUsedAt: null,
@@ -316,6 +317,7 @@ describe("Text command editor", () => {
         streamCondition: "online",
         games: [],
         responseType: "reply",
+        chatTarget: "source_only",
         variableAction: null,
       }));
     });
@@ -347,6 +349,7 @@ describe("Text command editor", () => {
       streamCondition: "any",
       games: [],
       responseType: "say",
+      chatTarget: "source_only",
       variableAction: null,
     }));
   });
@@ -379,6 +382,7 @@ describe("Text command editor", () => {
       streamCondition: "any",
       games: [],
       responseType: "say",
+      chatTarget: "source_only",
       variableAction: null,
     }));
   });
@@ -664,6 +668,7 @@ describe("Text command editor", () => {
       streamCondition: "online",
       games: [],
       responseType: "reply",
+      chatTarget: "source_only",
       variableAction: null,
     }));
     await waitFor(() => expect(within(screen.getByRole("row", { name: /!hallo/u })).getByText("Moderatoren")).toHaveClass("ui-badge"));

@@ -22,14 +22,15 @@ const insertTimer = async (input: {
   blockName?: string;
   trigger: unknown;
   triggerType: "interval" | "stream_start" | "time_of_day" | "before_event";
+  chatTarget?: "all_chats" | "source_only";
   nextRunAt?: number | null;
   activityCount?: number | null;
 }): Promise<void> => {
   await database.prepare(
     `INSERT INTO timers
-      (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision,
+      (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
        next_run_at, last_run_at, last_chat_activity_count, created_at, updated_at)
-     VALUES (?, ?, ?, 1, ?, ?, ?, 1, ?, NULL, ?, ?, ?)`,
+     VALUES (?, ?, ?, 1, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?)`,
   ).bind(
     input.id ?? timerId,
     channelId,
@@ -37,6 +38,7 @@ const insertTimer = async (input: {
     input.blockName ?? "welcome",
     input.triggerType,
     JSON.stringify(input.trigger),
+    input.chatTarget ?? "source_only",
     input.nextRunAt === undefined || input.nextRunAt === null ? null : new Date(input.nextRunAt).toISOString(),
     input.activityCount ?? 10,
     "2026-01-01T00:00:00.000Z",
@@ -44,11 +46,12 @@ const insertTimer = async (input: {
   ).run();
 };
 
-const prepareDatabase = async (): Promise<void> => {
+const prepareDatabase = async (chatTarget: "all_chats" | "source_only" = "source_only"): Promise<void> => {
   await insertChannel();
   await insertTimer({
     triggerType: "interval",
     trigger: { type: "interval", minutes: 10, minimumMessages: 3 },
+    chatTarget,
     nextRunAt: firstDueAt,
     activityCount: 10,
   });
@@ -111,6 +114,23 @@ describe("timer alarm execution", () => {
     expect(deadlines).toEqual([secondDueAt, secondDueAt, secondDueAt + 10 * 60_000]);
     await handleTimerAlarm(context, `timer:${timerId}`, secondDueAt);
     expect(sends).toHaveLength(1);
+  });
+
+  it("passes a configured chat target through the generic alarm output contract", async () => {
+    await prepareDatabase("all_chats");
+    const targets: Array<string | undefined> = [];
+    const context = contextFor(() => 13, [], [], {
+      sendChat: (_text, _key, _attributions, _stillValid, target) => {
+        targets.push(target);
+        return Promise.resolve({ sent: true, reason: null, retryable: false });
+      },
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    await handleTimerAlarm(context, `timer:${timerId}`, firstDueAt);
+
+    expect(targets).toEqual(["all_chats"]);
   });
 
   it("retries a known failed post without advancing the occurrence", async () => {

@@ -63,10 +63,11 @@ const response = (
 ): ModuleResult => {
   const replyToMessageId = textValue(event.payload.message_id);
   const action = !options.forceChat && command.responseType === "announcement"
-    ? { kind: "announcement" as const, text }
+    ? { kind: "announcement" as const, text, target: command.chatTarget }
     : {
       kind: "chat" as const,
       text,
+      target: command.chatTarget,
       ...(!options.forceChat && command.responseType === "reply" && replyToMessageId !== null
         ? { replyToMessageId }
         : {}),
