@@ -6,6 +6,8 @@ export interface TimersTexts {
   name: string;
   trigger: string;
   block: string;
+  chatTarget: string;
+  chatTargetLabels: Record<"all_chats" | "source_only", string>;
   interval: string;
   streamStart: string;
   timeOfDay: string;
@@ -53,6 +55,8 @@ const catalog: LocaleCatalog<TimersTexts> = {
     name: "Name",
     trigger: "Auslöser",
     block: "Textbaustein",
+    chatTarget: "Chat-Ziel",
+    chatTargetLabels: { all_chats: "Alle Chats", source_only: "Nur unser Chat" },
     interval: "Intervall",
     streamStart: "Nach Streamstart",
     timeOfDay: "Uhrzeit",
@@ -98,6 +102,8 @@ const catalog: LocaleCatalog<TimersTexts> = {
     name: "Name",
     trigger: "Trigger",
     block: "Text block",
+    chatTarget: "Chat target",
+    chatTargetLabels: { all_chats: "All chats", source_only: "Only our chat" },
     interval: "Interval",
     streamStart: "After stream start",
     timeOfDay: "Time of day",

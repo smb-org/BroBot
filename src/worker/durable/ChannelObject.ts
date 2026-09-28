@@ -970,7 +970,7 @@ export class ChannelObject extends DurableObject<Env> {
         await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision);
       },
       renderTemplate: async (text, now = Date.now()) => renderScheduledTemplate(this.env, channelId, text, now, externalFetchBudget),
-      sendChat: async (text, idempotencyKey, attributions = [], stillValid) => {
+      sendChat: async (text, idempotencyKey, attributions = [], stillValid, target = "source_only") => {
         const suppression = { reason: null as string | null };
         const validateOutput = async (): Promise<boolean> => {
           if (stillValid !== undefined && !await stillValid()) {
@@ -1007,6 +1007,7 @@ export class ChannelObject extends DurableObject<Env> {
           claimBeforePost,
           attributions,
           afterPost,
+          target,
         );
         if (result.reason === "already_attempted") {
           const claim = await readModuleAlarmSendClaim(this.ctx.storage, idempotencyKey);

@@ -34,12 +34,13 @@ export function processRaid(
   }
 
   const template = decision.aboveThreshold ? event.settings.textLong : event.settings.textShort;
+  const chatTarget = (decision.aboveThreshold ? event.settings.textLongTarget : event.settings.textShortTarget) ?? "source_only";
   const moduleValues = { channel: decision.sourceChannelName, viewers: decision.viewers };
   const makeResult = (chatText: string, templateDiagnostics: readonly ModuleDiagnostic[] = []): ModuleResult => {
   const shoutoutPossible = event.settings.shoutoutEnabled && decision.viewers >= event.settings.shoutoutThreshold;
   if (!shoutoutPossible) {
     return {
-      actions: [{ kind: "chat", text: chatText }],
+      actions: [{ kind: "chat", text: chatText, target: chatTarget }],
       diagnostics: [...templateDiagnostics, {
         code: "shoutout.suppressed" satisfies EventCode,
         detail: {
@@ -54,7 +55,7 @@ export function processRaid(
   return {
     actions: [
       { kind: "shoutout", targetChannelId: decision.sourceChannelId },
-      { kind: "chat", text: chatText },
+      { kind: "chat", text: chatText, target: chatTarget },
     ],
     diagnostics: [...templateDiagnostics, {
       code: "raid.shoutout" satisfies EventCode,

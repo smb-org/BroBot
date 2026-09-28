@@ -10,12 +10,19 @@ export const ADS_OPTIONAL_BROADCASTER_SCOPES = ["channel:manage:ads"] as const;
 export const adsSettingsSchema = z.object({
   automatic: z.string().trim().min(1).max(500),
   manual: z.string().trim().min(1).max(500),
+  automaticTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
+  manualTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
   prewarning: z.boolean().default(true),
   leadSeconds: z.number().int().min(30).max(300).default(60),
   prewarningText: z.string().trim().min(1).max(500).default(DEFAULT_PREWARNING_TEXT),
+  prewarningTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
 });
 
-export type AdsSettings = z.output<typeof adsSettingsSchema>;
+export type AdsSettings = Omit<z.output<typeof adsSettingsSchema>, "automaticTarget" | "manualTarget" | "prewarningTarget"> & {
+  automaticTarget?: "all_chats" | "source_only";
+  manualTarget?: "all_chats" | "source_only";
+  prewarningTarget?: "all_chats" | "source_only";
+};
 
 export const ADS_VARIABLES = {
   duration: { name: "ads.duration", group: "event", contexts: ["event"], sample: "90", maxLength: 4, fallbackWhenAbsent: 15, picker: { de: adsTemplateVariableCatalog.de["ads.duration"], en: adsTemplateVariableCatalog.en["ads.duration"] } },

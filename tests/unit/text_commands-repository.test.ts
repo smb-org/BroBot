@@ -501,12 +501,38 @@ describe("Text commands D1 adapter", () => {
     const audit = await database.prepare("SELECT before_json, after_json FROM audit_log").first<{ before_json: string; after_json: string }>();
     expect(JSON.parse(audit?.before_json ?? "null") as unknown).toEqual({
       name: "chat", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5,
-      aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say",
+      aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only",
     });
     expect(JSON.parse(audit?.after_json ?? "null") as unknown).toEqual({
       name: "chat", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5,
-      aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say",
+      aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only",
     });
+  });
+
+  it("persists and audits a text command output target change", async () => {
+    await insertChannel(database, "kanal-a");
+    const repository = createTextCommandRepository(
+      database as unknown as D1Database,
+      authorize,
+      (entry, changedAt) => prepareModuleAudit(database as unknown as D1Database, ACTOR.userId, changedAt, entry),
+    );
+    await expect(repository.create({
+      channelId: "kanal-a", name: "chat", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: true });
+    const current = await repository.find("kanal-a", "chat");
+    if (current === null) throw new Error("Created command was not found.");
+
+    await expect(repository.change({
+      channelId: "kanal-a", name: "chat", newName: "chat", text: "Antwort", kind: "text",
+      enabled: true, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any",
+      responseType: "say", chatTarget: "all_chats", expectedRevision: current.revision,
+      now: "2026-09-19T12:01:00.000Z",
+    }, ACTOR)).resolves.toEqual({ ok: true });
+
+    const audit = await database.prepare("SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'")
+      .first<{ before_json: string; after_json: string }>();
+    expect(JSON.parse(audit?.before_json ?? "null") as { chatTarget?: string }).toMatchObject({ chatTarget: "source_only" });
+    expect(JSON.parse(audit?.after_json ?? "null") as { chatTarget?: string }).toMatchObject({ chatTarget: "all_chats" });
   });
 
   it("clears per-user cooldown rows on command delete and rename", async () => {

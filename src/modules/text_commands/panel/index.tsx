@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 
 import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
-  Badge, Button, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
+  Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
   GamePicker, InspectorFieldRow, InspectorSection,
   registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
 } from "../../../dashboard/ui";
@@ -33,6 +33,7 @@ interface CommandDraft {
   streamCondition: TextCommandStreamCondition;
   games: TextCommandGame[];
   responseType: TextCommandResponseType;
+  chatTarget: TextCommand["chatTarget"];
   variableAction: TextCommand["variableAction"];
 }
 
@@ -50,6 +51,7 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
   streamCondition: command.streamCondition,
   games: [...(command.games ?? [])],
   responseType: command.responseType,
+  chatTarget: command.chatTarget,
   variableAction: command.variableAction === null ? null : { ...command.variableAction },
 });
 
@@ -67,6 +69,7 @@ const newCommandDraft = (): CommandDraft => ({
   streamCondition: "any",
   games: [],
   responseType: "say",
+  chatTarget: "source_only",
   variableAction: null,
 });
 
@@ -279,6 +282,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       streamCondition: draft.streamCondition,
       games: draft.games,
       responseType: draft.responseType,
+      chatTarget: draft.chatTarget,
       variableAction: draft.variableAction,
     };
     setPending(true); setError(undefined); setFieldError(null); setConcurrentConflict(false); setSaved(false);
@@ -565,6 +569,13 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           disabled={!canManageContent || pending}
           onChange={(value) => { setDraftField("responseType", value as TextCommandResponseType); }}
         />}
+        <ChatOutputTargetControl
+          label={labels.chatTarget}
+          value={draft.chatTarget}
+          includeWhereAsked
+          disabled={!canManageContent || pending}
+          onChange={(chatTarget) => { setDraftField("chatTarget", chatTarget); }}
+        />
       </>,
     },
     {
@@ -643,6 +654,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     kind: labels.kindLabels[draft.kind],
     text: draft.text,
     responseType: labels.responseTypeLabels[draft.responseType],
+    chatTarget: labels.chatTargetLabels[draft.chatTarget],
     minimumTier: labels.tierLabels[draft.minimumTier],
     minimumDescription: tierDescription(draft.minimumTier, labels),
     stream: draft.streamCondition === "any" ? labels.streamAny : draft.streamCondition === "online" ? labels.streamOnline : labels.streamOffline,
@@ -662,6 +674,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     {draft.kind !== "list" && draft.usageText.length > 0 ? <div><dt>{labels.templateFieldLabels.usageText}</dt><dd>{templateView("usageText")}</dd></div> : null}
     <div><dt>{labels.variableAction}</dt><dd>{variableAction === null ? labels.variableNone : `${variableAction.name} ${labels.variableOperations[variableAction.operation]}${variableAction.operation === "set_argument" ? "" : String(variableAction.amount ?? 0)}`}</dd></div>
     {draft.kind === "shoutout" ? null : <div><dt>{labels.responseType}</dt><dd>{props.responseType}</dd></div>}
+    <div><dt>{labels.chatTarget}</dt><dd>{props.chatTarget}</dd></div>
     <div><dt>{labels.minimumTier}</dt><dd>{props.minimumTier} · {props.minimumDescription}</dd></div>
     <div><dt>{labels.streamCondition}</dt><dd>{props.stream}</dd></div>
     <div><dt>{labels.gameFilter}</dt><dd>{props.games}</dd></div>

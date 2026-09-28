@@ -322,6 +322,7 @@ const runActions = async (
   muted: boolean,
   fetcher: typeof fetch,
   attributions: readonly string[] = [],
+  sourceBroadcasterUserId?: string | null,
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
   // Order is preserved: a reply after an announcement reads as a different
@@ -346,6 +347,9 @@ const runActions = async (
           undefined,
           undefined,
           attributions,
+          undefined,
+          action.target ?? "source_only",
+          sourceBroadcasterUserId,
         );
         if (result.truncated) {
           diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
@@ -356,7 +360,8 @@ const runActions = async (
         continue;
       }
       if (action.kind === "announcement") {
-        const result = await sendChatAnnouncement(environment, channelId, action.text, fetcher, attributions);
+        const target = action.target ?? "source_only";
+        const result = await sendChatAnnouncement(environment, channelId, action.text, fetcher, attributions, target, sourceBroadcasterUserId);
         if (result.truncated) {
           diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
         }
@@ -366,7 +371,19 @@ const runActions = async (
         }
 
         try {
-          const fallback = await sendChatMessage(environment, channelId, action.text, undefined, fetcher, undefined, undefined, attributions);
+          const fallback = await sendChatMessage(
+            environment,
+            channelId,
+            action.text,
+            undefined,
+            fetcher,
+            undefined,
+            undefined,
+            attributions,
+            undefined,
+            target,
+            sourceBroadcasterUserId,
+          );
           if (fallback.truncated && !result.truncated) {
             diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
           }
@@ -795,7 +812,16 @@ export const dispatchEventSubNotification = async (
         overlayIdsByVariable.set(change.name, change.overlayIds);
       }
       try {
-        diagnostics.push(...await runActions(environment, event.channelId, module, result.actions, dispatchState.controls.mute.active, fetcher, result.attributions));
+        diagnostics.push(...await runActions(
+          environment,
+          event.channelId,
+          module,
+          result.actions,
+          dispatchState.controls.mute.active,
+          fetcher,
+          result.attributions,
+          textValue(event.payload.source_broadcaster_user_id),
+        ));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
       }

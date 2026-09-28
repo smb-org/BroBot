@@ -259,7 +259,8 @@ braucht. Ein Modul kann zusätzlich über den Aktivierungshook einmalige, eigene
 Initialdaten anlegen. Das erfordert keinen Deploy.
 
 Für ein Modul, dessen Einstellungen sich vollständig aus den Naht-Bauteilen
-zusammensetzen (Zahl, Text, Vorlage, Segment, Kartenwahl, Schalterkarte), muss
+zusammensetzen (Zahl, Text, Vorlage, Segment, Kartenwahl, Schalterkarte,
+Chat-Ausgabeziel), muss
 kein eigenes Formular geschrieben werden: `module.settingsEditor` nimmt
 stattdessen eine `SettingsEditorSpec<Settings>`-Deklaration entgegen — lazy wie
 `panel`, in `modules/<id>/panel/settings-editor.ts`, damit ein ausgeschaltetes
@@ -271,6 +272,11 @@ Guard-Test (`module-settings-editor-guard.test.ts`) die Deklaration; ein leeres
 Schema (etwa Kanalereignisse) bleibt ohne Editor. `panel` bleibt daneben für
 Module mit eigenem Zustand oder Sofortaktionen (Werbung); wo beide stehen,
 erscheint `panel` oben und der `settingsEditor` darunter.
+
+Das gemeinsame `ChatOutputTargetControl` stellt das kompakte Zielmenü für
+einzelne Ausgaben bereit. Es bietet „Alle Chats“ und „Nur unser Chat“ sowie für
+Antworten „Wo gefragt“. Ein Infoknopf erklärt, dass das Ziel nur bei Shared
+Chat greift. Die sichtbaren Texte sind zweisprachig.
 
 ## Wie ein Modul zu seinem Ereignis kommt
 
@@ -356,13 +362,22 @@ Chat und Overlay sind semantisch getrennte Varianten; die Reihenfolge bleibt
 erhalten und neue Aktionsarten können später additiv ergänzt werden. Das Modul
 führt die Aktionen nicht selbst aus.
 
+Chat- und Ankündigungsaktionen können `target: "all_chats"` oder
+`target: "source_only"` setzen; fehlende Ziele werden vom Host als
+`source_only` behandelt. Antwortaktionen dürfen zusätzlich
+`target: "where_asked"` nutzen. Dabei wird der Quellkanal der auslösenden
+Chatnachricht generisch vom Host an den Sender weitergereicht. Module kennen
+weder Twitchs `for_source_only`-Parameter noch implementieren sie eigene
+Shared-Chat-Versandlogik. Auto-Antworten (#245) können denselben
+`ModuleAction`-Contract verwenden.
+
 Zusätzlich meldet ein Modul eine fachliche Entscheidung über das Feld
 `diagnostics`. Das gilt auch dann, wenn es keine Aktion erzeugt. So kann der
 Host erklären, warum eine Aktion bewusst unterblieben ist.
 
 ```ts
 return {
-  actions: [{ kind: "chat", text: "Danke für den Raid!" }],
+  actions: [{ kind: "chat", text: "Danke für den Raid!", target: "source_only" }],
   diagnostics: [{
     code: "shoutout.suppressed",
     detail: { grund: "raid_erkannt", zuschauer: 8, schwelle: 10 },

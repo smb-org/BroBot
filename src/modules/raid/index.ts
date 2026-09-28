@@ -40,6 +40,8 @@ export const raidModule: BotModule<typeof raidSettingsSchema> = {
     textThreshold: 3,
     textLong: DEFAULT_TEXT_LONG,
     textShort: DEFAULT_TEXT_SHORT,
+    textLongTarget: "source_only",
+    textShortTarget: "source_only",
   },
   eventSubTypes: ["channel.raid"],
   settingsEditor: () => import("./panel/settings-editor"),

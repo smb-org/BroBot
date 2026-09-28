@@ -1,10 +1,12 @@
 import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
-import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ImmediateActionRequirement } from "../contracts/values";
+import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ChatOutputTarget, ImmediateActionRequirement } from "../contracts/values";
 import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
+export { CHAT_OUTPUT_TARGETS } from "../contracts/values";
+export type { ChatOutputTarget } from "../contracts/values";
 
 /** The default channel timezone used by host template values and channel settings. */
 export const DEFAULT_CHANNEL_TIME_ZONE = "Europe/Berlin";
@@ -390,8 +392,8 @@ export const apiErrorDetail = (
 
 /** A semantically well-named module action for the host to execute. */
 export type ModuleAction =
-  | { kind: "chat"; text: string; replyToMessageId?: string }
-  | { kind: "announcement"; text: string }
+  | { kind: "chat"; text: string; target?: ChatOutputTarget; replyToMessageId?: string }
+  | { kind: "announcement"; text: string; target?: ChatOutputTarget }
   | { kind: "shoutout"; targetChannelId: string }
   | { kind: "shoutout"; targetLogin: string }
   | {
@@ -539,6 +541,7 @@ export interface ModuleAlarmContext {
     idempotencyKey: string,
     attributions?: readonly string[],
     stillValid?: () => Promise<boolean>,
+    target?: Exclude<ChatOutputTarget, "where_asked">,
   ) => Promise<{ sent: boolean; reason: string | null; retryable: boolean }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;

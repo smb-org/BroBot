@@ -165,6 +165,31 @@ describe("module selection", () => {
 });
 
 describe("dispatch and execution", () => {
+  it.each([
+    { source: null, forSourceOnly: true, description: "our channel with a null source" },
+    { source: "kanal-a", forSourceOnly: true, description: "our channel ID" },
+    { source: "partner-channel", forSourceOnly: false, description: "a partner channel" },
+  ])("routes where_asked chat output for $description", async ({ source, forSourceOnly }) => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      const fetcher = sent();
+      await runDispatch(database, [fakeModule("modul-a", () => ({
+        actions: [{ kind: "chat", text: "Antwort", target: "where_asked" }],
+        diagnostics: [],
+      }))], fetcher, "kanal-a", CHAT_TYPE, {
+        message: { text: "!hallo" },
+        chatter_user_id: "user-1",
+        chatter_user_login: "alice",
+        source_broadcaster_user_id: source,
+      });
+
+      expect(bodyOf(fetcher)).toMatchObject({ for_source_only: forSourceOnly });
+    } finally {
+      database.close();
+    }
+  });
+
   it("delivers mandatory channel events without an activation and through a disabled legacy row", async () => {
     const database = new TestD1Database();
     try {
@@ -1033,6 +1058,7 @@ describe("dispatch and execution", () => {
       expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("https://api.twitch.tv/helix/chat/announcements?");
       expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("broadcaster_id=kanal-a");
       expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("moderator_id=bot-1");
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("for_source_only=true");
       expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
         method: "POST",
         headers: { Authorization: "Bearer app-token", "Client-ID": "client-id" },
@@ -1056,6 +1082,7 @@ describe("dispatch and execution", () => {
 
       expect(fetcher).toHaveBeenCalledTimes(1);
       expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/chat/messages");
+      expect(bodyOf(fetcher)).toMatchObject({ for_source_only: true });
       const rows = await eventLog(database);
       expect(rows.map((row) => row.code)).toEqual(["host.announcement.failed", "host.chat.sent"]);
       expect(JSON.parse(rows[0]?.detail_json ?? "{}")).toMatchObject({

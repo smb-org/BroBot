@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { adsModule, processAdBreak } from "../../src/modules/ads";
+import type { AdsSettings } from "../../src/modules/ads/contracts";
 import type { ModuleEvent } from "../../src/modules/contract";
 
-const event = (payload: Record<string, unknown>, settings = adsModule.defaultSettings): ModuleEvent<typeof settings> => ({
+const event = (payload: Record<string, unknown>, settings: AdsSettings = adsModule.defaultSettings): ModuleEvent<AdsSettings> => ({
   channelId: "kanal-a",
   subscriptionType: "channel.ad_break.begin",
   triggerId: "trigger-1",
@@ -33,8 +34,8 @@ describe("ads module", () => {
       is_automatic: false,
     }));
 
-    expect(automatic.actions).toEqual([{ kind: "chat", text: "Automatische Werbepause: 30 Sekunden. Bin gleich zurück!" }]);
-    expect(manual.actions).toEqual([{ kind: "chat", text: "Werbepause: 90 Sekunden. Bin gleich zurück!" }]);
+    expect(automatic.actions).toEqual([{ kind: "chat", text: "Automatische Werbepause: 30 Sekunden. Bin gleich zurück!", target: "source_only" }]);
+    expect(manual.actions).toEqual([{ kind: "chat", text: "Werbepause: 90 Sekunden. Bin gleich zurück!", target: "source_only" }]);
     expect(automatic.diagnostics[0]).toEqual({
       code: "ads.announcement",
       detail: {
@@ -74,7 +75,7 @@ describe("ads module", () => {
       prewarningText: "Vorwarnung {ads.seconds}",
     }));
 
-    expect(result.actions).toEqual([{ kind: "chat", text: "Pause läuft (45 Sekunden)" }]);
+    expect(result.actions).toEqual([{ kind: "chat", text: "Pause läuft (45 Sekunden)", target: "source_only" }]);
   });
 
   it("replaces the English placeholder, not a German legacy name", () => {
@@ -90,6 +91,6 @@ describe("ads module", () => {
       prewarningText: "Vorwarnung {ads.seconds}",
     }));
 
-    expect(result.actions).toEqual([{ kind: "chat", text: "Pause {dauer} (45 Sekunden)" }]);
+    expect(result.actions).toEqual([{ kind: "chat", text: "Pause {dauer} (45 Sekunden)", target: "source_only" }]);
   });
 });

@@ -7,12 +7,15 @@ const spec: SettingsEditorSpec<AdsSettings> = {
   sections: [
     { id: "announcements", icon: "tabSettings", fields: [
       { kind: "template", key: "automatic", preview: (template, values) => renderAdBreakText(template, Number(values["ads.duration"] ?? "90")) },
+      { kind: "chatTarget", key: "automaticTarget" },
       { kind: "template", key: "manual", preview: (template, values) => renderAdBreakText(template, Number(values["ads.duration"] ?? "90")) },
+      { kind: "chatTarget", key: "manualTarget" },
     ] },
     { id: "prewarning", icon: "tabPrewarning", fields: [
       { kind: "switchCard", key: "prewarning", children: [
         { kind: "number", key: "leadSeconds", min: 30, max: 300, step: 10 },
       { kind: "template", key: "prewarningText", minRows: 2, preview: (template, values) => renderPrewarningText(template, { "ads.seconds": values["ads.seconds"] ?? "60" }) },
+      { kind: "chatTarget", key: "prewarningTarget" },
       ] },
     ] },
   ],

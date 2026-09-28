@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { formatTimestamp } from "../../../dashboard/locale";
-import { Button, ChatPreview, ConfirmDialog, Dialog, Field, InspectorSection, NumberField, Select, Switch } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, InspectorSection, NumberField, Select, Switch } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { Timer, TimerMutationInput, TimerTrigger } from "../contracts";
 import { timersTexts } from "./locale";
@@ -21,6 +21,7 @@ type TriggerType = TimerTrigger["type"];
 interface TimerDraft {
   name: string;
   blockName: string;
+  chatTarget: Timer["chatTarget"];
   type: TriggerType;
   minutes: number | "";
   minimumMessages: number | "";
@@ -34,6 +35,7 @@ interface TimerDraft {
 const emptyDraft = (sources: TimersPanelData["sources"]): TimerDraft => ({
   name: "",
   blockName: "",
+  chatTarget: "source_only",
   type: "interval",
   minutes: 30,
   minimumMessages: 10,
@@ -47,19 +49,19 @@ const emptyDraft = (sources: TimersPanelData["sources"]): TimerDraft => ({
 const draftFromTimer = (timer: Timer): TimerDraft => {
   const trigger = timer.trigger;
   if (trigger.type === "interval") return {
-    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, type: trigger.type,
+    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, chatTarget: timer.chatTarget, type: trigger.type,
     minutes: trigger.minutes, useMinimumMessages: trigger.minimumMessages !== undefined,
     minimumMessages: trigger.minimumMessages ?? 10,
   };
   if (trigger.type === "stream_start") return {
-    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, type: trigger.type, minutes: trigger.minutes,
+    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, chatTarget: timer.chatTarget, type: trigger.type, minutes: trigger.minutes,
   };
   if (trigger.type === "time_of_day") return {
-    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, type: trigger.type,
+    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, chatTarget: timer.chatTarget, type: trigger.type,
     time: trigger.time, weekdays: [...trigger.weekdays], alsoOffline: trigger.alsoOffline,
   };
   return {
-    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, type: trigger.type,
+    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, chatTarget: timer.chatTarget, type: trigger.type,
     minutes: trigger.minutes, sourceId: trigger.sourceId,
   };
 };
@@ -82,7 +84,7 @@ const inputFromDraft = (draft: TimerDraft): TimerMutationInput | null => {
     if (draft.sourceId.length === 0) return null;
     trigger = { type: "before_event", sourceId: draft.sourceId, minutes: draft.minutes as number };
   }
-  return { name: draft.name.trim(), blockName: draft.blockName, trigger };
+  return { name: draft.name.trim(), blockName: draft.blockName, chatTarget: draft.chatTarget, trigger };
 };
 
 const triggerTitle = (type: TriggerType, labels: ReturnType<typeof timersTexts>): string => {
@@ -230,6 +232,7 @@ export default function TimersPanel({ channelId, language, canManage = true, can
                 <span>{labels.trigger} · {triggerTitle(timer.trigger.type, labels)}</span>
                 <span>{triggerDetail(timer, data as TimersPanelData, labels, language ?? "de")}</span>
                 <span>{labels.block} · <code>{timer.blockName}</code></span>
+                <span>{labels.chatTarget} · {labels.chatTargetLabels[timer.chatTarget]}</span>
                 <span>{labels.nextRun} · {timer.nextRunAt === null ? labels.noNextRun : formatTimestamp(timer.nextRunAt)}</span>
               </div>
               <div className="timer-row__actions">
@@ -264,6 +267,12 @@ export default function TimersPanel({ channelId, language, canManage = true, can
             options={blockOptions}
             placeholder={labels.block}
             required
+          />
+          <ChatOutputTargetControl
+            label={labels.chatTarget}
+            value={draft.chatTarget}
+            disabled={pending}
+            onChange={(chatTarget) => { if (chatTarget !== "where_asked") patchDraft({ chatTarget }); }}
           />
           {blockOptions.length === 0 ? <p className="muted">{labels.noBlocks}</p> : null}
           <Select

@@ -97,3 +97,53 @@ describe("before_event timer scheduling routes", () => {
     expect(row).toEqual({ next_run_at: null });
   });
 });
+
+describe("timer edit keeps the stream id in sync with next_run_at", () => {
+  it("clears next_run_stream_id in the same write that clears next_run_at, even if the follow-up schedule write is skipped", async () => {
+    const realDatabase = await createDatabase();
+    await realDatabase.prepare(
+      `INSERT INTO timers
+        (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision,
+         next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?, ?, 1, ?, ?, NULL, ?, ?)`,
+    ).bind(
+      "timer-1", CHANNEL_ID, "Reminder", "welcome", "interval", JSON.stringify({ type: "interval", minutes: 10 }),
+      new Date("2026-09-27T12:10:00.000Z").toISOString(), "stream-1",
+      "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z",
+    ).run();
+
+    // Makes setScheduledAlarm's own reconciling write (which would otherwise
+    // also null both columns together) a no-op, so only the edit mutation's
+    // own clearing of `next_run_at` can be responsible for whatever
+    // `next_run_stream_id` ends up holding.
+    const skippingDatabase = {
+      prepare: (sql: string) => {
+        if (sql.includes("SET next_run_at = ?, next_run_stream_id = ?")) {
+          return { bind: () => ({ run: () => Promise.resolve({ results: [], success: true, meta: { changes: 0, rows_written: 0 } }) }) };
+        }
+        return realDatabase.prepare(sql);
+      },
+      batch: (statements: Parameters<typeof realDatabase.batch>[0]) => realDatabase.batch(statements),
+    } as unknown as D1Database;
+    const app = appFor(skippingDatabase);
+    const environment = environmentFor(skippingDatabase, []);
+
+    const response = await app.fetch(
+      new Request(`https://brobot.example/channels/${CHANNEL_ID}/timers/timer-1`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Reminder (edited)",
+          blockName: "welcome",
+          trigger: { type: "interval", minutes: 10 },
+          revision: 1,
+        }),
+      }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await realDatabase.prepare("SELECT next_run_at, next_run_stream_id FROM timers WHERE timer_id = ?")
+      .bind("timer-1").first()).toEqual({ next_run_at: null, next_run_stream_id: null });
+  });
+});

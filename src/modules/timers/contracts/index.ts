@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ChatOutputTarget } from "../../contract";
 
 export const TIMER_NAME_MAX_LENGTH = 60;
 export const TIMER_MAXIMUM_COUNT = 50;
@@ -26,9 +27,12 @@ export interface Timer {
   name: string;
   enabled: boolean;
   blockName: string;
+  chatTarget: Exclude<ChatOutputTarget, "where_asked">;
   trigger: TimerTrigger;
   revision: number;
   nextRunAt: string | null;
+  /** Twitch stream id `nextRunAt` was armed for, when the trigger is stream-scoped (interval, stream_start). */
+  nextRunStreamId: string | null;
   lastRunAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -37,5 +41,6 @@ export interface Timer {
 export interface TimerMutationInput {
   name: string;
   blockName: string;
+  chatTarget: Exclude<ChatOutputTarget, "where_asked">;
   trigger: TimerTrigger;
 }

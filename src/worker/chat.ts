@@ -3,6 +3,7 @@ import {
 } from "./db/bot-identity";
 import { getAppAccessToken } from "./app-token";
 import { truncateTo200Chars } from "../modules/contract";
+import type { ChatOutputTarget } from "../modules/contract";
 import { helixRequest } from "./twitch/helix";
 
 const CHAT_MESSAGES_URL = "https://api.twitch.tv/helix/chat/messages";
@@ -56,6 +57,16 @@ export interface ChatSendResult {
   detail: Readonly<Record<string, string | number | boolean | null>>;
 }
 
+/** Resolves the configured policy to Twitch's app-token `for_source_only` flag. */
+export const forSourceOnlyForChatTarget = (
+  target: ChatOutputTarget,
+  channelId: string,
+  sourceBroadcasterUserId?: string | null,
+): boolean => target === "source_only" || (
+  target === "where_asked" &&
+  (sourceBroadcasterUserId === undefined || sourceBroadcasterUserId === null || sourceBroadcasterUserId === channelId)
+);
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -99,6 +110,8 @@ export const sendChatMessage = async (
   /** Host-appended source labels, reserved before truncation. */
   attributions: readonly string[] = [],
   afterPost?: (delivery: ChatSendResult["delivery"], reason: string | null) => Promise<void>,
+  target: ChatOutputTarget = "source_only",
+  sourceBroadcasterUserId?: string | null,
 ): Promise<ChatSendResult> => {
   const preparedText = truncateChatTextWithAttributions(text, attributions);
   const textDetail = { text: truncateTo200Chars(preparedText.text) };
@@ -146,7 +159,7 @@ export const sendChatMessage = async (
     broadcaster_id: channelId,
     sender_id: identity.userId,
     message: preparedText.text,
-    for_source_only: false,
+    for_source_only: forSourceOnlyForChatTarget(target, channelId, sourceBroadcasterUserId),
   };
   if (replyToMessageId !== undefined) payload.reply_parent_message_id = replyToMessageId;
 

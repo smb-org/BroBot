@@ -379,7 +379,9 @@ const expectedModuleSettings = {
     shoutoutThreshold: 3,
     textThreshold: 3,
     textLong: "Willkommen {channel}! Danke für den Raid mit {viewers} Zuschauern — schaut gerne vorbei!",
+    textLongTarget: "source_only",
     textShort: "Danke für den Raid, {channel}, mit {viewers} Zuschauern!",
+    textShortTarget: "source_only",
   },
   text_commands: {},
   text_library: {},
@@ -391,10 +393,13 @@ const expectedModuleSettings = {
   api_source: {},
   ads: {
     automatic: "Automatische Werbepause: {ads.duration} Sekunden. Bin gleich zurück!",
+    automaticTarget: "source_only",
     manual: "Werbepause: {ads.duration} Sekunden. Bin gleich zurück!",
+    manualTarget: "source_only",
     prewarning: true,
     leadSeconds: 60,
     prewarningText: "Werbung in {ads.seconds} Sekunden. Bin gleich zurück!",
+    prewarningTarget: "source_only",
   },
 };
 
@@ -614,6 +619,7 @@ describe("serialized contract shapes", () => {
         userCooldownSeconds: 30,
         streamCondition: "online",
         responseType: "announcement",
+        chatTarget: "source_only",
         variableAction: null,
         useCount: 0,
         lastUsedAt: null,
@@ -765,7 +771,7 @@ describe("serialized contract shapes", () => {
         "$.realtime.panelPrincipal: channelId,expiresAt,kind,role,sessionId,userId,v",
         "$.realtime.systemHello: channelId,createdAt,id,payload,type,version",
         "$.realtime.systemHello.payload: ",
-        "$.textCommand: aliases,channelId,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,revision,streamCondition,text,updatedAt,useCount,userCooldownSeconds,variableAction",
+        "$.textCommand: aliases,channelId,chatTarget,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,revision,streamCondition,text,updatedAt,useCount,userCooldownSeconds,variableAction",
       ]);
       expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round"]);
       expect(MODULES.map((module) => module.id).sort()).toEqual([

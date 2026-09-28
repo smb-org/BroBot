@@ -14,8 +14,10 @@ export interface TimerRow {
   block_name: string;
   trigger_type: string;
   trigger_json: string;
+  chat_target?: Timer["chatTarget"];
   revision: number;
   next_run_at: string | null;
+  next_run_stream_id: string | null;
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
@@ -31,9 +33,11 @@ export const mapTimerRow = (row: TimerRow): Timer => {
     name: row.name,
     enabled: row.enabled === 1,
     blockName: row.block_name,
+    chatTarget: row.chat_target ?? "source_only",
     trigger: parsed.data,
     revision: row.revision,
     nextRunAt: row.next_run_at,
+    nextRunStreamId: row.next_run_stream_id,
     lastRunAt: row.last_run_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -144,5 +148,7 @@ export const timerMutationInput = (value: unknown): TimerMutationInput | null =>
       typeof record.blockName !== "string" || !TIMER_BLOCK_NAME_PATTERN.test(record.blockName)) return null;
   const parsed = timerTriggerSchema.safeParse(record.trigger);
   if (!parsed.success) return null;
-  return { name: record.name.trim(), blockName: record.blockName, trigger: parsed.data };
+  const chatTarget = record.chatTarget === undefined ? "source_only" : record.chatTarget;
+  if (chatTarget !== "all_chats" && chatTarget !== "source_only") return null;
+  return { name: record.name.trim(), blockName: record.blockName, chatTarget, trigger: parsed.data };
 };

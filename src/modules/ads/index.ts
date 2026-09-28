@@ -45,9 +45,12 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   defaultSettings: {
     automatic: DEFAULT_AUTOMATIC_TEXT,
     manual: DEFAULT_MANUAL_TEXT,
+    automaticTarget: "source_only",
+    manualTarget: "source_only",
     prewarning: true,
     leadSeconds: 60,
     prewarningText: DEFAULT_PREWARNING_TEXT,
+    prewarningTarget: "source_only",
   },
   broadcasterScopes: ["channel:read:ads"],
   eventTimeSources: [{
