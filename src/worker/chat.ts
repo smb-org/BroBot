@@ -88,6 +88,7 @@ export const sendChatMessage = async (
     TWITCH_CLIENT_SECRET: string;
     TOKEN_ENCRYPTION_KEYS?: string;
     SESSION_ENCRYPTION_KEYS?: string;
+    CHANNEL?: Env["CHANNEL"];
   },
   channelId: string,
   text: string,
@@ -112,6 +113,7 @@ export const sendChatMessage = async (
   afterPost?: (delivery: ChatSendResult["delivery"], reason: string | null) => Promise<void>,
   target: ChatOutputTarget = "source_only",
   sourceBroadcasterUserId?: string | null,
+  recordSent?: (senderId: string, text: string) => Promise<void>,
 ): Promise<ChatSendResult> => {
   const preparedText = truncateChatTextWithAttributions(text, attributions);
   const textDetail = { text: truncateTo200Chars(preparedText.text) };
@@ -202,6 +204,20 @@ export const sendChatMessage = async (
     };
   }
 
+  if (recordSent !== undefined) {
+    try {
+      await recordSent(identity.userId, preparedText.text);
+    } catch (error: unknown) {
+      console.warn("Recent bot chat output could not be recorded.", error);
+    }
+  } else if (environment.CHANNEL !== undefined) {
+    try {
+      const channelObject = environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId));
+      await channelObject.recordBotChatMessage(identity.userId, preparedText.text);
+    } catch (error: unknown) {
+      console.warn("Recent bot chat output could not be recorded.", error);
+    }
+  }
   await afterPost?.("sent", null);
   return { sent: true, truncated: preparedText.truncated, delivery: "sent", reason: null, detail: { messageId: readText(first.message_id), ...textDetail } };
 };

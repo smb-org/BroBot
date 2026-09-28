@@ -2,6 +2,7 @@ import type { BotModule } from "./contract";
 import { channelEventsModule } from "./channel_events";
 import { raidModule } from "./raid";
 import { textCommandModule } from "./text_commands";
+import { faqModule } from "./faq";
 import { adsModule } from "./ads";
 import { clipsModule } from "./clips";
 import { textLibraryModule } from "./text_library";
@@ -17,7 +18,7 @@ import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN, TEMPLATE_DOTTED_VARIABLE_NAME_PATT
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 // This is the only place that knows all modules.
-export const MODULES: readonly BotModule[] = [textCommandModule, textLibraryModule, timersModule, sunModule, moonModule, weatherModule, currencyModule, apiSourceModule, channelEventsModule, adsModule, raidModule, clipsModule];
+export const MODULES: readonly BotModule[] = [textCommandModule, faqModule, textLibraryModule, timersModule, sunModule, moonModule, weatherModule, currencyModule, apiSourceModule, channelEventsModule, adsModule, raidModule, clipsModule];
 
 const HOST_TEMPLATE_VARIABLE_NAMES = new Set(SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name));
 const EXISTING_BARE_MODULE_VARIABLES: Readonly<Record<string, ReadonlySet<string>>> = {

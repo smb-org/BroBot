@@ -246,6 +246,29 @@ lokalisierte Fehlermeldung. So bleiben auch spätere Änderungen an bereits
 verwendeten Blöcken validiert, ohne dass ein Modul sein konsumierendes Modul
 importiert oder dessen Tabellen kennt.
 
+Das FAQ-Modul unter `src/modules/faq/` wird direkt nach `text_commands` in der
+Registry aufgeführt und nutzt denselben Chat-Event-Typ. Die Dispatch-Reihenfolge
+folgt der Registry, damit Befehle vor automatischen Antworten verarbeitet
+werden. Das Modul ignoriert jede Nachricht mit Befehlspräfix und vergleicht
+Schlüsselwörter und Wortgruppen ohne Beachtung von Groß-/Kleinschreibung oder
+Akzenten, mit `ß`/`ẞ` als `ss`. Buchstaben- und Ziffernseiten müssen an einer
+Unicode-Wortgrenze liegen; Symbolseiten wie Emojis dürfen überall stehen. Vor
+der Auswahl des ersten Treffers werden Spieleignung und bekannter Spielstatus
+geprüft. Ein kurzer pro-Kanal-Cache hält die vorbereiteten, normalisierten
+Matcher; lokale Schreibvorgänge leeren ihn sofort, und Cache-Einträge laufen
+nach fünf Sekunden ab. Die Abkühlzeit beträgt mindestens 30 Sekunden. D1
+reserviert sie vor dem Senden; bei Erfolg oder unklarem Ausgang bleibt sie
+bestehen, bei sicherem Nichtversand wird sie freigegeben.
+
+FAQ-Einträge wählen einen Textbaustein, eine optionale Spielauswahl, eine
+Abkühlzeit (mindestens 30 Sekunden) und eines der drei gemeinsamen Chat-Ziele. `source_only` bleibt der
+Standard. Antwortbausteine werden beim Speichern sowie über den generischen
+`validateTemplateContent`-Contract bei späteren Textbibliotheksänderungen auf
+Befehls-Eingabevariablen geprüft. Panel-Test, Aktivierung und Reihenfolge sind
+kanalgebundene Modulrouten; Änderungen werden mit Audit-Einträgen gespeichert.
+Das Datenmodell lässt einen späteren Regex-Matcher zu, aber die erste
+Panel-Version kennt nur Schlüsselwörter und Wortgruppen.
+
 Das erste Modul ist `src/modules/text_commands/`. Es ist in der Registry als
 `text_commands` eingetragen, abonniert `channel.chat.message` und definiert
 seine Tabellen in der zentralen D1-Kette unter `migrations/`. Der D1-Adapter
@@ -385,6 +408,12 @@ Chatnachricht generisch vom Host an den Sender weitergereicht. Module kennen
 weder Twitchs `for_source_only`-Parameter noch implementieren sie eigene
 Shared-Chat-Versandlogik. Auto-Antworten (#245) können denselben
 `ModuleAction`-Contract verwenden.
+
+Automatische Chat-Ausgaben laufen durch eine gemeinsame Kanalbegrenzung von
+höchstens einer Nachricht je fünf Sekunden. Die Begrenzung gilt über Worker-
+Isolate hinweg; Ausgaben, die gerade keinen Platz haben, werden verworfen und
+nicht vorgemerkt. Direkt angeforderte Befehlsantworten kennzeichnet das Modul
+im Contract als nicht automatisch.
 
 Zusätzlich meldet ein Modul eine fachliche Entscheidung über das Feld
 `diagnostics`. Das gilt auch dann, wenn es keine Aktion erzeugt. So kann der

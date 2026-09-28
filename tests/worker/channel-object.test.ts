@@ -176,6 +176,7 @@ const objectFor = (
     TWITCH_CLIENT_ID: "client-id",
   } as Env;
   (object as unknown as { overlayStreamDetailsRefreshes: Map<string, Promise<unknown>> }).overlayStreamDetailsRefreshes = new Map();
+  (object as unknown as { channelGameIdRefresh: Promise<unknown> | null }).channelGameIdRefresh = null;
   (object as unknown as { adScheduleRefresh: Promise<unknown> | null }).adScheduleRefresh = null;
   (object as unknown as { adScheduleRefreshStartedAt: number }).adScheduleRefreshStartedAt = 0;
   (object as unknown as { adScheduleRefreshGeneration: number }).adScheduleRefreshGeneration = 0;
@@ -286,6 +287,76 @@ describe("ChannelObject realtime path", () => {
       url: "https://api.twitch.tv/helix/streams",
       query: { user_id: "kanal-a", type: "live" },
     }));
+  });
+
+  it("shares the channel's game id across a hundred chat messages within the cache TTL", async () => {
+    const values = new Map<string, unknown>();
+    const now = Date.parse("2026-09-27T12:30:00.000Z");
+    mocks.getAppAccessToken.mockResolvedValue("app-token");
+    mocks.helixRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { data: [{ title: "Live", game_name: "Some Game", game_id: "77" }] },
+    });
+    const object = objectFor([], undefined, values);
+
+    for (let index = 0; index < 100; index += 1) {
+      await expect(object.getCachedChannelGameId(now + index)).resolves.toBe("77");
+    }
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(1);
+
+    const afterWake = objectFor([], undefined, values);
+    await expect(afterWake.getCachedChannelGameId(now + 59_999)).resolves.toBe("77");
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(1);
+
+    await afterWake.getCachedChannelGameId(now + 60_000);
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(2);
+    expect(mocks.helixRequest).toHaveBeenLastCalledWith(expect.objectContaining({
+      url: "https://api.twitch.tv/helix/channels",
+      query: { broadcaster_id: "kanal-a" },
+    }));
+  });
+
+  it("retries a failed game-id lookup after a few seconds instead of the full cache TTL", async () => {
+    const values = new Map<string, unknown>();
+    const now = Date.parse("2026-09-27T12:30:00.000Z");
+    mocks.getAppAccessToken.mockResolvedValue("app-token");
+    mocks.helixRequest.mockResolvedValueOnce({ ok: false, status: 500, reason: "http_500", message: null, body: {} });
+    const object = objectFor([], undefined, values);
+
+    await expect(object.getCachedChannelGameId(now)).resolves.toBeNull();
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(1);
+
+    // Still within the short failure TTL: no retry yet.
+    const stillFailed = objectFor([], undefined, values);
+    await expect(stillFailed.getCachedChannelGameId(now + 4_999)).resolves.toBeNull();
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(1);
+
+    // Past the short failure TTL (well short of the normal 60s one): retries,
+    // and a real game now resolves instead of staying cached as "no game".
+    mocks.helixRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { data: [{ title: "Live", game_name: "Some Game", game_id: "77" }] },
+    });
+    const recovered = objectFor([], undefined, values);
+    await expect(recovered.getCachedChannelGameId(now + 5_000)).resolves.toBe("77");
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("updates the cached game id directly from a channel.update category, without a Helix call", async () => {
+    const values = new Map<string, unknown>();
+    const now = Date.parse("2026-09-27T12:30:00.000Z");
+    const object = objectFor([], undefined, values);
+
+    await object.updateCachedChannelGameId("509658", now);
+    await expect(object.getCachedChannelGameId(now + 1)).resolves.toBe("509658");
+    expect(mocks.helixRequest).not.toHaveBeenCalled();
+
+    // A category clear (no game) overwrites it back to null, still without a lookup.
+    await object.updateCachedChannelGameId(null, now + 2);
+    await expect(object.getCachedChannelGameId(now + 3)).resolves.toBeNull();
+    expect(mocks.helixRequest).not.toHaveBeenCalled();
   });
 
   it("rejects a connection without a principal with 403", () => {
@@ -921,6 +992,45 @@ describe("ChannelObject realtime path", () => {
     streamState = "offline";
     await object.recordChatActivity();
     expect(await object.getChatActivityCount()).toBe(1);
+  });
+
+  it("shares automated output claims and remembers recent bot messages per channel", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(20_000);
+    const object = objectFor([]);
+
+    expect(await object.claimAutomatedChatOutput()).toBe(true);
+    expect(await object.claimAutomatedChatOutput()).toBe(false);
+    await object.recordBotChatMessage("previous-bot", "The answer is 42.");
+    expect(await object.isRecentBotChatMessage("previous-bot", "A different message")).toBe(true);
+    // An ordinary viewer, identified by user id, is never treated as an echo
+    // just because their text happens to match a recent bot reply.
+    expect(await object.isRecentBotChatMessage("viewer", "The answer is 42.")).toBe(false);
+    for (let index = 0; index < 21; index += 1) {
+      await object.recordBotChatMessage("current-bot", `Current answer ${String(index)}.`);
+    }
+    expect(await object.isRecentBotChatMessage("previous-bot", "A different message")).toBe(true);
+    expect(await object.isRecentBotChatMessage("viewer", "The answer is 42.")).toBe(false);
+
+    vi.setSystemTime(20_000 + 10 * 60_000 + 1);
+    expect(await object.isRecentBotChatMessage("previous-bot", "A different message")).toBe(false);
+    expect(await object.isRecentBotChatMessage("viewer", "The answer is 42.")).toBe(false);
+  });
+
+  it("still guards an unverified sender by text, but never an identified viewer", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(20_000);
+    const object = objectFor([]);
+
+    await object.recordBotChatMessage("bot-1", "Thanks for the follow!");
+    // No chatter id at all (e.g. a malformed or system message) still needs
+    // the text guard, since it cannot be told apart from the bot itself.
+    expect(await object.isRecentBotChatMessage(null, "Thanks for the follow!")).toBe(true);
+    // A real, identified viewer asking the exact same short trigger phrase
+    // must still get answered, not be treated as the bot echoing itself.
+    expect(await object.isRecentBotChatMessage("viewer-1", "Thanks for the follow!")).toBe(false);
+    // The bot's own (current) identity is still recognized regardless of text.
+    expect(await object.isRecentBotChatMessage("bot-1", "Something else entirely")).toBe(true);
   });
 
   it("rejects stale module alarm revisions after a newer schedule or clear", async () => {

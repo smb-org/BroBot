@@ -47,6 +47,8 @@ export interface AdScheduler {
   readSchedule?: () => Promise<AdSchedule | null>;
   /** Claim the one external chat send for this due occurrence immediately before POST. */
   claimPrewarningSend?: (scheduledDueAtMs: number) => Promise<boolean>;
+  /** Records confirmed output without a Durable Object self-call when run from its alarm. */
+  recordSentChatMessage?: (senderId: string, text: string) => Promise<void>;
 }
 
 const nowMsFrom = (now: string): number => {
@@ -399,6 +401,8 @@ export const processAdPrewarning = async (
       [],
       undefined,
       configured.settings.prewarningTarget,
+      undefined,
+      scheduler?.recordSentChatMessage,
     );
     if (sent.truncated) {
       diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: finalDecision.text.length } });

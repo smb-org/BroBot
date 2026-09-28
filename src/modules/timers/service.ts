@@ -1,11 +1,13 @@
-import { templateVariableNames, SYSTEM_TEMPLATE_VARIABLE_LIST, type TemplateVariable } from "../contract";
 import type {
-  ModuleRegisteredTemplateVariable,
   ModuleTemplateContentValidationContext,
   ModuleTemplateContentIssue,
 } from "../contract";
 import type { Timer, TimerMutationInput } from "./contracts";
 import { TIMER_BLOCK_NAME_PATTERN, timerTriggerSchema } from "./contracts";
+import { validateEventTextBlock, validateEventTextBlockMutation, type EventTextBlockValidation } from "../contracts/text-block-validation";
+
+export type TimerBlockValidation = EventTextBlockValidation;
+export const validateTimerBlock = validateEventTextBlock;
 
 export interface TimerRow {
   timer_id: string;
@@ -44,101 +46,13 @@ export const mapTimerRow = (row: TimerRow): Timer => {
   };
 };
 
-export type TimerBlockValidation = { ok: true } | { ok: false; reason: "missing" | "input_dependent" };
-
-const bareReferences = (text: string): string[] =>
-  [...text.matchAll(/\{([a-z0-9_]{1,32})\}/gu)].flatMap((match) => match[1] === undefined ? [] : [match[1]]);
-
-/** Rejects blocks whose nested templates require a chat command's caller or arguments. */
-export const validateTimerBlock = async (
-  db: D1Database,
-  channelId: string,
-  blockName: string,
-  registeredVariables: readonly ModuleRegisteredTemplateVariable[],
-  candidate?: { name: string; texts: readonly string[] },
-): Promise<TimerBlockValidation> => {
-  if (!TIMER_BLOCK_NAME_PATTERN.test(blockName)) return { ok: false, reason: "missing" };
-  const inputVariables = new Set<string>();
-  const allVariables: readonly TemplateVariable[] = [
-    ...SYSTEM_TEMPLATE_VARIABLE_LIST,
-    ...registeredVariables,
-  ];
-  for (const variable of allVariables) {
-    const contexts = variable.contexts;
-    if (contexts !== undefined && !contexts.includes("event") &&
-        (contexts.includes("chat_command") || variable.unavailableContextText !== undefined)) {
-      inputVariables.add(variable.name);
-    }
-  }
-  const textBlockNames = new Set(registeredVariables.filter((variable) => variable.isTextBlock).map(({ name }) => name));
-  const knownNames = new Set(allVariables.map(({ name }) => name).filter((name) => !textBlockNames.has(name)));
-  const visited = new Set<string>();
-  const visit = async (name: string, depth: number): Promise<TimerBlockValidation> => {
-    if (visited.has(name)) return { ok: true };
-    if (depth > 3) return { ok: false, reason: "missing" };
-    visited.add(name);
-    if (candidate?.name === name) {
-      for (const text of candidate.texts) {
-        if (templateVariableNames(text).some((variable) => inputVariables.has(variable))) {
-          return { ok: false, reason: "input_dependent" };
-        }
-        const nested = [...new Set(bareReferences(text).filter((reference) => !knownNames.has(reference)))];
-        for (const nestedName of nested) {
-          const result = await visit(nestedName, depth + 1);
-          if (!result.ok) return result;
-        }
-      }
-      return { ok: true };
-    }
-    const block = await db.prepare(
-      `SELECT variant.texts_json
-         FROM text_block_variants AS variant
-        WHERE variant.channel_id = ? AND variant.block_name = ?
-        ORDER BY variant.position`,
-    ).bind(channelId, name).all<{ texts_json: string }>();
-    if (block.results.length === 0) return { ok: false, reason: "missing" };
-    const texts = block.results.flatMap(({ texts_json }) => {
-      try {
-        const value: unknown = JSON.parse(texts_json);
-        return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-      } catch { return []; }
-    });
-    for (const text of texts) {
-      if (templateVariableNames(text).some((variable) => inputVariables.has(variable))) {
-        return { ok: false, reason: "input_dependent" };
-      }
-      const nested = [...new Set(bareReferences(text).filter((reference) => !knownNames.has(reference)))];
-      for (const nestedName of nested) {
-        const result = await visit(nestedName, depth + 1);
-        if (!result.ok) return result;
-      }
-    }
-    return { ok: true };
-  };
-  return await visit(blockName, 1);
-};
-
 export const validateTimerTemplateMutation = async (
   context: ModuleTemplateContentValidationContext,
 ): Promise<readonly ModuleTemplateContentIssue[]> => {
   const rows = await context.DB.prepare(
     "SELECT timer_id, name, block_name FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id",
   ).bind(context.channelId).all<{ timer_id: string; name: string; block_name: string }>();
-  const issues: ModuleTemplateContentIssue[] = [];
-  const candidate = { name: context.candidate.name, texts: context.candidate.texts };
-  for (const row of rows.results) {
-    const validation = await validateTimerBlock(
-      context.DB,
-      context.channelId,
-      row.block_name,
-      context.registeredVariables,
-      candidate,
-    );
-    if (!validation.ok && validation.reason === "input_dependent") {
-      issues.push({ reason: "input_dependent", consumerName: row.name });
-    }
-  }
-  return issues;
+  return validateEventTextBlockMutation(context, rows.results.map((row) => ({ name: row.name, blockName: row.block_name })));
 };
 
 export const timerMutationInput = (value: unknown): TimerMutationInput | null => {

@@ -374,6 +374,7 @@ const realtimeForms = {
 const expectedModuleSettings = {
   channel_events: {},
   clips: {},
+  faq: {},
   raid: {
     shoutoutEnabled: true,
     shoutoutThreshold: 3,
@@ -780,6 +781,7 @@ describe("serialized contract shapes", () => {
         "channel_events",
         "clips",
         "currency",
+        "faq",
         "moon",
         "raid",
         "sun",

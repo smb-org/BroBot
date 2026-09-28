@@ -37,6 +37,8 @@ interface BotIdentityStatusRow {
   updated_at: string;
 }
 
+const botUserIdCache = new WeakMap<D1Database, { userId: string | null; updatedAt: string | null }>();
+
 const mapBotIdentity = (row: BotIdentityRow): BotIdentityRecord => ({
   id: 1,
   userId: row.user_id,
@@ -58,6 +60,21 @@ export const getBotIdentity = async (db: D1Database): Promise<BotIdentityRecord 
   ).first<BotIdentityRow>();
   return row === null ? null : mapBotIdentity(row);
 };
+
+/** Checks the D1 identity revision on every call before reusing an isolate-local value. */
+export const getCachedBotUserId = async (db: D1Database): Promise<string | null> => {
+  const identity = await db.prepare(
+    "SELECT user_id, updated_at FROM bot_identity WHERE id = 1",
+  ).first<{ user_id: string; updated_at: string }>();
+  const userId = identity?.user_id ?? null;
+  const updatedAt = identity?.updated_at ?? null;
+  const cached = botUserIdCache.get(db);
+  if (cached !== undefined && cached.userId === userId && cached.updatedAt === updatedAt) return cached.userId;
+  botUserIdCache.set(db, { userId, updatedAt });
+  return userId;
+};
+
+const invalidateBotUserIdCache = (db: D1Database): void => { botUserIdCache.delete(db); };
 
 export const upsertBotIdentity = async (
   db: D1Database,
@@ -87,6 +104,7 @@ export const upsertBotIdentity = async (
     identity.createdAt,
     identity.updatedAt,
   ).run();
+  invalidateBotUserIdCache(db);
 };
 
 export const upsertBotIdentityAndStatus = async (
@@ -129,6 +147,7 @@ export const upsertBotIdentityAndStatus = async (
        updated_at = excluded.updated_at`,
   ).bind(1, status, reason, updatedAt);
   await db.batch([identityMutation, statusMutation]);
+  invalidateBotUserIdCache(db);
 };
 
 export const getBotIdentityStatus = async (

@@ -42,6 +42,11 @@ import {
   finishModuleAlarmSend,
   readModuleAlarmSendClaim,
 } from "./module-alarm-send-claims";
+import {
+  claimAutomatedChatOutput,
+  isRecentBotChatMessage,
+  recordRecentBotChatMessage,
+} from "./automated-chat-output";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -73,6 +78,11 @@ const AD_COUNTDOWN_REFRESH_ATTEMPT_KEY = "ads:countdown_refresh_attempt";
 const AD_COUNTDOWN_REFRESH_DEADLINE_KEY = "ads:countdown_refresh_deadline";
 const AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY = "ads:countdown_refresh_retry_count";
 const OVERLAY_STREAM_DETAILS_CACHE_KEY = "overlay:stream_details";
+const CHANNEL_GAME_ID_CACHE_KEY = "channel:game_id";
+// A failed lookup retries almost immediately instead of sitting on the full
+// TTL below: an outage should not silently mean "no game" to every game
+// filter for a minute.
+const CHANNEL_GAME_ID_FAILURE_CACHE_TTL_MS = 5_000;
 const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
 const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
@@ -165,6 +175,13 @@ interface CachedOverlayStreamDetails {
 interface OverlayStreamDetailsCache {
   details: OverlayStreamDetails | null;
   expiresAt: number;
+}
+
+interface CachedChannelGameId {
+  checkedAt: number;
+  gameId: string | null;
+  /** True when `gameId` is null because the Helix lookup itself failed, not because the channel genuinely has no game set. */
+  failed: boolean;
 }
 
 const revokedTokenKey = (tokenId: string): string => `overlay_revoked:${tokenId}`;
@@ -342,6 +359,7 @@ const envelopeFor = (
  */
 export class ChannelObject extends DurableObject<Env> {
   private overlayStreamDetailsRefreshes = new Map<string, Promise<OverlayStreamDetailsCache>>();
+  private channelGameIdRefresh: Promise<CachedChannelGameId> | null = null;
   private adScheduleRefresh: Promise<AdScheduleRefreshResult> | null = null;
   private adScheduleRefreshStartedAt = 0;
   private adScheduleRefreshGeneration = 0;
@@ -532,6 +550,68 @@ export class ChannelObject extends DurableObject<Env> {
     } finally {
       if (refreshes.get(cacheIdentity) === refresh) refreshes.delete(cacheIdentity);
     }
+  }
+
+  /**
+   * Shares the channel's current game across chat modules (FAQ and text
+   * commands game filters) so a busy chat cannot turn every message into a
+   * Helix channel lookup. Reuses the overlay stream-details TTL: game
+   * changes are not time-critical enough to warrant their own constant.
+   */
+  public async getCachedChannelGameId(now: number): Promise<string | null> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return null;
+    const cached = await this.ctx.storage.get<CachedChannelGameId>(CHANNEL_GAME_ID_CACHE_KEY);
+    const cacheTtlMs = cached?.failed === true ? CHANNEL_GAME_ID_FAILURE_CACHE_TTL_MS : OVERLAY_STREAM_DETAILS_CACHE_TTL_MS;
+    if (cached !== undefined && Number.isFinite(cached.checkedAt) && cached.checkedAt <= now &&
+        now - cached.checkedAt < cacheTtlMs) {
+      return cached.gameId;
+    }
+
+    let refresh = this.channelGameIdRefresh;
+    if (refresh === null) {
+      refresh = (async () => {
+        let gameId: string | null = null;
+        let failed = false;
+        try {
+          const accessToken = await getAppAccessToken(this.env, new Date(now).toISOString());
+          const result = await helixRequest<{ data?: unknown }>({
+            url: "https://api.twitch.tv/helix/channels",
+            query: { broadcaster_id: channelId },
+            accessToken,
+            clientId: this.env.TWITCH_CLIENT_ID,
+          });
+          if (result.ok && isRecord(result.data) && Array.isArray(result.data.data)) {
+            const item: unknown = result.data.data[0];
+            if (isRecord(item) && typeof item.game_id === "string" && item.game_id.length > 0) gameId = item.game_id;
+          } else if (!result.ok) {
+            failed = true;
+          }
+        } catch {
+          failed = true;
+          // Cache the failure briefly too, so an API outage cannot multiply lookups per message.
+        }
+        await this.ctx.storage.put(CHANNEL_GAME_ID_CACHE_KEY, { checkedAt: now, gameId, failed } satisfies CachedChannelGameId);
+        return { checkedAt: now, gameId, failed } satisfies CachedChannelGameId;
+      })();
+      this.channelGameIdRefresh = refresh;
+    }
+    try {
+      return (await refresh).gameId;
+    } finally {
+      if (this.channelGameIdRefresh === refresh) this.channelGameIdRefresh = null;
+    }
+  }
+
+  /**
+   * Keeps the shared game-id cache in step with a `channel.update` EventSub
+   * notification for this channel, using the category id it already carries
+   * instead of waiting out the cache TTL (or spending another Helix call).
+   */
+  public async updateCachedChannelGameId(gameId: string | null, now: number): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    await this.ctx.storage.put(CHANNEL_GAME_ID_CACHE_KEY, { checkedAt: now, gameId, failed: false } satisfies CachedChannelGameId);
   }
 
   public async getAdScheduleGeneration(): Promise<number> {
@@ -1008,6 +1088,8 @@ export class ChannelObject extends DurableObject<Env> {
           attributions,
           afterPost,
           target,
+          undefined,
+          (senderId, messageText) => this.recordBotChatMessage(senderId, messageText),
         );
         if (result.reason === "already_attempted") {
           const claim = await readModuleAlarmSendClaim(this.ctx.storage, idempotencyKey);
@@ -1038,6 +1120,18 @@ export class ChannelObject extends DurableObject<Env> {
       await transaction.put(CHAT_ACTIVITY_COUNT_KEY, next);
       return next;
     });
+  }
+
+  public async claimAutomatedChatOutput(): Promise<boolean> {
+    return claimAutomatedChatOutput(this.ctx.storage, Date.now());
+  }
+
+  public async isRecentBotChatMessage(senderId: string | null, text: string): Promise<boolean> {
+    return isRecentBotChatMessage(this.ctx.storage, senderId, text, Date.now());
+  }
+
+  public async recordBotChatMessage(senderId: string, text: string): Promise<void> {
+    await recordRecentBotChatMessage(this.ctx.storage, senderId, text, Date.now());
   }
 
   public async getChatActivityCount(): Promise<number> {
@@ -1710,11 +1804,19 @@ export class ChannelObject extends DurableObject<Env> {
           const claims = typeof stored === "number" ? { [String(stored)]: stored } : stored ?? {};
           const key = String(scheduledDueAtMs);
           if (Object.hasOwn(claims, key)) return false;
+          // Exempt from the shared automated-output limit: an ad prewarning
+          // is time-critical (it must land before the ad break starts) and
+          // infrequent, unlike timers/FAQ, which yield to each other on that
+          // shared slot. Gating it the same way meant a timer or FAQ reply
+          // that took the slot within the last 5s made this occurrence
+          // "already_attempted" with no retry (see ad-prewarning.ts's
+          // isRetryablePrePostFailure, which deliberately excludes it).
           const pruned = prunePrewarningClaims(claims, Date.now());
           pruned[key] = scheduledDueAtMs;
           await transaction.put(AD_PREWARNING_SEND_CLAIM_KEY, pruned);
           return true;
         }),
+        recordSentChatMessage: (senderId, text) => this.recordBotChatMessage(senderId, text),
         storeSchedule: async (schedule, asOf, options) => {
           return await this.storeAdSchedule(
             schedule,

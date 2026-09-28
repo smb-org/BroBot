@@ -66,6 +66,7 @@ describe("Text commands service", () => {
 
     expect(result.actions).toEqual([{
       kind: "chat",
+      automated: false,
       text: "Hallo alice in kanal-a-login",
       target: "source_only",
       replyToMessageId: "twitch-message-1",
@@ -83,6 +84,7 @@ describe("Text commands service", () => {
 
     expect(result.actions).toEqual([{
       kind: "chat",
+      automated: false,
       text: "Hi alice",
       target: "where_asked",
       replyToMessageId: "twitch-message-1",
@@ -118,9 +120,9 @@ describe("Text commands service", () => {
 
     expect(shoutout.actions).toEqual([
       { kind: "shoutout", targetLogin: "streamerin" },
-      { kind: "chat", text: "Hey alice, folgt streamerin!", target: "source_only" },
+      { kind: "chat", text: "Hey alice, folgt streamerin!", target: "source_only", automated: false },
     ]);
-    expect(usage.actions).toEqual([{ kind: "chat", text: "Nutzung: !so <name>", target: "source_only" }]);
+    expect(usage.actions).toEqual([{ kind: "chat", text: "Nutzung: !so <name>", target: "source_only", automated: false }]);
     expect(usage.diagnostics).toContainEqual({ code: "text_commands.argument_missing", detail: { name: "so" } });
   });
 
@@ -217,6 +219,7 @@ describe("Text commands service", () => {
 
     expect(result.actions).toEqual([{
       kind: "chat",
+      automated: false,
       text: "Befehle: !aktiv, !befehle",
       target: "source_only",
       replyToMessageId: "twitch-message-1",
@@ -243,7 +246,7 @@ describe("Text commands service", () => {
 
     expect(findByAlias).toHaveBeenCalledWith("kanal-a", "hi");
     expect(claim).toHaveBeenCalledWith("kanal-a", "hallo", NOW, "user-1", 0, undefined, undefined, entry);
-    expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", target: "source_only", replyToMessageId: "twitch-message-1" }]);
+    expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", target: "source_only", replyToMessageId: "twitch-message-1", automated: false }]);
     expect(result.diagnostics).toEqual([{
       code: "text_commands.triggered",
       detail: { name: "hallo", alias: "hi", response: "Antwort" },
@@ -319,7 +322,7 @@ describe("Text commands service", () => {
       { streamState: () => Promise.resolve("unknown") },
     );
 
-    expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", target: "source_only", replyToMessageId: "twitch-message-1" }]);
+    expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", target: "source_only", replyToMessageId: "twitch-message-1", automated: false }]);
     expect(result.diagnostics[0]?.detail).toMatchObject({ name: "hallo", streamState: "unknown" });
   });
 
@@ -331,7 +334,7 @@ describe("Text commands service", () => {
       { channelGameId: () => Promise.resolve(null) },
     );
 
-    expect(result.actions).toEqual([{ kind: "chat", text: "Guide text", target: "source_only", replyToMessageId: "twitch-message-1" }]);
+    expect(result.actions).toEqual([{ kind: "chat", text: "Guide text", target: "source_only", replyToMessageId: "twitch-message-1", automated: false }]);
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       "text_commands.game_unknown",
       "text_commands.triggered",
@@ -354,12 +357,12 @@ describe("Text commands service", () => {
   });
 
   it.each([
-    ["text", "say", { kind: "chat", text: "Antwort", target: "source_only" }],
-    ["text", "reply", { kind: "chat", text: "Antwort", target: "source_only", replyToMessageId: "twitch-message-1" }],
-    ["text", "announcement", { kind: "announcement", text: "Antwort", target: "source_only" }],
-    ["list", "say", { kind: "chat", text: "Befehle: !befehle", target: "source_only" }],
-    ["list", "reply", { kind: "chat", text: "Befehle: !befehle", target: "source_only", replyToMessageId: "twitch-message-1" }],
-    ["list", "announcement", { kind: "announcement", text: "Befehle: !befehle", target: "source_only" }],
+    ["text", "say", { kind: "chat", text: "Antwort", target: "source_only", automated: false }],
+    ["text", "reply", { kind: "chat", text: "Antwort", target: "source_only", replyToMessageId: "twitch-message-1", automated: false }],
+    ["text", "announcement", { kind: "announcement", text: "Antwort", target: "source_only", automated: false }],
+    ["list", "say", { kind: "chat", text: "Befehle: !befehle", target: "source_only", automated: false }],
+    ["list", "reply", { kind: "chat", text: "Befehle: !befehle", target: "source_only", replyToMessageId: "twitch-message-1", automated: false }],
+    ["list", "announcement", { kind: "announcement", text: "Befehle: !befehle", target: "source_only", automated: false }],
   ] as const)("maps %s commands with response type %s to the matching action", async (kind, responseType, expected) => {
     const entry = { ...command("befehle", kind === "list" ? "" : "Antwort"), kind, responseType, aliases: ["hi"] };
     const result = await processTextCommandMessage(eventFor("!befehle"), repositoryFor([entry]));
@@ -381,14 +384,14 @@ describe("Text commands service", () => {
     const claim = vi.spyOn(repository, "claim");
 
     const invalid = await processTextCommandMessage(eventFor("!score nope 5"), repository);
-    expect(invalid.actions).toEqual([{ kind: "chat", text: "Usage: !score <number>", target: "source_only" }]);
+    expect(invalid.actions).toEqual([{ kind: "chat", text: "Usage: !score <number>", target: "source_only", automated: false }]);
     expect(invalid.diagnostics).toContainEqual({ code: "text_commands.argument_invalid", detail: { name: "score" } });
     expect(claim).not.toHaveBeenCalled();
 
     const valid = await processTextCommandMessage(eventFor("!score 5 add a note"), repository);
     expect(claim).toHaveBeenCalledTimes(1);
     expect(claim.mock.calls[0]?.[6]).toBe(5);
-    expect(valid.actions).toEqual([{ kind: "chat", text: "Score updated", target: "source_only", replyToMessageId: "twitch-message-1" }]);
+    expect(valid.actions).toEqual([{ kind: "chat", text: "Score updated", target: "source_only", replyToMessageId: "twitch-message-1", automated: false }]);
   });
 
   it.each([

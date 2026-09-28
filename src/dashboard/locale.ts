@@ -1057,6 +1057,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "text_commands.command.created": ({ actor, object }) => `${actor} erstellte den Textbefehl ${object}`,
         "text_commands.command.updated": ({ actor, object }) => `${actor} änderte den Textbefehl ${object}`,
         "text_commands.command.removed": ({ actor, object }) => `${actor} entfernte den Textbefehl ${object}`,
+        "faq.entry.created": ({ actor, object }) => `${actor} legte den FAQ-Eintrag ${object} an`,
+        "faq.entry.updated": ({ actor, object }) => `${actor} änderte den FAQ-Eintrag ${object}`,
+        "faq.entry.removed": ({ actor, object }) => `${actor} entfernte den FAQ-Eintrag ${object}`,
+        "faq.entry.enabled": ({ actor, object }) => `${actor} aktivierte den FAQ-Eintrag ${object}`,
+        "faq.entry.disabled": ({ actor, object }) => `${actor} deaktivierte den FAQ-Eintrag ${object}`,
+        "faq.entry.reordered": ({ actor, object }) => `${actor} änderte die Reihenfolge des FAQ-Eintrags ${object}`,
         "text_library.block.created": ({ actor, object }) => `${actor} erstellte den Textbaustein ${object}`,
         "text_library.block.updated": ({ actor, object }) => `${actor} änderte den Textbaustein ${object}`,
         "text_library.block.removed": ({ actor, object }) => `${actor} entfernte den Textbaustein ${object}`,
@@ -1329,6 +1335,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "text_commands.command.created": ({ actor, object }) => `${actor} created text command ${object}`,
         "text_commands.command.updated": ({ actor, object }) => `${actor} updated text command ${object}`,
         "text_commands.command.removed": ({ actor, object }) => `${actor} removed text command ${object}`,
+        "faq.entry.created": ({ actor, object }) => `${actor} created FAQ entry ${object}`,
+        "faq.entry.updated": ({ actor, object }) => `${actor} updated FAQ entry ${object}`,
+        "faq.entry.removed": ({ actor, object }) => `${actor} removed FAQ entry ${object}`,
+        "faq.entry.enabled": ({ actor, object }) => `${actor} enabled FAQ entry ${object}`,
+        "faq.entry.disabled": ({ actor, object }) => `${actor} disabled FAQ entry ${object}`,
+        "faq.entry.reordered": ({ actor, object }) => `${actor} reordered FAQ entry ${object}`,
         "text_library.block.created": ({ actor, object }) => `${actor} created text block ${object}`,
         "text_library.block.updated": ({ actor, object }) => `${actor} updated text block ${object}`,
         "text_library.block.removed": ({ actor, object }) => `${actor} removed text block ${object}`,
@@ -1901,7 +1913,11 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.action.suppressed": (detail) => `Aktion unterdrückt: ${detail.action === "chat" ? "Chatnachricht" : detail.action === "announcement" ? "Ankündigung" : "Shoutout"} wegen Kanal-Stummschaltung`,
     "host.chat.failed": "Chat-Nachricht fehlgeschlagen",
     "host.chat.sent": "Chat-Nachricht gesendet",
-    "host.chat.skipped": "Chat-Nachricht übersprungen: Zeitplan hat sich in letzter Sekunde geändert",
+    "host.chat.skipped": (detail) => detail.reason === "automated_output_rate_limited"
+      ? "Automatische Chat-Ausgabe wegen des 5-Sekunden-Limits übersprungen"
+      : detail.reason === "stale_before_send"
+        ? "Chat-Nachricht übersprungen: Zeitplan hat sich in letzter Sekunde geändert"
+        : "Chat-Nachricht vor dem Senden übersprungen",
     "host.announcement.sent": (detail) => `Chat-Ankündigung gesendet: ${detailText(detail, "text", "ohne Text")}`,
     "host.announcement.failed": (detail) => {
       const reason = eventCauseText("host.announcement.failed", detail, "de") ?? "unbekannter Grund";
@@ -2001,7 +2017,11 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.action.suppressed": (detail) => `Action suppressed: ${detail.action === "chat" ? "chat message" : detail.action === "announcement" ? "announcement" : "shoutout"} while the channel is muted`,
     "host.chat.failed": "Chat message failed",
     "host.chat.sent": "Chat message sent",
-    "host.chat.skipped": "Chat message skipped: schedule changed at the last moment",
+    "host.chat.skipped": (detail) => detail.reason === "automated_output_rate_limited"
+      ? "Automated chat output skipped by the five-second channel limit"
+      : detail.reason === "stale_before_send"
+        ? "Chat message skipped: schedule changed at the last moment"
+        : "Chat message skipped before sending",
     "host.announcement.sent": (detail) => `Chat announcement sent: ${detailText(detail, "text", "no text")}`,
     "host.announcement.failed": (detail) => {
       const reason = eventCauseText("host.announcement.failed", detail, "en") ?? "unknown reason";
@@ -2216,6 +2236,12 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_commands.command.created": "Textbefehl erstellt",
     "text_commands.command.updated": "Textbefehl aktualisiert",
     "text_commands.command.removed": "Textbefehl entfernt",
+    "faq.entry.created": "FAQ-Eintrag erstellt",
+    "faq.entry.updated": "FAQ-Eintrag geändert",
+    "faq.entry.removed": "FAQ-Eintrag entfernt",
+    "faq.entry.enabled": "FAQ-Eintrag aktiviert",
+    "faq.entry.disabled": "FAQ-Eintrag deaktiviert",
+    "faq.entry.reordered": "FAQ-Eintrag umsortiert",
     "text_library.block.created": "Textbaustein erstellt",
     "text_library.block.updated": "Textbaustein aktualisiert",
     "text_library.block.removed": "Textbaustein entfernt",
@@ -2264,6 +2290,12 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_commands.command.created": "Text command created",
     "text_commands.command.updated": "Text command updated",
     "text_commands.command.removed": "Text command removed",
+    "faq.entry.created": "FAQ entry created",
+    "faq.entry.updated": "FAQ entry updated",
+    "faq.entry.removed": "FAQ entry removed",
+    "faq.entry.enabled": "FAQ entry enabled",
+    "faq.entry.disabled": "FAQ entry disabled",
+    "faq.entry.reordered": "FAQ entry reordered",
     "text_library.block.created": "Text block created",
     "text_library.block.updated": "Text block updated",
     "text_library.block.removed": "Text block removed",
