@@ -273,6 +273,34 @@ describe("FAQ literal matcher", () => {
     }
   });
 
+  it("resolves the game before an unrestricted later entry can win over an eligible earlier one", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "channel-a");
+      await database.prepare(
+        `INSERT INTO faq_entries
+          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+           games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
+         VALUES
+          ('boss-fight', 'channel-a', 'Boss fight', 1, 'keywords', ?, 'boss', 30, ?, 'source_only', 0, 1, NULL, ?, ?),
+          ('any-game', 'channel-a', 'Any game', 1, 'keywords', ?, 'generic', 30, '[]', 'source_only', 1, 1, NULL, ?, ?)`,
+      ).bind(
+        JSON.stringify({ type: "keywords", patterns: ["get dark"] }), JSON.stringify([{ id: "77", name: "Game" }]), NOW, NOW,
+        JSON.stringify({ type: "keywords", patterns: ["get dark"] }), NOW, NOW,
+      ).run();
+      const repository = createFaqRepository(database as unknown as D1Database);
+      // The real current game (77) matches the earlier, game-bound entry: it
+      // must win over the later unrestricted one, even though the cheap
+      // no-game scan would have found the unrestricted entry first.
+      const context = contextFor(database, "77");
+      const result = await processFaqMessage(eventFor("When does it get dark?"), repository, context);
+      expect(result.actions).toMatchObject([{ kind: "chat", text: "{boss}" }]);
+      expect(context.channelGameId).toHaveBeenCalledTimes(1);
+    } finally {
+      database.close();
+    }
+  });
+
   it("lets the panel tester see the same game filter and skip reason as live chat", async () => {
     const database = new TestD1Database();
     try {

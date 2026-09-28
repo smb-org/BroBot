@@ -79,6 +79,10 @@ const AD_COUNTDOWN_REFRESH_DEADLINE_KEY = "ads:countdown_refresh_deadline";
 const AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY = "ads:countdown_refresh_retry_count";
 const OVERLAY_STREAM_DETAILS_CACHE_KEY = "overlay:stream_details";
 const CHANNEL_GAME_ID_CACHE_KEY = "channel:game_id";
+// A failed lookup retries almost immediately instead of sitting on the full
+// TTL below: an outage should not silently mean "no game" to every game
+// filter for a minute.
+const CHANNEL_GAME_ID_FAILURE_CACHE_TTL_MS = 5_000;
 const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
 const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
@@ -176,6 +180,8 @@ interface OverlayStreamDetailsCache {
 interface CachedChannelGameId {
   checkedAt: number;
   gameId: string | null;
+  /** True when `gameId` is null because the Helix lookup itself failed, not because the channel genuinely has no game set. */
+  failed: boolean;
 }
 
 const revokedTokenKey = (tokenId: string): string => `overlay_revoked:${tokenId}`;
@@ -556,8 +562,9 @@ export class ChannelObject extends DurableObject<Env> {
     const channelId = this.ownChannelId();
     if (channelId === null) return null;
     const cached = await this.ctx.storage.get<CachedChannelGameId>(CHANNEL_GAME_ID_CACHE_KEY);
+    const cacheTtlMs = cached?.failed === true ? CHANNEL_GAME_ID_FAILURE_CACHE_TTL_MS : OVERLAY_STREAM_DETAILS_CACHE_TTL_MS;
     if (cached !== undefined && Number.isFinite(cached.checkedAt) && cached.checkedAt <= now &&
-        now - cached.checkedAt < OVERLAY_STREAM_DETAILS_CACHE_TTL_MS) {
+        now - cached.checkedAt < cacheTtlMs) {
       return cached.gameId;
     }
 
@@ -565,6 +572,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (refresh === null) {
       refresh = (async () => {
         let gameId: string | null = null;
+        let failed = false;
         try {
           const accessToken = await getAppAccessToken(this.env, new Date(now).toISOString());
           const result = await helixRequest<{ data?: unknown }>({
@@ -576,12 +584,15 @@ export class ChannelObject extends DurableObject<Env> {
           if (result.ok && isRecord(result.data) && Array.isArray(result.data.data)) {
             const item: unknown = result.data.data[0];
             if (isRecord(item) && typeof item.game_id === "string" && item.game_id.length > 0) gameId = item.game_id;
+          } else if (!result.ok) {
+            failed = true;
           }
         } catch {
-          // Cache the miss briefly too, so an API outage cannot multiply lookups per message.
+          failed = true;
+          // Cache the failure briefly too, so an API outage cannot multiply lookups per message.
         }
-        await this.ctx.storage.put(CHANNEL_GAME_ID_CACHE_KEY, { checkedAt: now, gameId } satisfies CachedChannelGameId);
-        return { checkedAt: now, gameId } satisfies CachedChannelGameId;
+        await this.ctx.storage.put(CHANNEL_GAME_ID_CACHE_KEY, { checkedAt: now, gameId, failed } satisfies CachedChannelGameId);
+        return { checkedAt: now, gameId, failed } satisfies CachedChannelGameId;
       })();
       this.channelGameIdRefresh = refresh;
     }
@@ -590,6 +601,17 @@ export class ChannelObject extends DurableObject<Env> {
     } finally {
       if (this.channelGameIdRefresh === refresh) this.channelGameIdRefresh = null;
     }
+  }
+
+  /**
+   * Keeps the shared game-id cache in step with a `channel.update` EventSub
+   * notification for this channel, using the category id it already carries
+   * instead of waiting out the cache TTL (or spending another Helix call).
+   */
+  public async updateCachedChannelGameId(gameId: string | null, now: number): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    await this.ctx.storage.put(CHANNEL_GAME_ID_CACHE_KEY, { checkedAt: now, gameId, failed: false } satisfies CachedChannelGameId);
   }
 
   public async getAdScheduleGeneration(): Promise<number> {

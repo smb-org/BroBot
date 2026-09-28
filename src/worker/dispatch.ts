@@ -553,6 +553,17 @@ export const dispatchEventSubNotification = async (
       console.warn("Channel chat activity could not be counted.", error);
     }
   }
+  // `channel.update` already carries the new category, so the shared game-id
+  // cache (FAQ and text-command game filters) can be corrected immediately
+  // instead of serving the old game until its TTL expires.
+  if (event.subscriptionType === "channel.update" && environment.CHANNEL !== undefined) {
+    try {
+      const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+      await object.updateCachedChannelGameId(textValue(event.payload.category_id), Date.now());
+    } catch (error: unknown) {
+      console.warn("Channel game cache could not be updated.", error);
+    }
+  }
   // The ending stream remains current while its offline event is dispatched.
   // Capture that session's controls before the stored state moves to offline.
   const changedVariables = new Map<string, number>();
@@ -685,12 +696,19 @@ export const dispatchEventSubNotification = async (
     return channelInfoPromise;
   };
   const channelGameId = async (): Promise<string | null> => {
-    if (environment.CHANNEL === undefined) {
-      const details = await channelDetails();
-      return details === null || details.gameId.length === 0 ? null : details.gameId;
+    if (environment.CHANNEL !== undefined) {
+      try {
+        const channelObject = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+        return await channelObject.getCachedChannelGameId(Date.now());
+      } catch (error: unknown) {
+        // The cached lookup lives in the Durable Object; if that call itself
+        // fails (not just the Helix request inside it), fall back to the
+        // direct Helix path rather than letting the error reach every module.
+        console.warn("Channel game lookup via Durable Object failed; falling back to Helix.", error);
+      }
     }
-    const channelObject = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
-    return await channelObject.getCachedChannelGameId(Date.now());
+    const details = await channelDetails();
+    return details === null || details.gameId.length === 0 ? null : details.gameId;
   };
   const followedAt = (userId: string): Promise<ModuleFollowedAt> => {
     let pending = followedAtPromises.get(userId);

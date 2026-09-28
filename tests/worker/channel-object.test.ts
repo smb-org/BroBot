@@ -317,6 +317,48 @@ describe("ChannelObject realtime path", () => {
     }));
   });
 
+  it("retries a failed game-id lookup after a few seconds instead of the full cache TTL", async () => {
+    const values = new Map<string, unknown>();
+    const now = Date.parse("2026-09-27T12:30:00.000Z");
+    mocks.getAppAccessToken.mockResolvedValue("app-token");
+    mocks.helixRequest.mockResolvedValueOnce({ ok: false, status: 500, reason: "http_500", message: null, body: {} });
+    const object = objectFor([], undefined, values);
+
+    await expect(object.getCachedChannelGameId(now)).resolves.toBeNull();
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(1);
+
+    // Still within the short failure TTL: no retry yet.
+    const stillFailed = objectFor([], undefined, values);
+    await expect(stillFailed.getCachedChannelGameId(now + 4_999)).resolves.toBeNull();
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(1);
+
+    // Past the short failure TTL (well short of the normal 60s one): retries,
+    // and a real game now resolves instead of staying cached as "no game".
+    mocks.helixRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { data: [{ title: "Live", game_name: "Some Game", game_id: "77" }] },
+    });
+    const recovered = objectFor([], undefined, values);
+    await expect(recovered.getCachedChannelGameId(now + 5_000)).resolves.toBe("77");
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("updates the cached game id directly from a channel.update category, without a Helix call", async () => {
+    const values = new Map<string, unknown>();
+    const now = Date.parse("2026-09-27T12:30:00.000Z");
+    const object = objectFor([], undefined, values);
+
+    await object.updateCachedChannelGameId("509658", now);
+    await expect(object.getCachedChannelGameId(now + 1)).resolves.toBe("509658");
+    expect(mocks.helixRequest).not.toHaveBeenCalled();
+
+    // A category clear (no game) overwrites it back to null, still without a lookup.
+    await object.updateCachedChannelGameId(null, now + 2);
+    await expect(object.getCachedChannelGameId(now + 3)).resolves.toBeNull();
+    expect(mocks.helixRequest).not.toHaveBeenCalled();
+  });
+
   it("rejects a connection without a principal with 403", () => {
     const object = objectFor([]);
 

@@ -38,7 +38,12 @@ export const processFaqMessage = async (
   // the message out without any I/O. Only a keyword hit against a
   // game-bound entry (recorded in skippedByGame) needs the current game.
   const withoutGame = selectFaqMatch(prepared, text, null);
-  const selection = withoutGame.match !== null || withoutGame.skippedByGame.length === 0
+  // Any game-bound entry skipped before this result was decided (whether it
+  // ended in a match or not) might turn eligible once the real game is
+  // known, and -- being earlier in order -- would then win over it. Only a
+  // clean, unskipped result (an unrestricted match, or no keyword hit at
+  // all) can be trusted without resolving the game.
+  const selection = withoutGame.skippedByGame.length === 0
     ? withoutGame
     : selectFaqMatch(prepared, text, await (context.channelGameId ?? (() => Promise.resolve(null)))());
   const match = selection.match;

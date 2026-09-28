@@ -1218,4 +1218,113 @@ describe("dispatch and execution", () => {
       database.close();
     }
   });
+
+  it("updates the cached channel game straight from a channel.update notification's category", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const updateCachedChannelGameId = vi.fn().mockResolvedValue(undefined);
+      const runtime = {
+        ...environment(database),
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: () => ({ updateCachedChannelGameId }),
+        },
+      } as unknown as Env;
+
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: "channel.update",
+        triggerId: "update-1",
+        payload: { category_id: "509658", category_name: "Just Chatting" },
+        receivedAt: NOW,
+      }, vi.fn(), []);
+
+      expect(updateCachedChannelGameId).toHaveBeenCalledWith("509658", expect.any(Number));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("clears the cached channel game when channel.update reports no category", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const updateCachedChannelGameId = vi.fn().mockResolvedValue(undefined);
+      const runtime = {
+        ...environment(database),
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: () => ({ updateCachedChannelGameId }),
+        },
+      } as unknown as Env;
+
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: "channel.update",
+        triggerId: "update-2",
+        payload: { category_id: "", category_name: "" },
+        receivedAt: NOW,
+      }, vi.fn(), []);
+
+      expect(updateCachedChannelGameId).toHaveBeenCalledWith(null, expect.any(Number));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("falls back to Helix when the Durable Object's cached game lookup fails", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertAppAccessToken(
+        database,
+        await encryptJson({ token: "app-token" }, parseKeyRing(keyRing)),
+        "2099-09-21T00:00:00.000Z",
+        NOW,
+        NOW,
+      );
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ data: [{ title: "Live", game_name: "Some Game", game_id: "77" }] }), { status: 200 }),
+      );
+      const seenGameIds: (string | null)[] = [];
+      const module: BotModule = {
+        id: "modul-a",
+        settingsSchema: z.object({ prefix: z.string() }),
+        defaultSettings: { prefix: "!" },
+        eventSubTypes: [CHAT_TYPE],
+        handleEvent: async (_event, context) => {
+          seenGameIds.push(await context.channelGameId?.() ?? null);
+          return { actions: [], diagnostics: [] };
+        },
+      };
+      const runtime = {
+        ...environment(database),
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: () => ({
+            recordChatActivity: vi.fn().mockResolvedValue(0),
+            claimAutomatedChatOutput: vi.fn().mockResolvedValue(true),
+            isRecentBotChatMessage: vi.fn().mockResolvedValue(false),
+            getChatActivityCount: vi.fn().mockResolvedValue(0),
+            getCachedChannelGameId: vi.fn().mockRejectedValue(new Error("Durable Object unavailable")),
+          }),
+        },
+      } as unknown as Env;
+
+      await activate(database, "kanal-a", module.id);
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "trigger-1",
+        payload: { message: { text: "!hallo" }, chatter_user_id: "user-1", chatter_user_login: "alice" },
+        receivedAt: NOW,
+      }, fetcher, [module]);
+
+      expect(seenGameIds).toEqual(["77"]);
+      expect(requestedUrl(fetcher.mock.calls.at(-1)?.[0])).toContain("/helix/channels?");
+    } finally {
+      database.close();
+    }
+  });
 });
