@@ -5,7 +5,7 @@ import { canManage } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { API_SOURCE_MAXIMUMS, API_SOURCE_NAME_PATTERN } from "./contracts";
 import { getApiSource, listApiSources } from "./adapters/d1";
-import { validateJsonataExpression } from "./domain";
+import { inspectApiSourceExpression } from "./domain";
 import { isValidApiSourceUrl } from "./domain/url";
 
 const createSchema = z.object({
@@ -33,10 +33,15 @@ apiSourceRoutes.get("/sources", async (context) => {
 apiSourceRoutes.post("/sources", async (context) => {
   if (!canManage(context.get("channelRole"))) return context.json({ error: "api_source_management_denied" }, 403);
   const parsed = createSchema.safeParse(await context.req.json().catch(() => null));
-  if (!parsed.success || !isValidApiSourceUrl(parsed.data.url, context.env.PUBLIC_ORIGIN) ||
-      !validateJsonataExpression(parsed.data.expression)) {
+  if (!parsed.success) return context.json({ error: "api_source_invalid" }, 400);
+  if (!isValidApiSourceUrl(parsed.data.url, context.env.PUBLIC_ORIGIN)) {
     return context.json({ error: "api_source_invalid" }, 400);
   }
+  const expressionError = inspectApiSourceExpression(parsed.data.expression);
+  if (expressionError?.kind === "function_not_allowed") {
+    return context.json({ error: "api_source_function_not_allowed", functionName: expressionError.functionName }, 400);
+  }
+  if (expressionError !== null) return context.json({ error: "api_source_invalid" }, 400);
   const channelId = channelIdOf(context);
   if (await getApiSource(context.env.DB, channelId, parsed.data.name) !== null) {
     return context.json({ error: "api_source_exists" }, 409);
@@ -67,10 +72,15 @@ apiSourceRoutes.post("/sources", async (context) => {
 apiSourceRoutes.patch("/sources/:name", async (context) => {
   if (!canManage(context.get("channelRole"))) return context.json({ error: "api_source_management_denied" }, 403);
   const parsed = updateSchema.safeParse(await context.req.json().catch(() => null));
-  if (!parsed.success || !isValidApiSourceUrl(parsed.data.url, context.env.PUBLIC_ORIGIN) ||
-      !validateJsonataExpression(parsed.data.expression)) {
+  if (!parsed.success) return context.json({ error: "api_source_invalid" }, 400);
+  if (!isValidApiSourceUrl(parsed.data.url, context.env.PUBLIC_ORIGIN)) {
     return context.json({ error: "api_source_invalid" }, 400);
   }
+  const expressionError = inspectApiSourceExpression(parsed.data.expression);
+  if (expressionError?.kind === "function_not_allowed") {
+    return context.json({ error: "api_source_function_not_allowed", functionName: expressionError.functionName }, 400);
+  }
+  if (expressionError !== null) return context.json({ error: "api_source_invalid" }, 400);
   const channelId = channelIdOf(context);
   const name = context.req.param("name");
   const before = await getApiSource(context.env.DB, channelId, name);

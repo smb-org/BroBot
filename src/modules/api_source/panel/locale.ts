@@ -23,6 +23,7 @@ export interface ApiSourcePanelTexts {
   loadFailed: string;
   saveFailed: string;
   invalid: string;
+  functionNotAllowed: (functionName: string) => string;
   conflict: string;
   denied: string;
   limit: string;
@@ -55,6 +56,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     loadFailed: "Die API-Quellen konnten nicht geladen werden.",
     saveFailed: "Die API-Quelle konnte nicht gespeichert werden.",
     invalid: "Name, HTTPS-URL oder JSONata-Ausdruck ist ungültig oder nicht erlaubt.",
+    functionNotAllowed: (functionName) => `Die JSONata-Funktion ${functionName} ist nicht erlaubt.`,
     conflict: "Die Quelle wurde zwischenzeitlich geändert. Bitte neu laden.",
     denied: "Nur Broadcaster und Verwalter dürfen API-Quellen ändern.",
     limit: "Pro Kanal sind höchstens 20 API-Quellen erlaubt.",
@@ -85,6 +87,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     loadFailed: "API sources could not be loaded.",
     saveFailed: "The API source could not be saved.",
     invalid: "The name, HTTPS URL, or JSONata expression is invalid or not allowed.",
+    functionNotAllowed: (functionName) => `The JSONata function ${functionName} is not allowed.`,
     conflict: "The source changed in another session. Reload and try again.",
     denied: "Only the broadcaster and managers may change API sources.",
     limit: "A channel can define at most 20 API sources.",

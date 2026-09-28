@@ -12,14 +12,15 @@ const API_SOURCE_MAXIMUM_REDIRECTS = 3;
 const API_SOURCE_USER_AGENT = "BroBot/0.1.0 (+https://github.com/smb-org/BroBot)";
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-const cacheHash = async (url: string): Promise<string> => {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(url));
+const cacheHash = async (channelId: string, url: string): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([channelId, url])));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
 const cacheExpiry = (headers: Headers, now: number): number | null => {
-  if (/\b(?:no-store|no-cache)\b/iu.test(headers.get("Cache-Control") ?? "")) return null;
-  const maxAge = /(?:^|,)\s*max-age=(\d+)/iu.exec(headers.get("Cache-Control") ?? "")?.[1];
+  const cacheControl = headers.get("Cache-Control") ?? "";
+  if (/\b(?:private|no-store|no-cache)\b/iu.test(cacheControl)) return null;
+  const maxAge = /(?:^|,)\s*max-age=(\d+)/iu.exec(cacheControl)?.[1];
   if (maxAge === undefined) return now + API_SOURCE_DEFAULT_CACHE_TTL_MS;
   return now + Math.min(API_SOURCE_MAXIMUM_CACHE_TTL_MS, Number(maxAge) * 1_000);
 };
@@ -101,7 +102,7 @@ export const fetchCachedApiSourceJson = async (
   fetcher: typeof fetch = fetch,
 ): Promise<unknown> => {
   const canonicalUrl = validateApiSourceUrl(url, ownOrigin).href;
-  const urlHash = await cacheHash(canonicalUrl);
+  const urlHash = await cacheHash(channelId, canonicalUrl);
   const cached = await readCachedApiPayload(db, urlHash, now);
   if (cached !== null) return cached.payload;
 

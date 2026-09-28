@@ -178,12 +178,28 @@ Beispiele ohne JavaScript:
   `$formatNumber($.rates.EUR, '#,##0.0000') & ' EUR je USD'`, Quelle `usd_eur`.
 
 JSONata 2.2.2 ist als exakte Abhängigkeit festgeschrieben. Ausdrücke sind auf
-512 Zeichen, 10 ms Laufzeit, 64 Auswertungsstufen und 1.000 Sequenzelemente
-begrenzt; die JSON-Eingabe ist höchstens 64 Ebenen und 20.000 Knoten tief. Es
-werden keine Hostfunktionen oder benutzerdefinierten Bindings bereitgestellt.
-Der kombinierte CPU-Test rendert verschachtelte Textblöcke, zwei Bedingungen
-und drei JSONata-Ausdrücke mit höchstens drei Netzwerkabrufen gegen das
-10-ms-Budget.
+512 Zeichen begrenzt; ihr AST wird beim Speichern und erneut vor jeder
+Auswertung geprüft. Erlaubt ist nur eine feste Liste aus skalaren JSONata-
+Funktionen. Regexliterale, `$eval`, `$pad`, Sortierung mit benutzerdefinierten
+Funktionen, höherwertige Funktionen, Lambdas und Funktionsdefinitionen werden
+abgewiesen. Damit können JSON-Antworten nicht als neue Ausdrücke ausgewertet
+werden und der synchrone Regex-Pfad steht nicht zur Verfügung. Es gibt keine
+vom Nutzer bereitgestellten Funktionen oder Bindings. Die JSON-Eingabe ist
+höchstens 64 KiB, 64 Ebenen und 20.000 Knoten groß; Sequenzen sind auf 1.000
+Elemente begrenzt. `$split` liefert höchstens 1.000 Teile. `$join` und
+`$replace` begrenzen erzeugte Zeichenketten bereits beim Aufbau auf 2.000
+Zeichen. `$replace` erfordert ein festes Ganzzahllimit von höchstens zehn
+Treffern. Die fertige Vorlagenausgabe bleibt ebenfalls auf 2.000 Zeichen
+begrenzt.
+
+Die JSONata-Option für ein 10-ms-Timeout wird nicht verwendet: Sie prüft nur
+zwischen Auswertungsschritten und kann dadurch auch einfache Ausdrücke unter
+Last zurückweisen, ohne eine harte CPU-Garantie zu geben. Je Vorlagenlauf
+werden höchstens zehn verschiedene Quellen-Ausdruck-Paare
+ausgewertet; wiederholte Platzhalter verwenden dasselbe Ergebnis. Der
+kombinierte CPU-Test rendert verschachtelte Textblöcke, zwei Bedingungen und
+drei JSONata-Ausdrücke mit höchstens drei Netzwerkabrufen. Seine CPU-Messung
+läuft in Node und ist keine Workers-CPU-Garantie.
 
 Die URL-Regeln lassen nur HTTPS auf Standardport 443 zu. Zugangsdaten in der
 URL, Fragmente und IP-Literale sind gesperrt; ebenso lokale, private,
@@ -192,9 +208,11 @@ drei Mal manuell verfolgt und bei jedem Sprung erneut geprüft. Antworten werden
 über den gemeinsamen begrenzten JSON-Reader auf 64 KiB beschränkt. Pro Kanal
 sind 100 echte HTTP-Aufrufe je Stunde und pro Vorlagenlauf höchstens drei
 ausgehende HTTP-Aufrufe einschließlich Weiterleitungen erlaubt. Antworten
-werden nach URL-Hash standardmäßig 60 Sekunden und höchstens fünf Minuten
-zwischengespeichert. Der Overlay-Host plant für Werte und Bedingungen nach
-60 Sekunden eine erneute Auflösung.
+werden nach einem Hash aus Kanal-ID und URL standardmäßig 60 Sekunden und
+höchstens fünf Minuten zwischengespeichert. `private`, `no-store` und
+`no-cache` verhindern das Speichern; `max-age` gilt innerhalb derselben
+TTL-Grenzen. Der Overlay-Host plant für Werte und Bedingungen nach 60 Sekunden
+eine erneute Auflösung.
 
 Die verbleibende DNS-Rebinding-Grenze steht in Entscheidung 0013. Ein
 DNS-Name kann nach der Prüfung auf eine interne IP-Adresse aufgelöst werden;

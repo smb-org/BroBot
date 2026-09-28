@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 
+import { PanelApiError } from "../../../contracts/panel-error";
 import { Button, CodeField, Field, InspectorFieldRow, InspectorSection } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { ApiSource } from "../contracts";
@@ -16,6 +17,12 @@ const emptyDraft = (): SourceDraft => ({ name: "", url: "", expression: "" });
 
 const apiErrorCode = (error: unknown): string | null =>
   error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : null;
+
+const disallowedFunctionName = (error: unknown): string | null => {
+  if (!(error instanceof PanelApiError) || typeof error.details !== "object" || error.details === null || Array.isArray(error.details)) return null;
+  const functionName = (error.details as { functionName?: unknown }).functionName;
+  return typeof functionName === "string" ? functionName : null;
+};
 
 export default function ApiSourcePanel({ channelId, language, canManage }: ModulePanelProperties): ReactElement {
   const locale = language ?? "de";
@@ -78,7 +85,9 @@ export default function ApiSourcePanel({ channelId, language, canManage }: Modul
       setEditingName(null);
     } catch (failure: unknown) {
       const code = apiErrorCode(failure);
-      setError(code === "api_source_invalid" ? labels.invalid
+      const functionName = disallowedFunctionName(failure);
+      setError(code === "api_source_function_not_allowed" && functionName !== null ? labels.functionNotAllowed(functionName)
+        : code === "api_source_invalid" ? labels.invalid
         : code === "api_source_conflict" ? labels.conflict
           : code === "api_source_management_denied" ? labels.denied
             : code === "api_source_limit_or_conflict" ? labels.limit : labels.saveFailed);

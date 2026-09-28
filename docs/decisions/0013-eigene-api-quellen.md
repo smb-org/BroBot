@@ -29,7 +29,9 @@ Metadaten-Endpunkte, eigene BroBot-Routen oder Cloudflare-interne Dienste
 anzusprechen. Er könnte IPv4- oder IPv6-Literale, IPv4-mapped-IPv6-Schreibweisen,
 alternative IPv4-Schreibweisen, URL-Zugangsdaten, einen fremden Port oder eine
 Weiterleitung zu einem gesperrten Ziel nutzen. Eine externe Antwort kann groß,
-verschachtelt oder für eine sehr teure JSONata-Auswertung gebaut sein.
+verschachtelt oder für eine sehr teure JSONata-Auswertung gebaut sein. Deshalb
+ist JSONata auf eine statisch geprüfte Funktionsliste beschränkt; die
+kooperative Zeitoption allein gilt nicht als CPU-Grenze.
 
 Auch ein öffentlich aussehender DNS-Name kann seine Antwort ändern. Die URL
 enthält nur den geprüften Namen; die spätere DNS-Auflösung liegt bei der
@@ -51,15 +53,38 @@ Lücke.
   Request-Bodies und andere Clientdaten werden nicht weitergereicht.
 - Verbindungen brechen nach ungefähr drei Sekunden ab. Antworten müssen einen
   JSON-Content-Type haben und werden mit dem gemeinsamen begrenzten Reader auf
-  64 KiB begrenzt. Für JSONata gelten 64 Ebenen und 20.000 Eingabeknoten.
-- Je URL werden Antwortdaten in D1 zwischengespeichert. Das Standardfenster
-  beträgt 60 Sekunden; Anbieter dürfen es nicht über fünf Minuten verlängern.
+  64 KiB begrenzt. JSONata erhält höchstens 64 KiB, 64 Ebenen und 20.000
+  Eingabeknoten.
+- Antwortdaten werden in D1 unter einem Hash aus Kanal-ID und URL
+  zwischengespeichert. Das Standardfenster beträgt 60 Sekunden; Anbieter dürfen
+  es nicht über fünf Minuten verlängern. Antworten mit `private`, `no-store`
+  oder `no-cache` werden nicht gespeichert; `max-age` gilt innerhalb dieser
+  Grenzen.
   Je Kanal sind höchstens 100 tatsächliche HTTP-Aufrufe pro Stunde erlaubt.
   Ein Vorlagenlauf darf höchstens drei Aufrufe ausführen; Weiterleitungen
   verbrauchen dasselbe Budget.
 - JSONata ist exakt auf Version 2.2.2 festgelegt. Ausdrücke sind höchstens 512
-  Zeichen lang und erhalten Laufzeit-, Rekursions- und Sequenzgrenzen. Es gibt
-  keine eingespritzten Hostfunktionen, Bindings oder Erweiterungsfunktionen.
+  Zeichen lang. Ihr AST wird beim Speichern und vor jeder Auswertung geprüft;
+  nur `$string`, `$number`, `$boolean`, `$not`, `$exists`, `$length`,
+  `$substring`, `$substringBefore`, `$substringAfter`, `$uppercase`,
+  `$lowercase`, `$trim`, `$contains`, `$join`, `$sum`, `$max`, `$min`,
+  `$average`, `$count`, `$round`, `$floor`, `$ceil`, `$abs`, `$formatNumber`,
+  `$keys`, `$lookup`, `$fromMillis`, `$toMillis`, `$now`, `$split` und
+  `$replace` sind zulässig. Regexliterale und alle anderen Funktionen,
+  insbesondere `$eval`, `$pad`, `$sort`, `$map`, `$filter` und `$reduce`,
+  werden abgewiesen. Das sperrt synchrone Regexauswertung, das Parsen eines
+  zweiten Ausdrucks aus Antwortdaten, Lambda-Auswertung und benutzerdefinierte
+  Funktionsdefinitionen. `$contains` und `$split` nehmen dadurch nur
+  Zeichenkettenmuster an. `$replace` erfordert ein festes Ganzzahllimit von
+  höchstens zehn Treffern. `$join` und `$replace` begrenzen Zeichenketten
+  bereits während des Aufbaus auf 2.000 Zeichen; `$split` liefert höchstens
+  1.000 Teile. Auch die fertige Ausgabe wird auf 2.000 Zeichen gekürzt. Das
+  Ergebnis eines Vorlagenlaufs wird je
+  Quellen-Ausdruck-Paar höchstens einmal berechnet; höchstens zehn verschiedene
+  Paare werden ausgewertet. JSONatas 10-ms-Option wird nicht verwendet: Sie
+  prüft nur zwischen Auswertungsschritten, kann unter Last einfache Ausdrücke
+  zurückweisen und bietet keine harte CPU-Garantie. Es gibt keine vom Nutzer
+  bereitgestellten Hostfunktionen oder Bindings.
 - Nur Broadcaster und Manager dürfen Quellen anlegen, ändern oder löschen.
   Diese verwaltende Schwelle wird in derselben SQL-Mutation wie die Änderung
   geprüft und die Änderung wird auditiert ([Entscheidung 0006](0006-rollenschwellen.md)).
@@ -90,8 +115,14 @@ binden.
 
 Der kombinierte Test rendert drei ineinander verschachtelte Textblöcke, wertet
 zwei JSONata-Bedingungen und einen JSONata-Vorlagenwert aus und verwendet eine
-6.000-Elemente-Antwort. Er misst den kalten und warmen D1-Cachepfad mit
-stubbed Fetch und verlangt weniger als 10 ms Worker-seitige CPU pro
-Vorlagenlauf. Der Test loggt das höchste Ergebnis seiner fünf Durchläufe.
-Bei einer Überschreitung ist die Ausführung im Free-Tarif nicht akzeptiert;
-vor dem Versand muss die Tarifentscheidung auf Workers Paid fallen.
+6.000-Elemente-Antwort. Mit stubbed Fetch misst er den kalten und warmen
+D1-Cachepfad und protokolliert die höchste Thread-CPU-Zeit seiner fünf
+Durchläufe. Diese Messung läuft in Node. Sie beschreibt weder Workers-CPU noch
+garantiert sie dort ein 10-ms-Budget.
+
+Die verbleibende Leistungsgrenze ist die durch statische Regeln eingehegte
+Auswertungsarbeit: Antwortgröße, AST-Länge, Eingabetiefe, Knotenzahl,
+Sequenzlänge, Zeichenkettenausgabe und verschiedene Ausdrücke pro Vorlagenlauf
+sind begrenzt. D1-Cachetreffer vermeiden Netzwerkabrufe, aber nicht die
+Auswertung; das Zehn-Paar-Limit gilt daher auch bei warmem Cache. Es gibt keine
+Behauptung, dass diese Grenzen eine bestimmte Workers-CPU-Zeit garantieren.

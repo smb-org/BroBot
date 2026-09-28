@@ -15,7 +15,9 @@ const unavailableText = {
   en: apiSourceModuleCatalog.en.unavailableText,
 } as const;
 const OVERLAY_REFRESH_MS = 60_000;
+const MAXIMUM_EVALUATIONS_PER_RENDER = 10;
 const payloadCacheByInvocation = new WeakMap<ModuleExternalFetchBudget, Map<string, Promise<unknown>>>();
+const evaluationCacheByInvocation = new WeakMap<ModuleExternalFetchBudget, Map<string, Promise<unknown>>>();
 
 const sourcePayload = (
   source: ApiSource,
@@ -35,6 +37,29 @@ const sourcePayload = (
   if (cached !== undefined) return cached;
   const pending = fetchCachedApiSourceJson(context.DB, context.channelId, source.url, context.publicOrigin, context.now, budget);
   payloads.set(cacheKey, pending);
+  return pending;
+};
+
+const evaluateSource = (
+  source: ApiSource,
+  payload: unknown,
+  context: ModuleTemplateValueContext | ModuleTemplateConditionContext,
+): Promise<unknown> => {
+  const budget = context.externalFetchBudget;
+  if (budget === undefined) return evaluateApiSourceExpression(source.expression, payload);
+  let evaluations = evaluationCacheByInvocation.get(budget);
+  if (evaluations === undefined) {
+    evaluations = new Map();
+    evaluationCacheByInvocation.set(budget, evaluations);
+  }
+  const cacheKey = JSON.stringify([context.channelId, source.name, source.expression]);
+  const cached = evaluations.get(cacheKey);
+  if (cached !== undefined) return cached;
+  if (evaluations.size >= MAXIMUM_EVALUATIONS_PER_RENDER) {
+    return Promise.reject(new Error("API source invocation evaluation limit reached."));
+  }
+  const pending = evaluateApiSourceExpression(source.expression, payload);
+  evaluations.set(cacheKey, pending);
   return pending;
 };
 
@@ -60,7 +85,7 @@ const outputFor = async (
   const source = await getApiSource(context.DB, context.channelId, name);
   if (source === null) throw new Error("API source was not found.");
   const payload = await sourcePayload(source, context);
-  return await evaluateApiSourceExpression(source.expression, payload);
+  return await evaluateSource(source, payload, context);
 };
 
 const resolveConditionValues = async (
