@@ -124,6 +124,9 @@ importers:
       hono:
         specifier: ^4.13.1
         version: 4.13.1
+      jsonata:
+        specifier: 2.2.2
+        version: 2.2.2
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -1603,6 +1606,10 @@ packages:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
     hasBin: true
+
+  jsonata@2.2.2:
+    resolution: {integrity: sha512-XDFH2PuaAXv0AXJEWwElXbqADmKFGKMLMkFb+qOz0EhjQW2EIJ6pgtordLU+4u3IVERyBfqy6bi6kZKEncvRqA==}
+    engines: {node: '>= 8'}
 
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
@@ -3510,6 +3517,8 @@ snapshots:
   json-stable-stringify-without-jsonify@1.0.1: {}
 
   json5@2.2.3: {}
+
+  jsonata@2.2.2: {}
 
   keyv@4.5.4:
     dependencies:

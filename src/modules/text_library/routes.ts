@@ -122,9 +122,10 @@ export const textLibraryRoutes = new Hono<ModuleRouteEnvironment>();
 textLibraryRoutes.get("/library", async (context) => {
   const channelId = param(context, "channelId");
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeMutation"), context.get("prepareModuleAudit")));
-  const [data, registeredVariables] = await Promise.all([
+  const [data, registeredVariables, dataConditionDefinitions] = await Promise.all([
     service.list(channelId, await context.get("templateUsageSources")(channelId)),
     context.get("listRegisteredTemplateVariables")(channelId),
+    context.get("listTextBlockConditions")(channelId),
   ]);
   const conditionIds = [...new Set(data.blocks.flatMap((block) => block.variants.flatMap((variant) => Object.keys(variant.conditions.data ?? {}))))];
   const dataConditionValues = await context.get("resolveTextBlockConditions")(channelId, conditionIds, Date.now());
@@ -132,7 +133,7 @@ textLibraryRoutes.get("/library", async (context) => {
     ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name),
     ...registeredVariables.filter(({ moduleId }) => moduleId !== TEXT_LIBRARY_MODULE_ID).map(({ name }) => name),
   ])];
-  return context.json({ ...data, reservedNames, dataConditionValues });
+  return context.json({ ...data, reservedNames, dataConditionValues, dataConditionDefinitions });
 });
 
 textLibraryRoutes.get("/blocks", async (context) => {
@@ -153,7 +154,7 @@ textLibraryRoutes.post("/blocks", async (context) => {
   if (!canManage(context.get("channelRole"))) return denied(context);
   const [raw, dataConditions] = await Promise.all([
     readBody(context.req.raw),
-    context.get("listTextBlockConditions")(),
+    context.get("listTextBlockConditions")(param(context, "channelId")),
   ]);
   const parsed = parseBlock(raw, dataConditions);
   if (parsed === null || parsed.expectedRevision !== undefined) return context.json({ error: "text_library_block_invalid" }, 400);
@@ -189,7 +190,7 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
   if (!canManage(context.get("channelRole"))) return denied(context);
   const [raw, dataConditions] = await Promise.all([
     readBody(context.req.raw),
-    context.get("listTextBlockConditions")(),
+    context.get("listTextBlockConditions")(param(context, "channelId")),
   ]);
   const parsed = parseBlock(raw, dataConditions);
   const channelId = param(context, "channelId");

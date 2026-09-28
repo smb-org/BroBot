@@ -158,6 +158,49 @@ zwischengespeichert und die Ausgabe richtet sich nach der Kanalsprache. Wetter
 und Währung sind eigenständige Module und werden ausschließlich über Contract
 und Registry eingebunden.
 
+### Eigene API-Quellen
+
+`src/modules/api_source/` ergänzt die Datenquellen über Contract und Registry.
+Broadcaster und Manager eines Kanals können höchstens 20 Quellen anlegen. Der
+Name besteht aus Kleinbuchstaben, Ziffern und Unterstrichen und beginnt mit
+einem Buchstaben. Eine Quelle enthält eine HTTPS-URL und optional einen
+JSONata-Ausdruck. In Texten und Textblöcken wird sie als
+`{api_source.value sunset}` verwendet. Eine nichtleere JSONata-Quelle lässt
+sich außerdem als boolesche Bedingung für Textblockvarianten auswählen.
+
+Beispiele ohne JavaScript:
+
+- **Sonnenuntergang:** URL
+  `https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&daily=sunset&timezone=Europe%2FBerlin`, Ausdruck
+  `$fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]')`, Quelle `sunset`.
+- **USD nach EUR:** URL
+  `https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR`, Ausdruck
+  `$formatNumber($.rates.EUR, '#,##0.0000') & ' EUR je USD'`, Quelle `usd_eur`.
+
+JSONata 2.2.2 ist als exakte Abhängigkeit festgeschrieben. Ausdrücke sind auf
+512 Zeichen, 10 ms Laufzeit, 64 Auswertungsstufen und 1.000 Sequenzelemente
+begrenzt; die JSON-Eingabe ist höchstens 64 Ebenen und 20.000 Knoten tief. Es
+werden keine Hostfunktionen oder benutzerdefinierten Bindings bereitgestellt.
+Der kombinierte CPU-Test rendert verschachtelte Textblöcke, zwei Bedingungen
+und drei JSONata-Ausdrücke mit höchstens drei Netzwerkabrufen gegen das
+10-ms-Budget.
+
+Die URL-Regeln lassen nur HTTPS auf Standardport 443 zu. Zugangsdaten in der
+URL, Fragmente und IP-Literale sind gesperrt; ebenso lokale, private,
+reservierte, Cloudflare- und eigene Hostnamen. Weiterleitungen werden höchstens
+drei Mal manuell verfolgt und bei jedem Sprung erneut geprüft. Antworten werden
+über den gemeinsamen begrenzten JSON-Reader auf 64 KiB beschränkt. Pro Kanal
+sind 100 echte HTTP-Aufrufe je Stunde und pro Vorlagenlauf höchstens drei
+ausgehende HTTP-Aufrufe einschließlich Weiterleitungen erlaubt. Antworten
+werden nach URL-Hash standardmäßig 60 Sekunden und höchstens fünf Minuten
+zwischengespeichert. Der Overlay-Host plant für Werte und Bedingungen nach
+60 Sekunden eine erneute Auflösung.
+
+Die verbleibende DNS-Rebinding-Grenze steht in Entscheidung 0013. Ein
+DNS-Name kann nach der Prüfung auf eine interne IP-Adresse aufgelöst werden;
+Workers `fetch` legt die aufgelöste IP nicht offen und erlaubt nicht, sie für
+die Verbindung festzuhalten.
+
 `templateUsageSources` meldet eigene Vorlagentexte für generische
 Nutzungsanzeigen. Der Host ergänzt seine eigenen Oberflächenquellen; Module
 fragen dafür keine Tabellen anderer Module ab.

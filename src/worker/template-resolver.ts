@@ -8,10 +8,11 @@ import {
 } from "../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 import { templateLanguageText } from "../modules/template-language";
-import type { BotModule, ModuleChannelInfo, ModuleChannelLocation, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
+import type { BotModule, ModuleChannelInfo, ModuleChannelLocation, ModuleDiagnostic, ModuleEvent, ModuleExternalFetchBudget, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
 import { formatCount } from "../text";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN } from "../contracts/template-names";
+import { createModuleExternalFetchBudget } from "./external-fetch-budget";
 
 export type TemplateChannelDetails = Pick<ModuleChannelInfo, "title" | "gameName" | "gameId">;
 export type TemplateStreamDetails = Pick<ModuleChannelInfo, "startedAt" | "viewerCount">;
@@ -38,6 +39,8 @@ export interface TemplateValueProvider {
 
 export interface TemplateResolverSources {
   DB: D1Database;
+  publicOrigin?: string;
+  externalFetchBudget?: ModuleExternalFetchBudget;
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   channelGameId?: () => Promise<string | null>;
   channelTimeZone: () => Promise<string>;
@@ -132,6 +135,7 @@ export const createTemplateRenderer = (
   changed?: { name: string; value: number },
   mode: ModuleTemplateRenderMode = "chat",
 ): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }> => {
+  const externalFetchBudget = sources.externalFetchBudget ?? createModuleExternalFetchBudget();
   const providerVariables = (sources.templateValueProviders ?? [])
     .filter((provider) => provider.templateVariableNamespace !== "text_blocks")
     .flatMap((provider) => provider.variables)
@@ -333,7 +337,10 @@ export const createTemplateRenderer = (
     fragment: string,
     nestedMode: ModuleTemplateRenderMode = mode,
   ): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }> => {
-    const nested = await createTemplateRenderer(event, context, moduleVariables, sources)(fragment, moduleValues, changed, nestedMode);
+    const nested = await createTemplateRenderer(event, context, moduleVariables, {
+      ...sources,
+      externalFetchBudget,
+    })(fragment, moduleValues, changed, nestedMode);
     nested.diagnostics.forEach(addDiagnostic);
     nested.attributions?.forEach(addAttribution);
     return nested;
@@ -351,6 +358,8 @@ export const createTemplateRenderer = (
     ...(sources.channelGameId === undefined ? {} : { channelGameId: sources.channelGameId }),
     channelTimeZone: sources.channelTimeZone,
     channelLocation: sources.channelLocation,
+    ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
+    externalFetchBudget,
     renderTemplate: renderNestedTemplate,
     addDiagnostic,
     addTemplateValueAttribution: addAttribution,
@@ -371,6 +380,8 @@ export const createTemplateRenderer = (
             channelId: event.channelId,
             channelTimeZone: sources.channelTimeZone,
             channelLocation: sources.channelLocation,
+            ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
+            externalFetchBudget,
             ...(commandInput === undefined ? {} : { commandInput }),
             addTemplateValueAttribution: addAttribution,
             now,
@@ -429,7 +440,7 @@ export const createTemplateRenderer = (
     );
     if (provider?.resolveTemplateParameter === undefined) continue;
     const declared = provider.variables.find((variable) => variable.name === name && (variable.contexts?.includes(context) ?? true));
-    if (declared?.parameters !== "currency_pair") continue;
+    if (declared?.parameters !== "currency_pair" && declared?.parameters !== "api_source_name") continue;
     try {
       const resolvedParameter = parameter ?? "";
       const value = await provider.resolveTemplateParameter(name, resolvedParameter, providerContext);
@@ -443,7 +454,7 @@ export const createTemplateRenderer = (
   for (const provider of sources.templateValueProviders ?? []) {
     for (const variable of provider.variables) {
       if (!(variable.contexts?.includes(context) ?? true)) continue;
-      if (variable.parameters !== "currency_pair" || provider.resolveTemplateParameter === undefined) continue;
+      if ((variable.parameters !== "currency_pair" && variable.parameters !== "api_source_name") || provider.resolveTemplateParameter === undefined) continue;
       parameterValues[variable.name] = (parameter) => parameterValuesByToken.get(`${variable.name}\u0000${parameter}`) ?? `{${variable.name} ${parameter}}`;
     }
   }

@@ -11,7 +11,7 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleLanguage, ModuleOverlayHostEvent, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
+import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
 import { MODULES, templateVariableGroupForModule, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
@@ -35,6 +35,7 @@ import { readChannelLocation } from "../db/channel-settings";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
 import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event-times";
 import { notifyModuleScheduleInputsChanged } from "../module-schedules";
+import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -43,6 +44,7 @@ interface ModuleRouteEnvironment {
     "writeModuleDiagnostics" | "broadcasterHasScope" | "broadcasterScopesForChannel"
     | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
     | "listChannelVariables" | "findChannelVariable"
+    | "externalFetchBudget"
     | "listTextBlockConditions"
     | "listEventTimeSources" | "resolveEventTimes"
     | "notifyScheduleInputsChanged" | "validateTemplateContentMutation"
@@ -131,6 +133,8 @@ moduleRouter.use("/api/channels/:channelId/modules", requireChannelAuthorization
 moduleRouter.use("/api/channels/:channelId/modules/*", requireChannelAuthorization());
 
 moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
+  const externalFetchBudget: ModuleExternalFetchBudget = createModuleExternalFetchBudget();
+  context.set("externalFetchBudget", externalFetchBudget);
   context.set("writeModuleDiagnostics", writeModuleDiagnostics);
   context.set("broadcasterHasScope", broadcasterHasScope);
   context.set("broadcasterScopesForChannel", broadcasterScopesForChannel);
@@ -149,7 +153,13 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   context.set("listRegisteredTemplateVariables", async (channelId) => {
     return registeredTemplateVariablesForChannel(context.env.DB, channelId);
   });
-  context.set("listTextBlockConditions", () => Promise.resolve(MODULES.flatMap((module) => module.textBlockConditions ?? [])));
+  context.set("listTextBlockConditions", async (channelId) => {
+    const conditions = await Promise.all(MODULES.map(async (module) => [
+      ...(module.textBlockConditions ?? []),
+      ...(await module.textBlockConditionsForChannel?.(context.env.DB, channelId) ?? []),
+    ]));
+    return conditions.flat();
+  });
   context.set("listEventTimeSources", moduleEventTimeOptions);
   context.set("resolveEventTimes", (channelId, now) => resolveModuleEventTimes(context.env.DB, channelId, now));
   context.set("notifyScheduleInputsChanged", (channelId, reason) =>
@@ -172,12 +182,18 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
       channelId,
       channelTimeZone: () => Promise.resolve(channel.time_zone),
       channelLocation: () => readChannelLocation(context.env.DB, channelId),
+      publicOrigin: context.env.PUBLIC_ORIGIN,
+      externalFetchBudget: context.get("externalFetchBudget"),
       now,
     };
     const resolved: Record<string, string> = {};
     for (const module of MODULES) {
       if (module.resolveTemplateConditions === undefined) continue;
-      const declared = new Set((module.textBlockConditions ?? []).map(({ id }) => id));
+      const conditions = [
+        ...(module.textBlockConditions ?? []),
+        ...(await module.textBlockConditionsForChannel?.(context.env.DB, channelId) ?? []),
+      ];
+      const declared = new Set(conditions.map(({ id }) => id));
       const moduleIds = ids.filter((id) => requested.has(id) && declared.has(id));
       if (moduleIds.length === 0) continue;
       try {
@@ -315,6 +331,13 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
     module.id,
     registeredVariables.filter((variable) => variable.moduleId === module.id),
   ]));
+  const providerConditions = new Map(await Promise.all(MODULES.map(async (module) => [
+    module.id,
+    [
+      ...(module.textBlockConditions ?? []),
+      ...(await module.textBlockConditionsForChannel?.(context.env.DB, channelId) ?? []),
+    ],
+  ] as const)));
   const templateValueProviders: TemplateValueProvider[] = MODULES.flatMap((module) => {
     const resolveTemplateValues = module.resolveTemplateValues;
     if (resolveTemplateValues === undefined && module.resolveTemplateParameter === undefined) return [];
@@ -323,7 +346,7 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
       moduleId: module.id,
       ...(module.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: module.templateVariableNamespace }),
       variables,
-      ...(module.textBlockConditions === undefined ? {} : { textBlockConditions: module.textBlockConditions }),
+      textBlockConditions: providerConditions.get(module.id) ?? [],
       ...(module.templateUnavailableText === undefined ? {} : { templateUnavailableText: module.templateUnavailableText }),
       ...(module.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: module.resolveTemplateConditions }),
       ...(module.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: module.dynamicTemplateVariableNames }),
@@ -364,6 +387,8 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
   // value-provider discovery only.
   const render = createTemplateRenderer(event, parsed.data.templateContext, [], {
     DB: context.env.DB,
+    externalFetchBudget: context.get("externalFetchBudget"),
+    publicOrigin: context.env.PUBLIC_ORIGIN,
     channelInfo: () => Promise.resolve(channelInfo),
     channelGameId: () => Promise.resolve(game?.id ?? null),
     channelTimeZone: () => Promise.resolve(channelSettings === null ? DEFAULT_CHANNEL_TIME_ZONE : channelSettings.time_zone),
