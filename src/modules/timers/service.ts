@@ -17,6 +17,7 @@ export interface TimerRow {
   chat_target?: Timer["chatTarget"];
   revision: number;
   next_run_at: string | null;
+  next_run_stream_id: string | null;
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
@@ -36,6 +37,7 @@ export const mapTimerRow = (row: TimerRow): Timer => {
     trigger: parsed.data,
     revision: row.revision,
     nextRunAt: row.next_run_at,
+    nextRunStreamId: row.next_run_stream_id,
     lastRunAt: row.last_run_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

@@ -31,6 +31,8 @@ export interface Timer {
   trigger: TimerTrigger;
   revision: number;
   nextRunAt: string | null;
+  /** Twitch stream id `nextRunAt` was armed for, when the trigger is stream-scoped (interval, stream_start). */
+  nextRunStreamId: string | null;
   lastRunAt: string | null;
   createdAt: string;
   updatedAt: string;
