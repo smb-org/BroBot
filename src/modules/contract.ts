@@ -705,6 +705,10 @@ export interface ModuleTemplateValueContext {
   channelTimeZone: () => Promise<string>;
   /** Lazily reads the host-owned channel location. */
   channelLocation: () => Promise<ModuleChannelLocation | null>;
+  /** The public Worker origin, used by modules to reject requests back to this service. */
+  publicOrigin?: string;
+  /** Shared across the providers involved in a single template render. */
+  externalFetchBudget?: ModuleExternalFetchBudget;
   /** Renders a module-owned nested fragment with the same host values and channel context. */
   renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
   addDiagnostic: (diagnostic: ModuleDiagnostic) => void;
@@ -725,12 +729,21 @@ export interface ModuleTemplateConditionContext {
   channelTimeZone: () => Promise<string>;
   /** Lazily reads the host-owned channel location. */
   channelLocation: () => Promise<ModuleChannelLocation | null>;
+  /** The public Worker origin, used by modules to reject requests back to this service. */
+  publicOrigin?: string;
+  /** Shared across the providers involved in a single template render. */
+  externalFetchBudget?: ModuleExternalFetchBudget;
   now: number;
   commandInput?: { commandName: string; arguments: string; usageText?: string };
   /** Records a source label when a condition uses values from this module. */
   addTemplateValueAttribution?: (text: string) => void;
   /** Records the UTC instant when a resolved condition value may next change, for overlay refresh scheduling. */
   addTemplateConditionNextChangeAt?: (at: string) => void;
+}
+
+export interface ModuleExternalFetchBudget {
+  /** Claims one outbound HTTP request, including a redirect hop. */
+  claim: () => boolean;
 }
 
 export interface ModuleTemplateConditionTimelineContext extends ModuleTemplateConditionContext {
@@ -933,13 +946,14 @@ export interface ModuleRouteVariables {
   actor: { userId: string; sessionId: string };
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;
+  externalFetchBudget: ModuleExternalFetchBudget;
   prepareModuleAudit: PrepareModuleAudit;
   writeModuleAudit: WriteModuleAudit;
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];
   findChannelVariable: ModuleChannelVariableAccess["findChannelVariable"];
   templateUsageSources: (channelId: string) => Promise<readonly ModuleTemplateUsageSource[]>;
   listRegisteredTemplateVariables: (channelId: string) => Promise<readonly ModuleRegisteredTemplateVariable[]>;
-  listTextBlockConditions: () => Promise<readonly ModuleTextBlockConditionDefinition[]>;
+  listTextBlockConditions: (channelId: string) => Promise<readonly ModuleTextBlockConditionDefinition[]>;
   listEventTimeSources: () => readonly { id: string; label: Readonly<Record<ModuleLanguage, string>> }[];
   resolveEventTimes: (channelId: string, now: number) => Promise<readonly ResolvedModuleEventTime[]>;
   notifyScheduleInputsChanged: (channelId: string, reason: ModuleScheduleInputChangeReason) => Promise<void>;
@@ -1050,6 +1064,11 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   templateUnavailableText?: Readonly<Record<ModuleLanguage, string>>;
   /** Declares generic conditions that module-owned text blocks can select. */
   textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
+  /** Channel-specific condition choices backed by module-owned data. */
+  textBlockConditionsForChannel?: (
+    db: D1Database,
+    channelId: string,
+  ) => Promise<readonly ModuleTextBlockConditionDefinition[]>;
   /** Resolves condition ids declared by this module for a single template render. */
   resolveTemplateConditions?: (
     ids: readonly string[],

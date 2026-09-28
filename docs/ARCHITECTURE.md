@@ -94,6 +94,18 @@ die Ausgabe folgt der Kanalsprache. Beide Datenquellen besitzen eigene
 Tabellen und Einstellungen; sie werden ausschließlich über den
 Modul-Contract und die Registry eingebunden.
 
+Das Modul `src/modules/api_source/` lässt Broadcaster und Manager je Kanal bis
+zu 20 benannte HTTPS-JSON-Quellen mit optionalem JSONata-Ausdruck pflegen.
+`{api_source.value sunset}` gibt den ausgewerteten Wert aus; derselbe Ausdruck
+kann als boolesche Textblockbedingung gewählt werden. Die API-Beispiele und
+Sicherheitsgrenzen stehen in `src/modules/README.md` und Entscheidung 0013.
+Die URL-Sicherheitsprüfung liegt im Modul, HTTP-Aufrufe laufen manuell über
+höchstens drei validierte Weiterleitungen, und der Worker gibt weder Cookies
+noch Zugangsdaten weiter. D1 speichert Antworten nach URL-Hash und zählt
+Netzwerkaufrufe je Kanal und Stunde. Ein Vorlagenlauf teilt sein Budget von
+drei externen HTTP-Aufrufen mit allen verschachtelten Blöcken und Bedingungen.
+Das Modul ist über Contract und Registry angeschlossen.
+
 Migration `0016_text_library.sql` führte Textblöcke und zunächst eine
 Bibliothekszeitzone ein. `0017_text_library_variant_choices.sql` ergänzte den
 Zufallswahlindex je Variante. Migration `0018_template_value_providers.sql`
@@ -136,6 +148,9 @@ Raid-/Werbetext und Zeitgeber konfigurierbar; Wetter- und Währungsantworten
 verwenden das Ziel des Textbefehls. Änderungen an gespeicherten Zielen werden
 mit den jeweiligen Modulmutationen auditiert. Auto-Antworten (#245) können
 denselben Contract und dieselbe Host-Versandgrenze verwenden.
+
+Migration `0026_api_sources.sql` legt benannte Quellen, den URL-Cache und das
+stündliche Kanalkontingent an; sie aktiviert das Modul für bestehende Kanäle.
 
 Migration `0027_faq.sql` legt kanalgebundene FAQ-Einträge mit geordneter
 Schlüsselwort-/Wortgruppenliste, Textbaustein, Abkühlzeit, optionalen Spielen

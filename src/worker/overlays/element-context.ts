@@ -20,6 +20,7 @@ import { readChannelLocation } from "../db/channel-settings";
 import { readChannelStreamState } from "../db/stream-state";
 import { helixRequest } from "../twitch/helix";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
+import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 
 const moduleIsEnabled = (module: BotModule, enabled: ReadonlyMap<string, boolean>): boolean =>
   module.mandatory === true || enabled.get(module.id) === true;
@@ -144,16 +145,26 @@ export const createOverlayElementContext = async (
       lookupFailure = true;
       dynamic = [];
     }
-    const declared = Object.values(module.templateFields ?? {}).flatMap((variables) => (variables ?? []) as readonly TemplateVariable[]);
+    const declared = [
+      ...(module.templateVariableCatalog ?? []),
+      ...Object.values(module.templateFields ?? {}).flatMap((variables) => (variables ?? []) as readonly TemplateVariable[]),
+    ];
     moduleVariables.set(module.id, variablesForModuleTemplateContext(module, [...declared, ...dynamic]));
   }));
+  const conditionsByModule = new Map(await Promise.all(MODULES.filter((module) => moduleIsEnabled(module, enabled)).map(async (module) => [
+    module.id,
+    [
+      ...(module.textBlockConditions ?? []),
+      ...(await module.textBlockConditionsForChannel?.(env.DB, channelId) ?? []),
+    ],
+  ] as const)));
   const templateValueProviders: TemplateValueProvider[] = MODULES.flatMap((module) => {
     if (!moduleIsEnabled(module, enabled) || (module.resolveTemplateValues === undefined && module.resolveTemplateParameter === undefined)) return [];
     return [{
       moduleId: module.id,
       ...(module.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: module.templateVariableNamespace }),
       variables: moduleVariables.get(module.id) ?? [],
-      ...(module.textBlockConditions === undefined ? {} : { textBlockConditions: module.textBlockConditions }),
+      textBlockConditions: conditionsByModule.get(module.id) ?? [],
       ...(module.templateUnavailableText === undefined ? {} : { templateUnavailableText: module.templateUnavailableText }),
       ...(module.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: module.resolveTemplateConditions }),
       ...(module.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: module.dynamicTemplateVariableNames }),
@@ -166,9 +177,7 @@ export const createOverlayElementContext = async (
   const registeredVariables = MODULES.flatMap((module) => moduleIsEnabled(module, enabled) && module.templateVariableNamespace !== "text_blocks"
     ? moduleVariables.get(module.id) ?? []
     : []);
-  const conditionDefinitions: readonly ModuleTextBlockConditionDefinition[] = MODULES
-    .filter((module) => moduleIsEnabled(module, enabled))
-    .flatMap((module) => module.textBlockConditions ?? []);
+  const conditionDefinitions: readonly ModuleTextBlockConditionDefinition[] = [...conditionsByModule.values()].flat();
   const timeDependentTemplateConditionIds = new Set(conditionDefinitions
     .filter((condition) => condition.timeDependent === true)
     .map((condition) => condition.id));
@@ -188,8 +197,11 @@ export const createOverlayElementContext = async (
     actor: null,
     chatStatus: null,
   };
+  const externalFetchBudget = createModuleExternalFetchBudget();
   const render = createTemplateRenderer(event, "system", [], {
     DB: env.DB,
+    publicOrigin: env.PUBLIC_ORIGIN,
+    externalFetchBudget,
     channelInfo,
     channelGameId: async () => (await channelDetails())?.gameId || null,
     channelTimeZone,
@@ -222,11 +234,13 @@ export const createOverlayElementContext = async (
       channelId,
       channelTimeZone,
       channelLocation: () => readChannelLocation(env.DB, channelId),
+      publicOrigin: env.PUBLIC_ORIGIN,
+      externalFetchBudget,
       now,
     };
     for (const module of MODULES) {
       if (!moduleIsEnabled(module, enabled) || module.resolveTemplateConditions === undefined) continue;
-      const declared = new Set((module.textBlockConditions ?? []).map(({ id }) => id));
+      const declared = new Set((conditionsByModule.get(module.id) ?? []).map(({ id }) => id));
       const moduleIds = ids.filter((id) => requested.has(id) && declared.has(id));
       if (moduleIds.length === 0) continue;
       const moduleAttributions = new Set<string>();

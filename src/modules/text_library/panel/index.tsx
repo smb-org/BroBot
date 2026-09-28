@@ -114,6 +114,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const resolvedLanguage = language === "en" ? "en" : "de";
   const searchGames = useCallback((query: string) => searchTextLibraryGames(channelId, query), [channelId]);
   const [data, setData] = useState<Awaited<ReturnType<typeof loadTextLibrary>> | null>(null);
+  const conditionDefinitions = data?.dataConditionDefinitions ?? textBlockConditions;
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftBlock | null>(null);
   const [baselineDraft, setBaselineDraft] = useState<DraftBlock | null>(null);
@@ -460,7 +461,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                     <article className="text-library__variant" key={variant.id}>
                       <div className="text-library__variant-heading">
                         <strong>{isDefault ? labels.defaultVariant : labels.variant(index + 1)}</strong>
-                        <span className="muted">{isDefault ? labels.noConditions : conditionSummary(variant, labels, textBlockConditions, language === "en" ? "en" : "de")}</span>
+                        <span className="muted">{isDefault ? labels.noConditions : conditionSummary(variant, labels, conditionDefinitions, language === "en" ? "en" : "de")}</span>
                         {isDefault ? null : <div className="form-actions">
                           <Button size="compact" disabled={pending || index === 0} onClick={() => setDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index - 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index - 1] as TextBlockVariant : entry) })}>{labels.moveUp}</Button>
                           <Button size="compact" disabled={pending || index >= draft.variants.length - 2} onClick={() => setDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index + 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index + 1] as TextBlockVariant : entry) })}>{labels.moveDown}</Button>
@@ -472,7 +473,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         <div className="text-library__condition-grid">
                           <Select label={labels.stream} value={variant.conditions.stream ?? "any"} onChange={(value) => updateCondition(variant.id, (conditions) => value === "any" ? withoutCondition(conditions, "stream") : { ...conditions, stream: value as "online" | "offline" })} options={[{ value: "any", label: labels.anyStream }, { value: "online", label: labels.online }, { value: "offline", label: labels.offline }]} />
                           <Select label={labels.minimumTier} value={variant.conditions.minimumTier ?? "none"} onChange={(value) => updateCondition(variant.id, (conditions) => value === "none" ? withoutCondition(conditions, "minimumTier") : { ...conditions, minimumTier: value as NonNullable<TextBlockConditions["minimumTier"]> })} options={[{ value: "none", label: labels.noMinimumTier }, ...Object.entries(labels.tierLabels).map(([value, label]) => ({ value, label }))]} />
-                          {textBlockConditions.map((condition) => <Select
+                          {conditionDefinitions.map((condition) => <Select
                             key={condition.id}
                             label={condition.label[language === "en" ? "en" : "de"]}
                             value={variant.conditions.data?.[condition.id] ?? ""}
@@ -569,7 +570,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                     <dd><ol>{draft.variants.map((variant, index) => (
                       <li key={variant.id}>
                         <strong>{index === draft.variants.length - 1 ? labels.defaultVariant : labels.variant(index + 1)}</strong>
-                        <p>{conditionSummary(variant, labels, textBlockConditions, language === "en" ? "en" : "de")}</p>
+                        <p>{conditionSummary(variant, labels, conditionDefinitions, language === "en" ? "en" : "de")}</p>
                         <ul>{variant.texts.map((text, textIndex) => <li key={`${variant.id}-${String(textIndex)}`}><pre>{text}</pre></li>)}</ul>
                       </li>
                     ))}</ol></dd>

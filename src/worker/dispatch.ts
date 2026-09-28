@@ -1,5 +1,5 @@
 import type { EventCode } from "../contracts/values";
-import type { BotModule, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatDelivery, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState } from "../modules/contract";
+import type { BotModule, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatDelivery, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState, ModuleTextBlockConditionDefinition } from "../modules/contract";
 import type { RealtimeMessage } from "../realtime-contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../modules/registry";
 import {
@@ -30,6 +30,7 @@ import type { ChannelVariableOperation } from "../contracts/values";
 import type { TemplateVariable } from "../template";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { chatOutputSuppressionReason } from "./chat-output-gate";
+import { createModuleExternalFetchBudget } from "./external-fetch-budget";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -37,6 +38,7 @@ export interface DispatchEnvironment {
   TWITCH_CLIENT_SECRET: string;
   TOKEN_ENCRYPTION_KEYS?: string;
   SESSION_ENCRYPTION_KEYS?: string;
+  PUBLIC_ORIGIN?: string;
   CHANNEL?: Env["CHANNEL"];
 }
 
@@ -542,6 +544,7 @@ export const dispatchEventSubNotification = async (
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
+  const externalFetchBudget = createModuleExternalFetchBudget();
   if (event.subscriptionType === "channel.chat.message" && environment.CHANNEL !== undefined) {
     try {
       const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
@@ -733,19 +736,29 @@ export const dispatchEventSubNotification = async (
   };
 
   const registeredModuleVariables = new Map<string, readonly TemplateVariable[]>();
+  const registeredModuleConditions = new Map<string, readonly ModuleTextBlockConditionDefinition[]>();
   await Promise.all(registry.map(async (module) => {
     let dynamicVariables: readonly TemplateVariable[];
+    let dynamicConditions: readonly ModuleTextBlockConditionDefinition[];
     try {
-      dynamicVariables = module.templateVariableNamespace === "text_blocks"
-        ? []
-        : await module.templateVariables?.(environment.DB, event.channelId) ?? [];
+      [dynamicVariables, dynamicConditions] = await Promise.all([
+        module.templateVariableNamespace === "text_blocks"
+          ? Promise.resolve([] as readonly TemplateVariable[])
+          : module.templateVariables?.(environment.DB, event.channelId) ?? Promise.resolve([]),
+        module.textBlockConditionsForChannel?.(environment.DB, event.channelId) ?? Promise.resolve([]),
+      ]);
     } catch {
       dynamicVariables = [];
+      dynamicConditions = [];
     }
-    const staticVariables = Object.values(module.templateFields ?? {}).flatMap((variables) => variables ?? []) as TemplateVariable[];
+    const staticVariables = [
+      ...(module.templateVariableCatalog ?? []),
+      ...Object.values(module.templateFields ?? {}).flatMap((variables) => variables ?? []),
+    ] as TemplateVariable[];
     const variables = variablesForModuleTemplateContext(module, [...staticVariables, ...dynamicVariables]);
     for (const variable of variables) validateModuleTemplateVariable(module, variable.name);
     registeredModuleVariables.set(module.id, variables);
+    registeredModuleConditions.set(module.id, [...(module.textBlockConditions ?? []), ...dynamicConditions]);
   }));
   const registeredTemplateVariables = registry
     .filter((module) => module.templateVariableNamespace !== "text_blocks")
@@ -757,7 +770,7 @@ export const dispatchEventSubNotification = async (
       moduleId: provider.id,
       ...(provider.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: provider.templateVariableNamespace }),
       variables: registeredModuleVariables.get(provider.id) ?? [],
-      ...(provider.textBlockConditions === undefined ? {} : { textBlockConditions: provider.textBlockConditions }),
+      textBlockConditions: registeredModuleConditions.get(provider.id) ?? [],
       ...(provider.templateUnavailableText === undefined ? {} : { templateUnavailableText: provider.templateUnavailableText }),
       ...(provider.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: provider.resolveTemplateConditions }),
       ...(provider.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: provider.dynamicTemplateVariableNames }),
@@ -802,6 +815,8 @@ export const dispatchEventSubNotification = async (
       const templateContext = module.templateContext ?? "event";
       const render = createTemplateRenderer(moduleEvent, templateContext, moduleVariables, {
         DB: environment.DB,
+        externalFetchBudget,
+        ...(environment.PUBLIC_ORIGIN === undefined ? {} : { publicOrigin: environment.PUBLIC_ORIGIN }),
         channelInfo,
         channelGameId,
         channelTimeZone,

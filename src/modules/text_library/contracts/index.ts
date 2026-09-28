@@ -1,4 +1,4 @@
-import type { ModuleTemplateMinimumTier } from "../../contract";
+import type { ModuleTemplateMinimumTier, ModuleTextBlockConditionDefinition } from "../../contract";
 import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN } from "../../../contracts/template-names";
 
 export {
@@ -90,6 +90,7 @@ export interface TextLibraryData {
   usages: Readonly<Record<string, readonly TextBlockUsage[]>>;
   reservedNames?: readonly string[];
   dataConditionValues?: Readonly<Record<string, string>>;
+  dataConditionDefinitions?: readonly ModuleTextBlockConditionDefinition[];
 }
 
 export type TextBlockMutationError =
