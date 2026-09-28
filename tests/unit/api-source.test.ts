@@ -6,7 +6,15 @@ import type { ModuleEvent, ModuleRouteEnvironment } from "../../src/modules/cont
 import { API_SOURCE_VALUE_VARIABLE, apiSourceModule } from "../../src/modules/api_source";
 import { fetchCachedApiSourceJson } from "../../src/modules/api_source/adapters/fetch-json";
 import { claimApiSourceQuota } from "../../src/modules/api_source/adapters/d1";
-import { evaluateApiSourceExpression, inspectApiSourceExpression, JSONATA_LIMITS, validateJsonataExpression } from "../../src/modules/api_source/domain";
+import {
+  ALLOWED_FUNCTIONS,
+  evaluateApiSourceExpression,
+  inspectApiSourceExpression,
+  JSONATA_LIMITS,
+  OWN_IMPLEMENTATION_FUNCTIONS,
+  SAFE_BUILTIN_FUNCTIONS,
+  validateJsonataExpression,
+} from "../../src/modules/api_source/domain";
 import { isValidApiSourceUrl, validateApiSourceUrl } from "../../src/modules/api_source/domain/url";
 import { apiSourcePanelTexts } from "../../src/modules/api_source/panel/locale";
 import { apiSourceRoutes } from "../../src/modules/api_source/routes";
@@ -480,6 +488,52 @@ describe("API source JSONata", () => {
     expect(validateJsonataExpression(recursive)).toBe(false);
     await expect(evaluateApiSourceExpression(nestedMap, { values: [1, 2, 3] })).rejects.toThrow("$map is not allowed");
     await expect(evaluateApiSourceExpression(recursive, {})).rejects.toThrow("not allowed");
+  });
+
+  it("classifies every allowlisted function as either an own implementation or an explicitly reviewed safe builtin", () => {
+    expect(OWN_IMPLEMENTATION_FUNCTIONS.size + SAFE_BUILTIN_FUNCTIONS.size).toBe(ALLOWED_FUNCTIONS.size);
+    for (const name of ALLOWED_FUNCTIONS) {
+      const isOwn = OWN_IMPLEMENTATION_FUNCTIONS.has(name);
+      const isSafeBuiltin = SAFE_BUILTIN_FUNCTIONS.has(name);
+      expect(isOwn || isSafeBuiltin, `$${name} must be classified as own implementation or safe builtin`).toBe(true);
+      expect(isOwn && isSafeBuiltin, `$${name} must not be in both classification sets`).toBe(false);
+    }
+    for (const name of OWN_IMPLEMENTATION_FUNCTIONS) expect(ALLOWED_FUNCTIONS.has(name), `$${name}`).toBe(true);
+    for (const name of SAFE_BUILTIN_FUNCTIONS) expect(ALLOWED_FUNCTIONS.has(name), `$${name}`).toBe(true);
+  });
+
+  it("rejects $now with any argument, including a picture that would blow up JSONata's date formatter", async () => {
+    const hostilePicture = "$now($.picture)";
+    expect(validateJsonataExpression(hostilePicture)).toBe(false);
+    expect(inspectApiSourceExpression(hostilePicture)).toEqual({
+      kind: "construct_not_allowed",
+      constructName: "$now (zero arguments only)",
+    });
+    await expect(evaluateApiSourceExpression(hostilePicture, { picture: "[Y0001,1000000]" }))
+      .rejects.toThrow("JSONata construct $now (zero arguments only) is not allowed");
+    expect(validateJsonataExpression("$now('[H01]:[m01]')")).toBe(false);
+  });
+
+  it("evaluates $now with zero arguments through its own bounded implementation, not JSONata's date formatter", async () => {
+    const started = performance.now();
+    const result = await evaluateApiSourceExpression("$now()", {});
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect((result as string).length).toBeLessThanOrEqual(24);
+  });
+
+  it.each([
+    ["$boolean", "$boolean($.items)"],
+    ["$not", "$not($.enabled)"],
+    ["$exists", "$exists($.items)"],
+  ])("finishes %s fast on a large-but-capped input and returns a bounded boolean", async (_name, expression) => {
+    const started = performance.now();
+    const result = await evaluateApiSourceExpression(expression, {
+      items: Array.from({ length: 8_000 }, (_, index) => index % 2 === 0),
+      enabled: true,
+    });
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(typeof result).toBe("boolean");
   });
 });
 

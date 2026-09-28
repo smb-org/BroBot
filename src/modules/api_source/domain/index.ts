@@ -26,12 +26,13 @@ export type ApiSourceExpressionValidationError =
   | { kind: "syntax" }
   | { kind: "construct_not_allowed"; constructName: string };
 
-const allowedFunctions = new Set([
+export const ALLOWED_FUNCTIONS = new Set([
   "string", "number", "boolean", "not", "exists", "length", "substring", "substringBefore",
   "substringAfter", "uppercase", "lowercase", "trim", "contains", "join", "sum", "max", "min",
   "average", "count", "round", "floor", "ceil", "abs", "formatNumber", "fromMillis", "toMillis",
   "now", "split", "replace",
 ]);
+const allowedFunctions = ALLOWED_FUNCTIONS;
 
 const arithmeticOperators = new Set(["+", "-", "*", "/", "%"]);
 const formatNumberPictures = new Map<string, Intl.NumberFormatOptions>([
@@ -182,6 +183,9 @@ const inspectAst = (root: unknown): string | null => {
         }
         if (functionValue === "toMillis" && args.length !== 1) {
           reject("$toMillis (ISO-8601 timestamps only)");
+        }
+        if (functionValue === "now" && args.length !== 0) {
+          reject("$now (zero arguments only)");
         }
         if (functionValue === "replace") {
           const pattern = args[1];
@@ -515,6 +519,8 @@ const safeToMillis = (value: unknown, picture?: unknown): number | undefined => 
   return date.getTime();
 };
 
+const safeNow = (): string => new Date().toISOString();
+
 const aggregateValues = (value: unknown, functionName: string): unknown[] => {
   const values = value === undefined ? [] : Array.isArray(value) ? value : [value];
   if (values.length > JSONATA_LIMITS.maximumAggregateLength) {
@@ -591,6 +597,49 @@ const rewriteBoundedOperators = (value: unknown): void => {
   delete value.rhs;
 };
 
+// Every allowlisted function is either an own bounded implementation (below,
+// registered over JSONata's built-in of the same name) or an explicitly
+// reviewed JSONata builtin (`SAFE_BUILTIN_FUNCTIONS`) that provably cannot
+// amplify output or CPU beyond a small constant factor of its already-bounded
+// input: `$boolean` reduces a sequence (capped by `sequence`/input limits) to
+// one boolean, `$not` negates one boolean, `$exists` checks definedness. See
+// docs/decisions/0013-eigene-api-quellen.md for the classification table.
+// `tests/unit/api-source.test.ts` asserts every name in `allowedFunctions`
+// falls into one of these two sets, so a future addition can't slip through
+// unreviewed.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches jsonata's registerFunction implementation signature
+const ownFunctionImplementations: Readonly<Record<string, (...args: any[]) => unknown>> = {
+  string: safeString,
+  length: safeLength,
+  substring: safeSubstring,
+  substringBefore: safeSubstringBefore,
+  substringAfter: safeSubstringAfter,
+  uppercase: (value: unknown) => safeCase(value, true),
+  lowercase: (value: unknown) => safeCase(value, false),
+  trim: safeTrim,
+  contains: safeContains,
+  join: safeJoin,
+  sum: (value: unknown) => safeAggregate("sum", value),
+  max: (value: unknown) => safeAggregate("max", value),
+  min: (value: unknown) => safeAggregate("min", value),
+  average: (value: unknown) => safeAggregate("average", value),
+  count: safeCount,
+  number: safeNumber,
+  round: safeRound,
+  floor: (value: unknown) => safeMath(value, "floor"),
+  ceil: (value: unknown) => safeMath(value, "ceil"),
+  abs: (value: unknown) => safeMath(value, "abs"),
+  formatNumber: safeFormatNumber,
+  fromMillis: safeFromMillis,
+  toMillis: safeToMillis,
+  split: safeSplit,
+  replace: safeReplace,
+  now: safeNow,
+};
+
+export const OWN_IMPLEMENTATION_FUNCTIONS = new Set(Object.keys(ownFunctionImplementations));
+export const SAFE_BUILTIN_FUNCTIONS = new Set(["boolean", "not", "exists"]);
+
 export const evaluateApiSourceExpression = async (expression: string, input: unknown): Promise<unknown> => {
   assertJsonDepth(input);
   if (expression.trim().length === 0) return input;
@@ -605,31 +654,9 @@ export const evaluateApiSourceExpression = async (expression: string, input: unk
     stack: JSONATA_LIMITS.stackDepth,
     sequence: JSONATA_LIMITS.maximumSequenceLength,
   });
-  compiled.registerFunction("string", safeString);
-  compiled.registerFunction("length", safeLength);
-  compiled.registerFunction("substring", safeSubstring);
-  compiled.registerFunction("substringBefore", safeSubstringBefore);
-  compiled.registerFunction("substringAfter", safeSubstringAfter);
-  compiled.registerFunction("uppercase", (value) => safeCase(value, true));
-  compiled.registerFunction("lowercase", (value) => safeCase(value, false));
-  compiled.registerFunction("trim", safeTrim);
-  compiled.registerFunction("contains", safeContains);
-  compiled.registerFunction("join", safeJoin);
-  compiled.registerFunction("sum", (value) => safeAggregate("sum", value));
-  compiled.registerFunction("max", (value) => safeAggregate("max", value));
-  compiled.registerFunction("min", (value) => safeAggregate("min", value));
-  compiled.registerFunction("average", (value) => safeAggregate("average", value));
-  compiled.registerFunction("count", safeCount);
-  compiled.registerFunction("number", safeNumber);
-  compiled.registerFunction("round", safeRound);
-  compiled.registerFunction("floor", (value) => safeMath(value, "floor"));
-  compiled.registerFunction("ceil", (value) => safeMath(value, "ceil"));
-  compiled.registerFunction("abs", (value) => safeMath(value, "abs"));
-  compiled.registerFunction("formatNumber", safeFormatNumber);
-  compiled.registerFunction("fromMillis", safeFromMillis);
-  compiled.registerFunction("toMillis", safeToMillis);
-  compiled.registerFunction("split", safeSplit);
-  compiled.registerFunction("replace", safeReplace);
+  for (const [name, implementation] of Object.entries(ownFunctionImplementations)) {
+    compiled.registerFunction(name, implementation);
+  }
   compiled.registerFunction("apiSourceArithmetic", safeArithmetic);
   compiled.registerFunction("apiSourceConcat", (left, right) => cappedAppend(boundedString(left), boundedString(right)));
   rewriteBoundedOperators(compiled.ast());

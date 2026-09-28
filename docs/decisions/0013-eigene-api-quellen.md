@@ -118,10 +118,12 @@ Lücke.
   liefert höchstens 1.000 Teile. `$join`, `$sum`, `$max`, `$min`, `$average`
   und `$count` verarbeiten höchstens 1.000 Elemente. Jeder arithmetische
   Operator wird intern durch eine geprüfte Implementierung ausgewertet;
-  nichtendliche Zwischenergebnisse machen den Ausdruck nicht verfügbar.
-  Unverändert bleiben nur die einfachen eingebauten Funktionen `$boolean`,
-  `$not`, `$exists` und `$now`. Auch die fertige Ausgabe wird auf 2.000 Zeichen
-  gekürzt. Das Ergebnis eines Vorlagenlaufs wird je
+  nichtendliche Zwischenergebnisse machen den Ausdruck nicht verfügbar. `$now`
+  ist ebenfalls durch eine eigene Implementierung ersetzt und akzeptiert im AST
+  ausschließlich null Argumente (siehe Sicherheitskorrektur unten). Unverändert
+  bleiben nur die einfachen eingebauten Funktionen `$boolean`, `$not` und
+  `$exists` (siehe Klassifizierungstabelle unten). Auch die fertige Ausgabe
+  wird auf 2.000 Zeichen gekürzt. Das Ergebnis eines Vorlagenlaufs wird je
   Quellen-Ausdruck-Paar höchstens einmal berechnet; höchstens zehn verschiedene
   Paare werden ausgewertet. JSONatas 10-ms-Option wird nicht verwendet: Sie
   prüft nur zwischen Auswertungsschritten, kann unter Last einfache Ausdrücke
@@ -169,3 +171,65 @@ Sequenzlänge, Zeichenkettenausgabe und verschiedene Ausdrücke pro Vorlagenlauf
 sind begrenzt. D1-Cachetreffer vermeiden Netzwerkabrufe, aber nicht die
 Auswertung; das Zehn-Paar-Limit gilt daher auch bei warmem Cache. Es gibt keine
 Behauptung, dass diese Grenzen eine bestimmte Workers-CPU-Zeit garantieren.
+
+## 5. Korrektur: `$now` mit Bildargument
+
+Der ursprüngliche Validator ließ `$now` mit beliebigen Argumenten zu und rief
+JSONatas eingebauten Zeitformatierer unverändert auf. JSONatas Bildsprache
+für Datumsformate kann eine Komponente mit einer sehr großen Wiederholungs-
+oder Breitenangabe im Bild kodieren, sodass ein einziger Aufruf mit einem
+kurzen Bildargument eine sehr lange Ausgabezeichenkette baut, bevor die
+gemeinsame Ausgabegrenze greift. `$now` galt fälschlich als "einfache
+eingebaute Funktion ohne Verstärkungspotenzial" (siehe Abschnitt 2); das war
+falsch, weil das Bildargument, anders als bei `$boolean`, `$not` und
+`$exists`, keinen Eingabewert begrenzt, sondern die Ausgabegröße direkt aus
+dem Ausdruck heraus steuert.
+
+Die Korrektur: Der AST-Validator akzeptiert `$now` nur noch mit null
+Argumenten, und `$now` erhält wie die übrigen potenziell teuren Funktionen
+eine eigene gebundene Implementierung (`new Date().toISOString()`), die
+JSONatas eingebauten Bildparser gar nicht mehr aufruft.
+
+## 6. Klassifizierung jeder zugelassenen Funktion
+
+Jede in `allowedFunctions` gelistete Funktion ist entweder (a) eine eigene
+gebundene Implementierung, die JSONatas eingebaute Funktion überschreibt, oder
+(b) eine unveränderte JSONata-Kernfunktion, die nachweislich Ausgabe oder
+CPU-Zeit nicht über einen kleinen konstanten Faktor ihrer bereits begrenzten
+Eingabe hinaus verstärken kann. `tests/unit/api-source.test.ts` prüft, dass
+jeder Name in `allowedFunctions` in genau einer dieser beiden Mengen
+(`OWN_IMPLEMENTATION_FUNCTIONS` bzw. `SAFE_BUILTIN_FUNCTIONS`, beide aus
+`src/modules/api_source/domain/index.ts`) vorkommt, damit eine künftig
+hinzugefügte Funktion nicht unklassifiziert durchrutscht.
+
+| Funktion | Klasse | Begründung |
+| --- | --- | --- |
+| `$string` | eigen | fester Zeichenkettencast, Ausgabe auf 2.000 Zeichen gekürzt |
+| `$number` | eigen | geprüfter Cast, wirft bei nichtendlichem Ergebnis |
+| `$boolean` | eingebaut, sicher | reduziert eine durch `sequence`/Eingabegrenzen begrenzte Sequenz auf ein Bool; keine Ausgabeverstärkung |
+| `$not` | eingebaut, sicher | negiert ein einzelnes Bool, O(1) |
+| `$exists` | eingebaut, sicher | prüft nur Definiertheit, O(1), keine Traversierung |
+| `$length` | eigen | zählt Codepoints einer auf 8.192 Zeichen begrenzten Zeichenkette |
+| `$substring` | eigen | Slice auf begrenzter Zeichenkette, Ausgabe gekürzt |
+| `$substringBefore` | eigen | `indexOf` auf begrenzter Zeichenkette, Ausgabe gekürzt |
+| `$substringAfter` | eigen | `indexOf` auf begrenzter Zeichenkette, Ausgabe gekürzt |
+| `$uppercase` | eigen | `toUpperCase` auf begrenzter Zeichenkette, Ausgabe gekürzt |
+| `$lowercase` | eigen | `toLowerCase` auf begrenzter Zeichenkette, Ausgabe gekürzt |
+| `$trim` | eigen | `trim` auf begrenzter Zeichenkette, Ausgabe gekürzt |
+| `$contains` | eigen | `includes` auf zwei begrenzten Zeichenketten |
+| `$join` | eigen | Aggregatlimit auf Elementanzahl, Ausgabe während Aufbau gekürzt |
+| `$sum` | eigen | Aggregatlimit, wirft bei nichtendlichem Zwischenergebnis |
+| `$max` | eigen | Aggregatlimit, wirft bei nichtendlichem Zwischenergebnis |
+| `$min` | eigen | Aggregatlimit, wirft bei nichtendlichem Zwischenergebnis |
+| `$average` | eigen | Aggregatlimit, wirft bei nichtendlichem Zwischenergebnis |
+| `$count` | eigen | zählt nur, Aggregatlimit |
+| `$round` | eigen | geprüfte Präzision -15..15, endliches Ergebnis erzwungen |
+| `$floor` | eigen | endliches Ergebnis erzwungen |
+| `$ceil` | eigen | endliches Ergebnis erzwungen |
+| `$abs` | eigen | endliches Ergebnis erzwungen |
+| `$formatNumber` | eigen | `Intl.NumberFormat` mit fester Optionen-Allowlist, keine JSONata-Bildsprache |
+| `$fromMillis` | eigen | ISO-Ausgabe oder festes Bild `[H01]:[m01]`, keine JSONata-Bildsprache |
+| `$toMillis` | eigen | strikte ISO-8601-Prüfung durch Ziffern-Offsets, kein Regex, kein Bild |
+| `$now` | eigen (korrigiert) | `new Date().toISOString()`, keine Argumente, kein Bildparser |
+| `$split` | eigen | begrenzte Trennzeichenkette, Ergebnis auf 1.000 Teile begrenzt |
+| `$replace` | eigen | begrenztes Zeichenkettenmuster und Ganzzahllimit, Ausgabe während Aufbau gekürzt |
