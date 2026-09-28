@@ -390,6 +390,7 @@ const expectedModuleSettings = {
   moon: {},
   weather: {},
   currency: {},
+  api_source: {},
   ads: {
     automatic: "Automatische Werbepause: {ads.duration} Sekunden. Bin gleich zurück!",
     automaticTarget: "source_only",
@@ -775,6 +776,7 @@ describe("serialized contract shapes", () => {
       expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round"]);
       expect(MODULES.map((module) => module.id).sort()).toEqual([
         "ads",
+        "api_source",
         "channel_events",
         "clips",
         "currency",

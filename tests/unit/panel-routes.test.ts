@@ -318,6 +318,7 @@ describe("Panel read endpoints", () => {
         { moduleId: "moon", settings: "{}" },
         { moduleId: "weather", settings: "{}" },
         { moduleId: "currency", settings: "{}" },
+        { moduleId: "api_source", settings: "{}" },
         { moduleId: "channel_events", settings: "{}" },
       ],
     });
@@ -934,6 +935,7 @@ describe("Panel read endpoints", () => {
       { moduleId: "moon", settings: "{}" },
       { moduleId: "weather", settings: "{}" },
       { moduleId: "currency", settings: "{}" },
+      { moduleId: "api_source", settings: "{}" },
       { moduleId: "channel_events", settings: "{}" },
     ]);
     expect(body.tokens).toEqual({

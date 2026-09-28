@@ -18,7 +18,7 @@ import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protoc
 import type { AdsSchedule } from "../../modules/ads/contracts";
 import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
 import type { BotModule, HelixRequest, HelixRequestOptions } from "../../modules/contract";
-import type { ModuleAlarmContext, ModuleAlarmDefinition, ModuleScheduleInputChangeReason } from "../../modules/contract";
+import type { ModuleAlarmContext, ModuleAlarmDefinition, ModuleExternalFetchBudget, ModuleScheduleInputChangeReason } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
@@ -36,6 +36,7 @@ import { readDispatchChannelState } from "../db/channel-controls";
 import { chatOutputSuppressionReason } from "../chat-output-gate";
 import { resolveModuleEventTimes } from "../module-event-times";
 import { renderScheduledTemplate } from "../scheduled-template-renderer";
+import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import {
   claimModuleAlarmSend,
   finishModuleAlarmSend,
@@ -948,6 +949,7 @@ export class ChannelObject extends DurableObject<Env> {
   private moduleAlarmContext(
     moduleId: string,
     registration: ModuleAlarmDefinition,
+    externalFetchBudget: ModuleExternalFetchBudget,
   ): ModuleAlarmContext {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Module alarms require a named Durable Object.");
@@ -967,7 +969,7 @@ export class ChannelObject extends DurableObject<Env> {
       clear: async (key, ownerRevision) => {
         await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision);
       },
-      renderTemplate: async (text, now = Date.now()) => renderScheduledTemplate(this.env, channelId, text, now),
+      renderTemplate: async (text, now = Date.now()) => renderScheduledTemplate(this.env, channelId, text, now, externalFetchBudget),
       sendChat: async (text, idempotencyKey, attributions = [], stillValid, target = "source_only") => {
         const suppression = { reason: null as string | null };
         const validateOutput = async (): Promise<boolean> => {
@@ -1043,7 +1045,10 @@ export class ChannelObject extends DurableObject<Env> {
     return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
   }
 
-  private alarmHandlers(modules: readonly BotModule[] = MODULES): Map<string, AlarmHandlerRegistration> {
+  private alarmHandlers(
+    modules: readonly BotModule[] = MODULES,
+    externalFetchBudget: ModuleExternalFetchBudget = createModuleExternalFetchBudget(),
+  ): Map<string, AlarmHandlerRegistration> {
     const handlers = new Map<string, AlarmHandlerRegistration>([
       [SECURITY_ROUND_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
       [SECURITY_RETRY_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
@@ -1065,7 +1070,7 @@ export class ChannelObject extends DurableObject<Env> {
           for (const module of modules) {
             for (const registration of module.alarms ?? []) {
               if (registration.onScheduleInputsChanged === undefined) continue;
-              await registration.onScheduleInputsChanged(this.moduleAlarmContext(module.id, registration), reason);
+              await registration.onScheduleInputsChanged(this.moduleAlarmContext(module.id, registration, externalFetchBudget), reason);
             }
           }
         },
@@ -1080,7 +1085,7 @@ export class ChannelObject extends DurableObject<Env> {
           ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
           handle: async (key, entry) => {
             await registration.handle(
-              this.moduleAlarmContext(module.id, registration),
+              this.moduleAlarmContext(module.id, registration, externalFetchBudget),
               key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
               entry.deadline,
               entry.ownerRevision,
@@ -1727,9 +1732,10 @@ export class ChannelObject extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
+    const externalFetchBudget = createModuleExternalFetchBudget();
     await this.pruneRevokedTokenMarkers(now);
     await this.stopSecurityAlarmIfIdle();
-    await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers());
+    await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers(MODULES, externalFetchBudget));
   }
 
   override webSocketMessage(webSocket: WebSocket, message: string | ArrayBuffer): void {

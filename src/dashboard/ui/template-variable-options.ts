@@ -85,6 +85,7 @@ export const panelTemplateOptions = (
         ...(variable.parameters === "range" ? { parameter: { value: "1-100" } } : {}),
         ...(variable.parameters === "choices" ? { parameter: { value: "a|b|c" } } : {}),
         ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
+        ...(variable.parameters === "api_source_name" ? { parameter: { value: variable.parameterDefault ?? "sunset" } } : {}),
       };
     }
     if (variable.source === "channel") {
@@ -116,6 +117,7 @@ export const panelTemplateOptions = (
       ...(variable.external === undefined ? {} : { external: variable.external }),
       ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
       ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
+      ...(variable.parameters === "api_source_name" ? { parameter: { value: variable.parameterDefault ?? "sunset" } } : {}),
     };
   });
 };

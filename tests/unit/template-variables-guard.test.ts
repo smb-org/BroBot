@@ -57,7 +57,7 @@ describe("template variable catalog", () => {
       SYSTEM_TEMPLATE_VARIABLE_LIST,
     );
     const values = Object.fromEntries(declared.map((variable) => [variable.name, variable.sample]));
-    const variableTokens = declared.map(({ name }) => `{${name}}`).join("|");
+    const variableTokens = declared.map(({ name }) => name === "pick" ? "{pick heads|tails}" : `{${name}}`).join("|");
     const template = `${variableTokens}|{random 1-100}|{pick red|blue}|{missing}`;
     const rendered = renderTemplate(template, values, {
       random: (parameter) => {

@@ -1,4 +1,4 @@
-import type { ModuleChannelInfo, ModuleLanguage, ModuleStreamState } from "../modules/contract";
+import type { ModuleChannelInfo, ModuleExternalFetchBudget, ModuleLanguage, ModuleStreamState } from "../modules/contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../modules/registry";
 import { createTemplateRenderer, type TemplateChannelDetails, type TemplateStreamDetails, type TemplateValueProvider } from "./template-resolver";
 import { readChannelLocation } from "./db/channel-settings";
@@ -24,10 +24,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 /** Renders a scheduled text block through the normal event-context provider pipeline. */
 export const renderScheduledTemplate = async (
-  environment: Pick<Env, "DB" | "TWITCH_CLIENT_ID" | "TWITCH_CLIENT_SECRET" | "TOKEN_ENCRYPTION_KEYS" | "SESSION_ENCRYPTION_KEYS">,
+  environment: Pick<Env, "DB" | "TWITCH_CLIENT_ID" | "TWITCH_CLIENT_SECRET" | "TOKEN_ENCRYPTION_KEYS" | "SESSION_ENCRYPTION_KEYS" | "PUBLIC_ORIGIN">,
   channelId: string,
   text: string,
   now: number,
+  externalFetchBudget?: ModuleExternalFetchBudget,
 ): Promise<{ text: string; attributions?: readonly string[] }> => {
   const receivedAt = new Date(now).toISOString();
   const event = {
@@ -92,7 +93,10 @@ export const renderScheduledTemplate = async (
   const variablesByModule = new Map<string, ReturnType<typeof variablesForModuleTemplateContext>>();
   await Promise.all(MODULES.map(async (module) => {
     const dynamic = module.templateVariableNamespace === "text_blocks" ? [] : await module.templateVariables?.(environment.DB, channelId) ?? [];
-    const fields = Object.values(module.templateFields ?? {}).flatMap((items) => items ?? []) as TemplateVariable[];
+    const fields = [
+      ...(module.templateVariableCatalog ?? []),
+      ...Object.values(module.templateFields ?? {}).flatMap((items) => items ?? []),
+    ] as TemplateVariable[];
     const variables = variablesForModuleTemplateContext(module, [...fields, ...dynamic]);
     variables.forEach((variable) => { validateModuleTemplateVariable(module, variable.name); });
     variablesByModule.set(module.id, variables);
@@ -100,6 +104,13 @@ export const renderScheduledTemplate = async (
   const registeredTemplateVariables = MODULES
     .filter((module) => module.templateVariableNamespace !== "text_blocks")
     .flatMap((module) => variablesByModule.get(module.id) ?? []);
+  const conditionsByModule = new Map(await Promise.all(MODULES.map(async (module) => [
+    module.id,
+    [
+      ...(module.textBlockConditions ?? []),
+      ...(await module.textBlockConditionsForChannel?.(environment.DB, channelId) ?? []),
+    ],
+  ] as const)));
   const providers: TemplateValueProvider[] = MODULES.flatMap((module) => {
     const variables = variablesByModule.get(module.id) ?? [];
     if (module.resolveTemplateValues === undefined && module.resolveTemplateParameter === undefined) return [];
@@ -107,7 +118,7 @@ export const renderScheduledTemplate = async (
       moduleId: module.id,
       ...(module.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: module.templateVariableNamespace }),
       variables,
-      ...(module.textBlockConditions === undefined ? {} : { textBlockConditions: module.textBlockConditions }),
+      textBlockConditions: conditionsByModule.get(module.id) ?? [],
       ...(module.templateUnavailableText === undefined ? {} : { templateUnavailableText: module.templateUnavailableText }),
       ...(module.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: module.resolveTemplateConditions }),
       ...(module.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: module.dynamicTemplateVariableNames }),
@@ -124,6 +135,8 @@ export const renderScheduledTemplate = async (
   };
   const render = createTemplateRenderer(event, "event", [], {
     DB: environment.DB,
+    ...(externalFetchBudget === undefined ? {} : { externalFetchBudget }),
+    publicOrigin: environment.PUBLIC_ORIGIN,
     channelInfo,
     channelGameId: async () => (await channelDetails())?.gameId ?? null,
     channelTimeZone: () => Promise.resolve(timeZone),
