@@ -137,7 +137,7 @@ verwenden das Ziel des Textbefehls. Änderungen an gespeicherten Zielen werden
 mit den jeweiligen Modulmutationen auditiert. Auto-Antworten (#245) können
 denselben Contract und dieselbe Host-Versandgrenze verwenden.
 
-Migration `0026_faq.sql` legt kanalgebundene FAQ-Einträge mit geordneter
+Migration `0027_faq.sql` legt kanalgebundene FAQ-Einträge mit geordneter
 Schlüsselwort-/Wortgruppenliste, Textbaustein, Abkühlzeit, optionalen Spielen
 und Chat-Ausgabeziel an. Das FAQ-Modul steht in der Registry direkt hinter
 `text_commands`; die Dispatch-Reihenfolge folgt der Registrierung statt der
