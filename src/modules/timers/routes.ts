@@ -199,7 +199,8 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE timers
-        SET name = ?, block_name = ?, trigger_type = ?, trigger_json = ?, next_run_at = NULL, revision = revision + 1, updated_at = ?
+        SET name = ?, block_name = ?, trigger_type = ?, trigger_json = ?,
+            next_run_at = NULL, next_run_stream_id = NULL, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND timer_id = ? AND revision = ? ${authorization.sql}`,
   ).bind(input.name, input.blockName, input.trigger.type, JSON.stringify(input.trigger), now,
     channelId, timerId, revision, ...authorization.values);
@@ -235,7 +236,7 @@ timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
   const now = nowIso();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `UPDATE timers SET enabled = ?, next_run_at = NULL, revision = revision + 1, updated_at = ?
+    `UPDATE timers SET enabled = ?, next_run_at = NULL, next_run_stream_id = NULL, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled <> ? ${authorization.sql}`,
   ).bind(enabled ? 1 : 0, now, channelId, timerId, revision, enabled ? 1 : 0, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({

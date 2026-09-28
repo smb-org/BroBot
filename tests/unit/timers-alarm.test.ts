@@ -113,6 +113,74 @@ describe("timer alarm execution", () => {
     expect(sends).toHaveLength(1);
   });
 
+  it("does not send an interval post if the stream ends between the due-occurrence check and the send", async () => {
+    await insertChannel();
+    await insertTimer({
+      id: "interval-recheck",
+      triggerType: "interval",
+      trigger: { type: "interval", minutes: 10 },
+      nextRunAt: firstDueAt,
+      activityCount: null,
+    });
+    let state: "online" | "offline" = "online";
+    const sends: string[] = [];
+    const deadlines: number[] = [];
+    const context = contextFor(() => 0, sends, deadlines, {
+      streamState: () => Promise.resolve(state),
+      sendChat: (_text, key, _attributions, stillValid) => {
+        // The gap between the due-occurrence check above (already passed,
+        // since this callback is running at all) and the actual send is
+        // exactly where `renderTemplate` and the chat-activity lookup run.
+        state = "offline";
+        return (stillValid?.() ?? Promise.resolve(true)).then((ok) => {
+          if (ok) sends.push(key);
+          return { sent: ok, reason: ok ? null : "stream_ended", retryable: false };
+        });
+      },
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    await handleTimerAlarm(context, "timer:interval-recheck", firstDueAt);
+
+    expect(sends).toEqual([]);
+  });
+
+  it("does not send a stream-start post if the stream rolls over to a new one between the due-occurrence check and the send", async () => {
+    await insertChannel();
+    const streamStartedAt = new Date(firstDueAt - 10 * 60_000).toISOString();
+    await insertTimer({
+      id: "stream-start-recheck",
+      triggerType: "stream_start",
+      trigger: { type: "stream_start", minutes: 10 },
+      nextRunAt: firstDueAt,
+      activityCount: null,
+    });
+    await database.prepare("UPDATE timers SET next_run_stream_id = ? WHERE timer_id = ?").bind("stream-1", "stream-start-recheck").run();
+    let streamId = "stream-1";
+    const sends: string[] = [];
+    const deadlines: number[] = [];
+    const context = contextFor(() => 0, sends, deadlines, {
+      streamState: () => Promise.resolve("online"),
+      streamStartedAt: () => Promise.resolve({ streamId, startedAt: streamStartedAt }),
+      sendChat: (_text, key, _attributions, stillValid) => {
+        // A new stream starts (still short enough a gap that the alarm's
+        // own occurrence check above already ran against the old one).
+        streamId = "stream-2";
+        return (stillValid?.() ?? Promise.resolve(true)).then((ok) => {
+          if (ok) sends.push(key);
+          return { sent: ok, reason: ok ? null : "stream_rolled_over", retryable: false };
+        });
+      },
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    await handleTimerAlarm(context, "timer:stream-start-recheck", firstDueAt);
+
+    expect(sends).toEqual([]);
+  });
+
   it("retries a known failed post without advancing the occurrence", async () => {
     await prepareDatabase();
     const sent: string[] = [];
@@ -427,6 +495,61 @@ describe("timer alarm execution", () => {
         next_run_stream_id: "stream-2",
       });
     });
+
+    it("fires (rather than deferring) an interval timer whose legacy row (null stream id, from before migration 0024) is already due inside the current stream", async () => {
+      await insertChannel();
+      await insertTimer({
+        id: "interval-legacy",
+        triggerType: "interval",
+        trigger: { type: "interval", minutes: 10 },
+        nextRunAt: firstDueAt,
+        activityCount: 5,
+      });
+      // next_run_stream_id is left at its migrated-in NULL default -- a row
+      // armed before the stream-id column existed.
+      const sends: string[] = [];
+      const deadlines: number[] = [];
+      const context = contextFor(() => 0, sends, deadlines, {
+        streamState: () => Promise.resolve("online"),
+        streamStartedAt: () => Promise.resolve({ streamId: "stream-9", startedAt: new Date(firstDueAt - 5 * 60_000).toISOString() }),
+      });
+      vi.useFakeTimers();
+      vi.setSystemTime(firstDueAt);
+
+      await handleTimerAlarm(context, "timer:interval-legacy", firstDueAt);
+
+      expect(sends).toEqual([`interval-legacy:${String(firstDueAt)}`]);
+      expect(deadlines).toEqual([firstDueAt + 10 * 60_000]);
+      expect(await database.prepare(
+        "SELECT next_run_at, next_run_stream_id FROM timers WHERE timer_id = ?",
+      ).bind("interval-legacy").first()).toEqual({
+        next_run_at: new Date(firstDueAt + 10 * 60_000).toISOString(),
+        next_run_stream_id: "stream-9",
+      });
+    });
+
+    it("fires (rather than dropping) a stream-start timer whose legacy row (null stream id, from before migration 0024) is already due inside the current stream", async () => {
+      await insertChannel();
+      await insertTimer({
+        id: "stream-start-legacy",
+        triggerType: "stream_start",
+        trigger: { type: "stream_start", minutes: 10 },
+        nextRunAt: firstDueAt,
+        activityCount: null,
+      });
+      const sends: string[] = [];
+      const deadlines: number[] = [];
+      const context = contextFor(() => 0, sends, deadlines, {
+        streamState: () => Promise.resolve("online"),
+        streamStartedAt: () => Promise.resolve({ streamId: "stream-9", startedAt: new Date(firstDueAt - 10 * 60_000).toISOString() }),
+      });
+      vi.useFakeTimers();
+      vi.setSystemTime(firstDueAt);
+
+      await handleTimerAlarm(context, "timer:stream-start-legacy", firstDueAt);
+
+      expect(sends).toEqual([`stream-start-legacy:${String(firstDueAt)}:stream-9`]);
+    });
   });
 
   describe("activation replan (module re-enable / channel unpause)", () => {
@@ -496,6 +619,36 @@ describe("timer alarm execution", () => {
       expect(deadlines).toEqual([]);
       expect(await database.prepare("SELECT next_run_at FROM timers WHERE timer_id = ?").bind("interval-timer").first())
         .toEqual({ next_run_at: new Date(armedAt).toISOString() });
+    });
+
+    it("rearms a timer whose stored stream id already matches the current stream but whose next_run_at is null", async () => {
+      await insertChannel();
+      // An edit or a disable/enable cycle can leave a stream id sitting next
+      // to a null next_run_at; a matching id alone must not read as armed.
+      await insertTimer({
+        id: "interval-timer",
+        triggerType: "interval",
+        trigger: { type: "interval", minutes: 15 },
+        nextRunAt: null,
+        activityCount: null,
+      });
+      await database.prepare("UPDATE timers SET next_run_stream_id = ? WHERE timer_id = ?").bind("stream-1", "interval-timer").run();
+      const deadlines: number[] = [];
+      const context = contextFor(() => 0, [], deadlines, {
+        streamState: () => Promise.resolve("online"),
+        streamStartedAt: () => Promise.resolve({ streamId: "stream-1", startedAt: streamStartedAt }),
+      });
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+
+      await onInputsChangedOf()(context, "activation" satisfies ModuleScheduleInputChangeReason);
+
+      expect(deadlines).toEqual([now + 15 * 60_000]);
+      expect(await database.prepare("SELECT next_run_at, next_run_stream_id FROM timers WHERE timer_id = ?")
+        .bind("interval-timer").first()).toEqual({
+          next_run_at: new Date(now + 15 * 60_000).toISOString(),
+          next_run_stream_id: "stream-1",
+        });
     });
 
     it("rearms an interval timer whose schedule belongs to a previous stream and resets its chat baseline", async () => {

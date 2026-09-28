@@ -150,6 +150,46 @@ const rearmStreamScopedTimer = async (
   if (deadline !== null) await persistAndSchedule(timer, context, deadline, stream.streamId);
 };
 
+/**
+ * A schedule from before the stream-id migration (or otherwise still missing
+ * one) whose recorded deadline already falls inside `stream` -- the old,
+ * start-time-only heuristic, kept as a one-time fallback so a legacy row
+ * that is genuinely still armed for the current stream doesn't get rearmed
+ * out from under itself: that would defer an interval occurrence by a full
+ * interval, or silently drop a stream_start occurrence whose due time has
+ * already passed (rearming computes a *new* deadline, which is in the past
+ * by then). A row that already carries a stream id is judged on that id
+ * alone; this never overrides an actual mismatch.
+ */
+const isLegacyArmedForStream = (
+  storedStreamId: string | null,
+  nextRunAt: number,
+  stream: { startedAt: string | null },
+): boolean =>
+  storedStreamId === null && (stream.startedAt === null || nextRunAt >= Date.parse(stream.startedAt));
+
+/**
+ * Re-checks the live stream right before sending, in the same validity check
+ * as the revision and deadline -- `renderTemplate` and the chat-activity
+ * lookup above it can take long enough for the stream to end or roll over to
+ * a new one between the due-occurrence check and the actual send.
+ */
+const isStreamStillCurrentFor = async (
+  timer: Timer,
+  context: TimerAlarmContext,
+  occurrenceStreamId: string | undefined,
+): Promise<boolean> => {
+  if (timer.trigger.type === "interval") return await context.streamState() === "online";
+  if (timer.trigger.type === "stream_start") {
+    const [state, stream] = await Promise.all([context.streamState(), context.streamStartedAt()]);
+    return state === "online" && stream.streamId !== null && stream.streamId === occurrenceStreamId;
+  }
+  if (timer.trigger.type === "time_of_day") {
+    return timer.trigger.alsoOffline || await context.streamState() === "online";
+  }
+  return true;
+};
+
 const isDueOccurrenceCurrent = async (
   timer: Timer,
   context: TimerAlarmContext,
@@ -231,8 +271,15 @@ export const handleTimerAlarm = async (
   if (timer.trigger.type === "interval" || timer.trigger.type === "stream_start") {
     const [state, stream] = await Promise.all([context.streamState(), context.streamStartedAt()]);
     if (state === "online" && stream.streamId !== null && stream.streamId !== row.next_run_stream_id) {
-      await rearmStreamScopedTimer(timer, context, Date.now(), { streamId: stream.streamId, startedAt: stream.startedAt });
-      return;
+      if (isLegacyArmedForStream(row.next_run_stream_id, deadline, stream)) {
+        // A legacy row (from before the stream-id column existed) whose
+        // deadline is already due inside the current stream: backfill the
+        // id instead of rearming, so this occurrence still fires on time.
+        await saveNextRunAt(context.DB, context.channelId, timer, deadline, stream.streamId);
+      } else {
+        await rearmStreamScopedTimer(timer, context, Date.now(), { streamId: stream.streamId, startedAt: stream.startedAt });
+        return;
+      }
     }
   }
   const occurrence = await isDueOccurrenceCurrent(timer, context, alarmKey, deadline);
@@ -268,8 +315,9 @@ export const handleTimerAlarm = async (
         const current = await context.DB.prepare(
           `SELECT enabled, revision, next_run_at FROM timers WHERE channel_id = ? AND timer_id = ?`,
         ).bind(context.channelId, timer.id).first<{ enabled: number; revision: number; next_run_at: string | null }>();
-        return current?.enabled === 1 && current.revision === timer.revision &&
+        const stillScheduled = current?.enabled === 1 && current.revision === timer.revision &&
           current.next_run_at !== null && Date.parse(current.next_run_at) === deadline && Date.now() <= graceEndsAt;
+        return stillScheduled && await isStreamStillCurrentFor(timer, context, occurrence.streamId);
       });
       sent = result.sent;
       if (!result.sent && result.retryable) {
@@ -319,8 +367,14 @@ const refreshSchedules = async (
     const stream = await context.streamStartedAt();
     if (stream.streamId === null) return;
     for (const timer of timers) {
-      if (!timer.enabled || (timer.trigger.type !== "interval" && timer.trigger.type !== "stream_start") ||
-          timer.nextRunStreamId === stream.streamId) continue;
+      if (!timer.enabled || (timer.trigger.type !== "interval" && timer.trigger.type !== "stream_start")) continue;
+      // A null `nextRunAt` is unarmed regardless of what stream id happens
+      // to be stored alongside it (an edit or disable can leave one behind).
+      if (timer.nextRunAt !== null && timer.nextRunStreamId === stream.streamId) continue;
+      if (timer.nextRunAt !== null && isLegacyArmedForStream(timer.nextRunStreamId, Date.parse(timer.nextRunAt), stream)) {
+        await saveNextRunAt(context.DB, context.channelId, timer, Date.parse(timer.nextRunAt), stream.streamId);
+        continue;
+      }
       await rearmStreamScopedTimer(timer, context, now, { streamId: stream.streamId, startedAt: stream.startedAt });
     }
     return;
