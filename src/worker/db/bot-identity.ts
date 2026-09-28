@@ -37,6 +37,9 @@ interface BotIdentityStatusRow {
   updated_at: string;
 }
 
+const BOT_USER_ID_CACHE_TTL_MS = 60_000;
+const botUserIdCache = new WeakMap<D1Database, { userId: string | null; expiresAt: number }>();
+
 const mapBotIdentity = (row: BotIdentityRow): BotIdentityRecord => ({
   id: 1,
   userId: row.user_id,
@@ -58,6 +61,18 @@ export const getBotIdentity = async (db: D1Database): Promise<BotIdentityRecord 
   ).first<BotIdentityRow>();
   return row === null ? null : mapBotIdentity(row);
 };
+
+/** Reads the public bot user id at most once per minute per Worker database binding. */
+export const getCachedBotUserId = async (db: D1Database, now = Date.now()): Promise<string | null> => {
+  const cached = botUserIdCache.get(db);
+  if (cached !== undefined && cached.expiresAt > now) return cached.userId;
+  const identity = await getBotIdentity(db);
+  const userId = identity?.userId ?? null;
+  botUserIdCache.set(db, { userId, expiresAt: now + BOT_USER_ID_CACHE_TTL_MS });
+  return userId;
+};
+
+const invalidateBotUserIdCache = (db: D1Database): void => { botUserIdCache.delete(db); };
 
 export const upsertBotIdentity = async (
   db: D1Database,
@@ -87,6 +102,7 @@ export const upsertBotIdentity = async (
     identity.createdAt,
     identity.updatedAt,
   ).run();
+  invalidateBotUserIdCache(db);
 };
 
 export const upsertBotIdentityAndStatus = async (
@@ -129,6 +145,7 @@ export const upsertBotIdentityAndStatus = async (
        updated_at = excluded.updated_at`,
   ).bind(1, status, reason, updatedAt);
   await db.batch([identityMutation, statusMutation]);
+  invalidateBotUserIdCache(db);
 };
 
 export const getBotIdentityStatus = async (

@@ -485,6 +485,8 @@ export type AuthorizeModuleMutation = (
 export interface ModuleExecutionContext {
   DB: D1Database;
   authorizeMutation: AuthorizeModuleMutation;
+  /** Lazily resolves the connected bot identity so modules can ignore its own chat messages. */
+  botUserId?: () => Promise<string | null>;
   /** True only when this EventSub notification committed a real stream-state transition. */
   streamStateTransitionAccepted?: boolean;
   streamState: () => Promise<ModuleStreamState>;

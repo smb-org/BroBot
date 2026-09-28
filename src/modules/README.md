@@ -170,6 +170,26 @@ lokalisierte Fehlermeldung. So bleiben auch spätere Änderungen an bereits
 verwendeten Blöcken validiert, ohne dass ein Modul sein konsumierendes Modul
 importiert oder dessen Tabellen kennt.
 
+Das FAQ-Modul unter `src/modules/faq/` wird direkt nach `text_commands` in der
+Registry aufgeführt und nutzt denselben Chat-Event-Typ. Die Dispatch-Reihenfolge
+folgt der Registry, damit Befehle vor automatischen Antworten verarbeitet
+werden. Das Modul ignoriert jede Nachricht mit Befehlspräfix und vergleicht
+Schlüsselwörter und Wortgruppen ohne Beachtung von Groß-/Kleinschreibung oder
+Akzenten, aber nur an Unicode-Wortgrenzen. Der erste Treffer in der expliziten
+Eintragsreihenfolge gewinnt. Ein kurzer pro-Kanal-Cache hält die vorbereiteten,
+normalisierten Matcher; lokale Schreibvorgänge leeren ihn sofort, und Cache-
+Einträge laufen nach fünf Sekunden ab. Die Abkühlzeit wird nicht aus dem Cache
+übernommen, sondern je Eintrag atomar in D1 beansprucht.
+
+FAQ-Einträge wählen einen Textbaustein, eine optionale Spielauswahl, eine
+Abkühlzeit und eines der drei gemeinsamen Chat-Ziele. `source_only` bleibt der
+Standard. Antwortbausteine werden beim Speichern sowie über den generischen
+`validateTemplateContent`-Contract bei späteren Textbibliotheksänderungen auf
+Befehls-Eingabevariablen geprüft. Panel-Test, Aktivierung und Reihenfolge sind
+kanalgebundene Modulrouten; Änderungen werden mit Audit-Einträgen gespeichert.
+Das Datenmodell lässt einen späteren Regex-Matcher zu, aber die erste
+Panel-Version kennt nur Schlüsselwörter und Wortgruppen.
+
 Das erste Modul ist `src/modules/text_commands/`. Es ist in der Registry als
 `text_commands` eingetragen, abonniert `channel.chat.message` und definiert
 seine Tabellen in der zentralen D1-Kette unter `migrations/`. Der D1-Adapter

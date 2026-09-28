@@ -22,7 +22,7 @@ import {
 import { lookupAndRefreshStreamState } from "./stream-state-lookup";
 import { readChannelControls, readDispatchChannelState } from "./db/channel-controls";
 import { readChannelLocation } from "./db/channel-settings";
-import { getBotIdentity } from "./db/bot-identity";
+import { getBotIdentity, getCachedBotUserId } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { readChannelVariables, prepareChannelVariableChange, prepareResetChannelVariablesForStream } from "./db/channel-variables";
 import { createTemplateRenderer, type TemplateChannelDetails, type TemplateStreamDetails, type TemplateValueProvider } from "./template-resolver";
@@ -305,6 +305,8 @@ export const selectModulesForEvent = (
         !(module.eventSubTypes ?? []).includes(subscriptionType)) continue;
     matches.push({ module, settings: JSON.stringify(module.defaultSettings) });
   }
+  const registrationOrder = new Map(registry.map((module, index) => [module.id, index]));
+  matches.sort((left, right) => (registrationOrder.get(left.module.id) ?? 0) - (registrationOrder.get(right.module.id) ?? 0));
   return { matches, unknownModules };
 };
 
@@ -586,6 +588,7 @@ export const dispatchEventSubNotification = async (
   let channelInfoPromise: Promise<ModuleChannelInfo | null> | undefined;
   let channelDetailsPromise: Promise<TemplateChannelDetails | null> | undefined;
   let streamDetailsPromise: Promise<TemplateStreamDetails | null> | undefined;
+  let botUserIdPromise: Promise<string | null> | undefined;
   let appAccessTokenPromise: Promise<string> | undefined;
   let channelLanguagePromise: Promise<ModuleLanguage> | undefined;
   let channelTimeZonePromise: Promise<string> | undefined;
@@ -601,6 +604,10 @@ export const dispatchEventSubNotification = async (
   const appAccessToken = (): Promise<string> => {
     appAccessTokenPromise ??= getAppAccessToken(environment as unknown as Env, new Date().toISOString(), fetcher);
     return appAccessTokenPromise;
+  };
+  const botUserId = (): Promise<string | null> => {
+    botUserIdPromise ??= getCachedBotUserId(environment.DB);
+    return botUserIdPromise;
   };
   const channelDetails = (): Promise<TemplateChannelDetails | null> => {
     channelDetailsPromise ??= channelDetailsFor(environment, event.channelId, appAccessToken, fetcher);
@@ -756,6 +763,7 @@ export const dispatchEventSubNotification = async (
           : await module.handleEvent(moduleEvent, {
             DB: environment.DB,
             authorizeMutation: authorizeModuleMutation,
+            botUserId,
             streamState,
             streamStateTransitionAccepted,
             chatActivityCount: async () => {

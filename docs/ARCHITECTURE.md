@@ -137,6 +137,22 @@ verwenden das Ziel des Textbefehls. Änderungen an gespeicherten Zielen werden
 mit den jeweiligen Modulmutationen auditiert. Auto-Antworten (#245) können
 denselben Contract und dieselbe Host-Versandgrenze verwenden.
 
+Migration `0026_faq.sql` legt kanalgebundene FAQ-Einträge mit geordneter
+Schlüsselwort-/Wortgruppenliste, Textbaustein, Abkühlzeit, optionalen Spielen
+und Chat-Ausgabeziel an. Das FAQ-Modul steht in der Registry direkt hinter
+`text_commands`; die Dispatch-Reihenfolge folgt der Registrierung statt der
+nicht festgelegten D1-Zeilenfolge. Befehlspräfixe werden vor dem FAQ-Matcher
+übersprungen, und die verbundene Bot-Kennung schließt eigene Nachrichten aus.
+Der Matcher faltet Groß-/Kleinschreibung und Akzente, prüft Unicode-Wortgrenzen
+und nutzt einen kurzlebigen Cache bereits normalisierter Begriffe je Kanal.
+Eine Aktualisierung im Panel leert diesen Cache sofort; andere Worker-Isolate
+laden Änderungen spätestens nach fünf Sekunden. Die Abkühlzeit wird nicht aus
+dem Cache übernommen, sondern je Eintrag mit einem bedingten D1-Update atomar
+beansprucht. Die Messung mit 100 Einträgen folgt dem bestehenden
+10-ms-CPU-Maßstab für Chat-Vorlagen. Das Datenmodell reserviert einen
+Matcher-Typ für Regex; die erste Oberfläche speichert und wertet aber nur
+Schlüsselwörter und Wortgruppen aus.
+
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 
 ESLint schützt die Grenze: Overlay-Ansichten importieren weder Worker-, Service-, Repository- oder Adaptercode noch Zod. Panel-Ansichten importieren weder Worker-, Repository- noch Adaptercode; Zod und der Service sind dort für Formulare und ausgelöste Anwendungsfälle erlaubt. Module importieren keine Geschwistermodule. Der Worker importiert kein React.
