@@ -76,6 +76,14 @@ Lücke.
   `$uppercase`, `$lowercase`, `$trim`, `$contains`, `$join`, `$sum`, `$max`,
   `$min`, `$average`, `$count`, `$round`, `$floor`, `$ceil`, `$abs`,
   `$formatNumber`, `$fromMillis`, `$toMillis`, `$now`, `$split` und `$replace`.
+  Die Formatargumente von `$formatNumber` und `$fromMillis` müssen, falls
+  vorhanden, Zeichenkettenliterale im AST sein und einer festen Allowlist
+  entsprechen. `$formatNumber` erlaubt nur `#,##0`, `#,##0.00`, `0`, `0.0`,
+  `0.00` und `0%`; zusätzliche Optionen sind nicht erlaubt. `$fromMillis`
+  erlaubt ISO-Ausgabe oder das feste Bild `[H01]:[m01]`. `$toMillis` akzeptiert
+  nur streng geprüfte UTC-ISO-Zeitstempel ohne Formatbild. Der Validator prüft
+  diese Regeln sowohl beim Speichern als auch vor jeder Auswertung; Bilder und
+  Optionen aus Antwortdaten werden abgewiesen.
   `$replace` erfordert ein Zeichenkettenmuster und ein festes Ganzzahllimit von
   höchstens zehn Treffern. Jeder Knoten und jede Kind-Eigenschaft wird geprüft,
   auch Prädikate an Funktionsreferenzen, Pfadstufen, Argumente, Gruppen und
@@ -93,15 +101,33 @@ Lücke.
   Gruppieren, Transformieren, Blöcke, Bindings, Lambdas, partielle Anwendung,
   Funktionsverkettung und Bereiche. Dadurch sind synchrone Regexauswertung, das
   Parsen eines zweiten Ausdrucks aus Antwortdaten, Lambda-Auswertung und
-  benutzerdefinierte Funktionsdefinitionen ausgeschlossen. `$join` und
-  `$replace` begrenzen Zeichenketten bereits während des Aufbaus auf 2.000
-  Zeichen; `$split` liefert höchstens 1.000 Teile. Auch die fertige Ausgabe
-  wird auf 2.000 Zeichen gekürzt. Das Ergebnis eines Vorlagenlaufs wird je
+  benutzerdefinierte Funktionsdefinitionen ausgeschlossen.
+
+  JSONatas eingebaute Implementierungen für potenziell teure Format-, Datums-,
+  Zeichenketten- und Aggregatfunktionen werden pro Ausdruck durch eigene
+  gebundene Funktionen gleichen Namens ersetzt: `$string`, `$number`,
+  `$length`, `$substring`, `$substringBefore`, `$substringAfter`, `$uppercase`,
+  `$lowercase`, `$trim`, `$contains`, `$join`, `$sum`, `$max`, `$min`,
+  `$average`, `$count`, `$round`, `$floor`, `$ceil`, `$abs`, `$formatNumber`,
+  `$fromMillis`, `$toMillis`, `$split` und `$replace`. Zahlenformatierung
+  verwendet `Intl.NumberFormat` mit den obigen festen Optionen und weist
+  nichtendliche Zahlen ab. Datumsfunktionen verwenden begrenzte ISO-Prüfungen
+  und UTC-Felder, keine JSONata-Bildparser oder benutzerdefinierten Regexe.
+  Zeichenkettenarbeit ist auf 8.192 Zeichen pro Aufruf begrenzt; erzeugte
+  Zeichenketten werden während des Aufbaus auf 2.000 Zeichen gekürzt. `$split`
+  liefert höchstens 1.000 Teile. `$join`, `$sum`, `$max`, `$min`, `$average`
+  und `$count` verarbeiten höchstens 1.000 Elemente. Jeder arithmetische
+  Operator wird intern durch eine geprüfte Implementierung ausgewertet;
+  nichtendliche Zwischenergebnisse machen den Ausdruck nicht verfügbar.
+  Unverändert bleiben nur die einfachen eingebauten Funktionen `$boolean`,
+  `$not`, `$exists` und `$now`. Auch die fertige Ausgabe wird auf 2.000 Zeichen
+  gekürzt. Das Ergebnis eines Vorlagenlaufs wird je
   Quellen-Ausdruck-Paar höchstens einmal berechnet; höchstens zehn verschiedene
   Paare werden ausgewertet. JSONatas 10-ms-Option wird nicht verwendet: Sie
   prüft nur zwischen Auswertungsschritten, kann unter Last einfache Ausdrücke
   zurückweisen und bietet keine harte CPU-Garantie. Es gibt keine vom Nutzer
-  bereitgestellten Hostfunktionen oder Bindings.
+  bereitgestellten Hostfunktionen oder Bindings; registrierte interne
+  Implementierungen sind nicht aus Ausdrücken aufrufbar.
 - Nur Broadcaster und Manager dürfen Quellen anlegen, ändern oder löschen.
   Diese verwaltende Schwelle wird in derselben SQL-Mutation wie die Änderung
   geprüft und die Änderung wird auditiert ([Entscheidung 0006](0006-rollenschwellen.md)).

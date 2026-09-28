@@ -11,6 +11,8 @@ export const JSONATA_LIMITS = {
   maximumInputNodes: 20_000,
   maximumInputBytes: 64 * 1024,
   maximumReplaceLimit: 10,
+  maximumStringWorkLength: 8_192,
+  maximumAggregateLength: 1_000,
 } as const;
 
 type JsonataNode = {
@@ -30,6 +32,17 @@ const allowedFunctions = new Set([
   "average", "count", "round", "floor", "ceil", "abs", "formatNumber", "fromMillis", "toMillis",
   "now", "split", "replace",
 ]);
+
+const arithmeticOperators = new Set(["+", "-", "*", "/", "%"]);
+const formatNumberPictures = new Map<string, Intl.NumberFormatOptions>([
+  ["#,##0", { useGrouping: true, minimumFractionDigits: 0, maximumFractionDigits: 0 }],
+  ["#,##0.00", { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 }],
+  ["0", { useGrouping: false, minimumFractionDigits: 0, maximumFractionDigits: 0 }],
+  ["0.0", { useGrouping: false, minimumFractionDigits: 1, maximumFractionDigits: 1 }],
+  ["0.00", { useGrouping: false, minimumFractionDigits: 2, maximumFractionDigits: 2 }],
+  ["0%", { style: "percent", useGrouping: false, minimumFractionDigits: 0, maximumFractionDigits: 0 }],
+]);
+const fromMillisPictures = new Set(["[H01]:[m01]"]);
 
 type AstRole = "expression" | "path_step" | "path_stage" | "array_index" | "function_procedure";
 
@@ -151,6 +164,25 @@ const inspectAst = (root: unknown): string | null => {
         }
         if (!Array.isArray(value.arguments)) reject(`${functionName} arguments`);
         const args: unknown[] = Array.isArray(value.arguments) ? value.arguments as unknown[] : [];
+        const isStringLiteral = (argument: unknown): argument is JsonataNode =>
+          isAstNode(argument) && argument.type === "string" && typeof argument.value === "string";
+        if (functionValue === "formatNumber") {
+          const picture = args[1];
+          if ((args.length !== 1 && args.length !== 2) ||
+              (args.length === 2 && (!isStringLiteral(picture) || !formatNumberPictures.has(picture.value as string)))) {
+            reject("$formatNumber (approved string-literal picture required)");
+          }
+        }
+        if (functionValue === "fromMillis") {
+          const picture = args[1];
+          if ((args.length !== 1 && args.length !== 2) ||
+              (args.length === 2 && (!isStringLiteral(picture) || !fromMillisPictures.has(picture.value as string)))) {
+            reject("$fromMillis (approved string-literal picture required)");
+          }
+        }
+        if (functionValue === "toMillis" && args.length !== 1) {
+          reject("$toMillis (ISO-8601 timestamps only)");
+        }
         if (functionValue === "replace") {
           const pattern = args[1];
           const limit = args[3];
@@ -271,17 +303,15 @@ const cappedAppend = (current: string, next: string): string => {
 const safeJoin = (values: unknown, separator: unknown = ""): string | undefined => {
   if (values === undefined) return undefined;
   const items = Array.isArray(values) ? values : [values];
-  if (separator !== undefined && typeof separator !== "string") {
-    throw new Error("API source $join requires a string separator.");
-  }
-  const delimiter = typeof separator === "string" ? separator : "";
+  if (items.length > JSONATA_LIMITS.maximumAggregateLength) throw new Error("API source $join exceeded the aggregate limit.");
+  const delimiter = requireBoundedString(separator === undefined ? "" : separator, "$join");
   let result = "";
   for (const [index, value] of items.entries()) {
     if (index > 0) result = cappedAppend(result, delimiter);
     let item: string;
     if (value === undefined || value === null) item = "";
-    else if (typeof value === "string") item = value;
-    else if (typeof value === "number" || typeof value === "boolean") item = String(value);
+    else if (typeof value === "string") item = requireBoundedString(value, "$join");
+    else if (typeof value === "number" || typeof value === "boolean") item = boundedString(value);
     else throw new Error("API source $join requires scalar values.");
     result = cappedAppend(result, item);
     if (result.length >= API_SOURCE_MAXIMUMS.outputLength) break;
@@ -289,36 +319,276 @@ const safeJoin = (values: unknown, separator: unknown = ""): string | undefined 
   return result;
 };
 
+const requireBoundedString = (value: unknown, functionName: string): string => {
+  if (typeof value !== "string" || value.length > JSONATA_LIMITS.maximumStringWorkLength) {
+    throw new Error(`API source ${functionName} requires a bounded string.`);
+  }
+  return value;
+};
+
+const boundedString = (value: unknown): string => {
+  if (typeof value === "string") return value.slice(0, API_SOURCE_MAXIMUMS.outputLength);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("API source JSONata returned a non-finite number.");
+    return String(value);
+  }
+  if (typeof value === "boolean" || value === null) return String(value);
+  if (value === undefined) return "";
+  const serialized: unknown = JSON.stringify(value);
+  if (typeof serialized !== "string") throw new Error("API source JSONata returned no JSON string.");
+  return serialized.slice(0, API_SOURCE_MAXIMUMS.outputLength);
+};
+
+const safeString = (value: unknown): string | undefined => value === undefined ? undefined : boundedString(value);
+
+const safeLength = (value: unknown): number | undefined => {
+  if (value === undefined) return undefined;
+  return Array.from(requireBoundedString(value, "$length")).length;
+};
+
+const safeContains = (input: unknown, search: unknown): boolean | undefined => {
+  if (input === undefined || search === undefined) return undefined;
+  return requireBoundedString(input, "$contains").includes(requireBoundedString(search, "$contains"));
+};
+
+const safeCase = (input: unknown, upper: boolean): string | undefined => {
+  if (input === undefined) return undefined;
+  const text = requireBoundedString(input, upper ? "$uppercase" : "$lowercase");
+  return (upper ? text.toUpperCase() : text.toLowerCase()).slice(0, API_SOURCE_MAXIMUMS.outputLength);
+};
+
+const safeTrim = (input: unknown): string | undefined => {
+  if (input === undefined) return undefined;
+  return requireBoundedString(input, "$trim").trim().slice(0, API_SOURCE_MAXIMUMS.outputLength);
+};
+
+const safeNumber = (value: unknown): number | undefined => {
+  if (value === undefined) return undefined;
+  if (typeof value === "number") return finiteNumber(value, "$number");
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value !== "string") throw new Error("API source $number requires a number, boolean, or string.");
+  const text = requireBoundedString(value, "$number").trim();
+  if (text.length === 0) return undefined;
+  return finiteNumber(Number(text), "$number");
+};
+
+const safeRound = (value: unknown, precision: unknown = 0): number | undefined => {
+  if (value === undefined) return undefined;
+  const number = finiteNumber(value, "$round");
+  const digits = precision === undefined ? 0 : precision;
+  if (typeof digits !== "number" || !Number.isInteger(digits) || digits < -15 || digits > 15) {
+    throw new Error("API source $round requires an integer precision from -15 to 15.");
+  }
+  const factor = 10 ** digits;
+  return finiteNumber(Math.round(number * factor) / factor, "$round");
+};
+
+const safeMath = (value: unknown, operation: "floor" | "ceil" | "abs"): number | undefined => {
+  if (value === undefined) return undefined;
+  const number = finiteNumber(value, `$${operation}`);
+  const result = operation === "floor" ? Math.floor(number) : operation === "ceil" ? Math.ceil(number) : Math.abs(number);
+  return finiteNumber(result, `$${operation}`);
+};
+
+const safeSubstring = (input: unknown, start: unknown, length?: unknown): string | undefined => {
+  if (input === undefined) return undefined;
+  const text = requireBoundedString(input, "$substring");
+  if (typeof start !== "number" || !Number.isFinite(start) ||
+      (length !== undefined && (typeof length !== "number" || !Number.isFinite(length)))) {
+    throw new Error("API source $substring requires finite numeric positions.");
+  }
+  const characters = Array.from(text);
+  const index = Math.trunc(start);
+  const end = length === undefined ? undefined : index + Math.trunc(length);
+  return characters.slice(index, end).join("").slice(0, API_SOURCE_MAXIMUMS.outputLength);
+};
+
+const safeSubstringBefore = (input: unknown, search: unknown): string | undefined => {
+  if (input === undefined) return undefined;
+  const text = requireBoundedString(input, "$substringBefore");
+  const needle = requireBoundedString(search, "$substringBefore");
+  const index = text.indexOf(needle);
+  return (index < 0 ? "" : text.slice(0, index)).slice(0, API_SOURCE_MAXIMUMS.outputLength);
+};
+
+const safeSubstringAfter = (input: unknown, search: unknown): string | undefined => {
+  if (input === undefined) return undefined;
+  const text = requireBoundedString(input, "$substringAfter");
+  const needle = requireBoundedString(search, "$substringAfter");
+  const index = text.indexOf(needle);
+  return (index < 0 ? "" : text.slice(index + needle.length)).slice(0, API_SOURCE_MAXIMUMS.outputLength);
+};
+
 const safeSplit = (input: unknown, separator: unknown, limit: unknown = JSONATA_LIMITS.maximumSequenceLength): string[] | undefined => {
   if (input === undefined) return undefined;
-  if (typeof input !== "string" || typeof separator !== "string" ||
-      typeof limit !== "number" || !Number.isInteger(limit) || limit < 0 ||
+  const text = requireBoundedString(input, "$split");
+  const delimiter = requireBoundedString(separator, "$split");
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 0 ||
       limit > JSONATA_LIMITS.maximumSequenceLength) {
-    throw new Error("API source $split requires a string separator and a bounded integer limit.");
+    throw new Error("API source $split requires a bounded integer limit.");
   }
-  return input.split(separator, limit);
+  return text.split(delimiter, limit);
 };
 
 const safeReplace = (input: unknown, pattern: unknown, replacement: unknown, limit: unknown): string | undefined => {
   if (input === undefined) return undefined;
-  if (typeof input !== "string" || typeof pattern !== "string" || typeof replacement !== "string" ||
-      typeof limit !== "number" || !Number.isInteger(limit) || limit < 0 ||
-      limit > JSONATA_LIMITS.maximumReplaceLimit || pattern.length === 0) {
-    throw new Error("API source $replace requires strings and a bounded integer limit.");
+  const text = requireBoundedString(input, "$replace");
+  const needle = requireBoundedString(pattern, "$replace");
+  const substitute = requireBoundedString(replacement, "$replace");
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 0 ||
+      limit > JSONATA_LIMITS.maximumReplaceLimit || needle.length === 0) {
+    throw new Error("API source $replace requires a bounded integer limit and non-empty pattern.");
   }
   let result = "";
   let position = 0;
   let count = 0;
   while (count < limit) {
-    const match = input.indexOf(pattern, position);
+    const match = text.indexOf(needle, position);
     if (match < 0) break;
-    result = cappedAppend(result, input.slice(position, match));
-    result = cappedAppend(result, replacement);
-    position = match + pattern.length;
+    result = cappedAppend(result, text.slice(position, match));
+    result = cappedAppend(result, substitute);
+    position = match + needle.length;
     count += 1;
     if (result.length >= API_SOURCE_MAXIMUMS.outputLength) return result;
   }
-  return cappedAppend(result, input.slice(position));
+  return cappedAppend(result, text.slice(position));
+};
+
+const safeFormatNumber = (value: unknown, picture: unknown = "0"): string | undefined => {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error("API source $formatNumber requires a finite number.");
+  }
+  if (typeof picture !== "string") throw new Error("API source $formatNumber requires a literal picture.");
+  const options = formatNumberPictures.get(picture);
+  if (options === undefined) throw new Error("API source $formatNumber picture is not allowed.");
+  return new Intl.NumberFormat("en-US", options).format(value).slice(0, API_SOURCE_MAXIMUMS.outputLength);
+};
+
+const safeFromMillis = (value: unknown, picture?: unknown): string | undefined => {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error("API source $fromMillis requires finite milliseconds.");
+  }
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new Error("API source $fromMillis value is out of range.");
+  if (picture === undefined) return date.toISOString();
+  if (picture !== "[H01]:[m01]") throw new Error("API source $fromMillis picture is not allowed.");
+  const twoDigits = (part: number): string => String(part).padStart(2, "0");
+  return `${twoDigits(date.getUTCHours())}:${twoDigits(date.getUTCMinutes())}`;
+};
+
+const readIsoDigits = (value: string, start: number, length: number): number => {
+  let parsed = 0;
+  for (let index = start; index < start + length; index += 1) {
+    const digit = value.charCodeAt(index) - 48;
+    if (digit < 0 || digit > 9) throw new Error("API source $toMillis requires an ISO-8601 UTC timestamp.");
+    parsed = parsed * 10 + digit;
+  }
+  return parsed;
+};
+
+const safeToMillis = (value: unknown, picture?: unknown): number | undefined => {
+  if (value === undefined) return undefined;
+  if (picture !== undefined) throw new Error("API source $toMillis accepts ISO-8601 UTC timestamps only.");
+  if (typeof value !== "string" || (value.length !== 20 && value.length !== 24) ||
+      value[4] !== "-" || value[7] !== "-" || value[10] !== "T" ||
+      value[13] !== ":" || value[16] !== ":" ||
+      (value.length === 20 ? value[19] !== "Z" : value[19] !== "." || value[23] !== "Z")) {
+    throw new Error("API source $toMillis requires an ISO-8601 UTC timestamp.");
+  }
+  const year = readIsoDigits(value, 0, 4);
+  const month = readIsoDigits(value, 5, 2);
+  const day = readIsoDigits(value, 8, 2);
+  const hour = readIsoDigits(value, 11, 2);
+  const minute = readIsoDigits(value, 14, 2);
+  const second = readIsoDigits(value, 17, 2);
+  const millisecond = value.length === 24 ? readIsoDigits(value, 20, 3) : 0;
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, millisecond);
+  if (month < 1 || month > 12 || day < 1 || date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || hour > 23 ||
+      minute > 59 || second > 59) {
+    throw new Error("API source $toMillis requires a valid ISO-8601 UTC timestamp.");
+  }
+  return date.getTime();
+};
+
+const aggregateValues = (value: unknown, functionName: string): unknown[] => {
+  const values = value === undefined ? [] : Array.isArray(value) ? value : [value];
+  if (values.length > JSONATA_LIMITS.maximumAggregateLength) {
+    throw new Error(`API source ${functionName} exceeded the aggregate limit.`);
+  }
+  return values;
+};
+
+const finiteNumber = (value: unknown, functionName: string): number => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`API source ${functionName} requires finite numbers.`);
+  }
+  return value;
+};
+
+const safeAggregate = (kind: "sum" | "average" | "max" | "min", value: unknown): number | undefined => {
+  const values = aggregateValues(value, `$${kind}`);
+  if (values.length === 0) return kind === "sum" ? 0 : undefined;
+  let result = kind === "min" ? Number.POSITIVE_INFINITY : kind === "max" ? Number.NEGATIVE_INFINITY : 0;
+  for (const entry of values) {
+    const current = finiteNumber(entry, `$${kind}`);
+    if (kind === "sum" || kind === "average") {
+      result += current;
+      if (!Number.isFinite(result)) throw new Error(`API source $${kind} produced a non-finite number.`);
+    } else if (kind === "max") result = Math.max(result, current);
+    else result = Math.min(result, current);
+  }
+  if (kind === "average") result /= values.length;
+  return finiteNumber(result, `$${kind}`);
+};
+
+const safeCount = (value: unknown): number => aggregateValues(value, "$count").length;
+
+const safeArithmetic = (left: unknown, right: unknown, operator: unknown): number | undefined => {
+  if (left === undefined || right === undefined) return undefined;
+  const lhs = finiteNumber(left, "arithmetic");
+  const rhs = finiteNumber(right, "arithmetic");
+  let result: number;
+  switch (operator) {
+    case "+": result = lhs + rhs; break;
+    case "-": result = lhs - rhs; break;
+    case "*": result = lhs * rhs; break;
+    case "/": result = lhs / rhs; break;
+    case "%": result = lhs % rhs; break;
+    default: throw new Error("API source arithmetic operator is invalid.");
+  }
+  if (!Number.isFinite(result)) throw new Error("API source arithmetic produced a non-finite number.");
+  return result;
+};
+
+const rewriteBoundedOperators = (value: unknown): void => {
+  if (Array.isArray(value)) {
+    for (const child of value) rewriteBoundedOperators(child);
+    return;
+  }
+  if (!isNode(value)) return;
+  for (const child of Object.values(value)) rewriteBoundedOperators(child);
+  if (value.type !== "binary" || typeof value.value !== "string" ||
+      (!arithmeticOperators.has(value.value) && value.value !== "&")) return;
+
+  const operator = value.value;
+  const position = value.position;
+  const left = value.lhs;
+  const right = value.rhs;
+  value.type = "function";
+  value.value = "(";
+  value.arguments = [left, right, { type: "string", value: operator, position }];
+  value.procedure = {
+    type: "variable",
+    value: operator === "&" ? "apiSourceConcat" : "apiSourceArithmetic",
+    position,
+  };
+  delete value.lhs;
+  delete value.rhs;
 };
 
 export const evaluateApiSourceExpression = async (expression: string, input: unknown): Promise<unknown> => {
@@ -335,11 +605,36 @@ export const evaluateApiSourceExpression = async (expression: string, input: unk
     stack: JSONATA_LIMITS.stackDepth,
     sequence: JSONATA_LIMITS.maximumSequenceLength,
   });
+  compiled.registerFunction("string", safeString);
+  compiled.registerFunction("length", safeLength);
+  compiled.registerFunction("substring", safeSubstring);
+  compiled.registerFunction("substringBefore", safeSubstringBefore);
+  compiled.registerFunction("substringAfter", safeSubstringAfter);
+  compiled.registerFunction("uppercase", (value) => safeCase(value, true));
+  compiled.registerFunction("lowercase", (value) => safeCase(value, false));
+  compiled.registerFunction("trim", safeTrim);
+  compiled.registerFunction("contains", safeContains);
   compiled.registerFunction("join", safeJoin);
+  compiled.registerFunction("sum", (value) => safeAggregate("sum", value));
+  compiled.registerFunction("max", (value) => safeAggregate("max", value));
+  compiled.registerFunction("min", (value) => safeAggregate("min", value));
+  compiled.registerFunction("average", (value) => safeAggregate("average", value));
+  compiled.registerFunction("count", safeCount);
+  compiled.registerFunction("number", safeNumber);
+  compiled.registerFunction("round", safeRound);
+  compiled.registerFunction("floor", (value) => safeMath(value, "floor"));
+  compiled.registerFunction("ceil", (value) => safeMath(value, "ceil"));
+  compiled.registerFunction("abs", (value) => safeMath(value, "abs"));
+  compiled.registerFunction("formatNumber", safeFormatNumber);
+  compiled.registerFunction("fromMillis", safeFromMillis);
+  compiled.registerFunction("toMillis", safeToMillis);
   compiled.registerFunction("split", safeSplit);
   compiled.registerFunction("replace", safeReplace);
-  // The AST allowlist leaves only approved JSONata functions; these
-  // wrappers also cap output while it is being constructed.
+  compiled.registerFunction("apiSourceArithmetic", safeArithmetic);
+  compiled.registerFunction("apiSourceConcat", (left, right) => cappedAppend(boundedString(left), boundedString(right)));
+  rewriteBoundedOperators(compiled.ast());
+  // The AST allowlist admits no user-defined functions; bounded wrappers cover
+  // JSONata's picture, string, aggregate, and numeric implementations.
   return await compiled.evaluate(input);
 };
 

@@ -416,6 +416,57 @@ describe("API source JSONata", () => {
     expect(validateJsonataExpression("$replace($.value, 'x', 'y')")).toBe(false);
   });
 
+  it("rejects hostile pictures and finishes overflow, date, and format cases quickly", async () => {
+    const expectFast = async (operation: () => Promise<unknown>): Promise<void> => {
+      const started = performance.now();
+      await operation();
+      expect(performance.now() - started).toBeLessThan(1_000);
+    };
+
+    const overflow = "$formatNumber($.a * $.b, '#,##0.00')";
+    expect(validateJsonataExpression(overflow)).toBe(true);
+    await expectFast(() => expect(evaluateApiSourceExpression(overflow, { a: 1e308, b: 10 }))
+      .rejects.toThrow("non-finite number"));
+    expect(validateJsonataExpression("$formatNumber($.a * $.b, '0e0')")).toBe(false);
+
+    const backtrackingPicture = "$toMillis($.text, '[Mn][Mn][Mn][Mn][Mn][Mn]')";
+    expect(validateJsonataExpression(backtrackingPicture)).toBe(false);
+    await expectFast(() => expect(evaluateApiSourceExpression(backtrackingPicture, {
+      text: `${"A".repeat(80)}1`,
+    })).rejects.toThrow("JSONata construct"));
+    await expectFast(() => expect(evaluateApiSourceExpression("$toMillis($.text)", {
+      text: `${"A".repeat(80)}1`,
+    })).rejects.toThrow("ISO-8601 UTC timestamp"));
+
+    const suppliedPicture = "$formatNumber($.amount, $.picture)";
+    expect(validateJsonataExpression(suppliedPicture)).toBe(false);
+    await expectFast(() => expect(evaluateApiSourceExpression(suppliedPicture, {
+      amount: 1,
+      picture: `#,${"#".repeat(24_000)}`,
+    })).rejects.toThrow("JSONata construct"));
+    expect(validateJsonataExpression("$formatNumber($.amount, '0', $.options)")).toBe(false);
+  });
+
+  it("requires static approved format pictures and keeps date parsing ISO-only", async () => {
+    const rejected = [
+      "$formatNumber($.amount, $.picture)",
+      "$formatNumber($.amount, '0e0')",
+      "$formatNumber($.amount, '0', $.options)",
+      "$fromMillis($.timestamp, $.picture)",
+      "$fromMillis($.timestamp, '[Mn][Mn][Mn][Mn][Mn][Mn]')",
+      "$toMillis($.timestamp, '[Y0001]-[M01]-[D01]')",
+    ];
+    for (const expression of rejected) {
+      expect(validateJsonataExpression(expression), expression).toBe(false);
+      await expect(evaluateApiSourceExpression(expression, { amount: 2, timestamp: 0, picture: "0" }))
+        .rejects.toThrow("JSONata construct");
+    }
+    await expect(evaluateApiSourceExpression("$formatNumber(0.92, '0%')", {})).resolves.toBe("92%");
+    await expect(evaluateApiSourceExpression("$fromMillis($toMillis($.timestamp))", {
+      timestamp: "2099-06-21T18:42:00.000Z",
+    })).resolves.toBe("2099-06-21T18:42:00.000Z");
+  });
+
   it("rejects inputs deeper than the JSONata input-depth limit", async () => {
     let input: unknown = "leaf";
     for (let depth = 0; depth < JSONATA_LIMITS.maximumInputDepth + 1; depth += 1) input = { child: input };
