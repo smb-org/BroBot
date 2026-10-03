@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { Hono } from "hono";
 
-import type { BotModule } from "../../src/modules/contract";
+import type { BotModule, ModuleRouteEnvironment } from "../../src/modules/contract";
 import type * as ModuleRegistry from "../../src/modules/registry";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
@@ -11,10 +12,18 @@ import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 // focused on persistence and authorization, independent of product modules.
 const testModuleSchema = z.object({ betrag: z.number() });
 let prepareEnableCommand = false;
+const testModuleRoutes = new Hono<ModuleRouteEnvironment>();
+testModuleRoutes.get("/ballots/:ballotId", async (context) => {
+  const channelId = context.req.param("channelId");
+  if (channelId === undefined) throw new Error("Missing parent channel route parameter.");
+  const ballot = await context.get("ballots")(channelId).read(context.req.param("ballotId"));
+  return context.json({ ballot });
+});
 const testModule: BotModule<typeof testModuleSchema> = {
   id: "test-modul",
   settingsSchema: testModuleSchema,
   defaultSettings: { betrag: 42 },
+  routes: testModuleRoutes,
   // Mirrors raid's own event-scoped "viewers"/"channel" declarations (#253),
   // so the template-preview tests below can exercise cross-module shadowing
   // without depending on the real raid module.
@@ -213,6 +222,26 @@ describe("Module management in the panel", () => {
       // exactly like any other module. Only a real row makes it enabled.
       { id: "clips", enabled: false, settings: "{}", mandatory: false },
     ]);
+  });
+
+  it("binds route ballot access to the authorized channel and mounted module", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    const readBallot = vi.fn().mockResolvedValue({ counts: [5, 3], revision: 8 });
+    environment.CHANNEL = {
+      idFromName: vi.fn((channelId: string) => channelId),
+      get: vi.fn(() => ({ readBallot })),
+    } as unknown as Env["CHANNEL"];
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul/ballots/poll-a"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ballot: { counts: [5, 3], revision: 8 } });
+    expect(readBallot).toHaveBeenCalledWith("test-modul", "poll-a");
   });
 
   it("enables a module for a broadcaster and writes exactly one audit entry", async () => {

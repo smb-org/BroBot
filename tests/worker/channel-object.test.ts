@@ -24,6 +24,7 @@ import { OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON } fr
 import type { AdsSchedule } from "../../src/modules/ads/contracts";
 import type { BotModule } from "../../src/modules/contract";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
+import { ballotVoterHash } from "../../src/worker/durable/ballots";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
 
 const validPrincipal = (
@@ -148,7 +149,8 @@ const objectFor = (
       transaction: vi.fn(async <T>(closure: (transaction: {
         get: <Value>(key: string) => Promise<Value | undefined>;
         put: (key: string, value: unknown) => Promise<void>;
-        delete: (key: string) => Promise<boolean>;
+        delete: (key: string | string[]) => Promise<boolean | number>;
+        list: (options?: { prefix?: string }) => Promise<Map<string, unknown>>;
       }) => Promise<T>) => {
         const predecessor = transactionQueue;
         let release!: () => void;
@@ -161,7 +163,15 @@ const objectFor = (
               values.set(key, value);
               return Promise.resolve();
             },
-            delete: (key: string) => Promise.resolve(values.delete(key)),
+            delete: (key: string | string[]) => {
+              if (typeof key === "string") return Promise.resolve(values.delete(key));
+              let deleted = 0;
+              for (const item of key) if (values.delete(item)) deleted += 1;
+              return Promise.resolve(deleted);
+            },
+            list: (options?: { prefix?: string }) => Promise.resolve(new Map(
+              [...values].filter(([key]) => options?.prefix === undefined || key.startsWith(options.prefix)),
+            )),
           });
         } finally {
           release();
@@ -1047,6 +1057,107 @@ describe("ChannelObject realtime path", () => {
     await object.clearModuleAlarm("timers", "timer:timer-a", 4);
     await object.scheduleModuleAlarm("timers", "run", "timer:timer-a", 10_000, 3);
     expect(storageOf(object).values.get(alarmTableKey) ?? {}).not.toHaveProperty(alarmKey);
+  });
+
+  it("allows only one open ballot per channel across modules", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+
+    await expect(object.openBallot("chat_voting", "poll-a", 3, 20_000)).resolves.toEqual({ status: "opened" });
+    await expect(object.openBallot("votekick", "kick-a", 2, 20_000)).resolves.toEqual({
+      status: "busy",
+      moduleId: "chat_voting",
+    });
+  });
+
+  it("moves a changed vote between options and advances revisions monotonically", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 3, 20_000);
+
+    await expect(object.castBallot("chat_voting", "poll-a", "viewer-1", 1)).resolves.toEqual({
+      status: "counted",
+      counts: [1, 0, 0],
+      revision: 1,
+    });
+    await expect(object.castBallot("chat_voting", "poll-a", "viewer-1", 3)).resolves.toEqual({
+      status: "changed",
+      counts: [0, 0, 1],
+      revision: 2,
+    });
+    await expect(object.castBallot("chat_voting", "poll-a", "viewer-1", 3)).resolves.toEqual({
+      status: "unchanged",
+      counts: [0, 0, 1],
+      revision: 2,
+    });
+    await expect(object.castBallot("chat_voting", "other-poll", "viewer-2", 1)).resolves.toEqual({
+      status: "not_open",
+      counts: [],
+      revision: 0,
+    });
+  });
+
+  it("deletes voter entries and the per-ballot key when the ballot closes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
+    await object.castBallot("chat_voting", "poll-a", "viewer-2", 2);
+
+    await expect(object.closeBallot("chat_voting", "poll-a")).resolves.toEqual({ counts: [1, 1], revision: 2 });
+    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:"))).toEqual([]);
+    expect(storageOf(object).values.get("channel:alarm_schedule")).toBeUndefined();
+    await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
+  });
+
+  it("uses a fresh random voter key for each ballot and never stores the user id", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "fictional-viewer", 1);
+    const firstVoteKey = [...storageOf(object).values.keys()].find((key) => key.includes(":v:"));
+    await object.closeBallot("chat_voting", "poll-a");
+
+    await object.openBallot("chat_voting", "poll-b", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-b", "fictional-viewer", 1);
+    const secondVoteKey = [...storageOf(object).values.keys()].find((key) => key.includes(":v:"));
+
+    expect(firstVoteKey).toBeDefined();
+    expect(secondVoteKey).toBeDefined();
+    expect(firstVoteKey?.split(":v:")[1]).not.toBe(secondVoteKey?.split(":v:")[1]);
+    expect(secondVoteKey).not.toContain("fictional-viewer");
+  });
+
+  it("hard-deletes an unclosed ballot at its host-owned expiry alarm", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
+    expect(storageOf(object).values.get("channel:alarm_schedule")).toMatchObject({
+      "host:ballot_expiry:chat_voting:poll-a": { deadline: 20_000, handler: "host:ballot_expiry" },
+    });
+
+    vi.setSystemTime(20_000);
+    await object.alarm();
+
+    await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
+    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:"))).toEqual([]);
+  });
+
+  it("uses a length-prefixed channel id in ballot voter HMAC inputs", async () => {
+    const key = Uint8Array.from({ length: 32 }, (_, index) => index);
+
+    await expect(ballotVoterHash(key, "12", "345")).resolves.toBe(
+      "3c8979f2ba8a2a557317290c437d58356a5f60886ce3810dc87500455fa0ba28",
+    );
+    await expect(ballotVoterHash(key, "123", "45")).resolves.toBe(
+      "ea74bcf785957dd5a0e2cf9e6c064aeb45b8ad1142a09044212a4db84c4cc6da",
+    );
   });
 
   it("refreshes missing countdown schedules once per channel throttle window", async () => {

@@ -17,8 +17,19 @@ import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 import type { AdsSchedule } from "../../modules/ads/contracts";
 import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
-import type { BotModule, HelixRequest, HelixRequestOptions } from "../../modules/contract";
-import type { ModuleAlarmContext, ModuleAlarmDefinition, ModuleExternalFetchBudget, ModuleScheduleInputChangeReason } from "../../modules/contract";
+import type {
+  BallotCastResult,
+  BallotOpenResult,
+  BallotSnapshot,
+  BotModule,
+  HelixRequest,
+  HelixRequestOptions,
+  ModuleAlarmContext,
+  ModuleAlarmDefinition,
+  ModuleBallotAccess,
+  ModuleExternalFetchBudget,
+  ModuleScheduleInputChangeReason,
+} from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
@@ -47,6 +58,15 @@ import {
   isRecentBotChatMessage,
   recordRecentBotChatMessage,
 } from "./automated-chat-output";
+import {
+  BALLOT_EXPIRY_ALARM_HANDLER,
+  ballotExpiryAlarmKey,
+  ballotIdentityFromExpiryAlarmKey,
+  castStoredBallot,
+  closeStoredBallot,
+  openStoredBallot,
+  readStoredBallot,
+} from "./ballots";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -1038,6 +1058,7 @@ export class ChannelObject extends DurableObject<Env> {
     return {
       DB: this.env.DB,
       channelId,
+      ballots: this.ballotAccess(moduleId),
       storage: {
         get: (key: string) => this.ctx.storage.get(`${storagePrefix}${key}`),
         put: (key: string, value: unknown) => this.ctx.storage.put(`${storagePrefix}${key}`, value),
@@ -1139,11 +1160,73 @@ export class ChannelObject extends DurableObject<Env> {
     return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
   }
 
+  private ballotAccess(moduleId: string): ModuleBallotAccess {
+    return {
+      open: (ballotId, optionCount, expiresAt) => this.openBallot(moduleId, ballotId, optionCount, expiresAt),
+      cast: (ballotId, userId, choice) => this.castBallot(moduleId, ballotId, userId, choice),
+      read: (ballotId) => this.readBallot(moduleId, ballotId),
+      close: (ballotId) => this.closeBallot(moduleId, ballotId),
+    };
+  }
+
+  /** Opens a channel-wide exclusive ballot for a host-supplied module id. */
+  public async openBallot(
+    moduleId: string,
+    ballotId: string,
+    optionCount: number,
+    expiresAt: number,
+  ): Promise<BallotOpenResult> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Ballots require a named Durable Object.");
+    const result = await openStoredBallot(this.ctx.storage, moduleId, ballotId, optionCount, expiresAt);
+    if (result.status === "opened") {
+      try {
+        await this.scheduleAlarmEntry(
+          ballotExpiryAlarmKey(moduleId, ballotId),
+          BALLOT_EXPIRY_ALARM_HANDLER,
+          expiresAt,
+        );
+      } catch (error: unknown) {
+        await closeStoredBallot(this.ctx.storage, moduleId, ballotId);
+        throw error;
+      }
+    }
+    return result;
+  }
+
+  public async castBallot(
+    moduleId: string,
+    ballotId: string,
+    userId: string,
+    choice: number,
+  ): Promise<BallotCastResult> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
+    return await castStoredBallot(this.ctx.storage, channelId, moduleId, ballotId, userId, choice);
+  }
+
+  public async readBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
+    return await readStoredBallot(this.ctx.storage, moduleId, ballotId);
+  }
+
+  public async closeBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
+    const result = await closeStoredBallot(this.ctx.storage, moduleId, ballotId);
+    await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
+    return result;
+  }
+
+  private async expireBallot(key: string): Promise<void> {
+    const identity = ballotIdentityFromExpiryAlarmKey(key);
+    if (identity === null) return;
+    await closeStoredBallot(this.ctx.storage, identity.moduleId, identity.ballotId);
+  }
+
   private alarmHandlers(
     modules: readonly BotModule[] = MODULES,
     externalFetchBudget: ModuleExternalFetchBudget = createModuleExternalFetchBudget(),
   ): Map<string, AlarmHandlerRegistration> {
     const handlers = new Map<string, AlarmHandlerRegistration>([
+      [BALLOT_EXPIRY_ALARM_HANDLER, { handle: async (key) => { await this.expireBallot(key); } }],
       [SECURITY_ROUND_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
       [SECURITY_RETRY_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
       [AD_PREWARNING_HANDLER, {

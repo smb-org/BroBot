@@ -644,7 +644,7 @@ describe("text library", () => {
       TEST_SESSION_KEYS,
       TEST_ENCRYPTION_KEYS,
     );
-    const csrf = await createCsrfToken("session-manager-1", TEST_SESSION_KEYS, new Date(NOW).toISOString());
+    const csrf = await createCsrfToken("session-manager-1", TEST_SESSION_KEYS, new Date().toISOString());
     const environment = {
       DB: database as unknown as D1Database,
       TWITCH_CLIENT_ID: "client-id",
@@ -712,7 +712,7 @@ describe("text library", () => {
       TEST_SESSION_KEYS,
       TEST_ENCRYPTION_KEYS,
     );
-    const csrf = await createCsrfToken("session-manager-overlay-edit", TEST_SESSION_KEYS, new Date(NOW).toISOString());
+    const csrf = await createCsrfToken("session-manager-overlay-edit", TEST_SESSION_KEYS, new Date().toISOString());
     const published: unknown[] = [];
     const channel = {
       idFromName: (name: string) => name,

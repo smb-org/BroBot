@@ -26,6 +26,25 @@ Durable Object wird deterministisch aus dem `channelId`-Namen angesprochen und
 bleibt für die spätere Echtzeitstrecke zuständig. Der Worker bleibt das Gateway
 für HTTP und die Module.
 
+### Flüchtige Abstimmungen
+
+Der Channel Durable Object stellt Modulen einen gemeinsamen flüchtigen
+Stimmenspeicher („Ballot“) bereit. Pro Kanal kann genau ein Ballot geöffnet
+sein; dadurch schließen sich unterschiedliche Abstimmungsnutzer aus, ohne ihre
+Modulkennungen oder Tabellen gegenseitig zu kennen. Der Host bindet jeden
+Zugriff an Kanal und Modul, bevor er ihn dem Ausführungs-, Alarm-, Routen- oder
+Overlay-Kontext übergibt.
+
+Ein Ballot speichert nur die Zähler, eine monotone Revision und je abstimmender
+Person einen HMAC-Bezeichner. Der HMAC verwendet einen zufälligen 32-Byte-
+Schlüssel je Ballot sowie die längenpräfixierte Kanal- und Nutzerkennung aus
+[Decision 0003](decisions/0003-hash-und-salt-modell.md). Umentscheiden zieht
+die alte Wahl ab und zählt die neue in derselben Durable-Object-Transaktion.
+Beim Schließen werden alle Personeneinträge und der Schlüssel gelöscht; nur
+die aggregierten Zähler können vom aufrufenden Modul weiterverarbeitet werden.
+Ein Host-Alarm löscht nicht geschlossene Ballots spätestens zu ihrem beim
+Öffnen gesetzten Ablaufzeitpunkt, der höchstens 24 Stunden in der Zukunft liegt.
+
 ## Modulsystem
 
 Ein Modul ist ein Feature-Slice unter `src/modules/<id>` mit `contracts/`,
