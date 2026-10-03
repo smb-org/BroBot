@@ -675,7 +675,10 @@ export const dispatchEventSubNotification = async (
       const currentStream = await readChannelStreamState(environment.DB, event.channelId);
       if (streamStateChanged?.payload.state === "offline" || currentStream?.state === "offline") {
         try {
-          await object.clearActiveChatters();
+          await object.clearActiveChatters({
+            streamId: endingStreamDispatchState?.streamId ?? null,
+            startedAt: endingStreamDispatchState?.streamStartedAt ?? null,
+          });
         } catch (error: unknown) {
           console.warn("Active chatter tracking could not be cleared.", error);
         }

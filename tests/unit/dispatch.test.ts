@@ -859,7 +859,7 @@ describe("dispatch and execution", () => {
         channelId: "kanal-a",
         subscriptionType: "stream.online",
         triggerId: "online-1",
-        payload: { started_at: "2026-09-19T11:55:00.000Z" },
+        payload: { id: "stream-1", started_at: "2026-09-19T11:55:00.000Z" },
         receivedAt: "2026-09-19T12:00:00.000Z",
       }, sent(), []);
 
@@ -877,6 +877,10 @@ describe("dispatch and execution", () => {
 
       const object = environmentValue.CHANNEL.get(environmentValue.CHANNEL.idFromName("kanal-a"));
       expect(object.clearActiveChatters).toHaveBeenCalledTimes(1);
+      expect(object.clearActiveChatters).toHaveBeenCalledWith({
+        streamId: "stream-1",
+        startedAt: "2026-09-19T11:55:00.000Z",
+      });
 
       await expect(database.prepare(
         "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
