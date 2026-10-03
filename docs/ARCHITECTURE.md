@@ -42,8 +42,11 @@ Schlüssel je Ballot sowie die längenpräfixierte Kanal- und Nutzerkennung aus
 die alte Wahl ab und zählt die neue in derselben Durable-Object-Transaktion.
 Beim Schließen werden alle Personeneinträge und der Schlüssel gelöscht; nur
 die aggregierten Zähler können vom aufrufenden Modul weiterverarbeitet werden.
-Ein Host-Alarm löscht nicht geschlossene Ballots spätestens zu ihrem beim
-Öffnen gesetzten Ablaufzeitpunkt, der höchstens 24 Stunden in der Zukunft liegt.
+Ab dem beim Öffnen gesetzten Ablaufzeitpunkt nehmen Ballots keine Stimmen mehr
+an. Nicht geschlossene Ballots werden beim nächsten Zugriff gelöscht oder kurz
+nach dem Ablaufzeitpunkt durch den Host-Alarm; der Alarm kann sich um bis zu
+etwa eine Minute verzögern. Der Ablaufzeitpunkt liegt höchstens 24 Stunden in
+der Zukunft.
 
 ## Modulsystem
 

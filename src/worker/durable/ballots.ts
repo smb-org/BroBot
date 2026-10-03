@@ -34,7 +34,10 @@ interface StoredBallot {
 }
 
 type BallotStorage = Pick<DurableObjectStorage, "get" | "list" | "put" | "delete" | "transaction">;
-type BallotTransaction = Pick<DurableObjectTransaction, "get" | "list" | "put" | "delete">;
+type BallotTransaction = Pick<
+  DurableObjectTransaction,
+  "get" | "list" | "put" | "delete" | "setAlarm" | "deleteAlarm"
+>;
 
 const validId = (value: string, name: string): void => {
   if (!ID_PATTERN.test(value)) throw new RangeError(`${name} is invalid.`);
@@ -109,6 +112,7 @@ export const openStoredBallot = async (
   ballotId: string,
   optionCount: number,
   expiresAt: number,
+  onOpened?: (transaction: BallotTransaction) => Promise<void>,
 ): Promise<StoredBallotOpenResult> => {
   validId(moduleId, "Module id");
   validId(ballotId, "Ballot id");
@@ -155,6 +159,7 @@ export const openStoredBallot = async (
     };
     await transaction.put(ACTIVE_BALLOT_KEY, { moduleId, ballotId } satisfies ActiveBallot);
     await transaction.put(ballotKey(moduleId, ballotId), ballot);
+    if (onOpened !== undefined) await onOpened(transaction);
     return { status: "opened" };
   });
 };

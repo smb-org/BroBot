@@ -263,6 +263,15 @@ const validAlarmScheduleEntry = (value: unknown): value is AlarmScheduleEntry =>
 const alarmAttemptAt = (entry: AlarmScheduleEntry): number =>
   entry.claimUntil ?? entry.nextAttemptAt ?? entry.deadline;
 
+const earliestAlarmAt = (table: AlarmScheduleTable, now: number): number | null => {
+  const deadlines = Object.entries(table)
+    .filter(([, entry]) => Number.isFinite(alarmAttemptAt(entry)))
+    .filter(([, entry]) => !(entry.deadline <= now && entry.suppressedBy !== undefined &&
+      Object.hasOwn(table, entry.suppressedBy)))
+    .map(([, entry]) => alarmAttemptAt(entry));
+  return deadlines.length === 0 ? null : Math.min(...deadlines);
+};
+
 const readAlarmScheduleTable = async (storage: AlarmStorageAccess): Promise<AlarmScheduleTable> => {
   const saved = await storage.get(ALARM_TABLE_KEY);
   const table: AlarmScheduleTable = {};
@@ -1180,27 +1189,28 @@ export class ChannelObject extends DurableObject<Env> {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Ballots require a named Durable Object.");
     const requestedAlarmKey = ballotExpiryAlarmKey(moduleId, ballotId);
-    let result: Awaited<ReturnType<typeof openStoredBallot>>;
-    try {
-      // Persist the expiry schedule first so an interrupted open cannot leave
-      // an active ballot without a host-owned expiry alarm.
-      await this.scheduleAlarmEntry(requestedAlarmKey, BALLOT_EXPIRY_ALARM_HANDLER, expiresAt);
-      result = await openStoredBallot(this.ctx.storage, moduleId, ballotId, optionCount, expiresAt);
-    } catch (error: unknown) {
-      await this.clearAlarmEntry(requestedAlarmKey);
-      throw error;
-    }
+    const result = await openStoredBallot(
+      this.ctx.storage,
+      moduleId,
+      ballotId,
+      optionCount,
+      expiresAt,
+      async (transaction) => {
+        const table = await readAlarmScheduleTable(transaction);
+        const current = table[requestedAlarmKey];
+        table[requestedAlarmKey] = {
+          deadline: expiresAt,
+          handler: BALLOT_EXPIRY_ALARM_HANDLER,
+          revision: (current?.revision ?? 0) + 1,
+        };
+        await transaction.put(ALARM_TABLE_KEY, table);
+        const nextAlarmAt = earliestAlarmAt(table, Date.now());
+        if (nextAlarmAt === null) await transaction.deleteAlarm();
+        else await transaction.setAlarm(nextAlarmAt);
+      },
+    );
     if (result.status === "opened") {
       return { status: "opened" };
-    }
-
-    const activeBallot = result.activeBallot;
-    if (activeBallot !== undefined) {
-      const activeAlarmKey = ballotExpiryAlarmKey(activeBallot.moduleId, activeBallot.ballotId);
-      await this.scheduleAlarmEntry(activeAlarmKey, BALLOT_EXPIRY_ALARM_HANDLER, activeBallot.expiresAt);
-      if (activeAlarmKey !== requestedAlarmKey) await this.clearAlarmEntry(requestedAlarmKey);
-    } else {
-      await this.clearAlarmEntry(requestedAlarmKey);
     }
     return { status: "busy", moduleId: result.moduleId };
   }
@@ -1327,17 +1337,12 @@ export class ChannelObject extends DurableObject<Env> {
 
   private async scheduleEarliestAlarm(): Promise<void> {
     const table = await this.ensureAlarmScheduleTable();
-    const now = Date.now();
-    const deadlines = Object.entries(table)
-      .filter(([, entry]) => Number.isFinite(alarmAttemptAt(entry)))
-      .filter(([, entry]) => !(entry.deadline <= now && entry.suppressedBy !== undefined &&
-        Object.hasOwn(table, entry.suppressedBy)))
-      .map(([, entry]) => alarmAttemptAt(entry));
-    if (deadlines.length === 0) {
+    const nextAlarmAt = earliestAlarmAt(table, Date.now());
+    if (nextAlarmAt === null) {
       await this.ctx.storage.deleteAlarm();
       return;
     }
-    await this.ctx.storage.setAlarm(Math.min(...deadlines));
+    await this.ctx.storage.setAlarm(nextAlarmAt);
   }
 
   private async scheduleSecurityAlarm(): Promise<void> {

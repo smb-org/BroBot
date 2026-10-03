@@ -59,6 +59,15 @@ type SocketDouble = WebSocket & {
   serializeAttachment: ReturnType<typeof vi.fn>;
 };
 
+type StorageTransactionDouble = {
+  get: <Value>(key: string) => Promise<Value | undefined>;
+  put: (key: string, value: unknown) => Promise<void>;
+  delete: (key: string | string[]) => Promise<boolean | number>;
+  list: (options?: { prefix?: string }) => Promise<Map<string, unknown>>;
+  setAlarm: (scheduledTime: number | Date) => Promise<void>;
+  deleteAlarm: () => Promise<void>;
+};
+
 const socketFor = (principal: RealtimePanelPrincipal): SocketDouble => ({
   tags: [
     "kind:panel",
@@ -90,8 +99,11 @@ type StorageDouble = {
   values: Map<string, unknown>;
   get: ReturnType<typeof vi.fn<(key: string) => Promise<unknown>>>;
   list: ReturnType<typeof vi.fn>;
-  setAlarm: ReturnType<typeof vi.fn>;
-  deleteAlarm: ReturnType<typeof vi.fn>;
+  transaction: ReturnType<typeof vi.fn<(
+    closure: (transaction: StorageTransactionDouble) => Promise<unknown>,
+  ) => Promise<unknown>>>;
+  setAlarm: ReturnType<typeof vi.fn<(scheduledTime: number | Date) => void>>;
+  deleteAlarm: ReturnType<typeof vi.fn<() => void>>;
 };
 
 const storageOf = (object: ChannelObject): StorageDouble =>
@@ -114,6 +126,7 @@ const objectFor = (
       if (options?.limit !== undefined) keys = keys.slice(0, options.limit);
       return Promise.resolve(new Map(keys.map((key) => [key, values.get(key)])));
     }),
+    transaction: vi.fn(),
     setAlarm: vi.fn(),
     deleteAlarm: vi.fn(),
   };
@@ -146,12 +159,7 @@ const objectFor = (
         return Promise.resolve(true);
       }),
       list: storage.list,
-      transaction: vi.fn(async <T>(closure: (transaction: {
-        get: <Value>(key: string) => Promise<Value | undefined>;
-        put: (key: string, value: unknown) => Promise<void>;
-        delete: (key: string | string[]) => Promise<boolean | number>;
-        list: (options?: { prefix?: string }) => Promise<Map<string, unknown>>;
-      }) => Promise<T>) => {
+      transaction: storage.transaction.mockImplementation(async <T>(closure: (transaction: StorageTransactionDouble) => Promise<T>) => {
         const predecessor = transactionQueue;
         let release!: () => void;
         transactionQueue = new Promise<void>((resolve) => { release = resolve; });
@@ -176,6 +184,14 @@ const objectFor = (
                 .sort(([left], [right]) => left.localeCompare(right));
               if (options?.limit !== undefined) entries = entries.slice(0, options.limit);
               return Promise.resolve(new Map(entries));
+            },
+            setAlarm: (scheduledTime: number | Date) => {
+              storage.setAlarm(scheduledTime);
+              return Promise.resolve();
+            },
+            deleteAlarm: () => {
+              storage.deleteAlarm();
+              return Promise.resolve();
             },
           });
         } finally {
@@ -1076,6 +1092,51 @@ describe("ChannelObject realtime path", () => {
     });
   });
 
+  it("preserves an active ballot alarm when another open uses the same id or invalid arguments", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 3, 20_000);
+    const storage = storageOf(object);
+    const alarmKey = "host:ballot_expiry:chat_voting:poll-a";
+    const originalEntry = structuredClone(
+      (storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey],
+    );
+    storage.setAlarm.mockClear();
+    storage.deleteAlarm.mockClear();
+
+    await expect(object.openBallot("chat_voting", "poll-a", 3, 30_000)).resolves.toEqual({
+      status: "busy",
+      moduleId: "chat_voting",
+    });
+    await expect(object.openBallot("chat_voting", "poll-a", 0, 30_000)).rejects.toThrow(RangeError);
+
+    expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey]).toEqual(originalEntry);
+    expect(storage.setAlarm).not.toHaveBeenCalled();
+    expect(storage.deleteAlarm).not.toHaveBeenCalled();
+  });
+
+  it("preserves an active ballot alarm when a same-id open is interrupted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 3, 20_000);
+    const storage = storageOf(object);
+    const alarmKey = "host:ballot_expiry:chat_voting:poll-a";
+    const originalEntry = structuredClone(
+      (storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey],
+    );
+    storage.setAlarm.mockClear();
+    storage.deleteAlarm.mockClear();
+    storage.transaction.mockRejectedValueOnce(new Error("storage interrupted"));
+
+    await expect(object.openBallot("chat_voting", "poll-a", 3, 30_000)).rejects.toThrow("storage interrupted");
+
+    expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey]).toEqual(originalEntry);
+    expect(storage.setAlarm).not.toHaveBeenCalled();
+    expect(storage.deleteAlarm).not.toHaveBeenCalled();
+  });
+
   it("isolates ballot reads and closes between modules", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
@@ -1198,7 +1259,7 @@ describe("ChannelObject realtime path", () => {
     expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:")).sort()).toEqual([]);
   });
 
-  it("repairs a missing expiry alarm when another module finds a live ballot", async () => {
+  it("does not alter expiry alarms when another module finds a live ballot", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const object = objectFor([]);
@@ -1213,10 +1274,8 @@ describe("ChannelObject realtime path", () => {
       status: "busy",
       moduleId: "module_a",
     });
-    expect(storage.values.get("channel:alarm_schedule")).toMatchObject({
-      "host:ballot_expiry:module_a:poll-a": { deadline: 20_000, handler: "host:ballot_expiry" },
-    });
-    expect(storage.setAlarm).toHaveBeenLastCalledWith(20_000);
+    expect(storage.values.get("channel:alarm_schedule")).toBeUndefined();
+    expect(storage.setAlarm).not.toHaveBeenCalled();
   });
 
   it("reclaims an expired ballot on open when its expiry alarm is missing", async () => {
