@@ -191,7 +191,7 @@ export const eventChipNumber = (detail: EventDetail, key: EventNumberKey): strin
   }
   if (typeof value !== "number" || !Number.isFinite(value) || value === 0) return null;
   if (key === "count") return `${formatNumber(value)}x`;
-  if (key === "duration" || key === "remainingSeconds") return `${formatNumber(value)} s`;
+  if (key === "duration" || key === "seconds" || key === "remainingSeconds") return `${formatNumber(value)} s`;
   return formatNumber(value);
 };
 

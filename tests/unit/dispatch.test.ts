@@ -54,6 +54,8 @@ const environment = (database: TestD1Database, publish = vi.fn()) => ({
       recordBotChatMessage: vi.fn().mockResolvedValue(undefined),
       isRecentBotChatMessage: vi.fn().mockResolvedValue(false),
       getChatActivityCount: vi.fn().mockResolvedValue(0),
+      getTwitchRateLimitRetryAfter: vi.fn().mockResolvedValue(null),
+      setTwitchRateLimitRetryAfter: vi.fn().mockResolvedValue(undefined),
     }),
   } as unknown as Env["CHANNEL"],
 });
@@ -66,6 +68,14 @@ const chatResponse = (body: unknown, status = 200) =>
 const bodyOf = (fetcher: ReturnType<typeof chatResponse>, index = 0): Record<string, unknown> => {
   const body = fetcher.mock.calls[index]?.[1]?.body;
   return typeof body === "string" ? JSON.parse(body) as Record<string, unknown> : {};
+};
+
+const requestBodyOf = (body: BodyInit | null | undefined): Record<string, unknown> => {
+  if (typeof body !== "string") return {};
+  const parsed: unknown = JSON.parse(body);
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : {};
 };
 
 const requestedUrl = (input?: RequestInfo | URL): string =>
@@ -294,7 +304,7 @@ describe("dispatch and execution", () => {
     }
   });
 
-  it("runs modules while muted but suppresses chat, announcements, and automatic shoutouts", async () => {
+  it("runs modules while muted but suppresses chat, announcements, shoutouts, timeouts, and bans", async () => {
     const database = new TestD1Database();
     try {
       await withBot(database);
@@ -311,6 +321,8 @@ describe("dispatch and execution", () => {
             { kind: "chat", text: "Antwort", replyToMessageId: "message-1" },
             { kind: "announcement", text: "Ankündigung" },
             { kind: "shoutout", targetChannelId: "target-channel" },
+            { kind: "timeout", userId: "fictional-target-1", durationSeconds: 60, reason: "test" },
+            { kind: "ban", userId: "fictional-target-2", reason: "test" },
           ],
           diagnostics: [{ code: "text_commands.triggered" }],
         };
@@ -326,11 +338,108 @@ describe("dispatch and execution", () => {
         "modul-a:host.action.suppressed",
         "modul-a:host.action.suppressed",
         "modul-a:host.action.suppressed",
+        "modul-a:host.action.suppressed",
+        "modul-a:host.action.suppressed",
       ]);
       expect(rows.slice(1).map((row) => JSON.parse(row.detail_json) as unknown)).toEqual([
         { action: "chat", reason: "channel_muted" },
         { action: "announcement", reason: "channel_muted" },
         { action: "shoutout", reason: "channel_muted" },
+        { action: "timeout", reason: "channel_muted" },
+        { action: "ban", reason: "channel_muted" },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("suppresses moderation actions for mandatory modules during a channel pause", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO channel_controls (channel_id, muted, mute_until_stream_end, paused, pause_until_stream_end, updated_at)
+         VALUES ('kanal-a', 0, 0, 1, 0, ?)`
+      ).bind(NOW).run();
+      const module = {
+        ...fakeModule("mandatory-test", () => ({
+          actions: [{ kind: "timeout", userId: "fictional-target-3", durationSeconds: 30, reason: "test" }],
+          diagnostics: [],
+        })),
+        mandatory: true,
+      };
+      const fetcher = sent();
+      await runDispatch(database, [module], fetcher);
+
+      expect(fetcher).not.toHaveBeenCalled();
+      await expect(eventLog(database)).resolves.toMatchObject([
+        { module_id: "mandatory-test", code: "host.action.suppressed", detail_json: '{"action":"timeout","reason":"channel_paused"}' },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("sends exactly one moderation follow-up after a certain Helix outcome", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+         VALUES ('kanal-a', 1, ?, NULL)`,
+      ).bind(NOW).run();
+      const module = fakeModule("moderation-test", () => ({
+        actions: [{
+          kind: "timeout",
+          userId: "fictional-target-4",
+          durationSeconds: 30,
+          reason: "test",
+          onSuccess: { kind: "chat", text: "Timeout applied" },
+          onFailure: { kind: "chat", text: "Timeout failed" },
+        }],
+        diagnostics: [],
+      }));
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-result" }] }), { status: 200 }));
+      await runDispatch(database, [module], fetcher);
+
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(requestBodyOf(fetcher.mock.calls[1]?.[1]?.body)).toMatchObject({ message: "Timeout applied" });
+      await expect(eventLog(database)).resolves.toMatchObject([
+        { module_id: "moderation-test", code: "host.timeout.applied" },
+        { module_id: "moderation-test", code: "host.chat.sent" },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not send either follow-up after an ambiguous moderation outcome", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+         VALUES ('kanal-a', 1, ?, NULL)`,
+      ).bind(NOW).run();
+      const module = fakeModule("ambiguous-moderation-test", () => ({
+        actions: [{
+          kind: "timeout",
+          userId: "fictional-target-5",
+          durationSeconds: 30,
+          reason: "test",
+          onSuccess: { kind: "chat", text: "Timeout applied" },
+          onFailure: { kind: "chat", text: "Timeout failed" },
+        }],
+        diagnostics: [],
+      }));
+      const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("network unavailable"));
+      await runDispatch(database, [module], fetcher);
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await expect(eventLog(database)).resolves.toMatchObject([
+        { module_id: "ambiguous-moderation-test", code: "host.timeout.ambiguous" },
       ]);
     } finally {
       database.close();

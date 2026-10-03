@@ -8,6 +8,7 @@ import {
 import { sendChatMessage } from "./chat";
 import { sendChatAnnouncement } from "./announcement";
 import { fetchTwitchUserByLogin, sendShoutout } from "./shoutout";
+import { sendModerationBan } from "./moderation";
 import { publishRealtimeMessages, publishVariablesChanged } from "./realtime";
 import { prepareModuleOverlayRealtimeMessage } from "./module-overlay-realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
@@ -322,14 +323,18 @@ const runActions = async (
   module: BotModule,
   actions: readonly ModuleAction[],
   muted: boolean,
+  paused: boolean,
   fetcher: typeof fetch,
   attributions: readonly string[] = [],
   sourceBroadcasterUserId?: string | null,
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
+  const pendingActions = [...actions];
   // Order is preserved: a reply after an announcement reads as a different
   // conversation than the reverse.
-  for (const action of actions) {
+  for (let index = 0; index < pendingActions.length; index += 1) {
+    const action = pendingActions[index];
+    if (action === undefined) continue;
     const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {
@@ -338,12 +343,16 @@ const runActions = async (
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
       }
     };
-    if (chatOutputSuppressionReason({ moduleEnabled: true, mandatory: true, paused: false, muted }) !== null &&
-        (action.kind === "chat" || action.kind === "announcement" || action.kind === "shoutout")) {
+    const moderationAction = action.kind === "timeout" || action.kind === "ban";
+    const suppressionReason = moderationAction
+      ? muted ? "channel_muted" : paused ? "channel_paused" : null
+      : chatOutputSuppressionReason({ moduleEnabled: true, mandatory: true, paused: false, muted });
+    if (suppressionReason !== null &&
+        (action.kind === "chat" || action.kind === "announcement" || action.kind === "shoutout" || moderationAction)) {
       await reportDelivery("not_attempted");
       diagnostics.push({
         code: "host.action.suppressed" satisfies EventCode,
-        detail: { action: action.kind, reason: "channel_muted" },
+        detail: { action: action.kind, reason: suppressionReason },
       });
       continue;
     }
@@ -496,6 +505,25 @@ const runActions = async (
         diagnostics.push(result.sent
           ? { code: "host.shoutout.sent" satisfies EventCode, detail: result.detail }
           : { code: "host.shoutout.failed" satisfies EventCode, detail: { cause: result.reason, ...result.detail } });
+        continue;
+      }
+      if (action.kind === "timeout" || action.kind === "ban") {
+        const result = await sendModerationBan(environment, channelId, {
+          userId: action.userId,
+          durationSeconds: action.kind === "timeout" ? action.durationSeconds : null,
+          reason: action.reason,
+        }, fetcher);
+        const detail = result.reason === null ? result.detail : { ...result.detail, cause: result.reason };
+        const code: EventCode = action.kind === "timeout"
+          ? result.outcome === "applied" ? "host.timeout.applied"
+            : result.outcome === "ambiguous" ? "host.timeout.ambiguous" : "host.timeout.failed"
+          : result.outcome === "applied" ? "host.ban.applied"
+            : result.outcome === "ambiguous" ? "host.ban.ambiguous" : "host.ban.failed";
+        diagnostics.push({ code, detail });
+        if (result.outcome !== "ambiguous") {
+          const followUp = result.outcome === "applied" ? action.onSuccess : action.onFailure;
+          if (followUp !== undefined) pendingActions.splice(index + 1, 0, followUp);
+        }
         continue;
       }
       const prepared = await prepareModuleOverlayRealtimeMessage(
@@ -909,6 +937,7 @@ export const dispatchEventSubNotification = async (
           module,
           result.actions,
           dispatchState.controls.mute.active,
+          dispatchState.controls.pause.active,
           fetcher,
           result.attributions,
           textValue(event.payload.source_broadcaster_user_id),
