@@ -134,6 +134,15 @@ Zeitgeber kennt weder deren Modulnamen noch deren Tabellen. Er rendert
 Textblöcke über die allgemeine Vorlagenpipeline und lehnt beim Speichern Blöcke
 mit chatbefehlabhängigen Variablen ab.
 
+Ein Modul kann `needsActiveChatters` deklarieren. Während es im Kanal aktiviert
+ist, ergänzt der bestehende Chat-Aktivitätsaufruf im Channel Durable Object je
+Person den ersten und letzten Aktivitätszeitpunkt unter einem HMAC mit
+streameigenem Zufallsschlüssel. `ModuleExecutionContext.activeChatters` bietet
+die Fensterzählung und die Aktivitätsabfrage. Beim Streamende löscht der Host
+Schlüssel und Einträge; ein eigener Host-Alarm erzwingt dieselbe Löschung
+spätestens 24 Stunden nach Streambeginn. Die Speicherung nutzt den bestehenden
+Chat-Aktivitätsaufruf und fügt keinen zweiten Schreibaufruf je Chatnachricht hinzu.
+
 Migration `0025_chat_output_targets.sql` ergänzt Textbefehle und Zeitgeber um
 ein Chat-Ausgabeziel; bestehende Zeilen erhalten `source_only`. Auch neue
 Ereignistexte verwenden standardmäßig dieses Ziel. Der gemeinsame

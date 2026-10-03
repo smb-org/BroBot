@@ -312,6 +312,15 @@ export const selectModulesForEvent = (
   return { matches, unknownModules };
 };
 
+export const needsActiveChatterTracking = (
+  activations: readonly { moduleId: string; enabled: boolean }[],
+  registry: readonly BotModule[] = MODULES,
+): boolean => {
+  const enabledModuleIds = new Set(activations.filter((activation) => activation.enabled).map((activation) => activation.moduleId));
+  return registry.some((module) => module.needsActiveChatters === true &&
+    (module.mandatory === true || enabledModuleIds.has(module.id)));
+};
+
 // The `ursache`/`typ`/`meldung` detail keys below stay: they land in
 // event_log.detail_json (a wire/stored shape), and this file lives outside
 // `src/modules`, so the frozen detailKeys() test in
@@ -545,14 +554,6 @@ export const dispatchEventSubNotification = async (
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
   const externalFetchBudget = createModuleExternalFetchBudget();
-  if (event.subscriptionType === "channel.chat.message" && environment.CHANNEL !== undefined) {
-    try {
-      const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
-      await object.recordChatActivity();
-    } catch (error: unknown) {
-      console.warn("Channel chat activity could not be counted.", error);
-    }
-  }
   // `channel.update` already carries the new category, so the shared game-id
   // cache (FAQ and text-command game filters) can be corrected immediately
   // instead of serving the old game until its TTL expires.
@@ -650,6 +651,37 @@ export const dispatchEventSubNotification = async (
   }
   const dispatchState = endingStreamDispatchState ??
     await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt);
+  const trackActiveChatters = needsActiveChatterTracking(dispatchState.activations, registry);
+  if (environment.CHANNEL !== undefined) {
+    const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+    if (event.subscriptionType === "channel.chat.message") {
+      try {
+        await object.recordChatActivity(textValue(event.payload.chatter_user_id), trackActiveChatters);
+      } catch (error: unknown) {
+        console.warn("Channel chat activity could not be counted.", error);
+      }
+    }
+    if (streamStateChanged?.payload.state === "online" && trackActiveChatters) {
+      try {
+        await object.startActiveChatterStream(
+          textValue(event.payload.id),
+          textValue(event.payload.started_at),
+        );
+      } catch (error: unknown) {
+        console.warn("Active chatter tracking could not be started.", error);
+      }
+    }
+    if (event.subscriptionType === "stream.offline") {
+      const currentStream = await readChannelStreamState(environment.DB, event.channelId);
+      if (streamStateChanged?.payload.state === "offline" || currentStream?.state === "offline") {
+        try {
+          await object.clearActiveChatters();
+        } catch (error: unknown) {
+          console.warn("Active chatter tracking could not be cleared.", error);
+        }
+      }
+    }
+  }
   const { matches, unknownModules } = selectModulesForEvent(dispatchState.activations, event.subscriptionType, registry, dispatchState.controls.pause.active);
   const actor = await actorForEvent(environment.DB, event.channelId, event.payload);
   const newEntries: WrittenModuleDiagnostic[] = [];
@@ -867,6 +899,16 @@ export const dispatchEventSubNotification = async (
             chatActivityCount: async () => {
               if (environment.CHANNEL === undefined) return 0;
               return await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).getChatActivityCount();
+            },
+            activeChatters: {
+              count: async (windowMs) => {
+                if (module.needsActiveChatters !== true || environment.CHANNEL === undefined) return 0;
+                return await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).getActiveChatterCount(windowMs);
+              },
+              seen: async (userId) => {
+                if (module.needsActiveChatters !== true || environment.CHANNEL === undefined) return null;
+                return await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).getActiveChatter(userId);
+              },
             },
             channelInfo,
             channelGameId,

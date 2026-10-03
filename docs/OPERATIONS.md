@@ -407,6 +407,12 @@ den Status in `bot_channel_status` fest. Abgelaufene OAuth-Transaktionen
 werden im selben Lauf entfernt. Außerdem räumt er `event_log` auf und löscht
 Ereignisse, die älter als 14 Tage sind.
 
+Aktive Chatter liegen nur im Channel Durable Object. Ein zufälliger Schlüssel
+pro Stream ist der HMAC-Schlüssel der Einträge; `stream.offline` löscht
+Schlüssel und Einträge sofort. Ein Host-Alarm löscht beides spätestens 24
+Stunden nach Streambeginn. Diese flüchtigen Daten liegen nicht in D1 und werden
+nicht vom stündlichen Bereinigungslauf erfasst.
+
 Bei `invalid_grant` oder einer widerrufenen Autorisierung wird der globale
 Status mit Ursache `revoked` gespeichert. Der Scheduled-Handler versucht einen
 solchen Zustand nicht endlos erneut; der Betreiber startet zur erneuten

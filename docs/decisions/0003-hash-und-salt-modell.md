@@ -2,7 +2,7 @@
 
 **Stand:** 18. September 2026
 **Status:** entschieden, siehe [#1](https://github.com/smb-org/BroBot/issues/1)
-**Betrifft:** #10, #12, #14, #28, #30 — jedes Modul, das Nutzerdaten schreibt
+**Betrifft:** #10, #12, #14, #28, #30, #292 — jedes Modul, das Nutzerdaten schreibt
 
 ## Offene Entwurfsfragen
 
@@ -47,11 +47,11 @@ Zwei Eigenschaften daran sind Absicht:
 
 ### Flüchtiger Raum — Schlüssel stirbt mit dem Vorgang
 
-**Wofür:** Stimmen bei einem Chat-Voting (#10), Zählung unterschiedlicher Nutzer in einem gleitenden Fenster (#12).
+**Wofür:** Stimmen bei einem Chat-Voting (#10), Zählung unterschiedlicher Nutzer in einem gleitenden Fenster (#12) und aktive Chatter je Stream (#292).
 
-**Schlüssel:** 32 zufällige Bytes, erzeugt beim Start des Vorgangs, gespeichert neben dem Vorgang selbst.
+**Schlüssel:** 32 zufällige Bytes, erzeugt beim Start des Vorgangs oder Streams und im Durable Object neben den gehashten Daten gespeichert.
 
-**Lebensdauer:** Der Schlüssel wird mit dem Vorgang gelöscht — beim Schließen eines Votings, beim Ablauf eines Fensters. Danach ist der Bezug **endgültig** weg: Es gibt kein Geheimnis mehr, mit dem sich ein Wert einer Person zuordnen ließe, auch nicht für uns.
+**Lebensdauer:** Der Schlüssel wird mit dem Vorgang gelöscht — beim Schließen eines Votings, beim Ablauf eines Fensters, bei `stream.offline` oder spätestens 24 Stunden nach Streambeginn. Danach ist der Bezug **endgültig** weg: Es gibt kein Geheimnis mehr, mit dem sich ein Wert einer Person zuordnen ließe, auch nicht für uns.
 
 **Was bleibt:** Das Ergebnis. „Option A: 47 Stimmen" ist keine personenbezogene Angabe und darf unbegrenzt bleiben.
 
@@ -101,6 +101,7 @@ Beim flüchtigen Raum stellt sich die Frage nicht: Dort ist jeder Vorgang sein e
 |---|---|---|
 | Stimmen eines Votings | mit dem Schließen, spätestens **24 Stunden** nach Ende | Der Zweck endet mit der Auswertung |
 | Gleitendes Fenster der Themen-Erkennung | mit dem Fensterablauf, spätestens **am Streamende** | #12 sieht ohnehin Verfall am Streamende vor |
+| Aktive Chatter je Stream | bei `stream.offline`, spätestens **24 Stunden** nach Streambeginn | Kurzlebige Grundlage für streambezogene Schwellen und Teilnahmeprüfungen |
 | Kanalweite Aktivitätszähler je Person | **180 Tage** rollierend | Wiederkehrende Zuschauer zu erkennen braucht Monate, nicht Jahre |
 | Modul-Ereignisse mit roher `actor_user_id` | **14 Tage** | Betriebliche Fehlersuche; die Ausnahme bleibt wegen der kurzen Frist begrenzt |
 | Audit-Einträge | **24 Monate** | Administrative Nachvollziehbarkeit; betrifft Bedienende, nicht Zuschauer |

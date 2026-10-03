@@ -492,6 +492,11 @@ export type AuthorizeModuleMutation = (
   now: string,
 ) => ModuleMutationAuthorization;
 
+export interface ActiveChatterActivity {
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
 /** Infrastructure the host gives a module for its own adapter. */
 export interface ModuleExecutionContext {
   DB: D1Database;
@@ -505,6 +510,11 @@ export interface ModuleExecutionContext {
   streamState: () => Promise<ModuleStreamState>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
+  /** Distinct chatters tracked for the current stream when a module declares the need. */
+  activeChatters: {
+    count: (windowMs: number) => Promise<number>;
+    seen: (userId: string) => Promise<ActiveChatterActivity | null>;
+  };
   /** Lazily loads the current channel's public Helix fields and live start time. */
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   /** Lazily loads only the current channel game, independently of stream details. */
@@ -1035,6 +1045,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
    * for the row at read time.
    */
   defaultEnabled?: boolean;
+  /** Tracks per-user chat activity for the current stream while this module is enabled. */
+  needsActiveChatters?: boolean;
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
   /** Template fields and variables used by both panel validation and worker rendering. */

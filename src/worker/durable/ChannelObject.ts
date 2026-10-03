@@ -17,7 +17,7 @@ import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 import type { AdsSchedule } from "../../modules/ads/contracts";
 import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
-import type { BotModule, HelixRequest, HelixRequestOptions } from "../../modules/contract";
+import type { ActiveChatterActivity, BotModule, HelixRequest, HelixRequestOptions } from "../../modules/contract";
 import type { ModuleAlarmContext, ModuleAlarmDefinition, ModuleExternalFetchBudget, ModuleScheduleInputChangeReason } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
@@ -64,6 +64,11 @@ const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
+const ACTIVE_CHATTER_PREFIX = "chatter:";
+const ACTIVE_CHATTER_STREAM_KEY = `${ACTIVE_CHATTER_PREFIX}key`;
+const ACTIVE_CHATTER_EXPIRY_KEY = "host:active_chatters_expiry";
+const ACTIVE_CHATTER_EXPIRY_HANDLER = "channel.active_chatters_expiry";
+const ACTIVE_CHATTER_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MODULE_ALARM_OWNER_REVISIONS_KEY = "module_alarm:owner_revisions";
 const MODULE_ALARM_OWNER_REVISION_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const SECURITY_DEADLINE_KEY = "security_round";
@@ -160,6 +165,19 @@ interface StreamRefreshLease {
   expiresAt: number;
 }
 
+interface ActiveChatterStream {
+  key: number[];
+  streamId: string;
+  expiresAt: number;
+}
+
+interface ActiveChatterTransaction {
+  get<Value>(key: string): Promise<Value | undefined>;
+  put(key: string, value: unknown): Promise<void>;
+  delete(key: string): Promise<boolean>;
+  list(options?: { prefix?: string }): Promise<Map<string, unknown>>;
+}
+
 interface OverlayStreamDetails {
   startedAt: string | null;
   viewerCount: number;
@@ -200,6 +218,42 @@ type RealtimeSocketAttachment = RealtimePrincipal;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isActiveChatterStream = (value: unknown): value is ActiveChatterStream =>
+  isRecord(value) && Array.isArray(value.key) && value.key.length === 32 &&
+  value.key.every((byte) => typeof byte === "number" && Number.isInteger(byte) && byte >= 0 && byte <= 255) &&
+  typeof value.streamId === "string" && value.streamId.length > 0 &&
+  typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt);
+
+const isActiveChatterActivity = (value: unknown): value is ActiveChatterActivity =>
+  isRecord(value) && typeof value.firstSeenAt === "string" && Number.isFinite(Date.parse(value.firstSeenAt)) &&
+  typeof value.lastSeenAt === "string" && Number.isFinite(Date.parse(value.lastSeenAt));
+
+const deleteActiveChatterEntries = async (transaction: ActiveChatterTransaction): Promise<void> => {
+  const entries = await transaction.list({ prefix: ACTIVE_CHATTER_PREFIX });
+  for (const key of entries.keys()) await transaction.delete(key);
+};
+
+const activeChatterKey = async (secret: readonly number[], channelId: string, userId: string): Promise<string> => {
+  const encoder = new TextEncoder();
+  const channel = encoder.encode(channelId);
+  const user = encoder.encode(userId);
+  const input = new Uint8Array(8 + channel.length + user.length);
+  const view = new DataView(input.buffer);
+  view.setUint32(0, channel.length);
+  input.set(channel, 4);
+  view.setUint32(4 + channel.length, user.length);
+  input.set(user, 8 + channel.length);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    Uint8Array.from(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const digest = new Uint8Array(await crypto.subtle.sign("HMAC", key, input));
+  return `${ACTIVE_CHATTER_PREFIX}${Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+};
 
 type AlarmScheduleEntry = {
   /** The original scheduled time for this occurrence; stable across retries. */
@@ -1110,15 +1164,117 @@ export class ChannelObject extends DurableObject<Env> {
     };
   }
 
-  public async recordChatActivity(): Promise<number> {
-    if ((await readChannelStreamState(this.env.DB, this.ownChannelId() ?? ""))?.state !== "online") {
+  public async recordChatActivity(
+    chatterUserId: string | null = null,
+    needsActiveChatters = false,
+  ): Promise<number> {
+    const stream = await readChannelStreamState(this.env.DB, this.ownChannelId() ?? "");
+    if (stream?.state !== "online") {
       return await this.getChatActivityCount();
     }
-    return await this.ctx.storage.transaction(async (transaction) => {
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const streamId = stream.streamId ?? stream.startedAt;
+    const streamStartedAt = stream.startedAt === null ? Number.NaN : Date.parse(stream.startedAt);
+    const activeChatterExpiresAt = streamStartedAt + ACTIVE_CHATTER_RETENTION_MS;
+    const userIdForTracking = needsActiveChatters && typeof chatterUserId === "string" && chatterUserId.length > 0
+      ? chatterUserId
+      : null;
+    const update = await this.ctx.storage.transaction(async (transaction) => {
       const current = await transaction.get<number>(CHAT_ACTIVITY_COUNT_KEY);
       const next = typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current + 1 : 1;
       await transaction.put(CHAT_ACTIVITY_COUNT_KEY, next);
-      return next;
+      let scheduledExpiry: number | null = null;
+      if (userIdForTracking !== null && streamId !== null && Number.isFinite(streamStartedAt) &&
+          activeChatterExpiresAt > now) {
+        let activeStream = await transaction.get(ACTIVE_CHATTER_STREAM_KEY);
+        if (!isActiveChatterStream(activeStream) || activeStream.streamId !== streamId ||
+            activeStream.expiresAt !== activeChatterExpiresAt) {
+          await deleteActiveChatterEntries(transaction);
+          activeStream = {
+            key: Array.from(crypto.getRandomValues(new Uint8Array(32))),
+            streamId,
+            expiresAt: activeChatterExpiresAt,
+          } satisfies ActiveChatterStream;
+          await transaction.put(ACTIVE_CHATTER_STREAM_KEY, activeStream);
+          scheduledExpiry = activeChatterExpiresAt;
+        }
+        if (isActiveChatterStream(activeStream) && activeStream.expiresAt > now) {
+          const key = await activeChatterKey(activeStream.key, this.ownChannelId() ?? "", userIdForTracking);
+          const previous = await transaction.get(key);
+          await transaction.put(key, {
+            firstSeenAt: isActiveChatterActivity(previous) ? previous.firstSeenAt : nowIso,
+            lastSeenAt: nowIso,
+          } satisfies ActiveChatterActivity);
+        }
+      }
+      return { count: next, scheduledExpiry };
+    });
+    if (update.scheduledExpiry !== null) {
+      await this.scheduleAlarmEntry(ACTIVE_CHATTER_EXPIRY_KEY, ACTIVE_CHATTER_EXPIRY_HANDLER, update.scheduledExpiry);
+    }
+    return update.count;
+  }
+
+  public async startActiveChatterStream(streamId: string | null, startedAt: string | null): Promise<void> {
+    const identity = streamId ?? startedAt;
+    const startedAtMs = startedAt === null ? Number.NaN : Date.parse(startedAt);
+    const expiresAt = startedAtMs + ACTIVE_CHATTER_RETENTION_MS;
+    if (identity === null || !Number.isFinite(startedAtMs) || expiresAt <= Date.now()) {
+      await this.clearActiveChatters();
+      return;
+    }
+    const stream: ActiveChatterStream = {
+      key: Array.from(crypto.getRandomValues(new Uint8Array(32))),
+      streamId: identity,
+      expiresAt,
+    };
+    await this.ctx.storage.transaction(async (transaction) => {
+      await deleteActiveChatterEntries(transaction);
+      await transaction.put(ACTIVE_CHATTER_STREAM_KEY, stream);
+    });
+    await this.scheduleAlarmEntry(ACTIVE_CHATTER_EXPIRY_KEY, ACTIVE_CHATTER_EXPIRY_HANDLER, expiresAt);
+  }
+
+  public async clearActiveChatters(): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      await deleteActiveChatterEntries(transaction);
+    });
+    await this.clearAlarmEntry(ACTIVE_CHATTER_EXPIRY_KEY);
+  }
+
+  public async getActiveChatterCount(windowMs: number): Promise<number> {
+    if (!Number.isFinite(windowMs) || windowMs <= 0) return 0;
+    const now = Date.now();
+    const stream = await this.ctx.storage.get(ACTIVE_CHATTER_STREAM_KEY);
+    if (!isActiveChatterStream(stream) || stream.expiresAt <= now) return 0;
+    const cutoff = now - windowMs;
+    const entries = await this.ctx.storage.list({ prefix: ACTIVE_CHATTER_PREFIX });
+    let count = 0;
+    for (const [key, value] of entries) {
+      if (key === ACTIVE_CHATTER_STREAM_KEY || !isActiveChatterActivity(value)) continue;
+      const lastSeenAt = Date.parse(value.lastSeenAt);
+      if (lastSeenAt >= cutoff && lastSeenAt <= now) count += 1;
+    }
+    return count;
+  }
+
+  public async getActiveChatter(userId: string): Promise<ActiveChatterActivity | null> {
+    if (userId.length === 0) return null;
+    const stream = await this.ctx.storage.get(ACTIVE_CHATTER_STREAM_KEY);
+    if (!isActiveChatterStream(stream) || stream.expiresAt <= Date.now()) return null;
+    const key = await activeChatterKey(stream.key, this.ownChannelId() ?? "", userId);
+    const activity = await this.ctx.storage.get(key);
+    return isActiveChatterActivity(activity)
+      ? { firstSeenAt: activity.firstSeenAt, lastSeenAt: activity.lastSeenAt }
+      : null;
+  }
+
+  private async expireActiveChatters(deadline: number, now: number): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      const stream = await transaction.get(ACTIVE_CHATTER_STREAM_KEY);
+      if (!isActiveChatterStream(stream) || stream.expiresAt !== deadline || stream.expiresAt > now) return;
+      await deleteActiveChatterEntries(transaction);
     });
   }
 
@@ -1144,6 +1300,11 @@ export class ChannelObject extends DurableObject<Env> {
     externalFetchBudget: ModuleExternalFetchBudget = createModuleExternalFetchBudget(),
   ): Map<string, AlarmHandlerRegistration> {
     const handlers = new Map<string, AlarmHandlerRegistration>([
+      [ACTIVE_CHATTER_EXPIRY_HANDLER, {
+        handle: async (_key, entry, now) => {
+          await this.expireActiveChatters(entry.deadline, now);
+        },
+      }],
       [SECURITY_ROUND_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
       [SECURITY_RETRY_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
       [AD_PREWARNING_HANDLER, {

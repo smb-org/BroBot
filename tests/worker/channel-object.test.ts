@@ -102,17 +102,18 @@ const objectFor = (
   values = new Map<string, unknown>(),
 ): ChannelObject => {
   let transactionQueue = Promise.resolve();
+  const listValues = (options?: { prefix?: string; startAfter?: string; limit?: number }): Map<string, unknown> => {
+    let keys = [...values.keys()]
+      .filter((key) => options?.prefix === undefined || key.startsWith(options.prefix))
+      .filter((key) => options?.startAfter === undefined || key > options.startAfter)
+      .sort();
+    if (options?.limit !== undefined) keys = keys.slice(0, options.limit);
+    return new Map(keys.map((key) => [key, values.get(key)]));
+  };
   const storage: StorageDouble = {
     values,
     get: vi.fn((key: string) => Promise.resolve(values.get(key))),
-    list: vi.fn((options?: { prefix?: string; startAfter?: string; limit?: number }) => {
-      const keys = [...values.keys()]
-        .filter((key) => options?.prefix === undefined || key.startsWith(options.prefix))
-        .filter((key) => options?.startAfter === undefined || key > options.startAfter)
-        .sort()
-        .slice(0, options?.limit);
-      return Promise.resolve(new Map(keys.map((key) => [key, values.get(key)])));
-    }),
+    list: vi.fn((options?: { prefix?: string; startAfter?: string; limit?: number }) => Promise.resolve(listValues(options))),
     setAlarm: vi.fn(),
     deleteAlarm: vi.fn(),
   };
@@ -149,6 +150,7 @@ const objectFor = (
         get: <Value>(key: string) => Promise<Value | undefined>;
         put: (key: string, value: unknown) => Promise<void>;
         delete: (key: string) => Promise<boolean>;
+        list: (options?: { prefix?: string }) => Promise<Map<string, unknown>>;
       }) => Promise<T>) => {
         const predecessor = transactionQueue;
         let release!: () => void;
@@ -162,6 +164,7 @@ const objectFor = (
               return Promise.resolve();
             },
             delete: (key: string) => Promise.resolve(values.delete(key)),
+            list: (options?: { prefix?: string }) => Promise.resolve(listValues(options)),
           });
         } finally {
           release();
@@ -992,6 +995,99 @@ describe("ChannelObject realtime path", () => {
     streamState = "offline";
     await object.recordChatActivity();
     expect(await object.getChatActivityCount()).toBe(1);
+  });
+
+  it("tracks unique chatters for the current stream without storing their ids", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    vi.setSystemTime(Date.parse(startedAt));
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn().mockResolvedValue({
+        state: "online",
+        source: "eventsub",
+        changed_at: startedAt,
+        started_at: startedAt,
+        stream_id: "stream-1",
+        checked_at: null,
+      }),
+    };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+
+    await object.startActiveChatterStream("stream-1", startedAt);
+    await object.recordChatActivity("viewer-1", true);
+    const first = await object.getActiveChatter("viewer-1");
+    expect(first).toEqual({ firstSeenAt: startedAt, lastSeenAt: startedAt });
+
+    vi.setSystemTime(Date.parse(startedAt) + 2_000);
+    await object.recordChatActivity("viewer-1", true);
+    await object.recordChatActivity("viewer-2", true);
+
+    expect(await object.getActiveChatterCount(10_000)).toBe(2);
+    expect(await object.getActiveChatter("viewer-1")).toEqual({
+      firstSeenAt: startedAt,
+      lastSeenAt: "2026-09-27T12:00:02.000Z",
+    });
+    const chatterKeys = [...storage.values.keys()].filter((key) => key.startsWith("chatter:"));
+    expect(chatterKeys).toHaveLength(3);
+    expect(chatterKeys.join(" ")).not.toContain("viewer-1");
+    expect(chatterKeys.join(" ")).not.toContain("viewer-2");
+  });
+
+  it("does not write chatter records unless an enabled module requests them", async () => {
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn().mockResolvedValue({
+        state: "online",
+        source: "eventsub",
+        changed_at: startedAt,
+        started_at: startedAt,
+        stream_id: "stream-1",
+        checked_at: null,
+      }),
+    };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+
+    await object.recordChatActivity("viewer-1", false);
+
+    expect([...storageOf(object).values.keys()].some((key) => key.startsWith("chatter:"))).toBe(false);
+    expect(await object.getChatActivityCount()).toBe(1);
+  });
+
+  it("deletes active chatter data at stream end and after the 24-hour alarm", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    const expiresAt = Date.parse(startedAt) + 24 * 60 * 60 * 1_000;
+    vi.setSystemTime(Date.parse(startedAt));
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn().mockResolvedValue({
+        state: "online",
+        source: "eventsub",
+        changed_at: startedAt,
+        started_at: startedAt,
+        stream_id: "stream-1",
+        checked_at: null,
+      }),
+    };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+
+    await object.startActiveChatterStream("stream-1", startedAt);
+    await object.recordChatActivity("viewer-1", true);
+    expect([...storage.values.keys()].filter((key) => key.startsWith("chatter:"))).toHaveLength(2);
+    await object.clearActiveChatters();
+    expect([...storage.values.keys()].some((key) => key.startsWith("chatter:"))).toBe(false);
+
+    await object.startActiveChatterStream("stream-1", startedAt);
+    await object.recordChatActivity("viewer-2", true);
+    expect([...storage.values.keys()].filter((key) => key.startsWith("chatter:"))).toHaveLength(2);
+    vi.setSystemTime(expiresAt);
+    await object.alarm();
+
+    expect([...storage.values.keys()].some((key) => key.startsWith("chatter:"))).toBe(false);
   });
 
   it("shares automated output claims and remembers recent bot messages per channel", async () => {
