@@ -452,6 +452,57 @@ describe("dispatch and execution", () => {
     }
   });
 
+  it("rechecks mute before sending a moderation follow-up after Helix resolves", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+         VALUES ('kanal-a', 1, ?, NULL)`,
+      ).bind(NOW).run();
+      const module = fakeModule("moderation-follow-up-mute-test", () => ({
+        actions: [{
+          kind: "timeout",
+          userId: "fictional-target-muted-after-helix",
+          durationSeconds: 30,
+          reason: "test",
+          onSuccess: { kind: "chat", text: "Timeout applied" },
+          onFailure: { kind: "chat", text: "Timeout failed" },
+        }],
+        diagnostics: [],
+      }));
+      let markHelixStarted!: () => void;
+      const helixStarted = new Promise<void>((resolve) => { markHelixStarted = resolve; });
+      let releaseHelix!: (response: Response) => void;
+      const helixResponse = new Promise<Response>((resolve) => { releaseHelix = resolve; });
+      const fetcher = vi.fn<typeof fetch>().mockImplementationOnce(() => {
+        markHelixStarted();
+        return helixResponse;
+      });
+      const dispatch = runDispatch(database, [module], fetcher);
+
+      await helixStarted;
+      await database.prepare(
+        `INSERT INTO channel_controls (channel_id, muted, updated_at) VALUES ('kanal-a', 1, ?)
+         ON CONFLICT(channel_id) DO UPDATE SET muted = 1, updated_at = excluded.updated_at`,
+      ).bind(NOW).run();
+      releaseHelix(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+      await dispatch;
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await expect(eventLog(database)).resolves.toMatchObject([
+        { module_id: "moderation-follow-up-mute-test", code: "host.timeout.applied" },
+        {
+          module_id: "moderation-follow-up-mute-test",
+          code: "host.action.suppressed",
+          detail_json: '{"action":"chat","reason":"channel_muted"}',
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("does not send either follow-up after an ambiguous moderation outcome", async () => {
     const database = new TestD1Database();
     try {

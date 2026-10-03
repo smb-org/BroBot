@@ -102,6 +102,55 @@ describe("moderation actions", () => {
     }
   });
 
+  it("suppresses a moderation POST when the channel pauses during bot token lookup", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedChannel(database);
+      const { environment } = environmentFor(database);
+      const originalPrepare = database.prepare.bind(database);
+      let pausedDuringTokenLookup = false;
+      environment.DB = {
+        prepare: (sql: string) => {
+          const statement = originalPrepare(sql);
+          if (!sql.includes("FROM bot_identity") || !sql.includes("access_token_ciphertext")) return statement;
+          const wrapped = {
+            bind: (...values: Parameters<typeof statement.bind>) => {
+              statement.bind(...values);
+              return wrapped;
+            },
+            first: async <T>() => {
+              const identity = await statement.first<T>();
+              if (!pausedDuringTokenLookup) {
+                pausedDuringTokenLookup = true;
+                await originalPrepare(
+                  `INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES (?, 1, ?)
+                   ON CONFLICT(channel_id) DO UPDATE SET paused = 1, updated_at = excluded.updated_at`,
+                ).bind(CHANNEL_ID, NOW).run();
+              }
+              return identity;
+            },
+            all: <T>(...typeHint: readonly T[]) => statement.all<T>(...typeHint),
+            run: () => statement.run(),
+          };
+          return wrapped as unknown as D1PreparedStatement;
+        },
+        batch: database.batch.bind(database),
+      } as unknown as D1Database;
+      const fetcher = vi.fn<typeof fetch>();
+
+      await expect(sendModerationBan(environment, CHANNEL_ID, {
+        userId: TARGET_USER_ID,
+        durationSeconds: 90,
+        reason: "test",
+      }, fetcher)).resolves.toMatchObject({ outcome: "suppressed", reason: "channel_paused" });
+
+      expect(pausedDuringTokenLookup).toBe(true);
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
   it.each([
     { status: 400, message: "This user may not be banned.", reason: "protected_target" },
     { status: 400, message: "The user is already banned.", reason: "already_banned" },

@@ -329,6 +329,7 @@ const runActions = async (
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
   const pendingActions = [...actions];
+  const moderationFollowUps = new WeakSet<ModuleAction>();
   // Order is preserved: a reply after an announcement reads as a different
   // conversation than the reverse.
   for (let index = 0; index < pendingActions.length; index += 1) {
@@ -343,9 +344,14 @@ const runActions = async (
       }
     };
     const moderationAction = action.kind === "timeout" || action.kind === "ban";
+    let mutedForAction = muted;
+    if (action.kind === "chat" && moderationFollowUps.has(action)) {
+      const controls = await readChannelControls(environment.DB, channelId, new Date().toISOString());
+      mutedForAction = controls.mute.active;
+    }
     const suppressionReason = moderationAction
       ? null
-      : chatOutputSuppressionReason({ moduleEnabled: true, mandatory: true, paused: false, muted });
+      : chatOutputSuppressionReason({ moduleEnabled: true, mandatory: true, paused: false, muted: mutedForAction });
     if (suppressionReason !== null &&
         (action.kind === "chat" || action.kind === "announcement" || action.kind === "shoutout" || moderationAction)) {
       await reportDelivery("not_attempted");
@@ -507,22 +513,18 @@ const runActions = async (
         continue;
       }
       if (action.kind === "timeout" || action.kind === "ban") {
-        const controls = await readChannelControls(environment.DB, channelId, new Date().toISOString());
-        const moderationSuppressionReason = controls.mute.active
-          ? "channel_muted"
-          : controls.pause.active ? "channel_paused" : null;
-        if (moderationSuppressionReason !== null) {
-          diagnostics.push({
-            code: "host.action.suppressed" satisfies EventCode,
-            detail: { action: action.kind, reason: moderationSuppressionReason },
-          });
-          continue;
-        }
         const result = await sendModerationBan(environment, channelId, {
           userId: action.userId,
           durationSeconds: action.kind === "timeout" ? action.durationSeconds : null,
           reason: action.reason,
         }, fetcher);
+        if (result.outcome === "suppressed") {
+          diagnostics.push({
+            code: "host.action.suppressed" satisfies EventCode,
+            detail: { action: action.kind, reason: result.reason },
+          });
+          continue;
+        }
         const detail = result.reason === null ? result.detail : { ...result.detail, cause: result.reason };
         const code: EventCode = action.kind === "timeout"
           ? result.outcome === "applied" ? "host.timeout.applied"
@@ -532,7 +534,10 @@ const runActions = async (
         diagnostics.push({ code, detail });
         if (result.outcome !== "ambiguous") {
           const followUp = result.outcome === "applied" ? action.onSuccess : action.onFailure;
-          if (followUp !== undefined) pendingActions.splice(index + 1, 0, followUp);
+          if (followUp !== undefined) {
+            moderationFollowUps.add(followUp);
+            pendingActions.splice(index + 1, 0, followUp);
+          }
         }
         continue;
       }

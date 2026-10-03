@@ -3,6 +3,7 @@ import type { ModerationResult } from "../modules/contracts/moderation";
 import { MODERATION_TIMEOUT_MAX_SECONDS } from "../modules/contracts/moderation";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { getBotIdentity } from "./db/bot-identity";
+import { readChannelControls } from "./db/channel-controls";
 import { helixRequest } from "./twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "./twitch/rate-limit";
 
@@ -25,6 +26,16 @@ interface ModerationEnvironment {
 interface ModeratorStatusRow {
   is_moderator: number;
 }
+
+type ModerationSuppressionReason = "channel_muted" | "channel_paused";
+
+interface SuppressedModerationResult {
+  outcome: "suppressed";
+  reason: ModerationSuppressionReason;
+  detail: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+type ModerationExecutionResult = ModerationResult | SuppressedModerationResult;
 
 const truncateReason = (reason: string): string => Array.from(reason).slice(0, 500).join("");
 
@@ -53,19 +64,45 @@ const failureReasonFromStatus = (status: number): ModerationFailureReason => {
   return "twitch_error";
 };
 
-const executeModeration = async (
+function executeModeration(
+  environment: ModerationEnvironment,
+  channelId: string,
+  request: ModerationBanRequest,
+  method: "POST",
+  fetcher: typeof fetch,
+): Promise<ModerationExecutionResult>;
+function executeModeration(
+  environment: ModerationEnvironment,
+  channelId: string,
+  request: ModerationBanRequest,
+  method: "DELETE",
+  fetcher: typeof fetch,
+): Promise<ModerationResult>;
+async function executeModeration(
   environment: ModerationEnvironment,
   channelId: string,
   request: ModerationBanRequest,
   method: "POST" | "DELETE",
   fetcher: typeof fetch,
-): Promise<ModerationResult> => {
+): Promise<ModerationExecutionResult> {
   const reason = truncateReason(request.reason);
   const baseDetail = {
     target: request.userId,
     ...(request.durationSeconds === null ? {} : { seconds: request.durationSeconds }),
     ...(request.reason.length === 0 ? {} : { reason }),
   };
+  const readSuppressionReason = async (): Promise<ModerationSuppressionReason | null> => {
+    const controls = await readChannelControls(environment.DB, channelId, new Date().toISOString());
+    if (controls.mute.active) return "channel_muted";
+    if (controls.pause.active) return "channel_paused";
+    return null;
+  };
+  if (method === "POST") {
+    const suppressionReason = await readSuppressionReason();
+    if (suppressionReason !== null) {
+      return { outcome: "suppressed", reason: suppressionReason, detail: baseDetail };
+    }
+  }
   if (request.durationSeconds !== null &&
       (!Number.isSafeInteger(request.durationSeconds) || request.durationSeconds < 1 || request.durationSeconds > MODERATION_TIMEOUT_MAX_SECONDS)) {
     return failure("invalid_request", baseDetail);
@@ -103,6 +140,13 @@ const executeModeration = async (
     accessToken = tokenData.token;
   } catch {
     return failure("token_invalid", baseDetail);
+  }
+
+  if (method === "POST") {
+    const suppressionReason = await readSuppressionReason();
+    if (suppressionReason !== null) {
+      return { outcome: "suppressed", reason: suppressionReason, detail: baseDetail };
+    }
   }
 
   const result = await helixRequest({
@@ -150,14 +194,14 @@ const executeModeration = async (
     result.status === 400 ? failureReasonFrom400Message(result.message) : failureReasonFromStatus(result.status ?? 0),
     detail,
   );
-};
+}
 
 export const sendModerationBan = (
   environment: ModerationEnvironment,
   channelId: string,
   request: ModerationBanRequest,
   fetcher: typeof fetch = fetch,
-): Promise<ModerationResult> => executeModeration(environment, channelId, request, "POST", fetcher);
+): Promise<ModerationExecutionResult> => executeModeration(environment, channelId, request, "POST", fetcher);
 
 export const liftModerationBan = (
   environment: ModerationEnvironment,
