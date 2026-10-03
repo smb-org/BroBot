@@ -64,6 +64,7 @@ import {
   ballotIdentityFromExpiryAlarmKey,
   castStoredBallot,
   closeStoredBallot,
+  expireStoredBallot,
   openStoredBallot,
   readStoredBallot,
 } from "./ballots";
@@ -1178,20 +1179,30 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<BallotOpenResult> {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Ballots require a named Durable Object.");
-    const result = await openStoredBallot(this.ctx.storage, moduleId, ballotId, optionCount, expiresAt);
-    if (result.status === "opened") {
-      try {
-        await this.scheduleAlarmEntry(
-          ballotExpiryAlarmKey(moduleId, ballotId),
-          BALLOT_EXPIRY_ALARM_HANDLER,
-          expiresAt,
-        );
-      } catch (error: unknown) {
-        await closeStoredBallot(this.ctx.storage, moduleId, ballotId);
-        throw error;
-      }
+    const requestedAlarmKey = ballotExpiryAlarmKey(moduleId, ballotId);
+    let result: Awaited<ReturnType<typeof openStoredBallot>>;
+    try {
+      // Persist the expiry schedule first so an interrupted open cannot leave
+      // an active ballot without a host-owned expiry alarm.
+      await this.scheduleAlarmEntry(requestedAlarmKey, BALLOT_EXPIRY_ALARM_HANDLER, expiresAt);
+      result = await openStoredBallot(this.ctx.storage, moduleId, ballotId, optionCount, expiresAt);
+    } catch (error: unknown) {
+      await this.clearAlarmEntry(requestedAlarmKey);
+      throw error;
     }
-    return result;
+    if (result.status === "opened") {
+      return { status: "opened" };
+    }
+
+    const activeBallot = result.activeBallot;
+    if (activeBallot !== undefined) {
+      const activeAlarmKey = ballotExpiryAlarmKey(activeBallot.moduleId, activeBallot.ballotId);
+      await this.scheduleAlarmEntry(activeAlarmKey, BALLOT_EXPIRY_ALARM_HANDLER, activeBallot.expiresAt);
+      if (activeAlarmKey !== requestedAlarmKey) await this.clearAlarmEntry(requestedAlarmKey);
+    } else {
+      await this.clearAlarmEntry(requestedAlarmKey);
+    }
+    return { status: "busy", moduleId: result.moduleId };
   }
 
   public async castBallot(
@@ -1218,7 +1229,10 @@ export class ChannelObject extends DurableObject<Env> {
   private async expireBallot(key: string): Promise<void> {
     const identity = ballotIdentityFromExpiryAlarmKey(key);
     if (identity === null) return;
-    await closeStoredBallot(this.ctx.storage, identity.moduleId, identity.ballotId);
+    const nextExpiry = await expireStoredBallot(this.ctx.storage, identity.moduleId, identity.ballotId);
+    if (nextExpiry !== null) {
+      await this.scheduleAlarmEntry(key, BALLOT_EXPIRY_ALARM_HANDLER, nextExpiry);
+    }
   }
 
   private alarmHandlers(

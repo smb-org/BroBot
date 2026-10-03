@@ -51,7 +51,7 @@ Zwei Eigenschaften daran sind Absicht:
 
 **Schlüssel:** 32 zufällige Bytes, erzeugt beim Start des Vorgangs, gespeichert neben dem Vorgang selbst. Beim Ballot liegt er ausschließlich im Channel Durable Object; der HMAC folgt der längenpräfixierten Kodierung aus Abschnitt 2.
 
-**Lebensdauer:** Der Schlüssel wird mit dem Vorgang gelöscht — beim Schließen eines Votings, beim Ablauf eines Fensters. Danach ist der Bezug **endgültig** weg: Es gibt kein Geheimnis mehr, mit dem sich ein Wert einer Person zuordnen ließe, auch nicht für uns.
+**Lebensdauer:** Der Schlüssel wird beim Schließen eines Votings beziehungsweise beim Ablauf eines Fensters aus dem aktiven Durable-Object-Speicher gelöscht. Danach lässt sich ein zurückgebliebener HMAC-Wert mit dem regulären Laufzeitzustand keiner Person mehr zuordnen. SQLite-basierte Durable Objects können jedoch Point-in-Time-Recovery für bis zu 30 Tage bereitstellen; eine Wiederherstellung auf einen früheren Stand kann deshalb auch den gelöschten Schlüssel zurückbringen. Die Löschung ist keine Zusage sofortiger physischer Tilgung aus Wiederherstellungsständen.
 
 **Was bleibt:** Das Ergebnis. „Option A: 47 Stimmen" ist keine personenbezogene Angabe und darf unbegrenzt bleiben.
 

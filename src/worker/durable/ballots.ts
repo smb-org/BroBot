@@ -1,6 +1,5 @@
 import type {
   BallotCastResult,
-  BallotOpenResult,
   BallotSnapshot,
 } from "../../modules/contract";
 
@@ -14,6 +13,14 @@ interface ActiveBallot {
   moduleId: string;
   ballotId: string;
 }
+
+interface ActiveBallotExpiry extends ActiveBallot {
+  expiresAt: number;
+}
+
+type StoredBallotOpenResult =
+  | { status: "opened" }
+  | { status: "busy"; moduleId: string; activeBallot?: ActiveBallotExpiry };
 
 interface StoredBallot {
   moduleId: string;
@@ -56,6 +63,12 @@ const isStoredBallot = (value: unknown): value is StoredBallot => {
     Number.isFinite(ballot.openedAt) && Number.isFinite(ballot.expiresAt);
 };
 
+const isActiveBallot = (value: unknown): value is ActiveBallot => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const active = value as Partial<ActiveBallot>;
+  return typeof active.moduleId === "string" && typeof active.ballotId === "string";
+};
+
 const toHex = (bytes: ArrayBuffer): string =>
   [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 
@@ -96,20 +109,40 @@ export const openStoredBallot = async (
   ballotId: string,
   optionCount: number,
   expiresAt: number,
-  now = Date.now(),
-): Promise<BallotOpenResult> => {
+): Promise<StoredBallotOpenResult> => {
   validId(moduleId, "Module id");
   validId(ballotId, "Ballot id");
   if (!Number.isInteger(optionCount) || optionCount < 1 || optionCount > 9) {
     throw new RangeError("Ballots require between one and nine options.");
   }
-  if (!Number.isFinite(expiresAt) || expiresAt <= now || expiresAt > now + BALLOT_MAX_LIFETIME_MS) {
+  const requestedAt = Date.now();
+  if (!Number.isFinite(expiresAt) || expiresAt <= requestedAt || expiresAt > requestedAt + BALLOT_MAX_LIFETIME_MS) {
     throw new RangeError("Ballot expiry must be in the next 24 hours.");
   }
   const key = crypto.getRandomValues(new Uint8Array(32));
   return await storage.transaction(async (transaction) => {
+    const now = Date.now();
+    if (expiresAt <= now) throw new RangeError("Ballot expiry must be in the next 24 hours.");
     const active = await transaction.get<ActiveBallot>(ACTIVE_BALLOT_KEY);
-    if (active !== undefined) return { status: "busy", moduleId: active.moduleId };
+    if (active !== undefined) {
+      const validActive = isActiveBallot(active) && ID_PATTERN.test(active.moduleId) && ID_PATTERN.test(active.ballotId);
+      const activeKey = validActive ? ballotKey(active.moduleId, active.ballotId) : null;
+      const activeStored = activeKey === null ? undefined : await transaction.get(activeKey);
+      if (activeKey !== null && isStoredBallot(activeStored) &&
+          activeStored.moduleId === active.moduleId && activeStored.ballotId === active.ballotId &&
+          activeStored.expiresAt > now) {
+        return {
+          status: "busy",
+          moduleId: active.moduleId,
+          activeBallot: { moduleId: active.moduleId, ballotId: active.ballotId, expiresAt: activeStored.expiresAt },
+        };
+      }
+      if (validActive) {
+        await deleteBallotData(transaction, active.moduleId, active.ballotId);
+      } else {
+        await transaction.delete(ACTIVE_BALLOT_KEY);
+      }
+    }
     const ballot: StoredBallot = {
       moduleId,
       ballotId,
@@ -137,16 +170,28 @@ export const castStoredBallot = async (
   validId(moduleId, "Module id");
   validId(ballotId, "Ballot id");
   const stored = await storage.get(ballotKey(moduleId, ballotId));
-  if (!isStoredBallot(stored) || !Number.isInteger(choice) || choice < 1 || choice > stored.optionCount) {
+  if (!isStoredBallot(stored) || stored.moduleId !== moduleId || stored.ballotId !== ballotId) {
     return { status: "not_open", counts: [], revision: 0 };
   }
-  const hash = await ballotVoterHash(stored.key, channelId, userId);
-  const voteKey = `${voterPrefix(moduleId, ballotId)}${hash}`;
+  const choiceIsValid = Number.isInteger(choice) && choice >= 1 && choice <= stored.optionCount;
+  const initiallyExpired = stored.expiresAt <= Date.now();
+  if (!initiallyExpired && !choiceIsValid) return { status: "not_open", counts: [], revision: 0 };
+  const voteKey = initiallyExpired
+    ? null
+    : `${voterPrefix(moduleId, ballotId)}${await ballotVoterHash(stored.key, channelId, userId)}`;
   return await storage.transaction(async (transaction) => {
     const ballot = await transaction.get(ballotKey(moduleId, ballotId));
+    if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId ||
+        !equalBytes(ballot.key, stored.key)) {
+      return { status: "not_open", counts: [], revision: 0 };
+    }
+    if (ballot.expiresAt <= Date.now()) {
+      await deleteBallotData(transaction, moduleId, ballotId);
+      return { status: "not_open", counts: [], revision: 0 };
+    }
+    if (!choiceIsValid || voteKey === null) return { status: "not_open", counts: [], revision: 0 };
     const active = await transaction.get<ActiveBallot>(ACTIVE_BALLOT_KEY);
-    if (!isStoredBallot(ballot) || !equalBytes(ballot.key, stored.key) ||
-        active?.moduleId !== moduleId || active.ballotId !== ballotId) {
+    if (active?.moduleId !== moduleId || active.ballotId !== ballotId) {
       return { status: "not_open", counts: [], revision: 0 };
     }
     const previous = await transaction.get<number>(voteKey);
@@ -172,8 +217,15 @@ export const readStoredBallot = async (
 ): Promise<BallotSnapshot | null> => {
   validId(moduleId, "Module id");
   validId(ballotId, "Ballot id");
-  const ballot = await storage.get(ballotKey(moduleId, ballotId));
-  return isStoredBallot(ballot) ? snapshotOf(ballot) : null;
+  return await storage.transaction(async (transaction) => {
+    const ballot = await transaction.get(ballotKey(moduleId, ballotId));
+    if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) return null;
+    if (ballot.expiresAt <= Date.now()) {
+      await deleteBallotData(transaction, moduleId, ballotId);
+      return null;
+    }
+    return snapshotOf(ballot);
+  });
 };
 
 const deleteVoters = async (
@@ -192,6 +244,34 @@ const deleteVoters = async (
   } while (startAfter !== undefined);
 };
 
+const deleteBallotData = async (
+  transaction: BallotTransaction,
+  moduleId: string,
+  ballotId: string,
+): Promise<void> => {
+  await deleteVoters(transaction, moduleId, ballotId);
+  await transaction.delete(ballotKey(moduleId, ballotId));
+  const active = await transaction.get<ActiveBallot>(ACTIVE_BALLOT_KEY);
+  if (active?.moduleId === moduleId && active.ballotId === ballotId) await transaction.delete(ACTIVE_BALLOT_KEY);
+};
+
+/** Removes a ballot only after its expiry, returning a later deadline for stale alarms. */
+export const expireStoredBallot = async (
+  storage: BallotStorage,
+  moduleId: string,
+  ballotId: string,
+): Promise<number | null> => {
+  validId(moduleId, "Module id");
+  validId(ballotId, "Ballot id");
+  return await storage.transaction(async (transaction) => {
+    const ballot = await transaction.get(ballotKey(moduleId, ballotId));
+    if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) return null;
+    if (ballot.expiresAt > Date.now()) return ballot.expiresAt;
+    await deleteBallotData(transaction, moduleId, ballotId);
+    return null;
+  });
+};
+
 export const closeStoredBallot = async (
   storage: BallotStorage,
   moduleId: string,
@@ -201,11 +281,8 @@ export const closeStoredBallot = async (
   validId(ballotId, "Ballot id");
   return await storage.transaction(async (transaction) => {
     const ballot = await transaction.get(ballotKey(moduleId, ballotId));
-    if (!isStoredBallot(ballot)) return null;
-    await deleteVoters(transaction, moduleId, ballotId);
-    await transaction.delete(ballotKey(moduleId, ballotId));
-    const active = await transaction.get<ActiveBallot>(ACTIVE_BALLOT_KEY);
-    if (active?.moduleId === moduleId && active.ballotId === ballotId) await transaction.delete(ACTIVE_BALLOT_KEY);
+    if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) return null;
+    await deleteBallotData(transaction, moduleId, ballotId);
     return snapshotOf(ballot);
   });
 };

@@ -107,11 +107,11 @@ const objectFor = (
     values,
     get: vi.fn((key: string) => Promise.resolve(values.get(key))),
     list: vi.fn((options?: { prefix?: string; startAfter?: string; limit?: number }) => {
-      const keys = [...values.keys()]
+      let keys = [...values.keys()]
         .filter((key) => options?.prefix === undefined || key.startsWith(options.prefix))
         .filter((key) => options?.startAfter === undefined || key > options.startAfter)
         .sort()
-        .slice(0, options?.limit);
+      if (options?.limit !== undefined) keys = keys.slice(0, options.limit);
       return Promise.resolve(new Map(keys.map((key) => [key, values.get(key)])));
     }),
     setAlarm: vi.fn(),
@@ -169,9 +169,14 @@ const objectFor = (
               for (const item of key) if (values.delete(item)) deleted += 1;
               return Promise.resolve(deleted);
             },
-            list: (options?: { prefix?: string }) => Promise.resolve(new Map(
-              [...values].filter(([key]) => options?.prefix === undefined || key.startsWith(options.prefix)),
-            )),
+            list: (options?: { prefix?: string; startAfter?: string; limit?: number }) => {
+              let entries = [...values]
+                .filter(([key]) => options?.prefix === undefined || key.startsWith(options.prefix))
+                .filter(([key]) => options?.startAfter === undefined || key > options.startAfter)
+                .sort(([left], [right]) => left.localeCompare(right));
+              if (options?.limit !== undefined) entries = entries.slice(0, options.limit);
+              return Promise.resolve(new Map(entries));
+            },
           });
         } finally {
           release();
@@ -1071,6 +1076,18 @@ describe("ChannelObject realtime path", () => {
     });
   });
 
+  it("isolates ballot reads and closes between modules", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("module_a", "poll-a", 2, 20_000);
+    await object.castBallot("module_a", "poll-a", "viewer-1", 1);
+
+    await expect(object.readBallot("module_b", "poll-a")).resolves.toBeNull();
+    await expect(object.closeBallot("module_b", "poll-a")).resolves.toBeNull();
+    await expect(object.readBallot("module_a", "poll-a")).resolves.toEqual({ counts: [1, 0], revision: 1 });
+  });
+
   it("moves a changed vote between options and advances revisions monotonically", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
@@ -1106,6 +1123,10 @@ describe("ChannelObject realtime path", () => {
     await object.openBallot("chat_voting", "poll-a", 2, 20_000);
     await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
     await object.castBallot("chat_voting", "poll-a", "viewer-2", 2);
+    const values = storageOf(object).values;
+    for (let index = 0; index < 260; index += 1) {
+      values.set(`ballot:chat_voting:poll-a:v:seed-${String(index).padStart(3, "0")}`, index % 2 + 1);
+    }
 
     await expect(object.closeBallot("chat_voting", "poll-a")).resolves.toEqual({ counts: [1, 1], revision: 2 });
     expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:"))).toEqual([]);
@@ -1147,6 +1168,70 @@ describe("ChannelObject realtime path", () => {
 
     await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
     expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:"))).toEqual([]);
+  });
+
+  it("treats a post-deadline cast as closed and deletes ballot data", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
+
+    vi.setSystemTime(20_000);
+    await expect(object.castBallot("chat_voting", "poll-a", "viewer-2", 2)).resolves.toEqual({
+      status: "not_open",
+      counts: [],
+      revision: 0,
+    });
+    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:")).sort()).toEqual([]);
+  });
+
+  it("treats a post-deadline read as closed and deletes ballot data", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
+
+    vi.setSystemTime(20_000);
+    await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
+    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:")).sort()).toEqual([]);
+  });
+
+  it("repairs a missing expiry alarm when another module finds a live ballot", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("module_a", "poll-a", 2, 20_000);
+    const storage = storageOf(object);
+    storage.values.delete("channel:alarm_schedule");
+    storage.deleteAlarm.mockClear();
+    storage.setAlarm.mockClear();
+
+    vi.setSystemTime(15_000);
+    await expect(object.openBallot("module_b", "poll-b", 2, 30_000)).resolves.toEqual({
+      status: "busy",
+      moduleId: "module_a",
+    });
+    expect(storage.values.get("channel:alarm_schedule")).toMatchObject({
+      "host:ballot_expiry:module_a:poll-a": { deadline: 20_000, handler: "host:ballot_expiry" },
+    });
+    expect(storage.setAlarm).toHaveBeenLastCalledWith(20_000);
+  });
+
+  it("reclaims an expired ballot on open when its expiry alarm is missing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("module_a", "poll-a", 2, 20_000);
+    await object.castBallot("module_a", "poll-a", "viewer-1", 1);
+    const storage = storageOf(object);
+    storage.values.delete("channel:alarm_schedule");
+
+    vi.setSystemTime(20_000);
+    await expect(object.openBallot("module_b", "poll-b", 2, 30_000)).resolves.toEqual({ status: "opened" });
+    expect([...storage.values.keys()].filter((key) => key.startsWith("ballot:module_a:")).sort()).toEqual([]);
+    expect(storage.values.get("ballot:active")).toEqual({ moduleId: "module_b", ballotId: "poll-b" });
   });
 
   it("uses a length-prefixed channel id in ballot voter HMAC inputs", async () => {
