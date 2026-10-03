@@ -147,6 +147,23 @@ describe("moderation actions", () => {
     }
   });
 
+  it("maps a may-not-be-put-in-a-timeout response to protected_target", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedChannel(database);
+      const { environment } = environmentFor(database);
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(responseFor(400, "This user may not be put in a timeout."));
+
+      await expect(sendModerationBan(environment, CHANNEL_ID, {
+        userId: TARGET_USER_ID,
+        durationSeconds: 90,
+        reason: "test",
+      }, fetcher)).resolves.toMatchObject({ outcome: "rejected", reason: "protected_target" });
+    } finally {
+      database.close();
+    }
+  });
+
   it("sets the channel retry pause after Helix returns 429", async () => {
     const database = new TestD1Database();
     try {

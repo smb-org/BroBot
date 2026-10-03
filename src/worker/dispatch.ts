@@ -323,7 +323,6 @@ const runActions = async (
   module: BotModule,
   actions: readonly ModuleAction[],
   muted: boolean,
-  paused: boolean,
   fetcher: typeof fetch,
   attributions: readonly string[] = [],
   sourceBroadcasterUserId?: string | null,
@@ -345,7 +344,7 @@ const runActions = async (
     };
     const moderationAction = action.kind === "timeout" || action.kind === "ban";
     const suppressionReason = moderationAction
-      ? muted ? "channel_muted" : paused ? "channel_paused" : null
+      ? null
       : chatOutputSuppressionReason({ moduleEnabled: true, mandatory: true, paused: false, muted });
     if (suppressionReason !== null &&
         (action.kind === "chat" || action.kind === "announcement" || action.kind === "shoutout" || moderationAction)) {
@@ -508,6 +507,17 @@ const runActions = async (
         continue;
       }
       if (action.kind === "timeout" || action.kind === "ban") {
+        const controls = await readChannelControls(environment.DB, channelId, new Date().toISOString());
+        const moderationSuppressionReason = controls.mute.active
+          ? "channel_muted"
+          : controls.pause.active ? "channel_paused" : null;
+        if (moderationSuppressionReason !== null) {
+          diagnostics.push({
+            code: "host.action.suppressed" satisfies EventCode,
+            detail: { action: action.kind, reason: moderationSuppressionReason },
+          });
+          continue;
+        }
         const result = await sendModerationBan(environment, channelId, {
           userId: action.userId,
           durationSeconds: action.kind === "timeout" ? action.durationSeconds : null,
@@ -937,7 +947,6 @@ export const dispatchEventSubNotification = async (
           module,
           result.actions,
           dispatchState.controls.mute.active,
-          dispatchState.controls.pause.active,
           fetcher,
           result.attributions,
           textValue(event.payload.source_broadcaster_user_id),

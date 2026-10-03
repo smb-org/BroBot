@@ -36,7 +36,8 @@ const failure = (
 
 const failureReasonFrom400Message = (message: string | null): ModerationFailureReason => {
   const normalized = message?.toLocaleLowerCase("en-US") ?? "";
-  if (normalized.includes("may not be banned") || normalized.includes("cannot be timed out")) {
+  if (normalized.includes("may not be banned") || normalized.includes("cannot be timed out") ||
+      normalized.includes("may not be put in a timeout")) {
     return "protected_target";
   }
   if (normalized.includes("already banned")) return "already_banned";

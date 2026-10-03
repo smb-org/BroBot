@@ -380,6 +380,43 @@ describe("dispatch and execution", () => {
     }
   });
 
+  it("rechecks channel controls after a module handler pauses before returning a timeout", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+         VALUES ('kanal-a', 1, ?, NULL)`,
+      ).bind(NOW).run();
+      let releaseHandler!: (result: ModuleResult) => void;
+      let markHandlerStarted!: () => void;
+      const handlerStarted = new Promise<void>((resolve) => { markHandlerStarted = resolve; });
+      const module = fakeModule("pending-moderation-test", () => {
+        markHandlerStarted();
+        return new Promise<ModuleResult>((resolve) => { releaseHandler = resolve; });
+      });
+      const fetcher = vi.fn<typeof fetch>();
+      const dispatch = runDispatch(database, [module], fetcher);
+
+      await handlerStarted;
+      await database.prepare(
+        `INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('kanal-a', 1, ?)`,
+      ).bind(NOW).run();
+      releaseHandler({
+        actions: [{ kind: "timeout", userId: "fictional-target-pending", durationSeconds: 30, reason: "test" }],
+        diagnostics: [],
+      });
+      await dispatch;
+
+      expect(fetcher).not.toHaveBeenCalled();
+      await expect(eventLog(database)).resolves.toMatchObject([
+        { module_id: "pending-moderation-test", code: "host.action.suppressed", detail_json: '{"action":"timeout","reason":"channel_paused"}' },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("sends exactly one moderation follow-up after a certain Helix outcome", async () => {
     const database = new TestD1Database();
     try {
