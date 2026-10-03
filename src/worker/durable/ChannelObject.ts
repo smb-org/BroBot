@@ -17,8 +17,19 @@ import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 import type { AdsSchedule } from "../../modules/ads/contracts";
 import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
-import type { BotModule, HelixRequest, HelixRequestOptions } from "../../modules/contract";
-import type { ModuleAlarmContext, ModuleAlarmDefinition, ModuleExternalFetchBudget, ModuleScheduleInputChangeReason } from "../../modules/contract";
+import type {
+  BallotCastResult,
+  BallotOpenResult,
+  BallotSnapshot,
+  BotModule,
+  HelixRequest,
+  HelixRequestOptions,
+  ModuleAlarmContext,
+  ModuleAlarmDefinition,
+  ModuleBallotAccess,
+  ModuleExternalFetchBudget,
+  ModuleScheduleInputChangeReason,
+} from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
@@ -47,6 +58,16 @@ import {
   isRecentBotChatMessage,
   recordRecentBotChatMessage,
 } from "./automated-chat-output";
+import {
+  BALLOT_EXPIRY_ALARM_HANDLER,
+  ballotExpiryAlarmKey,
+  ballotIdentityFromExpiryAlarmKey,
+  castStoredBallot,
+  closeStoredBallot,
+  expireStoredBallot,
+  openStoredBallot,
+  readStoredBallot,
+} from "./ballots";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -241,6 +262,15 @@ const validAlarmScheduleEntry = (value: unknown): value is AlarmScheduleEntry =>
 
 const alarmAttemptAt = (entry: AlarmScheduleEntry): number =>
   entry.claimUntil ?? entry.nextAttemptAt ?? entry.deadline;
+
+const earliestAlarmAt = (table: AlarmScheduleTable, now: number): number | null => {
+  const deadlines = Object.entries(table)
+    .filter(([, entry]) => Number.isFinite(alarmAttemptAt(entry)))
+    .filter(([, entry]) => !(entry.deadline <= now && entry.suppressedBy !== undefined &&
+      Object.hasOwn(table, entry.suppressedBy)))
+    .map(([, entry]) => alarmAttemptAt(entry));
+  return deadlines.length === 0 ? null : Math.min(...deadlines);
+};
 
 const readAlarmScheduleTable = async (storage: AlarmStorageAccess): Promise<AlarmScheduleTable> => {
   const saved = await storage.get(ALARM_TABLE_KEY);
@@ -1038,6 +1068,7 @@ export class ChannelObject extends DurableObject<Env> {
     return {
       DB: this.env.DB,
       channelId,
+      ballots: this.ballotAccess(moduleId),
       storage: {
         get: (key: string) => this.ctx.storage.get(`${storagePrefix}${key}`),
         put: (key: string, value: unknown) => this.ctx.storage.put(`${storagePrefix}${key}`, value),
@@ -1139,11 +1170,87 @@ export class ChannelObject extends DurableObject<Env> {
     return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
   }
 
+  private ballotAccess(moduleId: string): ModuleBallotAccess {
+    return {
+      open: (ballotId, optionCount, expiresAt) => this.openBallot(moduleId, ballotId, optionCount, expiresAt),
+      cast: (ballotId, userId, choice) => this.castBallot(moduleId, ballotId, userId, choice),
+      read: (ballotId) => this.readBallot(moduleId, ballotId),
+      close: (ballotId) => this.closeBallot(moduleId, ballotId),
+    };
+  }
+
+  /** Opens a channel-wide exclusive ballot for a host-supplied module id. */
+  public async openBallot(
+    moduleId: string,
+    ballotId: string,
+    optionCount: number,
+    expiresAt: number,
+  ): Promise<BallotOpenResult> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Ballots require a named Durable Object.");
+    const requestedAlarmKey = ballotExpiryAlarmKey(moduleId, ballotId);
+    const result = await openStoredBallot(
+      this.ctx.storage,
+      moduleId,
+      ballotId,
+      optionCount,
+      expiresAt,
+      async (transaction) => {
+        const table = await readAlarmScheduleTable(transaction);
+        const current = table[requestedAlarmKey];
+        table[requestedAlarmKey] = {
+          deadline: expiresAt,
+          handler: BALLOT_EXPIRY_ALARM_HANDLER,
+          revision: (current?.revision ?? 0) + 1,
+        };
+        await transaction.put(ALARM_TABLE_KEY, table);
+        const nextAlarmAt = earliestAlarmAt(table, Date.now());
+        if (nextAlarmAt === null) await transaction.deleteAlarm();
+        else await transaction.setAlarm(nextAlarmAt);
+      },
+    );
+    if (result.status === "opened") {
+      return { status: "opened" };
+    }
+    return { status: "busy", moduleId: result.moduleId };
+  }
+
+  public async castBallot(
+    moduleId: string,
+    ballotId: string,
+    userId: string,
+    choice: number,
+  ): Promise<BallotCastResult> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
+    return await castStoredBallot(this.ctx.storage, channelId, moduleId, ballotId, userId, choice);
+  }
+
+  public async readBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
+    return await readStoredBallot(this.ctx.storage, moduleId, ballotId);
+  }
+
+  public async closeBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
+    const result = await closeStoredBallot(this.ctx.storage, moduleId, ballotId);
+    await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
+    return result;
+  }
+
+  private async expireBallot(key: string): Promise<void> {
+    const identity = ballotIdentityFromExpiryAlarmKey(key);
+    if (identity === null) return;
+    const nextExpiry = await expireStoredBallot(this.ctx.storage, identity.moduleId, identity.ballotId);
+    if (nextExpiry !== null) {
+      await this.scheduleAlarmEntry(key, BALLOT_EXPIRY_ALARM_HANDLER, nextExpiry);
+    }
+  }
+
   private alarmHandlers(
     modules: readonly BotModule[] = MODULES,
     externalFetchBudget: ModuleExternalFetchBudget = createModuleExternalFetchBudget(),
   ): Map<string, AlarmHandlerRegistration> {
     const handlers = new Map<string, AlarmHandlerRegistration>([
+      [BALLOT_EXPIRY_ALARM_HANDLER, { handle: async (key) => { await this.expireBallot(key); } }],
       [SECURITY_ROUND_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
       [SECURITY_RETRY_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
       [AD_PREWARNING_HANDLER, {
@@ -1230,17 +1337,12 @@ export class ChannelObject extends DurableObject<Env> {
 
   private async scheduleEarliestAlarm(): Promise<void> {
     const table = await this.ensureAlarmScheduleTable();
-    const now = Date.now();
-    const deadlines = Object.entries(table)
-      .filter(([, entry]) => Number.isFinite(alarmAttemptAt(entry)))
-      .filter(([, entry]) => !(entry.deadline <= now && entry.suppressedBy !== undefined &&
-        Object.hasOwn(table, entry.suppressedBy)))
-      .map(([, entry]) => alarmAttemptAt(entry));
-    if (deadlines.length === 0) {
+    const nextAlarmAt = earliestAlarmAt(table, Date.now());
+    if (nextAlarmAt === null) {
       await this.ctx.storage.deleteAlarm();
       return;
     }
-    await this.ctx.storage.setAlarm(Math.min(...deadlines));
+    await this.ctx.storage.setAlarm(nextAlarmAt);
   }
 
   private async scheduleSecurityAlarm(): Promise<void> {

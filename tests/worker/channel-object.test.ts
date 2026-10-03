@@ -24,6 +24,7 @@ import { OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON } fr
 import type { AdsSchedule } from "../../src/modules/ads/contracts";
 import type { BotModule } from "../../src/modules/contract";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
+import { ballotVoterHash } from "../../src/worker/durable/ballots";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
 
 const validPrincipal = (
@@ -58,6 +59,15 @@ type SocketDouble = WebSocket & {
   serializeAttachment: ReturnType<typeof vi.fn>;
 };
 
+type StorageTransactionDouble = {
+  get: <Value>(key: string) => Promise<Value | undefined>;
+  put: (key: string, value: unknown) => Promise<void>;
+  delete: (key: string | string[]) => Promise<boolean | number>;
+  list: (options?: { prefix?: string }) => Promise<Map<string, unknown>>;
+  setAlarm: (scheduledTime: number | Date) => Promise<void>;
+  deleteAlarm: () => Promise<void>;
+};
+
 const socketFor = (principal: RealtimePanelPrincipal): SocketDouble => ({
   tags: [
     "kind:panel",
@@ -89,8 +99,11 @@ type StorageDouble = {
   values: Map<string, unknown>;
   get: ReturnType<typeof vi.fn<(key: string) => Promise<unknown>>>;
   list: ReturnType<typeof vi.fn>;
-  setAlarm: ReturnType<typeof vi.fn>;
-  deleteAlarm: ReturnType<typeof vi.fn>;
+  transaction: ReturnType<typeof vi.fn<(
+    closure: (transaction: StorageTransactionDouble) => Promise<unknown>,
+  ) => Promise<unknown>>>;
+  setAlarm: ReturnType<typeof vi.fn<(scheduledTime: number | Date) => void>>;
+  deleteAlarm: ReturnType<typeof vi.fn<() => void>>;
 };
 
 const storageOf = (object: ChannelObject): StorageDouble =>
@@ -106,13 +119,14 @@ const objectFor = (
     values,
     get: vi.fn((key: string) => Promise.resolve(values.get(key))),
     list: vi.fn((options?: { prefix?: string; startAfter?: string; limit?: number }) => {
-      const keys = [...values.keys()]
+      let keys = [...values.keys()]
         .filter((key) => options?.prefix === undefined || key.startsWith(options.prefix))
         .filter((key) => options?.startAfter === undefined || key > options.startAfter)
         .sort()
-        .slice(0, options?.limit);
+      if (options?.limit !== undefined) keys = keys.slice(0, options.limit);
       return Promise.resolve(new Map(keys.map((key) => [key, values.get(key)])));
     }),
+    transaction: vi.fn(),
     setAlarm: vi.fn(),
     deleteAlarm: vi.fn(),
   };
@@ -145,11 +159,7 @@ const objectFor = (
         return Promise.resolve(true);
       }),
       list: storage.list,
-      transaction: vi.fn(async <T>(closure: (transaction: {
-        get: <Value>(key: string) => Promise<Value | undefined>;
-        put: (key: string, value: unknown) => Promise<void>;
-        delete: (key: string) => Promise<boolean>;
-      }) => Promise<T>) => {
+      transaction: storage.transaction.mockImplementation(async <T>(closure: (transaction: StorageTransactionDouble) => Promise<T>) => {
         const predecessor = transactionQueue;
         let release!: () => void;
         transactionQueue = new Promise<void>((resolve) => { release = resolve; });
@@ -161,7 +171,28 @@ const objectFor = (
               values.set(key, value);
               return Promise.resolve();
             },
-            delete: (key: string) => Promise.resolve(values.delete(key)),
+            delete: (key: string | string[]) => {
+              if (typeof key === "string") return Promise.resolve(values.delete(key));
+              let deleted = 0;
+              for (const item of key) if (values.delete(item)) deleted += 1;
+              return Promise.resolve(deleted);
+            },
+            list: (options?: { prefix?: string; startAfter?: string; limit?: number }) => {
+              let entries = [...values]
+                .filter(([key]) => options?.prefix === undefined || key.startsWith(options.prefix))
+                .filter(([key]) => options?.startAfter === undefined || key > options.startAfter)
+                .sort(([left], [right]) => left.localeCompare(right));
+              if (options?.limit !== undefined) entries = entries.slice(0, options.limit);
+              return Promise.resolve(new Map(entries));
+            },
+            setAlarm: (scheduledTime: number | Date) => {
+              storage.setAlarm(scheduledTime);
+              return Promise.resolve();
+            },
+            deleteAlarm: () => {
+              storage.deleteAlarm();
+              return Promise.resolve();
+            },
           });
         } finally {
           release();
@@ -1047,6 +1078,230 @@ describe("ChannelObject realtime path", () => {
     await object.clearModuleAlarm("timers", "timer:timer-a", 4);
     await object.scheduleModuleAlarm("timers", "run", "timer:timer-a", 10_000, 3);
     expect(storageOf(object).values.get(alarmTableKey) ?? {}).not.toHaveProperty(alarmKey);
+  });
+
+  it("allows only one open ballot per channel across modules", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+
+    await expect(object.openBallot("chat_voting", "poll-a", 3, 20_000)).resolves.toEqual({ status: "opened" });
+    await expect(object.openBallot("votekick", "kick-a", 2, 20_000)).resolves.toEqual({
+      status: "busy",
+      moduleId: "chat_voting",
+    });
+  });
+
+  it("preserves an active ballot alarm when another open uses the same id or invalid arguments", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 3, 20_000);
+    const storage = storageOf(object);
+    const alarmKey = "host:ballot_expiry:chat_voting:poll-a";
+    const originalEntry = structuredClone(
+      (storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey],
+    );
+    storage.setAlarm.mockClear();
+    storage.deleteAlarm.mockClear();
+
+    await expect(object.openBallot("chat_voting", "poll-a", 3, 30_000)).resolves.toEqual({
+      status: "busy",
+      moduleId: "chat_voting",
+    });
+    await expect(object.openBallot("chat_voting", "poll-a", 0, 30_000)).rejects.toThrow(RangeError);
+
+    expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey]).toEqual(originalEntry);
+    expect(storage.setAlarm).not.toHaveBeenCalled();
+    expect(storage.deleteAlarm).not.toHaveBeenCalled();
+  });
+
+  it("preserves an active ballot alarm when a same-id open is interrupted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 3, 20_000);
+    const storage = storageOf(object);
+    const alarmKey = "host:ballot_expiry:chat_voting:poll-a";
+    const originalEntry = structuredClone(
+      (storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey],
+    );
+    storage.setAlarm.mockClear();
+    storage.deleteAlarm.mockClear();
+    storage.transaction.mockRejectedValueOnce(new Error("storage interrupted"));
+
+    await expect(object.openBallot("chat_voting", "poll-a", 3, 30_000)).rejects.toThrow("storage interrupted");
+
+    expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey]).toEqual(originalEntry);
+    expect(storage.setAlarm).not.toHaveBeenCalled();
+    expect(storage.deleteAlarm).not.toHaveBeenCalled();
+  });
+
+  it("isolates ballot reads and closes between modules", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("module_a", "poll-a", 2, 20_000);
+    await object.castBallot("module_a", "poll-a", "viewer-1", 1);
+
+    await expect(object.readBallot("module_b", "poll-a")).resolves.toBeNull();
+    await expect(object.closeBallot("module_b", "poll-a")).resolves.toBeNull();
+    await expect(object.readBallot("module_a", "poll-a")).resolves.toEqual({ counts: [1, 0], revision: 1 });
+  });
+
+  it("moves a changed vote between options and advances revisions monotonically", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 3, 20_000);
+
+    await expect(object.castBallot("chat_voting", "poll-a", "viewer-1", 1)).resolves.toEqual({
+      status: "counted",
+      counts: [1, 0, 0],
+      revision: 1,
+    });
+    await expect(object.castBallot("chat_voting", "poll-a", "viewer-1", 3)).resolves.toEqual({
+      status: "changed",
+      counts: [0, 0, 1],
+      revision: 2,
+    });
+    await expect(object.castBallot("chat_voting", "poll-a", "viewer-1", 3)).resolves.toEqual({
+      status: "unchanged",
+      counts: [0, 0, 1],
+      revision: 2,
+    });
+    await expect(object.castBallot("chat_voting", "other-poll", "viewer-2", 1)).resolves.toEqual({
+      status: "not_open",
+      counts: [],
+      revision: 0,
+    });
+  });
+
+  it("deletes voter entries and the per-ballot key when the ballot closes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
+    await object.castBallot("chat_voting", "poll-a", "viewer-2", 2);
+    const values = storageOf(object).values;
+    for (let index = 0; index < 260; index += 1) {
+      values.set(`ballot:chat_voting:poll-a:v:seed-${String(index).padStart(3, "0")}`, index % 2 + 1);
+    }
+
+    await expect(object.closeBallot("chat_voting", "poll-a")).resolves.toEqual({ counts: [1, 1], revision: 2 });
+    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:"))).toEqual([]);
+    expect(storageOf(object).values.get("channel:alarm_schedule")).toBeUndefined();
+    await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
+  });
+
+  it("uses a fresh random voter key for each ballot and never stores the user id", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "fictional-viewer", 1);
+    const firstVoteKey = [...storageOf(object).values.keys()].find((key) => key.includes(":v:"));
+    await object.closeBallot("chat_voting", "poll-a");
+
+    await object.openBallot("chat_voting", "poll-b", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-b", "fictional-viewer", 1);
+    const secondVoteKey = [...storageOf(object).values.keys()].find((key) => key.includes(":v:"));
+
+    expect(firstVoteKey).toBeDefined();
+    expect(secondVoteKey).toBeDefined();
+    expect(firstVoteKey?.split(":v:")[1]).not.toBe(secondVoteKey?.split(":v:")[1]);
+    expect(secondVoteKey).not.toContain("fictional-viewer");
+  });
+
+  it("hard-deletes an unclosed ballot at its host-owned expiry alarm", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
+    expect(storageOf(object).values.get("channel:alarm_schedule")).toMatchObject({
+      "host:ballot_expiry:chat_voting:poll-a": { deadline: 20_000, handler: "host:ballot_expiry" },
+    });
+
+    vi.setSystemTime(20_000);
+    await object.alarm();
+
+    await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
+    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:"))).toEqual([]);
+  });
+
+  it("treats a post-deadline cast as closed and deletes ballot data", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
+
+    vi.setSystemTime(20_000);
+    await expect(object.castBallot("chat_voting", "poll-a", "viewer-2", 2)).resolves.toEqual({
+      status: "not_open",
+      counts: [],
+      revision: 0,
+    });
+    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:")).sort()).toEqual([]);
+  });
+
+  it("treats a post-deadline read as closed and deletes ballot data", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
+
+    vi.setSystemTime(20_000);
+    await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
+    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:")).sort()).toEqual([]);
+  });
+
+  it("does not alter expiry alarms when another module finds a live ballot", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("module_a", "poll-a", 2, 20_000);
+    const storage = storageOf(object);
+    storage.values.delete("channel:alarm_schedule");
+    storage.deleteAlarm.mockClear();
+    storage.setAlarm.mockClear();
+
+    vi.setSystemTime(15_000);
+    await expect(object.openBallot("module_b", "poll-b", 2, 30_000)).resolves.toEqual({
+      status: "busy",
+      moduleId: "module_a",
+    });
+    expect(storage.values.get("channel:alarm_schedule")).toBeUndefined();
+    expect(storage.setAlarm).not.toHaveBeenCalled();
+  });
+
+  it("reclaims an expired ballot on open when its expiry alarm is missing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("module_a", "poll-a", 2, 20_000);
+    await object.castBallot("module_a", "poll-a", "viewer-1", 1);
+    const storage = storageOf(object);
+    storage.values.delete("channel:alarm_schedule");
+
+    vi.setSystemTime(20_000);
+    await expect(object.openBallot("module_b", "poll-b", 2, 30_000)).resolves.toEqual({ status: "opened" });
+    expect([...storage.values.keys()].filter((key) => key.startsWith("ballot:module_a:")).sort()).toEqual([]);
+    expect(storage.values.get("ballot:active")).toEqual({ moduleId: "module_b", ballotId: "poll-b" });
+  });
+
+  it("uses a length-prefixed channel id in ballot voter HMAC inputs", async () => {
+    const key = Uint8Array.from({ length: 32 }, (_, index) => index);
+
+    await expect(ballotVoterHash(key, "12", "345")).resolves.toBe(
+      "3c8979f2ba8a2a557317290c437d58356a5f60886ce3810dc87500455fa0ba28",
+    );
+    await expect(ballotVoterHash(key, "123", "45")).resolves.toBe(
+      "ea74bcf785957dd5a0e2cf9e6c064aeb45b8ad1142a09044212a4db84c4cc6da",
+    );
   });
 
   it("refreshes missing countdown schedules once per channel throttle window", async () => {

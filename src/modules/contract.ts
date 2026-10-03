@@ -254,6 +254,8 @@ export interface ModuleOverlayElementContext {
   timeDependentTemplateConditionIds: ReadonlySet<string>;
   dynamicTemplateVariableNames: ReadonlySet<string>;
   overlayTemplateVariableNames: ReadonlySet<string>;
+  /** Reads only this overlay element's module ballot in the current channel. */
+  readBallot: (ballotId: string) => Promise<BallotSnapshot | null>;
 }
 
 export interface ModuleOverlayTemplateConditions {
@@ -320,6 +322,15 @@ export { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 /** Status of the chat-triggering person, derived from Twitch badges. */
 export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "broadcaster";
+
+/** Parses the deliberately narrow chat syntax shared by ballot-using modules. */
+export const ballotChoiceFromMessage = (text: string, optionCount: number): number | null => {
+  if (!Number.isInteger(optionCount) || optionCount < 1 || optionCount > 9) return null;
+  const normalized = text.trim();
+  if (!/^[1-9]$/u.test(normalized)) return null;
+  const choice = Number(normalized);
+  return choice <= optionCount ? choice : null;
+};
 
 /**
  * A justification for something a module did, or deliberately did not do.
@@ -496,6 +507,8 @@ export type AuthorizeModuleMutation = (
 export interface ModuleExecutionContext {
   DB: D1Database;
   authorizeMutation: AuthorizeModuleMutation;
+  /** Ephemeral ballot access bound to the event channel and executing module. */
+  ballots: ModuleBallotAccess;
   /** Lazily resolves the connected bot identity so modules can ignore its own chat messages. */
   botUserId?: () => Promise<string | null>;
   /** Checks the channel's recent bot send history for an identity or exact text match. */
@@ -540,6 +553,8 @@ export interface ModuleExecutionContext {
 export interface ModuleAlarmContext {
   DB: D1Database;
   channelId: string;
+  /** Ephemeral ballot access bound to this alarm's channel and module. */
+  ballots: ModuleBallotAccess;
   storage: {
     get(key: string): Promise<unknown>;
     put(key: string, value: unknown): Promise<void>;
@@ -636,6 +651,27 @@ export interface ModuleTemplateContentValidationContext {
 }
 
 export type ModuleFollowedAt = (string & {}) | null | "unavailable";
+
+export interface BallotSnapshot {
+  counts: readonly number[];
+  revision: number;
+}
+
+export type BallotOpenResult =
+  | { status: "opened" }
+  | { status: "busy"; moduleId: string };
+
+export type BallotCastResult = BallotSnapshot & {
+  status: "counted" | "changed" | "unchanged" | "not_open";
+};
+
+/** Ballot access already bound by the host to one channel and one module. */
+export interface ModuleBallotAccess {
+  open: (ballotId: string, optionCount: number, expiresAt: number) => Promise<BallotOpenResult>;
+  cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
+  read: (ballotId: string) => Promise<BallotSnapshot | null>;
+  close: (ballotId: string) => Promise<BallotSnapshot | null>;
+}
 
 export type ModuleStreamState = "online" | "offline" | "unknown";
 
@@ -947,6 +983,8 @@ export interface ModuleRouteVariables {
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;
   externalFetchBudget: ModuleExternalFetchBudget;
+  /** Returns ballot access bound to the authorized route channel and mounted module. */
+  ballots: (channelId: string) => ModuleBallotAccess;
   prepareModuleAudit: PrepareModuleAudit;
   writeModuleAudit: WriteModuleAudit;
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];
