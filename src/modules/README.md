@@ -436,7 +436,24 @@ Logging-API. Das Modul begründet Nicht-Handeln. Der Host kennt Kanal, Modul,
 `triggerId`, auslösenden Nutzer und Zeitpunkt und protokolliert Handeln und
 dessen Ausgang mit host-erzeugten Diagnosen wie `chat.gesendet` oder
 `shoutout.fehlgeschlagen` samt Ursache. Dieselbe Schreibfunktion übernimmt
-auch die Begrenzung und Löschung der Zeilen; ein Executor existiert noch nicht.
+auch die Begrenzung und Löschung der Zeilen.
+
+`ModuleAction` stellt außerdem `timeout` und `ban` bereit. Das Modul nennt
+Nutzer-ID, Grund und bei einem Timeout die Dauer; der Host führt die Aktion
+über Twitch Helix mit dem Bot-Nutzer-Token aus. Gründe werden auf 500 Zeichen
+gekürzt, Timeout-Dauern auf 1 bis 1.209.600 Sekunden begrenzt. Der Host schützt
+Broadcaster und Bot, prüft den gespeicherten Moderatorstatus sowie die
+kanalgebundene 429-Abklingzeit und unterdrückt Moderationsaktionen bei
+Stummschaltung oder Pause. Es gibt keine Wiederholung. Eine Aktion kann je
+einen vorgerenderten Chattext für Erfolg und sichere Ablehnung mitgeben; der
+Host sendet höchstens einen davon. Bei unklarem Helix-Ausgang sendet er keinen
+Folgetext. Der gemeinsame Host-Vertrag
+`src/modules/contracts/moderation.ts` enthält die validierte
+`TimeoutDurationRange`, den Zufallswert und die sprachabhängige Daueranzeige.
+`ModuleRouteVariables.liftModerationBan(channelId, userId)` stellt einer
+Modulroute dieselbe Host-Ausführung zum Aufheben eines Banns bereit.
+
+Der Aktionstyp `ban` ist derzeit keinem Modul oder Panel angeboten.
 
 ## Grenzen
 
