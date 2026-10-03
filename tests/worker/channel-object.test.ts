@@ -85,12 +85,16 @@ const overlaySocketFor = (
   } as unknown as SocketDouble;
 };
 
+type SqlCursorDouble = { toArray: () => unknown[]; one: () => unknown };
+
 type StorageDouble = {
   values: Map<string, unknown>;
   get: ReturnType<typeof vi.fn<(key: string) => Promise<unknown>>>;
   list: ReturnType<typeof vi.fn>;
-  setAlarm: ReturnType<typeof vi.fn>;
-  deleteAlarm: ReturnType<typeof vi.fn>;
+  sql: { exec: ReturnType<typeof vi.fn<(query: string, ...bindings: unknown[]) => SqlCursorDouble>> };
+  getAlarm: ReturnType<typeof vi.fn<() => Promise<number | null>>>;
+  setAlarm: ReturnType<typeof vi.fn<(scheduledTime: number | Date) => Promise<void>>>;
+  deleteAlarm: ReturnType<typeof vi.fn<() => Promise<void>>>;
 };
 
 const storageOf = (object: ChannelObject): StorageDouble =>
@@ -114,9 +118,61 @@ const objectFor = (
     values,
     get: vi.fn((key: string) => Promise.resolve(values.get(key))),
     list: vi.fn((options?: { prefix?: string; startAfter?: string; limit?: number }) => Promise.resolve(listValues(options))),
-    setAlarm: vi.fn(),
-    deleteAlarm: vi.fn(),
+    sql: { exec: vi.fn<(query: string, ...bindings: unknown[]) => SqlCursorDouble>() },
+    getAlarm: vi.fn<() => Promise<number | null>>(),
+    setAlarm: vi.fn<(scheduledTime: number | Date) => Promise<void>>(),
+    deleteAlarm: vi.fn<() => Promise<void>>(),
   };
+  const chatterRows = new Map<string, { hmac: string; first_seen_at: string; last_seen_at: string }>();
+  storage.sql.exec.mockImplementation((query: string, ...bindings: unknown[]) => {
+    if (/^\s*CREATE TABLE\b/iu.test(query)) {
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*DELETE FROM active_chatters\b/iu.test(query)) {
+      chatterRows.clear();
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT INTO active_chatters\b/iu.test(query)) {
+      const [hmac, firstSeenAt, lastSeenAt] = bindings as [string, string, string];
+      const previous = chatterRows.get(hmac);
+      chatterRows.set(hmac, {
+        hmac,
+        first_seen_at: previous?.first_seen_at ?? firstSeenAt,
+        last_seen_at: lastSeenAt,
+      });
+      return {
+        toArray: () => [],
+        one: () => undefined,
+      };
+    }
+    if (/^\s*SELECT COUNT\(\*\) AS count FROM active_chatters\b/iu.test(query)) {
+      const [cutoff] = bindings as [string];
+      const count = [...chatterRows.values()].filter((row) => row.last_seen_at >= cutoff).length;
+      return { toArray: () => [{ count }], one: () => ({ count }) };
+    }
+    if (/^\s*SELECT first_seen_at, last_seen_at FROM active_chatters WHERE hmac = \?/iu.test(query)) {
+      const [hmac] = bindings as [string];
+      const row = chatterRows.get(hmac);
+      return {
+        toArray: () => row === undefined ? [] : [{ first_seen_at: row.first_seen_at, last_seen_at: row.last_seen_at }],
+        one: () => row === undefined ? undefined : { first_seen_at: row.first_seen_at, last_seen_at: row.last_seen_at },
+      };
+    }
+    if (/^\s*SELECT hmac FROM active_chatters\b/iu.test(query)) {
+      return { toArray: () => [...chatterRows.values()].map(({ hmac }) => ({ hmac })), one: () => undefined };
+    }
+    throw new Error(`Unexpected Durable Object SQL query: ${query}`);
+  });
+  let platformAlarm: number | null = null;
+  storage.getAlarm.mockImplementation(() => Promise.resolve(platformAlarm));
+  storage.setAlarm.mockImplementation((scheduledTime: number | Date) => {
+    platformAlarm = scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime;
+    return Promise.resolve();
+  });
+  storage.deleteAlarm.mockImplementation(() => {
+    platformAlarm = null;
+    return Promise.resolve();
+  });
   const prepared = {
     bind: vi.fn(() => prepared),
     all: vi.fn().mockResolvedValue({ results: [] }),
@@ -1029,10 +1085,89 @@ describe("ChannelObject realtime path", () => {
       firstSeenAt: startedAt,
       lastSeenAt: "2026-09-27T12:00:02.000Z",
     });
-    const chatterKeys = [...storage.values.keys()].filter((key) => key.startsWith("chatter:"));
-    expect(chatterKeys).toHaveLength(3);
-    expect(chatterKeys.join(" ")).not.toContain("viewer-1");
-    expect(chatterKeys.join(" ")).not.toContain("viewer-2");
+    const chatterRows = storage.sql.exec("SELECT hmac FROM active_chatters").toArray() as Array<{ hmac: string }>;
+    expect(chatterRows).toHaveLength(2);
+    expect(JSON.stringify(chatterRows)).not.toContain("viewer-1");
+    expect(JSON.stringify(chatterRows)).not.toContain("viewer-2");
+    expect(storage.list).not.toHaveBeenCalledWith(expect.objectContaining({ prefix: "chatter:" }));
+  });
+
+  it("keeps a chat-event initialized stream when the stream-start event follows", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    vi.setSystemTime(Date.parse(startedAt));
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn().mockResolvedValue({
+        state: "online",
+        source: "eventsub",
+        changed_at: startedAt,
+        started_at: startedAt,
+        stream_id: "stream-1",
+        checked_at: null,
+      }),
+    };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+
+    await object.recordChatActivity("viewer-1", true);
+    const beforeStartEvent = await object.getActiveChatter("viewer-1");
+    await object.startActiveChatterStream("stream-1", startedAt);
+
+    expect(beforeStartEvent).toEqual({ firstSeenAt: startedAt, lastSeenAt: startedAt });
+    expect(await object.getActiveChatter("viewer-1")).toEqual(beforeStartEvent);
+    expect(await object.getActiveChatterCount(10_000)).toBe(1);
+  });
+
+  it("reconciles the chatter expiry alarm after alarm setup fails", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    vi.setSystemTime(Date.parse(startedAt));
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn().mockResolvedValue({
+        state: "online",
+        source: "eventsub",
+        changed_at: startedAt,
+        started_at: startedAt,
+        stream_id: "stream-1",
+        checked_at: null,
+      }),
+    };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+    storage.setAlarm.mockRejectedValueOnce(new Error("alarm setup failed"));
+
+    await expect(object.startActiveChatterStream("stream-1", startedAt)).rejects.toThrow("alarm setup failed");
+    await object.recordChatActivity("viewer-1", true);
+
+    expect(storage.setAlarm).toHaveBeenCalledTimes(2);
+    expect(await storage.getAlarm()).toBe(Date.parse(startedAt) + 24 * 60 * 60 * 1_000);
+    expect(await object.getActiveChatterCount(10_000)).toBe(1);
+  });
+
+  it("counts and clears a large chatter set with SQL operations", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    vi.setSystemTime(Date.parse(startedAt));
+    const object = objectFor([]);
+    const storage = storageOf(object);
+    await object.startActiveChatterStream("stream-1", startedAt);
+    for (let index = 0; index < 10_000; index += 1) {
+      storage.sql.exec(
+        "INSERT INTO active_chatters (hmac, first_seen_at, last_seen_at) VALUES (?, ?, ?) ON CONFLICT(hmac) DO UPDATE SET last_seen_at = excluded.last_seen_at",
+        `hmac-${String(index)}`,
+        startedAt,
+        startedAt,
+      );
+    }
+
+    expect(await object.getActiveChatterCount(10_000)).toBe(10_000);
+    expect(storage.list).not.toHaveBeenCalledWith(expect.objectContaining({ prefix: "chatter:" }));
+    storage.sql.exec.mockClear();
+    await object.clearActiveChatters();
+
+    expect(storage.sql.exec.mock.calls.filter(([query]) => query === "DELETE FROM active_chatters")).toHaveLength(1);
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
   });
 
   it("does not write chatter records unless an enabled module requests them", async () => {
@@ -1077,13 +1212,14 @@ describe("ChannelObject realtime path", () => {
 
     await object.startActiveChatterStream("stream-1", startedAt);
     await object.recordChatActivity("viewer-1", true);
-    expect([...storage.values.keys()].filter((key) => key.startsWith("chatter:"))).toHaveLength(2);
+    expect(await object.getActiveChatterCount(10_000)).toBe(1);
     await object.clearActiveChatters();
     expect([...storage.values.keys()].some((key) => key.startsWith("chatter:"))).toBe(false);
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
 
     await object.startActiveChatterStream("stream-1", startedAt);
     await object.recordChatActivity("viewer-2", true);
-    expect([...storage.values.keys()].filter((key) => key.startsWith("chatter:"))).toHaveLength(2);
+    expect(await object.getActiveChatterCount(10_000)).toBe(1);
     vi.setSystemTime(expiresAt);
     await object.alarm();
 
