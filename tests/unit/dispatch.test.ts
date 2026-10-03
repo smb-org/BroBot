@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../../src/modules/contract";
 import { channelEventsModule } from "../../src/modules/channel_events";
-import { dispatchEventSubNotification, selectModulesForEvent } from "../../src/worker/dispatch";
+import { dispatchEventSubNotification, needsActiveChatterTracking, selectModulesForEvent } from "../../src/worker/dispatch";
 import {
   upsertBotIdentity,
 } from "../../src/worker/db/bot-identity";
@@ -40,23 +40,29 @@ const silentModule = (id: string) => fakeModule(id, () => ({ actions: [], diagno
 const activation = (moduleId: string, enabled = true, settings = '{"prefix":"!"}') =>
   ({ moduleId, enabled, settings });
 
-const environment = (database: TestD1Database, publish = vi.fn()) => ({
-  DB: database as unknown as D1Database,
-  TWITCH_CLIENT_ID: "client-id",
-  TWITCH_CLIENT_SECRET: "client-secret",
-  TOKEN_ENCRYPTION_KEYS: keyRing,
-  CHANNEL: {
-    idFromName: (channelId: string) => channelId,
-    get: () => ({
-      publish,
-      recordChatActivity: vi.fn().mockResolvedValue(0),
-      claimAutomatedChatOutput: vi.fn().mockResolvedValue(true),
-      recordBotChatMessage: vi.fn().mockResolvedValue(undefined),
-      isRecentBotChatMessage: vi.fn().mockResolvedValue(false),
-      getChatActivityCount: vi.fn().mockResolvedValue(0),
-    }),
-  } as unknown as Env["CHANNEL"],
-});
+const environment = (database: TestD1Database, publish = vi.fn()) => {
+  const channelObject = {
+    publish,
+    recordChatActivity: vi.fn().mockResolvedValue(0),
+    clearActiveChatters: vi.fn().mockResolvedValue(undefined),
+    getActiveChatterCount: vi.fn().mockResolvedValue(0),
+    getActiveChatter: vi.fn().mockResolvedValue(null),
+    claimAutomatedChatOutput: vi.fn().mockResolvedValue(true),
+    recordBotChatMessage: vi.fn().mockResolvedValue(undefined),
+    isRecentBotChatMessage: vi.fn().mockResolvedValue(false),
+    getChatActivityCount: vi.fn().mockResolvedValue(0),
+  };
+  return {
+    DB: database as unknown as D1Database,
+    TWITCH_CLIENT_ID: "client-id",
+    TWITCH_CLIENT_SECRET: "client-secret",
+    TOKEN_ENCRYPTION_KEYS: keyRing,
+    CHANNEL: {
+      idFromName: (channelId: string) => channelId,
+      get: () => channelObject,
+    } as unknown as Env["CHANNEL"],
+  };
+};
 
 const chatResponse = (body: unknown, status = 200) =>
   vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(
@@ -172,9 +178,91 @@ describe("module selection", () => {
     expect(matches).toEqual([]);
     expect(unknownModules).toEqual(["verschwunden"]);
   });
+
+  it("tracks active chatters only for enabled registered declarations", () => {
+    const tracker = { ...silentModule("tracker"), needsActiveChatters: true };
+    expect(needsActiveChatterTracking([], [tracker])).toBe(false);
+    expect(needsActiveChatterTracking([activation("tracker", false)], [tracker])).toBe(false);
+    expect(needsActiveChatterTracking([activation("tracker")], [tracker])).toBe(true);
+    expect(needsActiveChatterTracking([activation("unknown")], [tracker])).toBe(false);
+    expect(needsActiveChatterTracking([activation("tracker", false)], [{ ...tracker, mandatory: true }])).toBe(true);
+  });
 });
 
 describe("dispatch and execution", () => {
+  it("passes the chatter id through the existing channel object call when tracking is declared", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      const tracker = { ...silentModule("tracker"), needsActiveChatters: true };
+      await activate(database, "kanal-a", tracker.id);
+      const runtime = environment(database);
+
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "activity-trigger",
+        payload: { message: { text: "hello" }, chatter_user_id: "viewer-1", chatter_user_login: "viewer-a" },
+        receivedAt: NOW,
+      }, vi.fn<typeof fetch>(), [tracker]);
+
+      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        recordChatActivity: ReturnType<typeof vi.fn>;
+      };
+      expect(object.recordChatActivity).toHaveBeenCalledTimes(1);
+      expect(object.recordChatActivity).toHaveBeenCalledWith("viewer-1", true);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("exposes active chatter counts and timestamps through the declaring module context", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      const observations: Array<{ count: number; seen: unknown }> = [];
+      const tracker: BotModule = {
+        ...silentModule("tracker"),
+        needsActiveChatters: true,
+        handleEvent: async (_event, context) => {
+          observations.push({
+            count: await context.activeChatters.count(60_000),
+            seen: await context.activeChatters.seen("viewer-1"),
+          });
+          return { actions: [], diagnostics: [] };
+        },
+      };
+      await activate(database, "kanal-a", tracker.id);
+      const runtime = environment(database);
+      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        getActiveChatterCount: ReturnType<typeof vi.fn>;
+        getActiveChatter: ReturnType<typeof vi.fn>;
+      };
+      object.getActiveChatterCount.mockResolvedValue(2);
+      object.getActiveChatter.mockResolvedValue({
+        firstSeenAt: "2026-09-19T11:00:00.000Z",
+        lastSeenAt: "2026-09-19T11:59:00.000Z",
+      });
+
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "active-chatter-context",
+        payload: { message: { text: "hello" }, chatter_user_id: "viewer-1", chatter_user_login: "viewer-a" },
+        receivedAt: NOW,
+      }, vi.fn<typeof fetch>(), [tracker]);
+
+      expect(observations).toEqual([{
+        count: 2,
+        seen: { firstSeenAt: "2026-09-19T11:00:00.000Z", lastSeenAt: "2026-09-19T11:59:00.000Z" },
+      }]);
+      expect(object.getActiveChatterCount).toHaveBeenCalledWith(60_000);
+      expect(object.getActiveChatter).toHaveBeenCalledWith("viewer-1");
+    } finally {
+      database.close();
+    }
+  });
+
   it.each([
     { source: null, forSourceOnly: true, description: "our channel with a null source" },
     { source: "kanal-a", forSourceOnly: true, description: "our channel ID" },
@@ -770,7 +858,7 @@ describe("dispatch and execution", () => {
         channelId: "kanal-a",
         subscriptionType: "stream.online",
         triggerId: "online-1",
-        payload: { started_at: "2026-09-19T11:55:00.000Z" },
+        payload: { id: "stream-1", started_at: "2026-09-19T11:55:00.000Z" },
         receivedAt: "2026-09-19T12:00:00.000Z",
       }, sent(), []);
 
@@ -785,6 +873,10 @@ describe("dispatch and execution", () => {
         payload: {},
         receivedAt: "2026-09-19T12:05:00.000Z",
       }, sent(), []);
+
+      const object = environmentValue.CHANNEL.get(environmentValue.CHANNEL.idFromName("kanal-a"));
+      expect(object.clearActiveChatters).toHaveBeenCalledTimes(1);
+      expect(object.clearActiveChatters).toHaveBeenCalledWith();
 
       await expect(database.prepare(
         "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",

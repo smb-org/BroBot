@@ -85,12 +85,23 @@ const overlaySocketFor = (
   } as unknown as SocketDouble;
 };
 
+type SqlCursorDouble = { toArray: () => unknown[]; one: () => unknown };
+
 type StorageDouble = {
   values: Map<string, unknown>;
   get: ReturnType<typeof vi.fn<(key: string) => Promise<unknown>>>;
   list: ReturnType<typeof vi.fn>;
-  setAlarm: ReturnType<typeof vi.fn>;
-  deleteAlarm: ReturnType<typeof vi.fn>;
+  kv: {
+    get: (key: string) => unknown;
+    put: (key: string, value: unknown) => void;
+    delete: (key: string) => boolean;
+  };
+  transactionSync: <T>(closure: () => T) => T;
+  sql: { exec: ReturnType<typeof vi.fn<(query: string, ...bindings: unknown[]) => SqlCursorDouble>> };
+  getAlarm: ReturnType<typeof vi.fn<() => Promise<number | null>>>;
+  setAlarm: ReturnType<typeof vi.fn<(scheduledTime: number | Date) => Promise<void>>>;
+  deleteAlarm: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  failNextChatterDelete: () => void;
 };
 
 const storageOf = (object: ChannelObject): StorageDouble =>
@@ -102,20 +113,129 @@ const objectFor = (
   values = new Map<string, unknown>(),
 ): ChannelObject => {
   let transactionQueue = Promise.resolve();
+  const chatterRows = new Map<string, { hmac: string; first_seen_at: string; last_seen_at: string }>();
+  let chatterKey: { key_hex: string; created_at: string } | undefined;
+  let failNextChatterDelete = false;
+  const listValues = (options?: { prefix?: string; startAfter?: string; limit?: number }): Map<string, unknown> => {
+    let keys = [...values.keys()]
+      .filter((key) => options?.prefix === undefined || key.startsWith(options.prefix))
+      .filter((key) => options?.startAfter === undefined || key > options.startAfter)
+      .sort();
+    if (options?.limit !== undefined) keys = keys.slice(0, options.limit);
+    return new Map(keys.map((key) => [key, values.get(key)]));
+  };
   const storage: StorageDouble = {
     values,
     get: vi.fn((key: string) => Promise.resolve(values.get(key))),
-    list: vi.fn((options?: { prefix?: string; startAfter?: string; limit?: number }) => {
-      const keys = [...values.keys()]
-        .filter((key) => options?.prefix === undefined || key.startsWith(options.prefix))
-        .filter((key) => options?.startAfter === undefined || key > options.startAfter)
-        .sort()
-        .slice(0, options?.limit);
-      return Promise.resolve(new Map(keys.map((key) => [key, values.get(key)])));
-    }),
-    setAlarm: vi.fn(),
-    deleteAlarm: vi.fn(),
+    list: vi.fn((options?: { prefix?: string; startAfter?: string; limit?: number }) => Promise.resolve(listValues(options))),
+    kv: {
+      get: (key: string) => values.get(key),
+      put: (key: string, value: unknown) => { values.set(key, value); },
+      delete: (key: string) => values.delete(key),
+    },
+    transactionSync: <T>(closure: () => T): T => {
+      const valuesBefore = new Map(values);
+      const rowsBefore = new Map(chatterRows);
+      const keyBefore = chatterKey;
+      try {
+        return closure();
+      } catch (error: unknown) {
+        values.clear();
+        for (const [key, value] of valuesBefore) values.set(key, value);
+        chatterRows.clear();
+        for (const [key, value] of rowsBefore) chatterRows.set(key, value);
+        chatterKey = keyBefore;
+        throw error;
+      }
+    },
+    sql: { exec: vi.fn<(query: string, ...bindings: unknown[]) => SqlCursorDouble>() },
+    getAlarm: vi.fn<() => Promise<number | null>>(),
+    setAlarm: vi.fn<(scheduledTime: number | Date) => Promise<void>>(),
+    deleteAlarm: vi.fn<() => Promise<void>>(),
+    failNextChatterDelete: () => { failNextChatterDelete = true; },
   };
+  storage.sql.exec.mockImplementation((query: string, ...bindings: unknown[]) => {
+    if (/^\s*CREATE TABLE\b/iu.test(query)) {
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*CREATE INDEX\b/iu.test(query)) {
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*DELETE FROM active_chatter_key\b/iu.test(query)) {
+      chatterKey = undefined;
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT INTO active_chatter_key\b/iu.test(query)) {
+      const [keyHex, createdAt] = bindings as [string, string];
+      chatterKey = { key_hex: keyHex, created_at: createdAt };
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT key_hex, created_at FROM active_chatter_key\b/iu.test(query)) {
+      return { toArray: () => chatterKey === undefined ? [] : [{ ...chatterKey }], one: () => chatterKey };
+    }
+    if (/^\s*SELECT MIN\(last_seen_at\) AS first_expiry FROM active_chatters\b/iu.test(query)) {
+      const firstExpiry = [...chatterRows.values()].map((row) => row.last_seen_at).sort()[0] ?? null;
+      return { toArray: () => [{ first_expiry: firstExpiry }], one: () => ({ first_expiry: firstExpiry }) };
+    }
+    if (/^\s*DELETE FROM active_chatters\b/iu.test(query)) {
+      if (failNextChatterDelete) {
+        failNextChatterDelete = false;
+        throw new Error("injected chatter delete failure");
+      }
+      if (/WHERE last_seen_at <= \?/iu.test(query)) {
+        const cutoff = bindings[0];
+        for (const [hmac, row] of chatterRows) {
+          if (typeof cutoff === "string" && row.last_seen_at <= cutoff) chatterRows.delete(hmac);
+        }
+      } else {
+        chatterRows.clear();
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT INTO active_chatters\b/iu.test(query)) {
+      const [hmac, firstSeenAt, lastSeenAt] = bindings as [string, string, string];
+      const previous = chatterRows.get(hmac);
+      chatterRows.set(hmac, {
+        hmac,
+        first_seen_at: previous?.first_seen_at ?? firstSeenAt,
+        last_seen_at: lastSeenAt,
+      });
+      return {
+        toArray: () => [],
+        one: () => undefined,
+      };
+    }
+    if (/^\s*SELECT COUNT\(\*\) AS count FROM active_chatters\b/iu.test(query)) {
+      const cutoff = bindings[0];
+      const count = typeof cutoff === "string"
+        ? [...chatterRows.values()].filter((row) => row.last_seen_at >= cutoff).length
+        : chatterRows.size;
+      return { toArray: () => [{ count }], one: () => ({ count }) };
+    }
+    if (/^\s*SELECT first_seen_at, last_seen_at FROM active_chatters\s+WHERE hmac = \?/iu.test(query)) {
+      const [hmac, cutoff] = bindings as [string, string];
+      const row = chatterRows.get(hmac);
+      const activeRow = row !== undefined && row.last_seen_at >= cutoff ? row : undefined;
+      return {
+        toArray: () => activeRow === undefined ? [] : [{ first_seen_at: activeRow.first_seen_at, last_seen_at: activeRow.last_seen_at }],
+        one: () => activeRow === undefined ? undefined : { first_seen_at: activeRow.first_seen_at, last_seen_at: activeRow.last_seen_at },
+      };
+    }
+    if (/^\s*SELECT hmac FROM active_chatters\b/iu.test(query)) {
+      return { toArray: () => [...chatterRows.values()].map(({ hmac }) => ({ hmac })), one: () => undefined };
+    }
+    throw new Error(`Unexpected Durable Object SQL query: ${query}`);
+  });
+  let platformAlarm: number | null = null;
+  storage.getAlarm.mockImplementation(() => Promise.resolve(platformAlarm));
+  storage.setAlarm.mockImplementation((scheduledTime: number | Date) => {
+    platformAlarm = scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime;
+    return Promise.resolve();
+  });
+  storage.deleteAlarm.mockImplementation(() => {
+    platformAlarm = null;
+    return Promise.resolve();
+  });
   const prepared = {
     bind: vi.fn(() => prepared),
     all: vi.fn().mockResolvedValue({ results: [] }),
@@ -128,6 +248,7 @@ const objectFor = (
     id: { name: "kanal-a" },
     setWebSocketAutoResponse: vi.fn(),
     getWebSockets,
+    blockConcurrencyWhile: vi.fn(async <T>(closure: () => Promise<T>) => await closure()),
     acceptWebSocket: vi.fn((socket: WebSocket) => {
       sockets.push(socket as SocketDouble);
       const endpoint = socket as WebSocket & { accept: () => void };
@@ -149,6 +270,7 @@ const objectFor = (
         get: <Value>(key: string) => Promise<Value | undefined>;
         put: (key: string, value: unknown) => Promise<void>;
         delete: (key: string) => Promise<boolean>;
+        list: (options?: { prefix?: string }) => Promise<Map<string, unknown>>;
       }) => Promise<T>) => {
         const predecessor = transactionQueue;
         let release!: () => void;
@@ -162,6 +284,7 @@ const objectFor = (
               return Promise.resolve();
             },
             delete: (key: string) => Promise.resolve(values.delete(key)),
+            list: (options?: { prefix?: string }) => Promise.resolve(listValues(options)),
           });
         } finally {
           release();
@@ -992,6 +1115,222 @@ describe("ChannelObject realtime path", () => {
     streamState = "offline";
     await object.recordChatActivity();
     expect(await object.getChatActivityCount()).toBe(1);
+  });
+
+  it("tracks unique chatters in a rolling window without storing their ids", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    vi.setSystemTime(Date.parse(startedAt));
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn().mockResolvedValue({ state: "online", source: "eventsub", changed_at: startedAt,
+        started_at: null, stream_id: null, checked_at: null }),
+    };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+
+    await object.recordChatActivity("viewer-1", true);
+    expect(await object.getActiveChatter("viewer-1")).toEqual({ firstSeenAt: startedAt, lastSeenAt: startedAt });
+    vi.setSystemTime(Date.parse(startedAt) + 2_000);
+    await object.recordChatActivity("viewer-1", true);
+    await object.recordChatActivity("viewer-2", true);
+
+    expect(await object.getActiveChatterCount(10_000)).toBe(2);
+    expect(storage.sql.exec.mock.calls.some(([query]) =>
+      typeof query === "string" && query.includes("active_chatters_last_seen_at_idx"),
+    )).toBe(true);
+    expect(await object.getActiveChatter("viewer-1")).toEqual({
+      firstSeenAt: startedAt,
+      lastSeenAt: "2026-09-27T12:00:02.000Z",
+    });
+    const chatterRows = storage.sql.exec("SELECT hmac FROM active_chatters").toArray() as Array<{ hmac: string }>;
+    expect(chatterRows).toHaveLength(2);
+    expect(JSON.stringify(chatterRows)).not.toContain("viewer-1");
+    expect(JSON.stringify(chatterRows)).not.toContain("viewer-2");
+    expect(storage.list).not.toHaveBeenCalledWith(expect.objectContaining({ prefix: "chatter:" }));
+  });
+
+  it("schedules the keyed sweep in the same transaction as its first chatter row", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+    const transaction = storage.transactionSync.bind(storage);
+    const writeSnapshot = vi.fn();
+    storage.transactionSync = <T>(closure: () => T): T => transaction(() => {
+      const result = closure();
+      const rows = storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one() as { count: number };
+      const alarmTable = storage.values.get("channel:alarm_schedule") as Record<string, { deadline: number }> | undefined;
+      if (rows.count > 0) writeSnapshot(rows.count, alarmTable?.["host:active_chatters_expiry"]?.deadline);
+      return result;
+    });
+
+    await object.recordChatActivity("viewer-1", true);
+
+    expect(writeSnapshot).toHaveBeenCalledWith(1, now + 60 * 60 * 1_000);
+    expect(await storage.getAlarm()).toBe(now + 60 * 60 * 1_000);
+  });
+
+  it("removes expired rows and deletes the key when the table becomes empty", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+    await object.recordChatActivity("viewer-1", true);
+    vi.setSystemTime(start + 30 * 60 * 1_000);
+    await object.recordChatActivity("viewer-2", true);
+
+    vi.setSystemTime(start + 60 * 60 * 1_000);
+    await object.alarm();
+    expect(await object.getActiveChatter("viewer-1")).toBeNull();
+    expect(await object.getActiveChatter("viewer-2")).not.toBeNull();
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 1 });
+    expect(await storage.getAlarm()).toBe(start + 90 * 60 * 1_000);
+
+    vi.setSystemTime(start + 90 * 60 * 1_000);
+    await object.alarm();
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
+    expect(await storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one()).toBeUndefined();
+    expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown> | undefined)?.["host:active_chatters_expiry"])
+      .toBeUndefined();
+  });
+
+  it("rotates the per-channel key and clears old rows after 24 hours", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+    await object.recordChatActivity("viewer-old", true);
+    const oldKey = storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one() as { key_hex: string };
+
+    vi.setSystemTime(start + 24 * 60 * 60 * 1_000);
+    await object.recordChatActivity("viewer-new", true);
+
+    const newKey = storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one() as { key_hex: string };
+    expect(newKey.key_hex).not.toBe(oldKey.key_hex);
+    expect(await object.getActiveChatter("viewer-old")).toBeNull();
+    expect(await object.getActiveChatter("viewer-new")).toEqual({
+      firstSeenAt: new Date(start + 24 * 60 * 60 * 1_000).toISOString(),
+      lastSeenAt: new Date(start + 24 * 60 * 60 * 1_000).toISOString(),
+    });
+  });
+
+  it("retries a failed sweep idempotently", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+    await object.recordChatActivity("viewer-1", true);
+    vi.setSystemTime(start + 60 * 60 * 1_000);
+    storage.failNextChatterDelete();
+
+    await object.alarm();
+    expect(await object.getActiveChatter("viewer-1")).not.toBeNull();
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 1 });
+    const retryAt = await storage.getAlarm();
+    expect(retryAt).toBeGreaterThan(start + 60 * 60 * 1_000);
+    vi.setSystemTime(retryAt ?? start + 61 * 60 * 1_000);
+    await object.alarm();
+    await object.alarm();
+
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
+    expect(await storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one()).toBeUndefined();
+  });
+
+  it("wipes every chatter row and the key on offline cleanup", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+    await object.recordChatActivity("viewer-1", true);
+    await object.recordChatActivity("viewer-2", true);
+    storage.values.set("chatter:stream", { key: [1, 2, 3], streamId: "legacy", expiresAt: start });
+
+    await object.clearActiveChatters();
+
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
+    expect(await storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one()).toBeUndefined();
+    expect(storage.values.has("chatter:stream")).toBe(false);
+    expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown> | undefined)?.["host:active_chatters_expiry"])
+      .toBeUndefined();
+  });
+
+  it("counts and clears a large chatter set with SQL operations", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    vi.setSystemTime(Date.parse(startedAt));
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+    await object.recordChatActivity("viewer-initial", true);
+    for (let index = 0; index < 9_999; index += 1) {
+      storage.sql.exec(
+        "INSERT INTO active_chatters (hmac, first_seen_at, last_seen_at) VALUES (?, ?, ?) ON CONFLICT(hmac) DO UPDATE SET last_seen_at = excluded.last_seen_at",
+        `hmac-${String(index)}`,
+        startedAt,
+        startedAt,
+      );
+    }
+
+    expect(await object.getActiveChatterCount(10_000)).toBe(10_000);
+    storage.sql.exec.mockClear();
+    await object.clearActiveChatters();
+
+    expect(storage.sql.exec.mock.calls.filter(([query]) => query === "DELETE FROM active_chatters")).toHaveLength(1);
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
+  });
+
+  it("does not write chatter records unless an enabled module requests them", async () => {
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn().mockResolvedValue({
+        state: "online",
+        source: "eventsub",
+        changed_at: startedAt,
+        started_at: startedAt,
+        stream_id: "stream-1",
+        checked_at: null,
+      }),
+    };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+
+    await object.recordChatActivity("viewer-1", false);
+
+    expect([...storageOf(object).values.keys()].some((key) => key.startsWith("chatter:"))).toBe(false);
+    expect(await object.getChatActivityCount()).toBe(1);
+  });
+
+  it("allows an in-flight chat after offline cleanup and expires it in the rolling window", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    vi.setSystemTime(Date.parse(startedAt));
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn().mockResolvedValue({ state: "offline", source: "eventsub", changed_at: startedAt,
+        started_at: null, stream_id: null, checked_at: null }),
+    };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+    await object.clearActiveChatters();
+    await object.recordChatActivity("viewer-1", true);
+    expect(await object.getActiveChatterCount(10_000)).toBe(1);
+    expect(await object.getActiveChatter("viewer-1")).not.toBeNull();
+    vi.setSystemTime(Date.parse(startedAt) + 60 * 60 * 1_000);
+    await object.alarm();
+
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
+    expect(await storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one()).toBeUndefined();
   });
 
   it("shares automated output claims and remembers recent bot messages per channel", async () => {

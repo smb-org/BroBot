@@ -407,6 +407,17 @@ den Status in `bot_channel_status` fest. Abgelaufene OAuth-Transaktionen
 werden im selben Lauf entfernt. Außerdem räumt er `event_log` auf und löscht
 Ereignisse, die älter als 14 Tage sind.
 
+Aktive Chatter liegen nur im Channel Durable Object. Ein zufälliger
+kanalgebundener HMAC-Schlüssel mit `created_at` wird spätestens nach 24 Stunden
+rotiert; dabei werden Schlüssel und alle Einträge in derselben Transaktion
+gelöscht. Ein keyed Host-Alarm löscht Einträge spätestens rund 60 Minuten nach
+ihrer letzten Aktivität, zuzüglich Alarmverzögerung, und löscht den Schlüssel,
+wenn keine Einträge mehr bestehen. `stream.offline` löscht Schlüssel und
+Einträge sofort und ohne Stream-ID-Abgleich. Eine bereits laufende
+Chatverarbeitung kann danach wieder Daten anlegen; der Alarm entfernt sie
+innerhalb des gleichen Aufbewahrungsfensters. Diese flüchtigen Daten liegen
+nicht in D1 und werden nicht vom stündlichen Bereinigungslauf erfasst.
+
 Bei `invalid_grant` oder einer widerrufenen Autorisierung wird der globale
 Status mit Ursache `revoked` gespeichert. Der Scheduled-Handler versucht einen
 solchen Zustand nicht endlos erneut; der Betreiber startet zur erneuten
