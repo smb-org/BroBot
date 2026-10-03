@@ -44,7 +44,6 @@ const environment = (database: TestD1Database, publish = vi.fn()) => {
   const channelObject = {
     publish,
     recordChatActivity: vi.fn().mockResolvedValue(0),
-    startActiveChatterStream: vi.fn().mockResolvedValue(undefined),
     clearActiveChatters: vi.fn().mockResolvedValue(undefined),
     getActiveChatterCount: vi.fn().mockResolvedValue(0),
     getActiveChatter: vi.fn().mockResolvedValue(null),
@@ -877,38 +876,11 @@ describe("dispatch and execution", () => {
 
       const object = environmentValue.CHANNEL.get(environmentValue.CHANNEL.idFromName("kanal-a"));
       expect(object.clearActiveChatters).toHaveBeenCalledTimes(1);
-      expect(object.clearActiveChatters).toHaveBeenCalledWith({
-        streamId: "stream-1",
-        startedAt: "2026-09-19T11:55:00.000Z",
-      });
+      expect(object.clearActiveChatters).toHaveBeenCalledWith();
 
       await expect(database.prepare(
         "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
       ).first()).resolves.toEqual({ state: "offline", started_at: null });
-    } finally {
-      database.close();
-    }
-  });
-
-  it("starts stream-scoped chatter tracking for an enabled declaration", async () => {
-    const database = new TestD1Database();
-    try {
-      await insertChannel(database, "kanal-a");
-      const tracker = { ...silentModule("tracker"), needsActiveChatters: true };
-      await activate(database, "kanal-a", tracker.id);
-      const runtime = environment(database);
-      const startedAt = "2026-09-27T12:00:00.000Z";
-
-      await dispatchEventSubNotification(runtime, {
-        channelId: "kanal-a",
-        subscriptionType: "stream.online",
-        triggerId: "online-tracker",
-        payload: { id: "stream-1", started_at: startedAt },
-        receivedAt: startedAt,
-      }, sent(), [tracker]);
-
-      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a"));
-      expect(object.startActiveChatterStream).toHaveBeenCalledWith("stream-1", startedAt);
     } finally {
       database.close();
     }

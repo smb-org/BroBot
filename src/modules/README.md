@@ -336,10 +336,14 @@ Ein Modul, das `needsActiveChatters: true` deklariert, erhält über
 `ModuleExecutionContext.activeChatters` die Zahl verschiedener Chatter in
 einem Zeitfenster sowie `seen(userId)` mit erstem und letztem
 Aktivitätszeitpunkt. Der Host speichert neue Aktivität im Channel Durable Object
-nur, solange mindestens ein solches Modul im Kanal aktiviert ist. Der Schlüssel
-ist zufällig und je Stream neu. Streamende oder ein Host-Alarm nach höchstens
-24 Stunden löschen Schlüssel und Einträge. Nur Module mit dieser Deklaration
-erhalten die Werte über ihren Ausführungskontext.
+nur, solange mindestens ein solches Modul im Kanal aktiviert ist. Pro Kanal
+gibt es einen zufälligen HMAC-Schlüssel, der spätestens nach 24 Stunden rotiert;
+dabei werden alle Einträge gelöscht. Ein keyed Host-Alarm löscht Einträge nach
+60 Minuten Inaktivität plus Alarmverzögerung und den Schlüssel, wenn keine
+Einträge übrig sind. `stream.offline` löscht Schlüssel und Einträge sofort,
+doch eine bereits laufende Chatverarbeitung kann Daten neu anlegen, die der
+Alarm innerhalb des Aufbewahrungsfensters entfernt. Nur Module mit dieser
+Deklaration erhalten die Werte über ihren Ausführungskontext.
 
 Der Zielkanal kommt aus dem geprüften Ereignis und wird dem Modul in
 `ModuleEvent.channelId` mitgeteilt. Der Host löst außerdem den Akteur anhand

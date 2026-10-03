@@ -510,7 +510,7 @@ export interface ModuleExecutionContext {
   streamState: () => Promise<ModuleStreamState>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
-  /** Distinct chatters tracked for the current stream when a module declares the need. */
+  /** Distinct chatters tracked in the rolling activity window when a module declares the need. */
   activeChatters: {
     count: (windowMs: number) => Promise<number>;
     seen: (userId: string) => Promise<ActiveChatterActivity | null>;

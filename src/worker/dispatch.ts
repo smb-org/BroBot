@@ -661,27 +661,11 @@ export const dispatchEventSubNotification = async (
         console.warn("Channel chat activity could not be counted.", error);
       }
     }
-    if (streamStateChanged?.payload.state === "online" && trackActiveChatters) {
-      try {
-        await object.startActiveChatterStream(
-          textValue(event.payload.id),
-          textValue(event.payload.started_at),
-        );
-      } catch (error: unknown) {
-        console.warn("Active chatter tracking could not be started.", error);
-      }
-    }
     if (event.subscriptionType === "stream.offline") {
-      const currentStream = await readChannelStreamState(environment.DB, event.channelId);
-      if (streamStateChanged?.payload.state === "offline" || currentStream?.state === "offline") {
-        try {
-          await object.clearActiveChatters({
-            streamId: endingStreamDispatchState?.streamId ?? null,
-            startedAt: endingStreamDispatchState?.streamStartedAt ?? null,
-          });
-        } catch (error: unknown) {
-          console.warn("Active chatter tracking could not be cleared.", error);
-        }
+      try {
+        await object.clearActiveChatters();
+      } catch (error: unknown) {
+        console.warn("Active chatter tracking could not be cleared.", error);
       }
     }
   }

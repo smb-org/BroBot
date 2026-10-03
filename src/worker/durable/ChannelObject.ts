@@ -64,11 +64,13 @@ const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
-const ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
+const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
+const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
 const ACTIVE_CHATTER_EXPIRY_KEY = "host:active_chatters_expiry";
 const ACTIVE_CHATTER_EXPIRY_HANDLER = "channel.active_chatters_expiry";
-const ACTIVE_CHATTER_RETENTION_MS = 24 * 60 * 60 * 1_000;
+const ACTIVE_CHATTER_RETENTION_MS = 60 * 60 * 1_000;
+const ACTIVE_CHATTER_KEY_ROTATION_MS = 24 * 60 * 60 * 1_000;
 const MODULE_ALARM_OWNER_REVISIONS_KEY = "module_alarm:owner_revisions";
 const MODULE_ALARM_OWNER_REVISION_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const SECURITY_DEADLINE_KEY = "security_round";
@@ -165,12 +167,6 @@ interface StreamRefreshLease {
   expiresAt: number;
 }
 
-interface ActiveChatterStream {
-  key: number[];
-  streamId: string;
-  expiresAt: number;
-}
-
 interface OverlayStreamDetails {
   startedAt: string | null;
   viewerCount: number;
@@ -212,13 +208,7 @@ type RealtimeSocketAttachment = RealtimePrincipal;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const isActiveChatterStream = (value: unknown): value is ActiveChatterStream =>
-  isRecord(value) && Array.isArray(value.key) && value.key.length === 32 &&
-  value.key.every((byte) => typeof byte === "number" && Number.isInteger(byte) && byte >= 0 && byte <= 255) &&
-  typeof value.streamId === "string" && value.streamId.length > 0 &&
-  typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt);
-
-const activeChatterKey = async (secret: readonly number[], channelId: string, userId: string): Promise<string> => {
+const activeChatterKey = async (secretHex: string, channelId: string, userId: string): Promise<string> => {
   const encoder = new TextEncoder();
   const channel = encoder.encode(channelId);
   const user = encoder.encode(userId);
@@ -230,7 +220,7 @@ const activeChatterKey = async (secret: readonly number[], channelId: string, us
   input.set(user, 8 + channel.length);
   const key = await crypto.subtle.importKey(
     "raw",
-    Uint8Array.from(secret),
+    Uint8Array.from(secretHex.match(/.{2}/gu) ?? [], (byte) => Number.parseInt(byte, 16)),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
@@ -402,13 +392,20 @@ export class ChannelObject extends DurableObject<Env> {
   private adScheduleRefreshStartedAt = 0;
   private adScheduleRefreshGeneration = 0;
   private adScheduleOperationQueue: Promise<void> = Promise.resolve();
-  private activeChatterTableReady = false;
+  private activeChatterSchemaReady = false;
   // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
   private recentlyBoundOverlayTokenIds = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    if (ctx.storage.kv.get(LEGACY_ACTIVE_CHATTER_STREAM_KEY) !== undefined) {
+      this.ensureActiveChatterTable();
+      ctx.storage.transactionSync(() => {
+        if (this.activeChatterKeyRowSync() === null) this.clearActiveChatterStateSync();
+        else ctx.storage.kv.delete(LEGACY_ACTIVE_CHATTER_STREAM_KEY);
+      });
+    }
   }
 
   private ownChannelId(): string | null {
@@ -417,7 +414,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private ensureActiveChatterTable(): void {
-    if (this.activeChatterTableReady) return;
+    if (this.activeChatterSchemaReady) return;
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ${ACTIVE_CHATTER_TABLE} (
         hmac TEXT PRIMARY KEY,
@@ -430,14 +427,25 @@ export class ChannelObject extends DurableObject<Env> {
       `CREATE INDEX IF NOT EXISTS active_chatters_last_seen_at_idx
        ON ${ACTIVE_CHATTER_TABLE} (last_seen_at)`,
     );
-    this.activeChatterTableReady = true;
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${ACTIVE_CHATTER_KEY_TABLE} (
+        slot INTEGER PRIMARY KEY CHECK (slot = 1),
+        key_hex TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`,
+    );
+    this.activeChatterSchemaReady = true;
   }
 
   private incrementChatActivityCountSync(): number {
-    const current = this.ctx.storage.kv.get<number>(CHAT_ACTIVITY_COUNT_KEY);
-    const next = typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current + 1 : 1;
+    const next = this.currentChatActivityCountSync() + 1;
     this.ctx.storage.kv.put(CHAT_ACTIVITY_COUNT_KEY, next);
     return next;
+  }
+
+  private currentChatActivityCountSync(): number {
+    const current = this.ctx.storage.kv.get<number>(CHAT_ACTIVITY_COUNT_KEY);
+    return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
   }
 
   private writeActiveChatterExpiryEntrySync(deadline: number): void {
@@ -449,6 +457,8 @@ export class ChannelObject extends DurableObject<Env> {
       }
     }
     const current = table[ACTIVE_CHATTER_EXPIRY_KEY];
+    if (current?.handler === ACTIVE_CHATTER_EXPIRY_HANDLER && current.deadline === deadline &&
+        current.nextAttemptAt === undefined && current.claimUntil === undefined) return;
     table[ACTIVE_CHATTER_EXPIRY_KEY] = {
       deadline,
       handler: ACTIVE_CHATTER_EXPIRY_HANDLER,
@@ -457,7 +467,7 @@ export class ChannelObject extends DurableObject<Env> {
     this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
   }
 
-  private clearActiveChatterExpiryEntrySync(deadline?: number): void {
+  private clearActiveChatterExpiryEntrySync(): void {
     const saved = this.ctx.storage.kv.get(ALARM_TABLE_KEY);
     if (!isRecord(saved)) return;
     const table: AlarmScheduleTable = {};
@@ -465,7 +475,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (validAlarmScheduleEntry(value)) table[key] = value;
     }
     const current = table[ACTIVE_CHATTER_EXPIRY_KEY];
-    if (current === undefined || (deadline !== undefined && current.deadline !== deadline)) return;
+    if (current === undefined) return;
     Reflect.deleteProperty(table, ACTIVE_CHATTER_EXPIRY_KEY);
     this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
   }
@@ -473,6 +483,27 @@ export class ChannelObject extends DurableObject<Env> {
   private clearActiveChatterRecordsSync(): void {
     this.ensureActiveChatterTable();
     this.ctx.storage.sql.exec(`DELETE FROM ${ACTIVE_CHATTER_TABLE}`);
+  }
+
+  private activeChatterKeyRowSync(): { keyHex: string; createdAt: number } | null {
+    this.ensureActiveChatterTable();
+    const row = this.ctx.storage.sql.exec<{ key_hex: string; created_at: string }>(
+      `SELECT key_hex, created_at FROM ${ACTIVE_CHATTER_KEY_TABLE} WHERE slot = 1`,
+    ).toArray()[0];
+    if (row === undefined || !/^[0-9a-f]{64}$/iu.test(row.key_hex)) return null;
+    const createdAt = Date.parse(row.created_at);
+    return Number.isFinite(createdAt) ? { keyHex: row.key_hex, createdAt } : null;
+  }
+
+  private activeChatterNextSweepSync(keyCreatedAt: number): number | null {
+    this.ensureActiveChatterTable();
+    const row = this.ctx.storage.sql.exec<{ first_expiry: string | null }>(
+      `SELECT MIN(last_seen_at) AS first_expiry FROM ${ACTIVE_CHATTER_TABLE}`,
+    ).toArray()[0];
+    if (row?.first_expiry == null) return null;
+    const firstSeen = Date.parse(row.first_expiry);
+    if (!Number.isFinite(firstSeen)) return Date.now();
+    return Math.min(firstSeen + ACTIVE_CHATTER_RETENTION_MS, keyCreatedAt + ACTIVE_CHATTER_KEY_ROTATION_MS);
   }
 
   private recordActiveChatter(hmac: string, seenAt: string): void {
@@ -487,38 +518,17 @@ export class ChannelObject extends DurableObject<Env> {
     );
   }
 
-  /** Arm cleanup before any chatter key or SQL row is committed. */
+  /** Arm a physical alarm before committing a new or earlier sweep deadline. */
   private async ensurePlatformActiveChatterAlarm(deadline: number): Promise<void> {
     const platformAlarm = await this.ctx.storage.getAlarm();
     if (platformAlarm === null || platformAlarm > deadline) await this.ctx.storage.setAlarm(deadline);
   }
 
-  private streamMatchesOfflineIdentity(
-    stream: ActiveChatterStream,
-    identity: { streamId: string | null; startedAt: string | null },
-  ): boolean {
-    if (identity.streamId !== null && stream.streamId === identity.streamId) return true;
-    if (identity.startedAt === null) return false;
-    const startedAt = Date.parse(identity.startedAt);
-    return Number.isFinite(startedAt) && stream.expiresAt === startedAt + ACTIVE_CHATTER_RETENTION_MS;
-  }
-
-  private clearActiveChatterStateSync(
-    identity?: { streamId: string | null; startedAt: string | null },
-  ): boolean {
-    const stream = this.ctx.storage.kv.get(ACTIVE_CHATTER_STREAM_KEY);
-    if (identity !== undefined && isActiveChatterStream(stream) &&
-        !this.streamMatchesOfflineIdentity(stream, identity)) return false;
+  private clearActiveChatterStateSync(): void {
     this.clearActiveChatterRecordsSync();
-    this.ctx.storage.kv.delete(ACTIVE_CHATTER_STREAM_KEY);
-    const startedAt = identity?.startedAt === null || identity?.startedAt === undefined
-      ? Number.NaN
-      : Date.parse(identity.startedAt);
-    const expectedDeadline = Number.isFinite(startedAt)
-      ? startedAt + ACTIVE_CHATTER_RETENTION_MS
-      : isActiveChatterStream(stream) ? stream.expiresAt : undefined;
-    this.clearActiveChatterExpiryEntrySync(expectedDeadline);
-    return true;
+    this.ctx.storage.sql.exec(`DELETE FROM ${ACTIVE_CHATTER_KEY_TABLE}`);
+    this.ctx.storage.kv.delete(LEGACY_ACTIVE_CHATTER_STREAM_KEY);
+    this.clearActiveChatterExpiryEntrySync();
   }
 
   /** Keep schedule cache writes and their alarm reconciliation in one order. */
@@ -1259,153 +1269,119 @@ export class ChannelObject extends DurableObject<Env> {
     needsActiveChatters = false,
   ): Promise<number> {
     const stream = await readChannelStreamState(this.env.DB, this.ownChannelId() ?? "");
-    if (stream?.state !== "online") {
-      return await this.getChatActivityCount();
-    }
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
-    // started_at is available before the stream.online EventSub ID and gives
-    // chat-first and stream-start-first delivery the same session identity.
-    const streamId = stream.startedAt;
-    const streamStartedAt = stream.startedAt === null ? Number.NaN : Date.parse(stream.startedAt);
-    const activeChatterExpiresAt = streamStartedAt + ACTIVE_CHATTER_RETENTION_MS;
     const userIdForTracking = needsActiveChatters && typeof chatterUserId === "string" && chatterUserId.length > 0
       ? chatterUserId
       : null;
-    const canTrack = userIdForTracking !== null && streamId !== null && Number.isFinite(streamStartedAt) &&
-      activeChatterExpiresAt > now;
+    const online = stream?.state === "online";
 
-    if (!canTrack) {
+    if (userIdForTracking === null) {
+      if (!online) return await this.getChatActivityCount();
       return this.ctx.storage.transactionSync(() => this.incrementChatActivityCountSync());
     }
 
     return await this.ctx.blockConcurrencyWhile(async () => {
-      const current = this.ctx.storage.kv.get(ACTIVE_CHATTER_STREAM_KEY);
-      if (isActiveChatterStream(current) && current.expiresAt > activeChatterExpiresAt) {
-        return this.ctx.storage.transactionSync(() => this.incrementChatActivityCountSync());
-      }
-      const activeStream: ActiveChatterStream = isActiveChatterStream(current) &&
-          current.expiresAt === activeChatterExpiresAt
-        ? current
-        : {
-          key: Array.from(crypto.getRandomValues(new Uint8Array(32))),
-          streamId,
-          expiresAt: activeChatterExpiresAt,
-        };
-      const hmac = await activeChatterKey(activeStream.key, this.ownChannelId() ?? "", userIdForTracking);
+      this.ensureActiveChatterTable();
+      const current = this.activeChatterKeyRowSync();
+      const rotating = current === null || now - current.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS;
+      const keyHex = rotating
+        ? Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) => byte.toString(16).padStart(2, "0")).join("")
+        : current.keyHex;
+      const keyCreatedAt = rotating ? now : current.createdAt;
+      const hmac = await activeChatterKey(keyHex, this.ownChannelId() ?? "", userIdForTracking);
+      const currentSweep = rotating ? null : this.activeChatterNextSweepSync(keyCreatedAt);
+      const preflightDeadline = Math.min(
+        currentSweep ?? Number.POSITIVE_INFINITY,
+        now + ACTIVE_CHATTER_RETENTION_MS,
+        keyCreatedAt + ACTIVE_CHATTER_KEY_ROTATION_MS,
+      );
 
-      // The physical alarm is established first. The following synchronous
-      // transaction commits its key, rows, and dispatch entry together.
       try {
-        await this.ensurePlatformActiveChatterAlarm(activeChatterExpiresAt);
+        await this.ensurePlatformActiveChatterAlarm(preflightDeadline);
       } catch (error: unknown) {
-        this.ctx.storage.transactionSync(() => {
-          this.clearActiveChatterStateSync({ streamId: activeStream.streamId, startedAt: streamId });
-          this.incrementChatActivityCountSync();
-        });
+        if (online) this.ctx.storage.transactionSync(() => this.incrementChatActivityCountSync());
         throw error;
       }
       return this.ctx.storage.transactionSync(() => {
         this.ensureActiveChatterTable();
-        const latest = this.ctx.storage.kv.get(ACTIVE_CHATTER_STREAM_KEY);
-        if (isActiveChatterStream(latest) && latest.expiresAt > activeChatterExpiresAt) {
-          return this.incrementChatActivityCountSync();
-        }
-        const next = this.incrementChatActivityCountSync();
-        if (!isActiveChatterStream(latest) || latest.expiresAt !== activeChatterExpiresAt) {
+        const latest = this.activeChatterKeyRowSync();
+        const latestRotating = latest === null || now - latest.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS;
+        if (latestRotating || latest.keyHex !== keyHex || latest.createdAt !== keyCreatedAt) {
           this.clearActiveChatterRecordsSync();
-          this.ctx.storage.kv.put(ACTIVE_CHATTER_STREAM_KEY, activeStream);
+          this.ctx.storage.sql.exec(`DELETE FROM ${ACTIVE_CHATTER_KEY_TABLE}`);
+          this.ctx.storage.kv.delete(LEGACY_ACTIVE_CHATTER_STREAM_KEY);
+          this.ctx.storage.sql.exec(
+            `INSERT INTO ${ACTIVE_CHATTER_KEY_TABLE} (slot, key_hex, created_at) VALUES (1, ?, ?)`,
+            keyHex,
+            new Date(keyCreatedAt).toISOString(),
+          );
         }
         this.recordActiveChatter(hmac, nowIso);
-        this.writeActiveChatterExpiryEntrySync(activeChatterExpiresAt);
-        return next;
+        const nextSweep = this.activeChatterNextSweepSync(keyCreatedAt);
+        if (nextSweep === null) this.clearActiveChatterExpiryEntrySync();
+        else this.writeActiveChatterExpiryEntrySync(nextSweep);
+        return online ? this.incrementChatActivityCountSync() : this.currentChatActivityCountSync();
       });
     });
   }
 
-  public async startActiveChatterStream(streamId: string | null, startedAt: string | null): Promise<void> {
-    void streamId; // The stored identity is started_at, which chat can use before EventSub's ID arrives.
-    const startedAtMs = startedAt === null ? Number.NaN : Date.parse(startedAt);
-    const expiresAt = startedAtMs + ACTIVE_CHATTER_RETENTION_MS;
-    if (startedAt === null || !Number.isFinite(startedAtMs) || expiresAt <= Date.now()) return;
+  public async clearActiveChatters(): Promise<void> {
     await this.ctx.blockConcurrencyWhile(async () => {
-      const current = this.ctx.storage.kv.get(ACTIVE_CHATTER_STREAM_KEY);
-      if (isActiveChatterStream(current) && current.expiresAt > expiresAt) return;
-      const stream: ActiveChatterStream = isActiveChatterStream(current) && current.expiresAt === expiresAt
-        ? current
-        : {
-          key: Array.from(crypto.getRandomValues(new Uint8Array(32))),
-          // `started_at` is the shared identity when chat arrives before the
-          // stream.online event supplies its EventSub ID.
-          streamId: startedAt,
-          expiresAt,
-        };
-      try {
-        await this.ensurePlatformActiveChatterAlarm(expiresAt);
-      } catch (error: unknown) {
-        this.ctx.storage.transactionSync(() => this.clearActiveChatterStateSync());
-        throw error;
-      }
       this.ctx.storage.transactionSync(() => {
-        this.ensureActiveChatterTable();
-        const latest = this.ctx.storage.kv.get(ACTIVE_CHATTER_STREAM_KEY);
-        if (isActiveChatterStream(latest) && latest.expiresAt > expiresAt) return;
-        if (!isActiveChatterStream(latest) || latest.expiresAt !== expiresAt) {
-          this.clearActiveChatterRecordsSync();
-          this.ctx.storage.kv.put(ACTIVE_CHATTER_STREAM_KEY, stream);
-        }
-        this.writeActiveChatterExpiryEntrySync(expiresAt);
+        this.clearActiveChatterStateSync();
       });
+      await this.scheduleEarliestAlarm();
     });
   }
 
-  public async clearActiveChatters(
-    identity?: { streamId: string | null; startedAt: string | null },
-  ): Promise<void> {
-    await this.ctx.blockConcurrencyWhile(async () => {
-      const cleared = this.ctx.storage.transactionSync(() => this.clearActiveChatterStateSync(identity));
-      if (cleared) await this.scheduleEarliestAlarm();
-    });
-  }
-
-  public async getActiveChatterCount(windowMs: number): Promise<number> {
-    if (!Number.isFinite(windowMs) || windowMs <= 0) return 0;
+  public getActiveChatterCount(windowMs: number): Promise<number> {
+    if (!Number.isFinite(windowMs) || windowMs <= 0) return Promise.resolve(0);
     const now = Date.now();
-    const stream = await this.ctx.storage.get(ACTIVE_CHATTER_STREAM_KEY);
-    if (!isActiveChatterStream(stream) || stream.expiresAt <= now) return 0;
-    const cutoff = now - windowMs;
+    const key = this.activeChatterKeyRowSync();
+    if (key === null || now - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) return Promise.resolve(0);
+    const cutoff = Math.max(now - windowMs, now - ACTIVE_CHATTER_RETENTION_MS);
     this.ensureActiveChatterTable();
     const result = this.ctx.storage.sql.exec<{ count: number }>(
       `SELECT COUNT(*) AS count FROM ${ACTIVE_CHATTER_TABLE} WHERE last_seen_at >= ?`,
       new Date(cutoff).toISOString(),
     ).one();
-    return result.count;
+    return Promise.resolve(result.count);
   }
 
   public async getActiveChatter(userId: string): Promise<ActiveChatterActivity | null> {
     if (userId.length === 0) return null;
-    const stream = await this.ctx.storage.get(ACTIVE_CHATTER_STREAM_KEY);
-    if (!isActiveChatterStream(stream) || stream.expiresAt <= Date.now()) return null;
-    const hmac = await activeChatterKey(stream.key, this.ownChannelId() ?? "", userId);
     this.ensureActiveChatterTable();
+    const key = this.activeChatterKeyRowSync();
+    if (key === null || Date.now() - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) return null;
+    const hmac = await activeChatterKey(key.keyHex, this.ownChannelId() ?? "", userId);
     const activity = this.ctx.storage.sql.exec<{ first_seen_at: string; last_seen_at: string }>(
-      `SELECT first_seen_at, last_seen_at FROM ${ACTIVE_CHATTER_TABLE} WHERE hmac = ?`,
+      `SELECT first_seen_at, last_seen_at FROM ${ACTIVE_CHATTER_TABLE}
+       WHERE hmac = ? AND last_seen_at >= ?`,
       hmac,
+      new Date(Date.now() - ACTIVE_CHATTER_RETENTION_MS).toISOString(),
     ).toArray()[0];
     return activity === undefined
       ? null
       : { firstSeenAt: activity.first_seen_at, lastSeenAt: activity.last_seen_at };
   }
 
-  private async expireActiveChatters(deadline: number, now: number): Promise<void> {
+  private async expireActiveChatters(_deadline: number, now: number): Promise<void> {
     await this.ctx.blockConcurrencyWhile(() => {
       this.ctx.storage.transactionSync(() => {
-        const stream = this.ctx.storage.kv.get(ACTIVE_CHATTER_STREAM_KEY);
-        if (deadline > now || (isActiveChatterStream(stream) &&
-            (stream.expiresAt !== deadline || stream.expiresAt > now))) return;
-        this.clearActiveChatterRecordsSync();
-        this.ctx.storage.kv.delete(ACTIVE_CHATTER_STREAM_KEY);
-        this.clearActiveChatterExpiryEntrySync(deadline);
+        this.ensureActiveChatterTable();
+        this.ctx.storage.sql.exec(
+          `DELETE FROM ${ACTIVE_CHATTER_TABLE} WHERE last_seen_at <= ?`,
+          new Date(now - ACTIVE_CHATTER_RETENTION_MS).toISOString(),
+        );
+        const key = this.activeChatterKeyRowSync();
+        if (key !== null && now - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) {
+          this.clearActiveChatterStateSync();
+          return;
+        }
+        const nextSweep = key === null ? null : this.activeChatterNextSweepSync(key.createdAt);
+        if (nextSweep === null) this.clearActiveChatterStateSync();
+        else this.writeActiveChatterExpiryEntrySync(nextSweep);
       });
       return Promise.resolve();
     });

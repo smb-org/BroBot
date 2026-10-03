@@ -114,6 +114,7 @@ const objectFor = (
 ): ChannelObject => {
   let transactionQueue = Promise.resolve();
   const chatterRows = new Map<string, { hmac: string; first_seen_at: string; last_seen_at: string }>();
+  let chatterKey: { key_hex: string; created_at: string } | undefined;
   let failNextChatterDelete = false;
   const listValues = (options?: { prefix?: string; startAfter?: string; limit?: number }): Map<string, unknown> => {
     let keys = [...values.keys()]
@@ -135,6 +136,7 @@ const objectFor = (
     transactionSync: <T>(closure: () => T): T => {
       const valuesBefore = new Map(values);
       const rowsBefore = new Map(chatterRows);
+      const keyBefore = chatterKey;
       try {
         return closure();
       } catch (error: unknown) {
@@ -142,6 +144,7 @@ const objectFor = (
         for (const [key, value] of valuesBefore) values.set(key, value);
         chatterRows.clear();
         for (const [key, value] of rowsBefore) chatterRows.set(key, value);
+        chatterKey = keyBefore;
         throw error;
       }
     },
@@ -158,12 +161,35 @@ const objectFor = (
     if (/^\s*CREATE INDEX\b/iu.test(query)) {
       return { toArray: () => [], one: () => undefined };
     }
+    if (/^\s*DELETE FROM active_chatter_key\b/iu.test(query)) {
+      chatterKey = undefined;
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT INTO active_chatter_key\b/iu.test(query)) {
+      const [keyHex, createdAt] = bindings as [string, string];
+      chatterKey = { key_hex: keyHex, created_at: createdAt };
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT key_hex, created_at FROM active_chatter_key\b/iu.test(query)) {
+      return { toArray: () => chatterKey === undefined ? [] : [{ ...chatterKey }], one: () => chatterKey };
+    }
+    if (/^\s*SELECT MIN\(last_seen_at\) AS first_expiry FROM active_chatters\b/iu.test(query)) {
+      const firstExpiry = [...chatterRows.values()].map((row) => row.last_seen_at).sort()[0] ?? null;
+      return { toArray: () => [{ first_expiry: firstExpiry }], one: () => ({ first_expiry: firstExpiry }) };
+    }
     if (/^\s*DELETE FROM active_chatters\b/iu.test(query)) {
       if (failNextChatterDelete) {
         failNextChatterDelete = false;
         throw new Error("injected chatter delete failure");
       }
-      chatterRows.clear();
+      if (/WHERE last_seen_at <= \?/iu.test(query)) {
+        const cutoff = bindings[0];
+        for (const [hmac, row] of chatterRows) {
+          if (typeof cutoff === "string" && row.last_seen_at <= cutoff) chatterRows.delete(hmac);
+        }
+      } else {
+        chatterRows.clear();
+      }
       return { toArray: () => [], one: () => undefined };
     }
     if (/^\s*INSERT INTO active_chatters\b/iu.test(query)) {
@@ -186,12 +212,13 @@ const objectFor = (
         : chatterRows.size;
       return { toArray: () => [{ count }], one: () => ({ count }) };
     }
-    if (/^\s*SELECT first_seen_at, last_seen_at FROM active_chatters WHERE hmac = \?/iu.test(query)) {
-      const [hmac] = bindings as [string];
+    if (/^\s*SELECT first_seen_at, last_seen_at FROM active_chatters\s+WHERE hmac = \?/iu.test(query)) {
+      const [hmac, cutoff] = bindings as [string, string];
       const row = chatterRows.get(hmac);
+      const activeRow = row !== undefined && row.last_seen_at >= cutoff ? row : undefined;
       return {
-        toArray: () => row === undefined ? [] : [{ first_seen_at: row.first_seen_at, last_seen_at: row.last_seen_at }],
-        one: () => row === undefined ? undefined : { first_seen_at: row.first_seen_at, last_seen_at: row.last_seen_at },
+        toArray: () => activeRow === undefined ? [] : [{ first_seen_at: activeRow.first_seen_at, last_seen_at: activeRow.last_seen_at }],
+        one: () => activeRow === undefined ? undefined : { first_seen_at: activeRow.first_seen_at, last_seen_at: activeRow.last_seen_at },
       };
     }
     if (/^\s*SELECT hmac FROM active_chatters\b/iu.test(query)) {
@@ -1090,29 +1117,20 @@ describe("ChannelObject realtime path", () => {
     expect(await object.getChatActivityCount()).toBe(1);
   });
 
-  it("tracks unique chatters for the current stream without storing their ids", async () => {
+  it("tracks unique chatters in a rolling window without storing their ids", async () => {
     vi.useFakeTimers();
     const startedAt = "2026-09-27T12:00:00.000Z";
     vi.setSystemTime(Date.parse(startedAt));
     const statement = {
       bind: vi.fn(() => statement),
-      first: vi.fn().mockResolvedValue({
-        state: "online",
-        source: "eventsub",
-        changed_at: startedAt,
-        started_at: startedAt,
-        stream_id: "stream-1",
-        checked_at: null,
-      }),
+      first: vi.fn().mockResolvedValue({ state: "online", source: "eventsub", changed_at: startedAt,
+        started_at: null, stream_id: null, checked_at: null }),
     };
     const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
     const storage = storageOf(object);
 
-    await object.startActiveChatterStream("stream-1", startedAt);
     await object.recordChatActivity("viewer-1", true);
-    const first = await object.getActiveChatter("viewer-1");
-    expect(first).toEqual({ firstSeenAt: startedAt, lastSeenAt: startedAt });
-
+    expect(await object.getActiveChatter("viewer-1")).toEqual({ firstSeenAt: startedAt, lastSeenAt: startedAt });
     vi.setSystemTime(Date.parse(startedAt) + 2_000);
     await object.recordChatActivity("viewer-1", true);
     await object.recordChatActivity("viewer-2", true);
@@ -1132,171 +1150,130 @@ describe("ChannelObject realtime path", () => {
     expect(storage.list).not.toHaveBeenCalledWith(expect.objectContaining({ prefix: "chatter:" }));
   });
 
-  it("keeps a chat-event initialized stream when the stream-start event follows", async () => {
+  it("schedules the keyed sweep in the same transaction as its first chatter row", async () => {
     vi.useFakeTimers();
-    const startedAt = "2026-09-27T12:00:00.000Z";
-    vi.setSystemTime(Date.parse(startedAt));
-    const statement = {
-      bind: vi.fn(() => statement),
-      first: vi.fn().mockResolvedValue({
-        state: "online",
-        source: "eventsub",
-        changed_at: startedAt,
-        started_at: startedAt,
-        stream_id: null,
-        checked_at: null,
-      }),
-    };
-    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
-
-    await object.recordChatActivity("viewer-1", true);
-    const beforeStartEvent = await object.getActiveChatter("viewer-1");
-    await object.startActiveChatterStream("stream-1", startedAt);
-
-    expect(beforeStartEvent).toEqual({ firstSeenAt: startedAt, lastSeenAt: startedAt });
-    expect(await object.getActiveChatter("viewer-1")).toEqual(beforeStartEvent);
-    expect(await object.getActiveChatterCount(10_000)).toBe(1);
-  });
-
-  it("reconciles the chatter expiry alarm after alarm setup fails", async () => {
-    vi.useFakeTimers();
-    const startedAt = "2026-09-27T12:00:00.000Z";
-    vi.setSystemTime(Date.parse(startedAt));
-    const statement = {
-      bind: vi.fn(() => statement),
-      first: vi.fn().mockResolvedValue({
-        state: "online",
-        source: "eventsub",
-        changed_at: startedAt,
-        started_at: startedAt,
-        stream_id: "stream-1",
-        checked_at: null,
-      }),
-    };
+    const now = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
     const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
     const storage = storageOf(object);
-    storage.setAlarm.mockRejectedValueOnce(new Error("alarm setup failed"));
+    const transaction = storage.transactionSync.bind(storage);
+    const writeSnapshot = vi.fn();
+    storage.transactionSync = <T>(closure: () => T): T => transaction(() => {
+      const result = closure();
+      const rows = storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one() as { count: number };
+      const alarmTable = storage.values.get("channel:alarm_schedule") as Record<string, { deadline: number }> | undefined;
+      if (rows.count > 0) writeSnapshot(rows.count, alarmTable?.["host:active_chatters_expiry"]?.deadline);
+      return result;
+    });
 
-    await expect(object.startActiveChatterStream("stream-1", startedAt)).rejects.toThrow("alarm setup failed");
     await object.recordChatActivity("viewer-1", true);
 
-    expect(storage.setAlarm).toHaveBeenCalledTimes(2);
-    expect(await storage.getAlarm()).toBe(Date.parse(startedAt) + 24 * 60 * 60 * 1_000);
-    expect(await object.getActiveChatterCount(10_000)).toBe(1);
+    expect(writeSnapshot).toHaveBeenCalledWith(1, now + 60 * 60 * 1_000);
+    expect(await storage.getAlarm()).toBe(now + 60 * 60 * 1_000);
   });
 
-  it("removes chatter state when the last chat cannot arm its expiry alarm", async () => {
+  it("removes expired rows and deletes the key when the table becomes empty", async () => {
     vi.useFakeTimers();
-    const startedAt = "2026-09-27T12:00:00.000Z";
-    vi.setSystemTime(Date.parse(startedAt));
-    const statement = {
-      bind: vi.fn(() => statement),
-      first: vi.fn().mockResolvedValue({
-        state: "online",
-        source: "eventsub",
-        changed_at: startedAt,
-        started_at: startedAt,
-        stream_id: "stream-1",
-        checked_at: null,
-      }),
-    };
+    const start = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
     const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
     const storage = storageOf(object);
-    await object.startActiveChatterStream("stream-1", startedAt);
-    await storage.deleteAlarm();
-    storage.setAlarm.mockRejectedValueOnce(new Error("alarm setup failed"));
+    await object.recordChatActivity("viewer-1", true);
+    vi.setSystemTime(start + 30 * 60 * 1_000);
+    await object.recordChatActivity("viewer-2", true);
 
-    await expect(object.recordChatActivity("viewer-1", true)).rejects.toThrow("alarm setup failed");
+    vi.setSystemTime(start + 60 * 60 * 1_000);
+    await object.alarm();
+    expect(await object.getActiveChatter("viewer-1")).toBeNull();
+    expect(await object.getActiveChatter("viewer-2")).not.toBeNull();
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 1 });
+    expect(await storage.getAlarm()).toBe(start + 90 * 60 * 1_000);
 
-    expect(storage.values.has("chatter:stream")).toBe(false);
-    expect(await object.getActiveChatterCount(10_000)).toBe(0);
+    vi.setSystemTime(start + 90 * 60 * 1_000);
+    await object.alarm();
     expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
-    expect(storage.values.get("channel:chat_activity_count")).toBe(1);
-    const alarmTable = storage.values.get("channel:alarm_schedule") as Record<string, unknown> | undefined;
-    expect(alarmTable?.["host:active_chatters_expiry"]).toBeUndefined();
+    expect(await storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one()).toBeUndefined();
+    expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown> | undefined)?.["host:active_chatters_expiry"])
+      .toBeUndefined();
   });
 
-  it("does not let delayed offline cleanup erase a newer stream", async () => {
+  it("rotates the per-channel key and clears old rows after 24 hours", async () => {
     vi.useFakeTimers();
-    const oldStartedAt = "2026-09-27T12:00:00.000Z";
-    const newStartedAt = "2026-09-27T12:05:00.000Z";
-    vi.setSystemTime(Date.parse(oldStartedAt));
-    let currentStartedAt = oldStartedAt;
-    let currentStreamId: string | null = "stream-old";
-    const statement = {
-      bind: vi.fn(() => statement),
-      first: vi.fn(() => Promise.resolve({
-        state: "online",
-        source: "eventsub",
-        changed_at: currentStartedAt,
-        started_at: currentStartedAt,
-        stream_id: currentStreamId,
-        checked_at: null,
-      })),
-    };
+    const start = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
     const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
     const storage = storageOf(object);
-    await object.startActiveChatterStream("stream-old", oldStartedAt);
     await object.recordChatActivity("viewer-old", true);
+    const oldKey = storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one() as { key_hex: string };
 
-    currentStartedAt = newStartedAt;
-    currentStreamId = "stream-new";
-    vi.setSystemTime(Date.parse(newStartedAt));
-    await object.startActiveChatterStream("stream-new", newStartedAt);
+    vi.setSystemTime(start + 24 * 60 * 60 * 1_000);
     await object.recordChatActivity("viewer-new", true);
-    const current = storage.values.get("chatter:stream");
 
-    await object.clearActiveChatters({ streamId: "stream-old", startedAt: oldStartedAt });
-
-    expect(storage.values.get("chatter:stream")).toEqual(current);
-    expect(await object.getActiveChatter("viewer-new")).not.toBeNull();
-    expect(await object.getActiveChatterCount(10_000)).toBe(1);
+    const newKey = storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one() as { key_hex: string };
+    expect(newKey.key_hex).not.toBe(oldKey.key_hex);
+    expect(await object.getActiveChatter("viewer-old")).toBeNull();
+    expect(await object.getActiveChatter("viewer-new")).toEqual({
+      firstSeenAt: new Date(start + 24 * 60 * 60 * 1_000).toISOString(),
+      lastSeenAt: new Date(start + 24 * 60 * 60 * 1_000).toISOString(),
+    });
   });
 
-  it("retries expiry after SQL deletion fails without separating key and rows", async () => {
+  it("retries a failed sweep idempotently", async () => {
     vi.useFakeTimers();
-    const startedAt = "2026-09-27T12:00:00.000Z";
-    const expiresAt = Date.parse(startedAt) + 24 * 60 * 60 * 1_000;
-    vi.setSystemTime(Date.parse(startedAt));
-    const statement = {
-      bind: vi.fn(() => statement),
-      first: vi.fn().mockResolvedValue({
-        state: "online",
-        source: "eventsub",
-        changed_at: startedAt,
-        started_at: startedAt,
-        stream_id: "stream-1",
-        checked_at: null,
-      }),
-    };
+    const start = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
     const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
     const storage = storageOf(object);
-    await object.startActiveChatterStream("stream-1", startedAt);
     await object.recordChatActivity("viewer-1", true);
-    vi.setSystemTime(expiresAt);
+    vi.setSystemTime(start + 60 * 60 * 1_000);
     storage.failNextChatterDelete();
 
     await object.alarm();
-
-    expect(storage.values.has("chatter:stream")).toBe(true);
+    expect(await object.getActiveChatter("viewer-1")).not.toBeNull();
     expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 1 });
     const retryAt = await storage.getAlarm();
-    expect(retryAt).toBeGreaterThan(expiresAt);
-    vi.setSystemTime(retryAt ?? expiresAt + 60_000);
+    expect(retryAt).toBeGreaterThan(start + 60 * 60 * 1_000);
+    vi.setSystemTime(retryAt ?? start + 61 * 60 * 1_000);
+    await object.alarm();
     await object.alarm();
 
-    expect(storage.values.has("chatter:stream")).toBe(false);
     expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
+    expect(await storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one()).toBeUndefined();
+  });
+
+  it("wipes every chatter row and the key on offline cleanup", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+    const storage = storageOf(object);
+    await object.recordChatActivity("viewer-1", true);
+    await object.recordChatActivity("viewer-2", true);
+    storage.values.set("chatter:stream", { key: [1, 2, 3], streamId: "legacy", expiresAt: start });
+
+    await object.clearActiveChatters();
+
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
+    expect(await storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one()).toBeUndefined();
+    expect(storage.values.has("chatter:stream")).toBe(false);
+    expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown> | undefined)?.["host:active_chatters_expiry"])
+      .toBeUndefined();
   });
 
   it("counts and clears a large chatter set with SQL operations", async () => {
     vi.useFakeTimers();
     const startedAt = "2026-09-27T12:00:00.000Z";
     vi.setSystemTime(Date.parse(startedAt));
-    const object = objectFor([]);
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
     const storage = storageOf(object);
-    await object.startActiveChatterStream("stream-1", startedAt);
-    for (let index = 0; index < 10_000; index += 1) {
+    await object.recordChatActivity("viewer-initial", true);
+    for (let index = 0; index < 9_999; index += 1) {
       storage.sql.exec(
         "INSERT INTO active_chatters (hmac, first_seen_at, last_seen_at) VALUES (?, ?, ?) ON CONFLICT(hmac) DO UPDATE SET last_seen_at = excluded.last_seen_at",
         `hmac-${String(index)}`,
@@ -1306,7 +1283,6 @@ describe("ChannelObject realtime path", () => {
     }
 
     expect(await object.getActiveChatterCount(10_000)).toBe(10_000);
-    expect(storage.list).not.toHaveBeenCalledWith(expect.objectContaining({ prefix: "chatter:" }));
     storage.sql.exec.mockClear();
     await object.clearActiveChatters();
 
@@ -1335,39 +1311,26 @@ describe("ChannelObject realtime path", () => {
     expect(await object.getChatActivityCount()).toBe(1);
   });
 
-  it("deletes active chatter data at stream end and after the 24-hour alarm", async () => {
+  it("allows an in-flight chat after offline cleanup and expires it in the rolling window", async () => {
     vi.useFakeTimers();
     const startedAt = "2026-09-27T12:00:00.000Z";
-    const expiresAt = Date.parse(startedAt) + 24 * 60 * 60 * 1_000;
     vi.setSystemTime(Date.parse(startedAt));
     const statement = {
       bind: vi.fn(() => statement),
-      first: vi.fn().mockResolvedValue({
-        state: "online",
-        source: "eventsub",
-        changed_at: startedAt,
-        started_at: startedAt,
-        stream_id: "stream-1",
-        checked_at: null,
-      }),
+      first: vi.fn().mockResolvedValue({ state: "offline", source: "eventsub", changed_at: startedAt,
+        started_at: null, stream_id: null, checked_at: null }),
     };
     const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
     const storage = storageOf(object);
-
-    await object.startActiveChatterStream("stream-1", startedAt);
+    await object.clearActiveChatters();
     await object.recordChatActivity("viewer-1", true);
     expect(await object.getActiveChatterCount(10_000)).toBe(1);
-    await object.clearActiveChatters();
-    expect([...storage.values.keys()].some((key) => key.startsWith("chatter:"))).toBe(false);
-    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
-
-    await object.startActiveChatterStream("stream-1", startedAt);
-    await object.recordChatActivity("viewer-2", true);
-    expect(await object.getActiveChatterCount(10_000)).toBe(1);
-    vi.setSystemTime(expiresAt);
+    expect(await object.getActiveChatter("viewer-1")).not.toBeNull();
+    vi.setSystemTime(Date.parse(startedAt) + 60 * 60 * 1_000);
     await object.alarm();
 
-    expect([...storage.values.keys()].some((key) => key.startsWith("chatter:"))).toBe(false);
+    expect(await storage.sql.exec("SELECT COUNT(*) AS count FROM active_chatters").one()).toMatchObject({ count: 0 });
+    expect(await storage.sql.exec("SELECT key_hex, created_at FROM active_chatter_key WHERE slot = 1").one()).toBeUndefined();
   });
 
   it("shares automated output claims and remembers recent bot messages per channel", async () => {
