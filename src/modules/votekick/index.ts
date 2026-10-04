@@ -1,4 +1,5 @@
-import type { BotModule } from "../contract";
+import type { BotModule, ModuleTemplateUsageSource } from "../contract";
+import { settingsVariableReferences } from "../contract";
 import { VOTEKICK_DEFAULT_TEXTS } from "./contracts/chat-defaults";
 import { VOTEKICK_TEMPLATE_FIELDS } from "./contracts/template-variable-catalog";
 import { votekickCatalog } from "./contracts/catalog";
@@ -8,6 +9,20 @@ import { processVotekickMessage, closeExpiredVotekick } from "./service";
 import { votekickRoutes } from "./routes";
 
 const votekickIcon = { paths: ["M12 3v18", "M3 12h18", "m5 5 14 14", "M19 5 5 19"] } as const;
+const templateFields = ["startText", "passText", "failText", "expiredText", "protectedText", "busyText"] as const;
+
+const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
+  const row = await db.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?")
+    .bind(channelId, VOTEKICK_MODULE_ID).first<{ settings: string }>();
+  if (row === null) return [];
+  let settings: unknown;
+  try { settings = JSON.parse(row.settings) as unknown; } catch { return []; }
+  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) return [];
+  return templateFields.flatMap((field) => {
+    const text: unknown = Reflect.get(settings, field);
+    return typeof text === "string" ? [{ text, kind: "event" as const, label: `votekick.${field}` }] : [];
+  });
+};
 
 export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   id: VOTEKICK_MODULE_ID,
@@ -29,6 +44,8 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   eventSubTypes: ["channel.chat.message"],
   templateFields: VOTEKICK_TEMPLATE_FIELDS,
   templateContext: "event",
+  templateUsageSources,
+  variableReferences: settingsVariableReferences(VOTEKICK_MODULE_ID, templateFields),
   routes: votekickRoutes,
   alarms: [{
     key: "close",

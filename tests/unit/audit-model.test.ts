@@ -121,6 +121,20 @@ describe("audit sentence action templates", () => {
     expect(auditSentenceText(removed, "en")).toContain("Bob with the Manager role");
   });
 
+  it("describes timeout lifting as an attempt and localizes the recorded outcome", () => {
+    const entry = baseEntry({
+      action: "votekick.timeout_lift_attempted",
+      actorDisplayName: "Alice",
+      moduleId: "votekick",
+      after: JSON.stringify({ outcome: "rejected", reason: "protected_target" }),
+    });
+
+    expect(auditSentenceText(entry, "de")).toBe("Alice versuchte, den Timeout für den Votekick aufzuheben (nicht aufgehoben)");
+    expect(auditSentenceText(entry, "en")).toBe("Alice attempted to lift the timeout for the votekick (not lifted)");
+    expect(auditRowLabel(entry, "de")).toContain("Aufhebung versucht");
+    expect(auditRowLabel(entry, "en")).toContain("lift attempted");
+  });
+
   it("shows the old and new channel time zone in the host audit sentence", () => {
     const entry = baseEntry({
       action: "channel.time_zone.updated",

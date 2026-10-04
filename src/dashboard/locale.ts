@@ -10,6 +10,7 @@ export interface AuditSentenceParts {
   object: string;
   from: string | null;
   to: string | null;
+  outcome?: string | null;
 }
 
 export const catalogString = (catalog: object, key: string): string | undefined => {
@@ -1089,7 +1090,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "channel.pause.enabled": ({ actor, object }) => `${actor} pausierte automatische Aktionen für ${object}`,
         "channel.pause.disabled": ({ actor, object }) => `${actor} setzte automatische Aktionen für ${object} fort`,
         "votekick.cancelled": ({ actor, object }) => `${actor} brach die Abstimmung ${object} ab`,
-        "votekick.timeout_lift_attempted": ({ actor, object }) => `${actor} hob den Timeout aus ${object} auf`,
+        "votekick.timeout_lift_attempted": (parts) => `${parts.actor} versuchte, den Timeout für ${parts.object} aufzuheben (${votekickLiftOutcomeText(parts.outcome, "de")})`,
         "overlay.token.issued": ({ actor, object }) => `${actor} stellte ${object} aus`,
         "overlay.token.revoked": ({ actor, object }) => `${actor} widerrief ${object}`,
         "overlay.access.issued": ({ actor, object }) => `${actor} stellte ${object} aus`,
@@ -1369,7 +1370,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "channel.pause.enabled": ({ actor, object }) => `${actor} paused automatic actions for ${object}`,
         "channel.pause.disabled": ({ actor, object }) => `${actor} resumed automatic actions for ${object}`,
         "votekick.cancelled": ({ actor, object }) => `${actor} cancelled the ballot ${object}`,
-        "votekick.timeout_lift_attempted": ({ actor, object }) => `${actor} lifted the timeout from ${object}`,
+        "votekick.timeout_lift_attempted": (parts) => `${parts.actor} attempted to lift the timeout for ${parts.object} (${votekickLiftOutcomeText(parts.outcome, "en")})`,
         "overlay.token.issued": ({ actor, object }) => `${actor} issued ${object}`,
         "overlay.token.revoked": ({ actor, object }) => `${actor} revoked ${object}`,
         "overlay.access.issued": ({ actor, object }) => `${actor} issued ${object}`,
@@ -1552,6 +1553,45 @@ const chatUnknownText = (
 
 const detailText = (detail: EventDetail, key: string, fallback: string): string =>
   typeof detail[key] === "string" && detail[key].length > 0 ? detail[key] : fallback;
+
+const votekickRejectionReasonText = (reason: unknown, language: DashboardLanguage): string => {
+  const reasons: LocaleCatalog<Record<string, string>> = {
+    de: {
+      busy: "Es läuft bereits eine Abstimmung.",
+      channel_cooldown: "Die kanalweite Abklingzeit läuft noch.",
+      target_cooldown: "Für dieses Ziel läuft die Abklingzeit noch.",
+      lookup_failure: "Die erforderlichen Kanaldaten waren nicht verfügbar.",
+      stream_not_online: "Der Stream ist nicht live.",
+      target_unresolvable: "Das Zielkonto wurde nicht gefunden.",
+      target_protected: "Das Ziel kann nicht abgestimmt werden.",
+      target_not_active: "Das Ziel war kürzlich nicht im Chat aktiv.",
+      starter_not_authorized: "Nur VIPs und Moderatoren dürfen eine Abstimmung starten.",
+    },
+    en: {
+      busy: "A ballot is already running.",
+      channel_cooldown: "The channel cooldown is still active.",
+      target_cooldown: "The target cooldown is still active.",
+      lookup_failure: "Required channel data was unavailable.",
+      stream_not_online: "The stream is not live.",
+      target_unresolvable: "The target account could not be found.",
+      target_protected: "This target cannot be voted against.",
+      target_not_active: "The target has not been active in chat recently.",
+      starter_not_authorized: "Only VIPs and moderators can start a ballot.",
+    },
+  };
+  return typeof reason === "string" ? reasons[language][reason] ?? (language === "de" ? "Unbekannter Grund" : "Unknown reason")
+    : language === "de" ? "Unbekannter Grund" : "Unknown reason";
+};
+
+const votekickLiftOutcomeText = (outcome: string | null | undefined, language: DashboardLanguage): string => {
+  const outcomes: LocaleCatalog<Record<string, string>> = {
+    de: { applied: "Timeout aufgehoben", rejected: "nicht aufgehoben", ambiguous: "Ausgang unklar" },
+    en: { applied: "timeout lifted", rejected: "not lifted", ambiguous: "outcome unclear" },
+  };
+  return outcome === undefined || outcome === null
+    ? language === "de" ? "Ergebnis unbekannt" : "outcome unknown"
+    : outcomes[language][outcome] ?? (language === "de" ? "Ergebnis unbekannt" : "outcome unknown");
+};
 
 const textCommandTier = (detail: EventDetail, key: string, fallback: string, language: DashboardLanguage): string => {
   const value = detail[key];
@@ -2017,7 +2057,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "raid.outgoing": (detail) => `Ausgehender Raid zu ${detailText(detail, "targetChannelId", "unbekannt")}`,
     "raid.shoutout": (detail) => `Raid über der Schwelle (${detailNumber(detail, "viewers", "unbekannt")} von ${detailNumber(detail, "threshold", "unbekannt")}): Shoutout und Chatzeile`,
     "raid.invalid": (detail) => `Raid verworfen: ${raidInvalidReasonText(detail.reason, "de")}`,
-    "votekick.rejected": (detail) => `Votekick abgelehnt: ${detailText(detail, "reason", "unbekannter Grund")}`,
+    "votekick.rejected": (detail) => `Votekick abgelehnt: ${votekickRejectionReasonText(detail.reason, "de")}`,
     "shoutout.suppressed": (detail) => detail.reason === ("disabled" satisfies ShoutoutSuppressedReason)
       ? "Shoutout abgeschaltet"
       : detail.reason === ("below_threshold" satisfies ShoutoutSuppressedReason)
@@ -2128,7 +2168,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "raid.outgoing": (detail) => `Outgoing raid to ${detailText(detail, "targetChannelId", "unknown")}`,
     "raid.shoutout": (detail) => `Raid above threshold (${detailNumber(detail, "viewers", "unknown")} of ${detailNumber(detail, "threshold", "unknown")}): shoutout and chat line`,
     "raid.invalid": (detail) => `Raid discarded: ${raidInvalidReasonText(detail.reason, "en")}`,
-    "votekick.rejected": (detail) => `Votekick rejected: ${detailText(detail, "reason", "unknown reason")}`,
+    "votekick.rejected": (detail) => `Votekick rejected: ${votekickRejectionReasonText(detail.reason, "en")}`,
     "shoutout.suppressed": (detail) => detail.reason === ("disabled" satisfies ShoutoutSuppressedReason)
       ? "Shoutout disabled"
       : detail.reason === ("below_threshold" satisfies ShoutoutSuppressedReason)
@@ -2336,7 +2376,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.pause.enabled": "Automatische Aktionen pausiert",
     "channel.pause.disabled": "Automatische Aktionen fortgesetzt",
     "votekick.cancelled": "Votekick abgebrochen",
-    "votekick.timeout_lift_attempted": "Votekick-Timeout aufgehoben",
+    "votekick.timeout_lift_attempted": "Votekick-Timeout-Aufhebung versucht",
     "overlay.token.issued": "Overlay-Token ausgestellt",
     "overlay.token.revoked": "Overlay-Token widerrufen",
     "overlay.access.issued": "Overlay-Zugang ausgestellt",
@@ -2392,7 +2432,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.pause.enabled": "Automatic actions paused",
     "channel.pause.disabled": "Automatic actions resumed",
     "votekick.cancelled": "Votekick cancelled",
-    "votekick.timeout_lift_attempted": "Votekick timeout lifted",
+    "votekick.timeout_lift_attempted": "Votekick timeout lift attempted",
     "overlay.token.issued": "Overlay token issued",
     "overlay.token.revoked": "Overlay token revoked",
     "overlay.access.issued": "Overlay access issued",

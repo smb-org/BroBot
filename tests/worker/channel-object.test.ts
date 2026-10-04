@@ -1526,6 +1526,51 @@ describe("ChannelObject realtime path", () => {
     await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
   });
 
+  it("keeps a threshold-crossed ballot open when its atomic snapshot falls below threshold", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("votekick", "kick-a", 2, 20_000);
+    await object.castBallot("votekick", "kick-a", "yes-1", 1);
+    await object.castBallot("votekick", "kick-a", "yes-2", 1);
+    await object.castBallot("votekick", "kick-a", "no-1", 2);
+
+    await expect(object.closeBallotIfNetAtLeast("votekick", "kick-a", 2)).resolves.toEqual({
+      status: "open",
+      counts: [2, 1],
+      revision: 3,
+    });
+    await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [2, 1], revision: 3 });
+    await object.castBallot("votekick", "kick-a", "yes-3", 1);
+    await expect(object.closeBallotIfNetAtLeast("votekick", "kick-a", 2)).resolves.toEqual({
+      status: "closed",
+      counts: [3, 1],
+      revision: 4,
+    });
+    await expect(object.readBallot("votekick", "kick-a")).resolves.toBeNull();
+  });
+
+  it("returns the closed ballot snapshot when expiry alarm cleanup fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("votekick", "kick-a", 2, 20_000);
+    await object.castBallot("votekick", "kick-a", "yes-1", 1);
+    await object.castBallot("votekick", "kick-a", "yes-2", 1);
+    const clearAlarmEntry = vi.spyOn(
+      object as unknown as { clearAlarmEntry: (key: string) => Promise<void> },
+      "clearAlarmEntry",
+    ).mockRejectedValue(new Error("alarm cleanup unavailable"));
+
+    await expect(object.closeBallotIfNetAtLeast("votekick", "kick-a", 2)).resolves.toEqual({
+      status: "closed",
+      counts: [2, 0],
+      revision: 2,
+    });
+    await expect(object.readBallot("votekick", "kick-a")).resolves.toBeNull();
+    expect(clearAlarmEntry).toHaveBeenCalledOnce();
+  });
+
   it("uses a fresh random voter key for each ballot and never stores the user id", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);

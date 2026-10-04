@@ -91,7 +91,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["placeholders", "?, ?, ?"],
   ["channelStateQuery", channelStateQuery],
   ["textCommandSelectColumns", textCommandSelectColumns],
-  ["rowColumns", "votekick_id, target_user_id, target_login, initiator_user_id, status, threshold, yes_votes, no_votes, duration_seconds, started_at, ends_at, ended_at, lifted_at"],
+  ["rowColumns", "votekick_id, target_user_id, target_login, initiator_user_id, status, threshold, yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at"],
   ["selectFaqEntries", `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
                                  games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at
                             FROM faq_entries
@@ -167,8 +167,8 @@ describe("SQL contract", () => {
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
       expect(objects.filter((object) => object.type === "table")).toHaveLength(44);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(37);
-      expect(objects).toHaveLength(81);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(38);
+      expect(objects).toHaveLength(82);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

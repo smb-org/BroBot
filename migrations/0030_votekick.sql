@@ -8,9 +8,10 @@ CREATE TABLE votekicks (
   threshold INTEGER NOT NULL CHECK (threshold >= 1),
   yes_votes INTEGER NOT NULL DEFAULT 1 CHECK (yes_votes >= 0),
   no_votes INTEGER NOT NULL DEFAULT 0 CHECK (no_votes >= 0),
+  ballot_revision INTEGER NOT NULL DEFAULT 0 CHECK (ballot_revision >= 0),
   duration_seconds INTEGER CHECK (duration_seconds BETWEEN 1 AND 3600),
   started_at TEXT NOT NULL,
-  ends_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
   ended_at TEXT,
   lifted_at TEXT,
   PRIMARY KEY (channel_id, votekick_id)
@@ -26,3 +27,6 @@ CREATE INDEX votekicks_target_cooldown
 CREATE INDEX votekicks_channel_ended
   ON votekicks(channel_id, ended_at DESC)
   WHERE ended_at IS NOT NULL;
+
+CREATE INDEX votekicks_channel_history
+  ON votekicks(channel_id, started_at, votekick_id);

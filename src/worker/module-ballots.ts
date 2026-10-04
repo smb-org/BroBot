@@ -12,6 +12,7 @@ export const moduleBallots = (
       cast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
       read: () => Promise.resolve(null),
       close: () => Promise.resolve(null),
+      closeIfNetAtLeast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
     };
   }
   const object = namespace.get(namespace.idFromName(channelId));
@@ -20,5 +21,6 @@ export const moduleBallots = (
     cast: (ballotId, userId, choice) => object.castBallot(moduleId, ballotId, userId, choice),
     read: (ballotId) => object.readBallot(moduleId, ballotId),
     close: (ballotId) => object.closeBallot(moduleId, ballotId),
+    closeIfNetAtLeast: (ballotId, threshold) => object.closeBallotIfNetAtLeast(moduleId, ballotId, threshold),
   };
 };

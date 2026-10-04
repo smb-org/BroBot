@@ -707,12 +707,17 @@ export type BallotCastResult = BallotSnapshot & {
   status: "counted" | "changed" | "unchanged" | "not_open";
 };
 
+export type BallotConditionalCloseResult =
+  | ({ status: "open" | "closed" } & BallotSnapshot)
+  | ({ status: "not_open" } & BallotSnapshot);
+
 /** Ballot access already bound by the host to one channel and one module. */
 export interface ModuleBallotAccess {
   open: (ballotId: string, optionCount: number, expiresAt: number) => Promise<BallotOpenResult>;
   cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
+  closeIfNetAtLeast: (ballotId: string, threshold: number) => Promise<BallotConditionalCloseResult>;
 }
 
 export type ModuleStreamState = "online" | "offline" | "unknown";

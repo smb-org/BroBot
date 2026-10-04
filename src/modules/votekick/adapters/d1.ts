@@ -1,5 +1,5 @@
 import type { Votekick, VotekickStatus } from "../contracts";
-import type { VotekickRepository, VotekickStart } from "../repository";
+import type { VotekickAdmissionResult, VotekickRepository } from "../repository";
 
 interface VotekickRow {
   votekick_id: string;
@@ -10,9 +10,10 @@ interface VotekickRow {
   threshold: number;
   yes_votes: number;
   no_votes: number;
+  ballot_revision: number;
   duration_seconds: number | null;
   started_at: string;
-  ends_at: string;
+  expires_at: string;
   ended_at: string | null;
   lifted_at: string | null;
 }
@@ -26,39 +27,71 @@ const mapRow = (row: VotekickRow): Votekick => ({
   threshold: row.threshold,
   yesVotes: row.yes_votes,
   noVotes: row.no_votes,
+  ballotRevision: row.ballot_revision,
   durationSeconds: row.duration_seconds,
   startedAt: row.started_at,
-  endsAt: row.ends_at,
+  endsAt: row.expires_at,
   endedAt: row.ended_at,
   liftedAt: row.lifted_at,
 });
 
 const rowColumns = `votekick_id, target_user_id, target_login, initiator_user_id, status, threshold,
-  yes_votes, no_votes, duration_seconds, started_at, ends_at, ended_at, lifted_at`;
+  yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at`;
 
 export const createVotekickRepository = (db: D1Database): VotekickRepository => ({
-  async channelEndedAt(channelId): Promise<string | null> {
-    const row = await db.prepare(
-      "SELECT MAX(ended_at) AS last_ended_at FROM votekicks WHERE channel_id = ? AND ended_at IS NOT NULL",
-    ).bind(channelId).first<{ last_ended_at: string | null }>();
-    return row?.last_ended_at ?? null;
+  async admit(channelId, input, checkedAt, channelCooldownSeconds, targetCooldownSeconds): Promise<VotekickAdmissionResult> {
+    const channelCutoff = new Date(Date.parse(checkedAt) - channelCooldownSeconds * 1000).toISOString();
+    const targetCutoff = new Date(Date.parse(checkedAt) - targetCooldownSeconds * 1000).toISOString();
+    const results = await db.batch([
+      db.prepare(
+        `UPDATE votekicks SET status = 'expired', ended_at = expires_at
+          WHERE channel_id = ? AND status = 'running' AND expires_at <= ?`,
+      ).bind(channelId, checkedAt),
+      db.prepare(
+        `INSERT OR IGNORE INTO votekicks
+          (channel_id, votekick_id, target_user_id, target_login, initiator_user_id, status, threshold,
+           yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at)
+         SELECT ?, ?, ?, ?, ?, 'running', ?, ?, 0, ?, NULL, ?, ?, NULL, NULL
+          WHERE NOT EXISTS (
+            SELECT 1 FROM votekicks WHERE channel_id = ? AND status = 'running'
+          )
+            AND NOT EXISTS (
+              SELECT 1 FROM votekicks WHERE channel_id = ? AND ended_at > ?
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM votekicks WHERE channel_id = ? AND target_user_id = ? AND started_at > ?
+            )`,
+      ).bind(channelId, input.id, input.targetUserId, input.targetLogin, input.initiatorUserId, input.threshold,
+        input.yesVotes, input.ballotRevision, input.startedAt, input.endsAt, channelId, channelId, channelCutoff,
+        channelId, input.targetUserId, targetCutoff),
+      db.prepare(
+        `SELECT CASE
+          WHEN EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND status = 'running') THEN 'busy'
+          WHEN EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND ended_at > ?) THEN 'channel_cooldown'
+          WHEN EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND target_user_id = ? AND started_at > ?) THEN 'target_cooldown'
+          ELSE 'busy'
+        END AS reason`,
+      ).bind(channelId, channelId, channelCutoff, channelId, input.targetUserId, targetCutoff),
+    ]);
+    if ((results[1]?.meta.changes ?? 0) > 0) return "admitted";
+    const reason = (results[2]?.results[0] as { reason?: unknown } | undefined)?.reason;
+    return reason === "channel_cooldown" || reason === "target_cooldown" ? reason : "busy";
   },
 
-  async targetStartedAt(channelId, targetUserId): Promise<string | null> {
-    const row = await db.prepare(
-      "SELECT MAX(started_at) AS last_started_at FROM votekicks WHERE channel_id = ? AND target_user_id = ?",
-    ).bind(channelId, targetUserId).first<{ last_started_at: string | null }>();
-    return row?.last_started_at ?? null;
-  },
-
-  async insertRunning(channelId, input: VotekickStart): Promise<boolean> {
+  async expireOverdue(channelId, now): Promise<readonly Votekick[]> {
     const result = await db.prepare(
-      `INSERT OR IGNORE INTO votekicks
-        (channel_id, votekick_id, target_user_id, target_login, initiator_user_id, status, threshold,
-         yes_votes, no_votes, duration_seconds, started_at, ends_at, ended_at, lifted_at)
-       VALUES (?, ?, ?, ?, ?, 'running', ?, 1, 0, NULL, ?, ?, NULL, NULL)`,
-    ).bind(channelId, input.id, input.targetUserId, input.targetLogin, input.initiatorUserId, input.threshold, input.startedAt, input.endsAt).run();
-    return result.meta.changes > 0;
+      `UPDATE votekicks SET status = 'expired', ended_at = expires_at
+        WHERE channel_id = ? AND status = 'running' AND expires_at <= ?
+        RETURNING ${rowColumns}`,
+    ).bind(channelId, now).all<VotekickRow>();
+    return result.results.map(mapRow);
+  },
+
+  async byId(channelId, id): Promise<Votekick | null> {
+    const row = await db.prepare(
+      `SELECT ${rowColumns} FROM votekicks WHERE channel_id = ? AND votekick_id = ?`,
+    ).bind(channelId, id).first<VotekickRow>();
+    return row === null ? null : mapRow(row);
   },
 
   async running(channelId): Promise<Votekick | null> {
@@ -77,19 +110,24 @@ export const createVotekickRepository = (db: D1Database): VotekickRepository => 
     return result.results.map(mapRow);
   },
 
-  async updateCounts(channelId, id, yesVotes, noVotes): Promise<void> {
+  async updateCounts(channelId, id, yesVotes, noVotes, ballotRevision): Promise<void> {
     await db.prepare(
-      `UPDATE votekicks SET yes_votes = ?, no_votes = ?
-        WHERE channel_id = ? AND votekick_id = ? AND status = 'running'`,
-    ).bind(yesVotes, noVotes, channelId, id).run();
+      `UPDATE votekicks SET yes_votes = ?, no_votes = ?, ballot_revision = ?
+        WHERE channel_id = ? AND votekick_id = ? AND status IN ('running', 'expired') AND ballot_revision < ?`,
+    ).bind(yesVotes, noVotes, ballotRevision, channelId, id, ballotRevision).run();
   },
 
-  async finish(channelId, id, status: Exclude<VotekickStatus, "running">, yesVotes, noVotes, durationSeconds, endedAt): Promise<boolean> {
+  async finish(channelId, id, status: Exclude<VotekickStatus, "running">, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt): Promise<boolean> {
     const result = await db.prepare(
       `UPDATE votekicks
-          SET status = ?, yes_votes = ?, no_votes = ?, duration_seconds = ?, ended_at = ?
+          SET status = ?,
+              yes_votes = CASE WHEN ? IS NOT NULL AND ballot_revision < ? THEN ? ELSE yes_votes END,
+              no_votes = CASE WHEN ? IS NOT NULL AND ballot_revision < ? THEN ? ELSE no_votes END,
+              ballot_revision = CASE WHEN ? IS NOT NULL AND ballot_revision < ? THEN ? ELSE ballot_revision END,
+              duration_seconds = ?, ended_at = ?
         WHERE channel_id = ? AND votekick_id = ? AND status = 'running'`,
-    ).bind(status, yesVotes, noVotes, durationSeconds, endedAt, channelId, id).run();
+    ).bind(status, ballotRevision, ballotRevision, yesVotes, ballotRevision, ballotRevision, noVotes,
+      ballotRevision, ballotRevision, ballotRevision, durationSeconds, endedAt, channelId, id).run();
     return result.meta.changes > 0;
   },
 

@@ -38,6 +38,7 @@ export interface Votekick {
   threshold: number;
   yesVotes: number;
   noVotes: number;
+  ballotRevision: number;
   durationSeconds: number | null;
   startedAt: string;
   endsAt: string;

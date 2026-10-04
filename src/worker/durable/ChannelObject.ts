@@ -65,6 +65,7 @@ import {
   ballotIdentityFromExpiryAlarmKey,
   castStoredBallot,
   closeStoredBallot,
+  closeStoredBallotIfNetAtLeast,
   expireStoredBallot,
   openStoredBallot,
   readStoredBallot,
@@ -1446,6 +1447,7 @@ export class ChannelObject extends DurableObject<Env> {
       cast: (ballotId, userId, choice) => this.castBallot(moduleId, ballotId, userId, choice),
       read: (ballotId) => this.readBallot(moduleId, ballotId),
       close: (ballotId) => this.closeBallot(moduleId, ballotId),
+      closeIfNetAtLeast: (ballotId, threshold) => this.closeBallotIfNetAtLeast(moduleId, ballotId, threshold),
     };
   }
 
@@ -1503,6 +1505,18 @@ export class ChannelObject extends DurableObject<Env> {
   public async closeBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
     const result = await closeStoredBallot(this.ctx.storage, moduleId, ballotId);
     await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
+    return result;
+  }
+
+  public async closeBallotIfNetAtLeast(moduleId: string, ballotId: string, threshold: number) {
+    const result = await closeStoredBallotIfNetAtLeast(this.ctx.storage, moduleId, ballotId, threshold);
+    if (result.status === "closed" || result.status === "not_open") {
+      try {
+        await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
+      } catch {
+        // The ballot snapshot is authoritative; a stale alarm safely finds no ballot to expire.
+      }
+    }
     return result;
   }
 

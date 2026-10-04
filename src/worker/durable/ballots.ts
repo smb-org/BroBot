@@ -291,3 +291,31 @@ export const closeStoredBallot = async (
     return snapshotOf(ballot);
   });
 };
+
+/** Closes a ballot only when its transactionally read net tally still meets the threshold. */
+export const closeStoredBallotIfNetAtLeast = async (
+  storage: BallotStorage,
+  moduleId: string,
+  ballotId: string,
+  threshold: number,
+): Promise<({ status: "open" | "closed" } & BallotSnapshot) | ({ status: "not_open" } & BallotSnapshot)> => {
+  validId(moduleId, "Module id");
+  validId(ballotId, "Ballot id");
+  if (!Number.isSafeInteger(threshold) || threshold < 1) throw new Error("Ballot threshold must be a positive integer.");
+  return await storage.transaction(async (transaction) => {
+    const ballot = await transaction.get(ballotKey(moduleId, ballotId));
+    if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) {
+      return { status: "not_open", counts: [], revision: 0 };
+    }
+    if (ballot.expiresAt <= Date.now()) {
+      await deleteBallotData(transaction, moduleId, ballotId);
+      return { status: "not_open", counts: [], revision: ballot.revision };
+    }
+    const snapshot = snapshotOf(ballot);
+    if ((snapshot.counts[0] ?? 0) - (snapshot.counts[1] ?? 0) < threshold) {
+      return { status: "open", ...snapshot };
+    }
+    await deleteBallotData(transaction, moduleId, ballotId);
+    return { status: "closed", ...snapshot };
+  });
+};

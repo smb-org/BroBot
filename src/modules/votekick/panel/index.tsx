@@ -50,12 +50,10 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
-  const runningId = data?.running?.id ?? null;
   useEffect(() => {
-    if (runningId === null) return;
     const timer = window.setInterval(() => { void reload(true); }, 2000);
     return () => window.clearInterval(timer);
-  }, [runningId, reload]);
+  }, [reload]);
 
   const cancel = async (): Promise<void> => {
     if (cancelTarget === null) return;

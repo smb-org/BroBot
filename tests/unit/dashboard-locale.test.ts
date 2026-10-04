@@ -73,6 +73,8 @@ describe("dashboard locale", () => {
     expect(eventText("text_commands.lookup_unavailable", { name: "uptime", kind: "uptime" })).toBe("Textbefehl !uptime: Stream-Daten nicht verfügbar");
     expect(eventText("text_commands.argument_missing", { name: "so" })).toBe("Befehl !so: Twitch-Name fehlt");
     expect(eventText("text_commands.variable_update_failed", { name: "score" })).toBe("Befehl !score konnte die Kanalvariable nicht ändern");
+    expect(eventText("votekick.rejected", { reason: "starter_not_authorized" }))
+      .toBe("Votekick abgelehnt: Nur VIPs und Moderatoren dürfen eine Abstimmung starten.");
   });
 
   it("returns the English detail texts", () => {
@@ -88,6 +90,8 @@ describe("dashboard locale", () => {
     expect(eventText("text_commands.lookup_unavailable", { name: "game", kind: "game" })).toBe("Command !game: game information unavailable");
     expect(eventText("text_commands.argument_missing", { name: "so" })).toBe("Command !so: Twitch login missing");
     expect(eventText("text_commands.variable_update_failed", { name: "score" })).toBe("Command !score could not change the channel variable");
+    expect(eventText("votekick.rejected", { reason: "target_not_active" }))
+      .toBe("Votekick rejected: The target has not been active in chat recently.");
   });
 
   it("distinguishes a disabled shoutout from the threshold", () => {

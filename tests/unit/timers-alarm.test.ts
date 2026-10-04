@@ -70,6 +70,7 @@ const contextFor = (
     cast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
     read: () => Promise.resolve(null),
     close: () => Promise.resolve(null),
+    closeIfNetAtLeast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
   },
   storage: {
     get: () => Promise.resolve(undefined),
@@ -399,6 +400,7 @@ describe("timer alarm execution", () => {
         cast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
         read: () => Promise.resolve(null),
         close: () => Promise.resolve(null),
+        closeIfNetAtLeast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
       },
       storage: { get: () => Promise.resolve(undefined), put: () => Promise.resolve(), delete: () => Promise.resolve(true) },
       schedule: (key, deadline) => { scheduled.push({ key, deadline }); return Promise.resolve(); },
