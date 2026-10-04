@@ -36,6 +36,7 @@ import { createTemplateRenderer, type TemplateValueProvider } from "../template-
 import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event-times";
 import { notifyModuleScheduleInputsChanged } from "../module-schedules";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
+import { liftModerationBan } from "../moderation";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -52,6 +53,7 @@ interface ModuleRouteEnvironment {
     | "publishModuleOverlayMessage"
     | "publishOverlayHostEvent"
     | "templateUsageSources" | "listRegisteredTemplateVariables"
+    | "liftModerationBan"
   >;
 }
 
@@ -143,6 +145,12 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   context.set("scheduleBackgroundWork", (work) => { scheduleBackgroundWork(context, work); });
   context.set("getAppAccessToken", getAppAccessToken);
   context.set("helixRequest", helixRequest);
+  context.set("liftModerationBan", async (channelId, userId) => {
+    if (channelId !== context.req.param("channelId")) {
+      return { outcome: "rejected", reason: "invalid_request", detail: { target: userId } };
+    }
+    return liftModerationBan(context.env, channelId, userId);
+  });
   context.set("listChannelVariables", async (channelId): Promise<readonly ModuleChannelVariable[]> =>
     (await listChannelVariables(context.env.DB, channelId)).map(({ name, value, description }) => ({ name, value, description })),
   );
