@@ -71,10 +71,9 @@ export const ChatVotingPanel = ({ channelId, language = "de" }: { channelId: str
   const vote = state.vote;
   const counts = state.counts ?? vote?.counts ?? [];
   const total = counts.reduce((sum, count) => sum + count, 0);
-  const closing = vote?.status === "open" && vote.closeReason === "manual" && state.closePending;
-  const running = vote?.status === "open" && !closing;
+  const running = vote?.status === "open";
   const closed = vote?.status === "closed";
-  const title = vote === null ? labels.currentVote : closing ? labels.closingTitle : running ? labels.runningTitle : labels.closedTitle;
+  const title = vote === null ? labels.currentVote : running ? labels.runningTitle : labels.closedTitle;
   const activeBallot = vote?.status === "open" || state.hasOpenBallot;
   const validOptionCount = typeof optionCount === "number" && Number.isInteger(optionCount) && optionCount >= 2 && optionCount <= 9;
 
@@ -83,7 +82,7 @@ export const ChatVotingPanel = ({ channelId, language = "de" }: { channelId: str
       <div className="section-heading"><h2>{title}</h2></div>
       {vote === null ? <p className="empty-state">{labels.noVote}</p> : <>
         <div className="chat-voting-panel__status">
-          <Led status={closing ? "amber" : running ? "green" : "off"} word={closing ? labels.closingStatus : running ? labels.runningStatus : labels.closedStatus} />
+          <Led status={running ? "green" : "off"} word={running ? labels.runningStatus : labels.closedStatus} />
           <span className="muted">{labels.starts(dateText(vote.openedAt, language))}</span>
         </div>
         {running ? <p className="muted">{labels.ends(dateText(vote.closesAt, language))}</p> : null}

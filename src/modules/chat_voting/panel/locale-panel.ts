@@ -3,10 +3,8 @@ import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale
 export interface ChatVotingPanelTexts {
   currentVote: string;
   runningTitle: string;
-  closingTitle: string;
   closedTitle: string;
   runningStatus: string;
-  closingStatus: string;
   closedStatus: string;
   noVote: string;
   loading: string;
@@ -37,10 +35,8 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
   de: {
     currentVote: "Laufende oder letzte Abstimmung",
     runningTitle: "Laufende Abstimmung",
-    closingTitle: "Abstimmung wird geschlossen",
     closedTitle: "Abstimmungsergebnis",
     runningStatus: "Läuft live",
-    closingStatus: "Wird geschlossen",
     closedStatus: "Beendet",
     noVote: "Es läuft gerade keine Abstimmung.",
     loading: "Abstimmung wird geladen …",
@@ -69,10 +65,8 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
   en: {
     currentVote: "Current or last vote",
     runningTitle: "Vote in progress",
-    closingTitle: "Closing vote",
     closedTitle: "Vote results",
     runningStatus: "Live",
-    closingStatus: "Closing",
     closedStatus: "Closed",
     noVote: "There is no vote in progress.",
     loading: "Loading the vote …",
