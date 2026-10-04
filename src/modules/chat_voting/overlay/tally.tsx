@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
 import { chatVotingOverlayLabels } from "./locale";
-import { mergeTallyState, type TallyState } from "./tally-state";
+import type { TallyState } from "./tally-state";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -19,6 +19,7 @@ const parseState = (value: unknown): TallyState | null => {
     : undefined;
   return {
     pollId: state.pollId,
+    ...(typeof state.openedAt === "string" ? { openedAt: state.openedAt } : {}),
     ...(state.status === "open" || state.status === "closed" ? { status: state.status } : {}),
     ...(labels === undefined ? {} : { labels }),
     counts: state.counts,
@@ -29,22 +30,17 @@ const parseState = (value: unknown): TallyState | null => {
 
 const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
   const incoming = useMemo(() => parseState(state), [state]);
-  const [current, setCurrent] = useState<TallyState | null>(() => incoming);
-  const [clock, setClock] = useState(0);
+  const current = incoming;
+  const [clock, setClock] = useState(() => Date.now());
   const labels = chatVotingOverlayLabels(language);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setCurrent((previous) => mergeTallyState(previous, incoming));
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [incoming]);
-
-  useEffect(() => {
     if (current?.status !== "closed") return;
+    const closeAt = current.closedAt === undefined ? Number.NaN : Date.parse(current.closedAt);
+    if (!Number.isFinite(closeAt)) return;
     const timer = window.setInterval(() => setClock(Date.now()), 500);
     return () => window.clearInterval(timer);
-  }, [current?.pollId, current?.status]);
+  }, [current?.pollId, current?.status, current?.closedAt, config.hideAfterCloseSeconds]);
 
   const closeAt = current?.closedAt === undefined ? Number.NaN : Date.parse(current.closedAt);
   const hideAfter = typeof config.hideAfterCloseSeconds === "number" ? config.hideAfterCloseSeconds : 15;

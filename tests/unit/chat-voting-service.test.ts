@@ -100,7 +100,7 @@ describe("chat voting event service", () => {
       kind: "overlay",
       type: "tally",
       elementKind: "chat_voting.tally",
-      payload: { pollId: "fictional-poll", counts: [0, 1], revision: 1 },
+      payload: { pollId: "fictional-poll", openedAt: openVote.openedAt, counts: [0, 1], revision: 1 },
     }]);
   });
 
@@ -112,8 +112,13 @@ describe("chat voting event service", () => {
       close: vi.fn(() => Promise.resolve(null)),
     };
     const insertOpen = vi.fn(() => Promise.resolve(true));
-    const repository = repositoryWith({ insertOpen });
     const openedAt = Date.parse("2026-10-04T10:00:00.000Z");
+    const latestVote = { ...openVote, status: "closed" as const, openedAt: new Date(openedAt).toISOString() };
+    const repository = repositoryWith({
+      insertOpen,
+      latest: vi.fn(() => Promise.resolve(latestVote)),
+    });
+    const effectiveOpenedAt = openedAt + 1;
     const scheduleClose = vi.fn(() => Promise.resolve());
 
     const result = await startChatVote(repository, {
@@ -126,13 +131,14 @@ describe("chat voting event service", () => {
     }, ballots, scheduleClose);
 
     expect(result.status).toBe("started");
-    expect(ballots.open).toHaveBeenCalledWith(expect.any(String), 2, openedAt + 24 * 60 * 60 * 1_000 - 60_000);
+    expect(ballots.open).toHaveBeenCalledWith(expect.any(String), 2, effectiveOpenedAt + 24 * 60 * 60 * 1_000 - 60_000);
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining<Partial<ChatVoteDraft>>({
       channelId: "fictional-channel",
       preset: "yes_no",
       closeReason: "limit",
     }), undefined);
-    expect(scheduleClose).toHaveBeenCalledWith(expect.any(String), openedAt + 4 * 60 * 60 * 1_000, 0);
+    expect(scheduleClose).toHaveBeenCalledWith(expect.any(String), effectiveOpenedAt + 4 * 60 * 60 * 1_000, 0);
+    expect(result).toMatchObject({ status: "started", vote: { openedAt: new Date(effectiveOpenedAt).toISOString() } });
   });
 
   it("releases the close recovery snapshot when another open vote makes the insert busy", async () => {

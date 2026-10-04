@@ -139,7 +139,7 @@ describe("OverlayShell and OverlayCanvas", () => {
           variableName: null,
           text: "",
           config: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 },
-          state: { pollId: "poll-a", status: "open", labels: ["Yes", "No"], counts: [0, 0], revision: 0 },
+          state: { pollId: "poll-a", openedAt: "2030-01-01T00:00:00.000Z", status: "open", labels: ["Yes", "No"], counts: [0, 0], revision: 0 },
           moduleEnabled: true,
           x: 0,
           y: 0,
@@ -168,7 +168,7 @@ describe("OverlayShell and OverlayCanvas", () => {
       }));
     };
 
-    send("modul.chat_voting.tally", { pollId: "poll-a", counts: [5, 2], revision: 5 });
+    send("modul.chat_voting.tally", { pollId: "poll-a", openedAt: "2030-01-01T00:00:00.000Z", counts: [5, 2], revision: 5 });
     await waitFor(() => expect(container.textContent).toContain("5 · 71%"));
     send("modul.chat_voting.tally", { pollId: "poll-a", counts: [3, 1], revision: 3 });
     await waitFor(() => expect(container.textContent).toContain("5 · 71%"));
@@ -176,20 +176,109 @@ describe("OverlayShell and OverlayCanvas", () => {
 
     send("modul.chat_voting.tally", {
       pollId: "poll-a",
+      openedAt: "2030-01-01T00:00:00.000Z",
       status: "closed",
-      counts: [5, 2],
-      revision: 5,
+      counts: [4, 2],
+      revision: 0,
       closedAt: "2030-01-01T00:00:00.000Z",
       closeReason: "manual",
     });
     await waitFor(() => expect(container.querySelector('[aria-label="Results"]')).not.toBeNull());
-    send("modul.chat_voting.tally", { pollId: "poll-a", counts: [8, 2], revision: 8 });
+    send("modul.chat_voting.tally", { pollId: "poll-a", openedAt: "2030-01-01T00:00:00.000Z", counts: [8, 2], revision: 8 });
 
-    await waitFor(() => expect(container.textContent).toContain("5 · 71%"));
+    await waitFor(() => expect(container.textContent).toContain("4 · 67%"));
     expect(container.querySelector('[aria-label="Results"]')).not.toBeNull();
     expect(container.textContent).toContain("Yes");
     expect(container.textContent).not.toContain("8 · 80%");
+
+    send("modul.chat_voting.tally", {
+      pollId: "poll-b",
+      openedAt: "2030-01-01T00:01:00.000Z",
+      status: "open",
+      labels: ["Up", "Down"],
+      counts: [0, 0],
+      revision: 0,
+    });
+    await waitFor(() => expect(container.textContent).toContain("Up"));
+    send("modul.chat_voting.tally", {
+      pollId: "poll-a",
+      openedAt: "2030-01-01T00:00:00.000Z",
+      status: "closed",
+      counts: [9, 0],
+      revision: 0,
+      closedAt: "2030-01-01T00:02:00.000Z",
+    });
+    await waitFor(() => expect(container.textContent).toContain("Up"));
+    expect(container.querySelector('[aria-label="Results"]')).toBeNull();
+    expect(container.textContent).not.toContain("9 · 100%");
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces rendered voting state with bootstrap snapshots, including null, and hides closed results on time", async () => {
+    const responseFor = (state: Readonly<Record<string, unknown>> | null): Response => new Response(JSON.stringify({
+      language: "en",
+      overlay: {
+        id: "voting-overlay",
+        revision: 1,
+        width: 1920,
+        height: 1080,
+        css: "",
+        elements: [{
+          id: "voting-element",
+          kind: "chat_voting.tally",
+          label: "Voting",
+          variableName: null,
+          text: "",
+          config: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 1 },
+          state,
+          moduleEnabled: true,
+          x: 0,
+          y: 0,
+          scalePercent: 100,
+          z: 0,
+          inComposition: true,
+        }],
+      },
+      variables: {},
+    }), { status: 200 });
+    const open = {
+      pollId: "poll-a",
+      openedAt: "2030-01-01T00:00:00.000Z",
+      status: "open",
+      labels: ["Yes", "No"],
+      counts: [7, 0],
+      revision: 7,
+    };
+    const closed = {
+      ...open,
+      status: "closed",
+      counts: [4, 2],
+      revision: 0,
+      closedAt: "2030-01-01T00:01:00.000Z",
+    };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(responseFor(open))
+      .mockResolvedValueOnce(responseFor(closed))
+      .mockResolvedValueOnce(responseFor(null))
+      .mockImplementationOnce(() => Promise.resolve(responseFor({
+        ...closed,
+        closedAt: new Date().toISOString(),
+      })));
+    vi.stubGlobal("fetch", fetcher);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+
+    await waitFor(() => expect(container.textContent).toContain("7 · 100%"));
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await waitFor(() => expect(container.textContent).toContain("4 · 67%"));
+    expect(container.querySelector('[aria-label="Results"]')).not.toBeNull();
+
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await waitFor(() => expect(container.querySelector(".chat-voting-tally")).toBeNull());
+
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await waitFor(() => expect(container.querySelector('[aria-label="Results"]')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector(".chat-voting-tally")).toBeNull(), { timeout: 2_500 });
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 
   it("adds half the bootstrap round trip to server state timestamps", () => {

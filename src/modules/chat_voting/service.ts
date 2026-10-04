@@ -32,7 +32,12 @@ export const startChatVote = async (
       input.preset === "scale_5" && input.optionCount !== 5) {
     throw new RangeError("The selected voting preset has an invalid option count.");
   }
-  const openedAt = input.openedAt ?? Date.now();
+  const requestedOpenedAt = input.openedAt ?? Date.now();
+  const latestVote = await repository.latest(input.channelId);
+  const latestOpenedAt = latestVote === null ? Number.NaN : Date.parse(latestVote.openedAt);
+  const openedAt = Number.isFinite(latestOpenedAt)
+    ? Math.max(requestedOpenedAt, latestOpenedAt + 1)
+    : requestedOpenedAt;
   const deadline = voteCloseDeadline(openedAt, input.settings.autoCloseSeconds);
   const vote: ChatVoteDraft = {
     id: crypto.randomUUID(),
@@ -182,7 +187,7 @@ export const processChatVotingMessage = async (
       kind: "overlay",
       type: "tally",
       elementKind: CHAT_VOTING_ELEMENT_KIND,
-      payload: { pollId: vote.id, counts: [...result.counts], revision: result.revision },
+      payload: { pollId: vote.id, openedAt: vote.openedAt, counts: [...result.counts], revision: result.revision },
     }],
     diagnostics: [],
   };
@@ -259,6 +264,7 @@ export const closeChatVoteFromAlarm = async (
 
   await context.publishModuleOverlayMessage("tally", CHAT_VOTING_ELEMENT_KIND, {
     pollId,
+    openedAt: closedVote.openedAt,
     status: "closed",
     counts: [...(closedVote.counts ?? snapshot.counts)],
     revision: snapshot.revision,

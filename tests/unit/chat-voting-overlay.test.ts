@@ -2,15 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import { mergeTallyState, type TallyState } from "../../src/modules/chat_voting/overlay/tally-state";
 
-const tally = (pollId: string, revision: number, status: TallyState["status"] = "open"): TallyState => ({
+const tally = (
+  pollId: string,
+  revision: number,
+  status: TallyState["status"] = "open",
+  openedAt = "2026-10-04T10:00:00.000Z",
+): TallyState => ({
   pollId,
+  openedAt,
   revision,
   status,
   labels: ["Yes", "No"],
   counts: [revision, 0],
 });
 
-describe("chat voting tally revisions", () => {
+describe("chat voting tally state", () => {
   it("keeps the newest counts when a delayed tally arrives", () => {
     const current = tally("poll-a", 4);
 
@@ -18,17 +24,39 @@ describe("chat voting tally revisions", () => {
     expect(mergeTallyState(current, tally("poll-a", 5))).toMatchObject({ revision: 5, counts: [5, 0] });
   });
 
-  it("accepts authoritative lifecycle state for a new poll and a close", () => {
-    expect(mergeTallyState(tally("poll-a", 7), { pollId: "poll-b", revision: 0, status: "open", counts: [0, 0] }))
-      .toMatchObject({ pollId: "poll-b", status: "open" });
-    const closed = mergeTallyState(tally("poll-a", 7), {
-      ...tally("poll-a", 1, "closed"),
-      closedAt: "2026-10-04T10:00:00.000Z",
+  it("replaces reducer state with a null or lower-revision closed snapshot", () => {
+    const current = tally("poll-a", 7);
+    const closed = {
+      ...tally("poll-a", 0, "closed"),
+      counts: [4, 2],
+      closedAt: "2026-10-04T10:05:00.000Z",
+    };
+
+    expect(mergeTallyState(current, null)).toBeNull();
+    expect(mergeTallyState(current, closed)).toEqual(closed);
+  });
+
+  it("keeps closed counts final even when the close revision is lower", () => {
+    const current = tally("poll-a", 7);
+    const closed = mergeTallyState(current, {
+      ...tally("poll-a", 0, "closed"),
+      counts: [4, 2],
+      closedAt: "2026-10-04T10:05:00.000Z",
     });
-    expect(closed).toMatchObject({ revision: 7, counts: [7, 0], status: "closed", closedAt: "2026-10-04T10:00:00.000Z" });
+
+    expect(closed).toMatchObject({ revision: 0, counts: [4, 2], status: "closed" });
     expect(mergeTallyState(closed, tally("poll-a", 8))).toBe(closed);
-    expect(mergeTallyState(tally("poll-a", 7), { pollId: "poll-b", revision: 0, counts: [0, 0] })?.pollId)
-      .toBe("poll-a");
+  });
+
+  it("accepts only newer polls and ignores old close retries", () => {
+    const pollA = tally("poll-a", 7, "open", "2026-10-04T10:00:00.000Z");
+    const pollB = tally("poll-b", 0, "open", "2026-10-04T10:01:00.000Z");
+    const newer = mergeTallyState(pollA, pollB);
+    const oldClose = { ...tally("poll-a", 0, "closed", "2026-10-04T10:00:00.000Z"), counts: [7, 0] };
+
+    expect(newer).toBe(pollB);
+    expect(mergeTallyState(newer, oldClose)).toBe(newer);
+    expect(mergeTallyState(newer, { pollId: "poll-c", revision: 0, counts: [0, 0] })).toBe(newer);
   });
 
   it("keeps prior module metadata when a partial tally omits labels", () => {
@@ -36,6 +64,6 @@ describe("chat voting tally revisions", () => {
 
     expect(mergeTallyState(current, { pollId: "poll-a", revision: 3, counts: [2, 1] }))
       .toMatchObject({ labels: ["Yes", "No"], counts: [2, 1], status: "open" });
-    expect(mergeTallyState(current, null)).toBe(current);
+    expect(mergeTallyState(current, null)).toBeNull();
   });
 });
