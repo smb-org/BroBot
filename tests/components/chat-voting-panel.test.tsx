@@ -76,6 +76,23 @@ describe("chat voting live panel", () => {
     expect(screen.getByRole("group", { name: /Yes: 7 votes, 70 percent|Yes: 4 votes, 67 percent/ })).toBeInTheDocument();
   });
 
+  it.each([
+    [openVote, "Laufende Abstimmung", "Läuft live"],
+    [closingVote, "Abstimmung wird geschlossen", "Wird geschlossen"],
+    [closedVote, "Abstimmungsergebnis", "Beendet"],
+  ] as const)("renders German status copy for %s", async (vote, title, status) => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
+      vote,
+      counts: vote.status === "closed" ? [7, 3] : [4, 2],
+      revision: 6,
+      hasOpenBallot: vote.status === "open",
+    }))));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="de" /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.getByText(status)).toBeInTheDocument();
+  });
+
   it("disables all start choices with a reason while another module owns the ballot", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
       vote: null,
@@ -115,5 +132,57 @@ describe("chat voting live panel", () => {
     expect(screen.getByText("Closed")).toBeInTheDocument();
     expect(screen.queryByText("Closing")).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Yes: 7 votes, 70 percent" })).toBeInTheDocument();
+  });
+
+  it.each([2, 9] as const)("sends the options-start payload with boundary count %i", async (optionCount) => {
+    let startPayload: unknown;
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request
+        ? new URL(input.url).pathname
+        : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path.endsWith("/start")) {
+        startPayload = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
+        return Promise.resolve(jsonResponse({ vote: {
+          ...openVote,
+          preset: "options_n",
+          optionCount,
+          labels: Array.from({ length: optionCount }, (_unused, index) => `Option ${String(index + 1)}`),
+        } }));
+      }
+      return Promise.resolve(jsonResponse({ vote: null, counts: null, revision: 0, hasOpenBallot: false }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const options = await screen.findByRole("spinbutton", { name: "Number of options" });
+    fireEvent.change(options, { target: { value: String(optionCount) } });
+    fireEvent.click(screen.getByRole("button", { name: "Start options vote" }));
+
+    await waitFor(() => expect(startPayload).toEqual({ preset: "options_n", optionCount }));
+  });
+
+  it.each([1, 10] as const)("does not send an options-start payload for count %i", async (optionCount) => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request
+        ? new URL(input.url).pathname
+        : new URL(String(input), "https://brobot.example").pathname;
+      return Promise.resolve(path === "/api/csrf"
+        ? jsonResponse({ token: "csrf-token" })
+        : jsonResponse({ vote: null, counts: null, revision: 0, hasOpenBallot: false }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const options = await screen.findByRole("spinbutton", { name: "Number of options" });
+    fireEvent.change(options, { target: { value: String(optionCount) } });
+
+    expect(screen.getByRole("button", { name: "Start options vote" })).toBeDisabled();
+    expect(fetcher.mock.calls.some(([input]) => {
+      const path = input instanceof Request
+        ? new URL(input.url).pathname
+        : new URL(String(input), "https://brobot.example").pathname;
+      return path.endsWith("/start");
+    })).toBe(false);
   });
 });

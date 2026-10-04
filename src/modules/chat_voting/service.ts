@@ -93,12 +93,13 @@ export const requestChatVoteClose = async (
 ): Promise<ChatVote | null> => {
   const vote = await repository.open(channelId);
   if (vote === null) return null;
-  const requested = await repository.requestManualClose(channelId, vote.id, authorization);
+  const ownerToken = crypto.randomUUID();
+  const requested = await repository.requestManualClose(channelId, vote.id, ownerToken, authorization);
   if (!requested) return null;
   try {
     await scheduleClose(vote.id, Date.now(), 1);
   } catch (error: unknown) {
-    await repository.restoreCloseReason(channelId, vote.id, vote.closeReason).catch(() => undefined);
+    await repository.restoreCloseReason(channelId, vote.id, ownerToken).catch(() => undefined);
     throw error;
   }
   return vote;

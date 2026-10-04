@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModuleAlarmContext } from "../../src/modules/contract";
 import type { ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
-import { closeChatVoteFromAlarm } from "../../src/modules/chat_voting/service";
+import { closeChatVoteFromAlarm, requestChatVoteClose } from "../../src/modules/chat_voting/service";
 import { insertChannel } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadBarrierDatabase, TestD1Database } from "./test-d1";
 
 const snapshot = { counts: [7, 3], revision: 4 } as const;
 
@@ -86,6 +86,38 @@ describe("chat voting close service", () => {
     } as unknown as ModuleAlarmContext;
     return { context, values, close, read, publishModuleOverlayMessage, sendChat, storagePut };
   };
+
+  it("allows only one concurrent manual-close request to own the transition", async () => {
+    await seedOpenVote(false);
+    const traced = createReadBarrierDatabase(
+      database,
+      (sql, operation) => operation === "first" && sql.includes("status = 'open'") ? "open-vote" : null,
+      2,
+    );
+    const repository = createChatVotingRepository(traced.database);
+    const scheduleClose = vi.fn(() => Promise.resolve());
+
+    const [first, second] = await Promise.all([
+      requestChatVoteClose(repository, "fictional-channel", scheduleClose),
+      requestChatVoteClose(repository, "fictional-channel", scheduleClose),
+    ]);
+
+    expect(traced.started).toEqual(["open-vote", "open-vote"]);
+    expect([first, second].filter((result) => result !== null)).toHaveLength(1);
+    expect(scheduleClose).toHaveBeenCalledOnce();
+    await expect(repository.open("fictional-channel")).resolves.toMatchObject({
+      id: "fictional-poll",
+      status: "open",
+      closeReason: "manual",
+    });
+
+    const owner = await database.prepare(
+      "SELECT manual_close_owner_token FROM chat_votes WHERE channel_id = ? AND poll_id = ?",
+    ).bind("fictional-channel", "fictional-poll").first<{ manual_close_owner_token: string | null }>();
+    expect(owner?.manual_close_owner_token).toEqual(expect.any(String));
+    await repository.restoreCloseReason("fictional-channel", "fictional-poll", "losing-request-owner");
+    await expect(repository.open("fictional-channel")).resolves.toMatchObject({ closeReason: "manual" });
+  });
 
   it("persists the observed aggregate before closing and finishes the vote with its snapshot", async () => {
     const repository = await seedOpenVote(false);

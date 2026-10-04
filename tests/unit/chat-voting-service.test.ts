@@ -179,7 +179,7 @@ describe("chat voting event service", () => {
   });
 
   it("rejects !vote end from a viewer and schedules a moderator close with a newer alarm revision", async () => {
-    const requestManualClose = vi.fn(() => Promise.resolve(true));
+    const requestManualClose = vi.fn<ChatVotingRepository["requestManualClose"]>(() => Promise.resolve(true));
     const repository = repositoryWith({
       open: vi.fn(() => Promise.resolve(openVote)),
       requestManualClose,
@@ -192,20 +192,27 @@ describe("chat voting event service", () => {
 
     const allowed = await processChatVotingMessage(eventWithText("!vote end", ["moderator"]), repository, context);
     expect(allowed.actions).toEqual([{ kind: "chat", text: "The vote is closing.", automated: false }]);
-    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined);
+    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", expect.any(String), undefined);
     expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), 1);
   });
 
   it("restores the prior status when a manual close cannot schedule its alarm", async () => {
+    const requestManualClose = vi.fn<ChatVotingRepository["requestManualClose"]>(() => Promise.resolve(true));
     const restoreCloseReason = vi.fn(() => Promise.resolve());
     const repository = repositoryWith({
       open: vi.fn(() => Promise.resolve(openVote)),
+      requestManualClose,
       restoreCloseReason,
     });
 
     await expect(requestChatVoteClose(repository, "fictional-channel", () => Promise.reject(new Error("alarm unavailable"))))
       .rejects.toThrow("alarm unavailable");
 
-    expect(restoreCloseReason).toHaveBeenCalledWith("fictional-channel", "fictional-poll", "limit");
+    expect(restoreCloseReason).toHaveBeenCalledWith(
+      "fictional-channel",
+      "fictional-poll",
+      requestManualClose.mock.calls[0]?.[2],
+    );
+    expect(requestManualClose.mock.calls[0]?.[2]).toEqual(expect.any(String));
   });
 });

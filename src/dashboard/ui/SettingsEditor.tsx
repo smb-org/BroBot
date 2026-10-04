@@ -321,7 +321,10 @@ const renderReadOnlyField = <Settings extends object>(
     return <TemplateText value={typeof value === "string" ? value : ""} variables={vars} />;
   }
   if (field.kind === "switchCard") return <>{value === true ? enabledLabel : disabledLabel}</>;
-  if (field.kind === "number") return <>{String(value)}{copy.unit === undefined ? "" : ` ${copy.unit}`}</>;
+  if (field.kind === "number") {
+    if (typeof value === "number" && value === 0 && copy.zeroValueLabel !== undefined) return <>{copy.zeroValueLabel}</>;
+    return <>{String(value)}{copy.unit === undefined ? "" : ` ${copy.unit}`}</>;
+  }
   if (field.kind === "timeoutDurationRange") {
     const range = value !== null && typeof value === "object" ? value as unknown as TimeoutDurationRangeValue : null;
     if (range === null) return <></>;

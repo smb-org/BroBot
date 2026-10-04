@@ -37,4 +37,22 @@ describe("chat voting settings editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Increase close time" }));
     expect(timer).toHaveValue("30");
   });
+
+  it("shows the localized zero label in the read-only operator properties", () => {
+    const copy = chatVotingSettingsEditorCatalog("de");
+    render(<UiProvider><SettingsEditor
+      spec={settingsEditor.spec}
+      sectionId="labels"
+      settings={DEFAULT_CHAT_VOTING_SETTINGS}
+      onChange={() => undefined}
+      texts={copy}
+      templateMessages={copy.templateMessages}
+      readOnly
+    /></UiProvider>);
+
+    expect(screen.getByText("Automatisch schließen")).toBeInTheDocument();
+    expect(screen.getByText("Aus")).toBeInTheDocument();
+    expect(screen.queryByText("0 s")).not.toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: "Automatisch schließen" })).not.toBeInTheDocument();
+  });
 });
