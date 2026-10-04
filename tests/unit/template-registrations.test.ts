@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { registeredTemplateVariablesForChannel } from "../../src/worker/panel/module-routes";
-import { usesParameterizedTemplateVariable } from "../../src/modules/text_commands/panel/editor-state";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -27,10 +26,6 @@ describe("registered template variables", () => {
         expect.objectContaining({ moduleId: "raid", name: "viewers", isTextBlock: false, contexts: ["event"] }),
         expect.objectContaining({ moduleId: "currency", name: "currency.convert", parameters: "currency_pair" }),
       ]));
-      expect(usesParameterizedTemplateVariable(
-        "Convert {currency.convert USD EUR}",
-        variables,
-      )).toBe(true);
     } finally {
       database.close();
     }

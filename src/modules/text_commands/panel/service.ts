@@ -15,11 +15,6 @@ export interface TextCommandPanelData {
   variables: TextCommandChannelVariable[];
 }
 
-export interface TextCommandTextBlock {
-  name: string;
-  variants: readonly { texts: readonly string[] }[];
-}
-
 export const textBlockNamesForPicker = (variables: readonly ModuleRegisteredTemplateVariable[]): string[] =>
   variables.filter((variable) => variable.isTextBlock).map(({ name }) => name);
 
@@ -47,11 +42,6 @@ export const loadTextCommands = async (channelId: string): Promise<TextCommand[]
 export const loadRegisteredTemplateVariables = async (channelId: string): Promise<readonly ModuleRegisteredTemplateVariable[]> => {
   const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/template-variables`);
   return (await json<{ variables: readonly ModuleRegisteredTemplateVariable[] }>(response)).variables;
-};
-
-export const loadTextCommandTextBlocks = async (channelId: string): Promise<readonly TextCommandTextBlock[]> => {
-  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/text_library/library`);
-  return (await json<{ blocks: readonly TextCommandTextBlock[] }>(response)).blocks;
 };
 
 export const searchTextGames = async (channelId: string, query: string): Promise<readonly TwitchGame[]> => {

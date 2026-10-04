@@ -153,7 +153,6 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
     ...(unavailableText === undefined ? {} : { unavailableText }),
     ...(usageText === undefined ? {} : { usageText }),
   };
-  if (parsed.data.kind === "shoutout" && body.usageText?.trim().length === 0) return null;
   return body;
 };
 
@@ -318,9 +317,6 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     ...(usageText === undefined ? {} : { usageText }),
   };
   if (kind !== "list" && text.trim().length === 0 && variableAction === null) {
-    return context.json({ error: "command_data_invalid" }, 400);
-  }
-  if (kind === "shoutout" && !templateValues.usageText?.trim()) {
     return context.json({ error: "command_data_invalid" }, 400);
   }
   if (variableAction !== null && await context.get("findChannelVariable")(channelId, variableAction.name) === null) {

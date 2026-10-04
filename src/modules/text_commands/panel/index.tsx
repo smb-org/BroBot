@@ -9,12 +9,12 @@ import {
 import { PanelApiError } from "../../../contracts/panel-error";
 import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand, type TextCommandGame, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
 import { MODERATION_TIMEOUT_MAX_SECONDS } from "../../contracts/moderation";
-import { minimumTierAfterVariableOperation, textCommandConsumesArguments } from "./editor-state";
+import { minimumTierAfterVariableOperation } from "./editor-state";
 import { commandListReply, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsFor } from "../contracts/chat-defaults";
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredTemplatePickerGroup } from "../../../dashboard/ui";
-import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, loadTextCommandTextBlocks, saveTextCommand, searchTextGames, textBlockNamesForPicker, toggleTextCommand, type TextCommandChannelVariable } from "./service";
+import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, saveTextCommand, searchTextGames, textBlockNamesForPicker, toggleTextCommand, type TextCommandChannelVariable } from "./service";
 import type { ModuleRegisteredTemplateVariable } from "../../contract";
 import { textCommandsTexts } from "./locale";
 
@@ -24,8 +24,6 @@ interface CommandDraft {
   name: string;
   text: string;
   usageText: string;
-  usageTextEnabled: boolean;
-  usageTextChanged: boolean;
   kind: TextCommandKind;
   minimumTier: TextCommandMinimumTier;
   cooldownSeconds: number | "";
@@ -43,8 +41,6 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
   name: command.name,
   text: command.text,
   usageText: command.usageText ?? (command.kind === "shoutout" ? TEXT_COMMAND_DEFAULT_USAGE_TEXT : ""),
-  usageTextEnabled: command.kind === "shoutout" || (command.usageText?.trim().length ?? 0) > 0,
-  usageTextChanged: false,
   kind: command.kind,
   minimumTier: command.minimumTier,
   cooldownSeconds: command.cooldownSeconds,
@@ -62,8 +58,6 @@ const newCommandDraft = (): CommandDraft => ({
   name: "",
   text: "",
   usageText: "",
-  usageTextEnabled: false,
-  usageTextChanged: false,
   kind: "text",
   minimumTier: "everyone",
   cooldownSeconds: 5,
@@ -187,7 +181,6 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [minimumTierExplicit, setMinimumTierExplicit] = useState(false);
   const [registeredVariables, setRegisteredVariables] = useState<readonly ModuleRegisteredTemplateVariable[]>([]);
-  const [textBlockTexts, setTextBlockTexts] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
   const libraryBlocks = textBlockNamesForPicker(registeredVariables);
   const [selectedLibraryBlock, setSelectedLibraryBlock] = useState("");
   const isCreate = command === null;
@@ -217,14 +210,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       };
     }),
   ];
-  const commandConsumesArguments = draft.kind === "text" && textCommandConsumesArguments(
-    draft.text,
-    templateVariables("text"),
-    textBlockTexts,
-    draft.variableAction,
-  );
   const templateFields = Object.fromEntries(Object.entries(baseTemplateFields)
-    .filter(([field]) => field !== "usageText" || draft.kind === "shoutout" || (commandConsumesArguments && draft.usageTextEnabled))
     .map(([field, variables]) => [field, [...variables, ...blockVariables]]));
   const templateValue = (field: CommandTemplateField): string => field === "timeoutFallbackText"
     ? draft.timeoutAction?.fallbackText ?? ""
@@ -239,7 +225,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const templateFieldNames = Object.keys(templateFields) as CommandTemplateField[];
   const responseInvalid = templateFieldNames.some((field) => {
     const value = templateValue(field);
-    return (value.trim().length === 0 && !(field === "text" && draft.variableAction !== null && draft.timeoutAction === null) && !(field === "usageText" && draft.kind === "text")) || value.length > 500;
+    return (value.trim().length === 0 && !(field === "text" && draft.variableAction !== null && draft.timeoutAction === null) && field !== "usageText") || value.length > 500;
   });
   const actionInvalid = draft.variableAction !== null && (!channelVariables.some((variable) => variable.name === draft.variableAction?.name) ||
     ((draft.variableAction.operation === "add" || draft.variableAction.operation === "subtract") && (draft.variableAction.amount === null || draft.variableAction.amount < 1 || draft.variableAction.amount > 1000)) ||
@@ -292,33 +278,17 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   useEffect(() => {
     let active = true;
     loadRegisteredTemplateVariables(channelId).then((variables) => { if (active) setRegisteredVariables(variables); }).catch(() => { if (active) setRegisteredVariables([]); });
-    loadTextCommandTextBlocks(channelId).then((blocks) => {
-      if (active) setTextBlockTexts(new Map(blocks.map((block) => [block.name, block.variants.flatMap((variant) => variant.texts)])));
-    }).catch(() => { if (active) setTextBlockTexts(new Map()); });
     return () => { active = false; };
   }, [channelId]);
 
   const saveDraft = useCallback(async (): Promise<string | null> => {
     setAttemptedSave(true);
     if (!canManageContent || !valid) return labels.invalid;
-    const commandConsumesArguments = draft.kind === "text" && textCommandConsumesArguments(
-      draft.text,
-      [
-        ...panelTemplateOptions("chat_command", [], channelVariables, language ?? dashboardLanguage()),
-        ...registeredVariables
-          .filter((variable) => !variable.isTextBlock && variable.name.includes(".") &&
-            (draft.timeoutAction !== null || !variable.name.startsWith("timeout.")) &&
-            (variable.contexts?.includes("chat_command") ?? true))
-          .map(({ name, parameters }) => ({ name, ...(parameters === undefined ? {} : { parameters }) })),
-      ],
-      textBlockTexts,
-      draft.variableAction,
-    );
     const payload = {
       name: normalizedName,
       text: draft.kind === "list" ? "" : draft.text,
       kind: draft.kind,
-      ...(draft.kind !== "list" && (draft.kind === "shoutout" || draft.usageTextChanged || (commandConsumesArguments && draft.usageTextEnabled)) ? { usageText: draft.usageText } : {}),
+      ...(draft.kind === "list" ? {} : { usageText: draft.usageText }),
       minimumTier: draft.minimumTier,
       cooldownSeconds: draft.cooldownSeconds as number,
       aliases: draft.aliases,
@@ -373,7 +343,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       setError(labels.saveError);
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, channelId, channelVariables, command, draft, isCreate, labels, language, normalizedName, onRefresh, registeredVariables, textBlockTexts, valid, setAttemptedSave, setConcurrentConflict, setError, setFieldError, setPending, setSaved, setServerWarnings]);
+  }, [accept, canManageContent, channelId, command, draft, isCreate, labels, normalizedName, onRefresh, valid, setAttemptedSave, setConcurrentConflict, setError, setFieldError, setPending, setSaved, setServerWarnings]);
 
   const guard = useDraftGuard(dirty, saveDraft, reset);
   useEffect(() => {
@@ -407,8 +377,6 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         usageText: kind === "shoutout"
           ? current.usageText || defaults?.usageText || TEXT_COMMAND_DEFAULT_USAGE_TEXT
           : current.kind === "shoutout" ? "" : current.usageText,
-        usageTextEnabled: kind === "shoutout" ? true : current.kind === "shoutout" ? false : current.usageTextEnabled,
-        usageTextChanged: current.kind !== kind,
         ...(isCreate && kind === "shoutout" ? { minimumTier: "moderator" as const } : {}),
       };
     });
@@ -451,14 +419,14 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     finally { setDeleting(false); }
   };
 
-  const templateEditor = (field: CommandTemplateField, label: string): ReactElement => {
+  const templateEditor = (field: CommandTemplateField, label: string, hint = labels.responseHint): ReactElement => {
     const value = templateValue(field);
     return <div className="command-template-editor" key={field}>
       <TextArea
         id={`command-${field}`}
         name={field}
         label={field === "text" ? labels.response : label}
-        hint={labels.responseHint}
+        hint={hint}
         value={value}
         onChange={(next) => { setTemplateField(field, next); }}
         maxLength={500}
@@ -534,26 +502,13 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         {draft.kind === "list"
           ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />
           : templateEditor("text", labels.response)}
-        {draft.kind === "text" && commandConsumesArguments ? <Switch
-          layout="inline"
-          label={labels.usageOverride}
-          hint={labels.usageOverrideHint}
-          checked={draft.usageTextEnabled}
-          disabled={!canManageContent || pending}
-          onChange={(enabled) => {
-            setValue((current) => ({
-              ...current,
-              usageTextEnabled: enabled,
-              usageTextChanged: true,
-              usageText: enabled ? current.usageText : "",
-            }));
-            setSaved(false); setError(undefined); setConcurrentConflict(false);
-          }}
-        /> : null}
-        {draft.kind === "shoutout" || (draft.kind === "text" && commandConsumesArguments && draft.usageTextEnabled) ? <>
-          {templateEditor("usageText", labels.templateFieldLabels.usageText)}
-          {draft.kind === "shoutout" ? <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p> : null}
-        </> : null}
+        {draft.kind !== "list" ? <details className="command-usage-advanced">
+          <summary>{labels.usageAdvanced}</summary>
+          <div className="command-usage-advanced__body">
+            {templateEditor("usageText", labels.templateFieldLabels.usageText, labels.usageTextHint)}
+            {draft.kind === "shoutout" ? <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p> : null}
+          </div>
+        </details> : null}
         {draft.kind === "text" ? <>
           <Switch
             layout="card"
