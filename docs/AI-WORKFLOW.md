@@ -8,7 +8,7 @@ Arbeitsteilung zwischen KI-Agenten in diesem Projekt, damit alle Mitarbeitenden 
 |---|---|
 | Implementierung, alle Themen (Standard); Ausnahme: kleine Korrekturen mit klarer Ursache (CSS, eine Beschriftung, eine Bedingung; ein, zwei Dateien) → Sonnet | Codex `gpt-6-luna`, Reasoning-Effort `xhigh` (Codex-CLI ≥ 0.155) |
 | Implementierung, wenn Codex nicht verfügbar ist | Sonnet |
-| Review vor jedem Merge | Codex `gpt-6-sol`, Reasoning-Effort `xhigh`, nur lesend |
+| Review vor jedem Merge | Codex `gpt-6.1-sol`, Reasoning-Effort `xhigh`, nur lesend |
 | Leichte Fleißarbeit: Test-Boilerplate, mechanische Edits, Formatierung, Doku-Anpassungen | Haiku oder Sonnet |
 | Befunde bewerten, anspruchsvolle Konzepte, Architekturentscheidungen | Hauptmodell, nicht delegieren |
 
@@ -27,7 +27,7 @@ abgebrochen und die Aufgabe an Sonnet übergeben.
 Kein Pull Request wird gemergt, bevor beides erfüllt ist:
 
 1. **Unabhängiges Review über den kompletten Diff** — in einem eigenen Worktree auf dem Stand des PR-Branches, mit explizitem Prompt und Basis-Revision, sonst liest die CLI von stdin statt den Diff zu reviewen:
-   `codex exec -m gpt-6-sol -c model_reasoning_effort="xhigh" -s read-only "Review the full diff origin/main..HEAD of this branch for correctness, security and architecture issues." < /dev/null`
+   `codex exec -m gpt-6.1-sol -c model_reasoning_effort="xhigh" -s read-only "Review the full diff origin/main..HEAD of this branch for correctness, security and architecture issues." < /dev/null`
    Das ist **nicht** der `/review`-Skill: `/review` läuft während der Arbeit und schreibt Fixes, dieser Lauf ist rein lesend und ist die Merge-Voraussetzung. Jeder Befund wird am Code geprüft und entweder behoben oder mit Begründung verworfen. Grüne Tests und Stichproben ersetzen das Review nicht.
 2. **CI grün und SonarCloud gelesen.** Die Branch-Protection von `main` verlangt `quality`. SonarCloud blockiert technisch nicht; seine Fehler-, Sicherheits- und Zuverlässigkeitsbefunde werden trotzdem vor dem Merge behoben. Eine rote Duplikationsschwelle allein hält den Merge nicht auf und wird als Aufräumaufgabe erfasst.
 

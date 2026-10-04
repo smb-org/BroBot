@@ -48,6 +48,17 @@ nach dem Ablaufzeitpunkt durch den Host-Alarm; der Alarm kann sich um bis zu
 etwa eine Minute verzögern. Der Ablaufzeitpunkt liegt höchstens 24 Stunden in
 der Zukunft.
 
+Module können über `ModuleAction` auch Timeout und Bann beschreiben. Der Host
+führt beides über `src/worker/moderation.ts` und Twitch Helix mit dem Bot-
+Nutzer-Token aus; kein Modul spricht Helix direkt an. Der Host prüft
+Kanalmoderatorstatus, schützt Broadcaster und Bot und beachtet die je Kanal im
+Channel Durable Object gespeicherte 429-Abklingzeit. Timeout-Dauern und Gründe
+werden vor dem Helix-Aufruf begrenzt. Stummschaltung oder Pause unterdrücken
+Moderationsaktionen. Eine sichere Ablehnung kann einen vorgerenderten
+Ersatztext auslösen; ein unklarer Ausgang löst weder Erfolgs- noch Fehlertext
+aus. Der Host protokolliert Erfolg, Ablehnung und unklaren Ausgang im
+Ereignisprotokoll.
+
 ## Modulsystem
 
 Ein Modul ist ein Feature-Slice unter `src/modules/<id>` mit `contracts/`,

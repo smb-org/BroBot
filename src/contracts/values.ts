@@ -88,6 +88,22 @@ export const SHOUTOUT_FAILURE_REASONS = [
 ] as const;
 export type ShoutoutFailureReason = (typeof SHOUTOUT_FAILURE_REASONS)[number];
 
+/** Stable outcomes for a host moderation action or lifted ban. */
+export const MODERATION_FAILURE_REASONS = [
+  "already_banned",
+  "bot_identity_missing",
+  "conflict",
+  "invalid_request",
+  "network_error",
+  "not_moderator",
+  "protected_target",
+  "rate_limited",
+  "timeout",
+  "token_invalid",
+  "twitch_error",
+] as const;
+export type ModerationFailureReason = (typeof MODERATION_FAILURE_REASONS)[number];
+
 /** Stable reasons for a rejected Start Commercial request. */
 export const COMMERCIAL_FAILURE_REASONS = [
   "app_token_unavailable",
@@ -174,6 +190,12 @@ export const EVENT_CODES = [
   "host.overlay.not_executed",
   "host.shoutout.failed",
   "host.shoutout.sent",
+  "host.timeout.applied",
+  "host.timeout.failed",
+  "host.timeout.ambiguous",
+  "host.ban.applied",
+  "host.ban.failed",
+  "host.ban.ambiguous",
   "channel_events.raid.incoming",
   "channel_events.raid.outgoing",
   "channel_events.shoutout.sent",

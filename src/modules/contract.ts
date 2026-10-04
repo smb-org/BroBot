@@ -4,6 +4,7 @@ import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ChatOutputTarget, ImmediateActionRequirement } from "../contracts/values";
 import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
+import type { ModerationResult } from "./contracts/moderation";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 export { CHAT_OUTPUT_TARGETS } from "../contracts/values";
 export type { ChatOutputTarget } from "../contracts/values";
@@ -418,6 +419,21 @@ export type ModuleAction =
   | { kind: "announcement"; text: string; target?: ChatOutputTarget; automated?: boolean }
   | { kind: "shoutout"; targetChannelId: string }
   | { kind: "shoutout"; targetLogin: string }
+  | {
+    kind: "timeout";
+    userId: string;
+    durationSeconds: number;
+    reason: string;
+    onSuccess?: Extract<ModuleAction, { kind: "chat" }>;
+    onFailure?: Extract<ModuleAction, { kind: "chat" }>;
+  }
+  | {
+    kind: "ban";
+    userId: string;
+    reason: string;
+    onSuccess?: Extract<ModuleAction, { kind: "chat" }>;
+    onFailure?: Extract<ModuleAction, { kind: "chat" }>;
+  }
   | {
     kind: "overlay";
     type: string;
@@ -1030,6 +1046,7 @@ export interface ModuleRouteVariables {
   getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch) => Promise<string>;
   /** Thin Helix HTTP transport (issue #163); modules never talk to `api.twitch.tv` directly. */
   helixRequest: HelixRequest;
+  liftModerationBan: (channelId: string, userId: string) => Promise<ModerationResult>;
 }
 
 export interface ModuleRouteEnvironment {
