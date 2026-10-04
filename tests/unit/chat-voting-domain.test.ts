@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
-import { formatVoteResult, labelsForVote, parseVoteCommand, voteCloseDeadline } from "../../src/modules/chat_voting/domain";
+import { formatVoteResult, isValidVoteLabelSetting, labelsForVote, parseVoteCommand, voteCloseDeadline } from "../../src/modules/chat_voting/domain";
 
 describe("chat voting command and result domain", () => {
   it("parses only the supported start and end commands", () => {
@@ -20,6 +20,20 @@ describe("chat voting command and result domain", () => {
       .toEqual(["Low", "Medium", "High", "Great", "Perfect"]);
     expect(labelsForVote({ ...DEFAULT_CHAT_VOTING_SETTINGS, optionLabels: "Red|Blue|Green" }, "options_n", 2, "en"))
       .toEqual(["Red", "Blue"]);
+  });
+
+  it("accepts empty labels as defaults and rejects malformed custom labels", () => {
+    expect(isValidVoteLabelSetting("", "yesNoLabels")).toBe(true);
+    expect(isValidVoteLabelSetting("  ", "scaleLabels")).toBe(true);
+    expect(isValidVoteLabelSetting("", "optionLabels")).toBe(true);
+    expect(isValidVoteLabelSetting("Ja|Nein", "yesNoLabels")).toBe(true);
+    expect(isValidVoteLabelSetting("Ja|", "yesNoLabels")).toBe(false);
+    expect(isValidVoteLabelSetting("Ja|Nein|Vielleicht", "yesNoLabels")).toBe(false);
+    expect(isValidVoteLabelSetting("1|2|3|4|5", "scaleLabels")).toBe(true);
+    expect(isValidVoteLabelSetting("1|2|3", "scaleLabels")).toBe(false);
+    expect(isValidVoteLabelSetting("A|B|C", "optionLabels")).toBe(true);
+    expect(isValidVoteLabelSetting("A", "optionLabels")).toBe(false);
+    expect(isValidVoteLabelSetting(`${"x".repeat(33)}|No`, "yesNoLabels")).toBe(false);
   });
 
   it("formats aggregate results and honors the timer-off hard limit", () => {

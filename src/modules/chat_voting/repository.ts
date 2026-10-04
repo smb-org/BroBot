@@ -56,6 +56,7 @@ export interface ChatVotingRepository {
   byId(channelId: string, pollId: string): Promise<ChatVote | null>;
   insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization): Promise<boolean>;
   requestManualClose(channelId: string, pollId: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
+  restoreCloseReason(channelId: string, pollId: string, closeReason: ChatVoteCloseReason): Promise<void>;
   finish(channelId: string, pollId: string, closeReason: ChatVoteCloseReason, closedAt: string, counts: readonly number[]): Promise<boolean>;
 }
 
@@ -107,6 +108,12 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     ).bind(channelId, pollId, ...(authorization?.values ?? []));
     const result = await statement.run();
     return result.meta.changes > 0;
+  },
+  async restoreCloseReason(channelId, pollId, closeReason) {
+    await db.prepare(
+      `UPDATE chat_votes SET close_reason = ?
+        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND close_reason = 'manual'`,
+    ).bind(closeReason, channelId, pollId).run();
   },
   async finish(channelId, pollId, closeReason, closedAt, counts) {
     const statement = db.prepare(

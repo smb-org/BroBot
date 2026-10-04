@@ -8,7 +8,7 @@ import {
   type ChatVotingSettings,
 } from "../../src/modules/chat_voting/contracts";
 import type { ChatVotingRepository } from "../../src/modules/chat_voting/repository";
-import { processChatVotingMessage, startChatVote } from "../../src/modules/chat_voting/service";
+import { processChatVotingMessage, requestChatVoteClose, startChatVote } from "../../src/modules/chat_voting/service";
 
 const openVote: ChatVote = {
   id: "fictional-poll",
@@ -31,6 +31,7 @@ const repositoryWith = (overrides: Partial<ChatVotingRepository> = {}): ChatVoti
   byId: vi.fn(() => Promise.resolve(null)),
   insertOpen: vi.fn(() => Promise.resolve(true)),
   requestManualClose: vi.fn(() => Promise.resolve(true)),
+  restoreCloseReason: vi.fn(() => Promise.resolve()),
   finish: vi.fn(() => Promise.resolve(true)),
   ...overrides,
 });
@@ -193,5 +194,18 @@ describe("chat voting event service", () => {
     expect(allowed.actions).toEqual([{ kind: "chat", text: "The vote is closing.", automated: false }]);
     expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined);
     expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), 1);
+  });
+
+  it("restores the prior status when a manual close cannot schedule its alarm", async () => {
+    const restoreCloseReason = vi.fn(() => Promise.resolve());
+    const repository = repositoryWith({
+      open: vi.fn(() => Promise.resolve(openVote)),
+      restoreCloseReason,
+    });
+
+    await expect(requestChatVoteClose(repository, "fictional-channel", () => Promise.reject(new Error("alarm unavailable"))))
+      .rejects.toThrow("alarm unavailable");
+
+    expect(restoreCloseReason).toHaveBeenCalledWith("fictional-channel", "fictional-poll", "limit");
   });
 });

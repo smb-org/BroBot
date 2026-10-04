@@ -286,6 +286,21 @@ gespeichert. Das Overlay-Element `chat_voting.tally` lädt den offenen Stand
 beim Start und nimmt Zähler mit monotoner Revision entgegen. Panel und Overlay
 bleiben lazy geladen.
 
+Das Panel hält alle Abschnitte in einer gemeinsamen 960-px-Spalte. Die
+Ergebnisansicht zeigt laufende, manuell schließende und beendete Abstimmungen
+mit jeweils passendem Titel; den Schließstatus liest sie aus dem gespeicherten
+Schließgrund und nicht aus einer lokalen Erfolgsmeldung. Stimmen erscheinen als
+horizontale Balken mit Zahl und Prozentwert. Ein Startknopf je Ja/Nein, Skala
+oder Optionsabstimmung ersetzt die Optionsleiste; die Zahl für Optionen liegt
+zwischen 2 und 9. Scheitert das Einplanen eines manuellen Schlusses, stellt das
+Modul den vorherigen Schließgrund wieder her; Fehler im Alarmhandler werden vom
+Host mit Backoff erneut versucht. Der Host stellt `ModuleBallotAccess.hasOpenBallot()` als
+generische Abfrage der kanalweiten Sperre bereit, damit das Panel auch einen
+Votekick erklären und den Start deaktivieren kann, ohne ein anderes Modul zu
+importieren. Leere Beschriftungen verwenden Platzhalterwerte als Vorschau und
+bleiben optional; ungültige eigene Beschriftungen werden erst nach Interaktion
+markiert. Der Wert `autoCloseSeconds: 0` zeigt „Aus“ im Panel.
+
 Das erste Modul ist `src/modules/text_commands/`. Es ist in der Registry als
 `text_commands` eingetragen, abonniert `channel.chat.message` und definiert
 seine Tabellen in der zentralen D1-Kette unter `migrations/`. Der D1-Adapter

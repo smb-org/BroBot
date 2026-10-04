@@ -41,4 +41,34 @@ describe("chat voting repository mutation guards", () => {
       database.close();
     }
   });
+
+  it("clears a pending manual state when alarm scheduling fails", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const vote: ChatVoteDraft = {
+        id: "fictional-poll",
+        channelId: "fictional-channel",
+        preset: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        openedAt: "2026-10-04T10:00:00.000Z",
+        closesAt: "2026-10-04T14:00:00.000Z",
+        closeReason: "limit",
+      };
+      await repository.insertOpen(vote);
+      await repository.requestManualClose("fictional-channel", vote.id);
+
+      await repository.restoreCloseReason("fictional-channel", vote.id, vote.closeReason);
+
+      await expect(repository.open("fictional-channel")).resolves.toMatchObject({
+        id: vote.id,
+        status: "open",
+        closeReason: "limit",
+      });
+    } finally {
+      database.close();
+    }
+  });
 });

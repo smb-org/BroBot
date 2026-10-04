@@ -1473,6 +1473,18 @@ describe("ChannelObject realtime path", () => {
     });
   });
 
+  it("reports whether a shared ballot is open without requiring its module id", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+
+    await expect(object.hasOpenBallot()).resolves.toBe(false);
+    await object.openBallot("votekick", "kick-a", 2, 20_000);
+    await expect(object.hasOpenBallot()).resolves.toBe(true);
+    await object.closeBallot("votekick", "kick-a");
+    await expect(object.hasOpenBallot()).resolves.toBe(false);
+  });
+
   it("preserves an active ballot alarm when another open uses the same id or invalid arguments", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);

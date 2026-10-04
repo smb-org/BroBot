@@ -18,7 +18,7 @@ import { TimeoutDurationRangeFields, type TimeoutDurationRangeValue } from "./Ti
 export type SettingsFieldSpec<Settings> =
   | { kind: "number"; key: keyof Settings & string; unit?: string; min: number; max: number; step: number }
   | { kind: "timeoutDurationRange"; key: keyof Settings & string; min: number; max: number }
-  | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number }
+  | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number; optional?: boolean; validate?: (value: string) => boolean }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; optional?: boolean; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
   | { kind: "chatTarget"; key: keyof Settings & string; includeWhereAsked?: boolean }
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string }[] }
@@ -33,6 +33,9 @@ export interface SettingsFieldText {
   label: string;
   hint: string;
   unit?: string;
+  zeroValueLabel?: string;
+  placeholder?: string;
+  invalidError?: string;
   requiredError?: string;
   description?: string;
   disabledReason?: string;
@@ -140,12 +143,15 @@ export function SettingsEditor<Settings extends object>({
       );
     }
     if (field.kind === "number") {
+      const unit = typeof fieldValue === "number" && fieldValue === 0
+        ? copy.zeroValueLabel ?? copy.unit ?? field.unit
+        : copy.unit ?? field.unit;
       return (
         <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
           <NumberField
             id={id}
             label={copy.label}
-            {...((copy.unit ?? field.unit) === undefined ? {} : { unit: copy.unit ?? field.unit })}
+            {...(unit === undefined ? {} : { unit })}
             {...(error === undefined ? {} : { error })}
             min={field.min}
             max={field.max}
@@ -192,6 +198,8 @@ export function SettingsEditor<Settings extends object>({
             value={typeof fieldValue === "string" ? fieldValue : ""}
             disabled={disabled}
             onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+            {...(copy.placeholder === undefined ? {} : { placeholder: copy.placeholder })}
+            required={!field.optional}
             {...(field.prefix === undefined ? {} : { prefix: field.prefix })}
             {...(maxLength === undefined ? {} : { maxLength, countLabel: copy.countLabel ?? ((count, maximum) => `${String(count)} / ${String(maximum)}`) })}
           />

@@ -73,6 +73,7 @@ import {
   forgetClosedStoredBallot,
   expireStoredBallot,
   finalizeStoredBallot,
+  hasOpenStoredBallot,
   hardDeleteFinalizedStoredBallot,
   openStoredBallot,
   readStoredBallot,
@@ -1557,6 +1558,17 @@ export class ChannelObject extends DurableObject<Env> {
       await this.writeBallotAlarmInTransaction(
         transaction,
         ballotExpiryAlarmKey(finalizedModuleId, finalizedBallotId),
+        BALLOT_HARD_DELETE_ALARM_HANDLER,
+        hardDeleteAt,
+      );
+    });
+  }
+
+  public async hasOpenBallot(): Promise<boolean> {
+    return await hasOpenStoredBallot(this.ctx.storage, async (transaction, moduleId, ballotId, hardDeleteAt) => {
+      await this.writeBallotAlarmInTransaction(
+        transaction,
+        ballotExpiryAlarmKey(moduleId, ballotId),
         BALLOT_HARD_DELETE_ALARM_HANDLER,
         hardDeleteAt,
       );
