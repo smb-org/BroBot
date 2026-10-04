@@ -40,14 +40,16 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
 interface FetchOptions {
   commands?: () => TextCommand[];
   templateVariables?: readonly unknown[];
+  textBlocks?: readonly { name: string; variants: readonly { texts: readonly string[] }[] }[];
   onMutation?: (method: string, path: string, body: unknown) => Response | Promise<Response>;
 }
 
-const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
+const panelFetch = ({ commands = () => [makeCommand()], templateVariables, textBlocks = [], onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
   vi.fn<typeof fetch>((input, init) => {
     const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+    if (url.pathname.endsWith("/modules/text_library/library") && method === "GET") return Promise.resolve(jsonResponse({ blocks: textBlocks }));
     if (url.pathname.endsWith("/template-variables") && method === "GET") return Promise.resolve(jsonResponse({ variables: templateVariables ?? [
       { name: "welcome", moduleId: "text_library", isTextBlock: true },
       ...TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES.map((variable) => ({ ...variable, moduleId: "text_commands", isTextBlock: false })),
@@ -300,6 +302,38 @@ describe("Text command editor", () => {
 
     expect(await screen.findByRole("textbox", { name: "Nutzungshinweis" })).toBeInTheDocument();
     expect(screen.getByText("Optionaler Antworttext, wenn eine Variable ohne erforderliche Argumente aufgerufen wird.")).toBeInTheDocument();
+  });
+
+  it("shows the usage hint when a referenced text block contains an argument-taking variable", async () => {
+    renderPanel(panelFetch({
+      commands: () => [makeCommand({ text: "{welcome}" })],
+      templateVariables: [
+        { name: "welcome", moduleId: "text_library", isTextBlock: true },
+        { name: "details", moduleId: "text_library", isTextBlock: true },
+        { ...CURRENCY_TEMPLATE_VARIABLE, moduleId: "currency", isTextBlock: false, contexts: ["chat_command"] },
+      ],
+      textBlocks: [
+        { name: "welcome", variants: [{ texts: ["{details}"] }] },
+        { name: "details", variants: [{ texts: ["{currency.convert USD EUR}"] }] },
+      ],
+    }));
+    await selectCommand();
+
+    expect(await screen.findByRole("switch", { name: "Eigenen Nutzungshinweis verwenden, wenn Argumente fehlen" })).toBeInTheDocument();
+  });
+
+  it("shows a usage hint editor for a set_argument channel variable action", async () => {
+    renderPanel(panelFetch({
+      commands: () => [makeCommand({
+        text: "Score updated",
+        usageText: "Try !score <number>",
+        variableAction: { name: "score", operation: "set_argument", amount: 0 },
+      })],
+    }));
+    await selectCommand();
+
+    expect(await screen.findByRole("switch", { name: "Eigenen Nutzungshinweis verwenden, wenn Argumente fehlen" })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Nutzungshinweis" })).toHaveValue("Try !score <number>");
   });
 
   it("puts the Art select's hint below the field, not between the label and the control", async () => {

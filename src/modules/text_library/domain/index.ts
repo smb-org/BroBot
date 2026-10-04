@@ -2,7 +2,10 @@ import type { ModuleChatStatus, ModuleStreamState } from "../../contract";
 import { MODULE_TEMPLATE_TIER_CHAT_STATUSES } from "../../contract";
 import type { TextBlock, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_MAXIMUMS, TEXT_BLOCK_NAME_PATTERN } from "../contracts";
+import { blockReferencesInText } from "../../contracts/text-block-references";
 import { localMidnightInTimeZone, nextLocalMidnightInTimeZone, validChannelTimeZone, wallTimeInstantsInTimeZone } from "../../contract";
+
+export { blockReferencesInText } from "../../contracts/text-block-references";
 
 export interface TextBlockState {
   streamState: ModuleStreamState;
@@ -253,9 +256,6 @@ export const firstMatchingTextBlockVariant = (variants: readonly TextBlockVarian
 
 export const textBlockAppliesToGame = (block: Pick<TextBlock, "games">, gameId: string | null): boolean =>
   block.games.length === 0 || (gameId !== null && block.games.some((game) => game.id === gameId));
-
-export const blockReferencesInText = (text: string): string[] =>
-  [...new Set([...text.matchAll(/\{([a-z0-9_]{1,32})\}/gu)].flatMap((match) => match[1] === undefined ? [] : [match[1]]))];
 
 export const validateTextBlockGraph = (
   blocks: ReadonlyMap<string, Pick<TextBlock, "name" | "variants">>,
