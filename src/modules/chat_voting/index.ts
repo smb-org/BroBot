@@ -1,0 +1,85 @@
+import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../contract";
+import { createChatVotingRepository } from "./repository";
+import { chatVotingResultVariableCatalog } from "./contracts/template-variable-catalog";
+import { chatVotingAlarmDefinition, processChatVotingMessage } from "./service";
+import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
+import { chatVotingOverlayElements } from "./overlay/element";
+import { chatVotingOverlayLabels } from "./overlay/locale";
+import { chatVotingRoutes } from "./routes";
+
+const settingsSchema = chatVotingSettingsSchema;
+
+const resultVariable = {
+  name: "vote.result",
+  maxLength: 420,
+  sample: "Yes: 8 (67%) · No: 4 (33%)",
+  picker: chatVotingResultVariableCatalog,
+} as const;
+
+const initialTallyState = async (
+  db: D1Database,
+  channelId: string,
+  config: Readonly<Record<string, unknown>>,
+  context?: ModuleOverlayElementContext,
+) => {
+  const vote = await createChatVotingRepository(db).latest(channelId);
+  if (vote === null) return null;
+  let counts: readonly number[] | null = vote.counts;
+  let revision = 0;
+  if (vote.status === "open") {
+    const snapshot = await context?.readBallot(vote.id) ?? null;
+    if (snapshot === null) return null;
+    counts = snapshot.counts;
+    revision = snapshot.revision;
+  } else {
+    const hiddenAfterSeconds = typeof config.hideAfterCloseSeconds === "number" ? config.hideAfterCloseSeconds : 15;
+    const closedAt = vote.closedAt === null ? Number.NaN : Date.parse(vote.closedAt);
+    if (!Number.isFinite(closedAt) || hiddenAfterSeconds === 0 || Date.now() >= closedAt + hiddenAfterSeconds * 1_000) return null;
+  }
+  if (counts === null) return null;
+  return {
+    pollId: vote.id,
+    status: vote.status,
+    preset: vote.preset,
+    optionCount: vote.optionCount,
+    labels: [...vote.labels],
+    counts: [...counts],
+    revision,
+    openedAt: vote.openedAt,
+    closesAt: vote.closesAt,
+    closedAt: vote.closedAt,
+    closeReason: vote.closeReason,
+    voterCount: vote.voterCount,
+  };
+};
+
+export const chatVotingModule: BotModule<typeof settingsSchema> = {
+  id: CHAT_VOTING_MODULE_ID,
+  panelIcon: { paths: ["M4 5h16v14H4z", "M7 9h3", "M14 9h3", "M7 13h3", "M14 13h3", "M10 17h4"] },
+  defaultEnabled: true,
+  settingsSchema,
+  defaultSettings: DEFAULT_CHAT_VOTING_SETTINGS,
+  templateContext: "event",
+  templateFields: { resultText: [resultVariable] },
+  templateVariableGroup: {
+    label: { de: "Abstimmung", en: "Voting" },
+    icon: { paths: ["M4 5h16v14H4z", "M7 9h3", "M14 9h3", "M7 13h3", "M14 13h3"] },
+  },
+  routes: chatVotingRoutes,
+  panel: () => import("./panel"),
+  settingsEditor: () => import("./panel/settings-editor"),
+  eventSubTypes: ["channel.chat.message"],
+  alarms: [chatVotingAlarmDefinition],
+  overlayElements: chatVotingOverlayElements.map((element) => ({
+    ...element,
+    kind: CHAT_VOTING_ELEMENT_KIND,
+    initialStateNeedsContext: true,
+    initialState: (db: D1Database, channelId: string, config: JsonObject, context?: ModuleOverlayElementContext) =>
+      initialTallyState(db, channelId, config, context),
+  })),
+  handleEvent: (event, context) => processChatVotingMessage(event, createChatVotingRepository(context.DB), context),
+};
+
+export { CHAT_VOTING_ELEMENT_KIND };
+export type { ChatVote, ChatVoteCloseReason, ChatVotePreset, ChatVotingSettings } from "./contracts";
+export { chatVotingOverlayLabels };

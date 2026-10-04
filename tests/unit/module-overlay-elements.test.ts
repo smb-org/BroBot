@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { BotModule, JsonObject, ModuleOverlayElementDefinition } from "../../src/modules/contract";
 import { adsModule } from "../../src/modules/ads";
+import { chatVotingModule } from "../../src/modules/chat_voting";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { MODULES, validateModuleOverlayElements } from "../../src/modules/registry";
 import { MODULE_OVERLAY_ELEMENTS, moduleOverlayMessageRequiresStateReload } from "../../src/modules/overlay-element-registry";
@@ -53,6 +54,21 @@ describe("module overlay element declarations", () => {
     expect(countdown?.parseConfig({ html: "<b>unsafe</b>" })).toBeNull();
   });
 
+  it("declares a lazy chat voting tally with a bounded display config", () => {
+    const tally = chatVotingModule.overlayElements?.find(({ kind }) => kind === "chat_voting.tally");
+
+    expect(tally).toMatchObject({
+      kind: "chat_voting.tally",
+      configVersion: 1,
+      defaultSize: { width: 640, height: 240 },
+      defaultConfig: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 },
+    });
+    expect(tally?.parseConfig({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0 }))
+      .toEqual({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0 });
+    expect(tally?.parseConfig({ hideAfterCloseSeconds: 121 })).toBeNull();
+    expect(tally?.parseConfig({ html: "unsafe" })).toBeNull();
+  });
+
   it("provides a client loader for every server-registered overlay element", () => {
     const serverElements = MODULES.flatMap((module) => (module.overlayElements ?? []).map(({ kind }) => ({
       moduleId: module.id,
@@ -94,6 +110,9 @@ describe("module overlay element declarations", () => {
   it("declares bootstrap reloads through the generic element registry", () => {
     expect(moduleOverlayMessageRequiresStateReload("modul.text_library.blocks_updated")).toBe(true);
     expect(moduleOverlayMessageRequiresStateReload("modul.text_library.state_changed")).toBe(true);
+    expect(moduleOverlayMessageRequiresStateReload("modul.chat_voting.opened")).toBe(true);
+    expect(moduleOverlayMessageRequiresStateReload("modul.chat_voting.closed")).toBe(true);
+    expect(moduleOverlayMessageRequiresStateReload("modul.chat_voting.tally")).toBe(false);
     expect(moduleOverlayMessageRequiresStateReload("modul.unknown.changed")).toBe(false);
   });
 });

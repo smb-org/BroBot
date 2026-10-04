@@ -1235,7 +1235,17 @@ export class ChannelObject extends DurableObject<Env> {
       clear: async (key, ownerRevision) => {
         await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision);
       },
-      renderTemplate: async (text, now = Date.now()) => renderScheduledTemplate(this.env, channelId, text, now, externalFetchBudget),
+      renderTemplate: async (text, now = Date.now(), moduleValues = {}) =>
+        renderScheduledTemplate(this.env, channelId, text, now, externalFetchBudget, moduleValues),
+      publishModuleOverlayMessage: async (type, elementKind, payload) => {
+        const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, moduleId, {
+          kind: "overlay",
+          type,
+          elementKind,
+          payload,
+        });
+        if (prepared.outcome === "ready") await this.publish([prepared.message]);
+      },
       sendChat: async (text, idempotencyKey, attributions = [], stillValid, target = "source_only") => {
         const suppression = { reason: null as string | null };
         const validateOutput = async (): Promise<boolean> => {

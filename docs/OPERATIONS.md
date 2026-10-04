@@ -424,6 +424,11 @@ Chatverarbeitung kann danach wieder Daten anlegen; der Alarm entfernt sie
 innerhalb des gleichen Aufbewahrungsfensters. Diese flüchtigen Daten liegen
 nicht in D1 und werden nicht vom stündlichen Bereinigungslauf erfasst.
 
+`chat_votes` speichert nach dem Schließen nur die Beschriftungen sowie die
+aggregierten Stimmenzahlen und die Gesamtzahl der Stimmen. Einzelne
+Abstimmende oder deren Auswahl stehen nicht in D1; die Zeilen werden als
+Ergebnisdaten ohne zeitliche Löschfrist aufbewahrt.
+
 Bei `invalid_grant` oder einer widerrufenen Autorisierung wird der globale
 Status mit Ursache `revoked` gespeichert. Der Scheduled-Handler versucht einen
 solchen Zustand nicht endlos erneut; der Betreiber startet zur erneuten

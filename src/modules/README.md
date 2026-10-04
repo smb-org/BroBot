@@ -269,6 +269,23 @@ kanalgebundene Modulrouten; Änderungen werden mit Audit-Einträgen gespeichert.
 Das Datenmodell lässt einen späteren Regex-Matcher zu, aber die erste
 Panel-Version kennt nur Schlüsselwörter und Wortgruppen.
 
+Das Modul `src/modules/chat_voting/` startet Ja/Nein-, 1-bis-5- und
+2-bis-9-Optionen-Abstimmungen über das Panel oder `!vote yesno`, `!vote scale`
+und `!vote <n>`. Nur Moderatoren und Broadcaster können Chatbefehle starten
+oder beenden; die Panel-Aktion steht allen Kanalmitgliedern offen. Stimmen
+werden ausschließlich über `ballotChoiceFromMessage` und den kanalgebundenen
+Ballot im Channel Durable Object gezählt. Ein Nutzer kann seine Stimme ändern;
+die letzte Wahl zählt. Pro Kanal bleibt höchstens ein Ballot offen, auch wenn
+ein anderes Modul ihn gestartet hat.
+
+Die Modulroute startet und beendet Abstimmungen, und ein einzelner
+Modul-Alarm schließt sie nach dem optionalen Timer oder spätestens nach vier
+Stunden. Die Ergebniszeile `chat_votes` speichert nur Voreinstellung,
+Beschriftungen und aggregierte Zähler; einzelne Abstimmende werden nicht in D1
+gespeichert. Das Overlay-Element `chat_voting.tally` lädt den offenen Stand
+beim Start und nimmt Zähler mit monotoner Revision entgegen. Panel und Overlay
+bleiben lazy geladen.
+
 Das erste Modul ist `src/modules/text_commands/`. Es ist in der Registry als
 `text_commands` eingetragen, abonniert `channel.chat.message` und definiert
 seine Tabellen in der zentralen D1-Kette unter `migrations/`. Der D1-Adapter

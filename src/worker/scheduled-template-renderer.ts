@@ -29,6 +29,7 @@ export const renderScheduledTemplate = async (
   text: string,
   now: number,
   externalFetchBudget?: ModuleExternalFetchBudget,
+  moduleValues: Readonly<Record<string, string | number>> = {},
 ): Promise<{ text: string; attributions?: readonly string[] }> => {
   const receivedAt = new Date(now).toISOString();
   const event = {
@@ -154,7 +155,7 @@ export const renderScheduledTemplate = async (
     readChannelVariables: (names) => readChannelVariables(environment.DB, channelId, names),
     now: () => now,
   });
-  const result = await render(text, {}, undefined, "chat");
+  const result = await render(text, moduleValues, undefined, "chat");
   return {
     text: result.text,
     ...(result.attributions === undefined ? {} : { attributions: result.attributions }),
