@@ -123,6 +123,75 @@ describe("OverlayShell and OverlayCanvas", () => {
       .toBe(".brobot-overlay { color: white; }"));
   });
 
+  it("merges voting tallies in the shell and keeps closed overlay state after delayed messages", async () => {
+    const bootstrap = {
+      language: "en",
+      overlay: {
+        id: "voting-overlay",
+        revision: 1,
+        width: 1920,
+        height: 1080,
+        css: "",
+        elements: [{
+          id: "voting-element",
+          kind: "chat_voting.tally",
+          label: "Voting",
+          variableName: null,
+          text: "",
+          config: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 },
+          state: { pollId: "poll-a", status: "open", labels: ["Yes", "No"], counts: [0, 0], revision: 0 },
+          moduleEnabled: true,
+          x: 0,
+          y: 0,
+          scalePercent: 100,
+          z: 0,
+          inComposition: true,
+        }],
+      },
+      variables: {},
+    };
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(JSON.stringify(bootstrap), { status: 200 })));
+    vi.stubGlobal("fetch", fetcher);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+
+    await waitFor(() => expect(container.textContent).toContain("Yes"));
+    const send = (type: `modul.${string}.${string}`, payload: Readonly<Record<string, unknown>>): void => {
+      const revision = payload.revision;
+      const messageId = typeof revision === "number" ? String(revision) : "closed";
+      act(() => realtimeCallbacks?.onModuleMessage?.({
+        version: 1,
+        id: `message-${type}-${messageId}`,
+        createdAt: "2026-10-04T10:00:00.000Z",
+        channelId: "fictional-channel",
+        type,
+        payload,
+      }));
+    };
+
+    send("modul.chat_voting.tally", { pollId: "poll-a", counts: [5, 2], revision: 5 });
+    await waitFor(() => expect(container.textContent).toContain("5 · 71%"));
+    send("modul.chat_voting.tally", { pollId: "poll-a", counts: [3, 1], revision: 3 });
+    await waitFor(() => expect(container.textContent).toContain("5 · 71%"));
+    expect(container.textContent).not.toContain("3 · 75%");
+
+    send("modul.chat_voting.tally", {
+      pollId: "poll-a",
+      status: "closed",
+      counts: [5, 2],
+      revision: 5,
+      closedAt: "2030-01-01T00:00:00.000Z",
+      closeReason: "manual",
+    });
+    await waitFor(() => expect(container.querySelector('[aria-label="Results"]')).not.toBeNull());
+    send("modul.chat_voting.tally", { pollId: "poll-a", counts: [8, 2], revision: 8 });
+
+    await waitFor(() => expect(container.textContent).toContain("5 · 71%"));
+    expect(container.querySelector('[aria-label="Results"]')).not.toBeNull();
+    expect(container.textContent).toContain("Yes");
+    expect(container.textContent).not.toContain("8 · 80%");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("adds half the bootstrap round trip to server state timestamps", () => {
     const now = "2026-09-27T12:00:00.000Z";
     const bootstrap: OverlayBootstrapData = {

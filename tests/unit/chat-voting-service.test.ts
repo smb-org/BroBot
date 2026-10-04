@@ -54,6 +54,7 @@ const executionContext = (overrides: Partial<ModuleExecutionContext> = {}): Modu
     cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [0, 1], revision: 1 })),
     read: vi.fn(() => Promise.resolve(null)),
     close: vi.fn(() => Promise.resolve(null)),
+    acknowledgeClosed: vi.fn(() => Promise.resolve()),
   },
   streamState: vi.fn(() => Promise.resolve("unknown" as const)),
   chatActivityCount: vi.fn(() => Promise.resolve(0)),
@@ -77,13 +78,15 @@ describe("chat voting event service", () => {
   it("does not read or mutate a ballot for non-choice chat", async () => {
     const open = vi.fn(() => Promise.resolve(null));
     const repository = repositoryWith({ open });
-    const context = executionContext();
+    const botUserId = vi.fn(() => Promise.resolve("fictional-bot"));
+    const context = executionContext({ botUserId });
 
     const result = await processChatVotingMessage(eventWithText("hello 1"), repository, context);
 
     expect(result.actions).toEqual([]);
     expect(open).not.toHaveBeenCalled();
     expect(context.ballots.cast).not.toHaveBeenCalled();
+    expect(botUserId).not.toHaveBeenCalled();
   });
 
   it("publishes the latest ballot counts and revision for a valid digit choice", async () => {
@@ -129,6 +132,51 @@ describe("chat voting event service", () => {
       preset: "yes_no",
       closeReason: "limit",
     }), undefined);
-    expect(scheduleClose).toHaveBeenCalledWith(expect.any(String), openedAt + 4 * 60 * 60 * 1_000);
+    expect(scheduleClose).toHaveBeenCalledWith(expect.any(String), openedAt + 4 * 60 * 60 * 1_000, 0);
+  });
+
+  it("releases the close recovery snapshot when another open vote makes the insert busy", async () => {
+    const ballots = executionContext().ballots;
+    const repository = repositoryWith({ insertOpen: vi.fn(() => Promise.resolve(false)) });
+
+    const result = await startChatVote(repository, {
+      channelId: "fictional-channel",
+      preset: "yes_no",
+      optionCount: 2,
+      settings: DEFAULT_CHAT_VOTING_SETTINGS,
+      language: "en",
+    }, ballots, vi.fn(() => Promise.resolve()));
+
+    expect(result.status).toBe("busy");
+    expect(ballots.close).toHaveBeenCalledOnce();
+    expect(ballots.acknowledgeClosed).toHaveBeenCalledOnce();
+  });
+
+  it("does not cast a choice after closesAt even if the host ballot remains open", async () => {
+    const repository = repositoryWith({ open: vi.fn(() => Promise.resolve({ ...openVote, closesAt: "2000-01-01T00:00:00.000Z" })) });
+    const context = executionContext();
+
+    const result = await processChatVotingMessage(eventWithText("1"), repository, context);
+
+    expect(result.actions).toEqual([]);
+    expect(context.ballots.cast).not.toHaveBeenCalled();
+  });
+
+  it("rejects !vote end from a viewer and schedules a moderator close with a newer alarm revision", async () => {
+    const requestManualClose = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryWith({
+      open: vi.fn(() => Promise.resolve(openVote)),
+      requestManualClose,
+    });
+    const context = executionContext();
+
+    const denied = await processChatVotingMessage(eventWithText("!vote end", ["viewer"]), repository, context);
+    expect(denied.actions).toEqual([]);
+    expect(requestManualClose).not.toHaveBeenCalled();
+
+    const allowed = await processChatVotingMessage(eventWithText("!vote end", ["moderator"]), repository, context);
+    expect(allowed.actions).toEqual([{ kind: "chat", text: "The vote is closing.", automated: false }]);
+    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined);
+    expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), 1);
   });
 });

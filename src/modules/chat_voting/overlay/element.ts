@@ -1,5 +1,6 @@
 import { CHAT_VOTING_TALLY_ELEMENT_KIND } from "./kinds";
 import { chatVotingOverlayLabels } from "./locale";
+import { mergeTallyRealtimeState } from "./tally-state";
 
 const german = chatVotingOverlayLabels("de");
 const english = chatVotingOverlayLabels("en");
@@ -12,7 +13,8 @@ export const chatVotingOverlayElement = {
   editorLabel: { de: german.editorLabel, en: english.editorLabel },
   editorAddLabel: { de: german.editorAddLabel, en: english.editorAddLabel },
   editorModuleLabel: { de: german.editorModuleLabel, en: english.editorModuleLabel },
-  reloadStateOnModuleMessages: ["modul.chat_voting.opened", "modul.chat_voting.closed"],
+  reloadStateOnModuleMessages: ["modul.chat_voting.opened"],
+  mergeRealtimeState: mergeTallyRealtimeState,
   parseConfig: (raw: unknown) => {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
     const config = raw as Record<string, unknown>;

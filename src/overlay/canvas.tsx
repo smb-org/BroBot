@@ -112,7 +112,19 @@ export const OverlayCanvas = ({ overlay, language, variables, elementId }: Overl
       const value = element.variableName !== null && Object.hasOwn(variables, element.variableName)
         ? variables[element.variableName]
         : null;
-      const resetKey = JSON.stringify([overlay.revision, element, language, value, isolatedElement !== null]);
+      const resetKey = JSON.stringify([
+        overlay.revision,
+        element.id,
+        element.kind,
+        element.label,
+        element.variableName,
+        element.text,
+        element.config,
+        element.moduleEnabled,
+        language,
+        value,
+        isolatedElement !== null,
+      ]);
       return <ElementErrorBoundary key={resetKey}>
       {renderElement(element, language, variables, isolatedElement !== null)}
       </ElementErrorBoundary>;

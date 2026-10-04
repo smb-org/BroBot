@@ -289,6 +289,11 @@ export interface ModuleOverlayElementDefinition {
   initialStateNeedsContext?: boolean;
   /** Module realtime message types that require the host to reload this element's state. */
   reloadStateOnModuleMessages?: readonly string[];
+  /** Merges partial realtime state into the current state without replacing module lifecycle data. */
+  mergeRealtimeState?: (
+    current: Readonly<Record<string, unknown>> | null,
+    incoming: Readonly<Record<string, unknown>>,
+  ) => Readonly<Record<string, unknown>>;
   /** Host state changes that cause a generic module state message for this element. */
   reloadStateOnHostEvents?: readonly ModuleOverlayHostEvent[];
   initialState?: (
@@ -707,6 +712,8 @@ export interface ModuleBallotAccess {
   cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
+  /** Releases an idempotent close snapshot after the module has persisted its result. */
+  acknowledgeClosed?: (ballotId: string) => Promise<void>;
 }
 
 export type ModuleStreamState = "online" | "offline" | "unknown";

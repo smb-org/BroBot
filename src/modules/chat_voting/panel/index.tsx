@@ -31,7 +31,6 @@ export const ChatVotingPanel = ({ channelId, language = "de" }: { channelId: str
   useEffect(() => { void Promise.resolve().then(() => refresh()); }, [refresh]);
 
   useEffect(() => {
-    if (state?.vote?.status !== "open") return;
     const poll = (): void => { if (document.visibilityState === "visible") void refresh(); };
     const timer = window.setInterval(poll, 2_000);
     document.addEventListener("visibilitychange", poll);
@@ -39,7 +38,7 @@ export const ChatVotingPanel = ({ channelId, language = "de" }: { channelId: str
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", poll);
     };
-  }, [refresh, state?.vote?.status]);
+  }, [refresh]);
 
   const start = async (preset: ChatVotePreset, optionCount?: number): Promise<void> => {
     setBusy(true);

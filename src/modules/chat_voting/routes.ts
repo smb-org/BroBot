@@ -71,9 +71,9 @@ chatVotingRoutes.post("/start", async (context) => {
       settings,
       language: await channelLanguage(context.env.DB, channelId),
       authorization,
-    }, context.get("ballots")(channelId), async (pollId, deadline) => {
+    }, context.get("ballots")(channelId), async (pollId, deadline, ownerRevision) => {
       const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-      await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, pollId, deadline);
+      await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, pollId, deadline, ownerRevision);
     });
   } catch {
     return context.json({ error: "chat_voting_start_failed" }, 503);
@@ -104,6 +104,8 @@ chatVotingRoutes.post("/start", async (context) => {
 
 chatVotingRoutes.post("/close", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
+  const now = new Date().toISOString();
+  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
   const vote = await repository.open(channelId);
   if (vote === null) return context.json({ error: "chat_voting_not_running" }, 404);
@@ -114,11 +116,11 @@ chatVotingRoutes.post("/close", async (context) => {
     before: { pollId: vote.id, status: vote.status },
     after: { pollId: vote.id, status: "closing" },
   };
-  const result = await requestChatVoteClose(repository, channelId, async (pollId, deadline) => {
+  const result = await requestChatVoteClose(repository, channelId, async (pollId, deadline, ownerRevision) => {
     const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-    await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, pollId, deadline);
-  });
+    await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, pollId, deadline, ownerRevision);
+  }, authorization);
   if (result === null) return context.json({ error: "chat_voting_not_running" }, 404);
-  await context.get("writeModuleAudit")(audit, new Date().toISOString());
+  await context.get("writeModuleAudit")(audit, now);
   return context.json({ closing: true, pollId: result.id });
 });

@@ -19,3 +19,10 @@ export const moduleOverlayMessageRequiresStateReload = (messageType: string): bo
     definition.reloadStateOnModuleMessages?.includes(messageType) === true ||
     (definition.reloadStateOnHostEvents !== undefined && messageType === `modul.${moduleId}.state_changed`),
   );
+
+export const mergeModuleOverlayElementState = (
+  elementKind: string,
+  current: Readonly<Record<string, unknown>> | null,
+  incoming: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> => MODULE_OVERLAY_ELEMENTS.find(({ definition }) => definition.kind === elementKind)
+  ?.definition.mergeRealtimeState?.(current, incoming) ?? incoming;

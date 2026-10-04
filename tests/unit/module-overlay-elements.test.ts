@@ -67,6 +67,7 @@ describe("module overlay element declarations", () => {
       .toEqual({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0 });
     expect(tally?.parseConfig({ hideAfterCloseSeconds: 121 })).toBeNull();
     expect(tally?.parseConfig({ html: "unsafe" })).toBeNull();
+    expect(tally?.mergeRealtimeState).toBeTypeOf("function");
   });
 
   it("provides a client loader for every server-registered overlay element", () => {
@@ -111,7 +112,7 @@ describe("module overlay element declarations", () => {
     expect(moduleOverlayMessageRequiresStateReload("modul.text_library.blocks_updated")).toBe(true);
     expect(moduleOverlayMessageRequiresStateReload("modul.text_library.state_changed")).toBe(true);
     expect(moduleOverlayMessageRequiresStateReload("modul.chat_voting.opened")).toBe(true);
-    expect(moduleOverlayMessageRequiresStateReload("modul.chat_voting.closed")).toBe(true);
+    expect(moduleOverlayMessageRequiresStateReload("modul.chat_voting.closed")).toBe(false);
     expect(moduleOverlayMessageRequiresStateReload("modul.chat_voting.tally")).toBe(false);
     expect(moduleOverlayMessageRequiresStateReload("modul.unknown.changed")).toBe(false);
   });

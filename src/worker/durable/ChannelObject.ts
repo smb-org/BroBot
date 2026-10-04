@@ -65,6 +65,7 @@ import {
   ballotIdentityFromExpiryAlarmKey,
   castStoredBallot,
   closeStoredBallot,
+  forgetClosedStoredBallot,
   expireStoredBallot,
   openStoredBallot,
   readStoredBallot,
@@ -1452,6 +1453,7 @@ export class ChannelObject extends DurableObject<Env> {
       cast: (ballotId, userId, choice) => this.castBallot(moduleId, ballotId, userId, choice),
       read: (ballotId) => this.readBallot(moduleId, ballotId),
       close: (ballotId) => this.closeBallot(moduleId, ballotId),
+      acknowledgeClosed: (ballotId) => this.acknowledgeClosedBallot(moduleId, ballotId),
     };
   }
 
@@ -1510,6 +1512,10 @@ export class ChannelObject extends DurableObject<Env> {
     const result = await closeStoredBallot(this.ctx.storage, moduleId, ballotId);
     await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
     return result;
+  }
+
+  public async acknowledgeClosedBallot(moduleId: string, ballotId: string): Promise<void> {
+    await forgetClosedStoredBallot(this.ctx.storage, moduleId, ballotId);
   }
 
   private async expireBallot(key: string): Promise<void> {

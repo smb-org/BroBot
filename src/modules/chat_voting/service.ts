@@ -25,7 +25,7 @@ export const startChatVote = async (
   repository: ChatVotingRepository,
   input: StartChatVoteInput,
   ballots: ModuleExecutionContext["ballots"],
-  scheduleClose: (pollId: string, deadline: number) => Promise<void>,
+  scheduleClose: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
 ): Promise<VoteStartResult> => {
   if (!Number.isInteger(input.optionCount) || input.optionCount < 2 || input.optionCount > 9 ||
       input.preset === "yes_no" && input.optionCount !== 2 ||
@@ -57,19 +57,23 @@ export const startChatVote = async (
     inserted = await repository.insertOpen(vote, input.authorization);
     if (!inserted) {
       await ballots.close(vote.id);
+      await ballots.acknowledgeClosed?.(vote.id);
       return { status: "busy" };
     }
-    await scheduleClose(vote.id, deadline.closesAt);
+    await scheduleClose(vote.id, deadline.closesAt, 0);
   } catch (error: unknown) {
-    await ballots.close(vote.id).catch(() => null);
+    const closedSnapshot = await ballots.close(vote.id).catch(() => null);
     if (inserted) {
-      await repository.finish(
+      const finished = await repository.finish(
         input.channelId,
         vote.id,
         vote.closeReason,
         new Date().toISOString(),
         Array.from({ length: vote.optionCount }, () => 0),
       ).catch(() => false);
+      if (finished) await ballots.acknowledgeClosed?.(vote.id).catch(() => null);
+    } else if (closedSnapshot !== null) {
+      await ballots.acknowledgeClosed?.(vote.id).catch(() => null);
     }
     throw error;
   }
@@ -79,13 +83,14 @@ export const startChatVote = async (
 export const requestChatVoteClose = async (
   repository: ChatVotingRepository,
   channelId: string,
-  scheduleClose: (pollId: string, deadline: number) => Promise<void>,
+  scheduleClose: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
+  authorization?: ModuleMutationAuthorization,
 ): Promise<ChatVote | null> => {
   const vote = await repository.open(channelId);
   if (vote === null) return null;
-  const requested = await repository.requestManualClose(channelId, vote.id);
+  const requested = await repository.requestManualClose(channelId, vote.id, authorization);
   if (!requested) return null;
-  await scheduleClose(vote.id, Date.now());
+  await scheduleClose(vote.id, Date.now(), 1);
   return vote;
 };
 
@@ -104,8 +109,11 @@ const directChat = (text: string) => ({ kind: "chat" as const, text, automated: 
 const canControlVotes = (event: ModuleEvent): boolean =>
   event.chatStatus?.includes("moderator") === true || event.chatStatus?.includes("broadcaster") === true;
 
-const closeAlarmScheduler = (context: ModuleExecutionContext) => (pollId: string, deadline: number): Promise<void> =>
-  context.scheduleAlarm(CHAT_VOTING_ALARM_HANDLER, pollId, deadline);
+const closeAlarmScheduler = (context: ModuleExecutionContext) => (
+  pollId: string,
+  deadline: number,
+  ownerRevision: number,
+): Promise<void> => context.scheduleAlarm(CHAT_VOTING_ALARM_HANDLER, pollId, deadline, ownerRevision);
 
 export const processChatVotingMessage = async (
   event: ModuleEvent<ChatVotingSettings>,
@@ -116,11 +124,14 @@ export const processChatVotingMessage = async (
   if (event.subscriptionType !== "channel.chat.message" || text === null || text.length === 0) {
     return { actions: [], diagnostics: [] };
   }
+  const command = parseVoteCommand(text);
+  const isChoice = /^[1-9]$/u.test(text.trim());
+  if (command === null && !isChoice) return { actions: [], diagnostics: [] };
+
   const userId = chatterId(event);
   const botUserId = await context.botUserId?.() ?? null;
   if (userId === null || botUserId !== null && userId === botUserId) return { actions: [], diagnostics: [] };
 
-  const command = parseVoteCommand(text);
   if (command !== null) {
     if (!canControlVotes(event)) return { actions: [], diagnostics: [] };
     const language = await context.channelLanguage();
@@ -158,9 +169,10 @@ export const processChatVotingMessage = async (
     }
   }
 
-  if (!/^[1-9]$/u.test(text.trim())) return { actions: [], diagnostics: [] };
   const vote = await repository.open(event.channelId);
   if (vote === null) return { actions: [], diagnostics: [] };
+  const closesAt = Date.parse(vote.closesAt);
+  if (!Number.isFinite(closesAt) || Date.now() >= closesAt) return { actions: [], diagnostics: [] };
   const choice = ballotChoiceFromMessage(text, vote.optionCount);
   if (choice === null) return { actions: [], diagnostics: [] };
   const result = await context.ballots.cast(vote.id, userId, choice);
@@ -211,6 +223,7 @@ export const closeChatVoteFromAlarm = async (
   const vote = await repository.byId(context.channelId, pollId);
   if (vote === null) {
     await context.ballots.close(pollId);
+    await context.ballots.acknowledgeClosed?.(pollId);
     await context.storage.delete(voteSnapshotStorageKey(pollId));
     return;
   }
@@ -218,11 +231,19 @@ export const closeChatVoteFromAlarm = async (
   const storageKey = voteSnapshotStorageKey(pollId);
   const stored = await context.storage.get(storageKey);
   let snapshot: StoredClosedSnapshot | null = isStoredSnapshot(stored) ? stored : null;
-  if (snapshot === null && vote.status === "open") {
+  if (vote.status === "open") {
+    if (snapshot === null) {
+      const observed = await context.ballots.read(pollId);
+      if (observed !== null) {
+        snapshot = { counts: [...observed.counts], revision: observed.revision };
+        // Keep a durable copy before handing ownership to close(), so a retry
+        // can never turn a failed persistence step into a zero-count result.
+        await context.storage.put(storageKey, snapshot);
+      }
+    }
     const closed = await context.ballots.close(pollId);
-    snapshot = closed === null
-      ? { counts: Array.from({ length: vote.optionCount }, () => 0), revision: 0 }
-      : { counts: [...closed.counts], revision: closed.revision };
+    if (closed !== null) snapshot = { counts: [...closed.counts], revision: closed.revision };
+    snapshot ??= { counts: [...(vote.counts ?? Array.from({ length: vote.optionCount }, () => 0))], revision: 0 };
     await context.storage.put(storageKey, snapshot);
   }
   snapshot ??= {
@@ -235,6 +256,15 @@ export const closeChatVoteFromAlarm = async (
   }
   const closedVote = await repository.byId(context.channelId, pollId);
   if (closedVote === null || closedVote.status !== "closed") throw new Error("The chat vote could not be closed.");
+
+  await context.publishModuleOverlayMessage("tally", CHAT_VOTING_ELEMENT_KIND, {
+    pollId,
+    status: "closed",
+    counts: [...(closedVote.counts ?? snapshot.counts)],
+    revision: snapshot.revision,
+    closedAt: closedVote.closedAt ?? new Date().toISOString(),
+    closeReason: closedVote.closeReason,
+  });
 
   const settings = await alarmSettings(context);
   if (settings.announceResult) {
@@ -256,13 +286,7 @@ export const closeChatVoteFromAlarm = async (
     }
   }
 
-  await context.publishModuleOverlayMessage("closed", CHAT_VOTING_ELEMENT_KIND, {
-    pollId,
-    counts: [...(closedVote.counts ?? snapshot.counts)],
-    revision: snapshot.revision,
-    closedAt: closedVote.closedAt ?? new Date().toISOString(),
-    closeReason: closedVote.closeReason,
-  });
+  await context.ballots.acknowledgeClosed?.(pollId);
   await context.storage.delete(storageKey);
 };
 

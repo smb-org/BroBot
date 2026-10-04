@@ -1,3 +1,4 @@
+import { settingsVariableReferences } from "../contract";
 import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../contract";
 import { createChatVotingRepository } from "./repository";
 import { chatVotingResultVariableCatalog } from "./contracts/template-variable-catalog";
@@ -61,6 +62,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   defaultSettings: DEFAULT_CHAT_VOTING_SETTINGS,
   templateContext: "event",
   templateFields: { resultText: [resultVariable] },
+  variableReferences: settingsVariableReferences(CHAT_VOTING_MODULE_ID, ["resultText"]),
   templateVariableGroup: {
     label: { de: "Abstimmung", en: "Voting" },
     icon: { paths: ["M4 5h16v14H4z", "M7 9h3", "M14 9h3", "M7 13h3", "M14 13h3"] },

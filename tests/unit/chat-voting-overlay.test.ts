@@ -21,9 +21,21 @@ describe("chat voting tally revisions", () => {
   it("accepts authoritative lifecycle state for a new poll and a close", () => {
     expect(mergeTallyState(tally("poll-a", 7), { pollId: "poll-b", revision: 0, status: "open", counts: [0, 0] }))
       .toMatchObject({ pollId: "poll-b", status: "open" });
-    expect(mergeTallyState(tally("poll-a", 7), { ...tally("poll-a", 1, "closed"), closedAt: "2026-10-04T10:00:00.000Z" }))
-      .toMatchObject({ revision: 1, status: "closed" });
+    const closed = mergeTallyState(tally("poll-a", 7), {
+      ...tally("poll-a", 1, "closed"),
+      closedAt: "2026-10-04T10:00:00.000Z",
+    });
+    expect(closed).toMatchObject({ revision: 7, counts: [7, 0], status: "closed", closedAt: "2026-10-04T10:00:00.000Z" });
+    expect(mergeTallyState(closed, tally("poll-a", 8))).toBe(closed);
     expect(mergeTallyState(tally("poll-a", 7), { pollId: "poll-b", revision: 0, counts: [0, 0] })?.pollId)
       .toBe("poll-a");
+  });
+
+  it("keeps prior module metadata when a partial tally omits labels", () => {
+    const current = tally("poll-a", 2);
+
+    expect(mergeTallyState(current, { pollId: "poll-a", revision: 3, counts: [2, 1] }))
+      .toMatchObject({ labels: ["Yes", "No"], counts: [2, 1], status: "open" });
+    expect(mergeTallyState(current, null)).toBe(current);
   });
 });
