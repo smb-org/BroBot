@@ -1494,11 +1494,11 @@ export class ChannelObject extends DurableObject<Env> {
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
     return {
-      open: (ballotId, optionCount, expiresAt) => this.openBallot(moduleId, ballotId, optionCount, expiresAt),
+      open: (ballotId, optionCount, expiresAt, rule) => this.openBallot(moduleId, ballotId, optionCount, expiresAt, rule),
       cast: (ballotId, userId, choice) => this.castBallot(moduleId, ballotId, userId, choice),
       read: (ballotId) => this.readBallot(moduleId, ballotId),
       close: (ballotId) => this.closeBallot(moduleId, ballotId),
-      finalize: (ballotId, rule) => this.finalizeBallot(moduleId, ballotId, rule),
+      finalize: (ballotId) => this.finalizeBallot(moduleId, ballotId),
       acknowledgeClosed: (ballotId) => this.acknowledgeClosedBallot(moduleId, ballotId),
     };
   }
@@ -1509,6 +1509,7 @@ export class ChannelObject extends DurableObject<Env> {
     ballotId: string,
     optionCount: number,
     expiresAt: number,
+    passRule?: BallotFinalizeRule,
   ): Promise<BallotOpenResult> {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Ballots require a named Durable Object.");
@@ -1519,6 +1520,7 @@ export class ChannelObject extends DurableObject<Env> {
       ballotId,
       optionCount,
       expiresAt,
+      passRule,
       async (transaction) => {
         await this.writeBallotAlarmInTransaction(
           transaction, requestedAlarmKey, BALLOT_EXPIRY_ALARM_HANDLER, expiresAt,
@@ -1567,8 +1569,8 @@ export class ChannelObject extends DurableObject<Env> {
     return result;
   }
 
-  public async finalizeBallot(moduleId: string, ballotId: string, rule: BallotFinalizeRule | null): Promise<BallotFinalizeResult> {
-    return await finalizeStoredBallot(this.ctx.storage, moduleId, ballotId, rule, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
+  public async finalizeBallot(moduleId: string, ballotId: string): Promise<BallotFinalizeResult> {
+    return await finalizeStoredBallot(this.ctx.storage, moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
         ballotExpiryAlarmKey(finalizedModuleId, finalizedBallotId),

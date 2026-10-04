@@ -1582,21 +1582,21 @@ describe("ChannelObject realtime path", () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const object = objectFor([]);
-    await object.openBallot("votekick", "kick-a", 2, 20_000);
+    const rule = { passIf: { yes: 0, no: 1, netAtLeast: 3 } };
+    await object.openBallot("votekick", "kick-a", 2, 20_000, rule);
     await object.castBallot("votekick", "kick-a", "yes-1", 1);
     await object.castBallot("votekick", "kick-a", "yes-2", 1);
     await object.castBallot("votekick", "kick-a", "yes-3", 1);
     await object.castBallot("votekick", "kick-a", "no-1", 2);
 
-    const rule = { passIf: { yes: 0, no: 1, netAtLeast: 3 } };
-    await expect(object.finalizeBallot("votekick", "kick-a", rule)).resolves.toEqual({
+    await expect(object.finalizeBallot("votekick", "kick-a")).resolves.toEqual({
       outcome: "open",
       counts: [3, 1],
       revision: 4,
     });
     await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [3, 1], revision: 4 });
     await object.castBallot("votekick", "kick-a", "yes-4", 1);
-    await expect(object.finalizeBallot("votekick", "kick-a", rule)).resolves.toEqual({
+    await expect(object.finalizeBallot("votekick", "kick-a")).resolves.toEqual({
       outcome: "passed",
       counts: [4, 1],
       revision: 5,
@@ -1608,9 +1608,7 @@ describe("ChannelObject realtime path", () => {
     });
     await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [4, 1], revision: 5, outcome: "passed" });
     vi.setSystemTime(20_000);
-    await expect(object.finalizeBallot("votekick", "kick-a", {
-      passIf: { yes: 0, no: 1, netAtLeast: 8 },
-    })).resolves.toEqual({
+    await expect(object.finalizeBallot("votekick", "kick-a")).resolves.toEqual({
       outcome: "passed",
       counts: [4, 1],
       revision: 5,
@@ -1778,6 +1776,29 @@ describe("ChannelObject realtime path", () => {
       counts: [1, 0], revision: 1, finalization: { outcome: "expired" },
     });
     expect(storage.values.get("ballot:active")).toEqual({ moduleId: "module_b", ballotId: "poll-b" });
+  });
+
+  it("passes a threshold ballot during post-deadline host reclamation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("votekick", "kick-a", 2, 20_000, {
+      passIf: { yes: 0, no: 1, netAtLeast: 3 },
+    });
+    await object.castBallot("votekick", "kick-a", "yes-1", 1);
+    await object.castBallot("votekick", "kick-a", "yes-2", 1);
+    await object.castBallot("votekick", "kick-a", "yes-3", 1);
+
+    vi.setSystemTime(20_000);
+    await expect(object.openBallot("chat_voting", "poll-a", 2, 30_000)).resolves.toEqual({ status: "opened" });
+
+    expect(storageOf(object).values.get("ballot:votekick:kick-a")).toMatchObject({
+      finalization: { outcome: "passed", snapshot: { counts: [3, 0], revision: 3 } },
+    });
+    await expect(object.finalizeBallot("votekick", "kick-a")).resolves.toEqual({
+      outcome: "passed", counts: [3, 0], revision: 3,
+    });
+    expect(storageOf(object).values.get("ballot:active")).toEqual({ moduleId: "chat_voting", ballotId: "poll-a" });
   });
 
   it("uses a length-prefixed channel id in ballot voter HMAC inputs", async () => {

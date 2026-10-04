@@ -171,7 +171,9 @@ describe("Votekick module", () => {
     } });
     const result = await processVotekickMessage(eventFor("!votekick sampleviewer"), repository, context);
 
-    expect(context.ballots.open).toHaveBeenCalledWith(expect.any(String), 2, expect.any(Number));
+    expect(context.ballots.open).toHaveBeenCalledWith(expect.any(String), 2, expect.any(Number), {
+      passIf: { yes: 0, no: 1, netAtLeast: 8 },
+    });
     expect(context.ballots.cast).toHaveBeenCalledWith(expect.any(String), "starter-user", 1);
     expect(admit).toHaveBeenCalledWith("channel-a", expect.objectContaining({ threshold: 8, targetLogin: "sampleviewer", initiatorUserId: "starter-user", ballotRevision: 1 }), expect.any(String), settings.channelCooldownSeconds, settings.targetCooldownSeconds);
     expect(context.scheduleAlarm).toHaveBeenCalledWith("close", expect.stringMatching(/^close:/u), expect.any(Number));

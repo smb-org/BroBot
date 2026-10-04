@@ -32,6 +32,7 @@ interface StoredBallot {
   ballotId: string;
   key: Uint8Array;
   optionCount: number;
+  passRule?: BallotFinalizeRule;
   counts: number[];
   revision: number;
   finalization?: StoredBallotFinalization;
@@ -100,6 +101,7 @@ const isStoredBallot = (value: unknown): value is StoredBallot => {
   return typeof ballot.moduleId === "string" && typeof ballot.ballotId === "string" &&
     ballot.key instanceof Uint8Array && ballot.key.byteLength === 32 &&
     Number.isInteger(ballot.optionCount) && (ballot.optionCount ?? 0) >= 1 && (ballot.optionCount ?? 0) <= 9 &&
+    (ballot.passRule === undefined || isValidStoredRule(ballot.passRule, ballot.optionCount ?? 0)) &&
     Array.isArray(ballot.counts) && ballot.counts.length === ballot.optionCount &&
     ballot.counts.every((count) => Number.isSafeInteger(count) && count >= 0) &&
     Number.isSafeInteger(ballot.revision) && (ballot.revision ?? -1) >= 0 &&
@@ -108,12 +110,22 @@ const isStoredBallot = (value: unknown): value is StoredBallot => {
     Number.isFinite(ballot.openedAt) && Number.isFinite(ballot.expiresAt);
 };
 
-const validateFinalizeRule = (rule: BallotFinalizeRule | null): void => {
-  if (rule === null) return;
-  const { yes, no, netAtLeast } = rule.passIf;
-  if (!Number.isSafeInteger(yes) || yes < 0 || !Number.isSafeInteger(no) || no < 0 || yes === no ||
-      !Number.isSafeInteger(netAtLeast) || netAtLeast < 1) {
-    throw new Error("Ballot finalize rule is invalid.");
+const isValidStoredRule = (value: unknown, optionCount: number): value is BallotFinalizeRule => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const passIf: unknown = Reflect.get(value, "passIf") as unknown;
+  if (typeof passIf !== "object" || passIf === null || Array.isArray(passIf)) return false;
+  const yes: unknown = Reflect.get(passIf, "yes");
+  const no: unknown = Reflect.get(passIf, "no");
+  const netAtLeast: unknown = Reflect.get(passIf, "netAtLeast");
+  return Number.isSafeInteger(yes) && (yes as number) >= 0 && (yes as number) < optionCount &&
+    Number.isSafeInteger(no) && (no as number) >= 0 && (no as number) < optionCount && yes !== no &&
+    Number.isSafeInteger(netAtLeast) && (netAtLeast as number) >= 1;
+};
+
+const validateOpenRule = (rule: BallotFinalizeRule | undefined, optionCount: number): void => {
+  if (rule === undefined) return;
+  if (!isValidStoredRule(rule, optionCount)) {
+    throw new Error("Ballot pass rule is invalid.");
   }
 };
 
@@ -172,7 +184,6 @@ type OnBallotFinalized = (
 const finalizeInTransaction = async (
   transaction: BallotTransaction,
   ballot: StoredBallot,
-  rule: BallotFinalizeRule | null,
   now: number,
   onFinalized?: OnBallotFinalized,
 ): Promise<BallotFinalizeResult> => {
@@ -186,11 +197,9 @@ const finalizeInTransaction = async (
   }
 
   const snapshot = snapshotOf(ballot);
-  if (rule !== null && (rule.passIf.yes >= snapshot.counts.length || rule.passIf.no >= snapshot.counts.length)) {
-    throw new RangeError("Ballot finalize option index is outside the ballot.");
-  }
-  const rulePassed = rule !== null &&
-    (snapshot.counts[rule.passIf.yes] ?? 0) - (snapshot.counts[rule.passIf.no] ?? 0) >= rule.passIf.netAtLeast;
+  const rulePassed = ballot.passRule !== undefined &&
+    (snapshot.counts[ballot.passRule.passIf.yes] ?? 0) -
+      (snapshot.counts[ballot.passRule.passIf.no] ?? 0) >= ballot.passRule.passIf.netAtLeast;
   const outcome: BallotFinalizeOutcome = ballot.frozen === true || rulePassed
     ? "passed"
     : now >= ballot.expiresAt ? "expired" : "open";
@@ -217,6 +226,7 @@ export const openStoredBallot = async (
   ballotId: string,
   optionCount: number,
   expiresAt: number,
+  passRule?: BallotFinalizeRule,
   onOpened?: (transaction: BallotTransaction) => Promise<void>,
   onFinalized?: OnBallotFinalized,
 ): Promise<StoredBallotOpenResult> => {
@@ -225,6 +235,7 @@ export const openStoredBallot = async (
   if (!Number.isInteger(optionCount) || optionCount < 1 || optionCount > 9) {
     throw new RangeError("Ballots require between one and nine options.");
   }
+  validateOpenRule(passRule, optionCount);
   const requestedAt = Date.now();
   if (!Number.isFinite(expiresAt) || expiresAt <= requestedAt || expiresAt > requestedAt + BALLOT_MAX_LIFETIME_MS) {
     throw new RangeError("Ballot expiry must be in the next 24 hours.");
@@ -243,7 +254,7 @@ export const openStoredBallot = async (
       const activeStored = activeKey === null ? undefined : await transaction.get(activeKey);
       if (activeKey !== null && isStoredBallot(activeStored) &&
           activeStored.moduleId === active.moduleId && activeStored.ballotId === active.ballotId) {
-        const finalized = await finalizeInTransaction(transaction, activeStored, null, now, onFinalized);
+        const finalized = await finalizeInTransaction(transaction, activeStored, now, onFinalized);
         if (finalized.outcome === "open") {
           return {
             status: "busy",
@@ -260,6 +271,9 @@ export const openStoredBallot = async (
       ballotId,
       key,
       optionCount,
+      ...(passRule === undefined ? {} : {
+        passRule: { passIf: { ...passRule.passIf } },
+      }),
       counts: Array.from({ length: optionCount }, () => 0),
       revision: 0,
       openedAt: now,
@@ -332,7 +346,7 @@ export const readStoredBallot = async (
   return await storage.transaction(async (transaction) => {
     const ballot = await transaction.get(ballotKey(moduleId, ballotId));
     if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) return null;
-    const finalized = await finalizeInTransaction(transaction, ballot, null, Date.now(), onFinalized);
+    const finalized = await finalizeInTransaction(transaction, ballot, Date.now(), onFinalized);
     if (finalized.outcome === "not_open") return null;
     return finalized.outcome === "open"
       ? { counts: finalized.counts, revision: finalized.revision }
@@ -367,7 +381,7 @@ const deleteBallotData = async (
   if (active?.moduleId === moduleId && active.ballotId === ballotId) await transaction.delete(ACTIVE_BALLOT_KEY);
 };
 
-/** Finalizes an expired ballot without a pass rule, preserving its authoritative tally. */
+/** Finalizes an expired ballot using its stored pass rule and authoritative tally. */
 export const expireStoredBallot = async (
   storage: BallotStorage,
   moduleId: string,
@@ -379,7 +393,7 @@ export const expireStoredBallot = async (
   return await storage.transaction(async (transaction) => {
     const ballot = await transaction.get(ballotKey(moduleId, ballotId));
     if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) return null;
-    const finalized = await finalizeInTransaction(transaction, ballot, null, Date.now(), onFinalized);
+    const finalized = await finalizeInTransaction(transaction, ballot, Date.now(), onFinalized);
     return finalized.outcome === "open" ? ballot.expiresAt : null;
   });
 };
@@ -389,18 +403,16 @@ export const finalizeStoredBallot = async (
   storage: BallotStorage,
   moduleId: string,
   ballotId: string,
-  rule: BallotFinalizeRule | null,
   onFinalized?: OnBallotFinalized,
 ): Promise<BallotFinalizeResult> => {
   validId(moduleId, "Module id");
   validId(ballotId, "Ballot id");
-  validateFinalizeRule(rule);
   return await storage.transaction(async (transaction) => {
     const ballot = await transaction.get(ballotKey(moduleId, ballotId));
     if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) {
       return { outcome: "not_open", counts: [], revision: 0 };
     }
-    return await finalizeInTransaction(transaction, ballot, rule, Date.now(), onFinalized);
+    return await finalizeInTransaction(transaction, ballot, Date.now(), onFinalized);
   });
 };
 

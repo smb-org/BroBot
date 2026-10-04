@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { BallotCastResult, BallotFinalizeRule, BallotOpenResult } from "../../src/modules/contract";
 import { votekickModule } from "../../src/modules/votekick";
+import {
+  closeStoredBallot,
+  finalizeStoredBallot,
+  forgetClosedStoredBallot,
+  openStoredBallot,
+  readStoredBallot,
+  castStoredBallot,
+} from "../../src/worker/durable/ballots";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { upsertBotIdentity } from "../../src/worker/db/bot-identity";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
@@ -13,10 +22,72 @@ const keyRing = JSON.stringify({
 });
 const databases: TestD1Database[] = [];
 
+type TestBallotTransaction = {
+  get: <Value>(key: string) => Promise<Value | undefined>;
+  list: (options?: { prefix?: string; startAfter?: string; limit?: number }) => Promise<Map<string, unknown>>;
+  put: (key: string, value: unknown) => Promise<void>;
+  delete: (key: string | string[]) => Promise<boolean | number>;
+  setAlarm: (scheduledTime: number | Date) => Promise<void>;
+  deleteAlarm: () => Promise<void>;
+};
+type TestBallotStorage = Parameters<typeof openStoredBallot>[0];
+type DispatchBallotObject = {
+  openBallot: ReturnType<typeof vi.fn<(
+    moduleId: string, ballotId: string, optionCount: number, expiresAt: number, passRule?: BallotFinalizeRule,
+  ) => Promise<BallotOpenResult>>>;
+  castBallot: ReturnType<typeof vi.fn<(
+    moduleId: string, ballotId: string, userId: string, choice: number,
+  ) => Promise<BallotCastResult>>>;
+};
+
+const memoryBallotStorage = (): TestBallotStorage => {
+  const values = new Map<string, unknown>();
+  const get = (key: string): Promise<unknown> => Promise.resolve(values.get(key));
+  const list = (options: { prefix?: string; startAfter?: string; limit?: number } = {}): Promise<Map<string, unknown>> => {
+    let keys = [...values.keys()]
+      .filter((key) => options.prefix === undefined || key.startsWith(options.prefix))
+      .filter((key) => options.startAfter === undefined || key > options.startAfter)
+      .sort();
+    if (options.limit !== undefined) keys = keys.slice(0, options.limit);
+    return Promise.resolve(new Map(keys.map((key) => [key, values.get(key)])));
+  };
+  const put = (key: string, value: unknown): Promise<void> => {
+    values.set(key, value);
+    return Promise.resolve();
+  };
+  const remove = (keys: string | string[]): Promise<boolean> => {
+    let deleted = false;
+    for (const key of Array.isArray(keys) ? keys : [keys]) deleted = values.delete(key) || deleted;
+    return Promise.resolve(deleted);
+  };
+  const transaction: TestBallotTransaction = {
+    get: async <Value>(key: string) => await get(key) as Value | undefined,
+    list: async (options) => await list(options),
+    put: async (key, value) => { await put(key, value); },
+    delete: async (keys) => await remove(keys),
+    setAlarm: () => Promise.resolve(),
+    deleteAlarm: () => Promise.resolve(),
+  };
+  return {
+    get,
+    list,
+    put,
+    delete: remove,
+    transaction: <Value>(closure: (transaction: TestBallotTransaction) => Promise<Value>) => closure(transaction),
+  } as unknown as TestBallotStorage;
+};
+
+const deferred = <Value = void>() => {
+  let resolve!: (value: Value | PromiseLike<Value>) => void;
+  const promise = new Promise<Value>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+};
+
 const setup = async (
   control: "none" | "mute" | "pause" = "none",
   pauseOnClose = false,
   disableModuleOnPass = false,
+  useStoredBallots = false,
 ) => {
   const database = new TestD1Database();
   databases.push(database);
@@ -64,12 +135,49 @@ const setup = async (
   let ballotOpen = false;
   let ballotOutcome: "passed" | "expired" | null = null;
   let ballotExpiresAt = 0;
-  const ballotObject = {
-    openBallot: vi.fn((_moduleId: string, _ballotId: string, _optionCount: number, expiresAt: number) => {
+  let passRule: { passIf: { yes: number; no: number; netAtLeast: number } } | undefined;
+  const storage = memoryBallotStorage();
+  const ballotObject = (useStoredBallots ? {
+    openBallot: vi.fn(async (
+      moduleId: string,
+      ballotId: string,
+      optionCount: number,
+      expiresAt: number,
+      rule?: { passIf: { yes: number; no: number; netAtLeast: number } },
+    ) => {
+      const result = await openStoredBallot(storage, moduleId, ballotId, optionCount, expiresAt, rule);
+      return result.status === "opened" ? result : { status: "busy" as const, moduleId: result.moduleId };
+    }),
+    castBallot: vi.fn((moduleId: string, ballotId: string, userId: string, choice: number) =>
+      castStoredBallot(storage, "channel-a", moduleId, ballotId, userId, choice)),
+    readBallot: vi.fn((moduleId: string, ballotId: string) => readStoredBallot(storage, moduleId, ballotId)),
+    closeBallot: vi.fn((moduleId: string, ballotId: string) => closeStoredBallot(storage, moduleId, ballotId)),
+    finalizeBallot: vi.fn((moduleId: string, ballotId: string) => finalizeStoredBallot(storage, moduleId, ballotId)),
+    acknowledgeClosedBallot: vi.fn((moduleId: string, ballotId: string) => forgetClosedStoredBallot(storage, moduleId, ballotId)),
+    scheduleModuleAlarm: vi.fn(() => Promise.resolve()),
+    clearModuleAlarm: vi.fn(() => Promise.resolve()),
+    getActiveChatterCount: vi.fn(() => Promise.resolve(20)),
+    getActiveChatter: vi.fn(() => Promise.resolve({
+      firstSeenAt: new Date(Date.now() - 60_000).toISOString(),
+      lastSeenAt: new Date(Date.now() - 1_000).toISOString(),
+    })),
+    recordChatActivity: vi.fn(() => Promise.resolve(0)),
+    clearActiveChatters: vi.fn(() => Promise.resolve()),
+    getChatActivityCount: vi.fn(() => Promise.resolve(0)),
+    claimAutomatedChatOutput: vi.fn(() => Promise.resolve(true)),
+    recordBotChatMessage: vi.fn(() => Promise.resolve()),
+    isRecentBotChatMessage: vi.fn(() => Promise.resolve(false)),
+    getTwitchRateLimitRetryAfter: vi.fn(() => Promise.resolve(null)),
+    setTwitchRateLimitRetryAfter: vi.fn(() => Promise.resolve()),
+    publish: vi.fn(() => Promise.resolve()),
+  } : {
+    openBallot: vi.fn((_moduleId: string, _ballotId: string, _optionCount: number, expiresAt: number,
+      rule?: { passIf: { yes: number; no: number; netAtLeast: number } }) => {
       if (ballotOpen) return Promise.resolve({ status: "busy" as const, moduleId: "votekick" });
       ballotOpen = true;
       ballotOutcome = null;
       ballotExpiresAt = expiresAt;
+      passRule = rule === undefined ? undefined : { passIf: { ...rule.passIf } };
       counts = [0, 0];
       revision = 0;
       return Promise.resolve({ status: "opened" as const });
@@ -87,10 +195,10 @@ const setup = async (
       ballotOutcome = null;
       return { counts: [...counts], revision };
     }),
-    finalizeBallot: vi.fn(async (_moduleId: string, _ballotId: string, rule: { passIf: { yes: number; no: number; netAtLeast: number } } | null) => {
+    finalizeBallot: vi.fn(async () => {
       if (ballotOutcome !== null) return { outcome: ballotOutcome, counts: [...counts], revision };
       if (!ballotOpen) return { outcome: "not_open" as const, counts: [], revision: 0 };
-      if (rule !== null && (counts[rule.passIf.yes] ?? 0) - (counts[rule.passIf.no] ?? 0) >= rule.passIf.netAtLeast) {
+      if (passRule !== undefined && (counts[passRule.passIf.yes] ?? 0) - (counts[passRule.passIf.no] ?? 0) >= passRule.passIf.netAtLeast) {
         ballotOutcome = "passed";
       } else if (Date.now() >= ballotExpiresAt) {
         ballotOutcome = "expired";
@@ -124,7 +232,7 @@ const setup = async (
     getTwitchRateLimitRetryAfter: vi.fn(() => Promise.resolve(null)),
     setTwitchRateLimitRetryAfter: vi.fn(() => Promise.resolve()),
     publish: vi.fn(() => Promise.resolve()),
-  };
+  }) as unknown as DispatchBallotObject;
   const runtime = {
     DB: database as unknown as D1Database,
     TWITCH_CLIENT_ID: "client-id",
@@ -142,7 +250,7 @@ const setup = async (
       : { data: [] };
     return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
   });
-  return { database, runtime, fetcher, ballotObject };
+  return { database, runtime, fetcher, ballotObject, storage };
 };
 
 const chat = async (runtime: Env, fetcher: typeof fetch, text: string, chatterId: string, badges: readonly string[] = []): Promise<void> => {
@@ -169,10 +277,69 @@ const requestUrl = (input: RequestInfo | URL): string =>
   input instanceof Request ? input.url : input instanceof URL ? input.href : input;
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const database of databases.splice(0)) database.close();
 });
 
 describe("Votekick dispatch integration", () => {
+  it("passes a committed final vote reclaimed after expiry and dispatches one timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-04T10:00:00.000Z"));
+    const { database, runtime, fetcher, ballotObject, storage } = await setup("none", false, false, true);
+    await database.prepare(
+      "INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason) VALUES ('channel-a', 1, ?, NULL)",
+    ).bind(new Date().toISOString()).run();
+    await chat(runtime, fetcher, "!votekick sampleviewer", "starter-a", ["vip"]);
+    await chat(runtime, fetcher, "1", "voter-a");
+
+    const running = await database.prepare(
+      "SELECT votekick_id, expires_at FROM votekicks WHERE channel_id = 'channel-a' AND status = 'running'",
+    ).first<{ votekick_id: string; expires_at: string }>();
+    expect(running).not.toBeNull();
+    if (running === null) throw new Error("Expected a running votekick row.");
+    const ballotId = running.votekick_id;
+    const expiresAt = Date.parse(running.expires_at);
+    expect(Date.now()).toBeLessThan(expiresAt);
+
+    const committed = deferred();
+    const responseGate = deferred();
+    const castImplementation = ballotObject.castBallot.getMockImplementation();
+    if (castImplementation === undefined) throw new Error("Expected a cast ballot implementation.");
+    ballotObject.castBallot.mockImplementationOnce(async (moduleId, id, userId, choice) => {
+      const result = await castImplementation(moduleId, id, userId, choice);
+      committed.resolve();
+      await responseGate.promise;
+      return result;
+    });
+    const delayedVote = chat(runtime, fetcher, "1", "voter-b");
+
+    try {
+      await committed.promise;
+      const beforeReclamation = await storage.get<{
+        counts: number[]; revision: number; finalization?: unknown;
+      }>(`ballot:votekick:${ballotId}`);
+      expect(beforeReclamation).toMatchObject({ counts: [3, 0], revision: 3 });
+      expect(beforeReclamation?.finalization).toBeUndefined();
+      await expect(storage.get("ballot:active")).resolves.toEqual({ moduleId: "votekick", ballotId });
+      vi.setSystemTime(expiresAt + 1);
+
+      await expect(ballotObject.openBallot(
+        "chat_voting", "poll-after-expiry", 2, Date.now() + 60_000,
+      )).resolves.toEqual({ status: "opened" });
+      await expect(readStoredBallot(storage, "votekick", ballotId)).resolves.toMatchObject({
+        counts: [3, 0], revision: 3, outcome: "passed",
+      });
+    } finally {
+      responseGate.resolve();
+      await delayedVote;
+    }
+
+    await expect(database.prepare(
+      "SELECT status, yes_votes, no_votes FROM votekicks WHERE channel_id = 'channel-a' AND votekick_id = ?",
+    ).bind(ballotId).first()).resolves.toEqual({ status: "passed", yes_votes: 3, no_votes: 0 });
+    expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).includes("/helix/moderation/bans"))).toHaveLength(1);
+  });
+
   it("does not start a ballot while the channel is paused", async () => {
     const { database, runtime, fetcher, ballotObject } = await setup("pause");
     await chat(runtime, fetcher, "!votekick sampleviewer", "starter-a", ["vip"]);

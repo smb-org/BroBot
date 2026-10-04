@@ -742,12 +742,12 @@ export type BallotFinalizeResult = Omit<BallotSnapshot, "outcome"> & { outcome: 
 
 /** Ballot access already bound by the host to one channel and one module. */
 export interface ModuleBallotAccess {
-  open: (ballotId: string, optionCount: number, expiresAt: number) => Promise<BallotOpenResult>;
+  open: (ballotId: string, optionCount: number, expiresAt: number, rule?: BallotFinalizeRule) => Promise<BallotOpenResult>;
   cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
-  /** Atomically finalizes against the current tally and returns the stored outcome and snapshot. */
-  finalize: (ballotId: string, rule: BallotFinalizeRule | null) => Promise<BallotFinalizeResult>;
+  /** Atomically finalizes using the stored pass rule and returns the outcome and snapshot. */
+  finalize: (ballotId: string) => Promise<BallotFinalizeResult>;
   /** Releases an idempotent close snapshot after the module has persisted its result. */
   acknowledgeClosed?: (ballotId: string) => Promise<void>;
 }

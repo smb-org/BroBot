@@ -38,8 +38,8 @@ const renderChat = async (
   };
 };
 
-const finalizeRule = (running: Votekick) => ({
-  passIf: { yes: 0, no: 1, netAtLeast: running.threshold },
+const finalizeRule = (threshold: number) => ({
+  passIf: { yes: 0, no: 1, netAtLeast: threshold },
 });
 
 const snapshotCounts = (snapshot: { counts: readonly number[] }): readonly [number, number] => [
@@ -112,7 +112,7 @@ const finalizeVotekick = async (
   repository: VotekickRepository,
   access: VotekickFinalizeAccess,
 ): Promise<VotekickFinalizeAttempt> => {
-  const finalized = await access.ballots.finalize(running.id, finalizeRule(running));
+  const finalized = await access.ballots.finalize(running.id);
   const [yesVotes, noVotes] = snapshotCounts(finalized);
   if (finalized.outcome === "open") {
     await repository.updateCounts(channelId, running.id, yesVotes, noVotes, finalized.revision);
@@ -246,7 +246,7 @@ const commandResult = async (
     // Register this first so the module can snapshot and close the ballot before its own expiry alarm.
     await context.scheduleAlarm("close", `close:${id}`, endsAtMs);
     alarmScheduled = true;
-    const opened = await context.ballots.open(id, 2, endsAtMs);
+    const opened = await context.ballots.open(id, 2, endsAtMs, finalizeRule(threshold));
     if (opened.status === "busy") {
       await bestEffortClear(context, `close:${id}`);
       const busy = await renderChat(context, event.settings.busyText, {
