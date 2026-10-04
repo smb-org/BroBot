@@ -20,6 +20,8 @@ import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
 import type {
   ActiveChatterActivity,
   BallotCastResult,
+  BallotFinalizeResult,
+  BallotFinalizeRule,
   BallotOpenResult,
   BallotSnapshot,
   BotModule,
@@ -43,11 +45,13 @@ import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import { sendChatMessage } from "../chat";
+import { sendModerationBan } from "../moderation";
 import { readChannelStreamState } from "../db/stream-state";
-import { readDispatchChannelState } from "../db/channel-controls";
+import { moduleEnabledForChannel, readDispatchChannelState } from "../db/channel-controls";
 import { chatOutputSuppressionReason } from "../chat-output-gate";
 import { resolveModuleEventTimes } from "../module-event-times";
 import { renderScheduledTemplate } from "../scheduled-template-renderer";
+import { secureRandomInteger } from "../template-resolver";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import {
   claimModuleAlarmSend,
@@ -61,12 +65,15 @@ import {
 } from "./automated-chat-output";
 import {
   BALLOT_EXPIRY_ALARM_HANDLER,
+  BALLOT_HARD_DELETE_ALARM_HANDLER,
   ballotExpiryAlarmKey,
   ballotIdentityFromExpiryAlarmKey,
   castStoredBallot,
   closeStoredBallot,
   forgetClosedStoredBallot,
   expireStoredBallot,
+  finalizeStoredBallot,
+  hardDeleteFinalizedStoredBallot,
   openStoredBallot,
   readStoredBallot,
 } from "./ballots";
@@ -1225,6 +1232,23 @@ export class ChannelObject extends DurableObject<Env> {
       DB: this.env.DB,
       channelId,
       ballots: this.ballotAccess(moduleId),
+      channelLanguage: async () => {
+        const row = await this.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
+          .bind(channelId).first<{ language: string }>();
+        return row?.language === "en" ? "en" : "de";
+      },
+      secureRandomInteger,
+      executeTimeout: async (action) => {
+        const module = MODULES.find((candidate) => candidate.id === moduleId);
+        if (!await moduleEnabledForChannel(this.env.DB, channelId, moduleId, module?.mandatory === true)) {
+          return "suppressed";
+        }
+        return (await sendModerationBan(this.env, channelId, {
+          userId: action.userId,
+          durationSeconds: action.durationSeconds,
+          reason: action.reason,
+        })).outcome;
+      },
       storage: {
         get: (key: string) => this.ctx.storage.get(`${storagePrefix}${key}`),
         put: (key: string, value: unknown) => this.ctx.storage.put(`${storagePrefix}${key}`, value),
@@ -1236,8 +1260,15 @@ export class ChannelObject extends DurableObject<Env> {
       clear: async (key, ownerRevision) => {
         await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision);
       },
-      renderTemplate: async (text, now = Date.now(), moduleValues = {}) =>
-        renderScheduledTemplate(this.env, channelId, text, now, externalFetchBudget, moduleValues),
+      renderTemplate: async (text, moduleValuesOrNow = {}, nowOrModuleValues = Date.now()) => {
+        const now = typeof moduleValuesOrNow === "number"
+          ? moduleValuesOrNow
+          : typeof nowOrModuleValues === "number" ? nowOrModuleValues : Date.now();
+        const moduleValues = typeof moduleValuesOrNow === "number"
+          ? typeof nowOrModuleValues === "object" ? nowOrModuleValues : {}
+          : moduleValuesOrNow;
+        return renderScheduledTemplate(this.env, channelId, text, now, externalFetchBudget, moduleValues);
+      },
       publishModuleOverlayMessage: async (type, elementKind, payload) => {
         const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, moduleId, {
           kind: "overlay",
@@ -1447,12 +1478,27 @@ export class ChannelObject extends DurableObject<Env> {
     return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
   }
 
+  /** Runs one registered module alarm from an authorized host route reconciliation. */
+  public async runModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string): Promise<void> {
+    const module = MODULES.find((candidate) => candidate.id === moduleId);
+    const registration = module?.alarms?.find((candidate) => candidate.key === handlerKey);
+    if (registration === undefined || alarmKey.length === 0 || alarmKey.length > 256) {
+      throw new Error("Module alarm is unavailable.");
+    }
+    await registration.handle(
+      this.moduleAlarmContext(moduleId, registration, createModuleExternalFetchBudget()),
+      alarmKey,
+      Date.now(),
+    );
+  }
+
   private ballotAccess(moduleId: string): ModuleBallotAccess {
     return {
-      open: (ballotId, optionCount, expiresAt) => this.openBallot(moduleId, ballotId, optionCount, expiresAt),
+      open: (ballotId, optionCount, expiresAt, rule) => this.openBallot(moduleId, ballotId, optionCount, expiresAt, rule),
       cast: (ballotId, userId, choice) => this.castBallot(moduleId, ballotId, userId, choice),
       read: (ballotId) => this.readBallot(moduleId, ballotId),
       close: (ballotId) => this.closeBallot(moduleId, ballotId),
+      finalize: (ballotId) => this.finalizeBallot(moduleId, ballotId),
       acknowledgeClosed: (ballotId) => this.acknowledgeClosedBallot(moduleId, ballotId),
     };
   }
@@ -1463,6 +1509,7 @@ export class ChannelObject extends DurableObject<Env> {
     ballotId: string,
     optionCount: number,
     expiresAt: number,
+    passRule?: BallotFinalizeRule,
   ): Promise<BallotOpenResult> {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Ballots require a named Durable Object.");
@@ -1473,18 +1520,19 @@ export class ChannelObject extends DurableObject<Env> {
       ballotId,
       optionCount,
       expiresAt,
+      passRule,
       async (transaction) => {
-        const table = await readAlarmScheduleTable(transaction);
-        const current = table[requestedAlarmKey];
-        table[requestedAlarmKey] = {
-          deadline: expiresAt,
-          handler: BALLOT_EXPIRY_ALARM_HANDLER,
-          revision: (current?.revision ?? 0) + 1,
-        };
-        await transaction.put(ALARM_TABLE_KEY, table);
-        const nextAlarmAt = earliestAlarmAt(table, Date.now());
-        if (nextAlarmAt === null) await transaction.deleteAlarm();
-        else await transaction.setAlarm(nextAlarmAt);
+        await this.writeBallotAlarmInTransaction(
+          transaction, requestedAlarmKey, BALLOT_EXPIRY_ALARM_HANDLER, expiresAt,
+        );
+      },
+      async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
+        await this.writeBallotAlarmInTransaction(
+          transaction,
+          ballotExpiryAlarmKey(finalizedModuleId, finalizedBallotId),
+          BALLOT_HARD_DELETE_ALARM_HANDLER,
+          hardDeleteAt,
+        );
       },
     );
     if (result.status === "opened") {
@@ -1505,13 +1553,31 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async readBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
-    return await readStoredBallot(this.ctx.storage, moduleId, ballotId);
+    return await readStoredBallot(this.ctx.storage, moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
+      await this.writeBallotAlarmInTransaction(
+        transaction,
+        ballotExpiryAlarmKey(finalizedModuleId, finalizedBallotId),
+        BALLOT_HARD_DELETE_ALARM_HANDLER,
+        hardDeleteAt,
+      );
+    });
   }
 
   public async closeBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
     const result = await closeStoredBallot(this.ctx.storage, moduleId, ballotId);
     await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
     return result;
+  }
+
+  public async finalizeBallot(moduleId: string, ballotId: string): Promise<BallotFinalizeResult> {
+    return await finalizeStoredBallot(this.ctx.storage, moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
+      await this.writeBallotAlarmInTransaction(
+        transaction,
+        ballotExpiryAlarmKey(finalizedModuleId, finalizedBallotId),
+        BALLOT_HARD_DELETE_ALARM_HANDLER,
+        hardDeleteAt,
+      );
+    });
   }
 
   public async acknowledgeClosedBallot(moduleId: string, ballotId: string): Promise<void> {
@@ -1521,10 +1587,41 @@ export class ChannelObject extends DurableObject<Env> {
   private async expireBallot(key: string): Promise<void> {
     const identity = ballotIdentityFromExpiryAlarmKey(key);
     if (identity === null) return;
-    const nextExpiry = await expireStoredBallot(this.ctx.storage, identity.moduleId, identity.ballotId);
+    const nextExpiry = await expireStoredBallot(
+      this.ctx.storage,
+      identity.moduleId,
+      identity.ballotId,
+      async (transaction, moduleId, ballotId, hardDeleteAt) => {
+        await this.writeBallotAlarmInTransaction(
+          transaction, ballotExpiryAlarmKey(moduleId, ballotId), BALLOT_HARD_DELETE_ALARM_HANDLER, hardDeleteAt,
+        );
+      },
+    );
     if (nextExpiry !== null) {
       await this.scheduleAlarmEntry(key, BALLOT_EXPIRY_ALARM_HANDLER, nextExpiry);
     }
+  }
+
+  private async hardDeleteBallot(key: string): Promise<void> {
+    const identity = ballotIdentityFromExpiryAlarmKey(key);
+    if (identity === null) return;
+    const retryAt = await hardDeleteFinalizedStoredBallot(this.ctx.storage, identity.moduleId, identity.ballotId);
+    if (retryAt !== null) await this.scheduleAlarmEntry(key, BALLOT_HARD_DELETE_ALARM_HANDLER, retryAt);
+  }
+
+  private async writeBallotAlarmInTransaction(
+    transaction: AlarmStorageAccess & Pick<DurableObjectTransaction, "setAlarm" | "deleteAlarm">,
+    key: string,
+    handler: string,
+    deadline: number,
+  ): Promise<void> {
+    const table = await readAlarmScheduleTable(transaction);
+    const current = table[key];
+    table[key] = { deadline, handler, revision: (current?.revision ?? 0) + 1 };
+    await transaction.put(ALARM_TABLE_KEY, table);
+    const nextAlarmAt = earliestAlarmAt(table, Date.now());
+    if (nextAlarmAt === null) await transaction.deleteAlarm();
+    else await transaction.setAlarm(nextAlarmAt);
   }
 
   private alarmHandlers(
@@ -1538,6 +1635,7 @@ export class ChannelObject extends DurableObject<Env> {
         },
       }],
       [BALLOT_EXPIRY_ALARM_HANDLER, { handle: async (key) => { await this.expireBallot(key); } }],
+      [BALLOT_HARD_DELETE_ALARM_HANDLER, { handle: async (key) => { await this.hardDeleteBallot(key); } }],
       [SECURITY_ROUND_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
       [SECURITY_RETRY_HANDLER, { handle: (_key, _entry, now, nowIso) => this.runSecurityRound(now, nowIso) }],
       [AD_PREWARNING_HANDLER, {

@@ -8,7 +8,7 @@ import {
 import { sendChatMessage } from "./chat";
 import { sendChatAnnouncement } from "./announcement";
 import { fetchTwitchUserByLogin, sendShoutout } from "./shoutout";
-import { sendModerationBan } from "./moderation";
+import { isTwitchChannelModerator, sendModerationBan } from "./moderation";
 import { publishRealtimeMessages, publishVariablesChanged } from "./realtime";
 import { prepareModuleOverlayRealtimeMessage } from "./module-overlay-realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
@@ -21,7 +21,7 @@ import {
   writeEventSubStreamState,
 } from "./db/stream-state";
 import { lookupAndRefreshStreamState } from "./stream-state-lookup";
-import { readChannelControls, readDispatchChannelState } from "./db/channel-controls";
+import { moduleEnabledForChannel, readChannelControls, readDispatchChannelState } from "./db/channel-controls";
 import { readChannelLocation } from "./db/channel-settings";
 import { getBotIdentity, getCachedBotUserId } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
@@ -530,6 +530,13 @@ const runActions = async (
         continue;
       }
       if (action.kind === "timeout" || action.kind === "ban") {
+        if (!await moduleEnabledForChannel(environment.DB, channelId, module.id, module.mandatory === true)) {
+          diagnostics.push({
+            code: "host.action.suppressed" satisfies EventCode,
+            detail: { action: action.kind, reason: "module_disabled" },
+          });
+          continue;
+        }
         const result = await sendModerationBan(environment, channelId, {
           userId: action.userId,
           durationSeconds: action.kind === "timeout" ? action.durationSeconds : null,
@@ -900,6 +907,7 @@ export const dispatchEventSubNotification = async (
         payload: event.payload,
         settings: validatedSettings,
         receivedAt: event.receivedAt,
+        ...(event.eventSubTimestamp === undefined ? {} : { eventSubTimestamp: event.eventSubTimestamp }),
         actor,
         chatStatus: chatStatusFor(event.subscriptionType, event.payload),
       };
@@ -935,6 +943,11 @@ export const dispatchEventSubNotification = async (
             authorizeMutation: authorizeModuleMutation,
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
             botUserId,
+            lookupUserByLogin: async (login) => {
+              const user = await fetchTwitchUserByLogin(fetcher, environment as unknown as Env, login, "app");
+              return user === null ? null : { userId: user.userId, login: user.login, displayName: user.displayName };
+            },
+            isChannelModerator: (userId) => isTwitchChannelModerator(environment, event.channelId, userId, fetcher),
             isRecentBotMessage,
             streamState,
             streamStateTransitionAccepted,

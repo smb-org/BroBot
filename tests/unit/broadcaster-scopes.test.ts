@@ -67,6 +67,7 @@ describe("broadcaster scopes", () => {
     expect(new Set(listAllBroadcasterScopes())).toEqual(new Set([
       ...LOGIN_SCOPES,
       ...VOLLUMFANG_BROADCASTER_SCOPES,
+      "moderation:read",
     ]));
   });
 

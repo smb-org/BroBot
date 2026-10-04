@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { MODERATION_TIMEOUT_MAX_SECONDS, formatTimeoutDuration, rollTimeoutSeconds, timeoutDurationRangeSchema } from "../../src/modules/contracts/moderation";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { upsertBotIdentity } from "../../src/worker/db/bot-identity";
-import { liftModerationBan, sendModerationBan } from "../../src/worker/moderation";
+import { upsertLoginIdentity } from "../../src/worker/db/login-identity";
+import { isTwitchChannelModerator, liftModerationBan, sendModerationBan } from "../../src/worker/moderation";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -60,6 +61,23 @@ const seedChannel = async (database: TestD1Database, isModerator = true): Promis
   ).bind(CHANNEL_ID, isModerator ? 1 : 0, NOW).run();
 };
 
+const seedBroadcasterIdentity = async (database: TestD1Database): Promise<void> => {
+  const ciphertext = await encryptJson({ token: "fictional-broadcaster-token" }, parseKeyRing(KEY_RING));
+  await upsertLoginIdentity(database as unknown as D1Database, {
+    userId: CHANNEL_ID,
+    login: "fictional_channel",
+    scopesJson: '["moderation:read"]',
+    tokenScopesJson: '["moderation:read"]',
+    accessTokenCiphertext: ciphertext,
+    refreshTokenCiphertext: ciphertext,
+    expiresAt: "2099-10-03T10:00:00.000Z",
+    status: "connected",
+    reason: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
+};
+
 const responseFor = (status: number, message?: string): Response => new Response(
   JSON.stringify(message === undefined ? { data: [] } : { message }),
   { status, headers: { "content-type": "application/json" } },
@@ -74,6 +92,70 @@ const jsonRequestBody = (body: BodyInit | null | undefined): Record<string, unkn
 };
 
 describe("moderation actions", () => {
+  it("checks moderator targets with the connected broadcaster token and moderation scope", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      const broadcasterToken = await encryptJson({ token: "fictional-broadcaster-token" }, parseKeyRing(KEY_RING));
+      await upsertLoginIdentity(database as unknown as D1Database, {
+        userId: CHANNEL_ID,
+        login: "fictional_channel",
+        scopesJson: '["moderation:read"]',
+        tokenScopesJson: '["moderation:read"]',
+        accessTokenCiphertext: broadcasterToken,
+        refreshTokenCiphertext: broadcasterToken,
+        expiresAt: "2099-10-03T10:00:00.000Z",
+        status: "connected",
+        reason: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      const { environment } = environmentFor(database);
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        data: [{ user_id: TARGET_USER_ID }],
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+
+      await expect(isTwitchChannelModerator(environment, CHANNEL_ID, TARGET_USER_ID, fetcher)).resolves.toBe(true);
+
+      const [input, init] = fetcher.mock.calls[0] ?? [];
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input?.url ?? "");
+      expect(url.origin + url.pathname).toBe("https://api.twitch.tv/helix/moderation/moderators");
+      expect(url.searchParams.get("broadcaster_id")).toBe(CHANNEL_ID);
+      expect(url.searchParams.get("user_id")).toBe(TARGET_USER_ID);
+      expect(init?.headers).toMatchObject({ Authorization: "Bearer fictional-broadcaster-token" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("fails moderator protection closed when the broadcaster token lacks moderation:read", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      const token = await encryptJson({ token: "fictional-broadcaster-token" }, parseKeyRing(KEY_RING));
+      await upsertLoginIdentity(database as unknown as D1Database, {
+        userId: CHANNEL_ID,
+        login: "fictional_channel",
+        scopesJson: "[]",
+        tokenScopesJson: "[]",
+        accessTokenCiphertext: token,
+        refreshTokenCiphertext: token,
+        expiresAt: "2099-10-03T10:00:00.000Z",
+        status: "connected",
+        reason: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      const { environment } = environmentFor(database);
+      const fetcher = vi.fn<typeof fetch>();
+
+      await expect(isTwitchChannelModerator(environment, CHANNEL_ID, TARGET_USER_ID, fetcher)).resolves.toBeNull();
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
   it("posts a timeout with the bot user token and truncates its reason to 500 characters", async () => {
     const database = new TestD1Database();
     try {
@@ -324,22 +406,99 @@ describe("moderation actions", () => {
     }
   });
 
-  it("lifts a ban with DELETE and the same stable status mapping", async () => {
+  it("lifts the matching active Votekick timeout with DELETE", async () => {
     const database = new TestD1Database();
     try {
       await seedChannel(database);
+      await seedBroadcasterIdentity(database);
       const { environment } = environmentFor(database);
-      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(responseFor(403, "Moderator privileges required"));
+      const startedAt = new Date(Date.now() - 5_000).toISOString();
+      const expiresAt = new Date(Date.parse(startedAt) + 120_000).toISOString();
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{
+          user_id: TARGET_USER_ID,
+          moderator_id: BOT_USER_ID,
+          reason: "Votekick (3:0) · ballot-1",
+          created_at: startedAt,
+          expires_at: expiresAt,
+        }] }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockResolvedValueOnce(responseFor(403, "Moderator privileges required"));
 
-      await expect(liftModerationBan(environment, CHANNEL_ID, TARGET_USER_ID, fetcher))
+      await expect(liftModerationBan(environment, CHANNEL_ID, TARGET_USER_ID, {
+        reason: "Votekick (3:0) · ballot-1", durationSeconds: 120, startedAt,
+      }, fetcher))
         .resolves.toMatchObject({ outcome: "rejected", reason: "not_moderator" });
-      const [input, init] = fetcher.mock.calls[0] ?? [];
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input?.url ?? "");
-      expect(url.searchParams.get("broadcaster_id")).toBe(CHANNEL_ID);
-      expect(url.searchParams.get("moderator_id")).toBe(BOT_USER_ID);
-      expect(url.searchParams.get("user_id")).toBe(TARGET_USER_ID);
-      expect(init?.method).toBe("DELETE");
-      expect(init?.body).toBeUndefined();
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      const [readInput, readInit] = fetcher.mock.calls[0] ?? [];
+      const readUrl = new URL(typeof readInput === "string" ? readInput : readInput instanceof URL ? readInput.href : readInput?.url ?? "");
+      expect(readUrl.origin + readUrl.pathname).toBe("https://api.twitch.tv/helix/moderation/banned");
+      expect(readUrl.searchParams.get("broadcaster_id")).toBe(CHANNEL_ID);
+      expect(readUrl.searchParams.get("user_id")).toBe(TARGET_USER_ID);
+      expect(readInit?.headers).toMatchObject({ Authorization: "Bearer fictional-broadcaster-token" });
+      const [deleteInput, deleteInit] = fetcher.mock.calls[1] ?? [];
+      const deleteUrl = new URL(typeof deleteInput === "string" ? deleteInput : deleteInput instanceof URL ? deleteInput.href : deleteInput?.url ?? "");
+      expect(deleteUrl.searchParams.get("broadcaster_id")).toBe(CHANNEL_ID);
+      expect(deleteUrl.searchParams.get("moderator_id")).toBe(BOT_USER_ID);
+      expect(deleteUrl.searchParams.get("user_id")).toBe(TARGET_USER_ID);
+      expect(deleteInit?.method).toBe("DELETE");
+      expect(deleteInit?.body).toBeUndefined();
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([
+    ["timeout not applied", null],
+    ["natural expiry", "expired"],
+    ["replacement by a different moderator", "different_moderator"],
+    ["replacement by a different sanction", "different_reason"],
+  ] as const)("does not lift after %s", async (_caseName, variant) => {
+    const database = new TestD1Database();
+    try {
+      await seedChannel(database);
+      await seedBroadcasterIdentity(database);
+      const { environment } = environmentFor(database);
+      const startedAt = new Date(Date.now() - 5_000).toISOString();
+      const currentBan = variant === null ? [] : [{
+        user_id: TARGET_USER_ID,
+        moderator_id: variant === "different_moderator" ? "4000004" : BOT_USER_ID,
+        reason: variant === "different_reason" ? "Different sanction" : "Votekick (3:0) · ballot-1",
+        created_at: startedAt,
+        expires_at: variant === "expired"
+          ? new Date(Date.now() - 1_000).toISOString()
+          : new Date(Date.parse(startedAt) + 120_000).toISOString(),
+      }];
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ data: currentBan }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+
+      await expect(liftModerationBan(environment, CHANNEL_ID, TARGET_USER_ID, {
+        reason: "Votekick (3:0) · ballot-1", durationSeconds: 120, startedAt,
+      }, fetcher)).resolves.toMatchObject({ outcome: "rejected", reason: "conflict" });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("fails closed on a malformed current-ban response", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedChannel(database);
+      await seedBroadcasterIdentity(database);
+      const { environment } = environmentFor(database);
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ data: [null] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+
+      await expect(liftModerationBan(environment, CHANNEL_ID, TARGET_USER_ID, {
+        reason: "Votekick (3:0) · ballot-1",
+        durationSeconds: 120,
+        startedAt: new Date(Date.now() - 5_000).toISOString(),
+      }, fetcher)).resolves.toMatchObject({ outcome: "rejected", reason: "twitch_error" });
+      expect(fetcher).toHaveBeenCalledTimes(1);
     } finally {
       database.close();
     }

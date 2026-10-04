@@ -304,7 +304,13 @@ export const auditSentenceText = (entry: PanelAuditEntry, language: DashboardLan
     if (kind === "settings") return dashboardTexts(language).audit.sentenceVariableSettingsChanged(actor, object);
   }
   const { from, to } = sentencePartValue(entry.action, before, after, language);
-  const parts: AuditSentenceParts = { actor, object, from, to };
+  const parts: AuditSentenceParts = {
+    actor,
+    object,
+    from,
+    to,
+    ...(entry.action === "votekick.timeout_lift_attempted" ? { outcome: recordText(after, "outcome") } : {}),
+  };
   return auditSentenceForAction(entry.action, parts, language);
 };
 

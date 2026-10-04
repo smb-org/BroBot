@@ -4,7 +4,7 @@ import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ChatOutputTarget, ImmediateActionRequirement } from "../contracts/values";
 import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
-import type { ModerationResult } from "./contracts/moderation";
+import type { ModerationResult, ModerationTimeoutExpectation } from "./contracts/moderation";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 export { CHAT_OUTPUT_TARGETS } from "../contracts/values";
 export type { ChatOutputTarget } from "../contracts/values";
@@ -529,6 +529,12 @@ export interface ActiveChatterActivity {
   lastSeenAt: string;
 }
 
+export interface ModuleTwitchUser {
+  userId: string;
+  login: string;
+  displayName: string;
+}
+
 /** Infrastructure the host gives a module for its own adapter. */
 export interface ModuleExecutionContext {
   DB: D1Database;
@@ -537,6 +543,10 @@ export interface ModuleExecutionContext {
   ballots: ModuleBallotAccess;
   /** Lazily resolves the connected bot identity so modules can ignore its own chat messages. */
   botUserId?: () => Promise<string | null>;
+  /** Looks up one public Twitch user by login; throws when Helix lookup fails. */
+  lookupUserByLogin?: (login: string) => Promise<ModuleTwitchUser | null>;
+  /** Returns null when Twitch moderator lookup fails. */
+  isChannelModerator?: (userId: string) => Promise<boolean | null>;
   /** Checks the channel's recent bot send history for an identity or exact text match. */
   isRecentBotMessage?: (senderId: string | null, text: string) => Promise<boolean>;
   /** True only when this EventSub notification committed a real stream-state transition. */
@@ -588,6 +598,11 @@ export interface ModuleAlarmContext {
   channelId: string;
   /** Ephemeral ballot access bound to this alarm's channel and module. */
   ballots: ModuleBallotAccess;
+  /** Channel locale and unbiased randomness for preparing the same module actions as event handlers. */
+  channelLanguage: () => Promise<ModuleLanguage>;
+  secureRandomInteger: (maximumExclusive: number) => number;
+  /** Executes a prepared timeout through the host moderation path for alarm recovery. */
+  executeTimeout: (action: Extract<ModuleAction, { kind: "timeout" }>) => Promise<ModuleTimeoutOutcome>;
   storage: {
     get(key: string): Promise<unknown>;
     put(key: string, value: unknown): Promise<void>;
@@ -599,8 +614,8 @@ export interface ModuleAlarmContext {
   /** Renders a host template in the channel's event context. */
   renderTemplate: (
     text: string,
-    now?: number,
-    moduleValues?: Readonly<Record<string, string | number>>,
+    moduleValuesOrNow?: Readonly<Record<string, string | number>> | number,
+    nowOrModuleValues?: number | Readonly<Record<string, string | number>>,
   ) => Promise<{ text: string; attributions?: readonly string[] }>;
   /** Publishes a module-owned overlay message to enabled elements in this channel. */
   publishModuleOverlayMessage: (
@@ -623,6 +638,8 @@ export interface ModuleAlarmContext {
   streamState: () => Promise<ModuleStreamState>;
   streamStartedAt: () => Promise<{ streamId: string | null; startedAt: string | null }>;
 }
+
+export type ModuleTimeoutOutcome = "applied" | "rejected" | "ambiguous" | "suppressed";
 
 export interface ModuleEventTimeContext {
   DB: D1Database;
@@ -698,6 +715,8 @@ export type ModuleFollowedAt = (string & {}) | null | "unavailable";
 export interface BallotSnapshot {
   counts: readonly number[];
   revision: number;
+  /** Present once the host has finalized the ballot. */
+  outcome?: Exclude<BallotFinalizeOutcome, "open">;
 }
 
 export type BallotOpenResult =
@@ -708,12 +727,27 @@ export type BallotCastResult = BallotSnapshot & {
   status: "counted" | "changed" | "unchanged" | "not_open";
 };
 
+export type BallotFinalizeOutcome = "open" | "passed" | "expired" | "not_open";
+
+/** Data-only pass predicate evaluated atomically against the host's current tally. */
+export interface BallotFinalizeRule {
+  passIf: {
+    yes: number;
+    no: number;
+    netAtLeast: number;
+  };
+}
+
+export type BallotFinalizeResult = Omit<BallotSnapshot, "outcome"> & { outcome: BallotFinalizeOutcome };
+
 /** Ballot access already bound by the host to one channel and one module. */
 export interface ModuleBallotAccess {
-  open: (ballotId: string, optionCount: number, expiresAt: number) => Promise<BallotOpenResult>;
+  open: (ballotId: string, optionCount: number, expiresAt: number, rule?: BallotFinalizeRule) => Promise<BallotOpenResult>;
   cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
+  /** Atomically finalizes using the stored pass rule and returns the outcome and snapshot. */
+  finalize: (ballotId: string) => Promise<BallotFinalizeResult>;
   /** Releases an idempotent close snapshot after the module has persisted its result. */
   acknowledgeClosed?: (ballotId: string) => Promise<void>;
 }
@@ -1030,6 +1064,8 @@ export interface ModuleRouteVariables {
   externalFetchBudget: ModuleExternalFetchBudget;
   /** Returns ballot access bound to the authorized route channel and mounted module. */
   ballots: (channelId: string) => ModuleBallotAccess;
+  /** Runs a registered module alarm immediately for a route that must reconcile module-owned state. */
+  runModuleAlarm: (channelId: string, moduleId: string, handlerKey: string, alarmKey: string) => Promise<void>;
   prepareModuleAudit: PrepareModuleAudit;
   writeModuleAudit: WriteModuleAudit;
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];
@@ -1075,7 +1111,7 @@ export interface ModuleRouteVariables {
   getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch) => Promise<string>;
   /** Thin Helix HTTP transport (issue #163); modules never talk to `api.twitch.tv` directly. */
   helixRequest: HelixRequest;
-  liftModerationBan: (channelId: string, userId: string) => Promise<ModerationResult>;
+  liftModerationBan: (channelId: string, userId: string, expected: ModerationTimeoutExpectation) => Promise<ModerationResult>;
 }
 
 export interface ModuleRouteEnvironment {
@@ -1098,6 +1134,8 @@ export interface ModuleEvent<Settings = unknown> {
   payload: Readonly<Record<string, unknown>>;
   settings: Settings;
   receivedAt: string;
+  /** Verified EventSub message time from the host, when available. */
+  eventSubTimestamp?: string;
   /** The role comes from channel_members; `null` means not a member. */
   actor: ModuleActor | null;
   /** Events unrelated to chat carry `null` here; chat events carry all matching statuses. */
@@ -1200,6 +1238,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   overlayElements?: readonly ModuleOverlayElementDefinition[];
   /** Durable alarm handlers registered through the shared host contract. */
   alarms?: readonly ModuleAlarmDefinition[];
+  /** Hourly module-owned cleanup run by the host through the registry. */
+  scheduledMaintenance?: (db: D1Database, now: string) => Promise<void>;
   /** Generic event-time sources that scheduled modules may select. */
   eventTimeSources?: readonly ModuleEventTimeSource[];
   /**

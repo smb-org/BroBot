@@ -175,6 +175,9 @@ export const moduleScopePurpose = (
   if (moduleId === "ads" && scope === "channel:read:ads") {
     return language === "de" ? "Werbepausen erkennen" : "Detect ad breaks";
   }
+  if (moduleId === "votekick" && scope === "moderation:read") {
+    return language === "de" ? "Moderatoren vor Votekicks schützen" : "Protect moderators from votekicks";
+  }
   return language === "de" ? "wird vom Modul benötigt" : "required by this module";
 };
 

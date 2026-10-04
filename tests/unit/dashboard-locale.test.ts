@@ -73,6 +73,8 @@ describe("dashboard locale", () => {
     expect(eventText("text_commands.lookup_unavailable", { name: "uptime", kind: "uptime" })).toBe("Textbefehl !uptime: Stream-Daten nicht verfügbar");
     expect(eventText("text_commands.argument_missing", { name: "so" })).toBe("Befehl !so: Twitch-Name fehlt");
     expect(eventText("text_commands.variable_update_failed", { name: "score" })).toBe("Befehl !score konnte die Kanalvariable nicht ändern");
+    expect(eventText("votekick.rejected", { reason: "starter_not_authorized" }))
+      .toBe("Votekick abgelehnt: Nur VIPs und Moderatoren dürfen eine Abstimmung starten.");
   });
 
   it("returns the English detail texts", () => {
@@ -88,6 +90,8 @@ describe("dashboard locale", () => {
     expect(eventText("text_commands.lookup_unavailable", { name: "game", kind: "game" })).toBe("Command !game: game information unavailable");
     expect(eventText("text_commands.argument_missing", { name: "so" })).toBe("Command !so: Twitch login missing");
     expect(eventText("text_commands.variable_update_failed", { name: "score" })).toBe("Command !score could not change the channel variable");
+    expect(eventText("votekick.rejected", { reason: "target_not_active" }))
+      .toBe("Votekick rejected: The target has not been active in chat recently.");
   });
 
   it("distinguishes a disabled shoutout from the threshold", () => {
@@ -125,6 +129,8 @@ describe("dashboard locale", () => {
     expect(eventCauseText("host.timeout.failed", detail)).toBe("geschütztes Ziel");
     expect(eventText("host.action.suppressed", { action: "ban", reason: "channel_paused" }))
       .toBe("Aktion unterdrückt: Bann wegen Kanalpause");
+    expect(eventText("host.action.suppressed", { action: "timeout", reason: "module_disabled" }))
+      .toBe("Aktion unterdrückt: Timeout weil das Modul deaktiviert ist");
     expect(eventToneEntries["host.timeout.ambiguous"]).toMatchObject({ tone: "warning", numberKey: "seconds" });
 
     setBrowserLanguage("en-US");
@@ -132,6 +138,8 @@ describe("dashboard locale", () => {
     expect(eventText("host.ban.applied", { target: "3000003" })).toBe("Ban applied to 3000003");
     expect(eventText("host.action.suppressed", { action: "timeout", reason: "channel_paused" }))
       .toBe("Action suppressed: timeout while the channel is paused");
+    expect(eventText("host.action.suppressed", { action: "timeout", reason: "module_disabled" }))
+      .toBe("Action suppressed: timeout because the module is disabled");
   });
 
   it("drops the placeholder entirely for an unknown notification with no type at all, instead of doubling up (issue #201)", () => {
@@ -188,7 +196,7 @@ describe("dashboard locale", () => {
       "text_commands.disabled", "text_commands.permission_denied", "text_commands.game_filter", "text_commands.game_unknown", "text_commands.already_exists",
       "text_commands.not_authorized", "text_commands.unknown", "text_commands.invalid",
       "text_commands.lookup_unavailable", "text_commands.argument_missing",
-      "text_commands.argument_invalid", "text_commands.changed_concurrently", "text_commands.variable_update_failed", "template.lookup_unavailable", "template_parameters_invalid",
+      "text_commands.argument_invalid", "text_commands.changed_concurrently", "text_commands.variable_update_failed", "template.lookup_unavailable", "template_parameters_invalid", "votekick.rejected",
     ];
 
     expect(Object.keys(eventToneEntries).sort()).toEqual([...codes].sort());

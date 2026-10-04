@@ -160,6 +160,20 @@ export const readDispatchChannelState = async (
   };
 };
 
+/** Rechecks module activation at the point a host-owned action is executed. */
+export const moduleEnabledForChannel = async (
+  db: D1Database,
+  channelId: string,
+  moduleId: string,
+  mandatory = false,
+): Promise<boolean> => {
+  if (mandatory) return true;
+  const row = await db.prepare(
+    "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+  ).bind(channelId, moduleId).first<{ enabled: number }>();
+  return row?.enabled === 1;
+};
+
 interface StoredControl {
   active: number;
   until: string | null;

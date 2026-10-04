@@ -54,6 +54,7 @@ const executionContext = (overrides: Partial<ModuleExecutionContext> = {}): Modu
     cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [0, 1], revision: 1 })),
     read: vi.fn(() => Promise.resolve(null)),
     close: vi.fn(() => Promise.resolve(null)),
+    finalize: vi.fn(() => Promise.resolve({ outcome: "open" as const, counts: [0, 1], revision: 1 })),
     acknowledgeClosed: vi.fn(() => Promise.resolve()),
   },
   streamState: vi.fn(() => Promise.resolve("unknown" as const)),
@@ -117,6 +118,7 @@ describe("chat voting event service", () => {
       cast: vi.fn(() => Promise.resolve({ status: "not_open" as const, counts: [0, 0], revision: 0 })),
       read: vi.fn(() => Promise.resolve(null)),
       close: vi.fn(() => Promise.resolve(null)),
+      finalize: vi.fn(() => Promise.resolve({ outcome: "open" as const, counts: [0, 0], revision: 0 })),
     };
     const insertOpen = vi.fn(() => Promise.resolve(true));
     const openedAt = Date.parse("2026-10-04T10:00:00.000Z");

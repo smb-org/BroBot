@@ -413,6 +413,10 @@ den Status in `bot_channel_status` fest. Abgelaufene OAuth-Transaktionen
 werden im selben Lauf entfernt. Außerdem räumt er `event_log` auf und löscht
 Ereignisse, die älter als 14 Tage sind.
 
+Votekick-Datensätze behalten Ziel-ID, Ziel-Login und Starter-ID für höchstens
+14 Tage. Der gleiche stündliche Lauf setzt diese Spalten danach auf `NULL`; die anonymisierten
+Abstimmungsergebnisse bleiben für die Panelhistorie bestehen.
+
 Aktive Chatter liegen nur im Channel Durable Object. Ein zufälliger
 kanalgebundener HMAC-Schlüssel mit `created_at` wird spätestens nach 24 Stunden
 rotiert; dabei werden Schlüssel und alle Einträge in derselben Transaktion

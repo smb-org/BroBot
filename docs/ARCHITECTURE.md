@@ -42,9 +42,17 @@ Schlüssel je Ballot sowie die längenpräfixierte Kanal- und Nutzerkennung aus
 die alte Wahl ab und zählt die neue in derselben Durable-Object-Transaktion.
 Beim Schließen werden alle Personeneinträge und der Schlüssel gelöscht; nur
 die aggregierten Zähler können vom aufrufenden Modul weiterverarbeitet werden.
-Ab dem beim Öffnen gesetzten Ablaufzeitpunkt nehmen Ballots keine Stimmen mehr
-an. Nicht geschlossene Ballots werden beim nächsten Zugriff gelöscht oder kurz
-nach dem Ablaufzeitpunkt durch den Host-Alarm; der Alarm kann sich um bis zu
+`freeze(ballotId, condition)` prüft eine Datenbedingung wie „Option A minus
+Option B erreicht die Schwelle“ in derselben Durable-Object-Transaktion wie
+das Setzen des eingefrorenen Zustands. Ein eingefrorener Ballot bleibt mit
+seinem unveränderlichen Zählerstand und seiner Revision lesbar, weist weitere
+Stimmen als `not_open` zurück und wird erst durch `close()` gelöscht. D1-Kopien
+von Zählern und Revisionen sind für diese Entscheidung nie maßgeblich.
+Ab dem beim Öffnen gesetzten Ablaufzeitpunkt nehmen offene Ballots keine
+Stimmen mehr an. Nicht eingefrorene Ballots werden beim nächsten Zugriff
+gelöscht oder kurz nach dem Ablaufzeitpunkt durch den Host-Alarm; eingefrorene
+Ballots bleiben bis `close()` erhalten und blockieren neue Ballots, damit ein
+Modul die Vorbereitung wiederholen kann. Der Host-Alarm kann sich um bis zu
 etwa eine Minute verzögern. Der Ablaufzeitpunkt liegt höchstens 24 Stunden in
 der Zukunft.
 
@@ -68,6 +76,20 @@ Moderationsaktionen. Eine sichere Ablehnung kann einen vorgerenderten
 Ersatztext auslösen; ein unklarer Ausgang löst weder Erfolgs- noch Fehlertext
 aus. Der Host protokolliert Erfolg, Ablehnung und unklaren Ausgang im
 Ereignisprotokoll.
+
+Das Votekick-Modul verwendet diesen Stimmenspeicher mit zwei Optionen und
+zählt die Ja-Stimme des Starters sofort. Es berechnet seine Netto-Ja-Schwelle
+aus dem aktiven Chatterbestand der letzten zehn Minuten. Ziel-ID, Ziel-Login
+und Starter-ID liegen in `votekicks` höchstens 14 Tage roh vor; der stündliche
+registry-gesteuerte Wartungslauf setzt sie danach auf `NULL`. Die Abstimmung
+läuft 30 bis 180 Sekunden und ein registrierter Modul-Alarm schließt sie.
+Erreicht sie die Schwelle, friert das Modul zuerst den maßgeblichen Ballotstand
+im Durable Object ein. Sprache und Vorlagen werden anhand dieses unveränderlichen
+Stands vorbereitet; erst danach beansprucht D1 den Status `passed` mit genau
+diesen Zählern und dieser Revision. Der erfolgreiche D1-Anspruch gibt die
+Host-Timeoutaktion genau einmal frei. Bei Vorlagenfehlern setzen die nächste
+Chatnachricht oder der Alarm die Vorbereitung mit demselben eingefrorenen Stand
+fort. Der Host bleibt für Twitch, Stream-Mute und Pause zuständig.
 
 ## Modulsystem
 
@@ -232,6 +254,12 @@ Moderatoren erhalten direkt den vorgerenderten Ersatztext; bei anderen
 Aufrufern wählt der Helix-Ausgang zwischen Erfolgs- und Ersatztext. Beide
 Texte bleiben Teil derselben Befehlsmutation wie eine optionale
 Kanalvariablenaktion.
+
+Migration `0030_votekick.sql` ergänzt kanalgebundene laufende und historische
+Abstimmungen. Pro Kanal erzwingt ein partieller Unique-Index höchstens eine
+laufende Abstimmung; ein Zielindex unterstützt die Ziel-Abkühlzeit. Die
+Panelansicht zeigt laufende und 14 Tage historische Ergebnisse und bietet
+Abbrechen sowie Timeout-Aufheben. Diese Bedienaktionen werden auditiert.
 
 Migration `0029_chat_voting.sql` legt die kanalgebundenen Ergebniszeilen für
 Chat-Abstimmungen an und aktiviert das Modul für bestehende Kanäle. Ein
