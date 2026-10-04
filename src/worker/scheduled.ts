@@ -9,6 +9,7 @@ import { purgeOldTextCommandUserCooldowns } from "./db/text-command-user-cooldow
 import { maintainEventSubSubscriptions } from "./eventsub-subscriptions";
 import { eventSubMessageCutoff } from "./eventsub";
 import { maintainStreamStates } from "./stream-state-lookup";
+import { MODULES } from "../modules/registry";
 
 export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   _controller,
@@ -27,6 +28,9 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
     maintainAppAccessToken(env, now),
     maintainEventSubSubscriptions(env, now),
     maintainStreamStates(env, now),
+    ...MODULES.flatMap((module) => module.scheduledMaintenance === undefined
+      ? []
+      : [module.scheduledMaintenance(env.DB, now)]),
   ];
   // The count trim is a full-table scan (see EVENT_LOG_LIMIT's comment) --
   // cheap once a day, not something every hourly tick should pay for.

@@ -4,7 +4,7 @@ import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ChatOutputTarget, ImmediateActionRequirement } from "../contracts/values";
 import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
-import type { ModerationResult } from "./contracts/moderation";
+import type { ModerationResult, ModerationTimeoutExpectation } from "./contracts/moderation";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 export { CHAT_OUTPUT_TARGETS } from "../contracts/values";
 export type { ChatOutputTarget } from "../contracts/values";
@@ -524,6 +524,12 @@ export interface ActiveChatterActivity {
   lastSeenAt: string;
 }
 
+export interface ModuleTwitchUser {
+  userId: string;
+  login: string;
+  displayName: string;
+}
+
 /** Infrastructure the host gives a module for its own adapter. */
 export interface ModuleExecutionContext {
   DB: D1Database;
@@ -532,6 +538,10 @@ export interface ModuleExecutionContext {
   ballots: ModuleBallotAccess;
   /** Lazily resolves the connected bot identity so modules can ignore its own chat messages. */
   botUserId?: () => Promise<string | null>;
+  /** Looks up one public Twitch user by login; throws when Helix lookup fails. */
+  lookupUserByLogin?: (login: string) => Promise<ModuleTwitchUser | null>;
+  /** Returns null when Twitch moderator lookup fails. */
+  isChannelModerator?: (userId: string) => Promise<boolean | null>;
   /** Checks the channel's recent bot send history for an identity or exact text match. */
   isRecentBotMessage?: (senderId: string | null, text: string) => Promise<boolean>;
   /** True only when this EventSub notification committed a real stream-state transition. */
@@ -592,7 +602,11 @@ export interface ModuleAlarmContext {
   schedule: (key: string, deadline: number, ownerRevision?: number) => Promise<void>;
   clear: (key: string, ownerRevision?: number) => Promise<void>;
   /** Renders a host template in the channel's event context. */
-  renderTemplate: (text: string, now?: number) => Promise<{ text: string; attributions?: readonly string[] }>;
+  renderTemplate: (
+    text: string,
+    moduleValuesOrNow?: Readonly<Record<string, string | number>> | number,
+    now?: number,
+  ) => Promise<{ text: string; attributions?: readonly string[] }>;
   /** Sends scheduled automated output through the shared channel limit with an occurrence claim. */
   sendChat: (
     text: string,
@@ -1058,7 +1072,7 @@ export interface ModuleRouteVariables {
   getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch) => Promise<string>;
   /** Thin Helix HTTP transport (issue #163); modules never talk to `api.twitch.tv` directly. */
   helixRequest: HelixRequest;
-  liftModerationBan: (channelId: string, userId: string) => Promise<ModerationResult>;
+  liftModerationBan: (channelId: string, userId: string, expected: ModerationTimeoutExpectation) => Promise<ModerationResult>;
 }
 
 export interface ModuleRouteEnvironment {
@@ -1183,6 +1197,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   overlayElements?: readonly ModuleOverlayElementDefinition[];
   /** Durable alarm handlers registered through the shared host contract. */
   alarms?: readonly ModuleAlarmDefinition[];
+  /** Hourly module-owned cleanup run by the host through the registry. */
+  scheduledMaintenance?: (db: D1Database, now: string) => Promise<void>;
   /** Generic event-time sources that scheduled modules may select. */
   eventTimeSources?: readonly ModuleEventTimeSource[];
   /**

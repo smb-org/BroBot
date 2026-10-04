@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
   Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
-  GamePicker, InspectorFieldRow, InspectorSection,
+  GamePicker, InspectorFieldRow, InspectorSection, TimeoutDurationRangeFields,
   registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
@@ -608,42 +608,20 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           }}
         >
           {draft.timeoutAction === null ? null : <div className="command-timeout-action">
-            <FieldPair>
-              <NumberField
-                id="command-timeout-minimum"
-                label={labels.timeoutMinSeconds}
-                hint={labels.timeoutRangeHint}
-                unit="s"
-                min={1}
-                max={MODERATION_TIMEOUT_MAX_SECONDS}
-                step={1}
-                value={draft.timeoutAction.minSeconds}
-                increaseLabel={`${labels.timeoutMinSeconds} +`}
-                decreaseLabel={`${labels.timeoutMinSeconds} −`}
-                disabled={!canManageContent || pending}
-                onChange={(minSeconds) => {
-                  const timeoutAction = draft.timeoutAction;
-                  if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, minSeconds });
-                }}
-              />
-              <NumberField
-                id="command-timeout-maximum"
-                label={labels.timeoutMaxSeconds}
-                hint={labels.timeoutRangeHint}
-                unit="s"
-                min={1}
-                max={MODERATION_TIMEOUT_MAX_SECONDS}
-                step={1}
-                value={draft.timeoutAction.maxSeconds}
-                increaseLabel={`${labels.timeoutMaxSeconds} +`}
-                decreaseLabel={`${labels.timeoutMaxSeconds} −`}
-                disabled={!canManageContent || pending}
-                onChange={(maxSeconds) => {
-                  const timeoutAction = draft.timeoutAction;
-                  if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, maxSeconds });
-                }}
-              />
-            </FieldPair>
+            <TimeoutDurationRangeFields
+              idPrefix="command-timeout"
+              value={draft.timeoutAction}
+              onChange={(range) => {
+                const timeoutAction = draft.timeoutAction;
+                if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, ...range });
+              }}
+              min={1}
+              max={MODERATION_TIMEOUT_MAX_SECONDS}
+              minimumLabel={labels.timeoutMinSeconds}
+              maximumLabel={labels.timeoutMaxSeconds}
+              hint={labels.timeoutRangeHint}
+              disabled={!canManageContent || pending}
+            />
             {templateEditor("timeoutFallbackText", labels.timeoutFallbackText)}
             {botIsModerator === false ? <p className="form-warning" role="note">{labels.timeoutBotWarning}</p> : null}
           </div>}

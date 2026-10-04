@@ -1088,6 +1088,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "channel.mute.disabled": ({ actor, object }) => `${actor} hob die Stummschaltung für ${object} auf`,
         "channel.pause.enabled": ({ actor, object }) => `${actor} pausierte automatische Aktionen für ${object}`,
         "channel.pause.disabled": ({ actor, object }) => `${actor} setzte automatische Aktionen für ${object} fort`,
+        "votekick.cancelled": ({ actor, object }) => `${actor} brach die Abstimmung ${object} ab`,
+        "votekick.timeout_lift_attempted": ({ actor, object }) => `${actor} hob den Timeout aus ${object} auf`,
         "overlay.token.issued": ({ actor, object }) => `${actor} stellte ${object} aus`,
         "overlay.token.revoked": ({ actor, object }) => `${actor} widerrief ${object}`,
         "overlay.access.issued": ({ actor, object }) => `${actor} stellte ${object} aus`,
@@ -1366,6 +1368,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "channel.mute.disabled": ({ actor, object }) => `${actor} unmuted ${object}`,
         "channel.pause.enabled": ({ actor, object }) => `${actor} paused automatic actions for ${object}`,
         "channel.pause.disabled": ({ actor, object }) => `${actor} resumed automatic actions for ${object}`,
+        "votekick.cancelled": ({ actor, object }) => `${actor} cancelled the ballot ${object}`,
+        "votekick.timeout_lift_attempted": ({ actor, object }) => `${actor} lifted the timeout from ${object}`,
         "overlay.token.issued": ({ actor, object }) => `${actor} issued ${object}`,
         "overlay.token.revoked": ({ actor, object }) => `${actor} revoked ${object}`,
         "overlay.access.issued": ({ actor, object }) => `${actor} issued ${object}`,
@@ -2013,6 +2017,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "raid.outgoing": (detail) => `Ausgehender Raid zu ${detailText(detail, "targetChannelId", "unbekannt")}`,
     "raid.shoutout": (detail) => `Raid über der Schwelle (${detailNumber(detail, "viewers", "unbekannt")} von ${detailNumber(detail, "threshold", "unbekannt")}): Shoutout und Chatzeile`,
     "raid.invalid": (detail) => `Raid verworfen: ${raidInvalidReasonText(detail.reason, "de")}`,
+    "votekick.rejected": (detail) => `Votekick abgelehnt: ${detailText(detail, "reason", "unbekannter Grund")}`,
     "shoutout.suppressed": (detail) => detail.reason === ("disabled" satisfies ShoutoutSuppressedReason)
       ? "Shoutout abgeschaltet"
       : detail.reason === ("below_threshold" satisfies ShoutoutSuppressedReason)
@@ -2123,6 +2128,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "raid.outgoing": (detail) => `Outgoing raid to ${detailText(detail, "targetChannelId", "unknown")}`,
     "raid.shoutout": (detail) => `Raid above threshold (${detailNumber(detail, "viewers", "unknown")} of ${detailNumber(detail, "threshold", "unknown")}): shoutout and chat line`,
     "raid.invalid": (detail) => `Raid discarded: ${raidInvalidReasonText(detail.reason, "en")}`,
+    "votekick.rejected": (detail) => `Votekick rejected: ${detailText(detail, "reason", "unknown reason")}`,
     "shoutout.suppressed": (detail) => detail.reason === ("disabled" satisfies ShoutoutSuppressedReason)
       ? "Shoutout disabled"
       : detail.reason === ("below_threshold" satisfies ShoutoutSuppressedReason)
@@ -2233,6 +2239,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "raid.shoutout": { family: "raid", tier: "full", word: { de: "Raid", en: "Raid" }, numberKey: "viewers" },
   "raid.invalid": { family: "raid", tier: "outlined", word: { de: "Raid", en: "Raid" }, numberKey: null, tone: "warning" },
   "shoutout.suppressed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "votekick.rejected": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "ads.announcement": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: "duration", tone: "info" },
   "ads.skipped": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "ads.prewarning.announced": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
@@ -2328,6 +2335,8 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.mute.disabled": "Kanal-Stummschaltung aufgehoben",
     "channel.pause.enabled": "Automatische Aktionen pausiert",
     "channel.pause.disabled": "Automatische Aktionen fortgesetzt",
+    "votekick.cancelled": "Votekick abgebrochen",
+    "votekick.timeout_lift_attempted": "Votekick-Timeout aufgehoben",
     "overlay.token.issued": "Overlay-Token ausgestellt",
     "overlay.token.revoked": "Overlay-Token widerrufen",
     "overlay.access.issued": "Overlay-Zugang ausgestellt",
@@ -2382,6 +2391,8 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.mute.disabled": "Channel unmuted",
     "channel.pause.enabled": "Automatic actions paused",
     "channel.pause.disabled": "Automatic actions resumed",
+    "votekick.cancelled": "Votekick cancelled",
+    "votekick.timeout_lift_attempted": "Votekick timeout lifted",
     "overlay.token.issued": "Overlay token issued",
     "overlay.token.revoked": "Overlay token revoked",
     "overlay.access.issued": "Overlay access issued",
@@ -2429,6 +2440,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "channel.variable.created": "Kanalvariable", "channel.variable.renamed": "Kanalvariable", "channel.variable.removed": "Kanalvariable", "channel.variable.value_changed": "Kanalvariable",
     "ads.commercial_started": "die Werbepause", "clip.created": "den Clip",
     "channel.mute.enabled": "den Kanal", "channel.mute.disabled": "den Kanal", "channel.pause.enabled": "den Kanal", "channel.pause.disabled": "den Kanal",
+    "votekick.cancelled": "den Votekick", "votekick.timeout_lift_attempted": "den Votekick",
     "overlay.token.issued": "den Overlay-Token", "overlay.token.revoked": "den Overlay-Token",
     "overlay.access.issued": "den Overlay-Zugang", "overlay.access.revealed": "den Overlay-Zugang", "overlay.access.revoked": "den Overlay-Zugang",
     "overlay.created": "Overlay", "overlay.updated": "Overlay", "overlay.deleted": "Overlay", "overlay.legacy.imported": "Overlay-Link",
@@ -2445,6 +2457,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "channel.variable.created": "channel variable", "channel.variable.renamed": "channel variable", "channel.variable.removed": "channel variable", "channel.variable.value_changed": "channel variable",
     "ads.commercial_started": "the commercial break", "clip.created": "the clip",
     "channel.mute.enabled": "the channel", "channel.mute.disabled": "the channel", "channel.pause.enabled": "the channel", "channel.pause.disabled": "the channel",
+    "votekick.cancelled": "the votekick", "votekick.timeout_lift_attempted": "the votekick",
     "overlay.token.issued": "the overlay token", "overlay.token.revoked": "the overlay token",
     "overlay.access.issued": "the overlay access", "overlay.access.revealed": "the overlay access", "overlay.access.revoked": "the overlay access",
     "overlay.created": "overlay", "overlay.updated": "overlay", "overlay.deleted": "overlay", "overlay.legacy.imported": "legacy overlay link",

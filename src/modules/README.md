@@ -284,6 +284,23 @@ Ersatztext. Für Broadcaster und Moderatoren wird nur der Ersatztext gerendert.
 Die drei Timeout-Felder liegen auf der vorhandenen Befehlstabelle und werden
 gemeinsam mit der Kanalvariablenaktion und dem Audit-Eintrag gespeichert.
 
+`src/modules/votekick/` nutzt den gemeinsamen Ballot-Speicher und die
+Aktivitätsübersicht der letzten zehn Minuten. VIPs, Moderatoren und Broadcaster
+können `!votekick <login>` starten; Broadcaster, Moderatoren und der Bot sind
+geschützte Ziele. Der Host prüft Moderatoren mit dem Scope `moderation:read`
+und dem Broadcaster-Token. Die Ja-Stimme des Starters zählt sofort. Die
+Schwelle ist das Maximum aus Mindest-Netto-Ja-Stimmen und aufgerundetem Anteil
+aktiver Chatter.
+Ein erfolgreicher Ballot gibt dem Host eine Timeoutaktion mit fester oder
+zufälliger Dauer bis 3.600 Sekunden. Ein registrierter Modul-Alarm beendet
+abgelaufene Abstimmungen; die generische stündliche Modulwartung löscht rohe
+Ziel-ID, Ziel-Login und Starter-ID nach 14 Tagen. Das Panel kann laufende
+Ballots abbrechen und nur einen noch aktiven, passenden Votekick-Timeout
+aufheben. Vor dem Aufheben vergleicht der Host den aktuellen Twitch-Eintrag
+mit Moderator, Ballot-ID, Dauer und Ablaufzeit. Twitch bietet für das Löschen
+keine bedingte Sperr-ID; eine Änderung direkt zwischen Prüfung und Löschung
+kann daher nicht atomar ausgeschlossen werden.
+
 Der Host mountet registrierte Modulrouten kanalbezogen unter
 `/api/channels/:channelId/modules/<id>`. Textbefehle stellen dort die
 CRUD-Routen unter `/commands` bereit. Die Host-Middleware prüft Session,

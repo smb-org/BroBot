@@ -5,6 +5,12 @@ import type { ModuleLanguage } from "../contract";
 
 export const MODERATION_TIMEOUT_MAX_SECONDS = 1_209_600;
 
+export interface ModerationTimeoutExpectation {
+  reason: string;
+  durationSeconds: number;
+  startedAt: string;
+}
+
 export interface TimeoutDurationRange {
   minSeconds: number;
   maxSeconds: number;

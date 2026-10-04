@@ -257,6 +257,7 @@ export const EVENT_CODES = [
   "text_commands.argument_invalid",
   "text_commands.changed_concurrently",
   "text_commands.variable_update_failed",
+  "votekick.rejected",
   "template_parameters_invalid",
 ] as const;
 export type EventCode = (typeof EVENT_CODES)[number];
@@ -313,6 +314,8 @@ export const AUDIT_ACTIONS = [
   "channel.mute.disabled",
   "channel.pause.enabled",
   "channel.pause.disabled",
+  "votekick.cancelled",
+  "votekick.timeout_lift_attempted",
   "overlay.token.issued",
   "overlay.token.revoked",
   "overlay.access.issued",

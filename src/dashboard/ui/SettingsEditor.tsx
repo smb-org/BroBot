@@ -13,11 +13,13 @@ import { SegmentedControl } from "./SegmentedControl";
 import { Switch } from "./Switch";
 import { TemplateText } from "./TemplateText";
 import { TextArea, type TemplateVariableOption, type TextAreaMessages } from "./TextArea";
+import { TimeoutDurationRangeFields, type TimeoutDurationRangeValue } from "./TimeoutDurationRangeFields";
 
 export type SettingsFieldSpec<Settings> =
   | { kind: "number"; key: keyof Settings & string; unit?: string; min: number; max: number; step: number }
+  | { kind: "timeoutDurationRange"; key: keyof Settings & string; min: number; max: number }
   | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number }
-  | { kind: "template"; key: keyof Settings & string; minRows?: number; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
+  | { kind: "template"; key: keyof Settings & string; minRows?: number; optional?: boolean; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
   | { kind: "chatTarget"; key: keyof Settings & string; includeWhereAsked?: boolean }
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string }[] }
   | { kind: "choice"; key: keyof Settings & string; options: readonly { value: string; icon?: IconName }[] }
@@ -36,6 +38,8 @@ export interface SettingsFieldText {
   disabledReason?: string;
   increaseLabel?: string;
   decreaseLabel?: string;
+  minimumLabel?: string;
+  maximumLabel?: string;
   options?: Readonly<Record<string, { label: string; description?: string }>>;
   countLabel?: (count: number, maxLength: number) => string;
   previewLabel?: string;
@@ -155,6 +159,28 @@ export function SettingsEditor<Settings extends object>({
         </InspectorFieldRow>
       );
     }
+    if (field.kind === "timeoutDurationRange") {
+      const range = fieldValue !== null && typeof fieldValue === "object"
+        ? fieldValue as unknown as TimeoutDurationRangeValue
+        : { minSeconds: "" as const, maxSeconds: "" as const };
+      return (
+        <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
+          <TimeoutDurationRangeFields
+            idPrefix={id}
+            value={range}
+            onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+            min={field.min}
+            max={field.max}
+            minimumLabel={copy.minimumLabel ?? copy.label}
+            maximumLabel={copy.maximumLabel ?? copy.label}
+            hint={copy.hint}
+            disabled={disabled}
+            {...(copy.unit === undefined ? {} : { unit: copy.unit })}
+            {...(error === undefined ? {} : { error })}
+          />
+        </InspectorFieldRow>
+      );
+    }
     if (field.kind === "text") {
       const maxLength = field.maxLength;
       return (
@@ -190,7 +216,7 @@ export function SettingsEditor<Settings extends object>({
             {...(metadata === undefined ? {} : { worstCaseLength: worstCaseTemplateLength(String(fieldValue ?? ""), metadata) })}
             {...(fieldVariables === undefined ? {} : { variables: fieldVariables })}
             preview={field.preview}
-            required
+            required={!field.optional}
             onIssuesChange={(issues) => { onIssuesChange?.(field.key, issues); }}
             {...(copy.previewLabel === undefined ? {} : { previewLabel: copy.previewLabel })}
             {...(copy.previewSpeaker === undefined ? {} : { previewSpeaker: copy.previewSpeaker })}
@@ -288,6 +314,13 @@ const renderReadOnlyField = <Settings extends object>(
   }
   if (field.kind === "switchCard") return <>{value === true ? enabledLabel : disabledLabel}</>;
   if (field.kind === "number") return <>{String(value)}{copy.unit === undefined ? "" : ` ${copy.unit}`}</>;
+  if (field.kind === "timeoutDurationRange") {
+    const range = value !== null && typeof value === "object" ? value as unknown as TimeoutDurationRangeValue : null;
+    if (range === null) return <></>;
+    return range.minSeconds === range.maxSeconds
+      ? <>{String(range.minSeconds)} {copy.unit ?? "s"}</>
+      : <>{String(range.minSeconds)}–{String(range.maxSeconds)} {copy.unit ?? "s"}</>;
+  }
   if (field.kind === "text") return <>{field.prefix ?? ""}{String(value)}</>;
   if (field.kind === "chatTarget") return <>{copy.options?.[String(value)]?.label ?? String(value)}</>;
   return <>{copy.options?.[String(value)]?.label ?? String(value)}</>;

@@ -291,7 +291,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       const current = value[field.key];
       if (field.kind === "number" && (typeof current !== "number" || !Number.isInteger(current) || current < field.min || current > field.max)) {
         fieldErrors[field.key] = typeof current !== "number" ? copy.numberMissing : copy.invalidMessage;
-      } else if ((field.kind === "text" || field.kind === "template") && (typeof current !== "string" || current.trim().length === 0)) {
+      } else if (field.kind === "timeoutDurationRange") {
+        const range = current !== null && typeof current === "object" ? current as { minSeconds?: unknown; maxSeconds?: unknown } : null;
+        if (range === null || !Number.isInteger(range.minSeconds) || !Number.isInteger(range.maxSeconds) ||
+            (range.minSeconds as number) < field.min || (range.minSeconds as number) > (range.maxSeconds as number) ||
+            (range.maxSeconds as number) > field.max) fieldErrors[field.key] = copy.invalidMessage;
+      } else if ((field.kind === "text" || field.kind === "template") && (typeof current !== "string" || (field.kind !== "template" || !field.optional) && current.trim().length === 0)) {
         fieldErrors[field.key] = copy.fields[field.key]?.requiredError ?? copy.invalidMessage;
       } else if (field.kind === "text" && field.maxLength !== undefined && typeof current === "string" && current.length > field.maxLength) {
         fieldErrors[field.key] = copy.invalidMessage;

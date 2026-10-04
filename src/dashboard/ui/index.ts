@@ -43,6 +43,8 @@ export { ReadOnlyTextArea } from "./ReadOnlyTextArea";
 
 export { FieldPair } from "./FieldPair";
 export type { FieldPairProps } from "./FieldPair";
+export { TimeoutDurationRangeFields } from "./TimeoutDurationRangeFields";
+export type { TimeoutDurationRangeFieldsProperties, TimeoutDurationRangeValue } from "./TimeoutDurationRangeFields";
 
 export { SegmentedControl } from "./SegmentedControl";
 export type { SegmentedControlOption, SegmentedControlProps } from "./SegmentedControl";

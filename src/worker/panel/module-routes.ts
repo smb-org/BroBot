@@ -155,11 +155,11 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   context.set("scheduleBackgroundWork", (work) => { scheduleBackgroundWork(context, work); });
   context.set("getAppAccessToken", getAppAccessToken);
   context.set("helixRequest", helixRequest);
-  context.set("liftModerationBan", async (channelId, userId) => {
+  context.set("liftModerationBan", async (channelId, userId, expected) => {
     if (channelId !== context.req.param("channelId")) {
       return { outcome: "rejected", reason: "invalid_request", detail: { target: userId } };
     }
-    return liftModerationBan(context.env, channelId, userId);
+    return liftModerationBan(context.env, channelId, userId, expected);
   });
   context.set("listChannelVariables", async (channelId): Promise<readonly ModuleChannelVariable[]> =>
     (await listChannelVariables(context.env.DB, channelId)).map(({ name, value, description }) => ({ name, value, description })),

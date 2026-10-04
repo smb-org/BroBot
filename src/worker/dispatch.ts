@@ -8,7 +8,7 @@ import {
 import { sendChatMessage } from "./chat";
 import { sendChatAnnouncement } from "./announcement";
 import { fetchTwitchUserByLogin, sendShoutout } from "./shoutout";
-import { sendModerationBan } from "./moderation";
+import { isTwitchChannelModerator, sendModerationBan } from "./moderation";
 import { publishRealtimeMessages, publishVariablesChanged } from "./realtime";
 import { prepareModuleOverlayRealtimeMessage } from "./module-overlay-realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
@@ -935,6 +935,11 @@ export const dispatchEventSubNotification = async (
             authorizeMutation: authorizeModuleMutation,
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
             botUserId,
+            lookupUserByLogin: async (login) => {
+              const user = await fetchTwitchUserByLogin(fetcher, environment as unknown as Env, login, "app");
+              return user === null ? null : { userId: user.userId, login: user.login, displayName: user.displayName };
+            },
+            isChannelModerator: (userId) => isTwitchChannelModerator(environment, event.channelId, userId, fetcher),
             isRecentBotMessage,
             streamState,
             streamStateTransitionAccepted,

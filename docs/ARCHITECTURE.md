@@ -59,6 +59,15 @@ Ersatztext auslösen; ein unklarer Ausgang löst weder Erfolgs- noch Fehlertext
 aus. Der Host protokolliert Erfolg, Ablehnung und unklaren Ausgang im
 Ereignisprotokoll.
 
+Das Votekick-Modul verwendet diesen Stimmenspeicher mit zwei Optionen und
+zählt die Ja-Stimme des Starters sofort. Es berechnet seine Netto-Ja-Schwelle
+aus dem aktiven Chatterbestand der letzten zehn Minuten. Ziel-ID, Ziel-Login
+und Starter-ID liegen in `votekicks` höchstens 14 Tage roh vor; der stündliche
+registry-gesteuerte Wartungslauf setzt sie danach auf `NULL`. Die Abstimmung
+läuft 30 bis 180 Sekunden und ein registrierter Modul-Alarm schließt sie.
+Erreicht sie die Schwelle, liefert das Modul eine Host-Timeoutaktion. Der Host
+bleibt für Twitch, Stream-Mute und Pause zuständig.
+
 ## Modulsystem
 
 Ein Modul ist ein Feature-Slice unter `src/modules/<id>` mit `contracts/`,
@@ -222,6 +231,12 @@ Moderatoren erhalten direkt den vorgerenderten Ersatztext; bei anderen
 Aufrufern wählt der Helix-Ausgang zwischen Erfolgs- und Ersatztext. Beide
 Texte bleiben Teil derselben Befehlsmutation wie eine optionale
 Kanalvariablenaktion.
+
+Migration `0030_votekick.sql` ergänzt kanalgebundene laufende und historische
+Abstimmungen. Pro Kanal erzwingt ein partieller Unique-Index höchstens eine
+laufende Abstimmung; ein Zielindex unterstützt die Ziel-Abkühlzeit. Die
+Panelansicht zeigt laufende und 14 Tage historische Ergebnisse und bietet
+Abbrechen sowie Timeout-Aufheben. Diese Bedienaktionen werden auditiert.
 
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 

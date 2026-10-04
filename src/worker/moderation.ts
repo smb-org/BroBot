@@ -1,9 +1,10 @@
 import type { ModerationFailureReason } from "../contracts/values";
-import type { ModerationResult } from "../modules/contracts/moderation";
+import type { ModerationResult, ModerationTimeoutExpectation } from "../modules/contracts/moderation";
 import { MODERATION_TIMEOUT_MAX_SECONDS } from "../modules/contracts/moderation";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { getBotIdentity } from "./db/bot-identity";
 import { readChannelControls } from "./db/channel-controls";
+import { getLoginIdentity } from "./db/login-identity";
 import { helixRequest } from "./twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "./twitch/rate-limit";
 
@@ -26,6 +27,21 @@ interface ModerationEnvironment {
 interface ModeratorStatusRow {
   is_moderator: number;
 }
+
+interface TwitchModerationBanRow {
+  user_id?: unknown;
+  moderator_id?: unknown;
+  reason?: unknown;
+  created_at?: unknown;
+  expires_at?: unknown;
+}
+
+const isTwitchModerationBanRows = (value: unknown): value is TwitchModerationBanRow[] =>
+  Array.isArray(value) && value.every((row: unknown): row is TwitchModerationBanRow =>
+    typeof row === "object" && row !== null && !Array.isArray(row) &&
+    typeof Reflect.get(row, "user_id") === "string" && typeof Reflect.get(row, "moderator_id") === "string" &&
+    typeof Reflect.get(row, "reason") === "string" && typeof Reflect.get(row, "created_at") === "string" &&
+    typeof Reflect.get(row, "expires_at") === "string");
 
 type ModerationSuppressionReason = "channel_muted" | "channel_paused";
 
@@ -203,15 +219,89 @@ export const sendModerationBan = (
   fetcher: typeof fetch = fetch,
 ): Promise<ModerationExecutionResult> => executeModeration(environment, channelId, request, "POST", fetcher);
 
+const broadcasterModerationToken = async (
+  environment: ModerationEnvironment,
+  channelId: string,
+): Promise<string | null> => {
+  const identity = await getLoginIdentity(environment.DB, channelId);
+  if (identity === null || identity.status !== "connected") return null;
+  try {
+    const scopes: unknown = JSON.parse(identity.tokenScopesJson);
+    if (!Array.isArray(scopes) || !scopes.includes("moderation:read")) return null;
+    const tokenData = await decryptJson<{ token?: unknown }>(
+      identity.accessTokenCiphertext,
+      parseKeyRing(getTokenEncryptionKeys(environment)),
+    );
+    return tokenData !== null && typeof tokenData.token === "string" && tokenData.token.length > 0
+      ? tokenData.token
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const isCurrentExpectedTimeout = async (
+  environment: ModerationEnvironment,
+  channelId: string,
+  userId: string,
+  expected: ModerationTimeoutExpectation,
+  fetcher: typeof fetch,
+): Promise<boolean | null> => {
+  if (!Number.isSafeInteger(expected.durationSeconds) || expected.durationSeconds < 1 || expected.durationSeconds > MODERATION_TIMEOUT_MAX_SECONDS) return null;
+  const expectedStart = Date.parse(expected.startedAt);
+  if (!Number.isFinite(expectedStart)) return null;
+  const token = await broadcasterModerationToken(environment, channelId);
+  const bot = await getBotIdentity(environment.DB);
+  if (token === null || bot === null) return null;
+  const result = await helixRequest<{ data?: TwitchModerationBanRow[] }>({
+    url: "https://api.twitch.tv/helix/moderation/banned",
+    query: { broadcaster_id: channelId, user_id: userId },
+    accessToken: token,
+    clientId: environment.TWITCH_CLIENT_ID,
+    fetcher,
+  });
+  if (!result.ok || !isTwitchModerationBanRows(result.data.data)) return null;
+  const current = result.data.data.find((row) => row.user_id === userId);
+  if (current === undefined || current.moderator_id !== bot.userId || current.reason !== expected.reason) return false;
+  const createdAt = Date.parse(current.created_at as string);
+  const expiresAt = Date.parse(current.expires_at as string);
+  if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt) || expiresAt <= Date.now() ||
+      Math.abs(createdAt - expectedStart) > 60_000 ||
+      Math.abs(expiresAt - createdAt - expected.durationSeconds * 1000) > 1_000) return false;
+  return true;
+};
+
+// Twitch's delete endpoint has no sanction ID or conditional version, so the
+// matched active timeout is checked immediately before the target-based delete.
 export const liftModerationBan = (
   environment: ModerationEnvironment,
   channelId: string,
   userId: string,
+  expected: ModerationTimeoutExpectation,
   fetcher: typeof fetch = fetch,
-): Promise<ModerationResult> => executeModeration(
-  environment,
-  channelId,
-  { userId, durationSeconds: null, reason: "" },
-  "DELETE",
-  fetcher,
-);
+): Promise<ModerationResult> => isCurrentExpectedTimeout(environment, channelId, userId, expected, fetcher)
+  .then((matches): Promise<ModerationResult> => matches === true
+    ? executeModeration(environment, channelId, { userId, durationSeconds: null, reason: "" }, "DELETE", fetcher)
+    : Promise.resolve(failure(matches === null ? "twitch_error" : "conflict", { target: userId })));
+
+/** Checks one user against Twitch's channel moderator list; null means lookup failure. */
+export const isTwitchChannelModerator = async (
+  environment: ModerationEnvironment,
+  channelId: string,
+  userId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<boolean | null> => {
+  const accessToken = await broadcasterModerationToken(environment, channelId);
+  if (accessToken === null) return null;
+  const result = await helixRequest<{ data?: unknown }>({
+    url: "https://api.twitch.tv/helix/moderation/moderators",
+    query: { broadcaster_id: channelId, user_id: userId },
+    accessToken,
+    clientId: environment.TWITCH_CLIENT_ID,
+    fetcher,
+  });
+  if (!result.ok || !Array.isArray(result.data.data)) return null;
+  if (!result.data.data.every((row) => typeof row === "object" && row !== null && !Array.isArray(row) &&
+      typeof Reflect.get(row, "user_id") === "string")) return null;
+  return result.data.data.some((row) => Reflect.get(row, "user_id") === userId);
+};

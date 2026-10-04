@@ -80,6 +80,14 @@ die Helix-Auflösung aus, zeigt das Panel die gespeicherte ID. Die kurze Frist
 begrenzt den personenbezogenen Bestand. Die Zeilen sind außerdem betriebliche
 Entscheidungsbegründungen und kein kanalweiter Aktivitätszähler.
 
+Für Votekicks (#295) werden Ziel- und Starter-ID sowie der Ziel-Login während
+des laufenden Vorgangs und in der 14-tägigen Panelhistorie roh gehalten. Der
+stündliche Scheduled-Handler setzt diese Angaben nach 14 Tagen auf `NULL`;
+Status, aggregierte Stimmen, Zeitpunkte und Timeoutdauer bleiben für die
+Historie erhalten. Die kurze Frist ermöglicht das Timeout-Aufheben und die
+Ziel-Abkühlzeit, solange diese Funktionen relevant sind. Anzeigenamen werden
+nicht gespeichert.
+
 ---
 
 ## 4. Rotation — was wirklich passiert
