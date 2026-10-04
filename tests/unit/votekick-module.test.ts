@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleAction, ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { votekickModule } from "../../src/modules/votekick";
@@ -91,6 +91,12 @@ const contextFor = (overrides: Record<string, unknown> = {}): ModuleExecutionCon
 };
 
 describe("Votekick module", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-15T12:00:00.000Z"));
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
   it("registers active chatter tracking, chat messages, and no overlay", () => {
     expect(votekickModule.broadcasterScopes).toEqual(["moderation:read"]);
     expect(votekickModule.needsActiveChatters).toBe(true);
@@ -183,6 +189,20 @@ describe("Votekick module", () => {
       target: "source_only",
       automated: false,
     }]);
+  });
+
+  it("admits a target seen one millisecond after the lookup started", async () => {
+    const admit = vi.fn(() => Promise.resolve("admitted" as const));
+    const context = contextFor({ activeChatters: {
+      count: vi.fn(() => Promise.resolve(20)),
+      seen: vi.fn(() => {
+        vi.setSystemTime(Date.now() + 1);
+        return Promise.resolve({ firstSeenAt: now(), lastSeenAt: now() });
+      }),
+    } });
+    await processVotekickMessage(eventFor("!votekick sampleviewer"), repositoryFor({ admit }), context);
+
+    expect(admit).toHaveBeenCalled();
   });
 
   it("runs a passing ballot through the host timeout action", async () => {
