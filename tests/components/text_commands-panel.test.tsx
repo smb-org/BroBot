@@ -123,7 +123,39 @@ describe("Text command editor", () => {
       expect(screen.getByRole("listbox")).toHaveTextContent("AntworttextAntwortet mit dem Text unten.");
       expect(screen.getByRole("listbox")).toHaveTextContent("BefehlslisteZählt alle eingeschalteten Befehle auf (ohne Aliase).");
       expect(screen.getByRole("listbox")).toHaveTextContent("Shoutout!so <name> empfiehlt einen Twitch-Kanal im Chat.");
+      expect(screen.getByRole("listbox")).toHaveTextContent("TimeoutTimeout für den Aufrufer; Antwort bei Erfolg und Ersatztext bei Ablehnung.");
     });
+  });
+
+  it("offers slash syntax, blocks malformed known commands, and keeps unknown commands as text", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body;
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "test" } });
+    const response = screen.getByRole("textbox", { name: "Antwort" });
+    fireEvent.change(response, { target: { value: "/" } });
+
+    const suggestions = screen.getByRole("group", { name: "Twitch-Befehle am Anfang werden beim Speichern in strukturierte Felder umgewandelt." });
+    expect(within(suggestions).getByRole("button", { name: /\/timeout \{user\} <seconds\|min-max> \[reason\]/u })).toHaveTextContent("Timeoutet den Aufrufer");
+    expect(within(suggestions).getByRole("button", { name: /\/announce <text>/u })).toHaveTextContent("Twitch-Ankündigung");
+    expect(within(suggestions).getByRole("button", { name: /\/shoutout \{target\}/u })).toHaveTextContent("Befehlsargument");
+
+    fireEvent.change(response, { target: { value: "/timeout somebody 30" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("Ungültige Syntax: /timeout {user} <seconds|min-max> [reason]");
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(created).toBeUndefined();
+
+    fireEvent.change(response, { target: { value: "/permit everyone" } });
+    expect(screen.getByText("Dieser Slash-Befehl bleibt Antworttext.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    await waitFor(() => expect(created).toMatchObject({ kind: "text", text: "/permit everyone" }));
   });
 
   it("offers the shared system variable catalog in the response picker", async () => {
@@ -587,7 +619,7 @@ describe("Text command editor", () => {
     expect(screen.queryByText("Der Bot ist hier kein Moderator — der Text geht als normale Nachricht raus.")).not.toBeInTheDocument();
   });
 
-  it("configures a caller timeout with ranged seconds, fallback templates, and a moderator warning", async () => {
+  it("converts a leading timeout slash command into structured fields before saving", async () => {
     let created: unknown;
     const fetcher = panelFetch({
       commands: () => [],
@@ -599,28 +631,53 @@ describe("Text command editor", () => {
     renderPanel(fetcher, { botIsModerator: false });
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "roulette" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Timed out for {timeout.duration}" } });
-    fireEvent.click(screen.getByRole("switch", { name: "Aufrufer timeouten" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), {
+      target: { value: "/timeout {user} 30-60 Raid spamming\nTimed out for {timeout.duration}" },
+    });
+    expect(screen.getByText("Timeout für den Aufrufer für 30–60 s.")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("switch", { name: "Aufrufer timeouten" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
-    expect(screen.getByRole("spinbutton", { name: "Mindestens" })).toHaveValue("120");
-    expect(screen.getByRole("spinbutton", { name: "Höchstens" })).toHaveValue("120");
+    expect(screen.getByRole("spinbutton", { name: "Mindestens" })).toHaveValue("30");
+    expect(screen.getByRole("spinbutton", { name: "Höchstens" })).toHaveValue("60");
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Timed out for {timeout.duration}");
+    expect(screen.getByRole("textbox", { name: "Timeout-Grund" })).toHaveValue("Raid spamming");
     expect(screen.getByText("Der Bot ist kein Moderator. Timeouts können nicht ausgeführt werden.")).toBeInTheDocument();
-    const minimum = screen.getByRole("spinbutton", { name: "Mindestens" });
-    const maximum = screen.getByRole("spinbutton", { name: "Höchstens" });
+    expect(screen.getByRole("switch", { name: "Kanalvariable ändern" })).toBeInTheDocument();
     const fallback = screen.getByRole("textbox", { name: "Ersatztext, wenn der Timeout abgelehnt wird" });
-    fireEvent.change(minimum, { target: { value: "30" } });
-    fireEvent.change(maximum, { target: { value: "60" } });
     fireEvent.change(fallback, { target: { value: "Cannot time out for {timeout.duration}." } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(created).toMatchObject({
       name: "roulette",
+      kind: "timeout",
+      text: "Timed out for {timeout.duration}",
       timeoutAction: {
         minSeconds: 30,
         maxSeconds: 60,
+        reason: "Raid spamming",
         fallbackText: "Cannot time out for {timeout.duration}.",
       },
     }));
+  });
+
+  it("converts a leading announcement slash command and keeps the converted result visible", async () => {
+    let saved: unknown;
+    const fetcher = panelFetch({
+      onMutation: (method, _path, body) => {
+        if (method === "PATCH") saved = body;
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    await selectCommand();
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "/announce Stream starts now!" } });
+    expect(screen.getByText("Wird als Twitch-Ankündigung gesendet.")).toHaveAttribute("role", "status");
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+
+    await waitFor(() => expect(saved).toMatchObject({ kind: "text", responseType: "announcement", text: "Stream starts now!" }));
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Stream starts now!");
+    expect(screen.getByRole("radio", { name: "Ankündigung" })).toBeChecked();
   });
 
   it("shows operators a read-only property list and keeps Active as an immediate action", async () => {

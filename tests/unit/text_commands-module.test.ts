@@ -433,7 +433,7 @@ describe("Text commands module", () => {
         channelId: "kanal-a",
         name: "roulette",
         text: "Timeout applied",
-        kind: "text",
+        kind: "timeout",
         cooldownSeconds: 0,
         responseType: "announcement",
         timeoutAction: { minSeconds: 30, maxSeconds: 30, fallbackText: "Timeout failed" },

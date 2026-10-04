@@ -34,12 +34,12 @@ const variableReferences: ModuleVariableReferences = {
     const token = `{var.${name}}`;
     const rows = await db.prepare(
       `SELECT command_name, response_text, template_fields_json, variable_name, variable_operation, variable_amount,
-              timeout_fallback_text
+              timeout_fallback_text, timeout_reason
          FROM text_commands
         WHERE channel_id = ?
-          AND (variable_name = ? OR instr(response_text, ?) > 0 OR instr(template_fields_json, ?) > 0 OR instr(timeout_fallback_text, ?) > 0)
+          AND (variable_name = ? OR instr(response_text, ?) > 0 OR instr(template_fields_json, ?) > 0 OR instr(timeout_fallback_text, ?) > 0 OR instr(timeout_reason, ?) > 0)
         ORDER BY command_name`,
-    ).bind(channelId, name, token, token, token).all<{
+    ).bind(channelId, name, token, token, token, token).all<{
       command_name: string;
       response_text: string;
       template_fields_json: string;
@@ -47,10 +47,11 @@ const variableReferences: ModuleVariableReferences = {
       variable_operation: string | null;
       variable_amount: number | null;
       timeout_fallback_text: string | null;
+      timeout_reason: string | null;
     }>();
     return rows.results.flatMap((row) => [
       ...(row.variable_name === name ? [{ moduleId: "text_commands", itemName: `!${row.command_name}`, kind: "action" as const }] : []),
-      ...(row.response_text.includes(token) || row.template_fields_json.includes(token) || row.timeout_fallback_text?.includes(token) === true
+      ...(row.response_text.includes(token) || row.template_fields_json.includes(token) || row.timeout_fallback_text?.includes(token) === true || row.timeout_reason?.includes(token) === true
         ? [{ moduleId: "text_commands", itemName: `!${row.command_name}`, kind: "template" as const }]
         : []),
     ]);
@@ -63,13 +64,14 @@ const variableReferences: ModuleVariableReferences = {
           SET response_text = replace(response_text, ?, ?),
               template_fields_json = replace(template_fields_json, ?, ?),
               timeout_fallback_text = replace(timeout_fallback_text, ?, ?),
+              timeout_reason = replace(timeout_reason, ?, ?),
               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
               revision = revision + 1
         WHERE channel_id = ?
-          AND (variable_name = ? OR instr(response_text, ?) > 0 OR instr(template_fields_json, ?) > 0 OR instr(timeout_fallback_text, ?) > 0)
+          AND (variable_name = ? OR instr(response_text, ?) > 0 OR instr(template_fields_json, ?) > 0 OR instr(timeout_fallback_text, ?) > 0 OR instr(timeout_reason, ?) > 0)
           AND EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)
           AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
-    ).bind(oldToken, nextToken, oldToken, nextToken, oldToken, nextToken, channelId, to, oldToken, oldToken, oldToken,
+    ).bind(oldToken, nextToken, oldToken, nextToken, oldToken, nextToken, oldToken, nextToken, channelId, to, oldToken, oldToken, oldToken, oldToken,
       channelId, to, channelId, from)];
   },
 };

@@ -139,6 +139,21 @@ describe("Text commands service", () => {
     }]);
   });
 
+  it("keeps slash syntax rendered from arguments as plain chat text at runtime", async () => {
+    const result = await processTextCommandMessage(
+      eventFor("!say /timeout {user} 300"),
+      repositoryFor([command("say", "{args}")]),
+    );
+
+    expect(result.actions).toEqual([{
+      kind: "chat",
+      text: "/timeout {user} 300",
+      target: "source_only",
+      replyToMessageId: "twitch-message-1",
+      automated: false,
+    }]);
+  });
+
   it("trims arguments after multiple spaces between name and argument", async () => {
     const result = await processTextCommandMessage(
       eventFor("!wiki   foo bar"),
@@ -418,7 +433,8 @@ describe("Text commands service", () => {
   it("uses one securely rolled duration for both the timeout action and its reply", async () => {
     const entry = {
       ...command("roulette", "Timed out for {timeout.duration} ({timeout.seconds})"),
-      timeoutAction: { minSeconds: 40, maxSeconds: 49, fallbackText: "Could not time you out for {timeout.duration}" },
+      kind: "timeout" as const,
+      timeoutAction: { minSeconds: 40, maxSeconds: 49, fallbackText: "Could not time you out for {timeout.duration}", reason: "Repeated spam" },
     };
     const renderTemplate = vi.fn((text: string, values: Readonly<Record<string, string | number>>) => Promise.resolve({
       text: text.replace(/\{([^{}]+)\}/gu, (_match, name: string) => String(values[name] ?? "?")),
@@ -437,7 +453,7 @@ describe("Text commands service", () => {
       kind: "timeout",
       userId: "user-1",
       durationSeconds: 44,
-      reason: "!roulette",
+      reason: "Repeated spam",
       onSuccess: { kind: "chat", text: "Timed out for 44 s (44)", automated: false, target: "source_only", replyToMessageId: "twitch-message-1" },
       onFailure: { kind: "chat", text: "Could not time you out for 44 s", automated: false, target: "source_only", replyToMessageId: "twitch-message-1" },
     });
@@ -446,6 +462,7 @@ describe("Text commands service", () => {
   it("keeps announcement response types on timeout follow-ups", async () => {
     const entry = {
       ...command("roulette", "Timeout applied"),
+      kind: "timeout" as const,
       responseType: "announcement" as const,
       timeoutAction: { minSeconds: 30, maxSeconds: 30, fallbackText: "Timeout failed" },
     };
@@ -466,6 +483,7 @@ describe("Text commands service", () => {
   it("uses the fallback without creating a timeout action for moderators", async () => {
     const entry = {
       ...command("roulette", "Timed out for {timeout.seconds}"),
+      kind: "timeout" as const,
       timeoutAction: { minSeconds: 30, maxSeconds: 30, fallbackText: "The caller cannot be timed out ({timeout.duration})." },
     };
     const renderTemplate = vi.fn((text: string, values: Readonly<Record<string, string | number>>) => Promise.resolve({
@@ -491,6 +509,7 @@ describe("Text commands service", () => {
   it("does not roll or return a moderation action after tier or cooldown rejection", async () => {
     const entry = {
       ...command("roulette", "Timed out for {timeout.seconds}"),
+      kind: "timeout" as const,
       minimumTier: "moderator" as const,
       timeoutAction: { minSeconds: 30, maxSeconds: 40, fallbackText: "Cannot time out caller." },
     };

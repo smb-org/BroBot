@@ -172,10 +172,12 @@ describe("Text commands panel", () => {
       minSeconds: 30,
       maxSeconds: 60,
       fallbackText: "Cannot time out for {timeout.duration} ({timeout.seconds}).",
+      reason: "Repeated spam",
     };
     const created = await panelRouter.fetch(
       await requestFor("user-1", collection, "POST", {
         name: "roulette",
+        kind: "timeout",
         text: "Timed out for {timeout.duration} ({timeout.seconds}).",
         cooldownSeconds: 0,
         timeoutAction,
@@ -188,26 +190,28 @@ describe("Text commands panel", () => {
       warnings: [],
     });
     await expect(database.prepare(
-      `SELECT timeout_min_seconds, timeout_max_seconds, timeout_fallback_text
+      `SELECT timeout_min_seconds, timeout_max_seconds, timeout_fallback_text, timeout_reason
          FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'roulette'`,
     ).first()).resolves.toEqual({
       timeout_min_seconds: 30,
       timeout_max_seconds: 60,
       timeout_fallback_text: timeoutAction.fallbackText,
+      timeout_reason: timeoutAction.reason,
     });
 
-    const updatedAction = { minSeconds: 45, maxSeconds: 45, fallbackText: "Try again for {timeout.seconds} seconds." };
+    const updatedAction = { minSeconds: 45, maxSeconds: 45, fallbackText: "Try again for {timeout.seconds} seconds.", reason: "Repeated spam" };
     const updated = await panelRouter.fetch(
       await requestFor("user-1", `${collection}/roulette`, "PATCH", { timeoutAction: updatedAction }),
       environment,
     );
     expect(updated.status).toBe(200);
     await expect(database.prepare(
-      "SELECT timeout_min_seconds, timeout_max_seconds, timeout_fallback_text FROM text_commands WHERE command_name = 'roulette'",
+      "SELECT timeout_min_seconds, timeout_max_seconds, timeout_fallback_text, timeout_reason FROM text_commands WHERE command_name = 'roulette'",
     ).first()).resolves.toEqual({
       timeout_min_seconds: 45,
       timeout_max_seconds: 45,
       timeout_fallback_text: updatedAction.fallbackText,
+      timeout_reason: updatedAction.reason,
     });
     const audit = await database.prepare(
       "SELECT after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
@@ -216,11 +220,12 @@ describe("Text commands panel", () => {
       timeoutMinSeconds: 45,
       timeoutMaxSeconds: 45,
       timeoutFallbackText: updatedAction.fallbackText,
+      timeoutReason: updatedAction.reason,
     });
 
     const invalidRange = await panelRouter.fetch(
       await requestFor("user-1", collection, "POST", {
-        name: "invalidrange", text: "Response", cooldownSeconds: 0,
+        name: "invalidrange", kind: "timeout", text: "Response", cooldownSeconds: 0,
         timeoutAction: { minSeconds: 0, maxSeconds: 2, fallbackText: "Fallback" },
       }),
       environment,
@@ -234,7 +239,7 @@ describe("Text commands panel", () => {
     );
     const longFallback = await panelRouter.fetch(
       await requestFor("user-1", collection, "POST", {
-        name: "longfallback", text: "Response", cooldownSeconds: 0,
+        name: "longfallback", kind: "timeout", text: "Response", cooldownSeconds: 0,
         timeoutAction: { minSeconds: 1, maxSeconds: 1, fallbackText: "x".repeat(501) },
       }),
       environment,

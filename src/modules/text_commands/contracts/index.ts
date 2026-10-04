@@ -7,7 +7,7 @@ import { TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES } from "./template-variable-cat
 
 export { TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES } from "./template-variable-catalog";
 
-export const TEXT_COMMAND_KINDS = ["text", "list", "shoutout"] as const;
+export const TEXT_COMMAND_KINDS = ["text", "list", "shoutout", "timeout"] as const;
 export type TextCommandKind = (typeof TEXT_COMMAND_KINDS)[number];
 export const TEXT_COMMAND_MINIMUM_TIERS = MODULE_TEMPLATE_MINIMUM_TIERS;
 export type TextCommandMinimumTier = ModuleTemplateMinimumTier;
@@ -21,6 +21,7 @@ export const TEXT_COMMAND_MAX_ALIASES = 10;
 
 export interface TextCommandTimeoutAction extends TimeoutDurationRange {
   fallbackText: string;
+  reason?: string;
 }
 
 export interface TextCommandGame {
@@ -143,6 +144,7 @@ export interface TextCommandActor {
 
 export const TEXT_COMMAND_TEMPLATE_FIELDS = {
   text: { text: TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, usageText: [] },
+  timeout: { text: TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES },
   list: {},
   shoutout: { text: [], usageText: [] },
 } as const satisfies Readonly<Record<TextCommandKind, TemplateFields<TextCommand>>>;
