@@ -289,12 +289,18 @@ const processTextCommandMessageAttempt = async (
 
     const rendered = await render(context, event, input, claimed, alias, claimed.text, changedVariable, timeoutValues);
     const replyToMessageId = textValue(event.payload.message_id);
-    const followUp = (text: string): Extract<ModuleAction, { kind: "chat" }> | undefined => text.length === 0 ? undefined : {
-      kind: "chat",
-      text,
-      target: claimed.chatTarget,
-      automated: false,
-      ...(claimed.responseType === "reply" && replyToMessageId !== null ? { replyToMessageId } : {}),
+    const followUp = (text: string): Extract<ModuleAction, { kind: "chat" | "announcement" }> | undefined => {
+      if (text.length === 0) return undefined;
+      if (claimed.responseType === "announcement") {
+        return { kind: "announcement", text, target: claimed.chatTarget, automated: false };
+      }
+      return {
+        kind: "chat",
+        text,
+        target: claimed.chatTarget,
+        automated: false,
+        ...(claimed.responseType === "reply" && replyToMessageId !== null ? { replyToMessageId } : {}),
+      };
     };
     const successFollowUp = followUp(rendered.text);
     const failureFollowUp = followUp(fallback.text);

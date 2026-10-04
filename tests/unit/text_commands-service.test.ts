@@ -438,9 +438,29 @@ describe("Text commands service", () => {
       userId: "user-1",
       durationSeconds: 44,
       reason: "!roulette",
-      onSuccess: { kind: "chat", text: "Timed out for 44 s (44)", automated: false },
-      onFailure: { kind: "chat", text: "Could not time you out for 44 s", automated: false },
+      onSuccess: { kind: "chat", text: "Timed out for 44 s (44)", automated: false, target: "source_only", replyToMessageId: "twitch-message-1" },
+      onFailure: { kind: "chat", text: "Could not time you out for 44 s", automated: false, target: "source_only", replyToMessageId: "twitch-message-1" },
     });
+  });
+
+  it("keeps announcement response types on timeout follow-ups", async () => {
+    const entry = {
+      ...command("roulette", "Timeout applied"),
+      responseType: "announcement" as const,
+      timeoutAction: { minSeconds: 30, maxSeconds: 30, fallbackText: "Timeout failed" },
+    };
+    const result = await processTextCommandMessage(eventFor("!roulette"), repositoryFor([entry]), {
+      secureRandomInteger: () => 0,
+    });
+
+    expect(result.actions).toEqual([{
+      kind: "timeout",
+      userId: "user-1",
+      durationSeconds: 30,
+      reason: "!roulette",
+      onSuccess: { kind: "announcement", text: "Timeout applied", automated: false, target: "source_only" },
+      onFailure: { kind: "announcement", text: "Timeout failed", automated: false, target: "source_only" },
+    }]);
   });
 
   it("uses the fallback without creating a timeout action for moderators", async () => {

@@ -39,7 +39,7 @@ const variableReferences: ModuleVariableReferences = {
         WHERE channel_id = ?
           AND (variable_name = ? OR instr(response_text, ?) > 0 OR instr(template_fields_json, ?) > 0 OR instr(timeout_fallback_text, ?) > 0)
         ORDER BY command_name`,
-    ).bind(channelId, name, token, token).all<{
+    ).bind(channelId, name, token, token, token).all<{
       command_name: string;
       response_text: string;
       template_fields_json: string;
