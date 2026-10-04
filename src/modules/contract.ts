@@ -715,6 +715,8 @@ export type ModuleFollowedAt = (string & {}) | null | "unavailable";
 export interface BallotSnapshot {
   counts: readonly number[];
   revision: number;
+  /** Present once the host has finalized the ballot. */
+  outcome?: Exclude<BallotFinalizeOutcome, "open">;
 }
 
 export type BallotOpenResult =
@@ -725,17 +727,18 @@ export type BallotCastResult = BallotSnapshot & {
   status: "counted" | "changed" | "unchanged" | "not_open";
 };
 
-/** Data-only predicate evaluated against a ballot's current counts in the host store. */
-export interface BallotFreezeCondition {
-  kind: "net_at_least";
-  positiveOptionIndex: number;
-  negativeOptionIndex: number;
-  threshold: number;
+export type BallotFinalizeOutcome = "open" | "passed" | "expired" | "not_open";
+
+/** Data-only pass predicate evaluated atomically against the host's current tally. */
+export interface BallotFinalizeRule {
+  passIf: {
+    yes: number;
+    no: number;
+    netAtLeast: number;
+  };
 }
 
-export type BallotFreezeResult =
-  | ({ status: "open" | "frozen" } & BallotSnapshot)
-  | ({ status: "not_open" } & BallotSnapshot);
+export type BallotFinalizeResult = Omit<BallotSnapshot, "outcome"> & { outcome: BallotFinalizeOutcome };
 
 /** Ballot access already bound by the host to one channel and one module. */
 export interface ModuleBallotAccess {
@@ -743,8 +746,8 @@ export interface ModuleBallotAccess {
   cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
-  /** Atomically freezes the authoritative snapshot when condition is met; frozen ballots reject casts until close. */
-  freeze: (ballotId: string, condition: BallotFreezeCondition) => Promise<BallotFreezeResult>;
+  /** Atomically finalizes against the current tally and returns the stored outcome and snapshot. */
+  finalize: (ballotId: string, rule: BallotFinalizeRule | null) => Promise<BallotFinalizeResult>;
   /** Releases an idempotent close snapshot after the module has persisted its result. */
   acknowledgeClosed?: (ballotId: string) => Promise<void>;
 }
@@ -1061,6 +1064,8 @@ export interface ModuleRouteVariables {
   externalFetchBudget: ModuleExternalFetchBudget;
   /** Returns ballot access bound to the authorized route channel and mounted module. */
   ballots: (channelId: string) => ModuleBallotAccess;
+  /** Runs a registered module alarm immediately for a route that must reconcile module-owned state. */
+  runModuleAlarm: (channelId: string, moduleId: string, handlerKey: string, alarmKey: string) => Promise<void>;
   prepareModuleAudit: PrepareModuleAudit;
   writeModuleAudit: WriteModuleAudit;
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];

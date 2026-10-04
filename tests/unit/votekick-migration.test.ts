@@ -160,7 +160,7 @@ describe("Votekick migration", () => {
     }
   });
 
-  it("claims a frozen pass from D1 counts that are behind the authoritative ballot revision", async () => {
+  it("claims a DO-finalized pass once and mirrors its authoritative snapshot", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "channel-a");
@@ -178,21 +178,54 @@ describe("Votekick migration", () => {
         endsAt: new Date(Date.now() + 60_000).toISOString(),
       }, startedAt, 300, 1800)).resolves.toBe("admitted");
 
-      await expect(repository.finish("channel-a", "ballot-frozen-pass", "passed", 4, 1, 6, 120, startedAt))
+      await repository.updateCounts("channel-a", "ballot-frozen-pass", 2, 1, 2);
+      await expect(repository.finalize("channel-a", "ballot-frozen-pass", "passed", 4, 1, 6, 120, startedAt))
         .resolves.toBe(true);
       await expect(database.prepare(
         "SELECT status, yes_votes, no_votes, ballot_revision, duration_seconds FROM votekicks WHERE votekick_id = ?",
       ).bind("ballot-frozen-pass").first()).resolves.toEqual({
         status: "passed", yes_votes: 4, no_votes: 1, ballot_revision: 6, duration_seconds: 120,
       });
-      await expect(repository.finish("channel-a", "ballot-frozen-pass", "passed", 4, 1, 6, 120, startedAt))
+      await expect(repository.finalize("channel-a", "ballot-frozen-pass", "passed", 4, 1, 6, 120, startedAt))
         .resolves.toBe(false);
     } finally {
       database.close();
     }
   });
 
-  it("expires overdue running rows on admission before applying cooldown checks", async () => {
+  it("persists the DO expiry tally exactly while conditionally transitioning only a running row", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "channel-a");
+      const repository = createVotekickRepository(database as unknown as D1Database);
+      const startedAt = new Date().toISOString();
+      await expect(repository.admit("channel-a", {
+        id: "ballot-expiry-snapshot",
+        targetUserId: "target-a",
+        targetLogin: "target-a",
+        initiatorUserId: "starter-a",
+        threshold: 3,
+        yesVotes: 1,
+        ballotRevision: 1,
+        startedAt,
+        endsAt: new Date(Date.now() + 60_000).toISOString(),
+      }, startedAt, 300, 1800)).resolves.toBe("admitted");
+
+      await expect(repository.finalize("channel-a", "ballot-expiry-snapshot", "expired", 4, 2, 6, null, startedAt))
+        .resolves.toBe(true);
+      await expect(repository.finalize("channel-a", "ballot-expiry-snapshot", "expired", 1, 0, 1, null, startedAt))
+        .resolves.toBe(false);
+      await expect(database.prepare(
+        "SELECT status, yes_votes, no_votes, ballot_revision, duration_seconds FROM votekicks WHERE votekick_id = ?",
+      ).bind("ballot-expiry-snapshot").first()).resolves.toEqual({
+        status: "expired", yes_votes: 4, no_votes: 2, ballot_revision: 6, duration_seconds: null,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps overdue running rows unresolved until the host ballot finalizes them", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "channel-a");
@@ -216,9 +249,9 @@ describe("Votekick migration", () => {
         endsAt: new Date(Date.now() + 60_000).toISOString(),
       }, startedAt, 0, 0);
 
-      expect(result).toBe("admitted");
+      expect(result).toBe("busy");
       await expect(database.prepare("SELECT status FROM votekicks WHERE votekick_id = 'ballot-overdue'").first())
-        .resolves.toEqual({ status: "expired" });
+        .resolves.toEqual({ status: "running" });
     } finally {
       database.close();
     }

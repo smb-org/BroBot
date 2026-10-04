@@ -48,6 +48,7 @@ interface ModuleRouteEnvironment {
     | "listChannelVariables" | "findChannelVariable"
     | "externalFetchBudget"
     | "ballots"
+    | "runModuleAlarm"
     | "listTextBlockConditions"
     | "listEventTimeSources" | "resolveEventTimes"
     | "notifyScheduleInputsChanged" | "validateTemplateContentMutation"
@@ -146,6 +147,15 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     const moduleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
     if (!MODULES.some((module) => module.id === moduleId)) throw new Error("Ballot access requires a registered module route.");
     return moduleBallots(context.env.CHANNEL, channelId, moduleId);
+  });
+  context.set("runModuleAlarm", async (channelId, moduleId, handlerKey, alarmKey) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Module alarm access must use the authorized route channel.");
+    const marker = "/modules/";
+    const suffix = new URL(context.req.url).pathname.split(marker, 2)[1];
+    const routedModuleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
+    if (routedModuleId !== moduleId) throw new Error("Module alarm access must use the mounted module route.");
+    const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+    await object.runModuleAlarm(moduleId, handlerKey, alarmKey);
   });
   context.set("writeModuleDiagnostics", writeModuleDiagnostics);
   context.set("broadcasterHasScope", broadcasterHasScope);

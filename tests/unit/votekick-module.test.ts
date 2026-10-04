@@ -45,11 +45,11 @@ const runningVotekick = (overrides: Partial<Votekick> = {}): Votekick => ({
 
 const repositoryFor = (overrides: Partial<VotekickRepository> = {}): VotekickRepository => ({
   admit: vi.fn(() => Promise.resolve("admitted" as const)),
-  expireOverdue: vi.fn(() => Promise.resolve([])),
   byId: vi.fn(() => Promise.resolve(null)),
   running: vi.fn(() => Promise.resolve(null)),
   listRecent: vi.fn(() => Promise.resolve([])),
   updateCounts: vi.fn(() => Promise.resolve()),
+  finalize: vi.fn(() => Promise.resolve(true)),
   finish: vi.fn(() => Promise.resolve(true)),
   cancel: vi.fn(() => Promise.resolve(null)),
   markLifted: vi.fn(() => Promise.resolve(true)),
@@ -62,7 +62,7 @@ const contextFor = (overrides: Record<string, unknown> = {}): ModuleExecutionCon
     cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [1, 0], revision: 1 })),
     read: vi.fn(() => Promise.resolve(null)),
     close: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 2 })),
-    freeze: vi.fn(() => Promise.resolve({ status: "open" as const, counts: [1, 0], revision: 1 })),
+    finalize: vi.fn(() => Promise.resolve({ outcome: "open" as const, counts: [1, 0], revision: 1 })),
   };
   const context = {
     DB: {},
@@ -186,8 +186,8 @@ describe("Votekick module", () => {
   it("runs a passing ballot through the host timeout action", async () => {
     const running = runningVotekick();
     const order: string[] = [];
-    const finish = vi.fn(() => { order.push("finish"); return Promise.resolve(true); });
-    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
+    const finalize = vi.fn(() => { order.push("finalize"); return Promise.resolve(true); });
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finalize });
     const context = contextFor({
       channelLanguage: vi.fn(() => { order.push("language"); return Promise.resolve("en" as const); }),
       renderTemplate: vi.fn((template: string, values: Readonly<Record<string, string | number>>) => {
@@ -203,13 +203,13 @@ describe("Votekick module", () => {
         cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
         read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 4 })),
         close: vi.fn(() => { order.push("close"); return Promise.resolve({ counts: [3, 0], revision: 3 }); }),
-        freeze: vi.fn(() => Promise.resolve({ status: "frozen" as const, counts: [3, 0], revision: 4 })),
+        finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [3, 0], revision: 4 })),
       },
     });
     const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
 
-    expect(finish).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 4, 120, expect.any(String));
-    expect(order).toEqual(["language", "template", "template", "finish", "close"]);
+    expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 4, 120, expect.any(String));
+    expect(order).toEqual(["language", "template", "template", "finalize", "close"]);
     expect(context.clearAlarm).toHaveBeenCalledWith("close:ballot-1");
     expect(result.actions).toEqual([{
       kind: "timeout",
@@ -223,54 +223,54 @@ describe("Votekick module", () => {
 
   it("does not pass when an opposing Durable Object vote commits before the D1 snapshot update", async () => {
     const running = runningVotekick();
-    const finish = vi.fn(() => Promise.resolve(true));
+    const finalize = vi.fn(() => Promise.resolve(true));
     const order: string[] = [];
     const updateCounts = vi.fn((_channelId: string, _id: string, yesVotes: number, noVotes: number) => {
       order.push(`d1:${String(yesVotes)}:${String(noVotes)}`);
       return Promise.resolve();
     });
-    let freezeCalls = 0;
-    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish, updateCounts });
+    let finalizeCalls = 0;
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finalize, updateCounts });
     const context = contextFor({ ballots: {
       open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
       cast: vi.fn(() => { order.push("cast-yes"); return Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 }); }),
       read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 3 })),
       close: vi.fn(() => Promise.resolve(null)),
-      freeze: vi.fn(() => {
-        freezeCalls += 1;
-        order.push(`freeze-${String(freezeCalls)}`);
-        if (freezeCalls === 1) return Promise.resolve({ status: "open" as const, counts: [2, 0], revision: 2 });
+      finalize: vi.fn(() => {
+        finalizeCalls += 1;
+        order.push(`finalize-${String(finalizeCalls)}`);
+        if (finalizeCalls === 1) return Promise.resolve({ outcome: "open" as const, counts: [2, 0], revision: 2 });
         order.push("opposing-vote-committed-in-do");
-        return Promise.resolve({ status: "open" as const, counts: [3, 1], revision: 4 });
+        return Promise.resolve({ outcome: "open" as const, counts: [3, 1], revision: 4 });
       }),
     } });
 
     const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
 
     expect(result.actions).toEqual([]);
-    expect(finish).not.toHaveBeenCalled();
+    expect(finalize).not.toHaveBeenCalled();
     expect(updateCounts).toHaveBeenLastCalledWith("channel-a", "ballot-1", 3, 1, 4);
-    expect(order.indexOf("freeze-2")).toBeLessThan(order.indexOf("d1:3:1"));
+    expect(order.indexOf("finalize-2")).toBeLessThan(order.indexOf("d1:3:1"));
   });
 
   it("keeps voting open when the latest ballot snapshot is below threshold", async () => {
     const running = runningVotekick();
-    const finish = vi.fn(() => Promise.resolve(true));
+    const finalize = vi.fn(() => Promise.resolve(true));
     const updateCounts = vi.fn(() => Promise.resolve());
-    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish, updateCounts });
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finalize, updateCounts });
     const context = contextFor({
       ballots: {
         open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
         cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
         read: vi.fn(() => Promise.resolve({ counts: [1, 2], revision: 4 })),
         close: vi.fn(() => Promise.resolve({ counts: [1, 2], revision: 4 })),
-        freeze: vi.fn(() => Promise.resolve({ status: "open" as const, counts: [1, 2], revision: 4 })),
+        finalize: vi.fn(() => Promise.resolve({ outcome: "open" as const, counts: [1, 2], revision: 4 })),
       },
     });
 
     const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
 
-    expect(finish).not.toHaveBeenCalled();
+    expect(finalize).not.toHaveBeenCalled();
     expect(updateCounts).toHaveBeenLastCalledWith("channel-a", "ballot-1", 1, 2, 4);
     expect(result.actions).toEqual([]);
     expect(context.clearAlarm).not.toHaveBeenCalled();
@@ -278,19 +278,19 @@ describe("Votekick module", () => {
 
   it("claims a pass when a concurrent cast raises the snapshot above threshold", async () => {
     const running = runningVotekick();
-    const finish = vi.fn(() => Promise.resolve(true));
-    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
+    const finalize = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finalize });
     const context = contextFor({ ballots: {
       open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
       cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [2, 0], revision: 2 })),
       read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 3 })),
       close: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 3 })),
-      freeze: vi.fn(() => Promise.resolve({ status: "frozen" as const, counts: [3, 0], revision: 3 })),
+      finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [3, 0], revision: 3 })),
     } });
 
     const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
 
-    expect(finish).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 3, 120, expect.any(String));
+    expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 3, 120, expect.any(String));
     expect(result.actions).toEqual([expect.objectContaining({ kind: "timeout" })]);
   });
 
@@ -349,9 +349,9 @@ describe("Votekick module", () => {
 
   it("freezes before timeout preparation so a later opposing cast cannot change the action", async () => {
     const running = runningVotekick();
-    const finish = vi.fn(() => Promise.resolve(true));
-    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
-    let ballotFrozen = false;
+    const finalize = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finalize });
+    let ballotFinalized = false;
     let releaseTemplates: (() => void) | undefined;
     const templateGate = new Promise<void>((resolve) => { releaseTemplates = resolve; });
     const renderTemplate = vi.fn(async (template: string, values: Readonly<Record<string, string | number>>) => {
@@ -366,14 +366,14 @@ describe("Votekick module", () => {
       renderTemplate,
       ballots: {
         open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
-        cast: vi.fn(() => Promise.resolve(ballotFrozen
+        cast: vi.fn(() => Promise.resolve(ballotFinalized
           ? { status: "not_open" as const, counts: [], revision: 0 }
           : { status: "counted" as const, counts: [3, 0], revision: 3 })),
         read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 4 })),
         close,
-        freeze: vi.fn(() => {
-          ballotFrozen = true;
-          return Promise.resolve({ status: "frozen" as const, counts: [3, 0], revision: 4 });
+        finalize: vi.fn(() => {
+          ballotFinalized = true;
+          return Promise.resolve({ outcome: "passed" as const, counts: [3, 0], revision: 4 });
         }),
       },
     });
@@ -384,28 +384,28 @@ describe("Votekick module", () => {
     releaseTemplates?.();
     await expect(processing).resolves.toMatchObject({ actions: [expect.objectContaining({ kind: "timeout", reason: "Votekick (3:0) · ballot-1" })] });
 
-    expect(finish).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 4, 120, expect.any(String));
+    expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 4, 120, expect.any(String));
     expect(close).toHaveBeenCalledOnce();
   });
 
   it("prepares timeout language and templates before persisting a passed ballot", async () => {
     const running = runningVotekick();
-    const finish = vi.fn(() => Promise.resolve(true));
-    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
+    const finalize = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finalize });
     const context = contextFor({
       ballots: {
         open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
         cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
         read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 4 })),
         close: vi.fn(() => Promise.resolve(null)),
-        freeze: vi.fn(() => Promise.resolve({ status: "frozen" as const, counts: [3, 0], revision: 4 })),
+        finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [3, 0], revision: 4 })),
       },
       channelLanguage: vi.fn(() => Promise.reject(new Error("language unavailable"))),
     });
 
     await expect(processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context)).rejects.toThrow("language unavailable");
 
-    expect(finish).not.toHaveBeenCalled();
+    expect(finalize).not.toHaveBeenCalled();
     expect(context.ballots.close).not.toHaveBeenCalled();
     expect(context.clearAlarm).not.toHaveBeenCalled();
   });
@@ -414,12 +414,12 @@ describe("Votekick module", () => {
     const running = runningVotekick();
     let passed = false;
     let ballotOpen = true;
-    const finish = vi.fn(() => {
+    const finalize = vi.fn(() => {
       if (passed) return Promise.resolve(false);
       passed = true;
       return Promise.resolve(true);
     });
-    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finalize });
     const close = vi.fn(() => {
       ballotOpen = false;
       return Promise.resolve({ counts: [3, 0], revision: 4 });
@@ -434,7 +434,7 @@ describe("Votekick module", () => {
         cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
         read: vi.fn(() => Promise.resolve(ballotOpen ? { counts: [3, 0], revision: 4 } : null)),
         close,
-        freeze: vi.fn(() => Promise.resolve({ status: "frozen" as const, counts: [3, 0], revision: 4 })),
+        finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [3, 0], revision: 4 })),
       },
     });
 
@@ -442,22 +442,22 @@ describe("Votekick module", () => {
       .rejects.toThrow("language unavailable");
     expect(ballotOpen).toBe(true);
     expect(close).not.toHaveBeenCalled();
-    expect(finish).not.toHaveBeenCalled();
+    expect(finalize).not.toHaveBeenCalled();
 
     const results = await Promise.all([
       processVotekickMessage(eventFor("1", ["viewer"], "voter-b"), repository, context),
       processVotekickMessage(eventFor("1", ["viewer"], "voter-c"), repository, context),
     ]);
     expect(results.flatMap((result) => result.actions).filter((action) => action.kind === "timeout")).toHaveLength(1);
-    expect(finish).toHaveBeenCalledTimes(2);
+    expect(finalize).toHaveBeenCalledTimes(2);
     expect(close).toHaveBeenCalledTimes(1);
     expect(ballotOpen).toBe(false);
   });
 
   it("does not persist passed when timeout template rendering fails", async () => {
     const running = runningVotekick();
-    const finish = vi.fn(() => Promise.resolve(true));
-    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
+    const finalize = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finalize });
     const renderTemplate = vi.fn(() => Promise.reject(new Error("template unavailable")));
     const context = contextFor({
       ballots: {
@@ -465,7 +465,7 @@ describe("Votekick module", () => {
         cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
         read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 4 })),
         close: vi.fn(() => Promise.resolve(null)),
-        freeze: vi.fn(() => Promise.resolve({ status: "frozen" as const, counts: [3, 0], revision: 4 })),
+        finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [3, 0], revision: 4 })),
       },
       renderTemplate,
     });
@@ -473,7 +473,7 @@ describe("Votekick module", () => {
     await expect(processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context)).rejects.toThrow("template unavailable");
 
     expect(renderTemplate).toHaveBeenCalledTimes(2);
-    expect(finish).not.toHaveBeenCalled();
+    expect(finalize).not.toHaveBeenCalled();
   });
 
   it("does not admit a row when alarm setup fails, even if ballot cleanup is unavailable", async () => {
@@ -499,7 +499,7 @@ describe("Votekick module", () => {
       cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [1, 0], revision: 1 })),
       read: vi.fn(() => Promise.resolve(null)),
       close: vi.fn(() => { order.push("close"); return Promise.reject(new Error("DO unavailable")); }),
-      freeze: vi.fn(() => Promise.resolve({ status: "not_open" as const, counts: [], revision: 0 })),
+      finalize: vi.fn(() => Promise.resolve({ outcome: "not_open" as const, counts: [], revision: 0 })),
     } });
 
     const result = await processVotekickMessage(eventFor("!votekick sampleviewer"), repository, context);
@@ -510,41 +510,41 @@ describe("Votekick module", () => {
     expect(result.diagnostics).toContainEqual({ code: "votekick.rejected", detail: { reason: "lookup_failure" } });
   });
 
-  it("finalizes overdue rows before processing a start attempt even when ballot cleanup fails", async () => {
+  it("uses the DO expiry outcome before processing a start attempt", async () => {
     const overdue = runningVotekick({ endsAt: new Date(Date.now() - 1_000).toISOString() });
-    const expireOverdue = vi.fn(() => Promise.resolve([overdue]));
+    const finalize = vi.fn(() => Promise.resolve(true));
     const context = contextFor({ ballots: {
       open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
       cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [1, 0], revision: 1 })),
       read: vi.fn(() => Promise.resolve(null)),
       close: vi.fn(() => Promise.reject(new Error("DO unavailable"))),
-      freeze: vi.fn(() => Promise.resolve({ status: "frozen" as const, counts: [3, 0], revision: 4 })),
+      finalize: vi.fn(() => Promise.resolve({ outcome: "expired" as const, counts: [2, 0], revision: 2 })),
     } });
-    const repository = repositoryFor({ expireOverdue });
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(overdue)), finalize });
 
     await processVotekickMessage(eventFor("!votekick sampleviewer", ["subscriber"]), repository, context);
 
-    expect(expireOverdue).toHaveBeenCalledWith("channel-a", expect.any(String));
+    expect(finalize).toHaveBeenCalledWith("channel-a", overdue.id, "expired", 2, 0, 2, null, expect.any(String));
     expect(context.ballots.close).toHaveBeenCalledWith(overdue.id);
   });
 
-  it("finalizes overdue rows before a numeric chat vote and never casts into an expired ballot", async () => {
+  it("mirrors a DO expiry snapshot before a numeric chat vote and never casts into it", async () => {
     const order: string[] = [];
     const overdue = runningVotekick({ endsAt: new Date(Date.now() - 1_000).toISOString() });
-    const expireOverdue = vi.fn(() => { order.push("expire"); return Promise.resolve([overdue]); });
-    const running = vi.fn(() => { order.push("running"); return Promise.resolve(null); });
-    const repository = repositoryFor({ expireOverdue, running });
+    const d1Finalize = vi.fn(() => { order.push("d1-finalize"); return Promise.resolve(true); });
+    const repository = repositoryFor({ running: vi.fn(() => { order.push("running"); return Promise.resolve(overdue); }), finalize: d1Finalize });
     const context = contextFor({ ballots: {
       open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
       cast: vi.fn(() => Promise.resolve({ status: "not_open" as const, counts: [], revision: 0 })),
       read: vi.fn(() => Promise.resolve(null)),
       close: vi.fn(() => { order.push("close"); return Promise.reject(new Error("DO unavailable")); }),
-      freeze: vi.fn(() => Promise.resolve({ status: "not_open" as const, counts: [], revision: 0 })),
+      finalize: vi.fn(() => { order.push("do-finalize"); return Promise.resolve({ outcome: "expired" as const, counts: [2, 1], revision: 3 }); }),
     } });
 
     await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
 
-    expect(order).toEqual(["running", "expire", "close", "running"]);
+    expect(order).toEqual(["running", "do-finalize", "d1-finalize", "close"]);
+    expect(d1Finalize).toHaveBeenCalledWith("channel-a", overdue.id, "expired", 2, 1, 3, null, expect.any(String));
     expect(context.ballots.cast).not.toHaveBeenCalled();
   });
 
@@ -585,9 +585,7 @@ describe("Votekick module", () => {
   it("sends expiry from the committed row when alarm-time ballot cleanup fails", async () => {
     const expired = runningVotekick({ status: "expired", endedAt: new Date(Date.now() - 1_000).toISOString() });
     const byId = vi.fn(() => Promise.resolve(expired));
-    const expireOverdue = vi.fn(() => Promise.resolve([expired]));
     const repository = repositoryFor({
-      expireOverdue,
       byId,
     });
     const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({ sent: true, reason: null, retryable: false }));
@@ -608,20 +606,22 @@ describe("Votekick module", () => {
 
     await expect(closeExpiredVotekick(context, "close:ballot-1", repository)).resolves.toBeUndefined();
 
-    expect(expireOverdue).not.toHaveBeenCalled();
     expect(closeBallot).toHaveBeenCalledOnce();
     expect(sendChat).toHaveBeenCalledWith(settings.expiredText, "votekick:ballot-1:expired", undefined, expect.any(Function), settings.chatTarget);
   });
 
   it("uses the authoritative ballot snapshot for expiry counts", async () => {
-    let expired = runningVotekick({ status: "expired", yesVotes: 1, noVotes: 0, ballotRevision: 1, endedAt: now() });
-    const byId = vi.fn(() => Promise.resolve(expired));
-    const updateCounts = vi.fn((_channelId: string, _id: string, yesVotes: number, noVotes: number, ballotRevision: number) => {
-      expired = { ...expired, yesVotes, noVotes, ballotRevision };
-      return Promise.resolve();
+    let current = runningVotekick({ endsAt: new Date(Date.now() - 1_000).toISOString() });
+    const byId = vi.fn(() => Promise.resolve(current));
+    const finalize = vi.fn((
+      _channelId: string, _id: string, status: "passed" | "expired", yesVotes: number, noVotes: number,
+      ballotRevision: number, durationSeconds: number | null, endedAt: string,
+    ) => {
+      current = { ...current, status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt };
+      return Promise.resolve(true);
     });
-    const repository = repositoryFor({ byId, updateCounts });
-    const close = vi.fn(() => Promise.resolve({ counts: [4, 1], revision: 6 }));
+    const repository = repositoryFor({ byId, finalize });
+    const close = vi.fn(() => Promise.resolve({ counts: [4, 2], revision: 6 }));
     const renderTemplate = vi.fn((text: string) => Promise.resolve({ text, attributions: [] }));
     const db = { prepare: vi.fn(() => ({
       bind: vi.fn().mockReturnThis(),
@@ -630,7 +630,7 @@ describe("Votekick module", () => {
     const context = {
       channelId: "channel-a",
       DB: db,
-      ballots: { close },
+      ballots: { finalize: vi.fn(() => Promise.resolve({ outcome: "expired" as const, counts: [4, 2], revision: 6 })), close },
       schedule: vi.fn(() => Promise.resolve()),
       clear: vi.fn(() => Promise.resolve()),
       renderTemplate,
@@ -639,17 +639,17 @@ describe("Votekick module", () => {
 
     await closeExpiredVotekick(context, "close:ballot-1", repository);
 
-    expect(updateCounts).toHaveBeenCalledWith("channel-a", "ballot-1", 4, 1, 6);
+    expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "expired", 4, 2, 6, null, expect.any(String));
     expect(renderTemplate).toHaveBeenCalledWith(settings.expiredText, expect.objectContaining({
       "votekick.yes": 4,
-      "votekick.no": 1,
+      "votekick.no": 2,
     }), expect.any(Number));
   });
 
   it("recovers a frozen pass from the alarm and executes one timeout with frozen counts", async () => {
     let current = runningVotekick();
     const byId = vi.fn(() => Promise.resolve(current));
-    const finish = vi.fn((
+    const finalize = vi.fn((
       _channelId: string,
       _id: string,
       status: "passed" | "expired" | "cancelled" | "failed",
@@ -663,9 +663,9 @@ describe("Votekick module", () => {
       current = { ...current, status, yesVotes, noVotes, ballotRevision: ballotRevision ?? current.ballotRevision, durationSeconds, endedAt };
       return Promise.resolve(true);
     });
-    const repository = repositoryFor({ byId, finish });
+    const repository = repositoryFor({ byId, finalize });
     const order: string[] = [];
-    const freeze = vi.fn(() => { order.push("freeze"); return Promise.resolve({ status: "frozen" as const, counts: [4, 1], revision: 6 }); });
+    const ballotFinalize = vi.fn(() => { order.push("finalize"); return Promise.resolve({ outcome: "passed" as const, counts: [4, 1], revision: 6 }); });
     const close = vi.fn(() => { order.push("close"); return Promise.resolve({ counts: [4, 1], revision: 6 }); });
     const executeTimeout = vi.fn((action: Extract<ModuleAction, { kind: "timeout" }>) => {
       order.push(`timeout:${action.reason}`);
@@ -683,7 +683,7 @@ describe("Votekick module", () => {
     const context = {
       channelId: "channel-a",
       DB: db,
-      ballots: { freeze, close },
+      ballots: { finalize: ballotFinalize, close },
       channelLanguage: vi.fn(() => { order.push("language"); return Promise.resolve("en" as const); }),
       secureRandomInteger: vi.fn(() => 0),
       executeTimeout,
@@ -695,14 +695,14 @@ describe("Votekick module", () => {
 
     await closeExpiredVotekick(context, "close:ballot-1", repository);
 
-    expect(finish).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 4, 1, 6, 120, expect.any(String));
+    expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 4, 1, 6, 120, expect.any(String));
     expect(executeTimeout).toHaveBeenCalledOnce();
     expect(executeTimeout).toHaveBeenCalledWith(expect.objectContaining({
       kind: "timeout",
       reason: "Votekick (4:1) · ballot-1",
     }));
     expect(sendChat).toHaveBeenCalledWith(expect.stringContaining("sampleviewer"), "votekick:ballot-1:passed:applied", undefined, expect.any(Function), settings.chatTarget);
-    expect(order).toEqual(["freeze", "language", "template", "template", "timeout:Votekick (4:1) · ballot-1", "close", "clear"]);
+    expect(order).toEqual(["finalize", "language", "template", "template", "timeout:Votekick (4:1) · ballot-1", "close", "clear"]);
     expect(current.status).toBe("passed");
   });
 });

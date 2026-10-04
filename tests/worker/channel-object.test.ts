@@ -1543,7 +1543,7 @@ describe("ChannelObject realtime path", () => {
     await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
   });
 
-  it("freezes only from its atomic snapshot and retains that snapshot until close", async () => {
+  it("finalizes atomically, replays the same outcome and releases the open slot", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const object = objectFor([]);
@@ -1553,16 +1553,16 @@ describe("ChannelObject realtime path", () => {
     await object.castBallot("votekick", "kick-a", "yes-3", 1);
     await object.castBallot("votekick", "kick-a", "no-1", 2);
 
-    const condition = { kind: "net_at_least" as const, positiveOptionIndex: 0, negativeOptionIndex: 1, threshold: 3 };
-    await expect(object.freezeBallot("votekick", "kick-a", condition)).resolves.toEqual({
-      status: "open",
+    const rule = { passIf: { yes: 0, no: 1, netAtLeast: 3 } };
+    await expect(object.finalizeBallot("votekick", "kick-a", rule)).resolves.toEqual({
+      outcome: "open",
       counts: [3, 1],
       revision: 4,
     });
     await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [3, 1], revision: 4 });
     await object.castBallot("votekick", "kick-a", "yes-4", 1);
-    await expect(object.freezeBallot("votekick", "kick-a", condition)).resolves.toEqual({
-      status: "frozen",
+    await expect(object.finalizeBallot("votekick", "kick-a", rule)).resolves.toEqual({
+      outcome: "passed",
       counts: [4, 1],
       revision: 5,
     });
@@ -1571,45 +1571,49 @@ describe("ChannelObject realtime path", () => {
       counts: [],
       revision: 0,
     });
-    await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [4, 1], revision: 5 });
-    await expect(object.freezeBallot("votekick", "kick-a", condition)).resolves.toEqual({
-      status: "frozen",
+    await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [4, 1], revision: 5, outcome: "passed" });
+    vi.setSystemTime(20_000);
+    await expect(object.finalizeBallot("votekick", "kick-a", {
+      passIf: { yes: 0, no: 1, netAtLeast: 8 },
+    })).resolves.toEqual({
+      outcome: "passed",
       counts: [4, 1],
       revision: 5,
     });
+    await expect(object.openBallot("chat_voting", "poll-after-finalize", 2, 30_000)).resolves.toEqual({ status: "opened" });
     await expect(object.closeBallot("votekick", "kick-a")).resolves.toEqual({ counts: [4, 1], revision: 5 });
     await expect(object.readBallot("votekick", "kick-a")).resolves.toBeNull();
   });
 
-  it("keeps a frozen ballot readable after expiry until explicit close", async () => {
+  it("finalizes expiry with its last tally and hard deletes after retention", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const object = objectFor([]);
     await object.openBallot("votekick", "kick-a", 2, 20_000);
     await object.castBallot("votekick", "kick-a", "yes-1", 1);
     await object.castBallot("votekick", "kick-a", "yes-2", 1);
-    const clearAlarmEntry = vi.spyOn(
-      object as unknown as { clearAlarmEntry: (key: string) => Promise<void> },
-      "clearAlarmEntry",
-    ).mockRejectedValue(new Error("alarm cleanup unavailable"));
-
-    const condition = { kind: "net_at_least" as const, positiveOptionIndex: 0, negativeOptionIndex: 1, threshold: 2 };
-    await expect(object.freezeBallot("votekick", "kick-a", condition)).resolves.toEqual({
-      status: "frozen",
-      counts: [2, 0],
-      revision: 2,
-    });
     vi.setSystemTime(20_000);
     await object.alarm();
-    await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [2, 0], revision: 2 });
-    await expect(object.openBallot("another_module", "another-ballot", 2, 30_000)).resolves.toEqual({
-      status: "busy",
-      moduleId: "votekick",
+    await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({
+      counts: [2, 0],
+      revision: 2,
+      outcome: "expired",
     });
-    expect(clearAlarmEntry).not.toHaveBeenCalled();
-    await expect(object.closeBallot("votekick", "kick-a")).rejects.toThrow("alarm cleanup unavailable");
-    await expect(object.readBallot("votekick", "kick-a")).resolves.toBeNull();
-    expect(clearAlarmEntry).toHaveBeenCalledOnce();
+    await expect(object.castBallot("votekick", "kick-a", "late-voter", 2)).resolves.toEqual({
+      status: "not_open",
+      counts: [],
+      revision: 0,
+    });
+    await expect(object.openBallot("another_module", "another-ballot", 2, 30_000)).resolves.toEqual({ status: "opened" });
+
+    const table = storageOf(object).values.get("channel:alarm_schedule") as Record<string, { handler: string; deadline: number }>;
+    expect(table["host:ballot_expiry:votekick:kick-a"]).toMatchObject({
+      handler: "host:ballot_hard_delete",
+      deadline: 20_000 + 24 * 60 * 60 * 1_000,
+    });
+    vi.setSystemTime(20_000 + 24 * 60 * 60 * 1_000);
+    await object.alarm();
+    expect(storageOf(object).values.has("ballot:votekick:kick-a")).toBe(false);
   });
 
   it("returns the same closed ballot snapshot on retry until the module acknowledges persistence", async () => {
@@ -1648,7 +1652,7 @@ describe("ChannelObject realtime path", () => {
     expect(secondVoteKey).not.toContain("fictional-viewer");
   });
 
-  it("hard-deletes an unclosed ballot at its host-owned expiry alarm", async () => {
+  it("finalizes an unclosed ballot at expiry and arms the host hard-delete backstop", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const object = objectFor([]);
@@ -1661,11 +1665,19 @@ describe("ChannelObject realtime path", () => {
     vi.setSystemTime(20_000);
     await object.alarm();
 
-    await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
-    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:"))).toEqual([]);
+    await expect(object.readBallot("chat_voting", "poll-a")).resolves.toEqual({
+      counts: [1, 0], revision: 1, outcome: "expired",
+    });
+    expect([...storageOf(object).values.keys()].filter((key) => key.includes(":v:"))).toEqual([]);
+    expect(storageOf(object).values.get("channel:alarm_schedule")).toMatchObject({
+      "host:ballot_expiry:chat_voting:poll-a": {
+        deadline: 20_000 + 24 * 60 * 60 * 1_000,
+        handler: "host:ballot_hard_delete",
+      },
+    });
   });
 
-  it("treats a post-deadline cast as closed and deletes ballot data", async () => {
+  it("rejects a post-deadline cast without deleting its unfinalized tally", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const object = objectFor([]);
@@ -1678,10 +1690,11 @@ describe("ChannelObject realtime path", () => {
       counts: [],
       revision: 0,
     });
-    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:")).sort()).toEqual([]);
+    expect(storageOf(object).values.get("ballot:chat_voting:poll-a")).toMatchObject({ counts: [1, 0], revision: 1 });
+    expect(storageOf(object).values.get("ballot:active")).toEqual({ moduleId: "chat_voting", ballotId: "poll-a" });
   });
 
-  it("treats a post-deadline read as closed and deletes ballot data", async () => {
+  it("finalizes a post-deadline read with the last counts", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const object = objectFor([]);
@@ -1689,8 +1702,11 @@ describe("ChannelObject realtime path", () => {
     await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
 
     vi.setSystemTime(20_000);
-    await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
-    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:")).sort()).toEqual([]);
+    await expect(object.readBallot("chat_voting", "poll-a")).resolves.toEqual({
+      counts: [1, 0], revision: 1, outcome: "expired",
+    });
+    expect(storageOf(object).values.has("ballot:chat_voting:poll-a")).toBe(true);
+    expect(storageOf(object).values.get("ballot:active")).toBeUndefined();
   });
 
   it("does not alter expiry alarms when another module finds a live ballot", async () => {
@@ -1712,7 +1728,7 @@ describe("ChannelObject realtime path", () => {
     expect(storage.setAlarm).not.toHaveBeenCalled();
   });
 
-  it("reclaims an expired ballot on open when its expiry alarm is missing", async () => {
+  it("finalizes an expired ballot during open when its host expiry alarm is missing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const object = objectFor([]);
@@ -1723,7 +1739,9 @@ describe("ChannelObject realtime path", () => {
 
     vi.setSystemTime(20_000);
     await expect(object.openBallot("module_b", "poll-b", 2, 30_000)).resolves.toEqual({ status: "opened" });
-    expect([...storage.values.keys()].filter((key) => key.startsWith("ballot:module_a:")).sort()).toEqual([]);
+    expect(storage.values.get("ballot:module_a:poll-a")).toMatchObject({
+      counts: [1, 0], revision: 1, finalization: { outcome: "expired" },
+    });
     expect(storage.values.get("ballot:active")).toEqual({ moduleId: "module_b", ballotId: "poll-b" });
   });
 

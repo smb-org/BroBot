@@ -58,46 +58,49 @@ const setup = async (control: "none" | "mute" | "pause" = "none", pauseOnClose =
   let counts = [0, 0];
   let revision = 0;
   let ballotOpen = false;
-  let ballotFrozen = false;
+  let ballotOutcome: "passed" | "expired" | null = null;
+  let ballotExpiresAt = 0;
   const ballotObject = {
-    openBallot: vi.fn(() => {
+    openBallot: vi.fn((_moduleId: string, _ballotId: string, _optionCount: number, expiresAt: number) => {
       if (ballotOpen) return Promise.resolve({ status: "busy" as const, moduleId: "votekick" });
       ballotOpen = true;
-      ballotFrozen = false;
+      ballotOutcome = null;
+      ballotExpiresAt = expiresAt;
       counts = [0, 0];
       revision = 0;
       return Promise.resolve({ status: "opened" as const });
     }),
     castBallot: vi.fn((_moduleId: string, _ballotId: string, _userId: string, choice: number) => {
-      if (!ballotOpen || ballotFrozen) return Promise.resolve({ status: "not_open" as const, counts: [], revision: 0 });
+      if (!ballotOpen || ballotOutcome !== null) return Promise.resolve({ status: "not_open" as const, counts: [], revision: 0 });
       counts[choice - 1] = (counts[choice - 1] ?? 0) + 1;
       revision += 1;
       return Promise.resolve({ status: "counted" as const, counts: [...counts], revision });
     }),
     readBallot: vi.fn(() => Promise.resolve(ballotOpen ? { counts: [...counts], revision } : null)),
     closeBallot: vi.fn(async () => {
-      if (!ballotOpen) return Promise.resolve(null);
-      if (pauseOnClose) {
-        await database.prepare("INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('channel-a', 1, ?)")
-          .bind(new Date().toISOString()).run();
-      }
+      if (!ballotOpen && ballotOutcome === null) return Promise.resolve(null);
       ballotOpen = false;
-      ballotFrozen = false;
+      ballotOutcome = null;
       return { counts: [...counts], revision };
     }),
-    freezeBallot: vi.fn(async (_moduleId: string, _ballotId: string, condition: { positiveOptionIndex: number; negativeOptionIndex: number; threshold: number }) => {
-      if (!ballotOpen) return { status: "not_open" as const, counts: [], revision: 0 };
-      if (ballotFrozen) return { status: "frozen" as const, counts: [...counts], revision };
-      if ((counts[condition.positiveOptionIndex] ?? 0) - (counts[condition.negativeOptionIndex] ?? 0) < condition.threshold) {
-        return { status: "open" as const, counts: [...counts], revision };
+    finalizeBallot: vi.fn(async (_moduleId: string, _ballotId: string, rule: { passIf: { yes: number; no: number; netAtLeast: number } } | null) => {
+      if (ballotOutcome !== null) return { outcome: ballotOutcome, counts: [...counts], revision };
+      if (!ballotOpen) return { outcome: "not_open" as const, counts: [], revision: 0 };
+      if (rule !== null && (counts[rule.passIf.yes] ?? 0) - (counts[rule.passIf.no] ?? 0) >= rule.passIf.netAtLeast) {
+        ballotOutcome = "passed";
+      } else if (Date.now() >= ballotExpiresAt) {
+        ballotOutcome = "expired";
+      } else {
+        return { outcome: "open" as const, counts: [...counts], revision };
       }
-      if (pauseOnClose) {
+      ballotOpen = false;
+      if (ballotOutcome === "passed" && pauseOnClose) {
         await database.prepare("INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('channel-a', 1, ?)")
           .bind(new Date().toISOString()).run();
       }
-      ballotFrozen = true;
-      return { status: "frozen" as const, counts: [...counts], revision };
+      return { outcome: ballotOutcome, counts: [...counts], revision };
     }),
+    acknowledgeClosedBallot: vi.fn(() => Promise.resolve()),
     scheduleModuleAlarm: vi.fn(() => Promise.resolve()),
     clearModuleAlarm: vi.fn(() => Promise.resolve()),
     getActiveChatterCount: vi.fn(() => Promise.resolve(20)),

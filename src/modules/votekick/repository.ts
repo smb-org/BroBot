@@ -16,11 +16,20 @@ export type VotekickAdmissionResult = "admitted" | "busy" | "channel_cooldown" |
 
 export interface VotekickRepository {
   admit(channelId: string, input: VotekickStart, checkedAt: string, channelCooldownSeconds: number, targetCooldownSeconds: number): Promise<VotekickAdmissionResult>;
-  expireOverdue(channelId: string, now: string): Promise<readonly Votekick[]>;
   byId(channelId: string, id: string): Promise<Votekick | null>;
   running(channelId: string): Promise<Votekick | null>;
   listRecent(channelId: string, since: string): Promise<readonly Votekick[]>;
   updateCounts(channelId: string, id: string, yesVotes: number, noVotes: number, ballotRevision: number): Promise<void>;
+  finalize(
+    channelId: string,
+    id: string,
+    status: "passed" | "expired",
+    yesVotes: number,
+    noVotes: number,
+    ballotRevision: number,
+    durationSeconds: number | null,
+    endedAt: string,
+  ): Promise<boolean>;
   finish(
     channelId: string,
     id: string,

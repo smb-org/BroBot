@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
@@ -20,8 +20,12 @@ const databaseFor = async (): Promise<TestD1Database> => {
   return database;
 };
 
-const environmentFor = (database: TestD1Database): Env => ({
+const environmentFor = (database: TestD1Database, runModuleAlarm = vi.fn(() => Promise.resolve())): Env => ({
   DB: database as unknown as D1Database,
+  CHANNEL: {
+    idFromName: (channelId: string) => channelId,
+    get: () => ({ runModuleAlarm }),
+  },
   ...keys,
 } as unknown as Env);
 
@@ -59,7 +63,8 @@ describe("Votekick routes", () => {
     await insertMember(database, "channel-a", "manager-a", "manager");
     await insertRunning(database, "channel-a", "ballot-a");
     await insertRunning(database, "channel-b", "ballot-b");
-    const environment = environmentFor(database);
+    const runModuleAlarm = vi.fn(() => Promise.resolve());
+    const environment = environmentFor(database, runModuleAlarm);
 
     const own = await panelRouter.fetch(
       await requestFor("manager-a", "/api/channels/channel-a/modules/votekick/votekicks"), environment,
@@ -75,6 +80,7 @@ describe("Votekick routes", () => {
 
     expect(own.status).toBe(200);
     await expect(own.json()).resolves.toMatchObject({ running: { id: "ballot-a" }, votekicks: [{ id: "ballot-a" }] });
+    expect(runModuleAlarm).toHaveBeenCalledWith("votekick", "close", "close:ballot-a");
     expect(foreign.status).toBe(403);
     expect(foreignCancel.status).toBe(403);
     expect(foreignRow).toEqual({ status: "running" });
@@ -94,5 +100,20 @@ describe("Votekick routes", () => {
 
     expect(response.status).toBe(204);
     expect(row).toEqual({ status: "cancelled" });
+  });
+
+  it("reconciles a running votekick through its alarm handler on panel access", async () => {
+    const database = await databaseFor();
+    await insertLoginIdentityAndSession(database, "operator-a");
+    await insertMember(database, "channel-a", "operator-a", "operator");
+    await insertRunning(database, "channel-a", "ballot-panel");
+    const runModuleAlarm = vi.fn(() => Promise.resolve());
+    const response = await panelRouter.fetch(
+      await requestFor("operator-a", "/api/channels/channel-a/modules/votekick/votekicks"),
+      environmentFor(database, runModuleAlarm),
+    );
+
+    expect(response.status).toBe(200);
+    expect(runModuleAlarm).toHaveBeenCalledWith("votekick", "close", "close:ballot-panel");
   });
 });

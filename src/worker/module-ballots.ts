@@ -12,7 +12,7 @@ export const moduleBallots = (
       cast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
       read: () => Promise.resolve(null),
       close: () => Promise.resolve(null),
-      freeze: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
+      finalize: () => Promise.resolve({ outcome: "not_open", counts: [], revision: 0 }),
       acknowledgeClosed: () => Promise.resolve(),
     };
   }
@@ -22,7 +22,7 @@ export const moduleBallots = (
     cast: (ballotId, userId, choice) => object.castBallot(moduleId, ballotId, userId, choice),
     read: (ballotId) => object.readBallot(moduleId, ballotId),
     close: (ballotId) => object.closeBallot(moduleId, ballotId),
-    freeze: (ballotId, condition) => object.freezeBallot(moduleId, ballotId, condition),
+    finalize: (ballotId, rule) => object.finalizeBallot(moduleId, ballotId, rule),
     acknowledgeClosed: (ballotId) => object.acknowledgeClosedBallot(moduleId, ballotId),
   };
 };

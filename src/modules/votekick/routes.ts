@@ -20,19 +20,12 @@ votekickRoutes.get("/votekicks", async (context) => {
   const channelId = requiredParam(context.req.param("channelId"), "channelId");
   const now = new Date().toISOString();
   const repository = createVotekickRepository(context.env.DB);
-  const expired = await repository.expireOverdue(channelId, now);
-  const ballots = context.get("ballots")(channelId);
-  await Promise.all(expired.map(async (row) => {
-    try {
-      const snapshot = await ballots.close(row.id);
-      if (snapshot !== null) {
-        await repository.updateCounts(channelId, row.id, snapshot.counts[0] ?? 0, snapshot.counts[1] ?? 0, snapshot.revision);
-      }
-    } catch { /* The ballot expires on its own; D1 already committed the expired status. */ }
-  }));
+  const running = await repository.running(channelId);
+  if (running !== null) {
+    await context.get("runModuleAlarm")(channelId, VOTEKICK_MODULE_ID, "close", `close:${running.id}`);
+  }
   const votekicks = await repository.listRecent(channelId, recentCutoff(now));
-  const running = votekicks.find((item) => item.status === "running") ?? null;
-  return context.json({ running, votekicks, now });
+  return context.json({ running: votekicks.find((item) => item.status === "running") ?? null, votekicks, now });
 });
 
 votekickRoutes.post("/votekicks/:id/cancel", async (context) => {
@@ -56,7 +49,11 @@ votekickRoutes.post("/votekicks/:id/cancel", async (context) => {
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);
   if (results.at(0)?.meta.changes !== 1) return context.json({ error: "votekick_not_running" }, 409);
-  try { await context.get("ballots")(channelId).close(id); } catch { /* The registered expiry alarm closes any remaining ballot. */ }
+  try {
+    const ballots = context.get("ballots")(channelId);
+    const snapshot = await ballots.close(id);
+    if (snapshot !== null) await ballots.acknowledgeClosed?.(id);
+  } catch { /* The host hard-delete alarm is the cleanup fallback. */ }
   return context.body(null, 204);
 });
 
