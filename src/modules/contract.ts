@@ -1100,6 +1100,8 @@ export interface ModuleEvent<Settings = unknown> {
   payload: Readonly<Record<string, unknown>>;
   settings: Settings;
   receivedAt: string;
+  /** Verified EventSub message time from the host, when available. */
+  eventSubTimestamp?: string;
   /** The role comes from channel_members; `null` means not a member. */
   actor: ModuleActor | null;
   /** Events unrelated to chat carry `null` here; chat events carry all matching statuses. */

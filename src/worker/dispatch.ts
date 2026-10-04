@@ -900,6 +900,7 @@ export const dispatchEventSubNotification = async (
         payload: event.payload,
         settings: validatedSettings,
         receivedAt: event.receivedAt,
+        ...(event.eventSubTimestamp === undefined ? {} : { eventSubTimestamp: event.eventSubTimestamp }),
         actor,
         chatStatus: chatStatusFor(event.subscriptionType, event.payload),
       };

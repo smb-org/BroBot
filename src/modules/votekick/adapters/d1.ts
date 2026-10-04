@@ -125,9 +125,10 @@ export const createVotekickRepository = (db: D1Database): VotekickRepository => 
               no_votes = CASE WHEN ? IS NOT NULL AND ballot_revision < ? THEN ? ELSE no_votes END,
               ballot_revision = CASE WHEN ? IS NOT NULL AND ballot_revision < ? THEN ? ELSE ballot_revision END,
               duration_seconds = ?, ended_at = ?
-        WHERE channel_id = ? AND votekick_id = ? AND status = 'running'`,
+        WHERE channel_id = ? AND votekick_id = ? AND status = 'running'
+          AND (? <> 'passed' OR ballot_revision = ?)`,
     ).bind(status, ballotRevision, ballotRevision, yesVotes, ballotRevision, ballotRevision, noVotes,
-      ballotRevision, ballotRevision, ballotRevision, durationSeconds, endedAt, channelId, id).run();
+      ballotRevision, ballotRevision, ballotRevision, durationSeconds, endedAt, channelId, id, status, ballotRevision).run();
     return result.meta.changes > 0;
   },
 

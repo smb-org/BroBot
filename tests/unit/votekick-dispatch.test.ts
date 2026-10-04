@@ -72,10 +72,15 @@ const setup = async (control: "none" | "mute" | "pause" = "none", pauseOnClose =
       revision += 1;
       return Promise.resolve({ status: "counted" as const, counts: [...counts], revision });
     }),
-    closeBallot: vi.fn(() => {
+    readBallot: vi.fn(() => Promise.resolve(ballotOpen ? { counts: [...counts], revision } : null)),
+    closeBallot: vi.fn(async () => {
       if (!ballotOpen) return Promise.resolve(null);
+      if (pauseOnClose) {
+        await database.prepare("INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('channel-a', 1, ?)")
+          .bind(new Date().toISOString()).run();
+      }
       ballotOpen = false;
-      return Promise.resolve({ counts: [...counts], revision });
+      return { counts: [...counts], revision };
     }),
     closeBallotIfNetAtLeast: vi.fn(async (_moduleId: string, _ballotId: string, threshold: number) => {
       if (!ballotOpen) return { status: "not_open" as const, counts: [], revision: 0 };
@@ -130,6 +135,7 @@ const chat = async (runtime: Env, fetcher: typeof fetch, text: string, chatterId
     subscriptionType: "channel.chat.message",
     triggerId: `trigger-${chatterId}-${text}`,
     receivedAt: new Date().toISOString(),
+    eventSubTimestamp: new Date().toISOString(),
     payload: {
       message: { text },
       chatter_user_id: chatterId,

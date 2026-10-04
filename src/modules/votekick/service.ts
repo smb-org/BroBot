@@ -251,6 +251,11 @@ export const processVotekickMessage = async (
   catch { return emptyResult(); }
   const running = await repository.running(event.channelId);
   if (running === null || running.targetUserId === null || running.initiatorUserId === null) return emptyResult();
+  const messageAt = Date.parse(event.eventSubTimestamp ?? "");
+  const startedAt = Date.parse(running.startedAt);
+  const endsAt = Date.parse(running.endsAt);
+  if (!Number.isFinite(messageAt) || !Number.isFinite(startedAt) || !Number.isFinite(endsAt) ||
+      messageAt < startedAt || messageAt > endsAt) return emptyResult();
   const activity = await context.activeChatters.seen(starterId);
   if (starterId !== running.initiatorUserId && !wasActiveBeforeVotekick(activity?.firstSeenAt ?? null, running.startedAt)) return emptyResult();
   const result = await context.ballots.cast(running.id, starterId, choice);
@@ -258,42 +263,55 @@ export const processVotekickMessage = async (
   const yesVotes = result.counts[0] ?? 0;
   const noVotes = result.counts[1] ?? 0;
   await repository.updateCounts(event.channelId, running.id, yesVotes, noVotes, result.revision);
-  if (yesVotes - noVotes < running.threshold) return emptyResult();
 
-  const closed = await context.ballots.closeIfNetAtLeast(running.id, running.threshold);
-  if (closed.status === "open") {
-    await repository.updateCounts(event.channelId, running.id, closed.counts[0] ?? 0, closed.counts[1] ?? 0, closed.revision);
-    return emptyResult();
+  let snapshot = await context.ballots.read(running.id);
+  while (snapshot !== null) {
+    const finalYes = snapshot.counts[0] ?? 0;
+    const finalNo = snapshot.counts[1] ?? 0;
+    await repository.updateCounts(event.channelId, running.id, finalYes, finalNo, snapshot.revision);
+    if (finalYes - finalNo < running.threshold) return emptyResult();
+
+    const durationSeconds = rollTimeoutSeconds(event.settings.duration, context.secureRandomInteger);
+    const duration = formatTimeoutDuration(durationSeconds, await context.channelLanguage());
+    const values = {
+      "votekick.target": running.targetLogin ?? running.targetUserId,
+      "votekick.yes": finalYes,
+      "votekick.no": finalNo,
+      "votekick.threshold": running.threshold,
+      "votekick.seconds": durationSeconds,
+      "votekick.duration": duration,
+    };
+    const [pass, fail] = await Promise.all([
+      context.renderTemplate(event.settings.passText, values),
+      context.renderTemplate(event.settings.failText, values),
+    ]);
+    const action: ModuleAction = {
+      kind: "timeout",
+      userId: running.targetUserId,
+      durationSeconds,
+      reason: votekickTimeoutReason(finalYes, finalNo, running.id),
+      ...(pass.text.length === 0 ? {} : { onSuccess: { kind: "chat", text: pass.text, target: event.settings.chatTarget, automated: false } }),
+      ...(fail.text.length === 0 ? {} : { onFailure: { kind: "chat", text: fail.text, target: event.settings.chatTarget, automated: false } }),
+    };
+
+    // Preparation can yield while another voter changes the ballot. Re-read
+    // before claiming so the timeout is built from the latest stable snapshot.
+    const latest = await context.ballots.read(running.id);
+    if (latest === null) return emptyResult();
+    if (latest.revision !== snapshot.revision) {
+      snapshot = latest;
+      continue;
+    }
+
+    const stored = await repository.finish(
+      event.channelId, running.id, "passed", finalYes, finalNo, snapshot.revision, durationSeconds, new Date().toISOString(),
+    );
+    if (!stored) return emptyResult();
+    await bestEffortClose(context, running.id);
+    try { await context.clearAlarm(`close:${running.id}`); } catch { /* A stale expiry alarm sees the passed row and exits. */ }
+    return { actions: [action], diagnostics: [...pass.diagnostics, ...fail.diagnostics] };
   }
-  if (closed.status !== "closed") return emptyResult();
-  const finalYes = closed.counts[0] ?? 0;
-  const finalNo = closed.counts[1] ?? 0;
-  const durationSeconds = rollTimeoutSeconds(event.settings.duration, context.secureRandomInteger);
-  const duration = formatTimeoutDuration(durationSeconds, await context.channelLanguage());
-  const values = {
-    "votekick.target": running.targetLogin ?? running.targetUserId,
-    "votekick.yes": finalYes,
-    "votekick.no": finalNo,
-    "votekick.threshold": running.threshold,
-    "votekick.seconds": durationSeconds,
-    "votekick.duration": duration,
-  };
-  const [pass, fail] = await Promise.all([
-    context.renderTemplate(event.settings.passText, values),
-    context.renderTemplate(event.settings.failText, values),
-  ]);
-  const action: ModuleAction = {
-    kind: "timeout",
-    userId: running.targetUserId,
-    durationSeconds,
-    reason: votekickTimeoutReason(finalYes, finalNo, running.id),
-    ...(pass.text.length === 0 ? {} : { onSuccess: { kind: "chat", text: pass.text, target: event.settings.chatTarget, automated: false } }),
-    ...(fail.text.length === 0 ? {} : { onFailure: { kind: "chat", text: fail.text, target: event.settings.chatTarget, automated: false } }),
-  };
-  const stored = await repository.finish(event.channelId, running.id, "passed", finalYes, finalNo, closed.revision, durationSeconds, new Date().toISOString());
-  if (!stored) return emptyResult();
-  try { await context.clearAlarm(`close:${running.id}`); } catch { /* A stale expiry alarm sees the passed row and exits. */ }
-  return { actions: [action], diagnostics: [...pass.diagnostics, ...fail.diagnostics] };
+  return emptyResult();
 };
 
 export const closeExpiredVotekick = async (

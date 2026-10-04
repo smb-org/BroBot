@@ -20,6 +20,7 @@ const eventFor = (text: string, chatStatus: ModuleEvent["chatStatus"] = ["vip"],
   payload: { message: { text }, chatter_user_id: sender },
   settings,
   receivedAt: now(),
+  eventSubTimestamp: now(),
   actor: null,
   chatStatus,
 });
@@ -184,21 +185,31 @@ describe("Votekick module", () => {
 
   it("runs a passing ballot through the host timeout action", async () => {
     const running = runningVotekick();
-    const finish = vi.fn(() => Promise.resolve(true));
+    const order: string[] = [];
+    const finish = vi.fn(() => { order.push("finish"); return Promise.resolve(true); });
     const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
     const context = contextFor({
+      channelLanguage: vi.fn(() => { order.push("language"); return Promise.resolve("en" as const); }),
+      renderTemplate: vi.fn((template: string, values: Readonly<Record<string, string | number>>) => {
+        order.push("template");
+        return Promise.resolve({
+          text: template.replace(/\{([^{}]+)\}/gu, (_token, name: string) => String(values[name] ?? "")),
+          diagnostics: [],
+        });
+      }),
       clearAlarm: vi.fn(() => Promise.reject(new Error("alarm cleanup unavailable"))),
       ballots: {
         open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
         cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
-        read: vi.fn(() => Promise.resolve(null)),
-        close: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 3 })),
+        read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 4 })),
+        close: vi.fn(() => { order.push("close"); return Promise.resolve({ counts: [3, 0], revision: 3 }); }),
         closeIfNetAtLeast: vi.fn(() => Promise.resolve({ status: "closed" as const, counts: [3, 0], revision: 4 })),
       },
     });
     const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
 
     expect(finish).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 4, 120, expect.any(String));
+    expect(order).toEqual(["language", "template", "template", "finish", "close"]);
     expect(context.clearAlarm).toHaveBeenCalledWith("close:ballot-1");
     expect(result.actions).toEqual([{
       kind: "timeout",
@@ -210,7 +221,7 @@ describe("Votekick module", () => {
     }]);
   });
 
-  it("keeps voting open when the atomic close snapshot is below threshold", async () => {
+  it("keeps voting open when the latest ballot snapshot is below threshold", async () => {
     const running = runningVotekick();
     const finish = vi.fn(() => Promise.resolve(true));
     const updateCounts = vi.fn(() => Promise.resolve());
@@ -219,7 +230,7 @@ describe("Votekick module", () => {
       ballots: {
         open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
         cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
-        read: vi.fn(() => Promise.resolve(null)),
+        read: vi.fn(() => Promise.resolve({ counts: [1, 2], revision: 4 })),
         close: vi.fn(() => Promise.resolve({ counts: [1, 2], revision: 4 })),
         closeIfNetAtLeast: vi.fn(() => Promise.resolve({ status: "open" as const, counts: [1, 2], revision: 4 })),
       },
@@ -231,6 +242,24 @@ describe("Votekick module", () => {
     expect(updateCounts).toHaveBeenLastCalledWith("channel-a", "ballot-1", 1, 2, 4);
     expect(result.actions).toEqual([]);
     expect(context.clearAlarm).not.toHaveBeenCalled();
+  });
+
+  it("claims a pass when a concurrent cast raises the snapshot above threshold", async () => {
+    const running = runningVotekick();
+    const finish = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
+    const context = contextFor({ ballots: {
+      open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
+      cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [2, 0], revision: 2 })),
+      read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 3 })),
+      close: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 3 })),
+      closeIfNetAtLeast: vi.fn(() => Promise.resolve({ status: "closed" as const, counts: [3, 0], revision: 3 })),
+    } });
+
+    const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
+
+    expect(finish).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 3, 120, expect.any(String));
+    expect(result.actions).toEqual([expect.objectContaining({ kind: "timeout" })]);
   });
 
   it("rejects voters who first appeared after the ballot started", async () => {
@@ -246,14 +275,97 @@ describe("Votekick module", () => {
     expect(context.ballots.cast).not.toHaveBeenCalled();
   });
 
-  it("prepares timeout language and templates before persisting a passed ballot", async () => {
+  it("does not cast delayed messages into a newer votekick", async () => {
+    const oldBallot = runningVotekick({ id: "ballot-old" });
+    const newBallot = runningVotekick({
+      id: "ballot-new",
+      startedAt: new Date(Date.now() + 1_000).toISOString(),
+      endsAt: new Date(Date.now() + 31_000).toISOString(),
+    });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let selectedBallot = oldBallot;
+    const running = vi.fn(async () => { await gate; return selectedBallot; });
+    const repository = repositoryFor({ running });
+    const context = contextFor();
+    const first = processVotekickMessage(eventFor("1", ["viewer"], "voter-a"), repository, context);
+    const second = processVotekickMessage(eventFor("1", ["viewer"], "voter-b"), repository, context);
+
+    await vi.waitFor(() => { expect(running).toHaveBeenCalledTimes(2); });
+    selectedBallot = newBallot;
+    release?.();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { actions: [], diagnostics: [] },
+      { actions: [], diagnostics: [] },
+    ]);
+    expect(context.ballots.cast).not.toHaveBeenCalled();
+  });
+
+  it("rejects messages whose EventSub time is after the selected ballot expires", async () => {
+    const running = runningVotekick();
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)) });
+    const context = contextFor();
+    const lateMessage = {
+      ...eventFor("1", ["viewer"], "voter-user"),
+      eventSubTimestamp: new Date(Date.parse(running.endsAt) + 1).toISOString(),
+    };
+
+    await processVotekickMessage(lateMessage, repository, context);
+
+    expect(context.ballots.cast).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the ballot after timeout preparation", async () => {
+    const running = runningVotekick();
     const finish = vi.fn(() => Promise.resolve(true));
-    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(runningVotekick())), finish });
+    const updateCounts = vi.fn(() => Promise.resolve());
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish, updateCounts });
+    let latestSnapshot = { counts: [3, 0], revision: 4 };
+    let readCount = 0;
+    let releaseTemplates: (() => void) | undefined;
+    const templateGate = new Promise<void>((resolve) => { releaseTemplates = resolve; });
+    const renderTemplate = vi.fn(async (template: string, values: Readonly<Record<string, string | number>>) => {
+      await templateGate;
+      return {
+        text: template.replace(/\{([^{}]+)\}/gu, (_token, name: string) => String(values[name] ?? "")),
+        diagnostics: [],
+      };
+    });
+    const close = vi.fn(() => Promise.resolve(null));
+    const context = contextFor({
+      renderTemplate,
+      ballots: {
+        open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
+        cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
+        read: vi.fn(() => {
+          readCount += 1;
+          return Promise.resolve(readCount === 1 ? { counts: [3, 0], revision: 4 } : latestSnapshot);
+        }),
+        close,
+        closeIfNetAtLeast: vi.fn(() => Promise.resolve({ status: "closed" as const, counts: [3, 0], revision: 4 })),
+      },
+    });
+
+    const processing = processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
+    await vi.waitFor(() => { expect(renderTemplate).toHaveBeenCalledTimes(2); });
+    latestSnapshot = { counts: [2, 1], revision: 5 };
+    releaseTemplates?.();
+    await expect(processing).resolves.toEqual({ actions: [], diagnostics: [] });
+
+    expect(updateCounts).toHaveBeenLastCalledWith("channel-a", "ballot-1", 2, 1, 5);
+    expect(finish).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("prepares timeout language and templates before persisting a passed ballot", async () => {
+    const running = runningVotekick();
+    const finish = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
     const context = contextFor({
       ballots: {
         open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
         cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
-        read: vi.fn(() => Promise.resolve(null)),
+        read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 4 })),
         close: vi.fn(() => Promise.resolve(null)),
         closeIfNetAtLeast: vi.fn(() => Promise.resolve({ status: "closed" as const, counts: [3, 0], revision: 4 })),
       },
@@ -263,18 +375,64 @@ describe("Votekick module", () => {
     await expect(processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context)).rejects.toThrow("language unavailable");
 
     expect(finish).not.toHaveBeenCalled();
+    expect(context.ballots.close).not.toHaveBeenCalled();
     expect(context.clearAlarm).not.toHaveBeenCalled();
   });
 
+  it("retries after language recovery and claims exactly one timeout action", async () => {
+    const running = runningVotekick();
+    let passed = false;
+    let ballotOpen = true;
+    const finish = vi.fn(() => {
+      if (passed) return Promise.resolve(false);
+      passed = true;
+      return Promise.resolve(true);
+    });
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
+    const close = vi.fn(() => {
+      ballotOpen = false;
+      return Promise.resolve({ counts: [3, 0], revision: 4 });
+    });
+    const language = vi.fn()
+      .mockRejectedValueOnce(new Error("language unavailable"))
+      .mockResolvedValue("en");
+    const context = contextFor({
+      channelLanguage: language,
+      ballots: {
+        open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
+        cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
+        read: vi.fn(() => Promise.resolve(ballotOpen ? { counts: [3, 0], revision: 4 } : null)),
+        close,
+        closeIfNetAtLeast: vi.fn(() => Promise.resolve({ status: "closed" as const, counts: [3, 0], revision: 4 })),
+      },
+    });
+
+    await expect(processVotekickMessage(eventFor("1", ["viewer"], "voter-a"), repository, context))
+      .rejects.toThrow("language unavailable");
+    expect(ballotOpen).toBe(true);
+    expect(close).not.toHaveBeenCalled();
+    expect(finish).not.toHaveBeenCalled();
+
+    const results = await Promise.all([
+      processVotekickMessage(eventFor("1", ["viewer"], "voter-b"), repository, context),
+      processVotekickMessage(eventFor("1", ["viewer"], "voter-c"), repository, context),
+    ]);
+    expect(results.flatMap((result) => result.actions).filter((action) => action.kind === "timeout")).toHaveLength(1);
+    expect(finish).toHaveBeenCalledTimes(2);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(ballotOpen).toBe(false);
+  });
+
   it("does not persist passed when timeout template rendering fails", async () => {
+    const running = runningVotekick();
     const finish = vi.fn(() => Promise.resolve(true));
-    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(runningVotekick())), finish });
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finish });
     const renderTemplate = vi.fn(() => Promise.reject(new Error("template unavailable")));
     const context = contextFor({
       ballots: {
         open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
         cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
-        read: vi.fn(() => Promise.resolve(null)),
+        read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 4 })),
         close: vi.fn(() => Promise.resolve(null)),
         closeIfNetAtLeast: vi.fn(() => Promise.resolve({ status: "closed" as const, counts: [3, 0], revision: 4 })),
       },

@@ -74,6 +74,7 @@ describe("Votekick migration", () => {
       const admittedId = await database.prepare("SELECT votekick_id, target_user_id FROM votekicks WHERE status = 'running'")
         .first<{ votekick_id: string; target_user_id: string }>();
       expect(admittedId).not.toBeNull();
+      await repository.updateCounts("channel-a", admittedId?.votekick_id ?? "", 5, 0, 2);
       await repository.finish("channel-a", admittedId?.votekick_id ?? "", "passed", 5, 0, 2, 120, startedAt);
 
       const delayed = await repository.admit(
@@ -123,6 +124,37 @@ describe("Votekick migration", () => {
 
       await expect(database.prepare("SELECT status, yes_votes, no_votes, ballot_revision FROM votekicks WHERE votekick_id = ?")
         .bind("ballot-revision").first()).resolves.toEqual({ status: "expired", yes_votes: 3, no_votes: 1, ballot_revision: 4 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not claim a pass from a snapshot older than the persisted ballot", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "channel-a");
+      const repository = createVotekickRepository(database as unknown as D1Database);
+      const startedAt = new Date().toISOString();
+      await expect(repository.admit("channel-a", {
+        id: "ballot-stale-pass",
+        targetUserId: "target-a",
+        targetLogin: "target-a",
+        initiatorUserId: "starter-a",
+        threshold: 3,
+        yesVotes: 1,
+        ballotRevision: 1,
+        startedAt,
+        endsAt: new Date(Date.now() + 60_000).toISOString(),
+      }, startedAt, 300, 1800)).resolves.toBe("admitted");
+
+      await repository.updateCounts("channel-a", "ballot-stale-pass", 2, 2, 4);
+      await expect(repository.finish("channel-a", "ballot-stale-pass", "passed", 3, 0, 3, 120, startedAt))
+        .resolves.toBe(false);
+      await expect(database.prepare(
+        "SELECT status, yes_votes, no_votes, ballot_revision FROM votekicks WHERE votekick_id = ?",
+      ).bind("ballot-stale-pass").first()).resolves.toEqual({
+        status: "running", yes_votes: 2, no_votes: 2, ballot_revision: 4,
+      });
     } finally {
       database.close();
     }
