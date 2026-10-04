@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleAction, ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { votekickModule } from "../../src/modules/votekick";
@@ -91,6 +91,12 @@ const contextFor = (overrides: Record<string, unknown> = {}): ModuleExecutionCon
 };
 
 describe("Votekick module", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-15T12:00:00.000Z"));
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
   it("registers active chatter tracking, chat messages, and no overlay", () => {
     expect(votekickModule.broadcasterScopes).toEqual(["moderation:read"]);
     expect(votekickModule.needsActiveChatters).toBe(true);
