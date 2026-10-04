@@ -214,6 +214,15 @@ beansprucht. Die Messung mit 100 Einträgen folgt dem bestehenden
 Matcher-Typ für Regex; die erste Oberfläche speichert und wertet aber nur
 Schlüsselwörter und Wortgruppen aus.
 
+Migration `0028_text_command_timeout.sql` ergänzt strukturierte Timeouts für
+Textbefehle. Die Dauer wird einmal je Auslösung mit dem Host-Zufallsgenerator
+aus `minSeconds..maxSeconds` gezogen und sowohl an `ModuleAction.timeout` als
+auch an `{timeout.seconds}` und `{timeout.duration}` übergeben. Broadcaster und
+Moderatoren erhalten direkt den vorgerenderten Ersatztext; bei anderen
+Aufrufern wählt der Helix-Ausgang zwischen Erfolgs- und Ersatztext. Beide
+Texte bleiben Teil derselben Befehlsmutation wie eine optionale
+Kanalvariablenaktion.
+
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 
 ESLint schützt die Grenze: Overlay-Ansichten importieren weder Worker-, Service-, Repository- oder Adaptercode noch Zod. Panel-Ansichten importieren weder Worker-, Repository- noch Adaptercode; Zod und der Service sind dort für Formulare und ausgelöste Anwendungsfälle erlaubt. Module importieren keine Geschwistermodule. Der Worker importiert kein React.

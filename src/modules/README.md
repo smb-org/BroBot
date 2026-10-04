@@ -275,6 +275,15 @@ seine Tabellen in der zentralen D1-Kette unter `migrations/`. Der D1-Adapter
 dieses Moduls nutzt kanalgebunden `text_commands`, `text_command_aliases`
 und `text_command_user_cooldowns`.
 
+Ein Textbefehl der Art `text` kann zusätzlich `timeoutAction` mit einem Bereich
+von 1 bis 1.209.600 Sekunden und einem Ersatztext speichern. Der Dienst zieht
+die Dauer einmal mit `rollTimeoutSeconds` und dem vom Host bereitgestellten
+`secureRandomInteger`; derselbe Wert steuert die Host-Aktion und die
+Variablen `{timeout.seconds}` sowie `{timeout.duration}` in Antwort und
+Ersatztext. Für Broadcaster und Moderatoren wird nur der Ersatztext gerendert.
+Die drei Timeout-Felder liegen auf der vorhandenen Befehlstabelle und werden
+gemeinsam mit der Kanalvariablenaktion und dem Audit-Eintrag gespeichert.
+
 Der Host mountet registrierte Modulrouten kanalbezogen unter
 `/api/channels/:channelId/modules/<id>`. Textbefehle stellen dort die
 CRUD-Routen unter `/commands` bereit. Die Host-Middleware prüft Session,

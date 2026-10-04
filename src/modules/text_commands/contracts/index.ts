@@ -2,6 +2,10 @@ import type { ChannelVariableOperation } from "../../../contracts/values";
 import type { ChatOutputTarget } from "../../contract";
 import { MODULE_TEMPLATE_MINIMUM_TIERS, MODULE_TEMPLATE_TIER_CHAT_STATUSES, type ModuleTemplateMinimumTier } from "../../contract";
 import type { TemplateFields } from "../contract";
+import type { TimeoutDurationRange } from "../../contracts/moderation";
+import { TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES } from "./template-variable-catalog";
+
+export { TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES } from "./template-variable-catalog";
 
 export const TEXT_COMMAND_KINDS = ["text", "list", "shoutout"] as const;
 export type TextCommandKind = (typeof TEXT_COMMAND_KINDS)[number];
@@ -14,6 +18,10 @@ export type TextCommandResponseType = (typeof TEXT_COMMAND_RESPONSE_TYPES)[numbe
 export const TEXT_COMMAND_STREAM_CONDITIONS = ["any", "online", "offline"] as const;
 export type TextCommandStreamCondition = (typeof TEXT_COMMAND_STREAM_CONDITIONS)[number];
 export const TEXT_COMMAND_MAX_ALIASES = 10;
+
+export interface TextCommandTimeoutAction extends TimeoutDurationRange {
+  fallbackText: string;
+}
 
 export interface TextCommandGame {
   id: string;
@@ -45,6 +53,7 @@ export interface TextCommand {
   responseType: TextCommandResponseType;
   chatTarget: ChatOutputTarget;
   variableAction: TextCommandVariableAction | null;
+  timeoutAction: TextCommandTimeoutAction | null;
   useCount: number;
   lastUsedAt: string | null;
   createdAt: string;
@@ -85,6 +94,7 @@ export interface NewTextCommand {
   responseType?: TextCommandResponseType;
   chatTarget?: ChatOutputTarget;
   variableAction?: TextCommandVariableAction | null;
+  timeoutAction?: TextCommandTimeoutAction | null;
   now: string;
 }
 
@@ -111,6 +121,7 @@ export interface TextCommandChange {
   responseType: TextCommandResponseType;
   chatTarget?: ChatOutputTarget;
   variableAction?: TextCommandVariableAction | null;
+  timeoutAction?: TextCommandTimeoutAction | null;
   expectedRevision?: number;
   now: string;
 }
@@ -131,7 +142,7 @@ export interface TextCommandActor {
 }
 
 export const TEXT_COMMAND_TEMPLATE_FIELDS = {
-  text: { text: [], usageText: [] },
+  text: { text: TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, usageText: [] },
   list: {},
   shoutout: { text: [], usageText: [] },
 } as const satisfies Readonly<Record<TextCommandKind, TemplateFields<TextCommand>>>;

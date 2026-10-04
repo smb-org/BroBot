@@ -7,7 +7,8 @@ import {
   registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, type TextCommand, type TextCommandGame, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
+import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand, type TextCommandGame, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
+import { MODERATION_TIMEOUT_MAX_SECONDS } from "../../contracts/moderation";
 import { minimumTierAfterVariableOperation } from "./editor-state";
 import { commandListReply, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsFor } from "../contracts/chat-defaults";
 import { statusForTier, validCommandName } from "../domain";
@@ -35,6 +36,7 @@ interface CommandDraft {
   responseType: TextCommandResponseType;
   chatTarget: TextCommand["chatTarget"];
   variableAction: TextCommand["variableAction"];
+  timeoutAction: { minSeconds: number | ""; maxSeconds: number | ""; fallbackText: string } | null;
 }
 
 const draftFromCommand = (command: TextCommand): CommandDraft => ({
@@ -53,6 +55,7 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
   responseType: command.responseType,
   chatTarget: command.chatTarget,
   variableAction: command.variableAction === null ? null : { ...command.variableAction },
+  timeoutAction: command.timeoutAction === null ? null : { ...command.timeoutAction },
 });
 
 const newCommandDraft = (): CommandDraft => ({
@@ -71,14 +74,22 @@ const newCommandDraft = (): CommandDraft => ({
   responseType: "say",
   chatTarget: "source_only",
   variableAction: null,
+  timeoutAction: null,
 });
 
-type CommandTemplateField = "text" | "usageText";
+type CommandTemplateField = "text" | "usageText" | "timeoutFallbackText";
 
-const templateFieldsForKind = (kind: TextCommandKind, channelVariables: readonly TextCommandChannelVariable[]): Readonly<Record<string, readonly TemplateVariable[]>> => {
+const templateFieldsForKind = (kind: TextCommandKind, channelVariables: readonly TextCommandChannelVariable[], timeoutEnabled: boolean): Readonly<Record<string, readonly TemplateVariable[]>> => {
   const fields = TEXT_COMMAND_TEMPLATE_FIELDS[kind] as Readonly<Record<string, readonly TemplateVariable[]>>;
   const effective = effectivePanelTemplateVariables("chat_command", [], channelVariables);
-  return Object.fromEntries(Object.keys(fields).map((key) => [key, effective]));
+  const timeoutVariables = timeoutEnabled ? TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES : [];
+  const result = Object.fromEntries(Object.keys(fields).map((key) => [
+    key,
+    key === "text" ? [...effective, ...timeoutVariables] : effective,
+  ]));
+  return timeoutEnabled
+    ? { ...result, timeoutFallbackText: [...effective, ...timeoutVariables] }
+    : result;
 };
 
 const tierDescription = (tier: TextCommandMinimumTier, labels: ReturnType<typeof textCommandsTexts>): string => {
@@ -180,15 +191,17 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const [selectedLibraryBlock, setSelectedLibraryBlock] = useState("");
   const isCreate = command === null;
   const blockVariables: TemplateVariable[] = libraryBlocks.map((name) => ({ name, group: "channel", sample: name, maxLength: 500 }));
-  const baseTemplateFields = templateFieldsForKind(draft.kind, channelVariables);
+  const baseTemplateFields = templateFieldsForKind(draft.kind, channelVariables, draft.timeoutAction !== null);
   const templateFields = Object.fromEntries(Object.entries(baseTemplateFields)
     .filter(([field]) => field !== "usageText" || draft.kind === "shoutout" || draft.usageTextEnabled)
     .map(([field, variables]) => [field, [...variables, ...blockVariables]]));
   const variableAction = draft.variableAction;
-  const templateVariables = () => [
+  const templateVariables = (field: CommandTemplateField) => [
     ...panelTemplateOptions("chat_command", [], channelVariables, resolvedLanguage),
     ...libraryBlocks.map((name) => ({ name, label: name, description: labels.libraryText, sample: "", group: "channel" as const, kind: "module" as const, isTextBlock: true })),
-    ...registeredVariables.filter((variable) => !variable.isTextBlock && variable.name.includes(".") && (variable.contexts?.includes("chat_command") ?? true)).map((variable) => {
+    ...registeredVariables.filter((variable) => !variable.isTextBlock && variable.name.includes(".") &&
+      (draft.timeoutAction !== null && (field === "text" || field === "timeoutFallbackText") || !variable.name.startsWith("timeout.")) &&
+      (variable.contexts?.includes("chat_command") ?? true)).map((variable) => {
       const pickerCopy = variable.picker?.[resolvedLanguage];
       const pickerGroup = registeredTemplatePickerGroup(variable, resolvedLanguage);
       return {
@@ -206,7 +219,9 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       };
     }),
   ];
-  const templateValue = (field: CommandTemplateField): string => draft[field];
+  const templateValue = (field: CommandTemplateField): string => field === "timeoutFallbackText"
+    ? draft.timeoutAction?.fallbackText ?? ""
+    : draft[field];
   const normalizedName = normalizeCommandName(draft.name);
   const nameInvalid = normalizedName.length === 0 || !validCommandName(normalizedName);
   const sameNameAlias = draft.aliases.includes(normalizedName);
@@ -217,12 +232,18 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const templateFieldNames = Object.keys(templateFields) as CommandTemplateField[];
   const responseInvalid = templateFieldNames.some((field) => {
     const value = templateValue(field);
-    return (value.trim().length === 0 && !(field === "text" && draft.variableAction !== null) && !(field === "usageText" && draft.kind === "text")) || value.length > 500;
+    return (value.trim().length === 0 && !(field === "text" && draft.variableAction !== null && draft.timeoutAction === null) && !(field === "usageText" && draft.kind === "text")) || value.length > 500;
   });
   const actionInvalid = draft.variableAction !== null && (!channelVariables.some((variable) => variable.name === draft.variableAction?.name) ||
     ((draft.variableAction.operation === "add" || draft.variableAction.operation === "subtract") && (draft.variableAction.amount === null || draft.variableAction.amount < 1 || draft.variableAction.amount > 1000)) ||
     (draft.variableAction.operation === "set" && (draft.variableAction.amount === null || draft.variableAction.amount < -999999999 || draft.variableAction.amount > 999999999)));
-  const valid = !nameInvalid && !sameNameAlias && !cooldownInvalid && !userCooldownInvalid && !responseInvalid && !actionInvalid && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES;
+  const timeoutActionInvalid = draft.timeoutAction !== null && (
+    typeof draft.timeoutAction.minSeconds !== "number" || !Number.isInteger(draft.timeoutAction.minSeconds) ||
+    typeof draft.timeoutAction.maxSeconds !== "number" || !Number.isInteger(draft.timeoutAction.maxSeconds) ||
+    draft.timeoutAction.minSeconds < 1 || draft.timeoutAction.minSeconds > draft.timeoutAction.maxSeconds ||
+    draft.timeoutAction.maxSeconds > MODERATION_TIMEOUT_MAX_SECONDS || draft.timeoutAction.fallbackText.length > 500
+  );
+  const valid = !nameInvalid && !sameNameAlias && !cooldownInvalid && !userCooldownInvalid && !responseInvalid && !actionInvalid && !timeoutActionInvalid && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES;
   const localWarnings = templateFieldNames.flatMap((field) => {
     const variables = templateFields[field] ?? [];
     const value = templateValue(field);
@@ -254,7 +275,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const advancedIssue = fieldError?.field === "aliases" || cooldownInvalid || userCooldownInvalid
     ? "error" as const
     : undefined;
-  const settingsIssue = nameError !== undefined || responseInvalid
+  const settingsIssue = nameError !== undefined || responseInvalid || timeoutActionInvalid
     ? "error" as const
     : announcementWarning !== undefined || localWarnings.length > 0 || serverWarnings.length > 0
       ? "warning" as const
@@ -284,6 +305,11 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       responseType: draft.responseType,
       chatTarget: draft.chatTarget,
       variableAction: draft.variableAction,
+      timeoutAction: draft.timeoutAction === null ? null : {
+        minSeconds: typeof draft.timeoutAction.minSeconds === "number" ? draft.timeoutAction.minSeconds : 0,
+        maxSeconds: typeof draft.timeoutAction.maxSeconds === "number" ? draft.timeoutAction.maxSeconds : 0,
+        fallbackText: draft.timeoutAction.fallbackText,
+      },
     };
     setPending(true); setError(undefined); setFieldError(null); setConcurrentConflict(false); setSaved(false);
     try {
@@ -339,6 +365,14 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     if (key === "name" || key === "aliases") setFieldError(null);
   };
 
+  const setTemplateField = (field: CommandTemplateField, value: string): void => {
+    if (field === "timeoutFallbackText") {
+      if (draft.timeoutAction !== null) setDraftField("timeoutAction", { ...draft.timeoutAction, fallbackText: value });
+      return;
+    }
+    setDraftField(field, value);
+  };
+
   const changeKind = (kind: TextCommandKind): void => {
     setValue((current) => {
       const defaults = kind === "shoutout" ? textCommandDefaultsFor(kind) : null;
@@ -346,6 +380,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         ...current,
         kind,
         text: kind === "list" ? "" : defaults?.text ?? (current.kind === "text" ? current.text : ""),
+        timeoutAction: kind === "text" ? current.timeoutAction : null,
         usageText: kind === "shoutout"
           ? current.usageText || defaults?.usageText || TEXT_COMMAND_DEFAULT_USAGE_TEXT
           : current.kind === "shoutout" ? "" : current.usageText,
@@ -402,17 +437,17 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         label={field === "text" ? labels.response : label}
         hint={labels.responseHint}
         value={value}
-        onChange={(next) => { setDraftField(field, next); }}
+        onChange={(next) => { setTemplateField(field, next); }}
         maxLength={500}
-        variables={templateVariables()}
+        variables={templateVariables(field)}
         preview={(template, values) => renderTemplate(template, values)}
         previewLabel={labels.previewLabel}
         previewSpeaker={labels.previewSpeaker}
         disabled={!canManageContent || pending}
         messages={labels.textAreaMessages}
         createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`}
-        required={field === "text" && draft.variableAction === null}
-        {...(attemptedSave && value.trim().length === 0 && field === "text" && draft.variableAction === null ? { error: labels.responseMissing } : {})}
+        required={field === "text" && (draft.variableAction === null || draft.timeoutAction !== null)}
+        {...(attemptedSave && value.trim().length === 0 && field === "text" && (draft.variableAction === null || draft.timeoutAction !== null) ? { error: labels.responseMissing } : {})}
       />
       <InspectorSection title={labels.libraryText}>
         {libraryBlocks.length === 0 ? <p className="muted">{labels.noLibraryTexts}</p> : <InspectorFieldRow label={labels.libraryText}>
@@ -420,7 +455,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             <Select label={labels.libraryText} value={selectedLibraryBlock || null} placeholder={labels.libraryTextPlaceholder} options={libraryBlocks.map((name) => ({ value: name, label: `{${name}}` }))} disabled={!canManageContent || pending} onChange={(name) => setSelectedLibraryBlock(name ?? "")} />
             <Button disabled={!canManageContent || pending || selectedLibraryBlock.length === 0} onClick={() => {
               const insertion = `{${selectedLibraryBlock}}`;
-              setDraftField(field, `${value}${value.length === 0 || /\s$/u.test(value) ? "" : " "}${insertion}`);
+              setTemplateField(field, `${value}${value.length === 0 || /\s$/u.test(value) ? "" : " "}${insertion}`);
             }}>{labels.insertLibraryText}</Button>
           </div>
         </InspectorFieldRow>}
@@ -560,6 +595,59 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           </div>}
           </Switch>
         </> : null}
+        {draft.kind === "text" ? <Switch
+          layout="card"
+          label={labels.timeoutAction}
+          description={labels.timeoutActionHint}
+          checked={draft.timeoutAction !== null}
+          disabled={!canManageContent || pending}
+          onChange={(enabled) => {
+            setDraftField("timeoutAction", enabled
+              ? { minSeconds: 120, maxSeconds: 120, fallbackText: "" }
+              : null);
+          }}
+        >
+          {draft.timeoutAction === null ? null : <div className="command-timeout-action">
+            <FieldPair>
+              <NumberField
+                id="command-timeout-minimum"
+                label={labels.timeoutMinSeconds}
+                hint={labels.timeoutRangeHint}
+                unit="s"
+                min={1}
+                max={MODERATION_TIMEOUT_MAX_SECONDS}
+                step={1}
+                value={draft.timeoutAction.minSeconds}
+                increaseLabel={`${labels.timeoutMinSeconds} +`}
+                decreaseLabel={`${labels.timeoutMinSeconds} −`}
+                disabled={!canManageContent || pending}
+                onChange={(minSeconds) => {
+                  const timeoutAction = draft.timeoutAction;
+                  if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, minSeconds });
+                }}
+              />
+              <NumberField
+                id="command-timeout-maximum"
+                label={labels.timeoutMaxSeconds}
+                hint={labels.timeoutRangeHint}
+                unit="s"
+                min={1}
+                max={MODERATION_TIMEOUT_MAX_SECONDS}
+                step={1}
+                value={draft.timeoutAction.maxSeconds}
+                increaseLabel={`${labels.timeoutMaxSeconds} +`}
+                decreaseLabel={`${labels.timeoutMaxSeconds} −`}
+                disabled={!canManageContent || pending}
+                onChange={(maxSeconds) => {
+                  const timeoutAction = draft.timeoutAction;
+                  if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, maxSeconds });
+                }}
+              />
+            </FieldPair>
+            {templateEditor("timeoutFallbackText", labels.timeoutFallbackText)}
+            {botIsModerator === false ? <p className="form-warning" role="note">{labels.timeoutBotWarning}</p> : null}
+          </div>}
+        </Switch> : null}
         {draft.kind === "shoutout" ? null : <SegmentedControl
           label={labels.responseType}
           hint={labels.responseTypeHints[draft.responseType]}
@@ -663,7 +751,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     userCooldown: draft.userCooldownSeconds === 0 ? labels.cooldownOff : draft.userCooldownSeconds === "" ? "—" : `${String(draft.userCooldownSeconds)} s`,
   }), [draft, labels]);
   const templateView = (field: CommandTemplateField): ReactElement =>
-    <TemplateText value={templateValue(field)} variables={templateVariables()} />;
+    <TemplateText value={templateValue(field)} variables={templateVariables(field)} />;
 
   const propertyList = <dl className="properties command-properties">
     <div><dt>{labels.name}</dt><dd className="mono">!{draft.name}</dd></div>
@@ -673,6 +761,10 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     <div><dt>{labels.response}</dt><dd>{draft.kind === "list" ? <TemplateText value={listPreview} variables={[]} /> : templateView("text")}</dd></div>
     {draft.kind !== "list" && draft.usageText.length > 0 ? <div><dt>{labels.templateFieldLabels.usageText}</dt><dd>{templateView("usageText")}</dd></div> : null}
     <div><dt>{labels.variableAction}</dt><dd>{variableAction === null ? labels.variableNone : `${variableAction.name} ${labels.variableOperations[variableAction.operation]}${variableAction.operation === "set_argument" ? "" : String(variableAction.amount ?? 0)}`}</dd></div>
+    <div><dt>{labels.timeoutAction}</dt><dd>{draft.timeoutAction === null
+      ? labels.timeoutNone
+      : `${String(draft.timeoutAction.minSeconds)}–${String(draft.timeoutAction.maxSeconds)} s`}</dd></div>
+    {draft.timeoutAction === null ? null : <div><dt>{labels.timeoutFallbackText}</dt><dd>{templateView("timeoutFallbackText")}</dd></div>}
     {draft.kind === "shoutout" ? null : <div><dt>{labels.responseType}</dt><dd>{props.responseType}</dd></div>}
     <div><dt>{labels.chatTarget}</dt><dd>{props.chatTarget}</dd></div>
     <div><dt>{labels.minimumTier}</dt><dd>{props.minimumTier} · {props.minimumDescription}</dd></div>

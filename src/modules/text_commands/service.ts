@@ -11,6 +11,8 @@ import type { TextCommandInput } from "./domain";
 import type { TextCommand } from "./contracts";
 import type { TextCommandRepository } from "./repository";
 import { NO_COMMANDS_REPLY, TEXT_COMMAND_DEFAULT_USAGE_TEXT, commandListReply } from "./contracts/chat-defaults";
+import { formatTimeoutDuration, rollTimeoutSeconds } from "../contracts/moderation";
+import { TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES } from "./contracts";
 
 
 const recordValue = (value: unknown, key: string): unknown =>
@@ -103,6 +105,7 @@ const moduleValuesFor = (
   input: Exclude<TextCommandInput, { kind: "unknown" }>,
   command: TextCommand,
   alias: string | null,
+  timeout?: { seconds: number; duration: string },
 ): Readonly<Record<string, string | number>> => {
   const args = input.arguments?.trim() ?? "";
   const firstArgument = args.split(/\s+/u)[0] ?? "";
@@ -121,6 +124,7 @@ const moduleValuesFor = (
     ...(command.usageText === undefined ? {} : { usageText: command.usageText }),
     ...(command.legacyFallback === true ? { legacyFallback: "true" } : {}),
     ...(command.legacyKind === undefined ? {} : { legacyKind: command.legacyKind }),
+    ...(timeout === undefined ? {} : { "timeout.seconds": timeout.seconds, "timeout.duration": timeout.duration }),
   };
 };
 
@@ -133,6 +137,7 @@ const moduleTemplateVariables = Object.values({
     { name: "uses", group: "command", contexts: ["chat_command"], sample: "12", maxLength: 10 },
   ],
 }).flat() as TemplateVariable[];
+moduleTemplateVariables.push(...TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES);
 
 const render = async (
   context: Partial<Pick<ModuleExecutionContext, "renderTemplate">>,
@@ -142,8 +147,9 @@ const render = async (
   alias: string | null,
   text: string,
   changedVariable?: { name: string; value: number },
+  timeout?: { seconds: number; duration: string },
 ): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }> => {
-  const values = moduleValuesFor(event, input, command, alias);
+  const values = moduleValuesFor(event, input, command, alias, timeout);
   if (context.renderTemplate !== undefined) return context.renderTemplate(text, values, changedVariable);
   const systemValues = {
     user: userFor(event),
@@ -159,7 +165,7 @@ const render = async (
 const processTextCommandMessageAttempt = async (
   event: ModuleEvent,
   repository: TextCommandRepository,
-  context: Partial<Pick<ModuleExecutionContext, "streamState" | "channelInfo" | "channelGameId" | "renderTemplate" | "prepareVariableChange">>,
+  context: Partial<Pick<ModuleExecutionContext, "streamState" | "channelInfo" | "channelGameId" | "renderTemplate" | "prepareVariableChange" | "channelLanguage" | "secureRandomInteger">>,
   staleRetries: number,
 ): Promise<ModuleResult> => {
   const text = messageText(event);
@@ -247,6 +253,73 @@ const processTextCommandMessageAttempt = async (
     ...claim.changedVariable,
     overlayIds: claim.changedVariableOverlayIds ?? [],
   };
+  if (claimed.kind === "text" && claimed.timeoutAction !== null) {
+    const timeoutAction = claimed.timeoutAction;
+    const durationSeconds = rollTimeoutSeconds(
+      { minSeconds: timeoutAction.minSeconds, maxSeconds: timeoutAction.maxSeconds },
+      context.secureRandomInteger ?? (() => { throw new Error("The host did not provide secure randomness."); }),
+    );
+    const language = await (context.channelLanguage ?? (() => Promise.resolve("de" as const)))();
+    const timeoutValues = {
+      seconds: durationSeconds,
+      duration: formatTimeoutDuration(durationSeconds, language),
+    };
+    const changedVariable = claim.changedVariable;
+    const fallback = await render(
+      context,
+      event,
+      input,
+      claimed,
+      alias,
+      timeoutAction.fallbackText,
+      changedVariable,
+      timeoutValues,
+    );
+    const callerUserId = userIdFor(event);
+    const callerIsModerator = event.chatStatus?.some((status) =>
+      status === "broadcaster" || status === "moderator") === true;
+    if (callerUserId === null || callerIsModerator) {
+      return response(event, input, claimed, fallback.text, alias, streamState, {
+        forceChat: true,
+        diagnostics: [...(gameUnknownDiagnostic === undefined ? [] : [gameUnknownDiagnostic]), ...fallback.diagnostics],
+        ...(fallback.attributions === undefined ? {} : { attributions: fallback.attributions }),
+        ...(changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult }),
+      });
+    }
+
+    const rendered = await render(context, event, input, claimed, alias, claimed.text, changedVariable, timeoutValues);
+    const replyToMessageId = textValue(event.payload.message_id);
+    const followUp = (text: string): Extract<ModuleAction, { kind: "chat" }> | undefined => text.length === 0 ? undefined : {
+      kind: "chat",
+      text,
+      target: claimed.chatTarget,
+      automated: false,
+      ...(claimed.responseType === "reply" && replyToMessageId !== null ? { replyToMessageId } : {}),
+    };
+    const successFollowUp = followUp(rendered.text);
+    const failureFollowUp = followUp(fallback.text);
+    const action: ModuleAction = {
+      kind: "timeout",
+      userId: callerUserId,
+      durationSeconds,
+      reason: `!${input.name}`,
+      ...(successFollowUp === undefined ? {} : { onSuccess: successFollowUp }),
+      ...(failureFollowUp === undefined ? {} : { onFailure: failureFollowUp }),
+    };
+    return {
+      actions: [action],
+      diagnostics: [
+        ...(gameUnknownDiagnostic === undefined ? [] : [gameUnknownDiagnostic]),
+        ...rendered.diagnostics,
+        ...fallback.diagnostics,
+        diagnosticTriggered(input, claimed, rendered.text, alias, streamState, claim.changedVariable),
+      ],
+      ...([...(rendered.attributions ?? []), ...(fallback.attributions ?? [])].length === 0
+        ? {}
+        : { attributions: [...new Set([...(rendered.attributions ?? []), ...(fallback.attributions ?? [])])] }),
+      ...(changedVariableForResult === undefined ? {} : { variableChanges: [changedVariableForResult] }),
+    };
+  }
   if (claimed.kind === "list") {
     const commands = (await repository.list(event.channelId)).filter((entry) => entry.enabled).sort((left, right) => left.name.localeCompare(right.name));
     const list = commands.length === 0 ? NO_COMMANDS_REPLY : commandListReply(commands.map((entry) => entry.name));
@@ -289,5 +362,5 @@ const processTextCommandMessageAttempt = async (
 export const processTextCommandMessage = (
   event: ModuleEvent,
   repository: TextCommandRepository,
-  context: Partial<Pick<ModuleExecutionContext, "streamState" | "channelInfo" | "channelGameId" | "renderTemplate" | "prepareVariableChange">> = {},
+  context: Partial<Pick<ModuleExecutionContext, "streamState" | "channelInfo" | "channelGameId" | "renderTemplate" | "prepareVariableChange" | "channelLanguage" | "secureRandomInteger">> = {},
 ): Promise<ModuleResult> => processTextCommandMessageAttempt(event, repository, context, 0);
