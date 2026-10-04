@@ -221,8 +221,8 @@ const commandResult = async (
     const moderator = await context.isChannelModerator(lookup.userId);
     if (moderator === null) return await reject("lookup_failure", lookup.userId);
     if (moderator) return await reject("target_protected", lookup.userId, true, lookup.login);
-    const nowMs = Date.now();
     const activity = await context.activeChatters.seen(lookup.userId);
+    const nowMs = Date.now();
     if (!isActiveVotekickTarget(activity?.lastSeenAt ?? null, nowMs, VOTEKICK_WINDOW_MS)) {
       return await reject("target_not_active", lookup.userId);
     }

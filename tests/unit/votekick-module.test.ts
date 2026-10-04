@@ -191,6 +191,20 @@ describe("Votekick module", () => {
     }]);
   });
 
+  it("admits a target seen one millisecond after the lookup started", async () => {
+    const admit = vi.fn(() => Promise.resolve("admitted" as const));
+    const context = contextFor({ activeChatters: {
+      count: vi.fn(() => Promise.resolve(20)),
+      seen: vi.fn(() => {
+        vi.setSystemTime(Date.now() + 1);
+        return Promise.resolve({ firstSeenAt: now(), lastSeenAt: now() });
+      }),
+    } });
+    await processVotekickMessage(eventFor("!votekick sampleviewer"), repositoryFor({ admit }), context);
+
+    expect(admit).toHaveBeenCalled();
+  });
+
   it("runs a passing ballot through the host timeout action", async () => {
     const running = runningVotekick();
     const order: string[] = [];
