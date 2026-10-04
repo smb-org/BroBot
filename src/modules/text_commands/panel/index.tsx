@@ -304,7 +304,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       name: normalizedName,
       text: draft.kind === "list" ? "" : draft.text,
       kind: draft.kind,
-      ...(draft.kind !== "list" && (draft.kind === "shoutout" || (responseUsesParameterizedVariable && (draft.usageTextEnabled || draft.usageTextChanged))) ? { usageText: draft.usageText } : {}),
+      ...(draft.kind !== "list" && (draft.kind === "shoutout" || draft.usageTextChanged || (responseUsesParameterizedVariable && draft.usageTextEnabled)) ? { usageText: draft.usageText } : {}),
       minimumTier: draft.minimumTier,
       cooldownSeconds: draft.cooldownSeconds as number,
       aliases: draft.aliases,

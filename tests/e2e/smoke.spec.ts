@@ -142,7 +142,31 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
   await expect(sidebar).toBeInViewport();
   await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeVisible();
 
+  // The compact header leaves a useful, independently scrollable drawer at
+  // short phone heights; the collapse control remains a full-size target.
+  await page.setViewportSize({ width: 390, height: 240 });
+  // Mantine transitions the open drawer's top and height when the viewport
+  // changes; wait for the compact layout before measuring its scroll region.
+  await expect(sidebar).toHaveCSS("top", "96px");
+  await expect(sidebar).toHaveCSS("height", "144px");
+  await expect(sidebar).toBeInViewport();
+  const sidebarScroll = sidebar.locator(".sidebar__scroll");
+  const sidebarScrollHeight = await sidebarScroll.evaluate((element) => element.clientHeight);
+  const sidebarContentHeight = await sidebarScroll.evaluate((element) => element.scrollHeight);
+  expect(sidebarScrollHeight).toBeGreaterThan(44);
+  expect(sidebarContentHeight).toBeGreaterThan(sidebarScrollHeight);
+  await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeInViewport();
+  await sidebarScroll.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect(sidebar.getByRole("link", { name: "Module verwalten", exact: true })).toBeInViewport();
+  const collapseToggleRect = await sidebar.locator(".sidebar__collapse-toggle").evaluate((element) => {
+    const { height, bottom } = element.getBoundingClientRect();
+    return { height, bottom };
+  });
+  expect(collapseToggleRect.height).toBeGreaterThanOrEqual(40);
+  expect(collapseToggleRect.bottom).toBeLessThanOrEqual(240);
+
   // The channel select drops to its own full-width row alongside the burger.
+  await page.setViewportSize({ width: 600, height: 900 });
   const brandBox = await page.getByRole("link", { name: "BroBot" }).boundingBox();
   const channelSelectBox = await page.getByRole("combobox", { name: "Kanal auswählen" }).boundingBox();
   expect(brandBox).not.toBeNull();

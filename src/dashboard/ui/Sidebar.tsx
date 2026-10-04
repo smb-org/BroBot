@@ -77,8 +77,12 @@ export function Sidebar({ groups, collapsed, onToggleCollapsed, onEntryNavigate,
     <div className="sidebar" data-collapsed={collapsed ? "true" : undefined}>
       <div className="sidebar__scroll">
         {groups.map((group) => (
-          <div className={`sidebar__group${group.id === "platform" ? " sidebar__group--platform" : ""}`} key={group.id}>
-            {collapsed || group.heading === undefined ? null : <div className="sidebar__heading">{group.heading}</div>}
+          <div
+            className={`sidebar__group${group.id === "platform" ? " sidebar__group--platform" : ""}`}
+            key={group.id}
+            {...(group.heading === undefined ? {} : { role: "group", "aria-labelledby": `sidebar-heading-${group.id}` })}
+          >
+            {group.heading === undefined ? null : <h2 id={`sidebar-heading-${group.id}`} className={`sidebar__heading${collapsed ? " sr-only" : ""}`}>{group.heading}</h2>}
             {group.entries.map((entry) => renderEntry(entry, group.nestedEntries === true))}
           </div>
         ))}

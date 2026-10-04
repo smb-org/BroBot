@@ -7,8 +7,10 @@ import { TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, ty
 import { statusForTier, renderCommandText } from "../../src/modules/text_commands/domain";
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
+import { registeredTemplateVariablesForChannel } from "../../src/worker/panel/module-routes";
 import { useDashboardRoute } from "../../src/dashboard/router";
 import { jsonResponse } from "../unit/fixtures";
+import { TestD1Database } from "../unit/test-d1";
 
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
 
@@ -37,7 +39,7 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
 
 interface FetchOptions {
   commands?: () => TextCommand[];
-  templateVariables?: unknown[];
+  templateVariables?: readonly unknown[];
   onMutation?: (method: string, path: string, body: unknown) => Response | Promise<Response>;
 }
 
@@ -75,6 +77,18 @@ const editor = (): HTMLElement => {
   const node = document.querySelector(".ui-editor-shell");
   if (!(node instanceof HTMLElement)) throw new Error("Command editor is missing");
   return node;
+};
+
+const registeredTemplateVariables = async () => {
+  const database = new TestD1Database();
+  try {
+    return await registeredTemplateVariablesForChannel(
+      database as unknown as Parameters<typeof registeredTemplateVariablesForChannel>[0],
+      "kanal-a",
+    );
+  } finally {
+    database.close();
+  }
 };
 
 describe("Text command editor", () => {
@@ -164,6 +178,30 @@ describe("Text command editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Text einsetzen" }));
 
     expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Hallo {user} aus {channel} {welcome}");
+  });
+
+  it("uses the registered currency declaration and persists an explicitly cleared usage hint", async () => {
+    const templateVariables = await registeredTemplateVariables();
+    const currencyVariable = templateVariables.find((variable) => variable.name === "currency.convert");
+    expect(currencyVariable).toMatchObject({ moduleId: "currency", parameters: "currency_pair" });
+
+    const command = makeCommand({
+      text: "Convert {currency.convert USD EUR}",
+      usageText: "Try !hallo 10",
+    });
+    const onMutation = vi.fn<(method: string, path: string, body: unknown) => Response>(() => jsonResponse({ warnings: [] }));
+    renderPanel(panelFetch({ commands: () => [command], templateVariables, onMutation }));
+    await selectCommand();
+
+    const labels = textCommandsTexts("de");
+    const usageSwitch = await screen.findByRole("switch", { name: labels.usageOverride });
+    expect(usageSwitch).toBeChecked();
+    fireEvent.click(usageSwitch);
+    fireEvent.change(screen.getByRole("textbox", { name: labels.response }), { target: { value: "Converted" } });
+    fireEvent.click(screen.getByRole("button", { name: labels.save }));
+
+    await waitFor(() => expect(onMutation).toHaveBeenCalled());
+    expect(onMutation.mock.calls[0]?.[2]).toMatchObject({ text: "Converted", usageText: "" });
   });
 
   it("keeps the variable action in a left-aligned switch card and the command body scrollable", async () => {

@@ -72,9 +72,14 @@ Berechtigungen ist kein Inspektor und trägt `.sub-inspector` nicht.
 
 ### Generische Erweiterungspunkte
 
-Module dürfen über `navigationEntries` lokalisierte Einträge für Kanalnavigation
-und Spotlight bereitstellen. `group: "channel"` fügt einen Eintrag neben den
-Kanalbereichen ein; ohne Angabe erscheint er unter „Module“.
+Jedes Modul ordnet seine Seitenleiste über `navigationCategory` einer der
+Kategorien `chat`, `interaction`, `data` oder `twitch` zu. Der Host gruppiert
+aktivierte und berechtigte Module unter den lokalisierten Kategorieüberschriften
+und verwendet den Modulnamen als Zieleintrag, wenn keine eigenen
+`navigationEntries` deklariert sind. Eigene Einträge können über
+`navigationEntries` zusätzlich lokalisierten Namen, Beschreibungen, Symbole und
+Suchbegriffe für die Seitenleiste und Spotlight bereitstellen; sie wählen keine
+eigene Kategorie.
 `showMainSwitch: false` blendet bei dauerhaft verfügbaren Modulansichten den
 nicht bedienbaren Hauptschalter aus. Der Host baut daraus Modulrouten; Namen,
 Texte, Symbole und Suchbegriffe bleiben beim Modul.

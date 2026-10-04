@@ -475,7 +475,7 @@ pre {
 .sidebar__scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .sidebar__group { display: flex; flex-direction: column; gap: 2px; }
 .sidebar__group--platform { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); }
-.sidebar__heading { padding: 12px 10px 4px; font-size: 13px; font-weight: 600; color: var(--text-3); }
+.sidebar__heading { margin: 0; padding: 12px 10px 4px; font-size: 13px; font-weight: 600; color: var(--text-3); }
 .sidebar-nav-link { min-height: 44px; border-radius: var(--r-control); border-left: 2px solid transparent; color: var(--text-2); }
 .sidebar .sidebar-nav-link:hover { color: var(--text); background: var(--surface-hover); }
 .sidebar .sidebar-nav-link[data-active] { color: var(--brand-text); background: var(--tint-2); border-left-color: var(--brand); font-weight: 600; }
@@ -801,6 +801,22 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .module-workspace { min-height: auto; margin: -16px -16px -40px; }
   .module-workspace__main { padding: 20px 16px 28px; }
   .module-grid { grid-template-columns: repeat(2, 132px); justify-content: start; }
+}
+
+@media (max-width: 768px) and (max-height: 360px) {
+  .dashboard-shell { --app-shell-header-height: 96px !important; }
+  .dashboard-shell .dashboard-shell__navbar { top: 96px; height: calc(100dvh - 96px); }
+  .dashboard-header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: 44px 44px;
+    grid-template-areas:
+      "brand channel logout"
+      "status controls controls";
+    gap: 4px 8px;
+  }
+  .dashboard-header__channel { grid-template-columns: minmax(0, 1fr) auto; }
+  .dashboard-header__location { max-width: 110px; }
+  .dashboard-header__controls { justify-self: end; }
 }
 
 @media (max-width: 420px) {
