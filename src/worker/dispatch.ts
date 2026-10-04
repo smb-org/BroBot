@@ -32,6 +32,7 @@ import type { TemplateVariable } from "../template";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { chatOutputSuppressionReason } from "./chat-output-gate";
 import { createModuleExternalFetchBudget } from "./external-fetch-budget";
+import { moduleBallots } from "./module-ballots";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -903,6 +904,7 @@ export const dispatchEventSubNotification = async (
           : await module.handleEvent(moduleEvent, {
             DB: environment.DB,
             authorizeMutation: authorizeModuleMutation,
+            ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
             botUserId,
             isRecentBotMessage,
             streamState,

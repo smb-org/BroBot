@@ -20,7 +20,7 @@ export const hydrateModuleOverlayElements = async <Element extends ModuleOverlay
   channelId: string,
   elements: readonly Element[],
   modules: readonly BotModule[] = MODULES,
-  context?: ModuleOverlayElementContext,
+  context?: ModuleOverlayElementContext | ((moduleId: string) => ModuleOverlayElementContext | undefined),
 ): Promise<(Element & { moduleEnabled?: boolean; state?: JsonObject | null })[]> => {
   const moduleElements = elements.flatMap((element) => {
     const declaration = moduleOverlayElementForKind(element.kind, modules);
@@ -43,14 +43,15 @@ export const hydrateModuleOverlayElements = async <Element extends ModuleOverlay
     if (moduleEnabled && item.definition.initialState !== undefined) {
       const config = item.definition.parseConfig(item.element.config);
       if (config !== null) {
+        const moduleContext = typeof context === "function" ? context(item.module.id) : context;
         try {
-          state = await item.definition.initialState(db, channelId, config, context);
+          state = await item.definition.initialState(db, channelId, config, moduleContext);
         } catch (error: unknown) {
           console.warn(`Module overlay initial state failed for ${item.definition.kind}.`, error);
           // Don't blank the element on a transient error: keep a short retry
           // refreshAt so the client re-bootstraps soon instead of staying
           // blank with no scheduled refresh.
-          const now = context?.now ?? Date.now();
+          const now = moduleContext?.now ?? Date.now();
           state = {
             serverNow: new Date(now).toISOString(),
             refreshAt: new Date(now + TRANSIENT_INITIAL_STATE_RETRY_MS).toISOString(),

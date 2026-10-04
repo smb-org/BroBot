@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getAppAccessToken: vi.fn(),
   helixRequest: vi.fn(),
   getOverlayStreamDetails: vi.fn(),
+  readBallot: vi.fn(),
 }));
 
 vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAccessToken }));
@@ -36,7 +37,10 @@ const environment = {
   TWITCH_CLIENT_ID: "client-id",
   CHANNEL: {
     idFromName: (channelId: string) => channelId,
-    get: () => ({ getOverlayStreamDetails: mocks.getOverlayStreamDetails }),
+    get: () => ({
+      getOverlayStreamDetails: mocks.getOverlayStreamDetails,
+      readBallot: mocks.readBallot,
+    }),
   },
 } as unknown as Env;
 
@@ -48,13 +52,14 @@ describe("overlay element template context", () => {
     mocks.getAppAccessToken.mockResolvedValue("app-token");
     mocks.helixRequest.mockReset();
     mocks.getOverlayStreamDetails.mockReset();
+    mocks.readBallot.mockReset();
   });
 
   it("renders viewer counts through the channel's shared stream-details cache", async () => {
     const now = Date.parse("2026-09-27T12:30:00.000Z");
     const expiresAt = now + 60_000;
     mocks.getOverlayStreamDetails.mockResolvedValue({ details: { startedAt, viewerCount: 42 }, expiresAt });
-    const context = await createOverlayElementContext(environment, "channel-a", "en", now);
+    const context = await createOverlayElementContext(environment, "channel-a", "weather", "en", now);
 
     await expect(context.renderTemplate("{viewers}")).resolves.toMatchObject({ text: "42" });
     expect(mocks.getOverlayStreamDetails).toHaveBeenCalledWith(startedAt, "stream-1", now);
@@ -62,9 +67,23 @@ describe("overlay element template context", () => {
     expect(mocks.helixRequest).not.toHaveBeenCalled();
   });
 
+  it("reads ballots through the current channel and overlay module binding", async () => {
+    mocks.readBallot.mockResolvedValue({ counts: [4, 2], revision: 6 });
+    const context = await createOverlayElementContext(
+      environment,
+      "channel-a",
+      "chat_voting",
+      "en",
+      Date.parse("2026-09-27T12:30:00.000Z"),
+    );
+
+    await expect(context.readBallot("poll-a")).resolves.toEqual({ counts: [4, 2], revision: 6 });
+    expect(mocks.readBallot).toHaveBeenCalledWith("chat_voting", "poll-a");
+  });
+
   it("uses the chat unavailable output when the stream viewer count cannot be read", async () => {
     mocks.getOverlayStreamDetails.mockResolvedValue(null);
-    const context = await createOverlayElementContext(environment, "channel-a", "en", Date.parse("2026-09-27T12:30:00.000Z"));
+    const context = await createOverlayElementContext(environment, "channel-a", "weather", "en", Date.parse("2026-09-27T12:30:00.000Z"));
 
     await expect(context.renderTemplate("{viewers}")).resolves.toMatchObject({ text: "?" });
     expect(context.hasLookupFailure()).toBe(true);
@@ -76,7 +95,7 @@ describe("overlay element template context", () => {
       details: { startedAt: "2026-09-27T12:29:00.000Z", viewerCount: 17 },
       expiresAt: Date.parse("2026-09-27T12:31:00.000Z"),
     });
-    const context = await createOverlayElementContext(environment, "channel-a", "en", Date.parse("2026-09-27T12:30:00.000Z"));
+    const context = await createOverlayElementContext(environment, "channel-a", "weather", "en", Date.parse("2026-09-27T12:30:00.000Z"));
 
     await expect(context.renderTemplate("{viewers}")).resolves.toMatchObject({ text: "17" });
     expect(mocks.getOverlayStreamDetails).toHaveBeenCalledWith(null, null, Date.parse("2026-09-27T12:30:00.000Z"));
@@ -89,7 +108,7 @@ describe("overlay element template context", () => {
       expiresAt: Date.parse("2026-09-27T12:31:00.000Z"),
     });
     const now = Date.parse("2026-09-27T12:30:00.000Z");
-    const context = await createOverlayElementContext(environment, "channel-a", "en", now);
+    const context = await createOverlayElementContext(environment, "channel-a", "weather", "en", now);
 
     await expect(context.renderTemplate("{viewers}")).resolves.toMatchObject({ text: "23" });
     expect(mocks.getOverlayStreamDetails).toHaveBeenCalledWith(null, null, now);
@@ -103,7 +122,7 @@ describe("overlay element template context", () => {
       status: 200,
       data: { data: [{ title: "Late night coding", game_name: "Software and Game Development", game_id: "509658" }] },
     });
-    const context = await createOverlayElementContext(environment, "channel-a", "en", Date.parse("2026-09-27T12:30:00.000Z"));
+    const context = await createOverlayElementContext(environment, "channel-a", "weather", "en", Date.parse("2026-09-27T12:30:00.000Z"));
 
     await context.renderTemplate("{uptime}");
     await expect(context.channelGameId()).resolves.toBe("509658");
@@ -114,7 +133,7 @@ describe("overlay element template context", () => {
   });
 
   it("renders uptime from the stored stream start without a Helix streams lookup", async () => {
-    const context = await createOverlayElementContext(environment, "channel-a", "en", Date.parse("2026-09-27T12:30:00.000Z"));
+    const context = await createOverlayElementContext(environment, "channel-a", "weather", "en", Date.parse("2026-09-27T12:30:00.000Z"));
 
     const rendered = await context.renderTemplate("{uptime}");
     expect(rendered.text).toContain("30 min");
@@ -135,7 +154,7 @@ describe("overlay element template context", () => {
         }],
       },
     }), { headers: { "Content-Type": "application/json", Expires: new Date(now + 60_000).toUTCString() } })));
-    const context = await createOverlayElementContext(environment, "channel-a", "en", now);
+    const context = await createOverlayElementContext(environment, "channel-a", "weather", "en", now);
 
     await expect(context.resolveTemplateConditions(["weather.condition"])).resolves.toEqual({
       values: { "weather.condition": "rain" },

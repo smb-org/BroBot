@@ -21,6 +21,7 @@ import { readChannelStreamState } from "../db/stream-state";
 import { helixRequest } from "../twitch/helix";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
+import { moduleBallots } from "../module-ballots";
 
 const moduleIsEnabled = (module: BotModule, enabled: ReadonlyMap<string, boolean>): boolean =>
   module.mandatory === true || enabled.get(module.id) === true;
@@ -29,6 +30,7 @@ const moduleIsEnabled = (module: BotModule, enabled: ReadonlyMap<string, boolean
 export const createOverlayElementContext = async (
   env: Env,
   channelId: string,
+  moduleId: string,
   language: ModuleLanguage,
   now: number,
 ): Promise<ModuleOverlayElementContext> => {
@@ -350,5 +352,6 @@ export const createOverlayElementContext = async (
     timeDependentTemplateConditionIds,
     dynamicTemplateVariableNames,
     overlayTemplateVariableNames,
+    readBallot: (ballotId) => moduleBallots(env.CHANNEL, channelId, moduleId).read(ballotId),
   };
 };
