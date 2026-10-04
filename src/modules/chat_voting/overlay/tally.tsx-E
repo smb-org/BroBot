@@ -36,13 +36,13 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
 
   useEffect(() => {
     if (current?.status !== "closed") return;
-    const closeAt = current.closedAt == null ? Number.NaN : Date.parse(current.closedAt);
+    const closeAt = current.closedAt === undefined ? Number.NaN : Date.parse(current.closedAt);
     if (!Number.isFinite(closeAt)) return;
     const timer = window.setInterval(() => setClock(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, [current?.pollId, current?.status, current?.closedAt, config.hideAfterCloseSeconds]);
 
-  const closeAt = current?.closedAt == null ? Number.NaN : Date.parse(current.closedAt);
+  const closeAt = current?.closedAt === undefined ? Number.NaN : Date.parse(current.closedAt);
   const hideAfter = typeof config.hideAfterCloseSeconds === "number" ? config.hideAfterCloseSeconds : 15;
   if (current === null || current.counts.length === 0 ||
       current.status === "closed" && (!Number.isFinite(closeAt) || clock >= closeAt + hideAfter * 1_000)) return null;

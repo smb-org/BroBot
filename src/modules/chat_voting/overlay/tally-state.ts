@@ -5,7 +5,7 @@ export interface TallyState {
   labels?: readonly string[];
   counts: readonly number[];
   revision: number;
-  closedAt?: string;
+  closedAt?: string | null;
 }
 
 const isTallyState = (value: unknown): value is TallyState => {
@@ -17,7 +17,7 @@ const isTallyState = (value: unknown): value is TallyState => {
     (state.status === undefined || state.status === "open" || state.status === "closed") &&
     (state.openedAt === undefined || typeof state.openedAt === "string" && Number.isFinite(Date.parse(state.openedAt))) &&
     (state.labels === undefined || Array.isArray(state.labels) && state.labels.every((label) => typeof label === "string")) &&
-    (state.closedAt === undefined || typeof state.closedAt === "string");
+    (state.closedAt === undefined || state.closedAt === null || typeof state.closedAt === "string");
 };
 
 const isNewerPoll = (incoming: TallyState, previous: TallyState): boolean => {

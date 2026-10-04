@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeTallyState, type TallyState } from "../../src/modules/chat_voting/overlay/tally-state";
+import { mergeTallyRealtimeState, mergeTallyState, type TallyState } from "../../src/modules/chat_voting/overlay/tally-state";
 
 const tally = (
   pollId: string,
@@ -65,5 +65,21 @@ describe("chat voting tally state", () => {
     expect(mergeTallyState(current, { pollId: "poll-a", revision: 3, counts: [2, 1] }))
       .toMatchObject({ labels: ["Yes", "No"], counts: [2, 1], status: "open" });
     expect(mergeTallyState(current, null)).toBeNull();
+  });
+
+  it("keeps a server bootstrap with closedAt null against stale realtime payloads", () => {
+    const bootstrap = {
+      pollId: "poll-a", status: "open", preset: "yes_no", optionCount: 2, labels: ["Yes", "No"], counts: [3, 1],
+      revision: 5, openedAt: "2026-10-04T10:00:00.000Z", closesAt: "2026-10-04T14:00:00.000Z",
+      closedAt: null, closeReason: "limit", voterCount: null,
+    };
+    const delayed = mergeTallyRealtimeState(bootstrap, { pollId: "poll-a", revision: 2, counts: [1, 0] });
+    expect(delayed).toMatchObject({ revision: 5, counts: [3, 1], labels: ["Yes", "No"] });
+
+    const newer = mergeTallyRealtimeState(bootstrap, {
+      pollId: "poll-b", revision: 0, counts: [0, 0], openedAt: "2026-10-04T10:01:00.000Z",
+    });
+    const oldClose = { pollId: "poll-a", status: "closed", revision: 0, counts: [3, 1], openedAt: bootstrap.openedAt };
+    expect(mergeTallyRealtimeState(newer, oldClose)).toBe(newer);
   });
 });

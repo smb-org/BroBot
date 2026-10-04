@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import {
@@ -75,6 +75,12 @@ const executionContext = (overrides: Partial<ModuleExecutionContext> = {}): Modu
 });
 
 describe("chat voting event service", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-04T11:00:00.000Z"));
+  });
+  afterEach(() => vi.useRealTimers());
+
   it("does not read or mutate a ballot for non-choice chat", async () => {
     const open = vi.fn(() => Promise.resolve(null));
     const repository = repositoryWith({ open });
