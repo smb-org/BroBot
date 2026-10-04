@@ -548,6 +548,97 @@ describe("Votekick module", () => {
     expect(context.ballots.cast).not.toHaveBeenCalled();
   });
 
+  it("resolves a missing ballot during the next start and keeps an expiry alarm", async () => {
+    let current = runningVotekick();
+    const finalize = vi.fn((
+      _channelId: string,
+      _id: string,
+      status: "passed" | "expired",
+      yesVotes: number,
+      noVotes: number,
+      ballotRevision: number,
+      durationSeconds: number | null,
+      endedAt: string,
+    ) => {
+      current = { ...current, status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt };
+      return Promise.resolve(true);
+    });
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(current)), finalize });
+    const context = contextFor({ ballots: {
+      open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
+      cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [1, 0], revision: 1 })),
+      read: vi.fn(() => Promise.resolve(null)),
+      close: vi.fn(() => Promise.resolve(null)),
+      finalize: vi.fn(() => Promise.resolve({ outcome: "not_open" as const, counts: [], revision: 0 })),
+    } });
+
+    const result = await processVotekickMessage(eventFor("!votekick another-viewer"), repository, context);
+
+    expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "expired", 2, 0, 1, null, expect.any(String));
+    expect(current.status).toBe("expired");
+    expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "close:ballot-1", expect.any(Number));
+    expect(context.clearAlarm).not.toHaveBeenCalled();
+    expect(result.actions).toEqual([]);
+  });
+
+  it("resolves a missing alarm-time ballot and retains retryable expiry delivery", async () => {
+    let current = runningVotekick();
+    const byId = vi.fn(() => Promise.resolve(current));
+    const finalize = vi.fn((
+      _channelId: string,
+      _id: string,
+      status: "passed" | "expired",
+      yesVotes: number,
+      noVotes: number,
+      ballotRevision: number,
+      durationSeconds: number | null,
+      endedAt: string,
+    ) => {
+      current = { ...current, status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt };
+      return Promise.resolve(true);
+    });
+    const repository = repositoryFor({ byId, finalize });
+    const order: string[] = [];
+    let sendCount = 0;
+    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => {
+      order.push("send");
+      sendCount += 1;
+      return Promise.resolve(sendCount === 1
+        ? { sent: false, reason: "rate_limited", retryable: true }
+        : { sent: true, reason: null, retryable: false });
+    });
+    const clear = vi.fn(() => { order.push("clear"); return Promise.resolve(); });
+    const db = { prepare: vi.fn(() => ({
+      bind: vi.fn().mockReturnThis(),
+      first: vi.fn(() => Promise.resolve({ settings: JSON.stringify(settings) })),
+    })) };
+    const context = {
+      channelId: "channel-a",
+      DB: db,
+      ballots: {
+        close: vi.fn(() => Promise.resolve(null)),
+        finalize: vi.fn(() => Promise.resolve({ outcome: "not_open" as const, counts: [], revision: 0 })),
+      },
+      channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
+      secureRandomInteger: vi.fn(() => 0),
+      executeTimeout: vi.fn(() => Promise.resolve("applied" as const)),
+      schedule: vi.fn(() => Promise.resolve()),
+      clear,
+      renderTemplate: vi.fn((text: string) => Promise.resolve({ text, attributions: [] })),
+      sendChat,
+    } as unknown as ModuleAlarmContext;
+
+    await expect(closeExpiredVotekick(context, "close:ballot-1", repository)).rejects.toThrow("rate_limited");
+    expect(current.status).toBe("expired");
+    expect(clear).not.toHaveBeenCalled();
+    await closeExpiredVotekick(context, "close:ballot-1", repository);
+
+    expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "expired", 2, 0, 1, null, expect.any(String));
+    expect(sendChat).toHaveBeenCalledTimes(2);
+    expect(clear).toHaveBeenCalledOnce();
+    expect(order).toEqual(["send", "send", "clear"]);
+  });
+
   it("retries expiry delivery from the expired row with the same idempotency key", async () => {
     const expired = runningVotekick({ status: "expired", endedAt: new Date().toISOString() });
     const byId = vi.fn(() => Promise.resolve(expired));
@@ -557,6 +648,7 @@ describe("Votekick module", () => {
     const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>()
       .mockResolvedValueOnce({ sent: false, reason: "rate_limited", retryable: true })
       .mockResolvedValueOnce({ sent: true, reason: null, retryable: false });
+    const clear = vi.fn(() => Promise.resolve());
     const db = { prepare: vi.fn(() => ({
       bind: vi.fn().mockReturnThis(),
       first: vi.fn(() => Promise.resolve({ settings: JSON.stringify(settings) })),
@@ -566,12 +658,13 @@ describe("Votekick module", () => {
       DB: db,
       ballots: { close: vi.fn(() => Promise.resolve(null)) },
       schedule: vi.fn(() => Promise.resolve()),
-      clear: vi.fn(() => Promise.resolve()),
+      clear,
       renderTemplate: vi.fn((text: string) => Promise.resolve({ text, attributions: [] })),
       sendChat,
     } as unknown as ModuleAlarmContext;
 
     await expect(closeExpiredVotekick(context, "close:ballot-1", repository)).rejects.toThrow("rate_limited");
+    expect(clear).not.toHaveBeenCalled();
     await closeExpiredVotekick(context, "close:ballot-1", repository);
 
     expect(sendChat).toHaveBeenCalledTimes(2);
@@ -580,6 +673,7 @@ describe("Votekick module", () => {
       [settings.expiredText, "votekick:ballot-1:expired"],
     ]);
     expect(byId).toHaveBeenCalledTimes(2);
+    expect(clear).toHaveBeenCalledOnce();
   });
 
   it("sends expiry from the committed row when alarm-time ballot cleanup fails", async () => {

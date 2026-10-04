@@ -13,7 +13,11 @@ const keyRing = JSON.stringify({
 });
 const databases: TestD1Database[] = [];
 
-const setup = async (control: "none" | "mute" | "pause" = "none", pauseOnClose = false) => {
+const setup = async (
+  control: "none" | "mute" | "pause" = "none",
+  pauseOnClose = false,
+  disableModuleOnPass = false,
+) => {
   const database = new TestD1Database();
   databases.push(database);
   await insertChannel(database, "channel-a");
@@ -97,6 +101,9 @@ const setup = async (control: "none" | "mute" | "pause" = "none", pauseOnClose =
       if (ballotOutcome === "passed" && pauseOnClose) {
         await database.prepare("INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('channel-a', 1, ?)")
           .bind(new Date().toISOString()).run();
+      }
+      if (ballotOutcome === "passed" && disableModuleOnPass) {
+        await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'channel-a' AND module_id = 'votekick'").run();
       }
       return { outcome: ballotOutcome, counts: [...counts], revision };
     }),
@@ -204,6 +211,22 @@ describe("Votekick dispatch integration", () => {
       module_id: "votekick",
       code: "host.action.suppressed",
       detail_json: '{"action":"timeout","reason":"channel_paused"}',
+    }));
+  });
+
+  it("rechecks module activation after a pass is prepared and suppresses its timeout", async () => {
+    const { database, runtime, fetcher } = await setup("none", false, true);
+    await chat(runtime, fetcher, "!votekick sampleviewer", "starter-a", ["vip"]);
+    await chat(runtime, fetcher, "1", "voter-a");
+    await chat(runtime, fetcher, "1", "voter-b");
+
+    await expect(database.prepare("SELECT status FROM votekicks WHERE channel_id = 'channel-a'")
+      .first()).resolves.toEqual({ status: "passed" });
+    expect(fetcher.mock.calls.some(([input]) => requestUrl(input).includes("/helix/moderation/bans"))).toBe(false);
+    expect(await log(database)).toContainEqual(expect.objectContaining({
+      module_id: "votekick",
+      code: "host.action.suppressed",
+      detail_json: '{"action":"timeout","reason":"module_disabled"}',
     }));
   });
 });

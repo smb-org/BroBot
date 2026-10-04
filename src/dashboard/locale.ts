@@ -2001,7 +2001,7 @@ export const eventCauseAlreadyShown = (code: string, detail: EventDetail): boole
 export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   de: {
     "host.action.failed": "Aktion fehlgeschlagen",
-    "host.action.suppressed": (detail) => `Aktion unterdrückt: ${detail.action === "chat" ? "Chatnachricht" : detail.action === "announcement" ? "Ankündigung" : detail.action === "timeout" ? "Timeout" : detail.action === "ban" ? "Bann" : "Shoutout"} ${detail.reason === "channel_paused" ? "wegen Kanalpause" : "wegen Kanal-Stummschaltung"}`,
+    "host.action.suppressed": (detail) => `Aktion unterdrückt: ${detail.action === "chat" ? "Chatnachricht" : detail.action === "announcement" ? "Ankündigung" : detail.action === "timeout" ? "Timeout" : detail.action === "ban" ? "Bann" : "Shoutout"} ${detail.reason === "module_disabled" ? "weil das Modul deaktiviert ist" : detail.reason === "channel_paused" ? "wegen Kanalpause" : "wegen Kanal-Stummschaltung"}`,
     "host.chat.failed": "Chat-Nachricht fehlgeschlagen",
     "host.chat.sent": "Chat-Nachricht gesendet",
     "host.chat.skipped": (detail) => detail.reason === "automated_output_rate_limited"
@@ -2112,7 +2112,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   },
   en: {
     "host.action.failed": "Action failed",
-    "host.action.suppressed": (detail) => `Action suppressed: ${detail.action === "chat" ? "chat message" : detail.action === "announcement" ? "announcement" : detail.action === "timeout" ? "timeout" : detail.action === "ban" ? "ban" : "shoutout"} ${detail.reason === "channel_paused" ? "while the channel is paused" : "while the channel is muted"}`,
+    "host.action.suppressed": (detail) => `Action suppressed: ${detail.action === "chat" ? "chat message" : detail.action === "announcement" ? "announcement" : detail.action === "timeout" ? "timeout" : detail.action === "ban" ? "ban" : "shoutout"} ${detail.reason === "module_disabled" ? "because the module is disabled" : detail.reason === "channel_paused" ? "while the channel is paused" : "while the channel is muted"}`,
     "host.chat.failed": "Chat message failed",
     "host.chat.sent": "Chat message sent",
     "host.chat.skipped": (detail) => detail.reason === "automated_output_rate_limited"

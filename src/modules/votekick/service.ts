@@ -118,12 +118,26 @@ const finalizeVotekick = async (
     await repository.updateCounts(channelId, running.id, yesVotes, noVotes, finalized.revision);
     return { outcome: "open", claimed: false };
   }
-  if (finalized.outcome === "not_open") return { outcome: "not_open", claimed: false };
+  if (finalized.outcome === "not_open") {
+    const endedAt = new Date().toISOString();
+    const resolved = await repository.finalize(
+      channelId, running.id, "expired", running.yesVotes, running.noVotes, running.ballotRevision, null, endedAt,
+    );
+    if (resolved) return { outcome: "expired", claimed: false };
+    const current = await repository.byId(channelId, running.id);
+    if (current?.status === "expired") return { outcome: "expired", claimed: false };
+    if (current?.status === "running") throw new Error("Missing votekick ballot could not be resolved in D1.");
+    return { outcome: "not_open", claimed: false };
+  }
   if (finalized.outcome === "expired") {
-    await repository.finalize(
+    const resolved = await repository.finalize(
       channelId, running.id, "expired", yesVotes, noVotes, finalized.revision, null, new Date().toISOString(),
     );
-    return { outcome: "expired", claimed: false };
+    if (resolved) return { outcome: "expired", claimed: false };
+    const current = await repository.byId(channelId, running.id);
+    if (current?.status === "expired") return { outcome: "expired", claimed: false };
+    if (current?.status === "running") throw new Error("Expired votekick ballot could not be resolved in D1.");
+    return { outcome: "not_open", claimed: false };
   }
   // Preparing before the conditional D1 update leaves a finalized DO pass retryable on failure.
   const prepared = await preparePass(
@@ -348,7 +362,8 @@ export const processVotekickMessage = async (
     }
     if (attempt.outcome === "expired") {
       await bestEffortClose(context, running.id);
-      await bestEffortClear(context, `close:${running.id}`);
+      if (event.settings.expiredText.length === 0) await bestEffortClear(context, `close:${running.id}`);
+      else await context.scheduleAlarm("close", `close:${running.id}`, Date.now());
       return emptyResult();
     }
     return null;
@@ -435,21 +450,33 @@ export const closeExpiredVotekick = async (
       return;
     }
     if (attempt.outcome === "not_open") {
-      await bestEffortCloseAlarm(context, id);
-      try { await context.clear(`close:${id}`); } catch { /* The host hard-delete alarm is independent. */ }
-      return;
+      const current = await repository.byId(context.channelId, id);
+      if (current?.status === "running") throw new Error("Votekick ballot is missing while its D1 row is still running.");
+      if (current?.status !== "expired") {
+        await bestEffortCloseAlarm(context, id);
+        try { await context.clear(`close:${id}`); } catch { /* The row is no longer unresolved. */ }
+        return;
+      }
+      running = current;
+    } else {
+      running = await repository.byId(context.channelId, id);
     }
-    running = await repository.byId(context.channelId, id);
   }
   if (running?.status !== "expired") return;
-  await bestEffortCloseAlarm(context, id);
-  try { await context.clear(`close:${id}`); } catch { /* The host hard-delete alarm is independent. */ }
 
   const stored = await context.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?")
     .bind(context.channelId, "votekick").first<{ settings: string }>();
-  if (stored === null) return;
+  if (stored === null) {
+    await bestEffortCloseAlarm(context, id);
+    try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }
+    return;
+  }
   const settings = votekickSettingsSchema.parse(JSON.parse(stored.settings));
-  if (settings.expiredText.length === 0) return;
+  if (settings.expiredText.length === 0) {
+    await bestEffortCloseAlarm(context, id);
+    try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }
+    return;
+  }
   const rendered = await context.renderTemplate(settings.expiredText, {
     "votekick.target": running.targetLogin ?? running.targetUserId ?? "",
     "votekick.yes": running.yesVotes,
@@ -458,7 +485,11 @@ export const closeExpiredVotekick = async (
     "votekick.seconds": 0,
     "votekick.duration": "",
   }, Date.parse(running.endedAt ?? running.endsAt));
-  const result = await context.sendChat(rendered.text, `votekick:${id}:expired`, rendered.attributions, async () =>
-    (await repository.byId(context.channelId, id))?.status === "expired", settings.chatTarget);
-  if (!result.sent && result.retryable) throw new Error(`Votekick expiry chat failed: ${result.reason ?? "unknown"}.`);
+  if (rendered.text.length > 0) {
+    const result = await context.sendChat(rendered.text, `votekick:${id}:expired`, rendered.attributions, async () =>
+      (await repository.byId(context.channelId, id))?.status === "expired", settings.chatTarget);
+    if (!result.sent && result.retryable) throw new Error(`Votekick expiry chat failed: ${result.reason ?? "unknown"}.`);
+  }
+  await bestEffortCloseAlarm(context, id);
+  try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }
 };

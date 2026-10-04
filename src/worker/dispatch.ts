@@ -21,7 +21,7 @@ import {
   writeEventSubStreamState,
 } from "./db/stream-state";
 import { lookupAndRefreshStreamState } from "./stream-state-lookup";
-import { readChannelControls, readDispatchChannelState } from "./db/channel-controls";
+import { moduleEnabledForChannel, readChannelControls, readDispatchChannelState } from "./db/channel-controls";
 import { readChannelLocation } from "./db/channel-settings";
 import { getBotIdentity, getCachedBotUserId } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
@@ -530,6 +530,13 @@ const runActions = async (
         continue;
       }
       if (action.kind === "timeout" || action.kind === "ban") {
+        if (!await moduleEnabledForChannel(environment.DB, channelId, module.id, module.mandatory === true)) {
+          diagnostics.push({
+            code: "host.action.suppressed" satisfies EventCode,
+            detail: { action: action.kind, reason: "module_disabled" },
+          });
+          continue;
+        }
         const result = await sendModerationBan(environment, channelId, {
           userId: action.userId,
           durationSeconds: action.kind === "timeout" ? action.durationSeconds : null,

@@ -22,7 +22,8 @@ import type {
 } from "../../src/realtime-contract";
 import { OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON } from "../../src/realtime-contract";
 import type { AdsSchedule } from "../../src/modules/ads/contracts";
-import type { BotModule } from "../../src/modules/contract";
+import type { BotModule, ModuleAlarmContext, ModuleAlarmDefinition, ModuleExternalFetchBudget } from "../../src/modules/contract";
+import { votekickModule } from "../../src/modules/votekick";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { ballotVoterHash } from "../../src/worker/durable/ballots";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
@@ -1409,6 +1410,40 @@ describe("ChannelObject realtime path", () => {
     await object.clearModuleAlarm("timers", "timer:timer-a", 4);
     await object.scheduleModuleAlarm("timers", "run", "timer:timer-a", 10_000, 3);
     expect(storageOf(object).values.get(alarmTableKey) ?? {}).not.toHaveProperty(alarmKey);
+  });
+
+  it("suppresses a recovered module timeout after the module is disabled", async () => {
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn(() => Promise.resolve({ enabled: 0 })),
+    };
+    const prepare = vi.fn(() => statement);
+    const database = { prepare } as unknown as D1Database;
+    const object = objectFor([], database);
+    const registration = votekickModule.alarms?.find((alarm) => alarm.key === "close");
+    if (registration === undefined) throw new Error("Votekick close alarm registration is missing.");
+    const moduleAlarmContext = (object as unknown as {
+      moduleAlarmContext: (
+        moduleId: string,
+        alarm: ModuleAlarmDefinition,
+        fetchBudget: ModuleExternalFetchBudget,
+      ) => ModuleAlarmContext;
+    }).moduleAlarmContext("votekick", registration, {} as ModuleExternalFetchBudget);
+    mocks.getAppAccessToken.mockClear();
+    mocks.helixRequest.mockClear();
+
+    await expect(moduleAlarmContext.executeTimeout({
+      kind: "timeout",
+      userId: "target-user",
+      durationSeconds: 120,
+      reason: "Votekick passed",
+    })).resolves.toBe("suppressed");
+
+    expect(prepare).toHaveBeenCalledWith(
+      "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+    );
+    expect(mocks.getAppAccessToken).not.toHaveBeenCalled();
+    expect(mocks.helixRequest).not.toHaveBeenCalled();
   });
 
   it("keeps a manual chat vote close ahead of a late initial deadline", async () => {

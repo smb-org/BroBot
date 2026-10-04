@@ -129,6 +129,8 @@ describe("dashboard locale", () => {
     expect(eventCauseText("host.timeout.failed", detail)).toBe("geschütztes Ziel");
     expect(eventText("host.action.suppressed", { action: "ban", reason: "channel_paused" }))
       .toBe("Aktion unterdrückt: Bann wegen Kanalpause");
+    expect(eventText("host.action.suppressed", { action: "timeout", reason: "module_disabled" }))
+      .toBe("Aktion unterdrückt: Timeout weil das Modul deaktiviert ist");
     expect(eventToneEntries["host.timeout.ambiguous"]).toMatchObject({ tone: "warning", numberKey: "seconds" });
 
     setBrowserLanguage("en-US");
@@ -136,6 +138,8 @@ describe("dashboard locale", () => {
     expect(eventText("host.ban.applied", { target: "3000003" })).toBe("Ban applied to 3000003");
     expect(eventText("host.action.suppressed", { action: "timeout", reason: "channel_paused" }))
       .toBe("Action suppressed: timeout while the channel is paused");
+    expect(eventText("host.action.suppressed", { action: "timeout", reason: "module_disabled" }))
+      .toBe("Action suppressed: timeout because the module is disabled");
   });
 
   it("drops the placeholder entirely for an unknown notification with no type at all, instead of doubling up (issue #201)", () => {

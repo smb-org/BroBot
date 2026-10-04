@@ -47,7 +47,7 @@ import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime"
 import { sendChatMessage } from "../chat";
 import { sendModerationBan } from "../moderation";
 import { readChannelStreamState } from "../db/stream-state";
-import { readDispatchChannelState } from "../db/channel-controls";
+import { moduleEnabledForChannel, readDispatchChannelState } from "../db/channel-controls";
 import { chatOutputSuppressionReason } from "../chat-output-gate";
 import { resolveModuleEventTimes } from "../module-event-times";
 import { renderScheduledTemplate } from "../scheduled-template-renderer";
@@ -1238,11 +1238,17 @@ export class ChannelObject extends DurableObject<Env> {
         return row?.language === "en" ? "en" : "de";
       },
       secureRandomInteger,
-      executeTimeout: async (action) => (await sendModerationBan(this.env, channelId, {
-        userId: action.userId,
-        durationSeconds: action.durationSeconds,
-        reason: action.reason,
-      })).outcome,
+      executeTimeout: async (action) => {
+        const module = MODULES.find((candidate) => candidate.id === moduleId);
+        if (!await moduleEnabledForChannel(this.env.DB, channelId, moduleId, module?.mandatory === true)) {
+          return "suppressed";
+        }
+        return (await sendModerationBan(this.env, channelId, {
+          userId: action.userId,
+          durationSeconds: action.durationSeconds,
+          reason: action.reason,
+        })).outcome;
+      },
       storage: {
         get: (key: string) => this.ctx.storage.get(`${storagePrefix}${key}`),
         put: (key: string, value: unknown) => this.ctx.storage.put(`${storagePrefix}${key}`, value),
