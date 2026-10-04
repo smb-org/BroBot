@@ -2,6 +2,42 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+const positionalBindingCount = (sql: string): number => {
+  let count = 0;
+  let index = 0;
+  let quote: string | null = null;
+  while (index < sql.length) {
+    const character = sql[index];
+    if (quote !== null) {
+      if (character === quote) {
+        if (sql[index + 1] === quote) index += 1;
+        else quote = null;
+      }
+      index += 1;
+      continue;
+    }
+    if (sql.startsWith("--", index)) {
+      const newline = sql.indexOf("\n", index + 2);
+      index = newline === -1 ? sql.length : newline + 1;
+      continue;
+    }
+    if (sql.startsWith("/*", index)) {
+      const commentEnd = sql.indexOf("*/", index + 2);
+      index = commentEnd === -1 ? sql.length : commentEnd + 2;
+      continue;
+    }
+    if (character === "'" || character === '"' || character === "`") {
+      quote = character;
+    } else if (character === "[") {
+      quote = "]";
+    } else if (character === "?") {
+      count += 1;
+    }
+    index += 1;
+  }
+  return count;
+};
+
 // rows_written is synthetic here: DML mirrors SQLite changes and does not measure D1 write amplification.
 export interface TestD1Result {
   results: unknown[];
@@ -19,11 +55,20 @@ export class TestPreparedStatement {
   ) {}
 
   public bind(...values: SQLInputValue[]): this {
+    this.assertBindingCount(values.length);
     this.values = values;
     return this;
   }
 
+  private assertBindingCount(actual: number): void {
+    const expected = positionalBindingCount(this.sql);
+    if (actual !== expected) {
+      throw new Error(`SQLite test adapter expected ${String(expected)} bind values but received ${String(actual)}.`);
+    }
+  }
+
   public runSync(): TestD1Result {
+    this.assertBindingCount(this.values.length);
     if (/^\s*SELECT\b/iu.test(this.sql)) {
       const results = this.statement.all(...this.values) as unknown[];
       const metadata = this.database.prepare("SELECT changes() AS changes, last_insert_rowid() AS last_row_id").get() as {
@@ -66,10 +111,12 @@ export class TestPreparedStatement {
   }
 
   public first<T>(): Promise<T | null> {
+    this.assertBindingCount(this.values.length);
     return Promise.resolve((this.statement.get(...this.values) as T | undefined) ?? null);
   }
 
   public all<T>(..._typeHint: readonly T[]): Promise<{ results: T[]; success: true; meta: { changes: number; size: number } }> {
+    this.assertBindingCount(this.values.length);
     void _typeHint;
     const results = this.statement.all(...this.values) as T[];
     return Promise.resolve({

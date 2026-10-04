@@ -414,6 +414,87 @@ describe("Text commands module", () => {
     }
   });
 
+  it("dispatches timeout success and rejection announcements and bypasses protected callers", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await database.prepare(
+        `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+         VALUES ('kanal-a', 1, ?, NULL)`,
+      ).bind(NOW).run();
+      await activate(database, "kanal-a");
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] as const }),
+      );
+      await repository.create({
+        channelId: "kanal-a",
+        name: "roulette",
+        text: "Timeout applied",
+        kind: "text",
+        cooldownSeconds: 0,
+        responseType: "announcement",
+        timeoutAction: { minSeconds: 30, maxSeconds: 30, fallbackText: "Timeout failed" },
+        now: NOW,
+      }, { userId: "user-1" });
+
+      const successFetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(null, { status: 204 }))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await dispatchEventSubNotification(
+        environment(database),
+        eventFor("!roulette", "kanal-a", NOW, "timeout-success"),
+        successFetcher,
+        [textCommandModule],
+      );
+      expect(requestedUrl(successFetcher.mock.calls[0]?.[0])).toContain("/helix/moderation/bans?");
+      expect(requestedUrl(successFetcher.mock.calls[1]?.[0])).toContain("/helix/chat/announcements?");
+      expect(body(successFetcher, 1)).toMatchObject({ message: "Timeout applied" });
+
+      const rejectionFetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ message: "The user cannot be timed out" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        }))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await dispatchEventSubNotification(
+        environment(database),
+        eventFor("!roulette", "kanal-a", "2026-09-19T12:00:01.000Z", "timeout-rejected"),
+        rejectionFetcher,
+        [textCommandModule],
+      );
+      expect(requestedUrl(rejectionFetcher.mock.calls[0]?.[0])).toContain("/helix/moderation/bans?");
+      expect(requestedUrl(rejectionFetcher.mock.calls[1]?.[0])).toContain("/helix/chat/announcements?");
+      expect(body(rejectionFetcher, 1)).toMatchObject({ message: "Timeout failed" });
+
+      const protectedCallerFetcher = fetcherForChat();
+      await dispatchEventSubNotification(
+        environment(database),
+        eventFor("!roulette", "kanal-a", "2026-09-19T12:00:02.000Z", "timeout-protected-caller", [{ set_id: "moderator" }]),
+        protectedCallerFetcher,
+        [textCommandModule],
+      );
+      expect(protectedCallerFetcher).toHaveBeenCalledTimes(1);
+      expect(requestedUrl(protectedCallerFetcher.mock.calls[0]?.[0])).toContain("/helix/chat/messages");
+      expect(body(protectedCallerFetcher, 0)).toMatchObject({ message: "Timeout failed" });
+
+      await expect(eventCodes(database)).resolves.toEqual([
+        "text_commands.triggered",
+        "host.timeout.applied",
+        "host.announcement.sent",
+        "text_commands.triggered",
+        "host.timeout.failed",
+        "host.announcement.sent",
+        "text_commands.triggered",
+        "host.chat.sent",
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("reads only requested channel variables once and deduplicates repeated tokens", async () => {
     const database = new TestD1Database();
     try {

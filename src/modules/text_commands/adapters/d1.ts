@@ -50,6 +50,11 @@ const auditValues = async (command: TextCommand) => ({
     variableOperation: command.variableAction.operation,
     variableAmount: command.variableAction.amount,
   }),
+  ...(command.timeoutAction === null ? {} : {
+    timeoutMinSeconds: command.timeoutAction.minSeconds,
+    timeoutMaxSeconds: command.timeoutAction.maxSeconds,
+    ...await previewField("timeoutFallbackText", command.timeoutAction.fallbackText),
+  }),
   ...(command.offlineText === undefined ? {} : await previewField("offlineText", command.offlineText)),
   ...(command.notFollowingText === undefined ? {} : await previewField("notFollowingText", command.notFollowingText)),
   ...(command.unavailableText === undefined ? {} : await previewField("unavailableText", command.unavailableText)),
@@ -73,6 +78,7 @@ const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
   left.responseType === right.responseType &&
   left.chatTarget === right.chatTarget &&
   JSON.stringify(left.variableAction) === JSON.stringify(right.variableAction) &&
+  JSON.stringify(left.timeoutAction) === JSON.stringify(right.timeoutAction) &&
   left.legacyFallback === right.legacyFallback &&
   left.legacyKind === right.legacyKind &&
   extraTemplateKeys.every((key) => left[key] === right[key]);
@@ -160,6 +166,9 @@ interface TextCommandRow {
   variable_name: string | null;
   variable_operation: ChannelVariableOperation | null;
   variable_amount: number | null;
+  timeout_min_seconds: number | null;
+  timeout_max_seconds: number | null;
+  timeout_fallback_text: string | null;
 }
 
 const mapTextCommand = (row: TextCommandRow): TextCommand => ({
@@ -180,6 +189,13 @@ const mapTextCommand = (row: TextCommandRow): TextCommand => ({
   variableAction: row.variable_name === null || row.variable_operation === null || row.variable_amount === null
     ? null
     : { name: row.variable_name, operation: row.variable_operation, amount: row.variable_amount },
+  timeoutAction: row.timeout_min_seconds === null || row.timeout_max_seconds === null || row.timeout_fallback_text === null
+    ? null
+    : {
+      minSeconds: row.timeout_min_seconds,
+      maxSeconds: row.timeout_max_seconds,
+      fallbackText: row.timeout_fallback_text,
+    },
   useCount: row.use_count,
   lastUsedAt: row.last_used_at,
   createdAt: row.created_at,
@@ -229,7 +245,8 @@ const aliasConflict = async (
 export const textCommandSelectColumns = `channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
                                        aliases_json, user_cooldown_seconds, stream_condition, response_type,
                                        chat_target, games_json, template_fields_json, last_used_at, created_at, updated_at, revision,
-                                       use_count, variable_name, variable_operation, variable_amount`;
+                                       use_count, variable_name, variable_operation, variable_amount,
+                                       timeout_min_seconds, timeout_max_seconds, timeout_fallback_text`;
 
 export const createTextCommandRepository = (
   db: D1Database,
@@ -262,7 +279,8 @@ export const createTextCommandRepository = (
               command.user_cooldown_seconds, command.stream_condition, command.response_type,
               command.chat_target,
               command.games_json, command.template_fields_json, command.last_used_at, command.created_at, command.updated_at,
-              command.revision, command.use_count, command.variable_name, command.variable_operation, command.variable_amount
+              command.revision, command.use_count, command.variable_name, command.variable_operation, command.variable_amount,
+              command.timeout_min_seconds, command.timeout_max_seconds, command.timeout_fallback_text
          FROM text_command_aliases AS alias
          JOIN text_commands AS command
            ON command.channel_id = alias.channel_id AND command.command_name = alias.command_name
@@ -287,8 +305,9 @@ export const createTextCommandRepository = (
         (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
          aliases_json, user_cooldown_seconds, stream_condition, response_type, chat_target,
          games_json, template_fields_json, variable_name, variable_operation, variable_amount,
+         timeout_min_seconds, timeout_max_seconds, timeout_fallback_text,
          last_used_at, created_at, updated_at, revision)
-       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
+       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
         WHERE NOT EXISTS (
           SELECT 1 FROM text_commands AS other
            WHERE other.channel_id = ? AND other.command_name = ?
@@ -321,6 +340,9 @@ export const createTextCommandRepository = (
       input.variableAction?.name ?? null,
       input.variableAction?.operation ?? null,
       input.variableAction?.amount ?? null,
+      input.timeoutAction?.minSeconds ?? null,
+      input.timeoutAction?.maxSeconds ?? null,
+      input.timeoutAction?.fallbackText ?? null,
       input.now,
       input.now,
       initialTextCommandRevision(input.now),
@@ -350,6 +372,7 @@ export const createTextCommandRepository = (
       responseType,
       chatTarget,
       variableAction: input.variableAction ?? null,
+      timeoutAction: input.timeoutAction ?? null,
       useCount: 0,
       lastUsedAt: null,
       createdAt: input.now,
@@ -406,6 +429,7 @@ export const createTextCommandRepository = (
             SET command_name = ?, response_text = ?, kind = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?,
               aliases_json = ?, user_cooldown_seconds = ?, stream_condition = ?, response_type = ?, chat_target = ?, games_json = ?,
                 template_fields_json = ?, variable_name = ?, variable_operation = ?, variable_amount = ?,
+                timeout_min_seconds = ?, timeout_max_seconds = ?, timeout_fallback_text = ?,
                 updated_at = ?, revision = revision + 1
           WHERE channel_id = ? AND command_name = ? AND revision = ?
             AND (command_name = ? OR NOT EXISTS (
@@ -440,6 +464,9 @@ export const createTextCommandRepository = (
         input.variableAction?.name ?? null,
         input.variableAction?.operation ?? null,
         input.variableAction?.amount ?? null,
+        input.timeoutAction?.minSeconds ?? null,
+        input.timeoutAction?.maxSeconds ?? null,
+        input.timeoutAction?.fallbackText ?? null,
         input.now,
         input.channelId,
         input.name,
@@ -474,6 +501,7 @@ export const createTextCommandRepository = (
         responseType: input.responseType,
         chatTarget,
         variableAction: input.variableAction ?? null,
+        timeoutAction: input.timeoutAction ?? null,
         useCount: before.useCount,
         ...extraTemplates,
         updatedAt: input.now,
@@ -564,6 +592,7 @@ export const createTextCommandRepository = (
           AND user_cooldown_seconds = ? AND stream_condition = ? AND response_type = ?
           AND template_fields_json = ?
           AND variable_name IS ? AND variable_operation IS ? AND variable_amount IS ?
+          AND timeout_min_seconds IS ? AND timeout_max_seconds IS ? AND timeout_fallback_text IS ?
           ${authorization.sql}`,
     ).bind(
       channelId,
@@ -582,6 +611,9 @@ export const createTextCommandRepository = (
       before.variableAction?.name ?? null,
       before.variableAction?.operation ?? null,
       before.variableAction?.amount ?? null,
+      before.timeoutAction?.minSeconds ?? null,
+      before.timeoutAction?.maxSeconds ?? null,
+      before.timeoutAction?.fallbackText ?? null,
       ...authorization.values,
     );
     const cleanupCooldowns = db.prepare(
@@ -800,10 +832,10 @@ export const listTextCommandTemplateUsageSources = async (
   channelId: string,
 ): Promise<readonly { text: string; kind: "command"; label: string }[]> => {
   const rows = await db.prepare(
-    "SELECT command_name, response_text, template_fields_json FROM text_commands WHERE channel_id = ? ORDER BY command_name",
-  ).bind(channelId).all<{ command_name: string; response_text: string; template_fields_json: string }>();
+    "SELECT command_name, response_text, template_fields_json, timeout_fallback_text FROM text_commands WHERE channel_id = ? ORDER BY command_name",
+  ).bind(channelId).all<{ command_name: string; response_text: string; template_fields_json: string; timeout_fallback_text: string | null }>();
   return rows.results.map((row) => ({
-    text: `${row.response_text} ${row.template_fields_json}`,
+    text: `${row.response_text} ${row.template_fields_json} ${row.timeout_fallback_text ?? ""}`,
     kind: "command",
     label: `!${row.command_name}`,
   }));

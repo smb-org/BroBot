@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
-import { TEXT_COMMAND_MINIMUM_TIERS, type TextCommand } from "../../src/modules/text_commands/contracts";
+import { TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand } from "../../src/modules/text_commands/contracts";
 import { statusForTier, renderCommandText } from "../../src/modules/text_commands/domain";
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
@@ -25,6 +25,7 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
   responseType: "reply",
   chatTarget: "source_only",
   variableAction: null,
+  timeoutAction: null,
   useCount: 0,
   lastUsedAt: null,
   createdAt: "2026-09-19T12:00:00.000Z",
@@ -43,7 +44,10 @@ const panelFetch = ({ commands = () => [makeCommand()], onMutation = () => jsonR
     const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-    if (url.pathname.endsWith("/template-variables") && method === "GET") return Promise.resolve(jsonResponse({ variables: [{ name: "welcome", moduleId: "text_library", isTextBlock: true }] }));
+    if (url.pathname.endsWith("/template-variables") && method === "GET") return Promise.resolve(jsonResponse({ variables: [
+      { name: "welcome", moduleId: "text_library", isTextBlock: true },
+      ...TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES.map((variable) => ({ ...variable, moduleId: "text_commands", isTextBlock: false })),
+    ] }));
     if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: [] }));
     if (url.pathname.includes("/commands/") || (url.pathname.endsWith("/commands") && method !== "GET")) {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
@@ -319,6 +323,7 @@ describe("Text command editor", () => {
         responseType: "reply",
         chatTarget: "source_only",
         variableAction: null,
+        timeoutAction: null,
       }));
     });
   });
@@ -351,6 +356,7 @@ describe("Text command editor", () => {
       responseType: "say",
       chatTarget: "source_only",
       variableAction: null,
+      timeoutAction: null,
     }));
   });
 
@@ -384,6 +390,7 @@ describe("Text command editor", () => {
       responseType: "say",
       chatTarget: "source_only",
       variableAction: null,
+      timeoutAction: null,
     }));
   });
 
@@ -580,6 +587,42 @@ describe("Text command editor", () => {
     expect(screen.queryByText("Der Bot ist hier kein Moderator — der Text geht als normale Nachricht raus.")).not.toBeInTheDocument();
   });
 
+  it("configures a caller timeout with ranged seconds, fallback templates, and a moderator warning", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (method, _path, body) => {
+        if (method === "POST") created = body;
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher, { botIsModerator: false });
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "roulette" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Timed out for {timeout.duration}" } });
+    fireEvent.click(screen.getByRole("switch", { name: "Aufrufer timeouten" }));
+
+    expect(screen.getByRole("spinbutton", { name: "Mindestens" })).toHaveValue("120");
+    expect(screen.getByRole("spinbutton", { name: "Höchstens" })).toHaveValue("120");
+    expect(screen.getByText("Der Bot ist kein Moderator. Timeouts können nicht ausgeführt werden.")).toBeInTheDocument();
+    const minimum = screen.getByRole("spinbutton", { name: "Mindestens" });
+    const maximum = screen.getByRole("spinbutton", { name: "Höchstens" });
+    const fallback = screen.getByRole("textbox", { name: "Ersatztext, wenn der Timeout abgelehnt wird" });
+    fireEvent.change(minimum, { target: { value: "30" } });
+    fireEvent.change(maximum, { target: { value: "60" } });
+    fireEvent.change(fallback, { target: { value: "Cannot time out for {timeout.duration}." } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created).toMatchObject({
+      name: "roulette",
+      timeoutAction: {
+        minSeconds: 30,
+        maxSeconds: 60,
+        fallbackText: "Cannot time out for {timeout.duration}.",
+      },
+    }));
+  });
+
   it("shows operators a read-only property list and keeps Active as an immediate action", async () => {
     const fetcher = panelFetch();
     renderPanel(fetcher, { canManage: false });
@@ -670,6 +713,7 @@ describe("Text command editor", () => {
       responseType: "reply",
       chatTarget: "source_only",
       variableAction: null,
+      timeoutAction: null,
     }));
     await waitFor(() => expect(within(screen.getByRole("row", { name: /!hallo/u })).getByText("Moderatoren")).toHaveClass("ui-badge"));
     expect(current.minimumTier).toBe("moderator");
