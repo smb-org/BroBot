@@ -58,16 +58,18 @@ const setup = async (control: "none" | "mute" | "pause" = "none", pauseOnClose =
   let counts = [0, 0];
   let revision = 0;
   let ballotOpen = false;
+  let ballotFrozen = false;
   const ballotObject = {
     openBallot: vi.fn(() => {
       if (ballotOpen) return Promise.resolve({ status: "busy" as const, moduleId: "votekick" });
       ballotOpen = true;
+      ballotFrozen = false;
       counts = [0, 0];
       revision = 0;
       return Promise.resolve({ status: "opened" as const });
     }),
     castBallot: vi.fn((_moduleId: string, _ballotId: string, _userId: string, choice: number) => {
-      if (!ballotOpen) return Promise.resolve({ status: "not_open" as const, counts: [], revision: 0 });
+      if (!ballotOpen || ballotFrozen) return Promise.resolve({ status: "not_open" as const, counts: [], revision: 0 });
       counts[choice - 1] = (counts[choice - 1] ?? 0) + 1;
       revision += 1;
       return Promise.resolve({ status: "counted" as const, counts: [...counts], revision });
@@ -80,17 +82,21 @@ const setup = async (control: "none" | "mute" | "pause" = "none", pauseOnClose =
           .bind(new Date().toISOString()).run();
       }
       ballotOpen = false;
+      ballotFrozen = false;
       return { counts: [...counts], revision };
     }),
-    closeBallotIfNetAtLeast: vi.fn(async (_moduleId: string, _ballotId: string, threshold: number) => {
+    freezeBallot: vi.fn(async (_moduleId: string, _ballotId: string, condition: { positiveOptionIndex: number; negativeOptionIndex: number; threshold: number }) => {
       if (!ballotOpen) return { status: "not_open" as const, counts: [], revision: 0 };
+      if (ballotFrozen) return { status: "frozen" as const, counts: [...counts], revision };
+      if ((counts[condition.positiveOptionIndex] ?? 0) - (counts[condition.negativeOptionIndex] ?? 0) < condition.threshold) {
+        return { status: "open" as const, counts: [...counts], revision };
+      }
       if (pauseOnClose) {
         await database.prepare("INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('channel-a', 1, ?)")
           .bind(new Date().toISOString()).run();
       }
-      if ((counts[0] ?? 0) - (counts[1] ?? 0) < threshold) return { status: "open" as const, counts: [...counts], revision };
-      ballotOpen = false;
-      return { status: "closed" as const, counts: [...counts], revision };
+      ballotFrozen = true;
+      return { status: "frozen" as const, counts: [...counts], revision };
     }),
     scheduleModuleAlarm: vi.fn(() => Promise.resolve()),
     clearModuleAlarm: vi.fn(() => Promise.resolve()),

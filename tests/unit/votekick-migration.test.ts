@@ -160,6 +160,38 @@ describe("Votekick migration", () => {
     }
   });
 
+  it("claims a frozen pass from D1 counts that are behind the authoritative ballot revision", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "channel-a");
+      const repository = createVotekickRepository(database as unknown as D1Database);
+      const startedAt = new Date().toISOString();
+      await expect(repository.admit("channel-a", {
+        id: "ballot-frozen-pass",
+        targetUserId: "target-a",
+        targetLogin: "target-a",
+        initiatorUserId: "starter-a",
+        threshold: 3,
+        yesVotes: 1,
+        ballotRevision: 1,
+        startedAt,
+        endsAt: new Date(Date.now() + 60_000).toISOString(),
+      }, startedAt, 300, 1800)).resolves.toBe("admitted");
+
+      await expect(repository.finish("channel-a", "ballot-frozen-pass", "passed", 4, 1, 6, 120, startedAt))
+        .resolves.toBe(true);
+      await expect(database.prepare(
+        "SELECT status, yes_votes, no_votes, ballot_revision, duration_seconds FROM votekicks WHERE votekick_id = ?",
+      ).bind("ballot-frozen-pass").first()).resolves.toEqual({
+        status: "passed", yes_votes: 4, no_votes: 1, ballot_revision: 6, duration_seconds: 120,
+      });
+      await expect(repository.finish("channel-a", "ballot-frozen-pass", "passed", 4, 1, 6, 120, startedAt))
+        .resolves.toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
   it("expires overdue running rows on admission before applying cooldown checks", async () => {
     const database = new TestD1Database();
     try {

@@ -1526,31 +1526,45 @@ describe("ChannelObject realtime path", () => {
     await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
   });
 
-  it("keeps a threshold-crossed ballot open when its atomic snapshot falls below threshold", async () => {
+  it("freezes only from its atomic snapshot and retains that snapshot until close", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const object = objectFor([]);
     await object.openBallot("votekick", "kick-a", 2, 20_000);
     await object.castBallot("votekick", "kick-a", "yes-1", 1);
     await object.castBallot("votekick", "kick-a", "yes-2", 1);
+    await object.castBallot("votekick", "kick-a", "yes-3", 1);
     await object.castBallot("votekick", "kick-a", "no-1", 2);
 
-    await expect(object.closeBallotIfNetAtLeast("votekick", "kick-a", 2)).resolves.toEqual({
+    const condition = { kind: "net_at_least" as const, positiveOptionIndex: 0, negativeOptionIndex: 1, threshold: 3 };
+    await expect(object.freezeBallot("votekick", "kick-a", condition)).resolves.toEqual({
       status: "open",
-      counts: [2, 1],
-      revision: 3,
-    });
-    await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [2, 1], revision: 3 });
-    await object.castBallot("votekick", "kick-a", "yes-3", 1);
-    await expect(object.closeBallotIfNetAtLeast("votekick", "kick-a", 2)).resolves.toEqual({
-      status: "closed",
       counts: [3, 1],
       revision: 4,
     });
+    await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [3, 1], revision: 4 });
+    await object.castBallot("votekick", "kick-a", "yes-4", 1);
+    await expect(object.freezeBallot("votekick", "kick-a", condition)).resolves.toEqual({
+      status: "frozen",
+      counts: [4, 1],
+      revision: 5,
+    });
+    await expect(object.castBallot("votekick", "kick-a", "late-voter", 2)).resolves.toEqual({
+      status: "not_open",
+      counts: [],
+      revision: 0,
+    });
+    await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [4, 1], revision: 5 });
+    await expect(object.freezeBallot("votekick", "kick-a", condition)).resolves.toEqual({
+      status: "frozen",
+      counts: [4, 1],
+      revision: 5,
+    });
+    await expect(object.closeBallot("votekick", "kick-a")).resolves.toEqual({ counts: [4, 1], revision: 5 });
     await expect(object.readBallot("votekick", "kick-a")).resolves.toBeNull();
   });
 
-  it("returns the closed ballot snapshot when expiry alarm cleanup fails", async () => {
+  it("keeps a frozen ballot readable after expiry until explicit close", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const object = objectFor([]);
@@ -1562,11 +1576,21 @@ describe("ChannelObject realtime path", () => {
       "clearAlarmEntry",
     ).mockRejectedValue(new Error("alarm cleanup unavailable"));
 
-    await expect(object.closeBallotIfNetAtLeast("votekick", "kick-a", 2)).resolves.toEqual({
-      status: "closed",
+    const condition = { kind: "net_at_least" as const, positiveOptionIndex: 0, negativeOptionIndex: 1, threshold: 2 };
+    await expect(object.freezeBallot("votekick", "kick-a", condition)).resolves.toEqual({
+      status: "frozen",
       counts: [2, 0],
       revision: 2,
     });
+    vi.setSystemTime(20_000);
+    await object.alarm();
+    await expect(object.readBallot("votekick", "kick-a")).resolves.toEqual({ counts: [2, 0], revision: 2 });
+    await expect(object.openBallot("another_module", "another-ballot", 2, 30_000)).resolves.toEqual({
+      status: "busy",
+      moduleId: "votekick",
+    });
+    expect(clearAlarmEntry).not.toHaveBeenCalled();
+    await expect(object.closeBallot("votekick", "kick-a")).rejects.toThrow("alarm cleanup unavailable");
     await expect(object.readBallot("votekick", "kick-a")).resolves.toBeNull();
     expect(clearAlarmEntry).toHaveBeenCalledOnce();
   });

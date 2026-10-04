@@ -593,6 +593,11 @@ export interface ModuleAlarmContext {
   channelId: string;
   /** Ephemeral ballot access bound to this alarm's channel and module. */
   ballots: ModuleBallotAccess;
+  /** Channel locale and unbiased randomness for preparing the same module actions as event handlers. */
+  channelLanguage: () => Promise<ModuleLanguage>;
+  secureRandomInteger: (maximumExclusive: number) => number;
+  /** Executes a prepared timeout through the host moderation path for alarm recovery. */
+  executeTimeout: (action: Extract<ModuleAction, { kind: "timeout" }>) => Promise<ModuleTimeoutOutcome>;
   storage: {
     get(key: string): Promise<unknown>;
     put(key: string, value: unknown): Promise<void>;
@@ -622,6 +627,8 @@ export interface ModuleAlarmContext {
   streamState: () => Promise<ModuleStreamState>;
   streamStartedAt: () => Promise<{ streamId: string | null; startedAt: string | null }>;
 }
+
+export type ModuleTimeoutOutcome = "applied" | "rejected" | "ambiguous" | "suppressed";
 
 export interface ModuleEventTimeContext {
   DB: D1Database;
@@ -707,8 +714,16 @@ export type BallotCastResult = BallotSnapshot & {
   status: "counted" | "changed" | "unchanged" | "not_open";
 };
 
-export type BallotConditionalCloseResult =
-  | ({ status: "open" | "closed" } & BallotSnapshot)
+/** Data-only predicate evaluated against a ballot's current counts in the host store. */
+export interface BallotFreezeCondition {
+  kind: "net_at_least";
+  positiveOptionIndex: number;
+  negativeOptionIndex: number;
+  threshold: number;
+}
+
+export type BallotFreezeResult =
+  | ({ status: "open" | "frozen" } & BallotSnapshot)
   | ({ status: "not_open" } & BallotSnapshot);
 
 /** Ballot access already bound by the host to one channel and one module. */
@@ -717,7 +732,8 @@ export interface ModuleBallotAccess {
   cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
-  closeIfNetAtLeast: (ballotId: string, threshold: number) => Promise<BallotConditionalCloseResult>;
+  /** Atomically freezes the authoritative snapshot when condition is met; frozen ballots reject casts until close. */
+  freeze: (ballotId: string, condition: BallotFreezeCondition) => Promise<BallotFreezeResult>;
 }
 
 export type ModuleStreamState = "online" | "offline" | "unknown";

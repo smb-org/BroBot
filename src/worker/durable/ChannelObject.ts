@@ -20,6 +20,8 @@ import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
 import type {
   ActiveChatterActivity,
   BallotCastResult,
+  BallotFreezeCondition,
+  BallotFreezeResult,
   BallotOpenResult,
   BallotSnapshot,
   BotModule,
@@ -43,11 +45,13 @@ import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import { sendChatMessage } from "../chat";
+import { sendModerationBan } from "../moderation";
 import { readChannelStreamState } from "../db/stream-state";
 import { readDispatchChannelState } from "../db/channel-controls";
 import { chatOutputSuppressionReason } from "../chat-output-gate";
 import { resolveModuleEventTimes } from "../module-event-times";
 import { renderScheduledTemplate } from "../scheduled-template-renderer";
+import { secureRandomInteger } from "../template-resolver";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import {
   claimModuleAlarmSend,
@@ -65,8 +69,8 @@ import {
   ballotIdentityFromExpiryAlarmKey,
   castStoredBallot,
   closeStoredBallot,
-  closeStoredBallotIfNetAtLeast,
   expireStoredBallot,
+  freezeStoredBallot,
   openStoredBallot,
   readStoredBallot,
 } from "./ballots";
@@ -1225,6 +1229,17 @@ export class ChannelObject extends DurableObject<Env> {
       DB: this.env.DB,
       channelId,
       ballots: this.ballotAccess(moduleId),
+      channelLanguage: async () => {
+        const row = await this.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
+          .bind(channelId).first<{ language: string }>();
+        return row?.language === "en" ? "en" : "de";
+      },
+      secureRandomInteger,
+      executeTimeout: async (action) => (await sendModerationBan(this.env, channelId, {
+        userId: action.userId,
+        durationSeconds: action.durationSeconds,
+        reason: action.reason,
+      })).outcome,
       storage: {
         get: (key: string) => this.ctx.storage.get(`${storagePrefix}${key}`),
         put: (key: string, value: unknown) => this.ctx.storage.put(`${storagePrefix}${key}`, value),
@@ -1447,7 +1462,7 @@ export class ChannelObject extends DurableObject<Env> {
       cast: (ballotId, userId, choice) => this.castBallot(moduleId, ballotId, userId, choice),
       read: (ballotId) => this.readBallot(moduleId, ballotId),
       close: (ballotId) => this.closeBallot(moduleId, ballotId),
-      closeIfNetAtLeast: (ballotId, threshold) => this.closeBallotIfNetAtLeast(moduleId, ballotId, threshold),
+      freeze: (ballotId, condition) => this.freezeBallot(moduleId, ballotId, condition),
     };
   }
 
@@ -1508,16 +1523,8 @@ export class ChannelObject extends DurableObject<Env> {
     return result;
   }
 
-  public async closeBallotIfNetAtLeast(moduleId: string, ballotId: string, threshold: number) {
-    const result = await closeStoredBallotIfNetAtLeast(this.ctx.storage, moduleId, ballotId, threshold);
-    if (result.status === "closed" || result.status === "not_open") {
-      try {
-        await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
-      } catch {
-        // The ballot snapshot is authoritative; a stale alarm safely finds no ballot to expire.
-      }
-    }
-    return result;
+  public async freezeBallot(moduleId: string, ballotId: string, condition: BallotFreezeCondition): Promise<BallotFreezeResult> {
+    return await freezeStoredBallot(this.ctx.storage, moduleId, ballotId, condition);
   }
 
   private async expireBallot(key: string): Promise<void> {

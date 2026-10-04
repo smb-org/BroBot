@@ -1,4 +1,6 @@
 import type {
+  BallotFreezeCondition,
+  BallotFreezeResult,
   BallotCastResult,
   BallotSnapshot,
 } from "../../modules/contract";
@@ -29,6 +31,7 @@ interface StoredBallot {
   optionCount: number;
   counts: number[];
   revision: number;
+  frozen?: boolean;
   openedAt: number;
   expiresAt: number;
 }
@@ -63,6 +66,7 @@ const isStoredBallot = (value: unknown): value is StoredBallot => {
     Array.isArray(ballot.counts) && ballot.counts.length === ballot.optionCount &&
     ballot.counts.every((count) => Number.isSafeInteger(count) && count >= 0) &&
     Number.isSafeInteger(ballot.revision) && (ballot.revision ?? -1) >= 0 &&
+    (ballot.frozen === undefined || typeof ballot.frozen === "boolean") &&
     Number.isFinite(ballot.openedAt) && Number.isFinite(ballot.expiresAt);
 };
 
@@ -134,7 +138,7 @@ export const openStoredBallot = async (
       const activeStored = activeKey === null ? undefined : await transaction.get(activeKey);
       if (activeKey !== null && isStoredBallot(activeStored) &&
           activeStored.moduleId === active.moduleId && activeStored.ballotId === active.ballotId &&
-          activeStored.expiresAt > now) {
+          (activeStored.frozen === true || activeStored.expiresAt > now)) {
         return {
           status: "busy",
           moduleId: active.moduleId,
@@ -154,6 +158,7 @@ export const openStoredBallot = async (
       optionCount,
       counts: Array.from({ length: optionCount }, () => 0),
       revision: 0,
+      frozen: false,
       openedAt: now,
       expiresAt,
     };
@@ -190,6 +195,7 @@ export const castStoredBallot = async (
         !equalBytes(ballot.key, stored.key)) {
       return { status: "not_open", counts: [], revision: 0 };
     }
+    if (ballot.frozen === true) return { status: "not_open", counts: [], revision: 0 };
     if (ballot.expiresAt <= Date.now()) {
       await deleteBallotData(transaction, moduleId, ballotId);
       return { status: "not_open", counts: [], revision: 0 };
@@ -225,6 +231,7 @@ export const readStoredBallot = async (
   return await storage.transaction(async (transaction) => {
     const ballot = await transaction.get(ballotKey(moduleId, ballotId));
     if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) return null;
+    if (ballot.frozen === true) return snapshotOf(ballot);
     if (ballot.expiresAt <= Date.now()) {
       await deleteBallotData(transaction, moduleId, ballotId);
       return null;
@@ -271,6 +278,7 @@ export const expireStoredBallot = async (
   return await storage.transaction(async (transaction) => {
     const ballot = await transaction.get(ballotKey(moduleId, ballotId));
     if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) return null;
+    if (ballot.frozen === true) return null;
     if (ballot.expiresAt > Date.now()) return ballot.expiresAt;
     await deleteBallotData(transaction, moduleId, ballotId);
     return null;
@@ -292,30 +300,41 @@ export const closeStoredBallot = async (
   });
 };
 
-/** Closes a ballot only when its transactionally read net tally still meets the threshold. */
-export const closeStoredBallotIfNetAtLeast = async (
+/** Freezes a ballot in place when its transactionally read counts satisfy a data-only condition. */
+export const freezeStoredBallot = async (
   storage: BallotStorage,
   moduleId: string,
   ballotId: string,
-  threshold: number,
-): Promise<({ status: "open" | "closed" } & BallotSnapshot) | ({ status: "not_open" } & BallotSnapshot)> => {
+  condition: BallotFreezeCondition,
+): Promise<BallotFreezeResult> => {
   validId(moduleId, "Module id");
   validId(ballotId, "Ballot id");
-  if (!Number.isSafeInteger(threshold) || threshold < 1) throw new Error("Ballot threshold must be a positive integer.");
+  if (!Number.isSafeInteger(condition.positiveOptionIndex) ||
+      !Number.isSafeInteger(condition.negativeOptionIndex) || condition.positiveOptionIndex < 0 ||
+      condition.negativeOptionIndex < 0 || condition.positiveOptionIndex === condition.negativeOptionIndex ||
+      !Number.isSafeInteger(condition.threshold) || condition.threshold < 1) {
+    throw new Error("Ballot freeze condition is invalid.");
+  }
   return await storage.transaction(async (transaction) => {
     const ballot = await transaction.get(ballotKey(moduleId, ballotId));
     if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) {
       return { status: "not_open", counts: [], revision: 0 };
     }
+    if (ballot.frozen === true) return { status: "frozen", ...snapshotOf(ballot) };
     if (ballot.expiresAt <= Date.now()) {
       await deleteBallotData(transaction, moduleId, ballotId);
       return { status: "not_open", counts: [], revision: ballot.revision };
     }
     const snapshot = snapshotOf(ballot);
-    if ((snapshot.counts[0] ?? 0) - (snapshot.counts[1] ?? 0) < threshold) {
+    if (condition.positiveOptionIndex >= snapshot.counts.length || condition.negativeOptionIndex >= snapshot.counts.length) {
+      throw new RangeError("Ballot freeze option index is outside the ballot.");
+    }
+    if ((snapshot.counts[condition.positiveOptionIndex] ?? 0) -
+        (snapshot.counts[condition.negativeOptionIndex] ?? 0) < condition.threshold) {
       return { status: "open", ...snapshot };
     }
-    await deleteBallotData(transaction, moduleId, ballotId);
-    return { status: "closed", ...snapshot };
+    const frozen: StoredBallot = { ...ballot, frozen: true };
+    await transaction.put(ballotKey(moduleId, ballotId), frozen);
+    return { status: "frozen", ...snapshotOf(frozen) };
   });
 };

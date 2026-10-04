@@ -1,5 +1,5 @@
 import { ballotChoiceFromMessage } from "../contract";
-import type { ModuleAction, ModuleAlarmContext, ModuleBallotAccess, ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
+import type { BallotSnapshot, ModuleAction, ModuleAlarmContext, ModuleBallotAccess, ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { formatTimeoutDuration, rollTimeoutSeconds } from "../contracts/moderation";
 import { VOTEKICK_WINDOW_MS, votekickSettingsSchema, type Votekick, type VotekickSettings } from "./contracts";
 import { canStartVotekick, isActiveVotekickTarget, votekickThreshold, votekickTimeoutReason, VOTEKICK_COMMAND_PATTERN, wasActiveBeforeVotekick } from "./domain";
@@ -38,7 +38,102 @@ const renderChat = async (
   };
 };
 
-/** D1 owns expiry; ballot closure is only cleanup and can never block the status transition. */
+const freezeCondition = (running: Votekick) => ({
+  kind: "net_at_least" as const,
+  positiveOptionIndex: 0,
+  negativeOptionIndex: 1,
+  threshold: running.threshold,
+});
+
+const snapshotCounts = (snapshot: BallotSnapshot): readonly [number, number] => [
+  snapshot.counts[0] ?? 0,
+  snapshot.counts[1] ?? 0,
+];
+
+type PassPreparation = {
+  action: Extract<ModuleAction, { kind: "timeout" }>;
+  diagnostics: readonly ModuleDiagnostic[];
+};
+
+const preparePass = async (
+  running: Votekick,
+  snapshot: BallotSnapshot,
+  settings: VotekickSettings,
+  language: "de" | "en",
+  randomInteger: (maximumExclusive: number) => number,
+  renderTemplate: (
+    text: string,
+    values: Readonly<Record<string, string | number>>,
+  ) => Promise<{ text: string; diagnostics?: readonly ModuleDiagnostic[] }>,
+): Promise<PassPreparation> => {
+  const [yesVotes, noVotes] = snapshotCounts(snapshot);
+  const durationSeconds = rollTimeoutSeconds(settings.duration, randomInteger);
+  const duration = formatTimeoutDuration(durationSeconds, language);
+  const values = {
+    "votekick.target": running.targetLogin ?? running.targetUserId ?? "",
+    "votekick.yes": yesVotes,
+    "votekick.no": noVotes,
+    "votekick.threshold": running.threshold,
+    "votekick.seconds": durationSeconds,
+    "votekick.duration": duration,
+  };
+  const [pass, fail] = await Promise.all([
+    renderTemplate(settings.passText, values),
+    renderTemplate(settings.failText, values),
+  ]);
+  return {
+    action: {
+      kind: "timeout",
+      userId: running.targetUserId ?? "",
+      durationSeconds,
+      reason: votekickTimeoutReason(yesVotes, noVotes, running.id),
+      ...(pass.text.length === 0 ? {} : { onSuccess: { kind: "chat", text: pass.text, target: settings.chatTarget, automated: false } }),
+      ...(fail.text.length === 0 ? {} : { onFailure: { kind: "chat", text: fail.text, target: settings.chatTarget, automated: false } }),
+    },
+    diagnostics: [...(pass.diagnostics ?? []), ...(fail.diagnostics ?? [])],
+  };
+};
+
+const claimPassed = async (
+  channelId: string,
+  running: Votekick,
+  snapshot: BallotSnapshot,
+  repository: VotekickRepository,
+  durationSeconds: number,
+): Promise<boolean> => {
+  const [yesVotes, noVotes] = snapshotCounts(snapshot);
+  return await repository.finish(
+    channelId, running.id, "passed", yesVotes, noVotes, snapshot.revision, durationSeconds, new Date().toISOString(),
+  );
+};
+
+const tryFrozenPass = async (
+  channelId: string,
+  running: Votekick,
+  settings: VotekickSettings,
+  repository: VotekickRepository,
+  context: ModuleExecutionContext,
+  persistOpenSnapshot: boolean,
+): Promise<ModuleResult | null> => {
+  const frozen = await context.ballots.freeze(running.id, freezeCondition(running));
+  if (frozen.status === "open" && persistOpenSnapshot) {
+    const [yesVotes, noVotes] = snapshotCounts(frozen);
+    await repository.updateCounts(channelId, running.id, yesVotes, noVotes, frozen.revision);
+    return null;
+  }
+  if (frozen.status === "open") return null;
+  if (frozen.status !== "frozen") return null;
+
+  const prepared = await preparePass(
+    running, frozen, settings, await context.channelLanguage(), context.secureRandomInteger, context.renderTemplate,
+  );
+  if (!await claimPassed(channelId, running, frozen, repository, prepared.action.durationSeconds)) return emptyResult();
+  await bestEffortClose(context, running.id);
+  await bestEffortClear(context, `close:${running.id}`);
+  return { actions: [prepared.action], diagnostics: [...prepared.diagnostics] };
+};
+
+/** D1 records expiry; final expiry counts always come from the host ballot snapshot. */
 const recoverOverdue = async (
   context: { channelId: string; ballots: ModuleBallotAccess },
   repository: VotekickRepository,
@@ -59,6 +154,10 @@ const recoverOverdue = async (
 };
 
 const bestEffortClose = async (context: ModuleExecutionContext, id: string): Promise<void> => {
+  try { await context.ballots.close(id); } catch { /* Its own expiry alarm is the cleanup fallback. */ }
+};
+
+const bestEffortCloseAlarm = async (context: Pick<ModuleAlarmContext, "ballots">, id: string): Promise<void> => {
   try { await context.ballots.close(id); } catch { /* Its own expiry alarm is the cleanup fallback. */ }
 };
 
@@ -238,80 +337,34 @@ export const processVotekickMessage = async (
   const starterId = payloadString(event, "chatter_user_id");
   if (starterId === null || starterId === await context.botUserId?.()) return emptyResult();
   const command = VOTEKICK_COMMAND_PATTERN.exec(text.trim());
+  const choice = ballotChoiceFromMessage(text, 2);
+  if (choice !== null) {
+    const running = await repository.running(event.channelId);
+    if (running !== null && running.targetUserId !== null) {
+      const recovered = await tryFrozenPass(event.channelId, running, event.settings, repository, context, false);
+      if (recovered !== null) return recovered;
+    }
+  }
+  try { await recoverOverdue({ channelId: event.channelId, ballots: context.ballots }, repository, new Date().toISOString()); }
+  catch { return command === null ? emptyResult() : rejection("lookup_failure"); }
+
   if (command !== null) {
-    try { await recoverOverdue({ channelId: event.channelId, ballots: context.ballots }, repository, new Date().toISOString()); }
-    catch { return rejection("lookup_failure"); }
     if (!canStartVotekick(event.chatStatus)) return rejection("starter_not_authorized");
     return commandResult(event, repository, context, command[1] ?? "");
   }
 
-  const choice = ballotChoiceFromMessage(text, 2);
   if (choice === null) return emptyResult();
-  try { await recoverOverdue({ channelId: event.channelId, ballots: context.ballots }, repository, new Date().toISOString()); }
-  catch { return emptyResult(); }
-  const running = await repository.running(event.channelId);
-  if (running === null || running.targetUserId === null || running.initiatorUserId === null) return emptyResult();
+  const current = await repository.running(event.channelId);
+  if (current === null || current.targetUserId === null || current.initiatorUserId === null) return emptyResult();
   const messageAt = Date.parse(event.eventSubTimestamp ?? "");
-  const startedAt = Date.parse(running.startedAt);
-  const endsAt = Date.parse(running.endsAt);
+  const startedAt = Date.parse(current.startedAt);
+  const endsAt = Date.parse(current.endsAt);
   if (!Number.isFinite(messageAt) || !Number.isFinite(startedAt) || !Number.isFinite(endsAt) ||
       messageAt < startedAt || messageAt > endsAt) return emptyResult();
   const activity = await context.activeChatters.seen(starterId);
-  if (starterId !== running.initiatorUserId && !wasActiveBeforeVotekick(activity?.firstSeenAt ?? null, running.startedAt)) return emptyResult();
-  const result = await context.ballots.cast(running.id, starterId, choice);
-  if (result.status === "not_open") return emptyResult();
-  const yesVotes = result.counts[0] ?? 0;
-  const noVotes = result.counts[1] ?? 0;
-  await repository.updateCounts(event.channelId, running.id, yesVotes, noVotes, result.revision);
-
-  let snapshot = await context.ballots.read(running.id);
-  while (snapshot !== null) {
-    const finalYes = snapshot.counts[0] ?? 0;
-    const finalNo = snapshot.counts[1] ?? 0;
-    await repository.updateCounts(event.channelId, running.id, finalYes, finalNo, snapshot.revision);
-    if (finalYes - finalNo < running.threshold) return emptyResult();
-
-    const durationSeconds = rollTimeoutSeconds(event.settings.duration, context.secureRandomInteger);
-    const duration = formatTimeoutDuration(durationSeconds, await context.channelLanguage());
-    const values = {
-      "votekick.target": running.targetLogin ?? running.targetUserId,
-      "votekick.yes": finalYes,
-      "votekick.no": finalNo,
-      "votekick.threshold": running.threshold,
-      "votekick.seconds": durationSeconds,
-      "votekick.duration": duration,
-    };
-    const [pass, fail] = await Promise.all([
-      context.renderTemplate(event.settings.passText, values),
-      context.renderTemplate(event.settings.failText, values),
-    ]);
-    const action: ModuleAction = {
-      kind: "timeout",
-      userId: running.targetUserId,
-      durationSeconds,
-      reason: votekickTimeoutReason(finalYes, finalNo, running.id),
-      ...(pass.text.length === 0 ? {} : { onSuccess: { kind: "chat", text: pass.text, target: event.settings.chatTarget, automated: false } }),
-      ...(fail.text.length === 0 ? {} : { onFailure: { kind: "chat", text: fail.text, target: event.settings.chatTarget, automated: false } }),
-    };
-
-    // Preparation can yield while another voter changes the ballot. Re-read
-    // before claiming so the timeout is built from the latest stable snapshot.
-    const latest = await context.ballots.read(running.id);
-    if (latest === null) return emptyResult();
-    if (latest.revision !== snapshot.revision) {
-      snapshot = latest;
-      continue;
-    }
-
-    const stored = await repository.finish(
-      event.channelId, running.id, "passed", finalYes, finalNo, snapshot.revision, durationSeconds, new Date().toISOString(),
-    );
-    if (!stored) return emptyResult();
-    await bestEffortClose(context, running.id);
-    try { await context.clearAlarm(`close:${running.id}`); } catch { /* A stale expiry alarm sees the passed row and exits. */ }
-    return { actions: [action], diagnostics: [...pass.diagnostics, ...fail.diagnostics] };
-  }
-  return emptyResult();
+  if (starterId !== current.initiatorUserId && !wasActiveBeforeVotekick(activity?.firstSeenAt ?? null, current.startedAt)) return emptyResult();
+  await context.ballots.cast(current.id, starterId, choice);
+  return await tryFrozenPass(event.channelId, current, event.settings, repository, context, true) ?? emptyResult();
 };
 
 export const closeExpiredVotekick = async (
@@ -322,13 +375,54 @@ export const closeExpiredVotekick = async (
   const id = alarmKey.startsWith("close:") ? alarmKey.slice("close:".length) : "";
   if (id.length === 0) return;
   const now = new Date().toISOString();
-  const finalized = await recoverOverdue(context, repository, now);
   let running = await repository.byId(context.channelId, id);
   if (running === null) {
-    try { await context.ballots.close(id); } catch { /* No D1 row remains; the ballot expires on its own. */ }
+    await bestEffortCloseAlarm(context, id);
     return;
   }
   if (running.status === "running") {
+    if (running.targetUserId !== null) {
+      const frozen = await context.ballots.freeze(id, freezeCondition(running));
+      if (frozen.status === "frozen") {
+        const stored = await context.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?")
+          .bind(context.channelId, "votekick").first<{ settings: string }>();
+        if (stored === null) throw new Error("Votekick settings are unavailable for frozen ballot recovery.");
+        const settings = votekickSettingsSchema.parse(JSON.parse(stored.settings));
+        const prepared = await preparePass(
+          running, frozen, settings, await context.channelLanguage(), context.secureRandomInteger, context.renderTemplate,
+        );
+        const claimed = await claimPassed(
+          context.channelId, running, frozen, repository, prepared.action.durationSeconds,
+        );
+        if (!claimed) {
+          const current = await repository.byId(context.channelId, id);
+          if (current?.status !== "passed") throw new Error("Frozen votekick pass is waiting for its D1 claim.");
+          await bestEffortCloseAlarm(context, id);
+          await context.clear(`close:${id}`);
+          return;
+        }
+        try {
+          const outcome = await context.executeTimeout(prepared.action);
+          const followUp = outcome === "applied" ? prepared.action.onSuccess
+            : outcome === "rejected" ? prepared.action.onFailure
+              : undefined;
+          if (followUp?.kind === "chat" && followUp.text.length > 0) {
+            const delivery = await context.sendChat(
+              followUp.text,
+              `votekick:${id}:passed:${outcome}`,
+              undefined,
+              async () => (await repository.byId(context.channelId, id))?.status === "passed",
+              followUp.target === "where_asked" ? settings.chatTarget : followUp.target ?? settings.chatTarget,
+            );
+            if (!delivery.sent && delivery.retryable) throw new Error(`Votekick pass follow-up failed: ${delivery.reason ?? "unknown"}.`);
+          }
+        } finally {
+          await bestEffortCloseAlarm(context, id);
+          try { await context.clear(`close:${id}`); } catch { /* A stale alarm safely observes the passed D1 row. */ }
+        }
+        return;
+      }
+    }
     const expiresAt = Date.parse(running.endsAt);
     if (Number.isFinite(expiresAt) && expiresAt > Date.now()) {
       await context.schedule(`close:${id}`, expiresAt);
@@ -339,18 +433,15 @@ export const closeExpiredVotekick = async (
   }
   if (running?.status !== "expired") return;
 
-  if (!finalized.some((row) => row.id === id)) {
-    try {
-      const snapshot = await context.ballots.close(id);
-      if (snapshot !== null) {
-        await repository.updateCounts(context.channelId, id, snapshot.counts[0] ?? 0, snapshot.counts[1] ?? 0, snapshot.revision);
-        running = await repository.byId(context.channelId, id);
-      }
-    } catch {
-      // Expiry is committed in D1 already; persisted revision-guarded counts are the fallback.
+  try {
+    const snapshot = await context.ballots.close(id);
+    if (snapshot !== null) {
+      const [yesVotes, noVotes] = snapshotCounts(snapshot);
+      await repository.updateCounts(context.channelId, id, yesVotes, noVotes, snapshot.revision);
+      running = await repository.byId(context.channelId, id);
     }
-  } else {
-    running = await repository.byId(context.channelId, id);
+  } catch {
+    // Expiry is committed in D1 already; revision-guarded authoritative counts are the fallback.
   }
   if (running === null || running.status !== "expired") return;
 
