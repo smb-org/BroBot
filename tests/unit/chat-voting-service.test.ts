@@ -69,6 +69,7 @@ const executionContext = (overrides: Partial<ModuleExecutionContext> = {}): Modu
   prepareVariableChange: vi.fn(() => ({} as D1PreparedStatement)),
   channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
   channelTimeZone: vi.fn(() => Promise.resolve("UTC")),
+  secureRandomInteger: vi.fn(() => 0),
   scheduleAlarm: vi.fn(() => Promise.resolve()),
   clearAlarm: vi.fn(() => Promise.resolve()),
   ...overrides,
