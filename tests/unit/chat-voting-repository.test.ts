@@ -35,14 +35,14 @@ describe("chat voting repository mutation guards", () => {
         "DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?",
       ).bind("fictional-channel", "fictional-operator").run();
 
-      await expect(repository.requestManualClose("fictional-channel", vote.id, "owner-token", authorization)).resolves.toBe(false);
+      await expect(repository.requestManualClose("fictional-channel", vote.id, authorization)).resolves.toBe(false);
       await expect(repository.open("fictional-channel")).resolves.toMatchObject({ id: vote.id, status: "open" });
     } finally {
       database.close();
     }
   });
 
-  it("only lets the manual-close owner restore the prior reason", async () => {
+  it("accepts repeated manual-close requests for an open vote", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "fictional-channel");
@@ -58,21 +58,18 @@ describe("chat voting repository mutation guards", () => {
         closeReason: "limit",
       };
       await repository.insertOpen(vote);
-      await repository.requestManualClose("fictional-channel", vote.id, "owner-token");
-
-      await repository.restoreCloseReason("fictional-channel", vote.id, "other-owner");
+      await expect(repository.requestManualClose("fictional-channel", vote.id)).resolves.toBe(true);
       await expect(repository.open("fictional-channel")).resolves.toMatchObject({
         id: vote.id,
         status: "open",
         closeReason: "manual",
       });
 
-      await repository.restoreCloseReason("fictional-channel", vote.id, "owner-token");
+      await expect(repository.requestManualClose("fictional-channel", vote.id)).resolves.toBe(true);
 
       await expect(repository.open("fictional-channel")).resolves.toMatchObject({
-        id: vote.id,
         status: "open",
-        closeReason: "limit",
+        closeReason: "manual",
       });
     } finally {
       database.close();

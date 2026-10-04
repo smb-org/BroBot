@@ -6,6 +6,7 @@ export interface ChatVotingPanelState {
   counts: readonly number[] | null;
   revision: number;
   hasOpenBallot: boolean;
+  closePending: boolean;
 }
 
 const readJson = async <Value>(response: Response): Promise<Value> => {

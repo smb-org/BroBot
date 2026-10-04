@@ -1877,6 +1877,19 @@ export class ChannelObject extends DurableObject<Env> {
     );
   }
 
+  /** Reports whether a module-owned alarm still has a scheduled attempt. */
+  public async isModuleAlarmPending(moduleId: string, handlerKey: string, alarmKey: string): Promise<boolean> {
+    const registration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === handlerKey);
+    if (registration === undefined || alarmKey.length === 0) {
+      throw new Error(`Unknown module alarm ${moduleId}.${handlerKey}.`);
+    }
+    const table = await this.ensureAlarmScheduleTable();
+    const entry = table[`module:${moduleId}:${alarmKey}`];
+    if (entry === undefined) return false;
+    const platformAlarm = await this.ctx.storage.getAlarm();
+    return platformAlarm !== null && platformAlarm <= alarmAttemptAt(entry);
+  }
+
   /** Clear one module-owned alarm key without disturbing other module deadlines. */
   public async clearModuleAlarm(moduleId: string, alarmKey: string, ownerRevision?: number): Promise<void> {
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) {

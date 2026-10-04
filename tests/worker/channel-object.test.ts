@@ -1455,10 +1455,21 @@ describe("ChannelObject realtime path", () => {
     await object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 14_410_000, 0);
     await object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 10_000, 1);
     await object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 14_410_000, 0);
+    await Promise.all([
+      object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 10_000, 1),
+      object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 10_000, 1),
+    ]);
 
     expect(storageOf(object).values.get("channel:alarm_schedule")).toMatchObject({
       [alarmKey]: { deadline: 10_000, ownerRevision: 1 },
     });
+    await expect(object.isModuleAlarmPending("chat_voting", "close", "poll-a")).resolves.toBe(true);
+    await expect(object.isModuleAlarmPending("chat_voting", "close", "poll-b")).resolves.toBe(false);
+    expect(Object.keys(storageOf(object).values.get("channel:alarm_schedule") as Record<string, unknown>)
+      .filter((key) => key === alarmKey)).toHaveLength(1);
+
+    await storageOf(object).setAlarm(20_000);
+    await expect(object.isModuleAlarmPending("chat_voting", "close", "poll-a")).resolves.toBe(false);
   });
 
   it("allows only one open ballot per channel across modules", async () => {

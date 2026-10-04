@@ -37,17 +37,22 @@ chatVotingRoutes.get("/current", async (context) => {
   const ballots = context.get("ballots")(channelId);
   if (vote === null) {
     const hasOpenBallot = await ballots.hasOpenBallot?.() ?? false;
-    return context.json({ vote: null, counts: null, revision: 0, hasOpenBallot });
+    return context.json({ vote: null, counts: null, revision: 0, hasOpenBallot, closePending: false });
   }
-  const [snapshot, hasOpenBallot] = await Promise.all([
+  const [snapshot, hasOpenBallot, closePending] = await Promise.all([
     vote.status === "open" ? ballots.read(vote.id) : Promise.resolve(null),
     ballots.hasOpenBallot?.() ?? Promise.resolve(false),
+    vote.status === "open" && vote.closeReason === "manual"
+      ? context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId))
+        .isModuleAlarmPending(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, vote.id)
+      : Promise.resolve(false),
   ]);
   return context.json({
     vote,
     counts: snapshot?.counts ?? vote.counts,
     revision: snapshot?.revision ?? 0,
     hasOpenBallot,
+    closePending,
   });
 });
 

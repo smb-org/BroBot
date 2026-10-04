@@ -37,13 +37,13 @@ describe("chat voting live panel", () => {
   });
 
   it("discovers a chat-started vote from an idle panel on refresh", async () => {
-    let current: unknown = { vote: null, counts: null, revision: 0, hasOpenBallot: false };
+    let current: unknown = { vote: null, counts: null, revision: 0, hasOpenBallot: false, closePending: false };
     const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(current)));
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
     expect(await screen.findByText("There is no vote in progress.")).toBeInTheDocument();
-    current = { vote: openVote, counts: [4, 2], revision: 6, hasOpenBallot: true };
+    current = { vote: openVote, counts: [4, 2], revision: 6, hasOpenBallot: true, closePending: false };
     fireEvent(document, new Event("visibilitychange"));
 
     expect(await screen.findByRole("button", { name: "Close vote" })).toBeInTheDocument();
@@ -57,15 +57,17 @@ describe("chat voting live panel", () => {
   });
 
   it.each([
-    ["running", openVote, [4, 2], "Vote in progress", "Live", true],
-    ["closing", closingVote, [4, 2], "Closing vote", "Closing", false],
-    ["closed", closedVote, [7, 3], "Vote results", "Closed", false],
-  ] as const)("renders one matching %s status and title", async (_name, vote, counts, title, status, canClose) => {
+    ["running", openVote, [4, 2], false, "Vote in progress", "Live", true],
+    ["retry", closingVote, [4, 2], false, "Vote in progress", "Live", true],
+    ["closing", closingVote, [4, 2], true, "Closing vote", "Closing", true],
+    ["closed", closedVote, [7, 3], false, "Vote results", "Closed", false],
+  ] as const)("renders one matching %s status and title", async (_name, vote, counts, closePending, title, status, canClose) => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
       vote,
       counts,
       revision: 6,
       hasOpenBallot: vote.status === "open",
+      closePending,
     }))));
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
@@ -86,6 +88,7 @@ describe("chat voting live panel", () => {
       counts: vote.status === "closed" ? [7, 3] : [4, 2],
       revision: 6,
       hasOpenBallot: vote.status === "open",
+      closePending: vote === closingVote,
     }))));
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="de" /></UiProvider>);
 
@@ -99,6 +102,7 @@ describe("chat voting live panel", () => {
       counts: null,
       revision: 0,
       hasOpenBallot: true,
+      closePending: false,
     }))));
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
@@ -113,12 +117,12 @@ describe("chat voting live panel", () => {
   });
 
   it("does not leave a stale closing message beside a closed result", async () => {
-    let current: unknown = { vote: openVote, counts: [4, 2], revision: 6, hasOpenBallot: true };
+    let current: unknown = { vote: openVote, counts: [4, 2], revision: 6, hasOpenBallot: true, closePending: false };
     const fetcher = vi.fn<typeof fetch>((input) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
       if (path.endsWith("/close")) {
-        current = { vote: closedVote, counts: [7, 3], revision: 7, hasOpenBallot: false };
+        current = { vote: closedVote, counts: [7, 3], revision: 7, hasOpenBallot: false, closePending: false };
         return Promise.resolve(jsonResponse({ closing: true, pollId: closedVote.id }));
       }
       return Promise.resolve(jsonResponse(current));
@@ -150,7 +154,7 @@ describe("chat voting live panel", () => {
           labels: Array.from({ length: optionCount }, (_unused, index) => `Option ${String(index + 1)}`),
         } }));
       }
-      return Promise.resolve(jsonResponse({ vote: null, counts: null, revision: 0, hasOpenBallot: false }));
+      return Promise.resolve(jsonResponse({ vote: null, counts: null, revision: 0, hasOpenBallot: false, closePending: false }));
     });
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
@@ -169,7 +173,7 @@ describe("chat voting live panel", () => {
         : new URL(String(input), "https://brobot.example").pathname;
       return Promise.resolve(path === "/api/csrf"
         ? jsonResponse({ token: "csrf-token" })
-        : jsonResponse({ vote: null, counts: null, revision: 0, hasOpenBallot: false }));
+        : jsonResponse({ vote: null, counts: null, revision: 0, hasOpenBallot: false, closePending: false }));
     });
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);

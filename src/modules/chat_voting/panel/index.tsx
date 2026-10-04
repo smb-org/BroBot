@@ -71,7 +71,7 @@ export const ChatVotingPanel = ({ channelId, language = "de" }: { channelId: str
   const vote = state.vote;
   const counts = state.counts ?? vote?.counts ?? [];
   const total = counts.reduce((sum, count) => sum + count, 0);
-  const closing = vote?.status === "open" && vote.closeReason === "manual";
+  const closing = vote?.status === "open" && vote.closeReason === "manual" && state.closePending;
   const running = vote?.status === "open" && !closing;
   const closed = vote?.status === "closed";
   const title = vote === null ? labels.currentVote : closing ? labels.closingTitle : running ? labels.runningTitle : labels.closedTitle;
@@ -103,7 +103,7 @@ export const ChatVotingPanel = ({ channelId, language = "de" }: { channelId: str
           })}
         </div>
         <p className="muted">{labels.voterCount(closed ? vote.voterCount ?? total : total)}</p>
-        {running ? <Button variant="secondary" icon="close" disabled={busy} onClick={() => { void close(); }}>{labels.close}</Button> : null}
+        {vote.status === "open" ? <Button variant="secondary" icon="close" disabled={busy} onClick={() => { void close(); }}>{labels.close}</Button> : null}
       </>}
       {message === null ? null : <p className="form-error" role="alert">{message}</p>}
     </section>

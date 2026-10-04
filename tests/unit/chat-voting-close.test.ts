@@ -87,7 +87,7 @@ describe("chat voting close service", () => {
     return { context, values, close, read, publishModuleOverlayMessage, sendChat, storagePut };
   };
 
-  it("allows only one concurrent manual-close request to own the transition", async () => {
+  it("coalesces concurrent manual-close requests onto the same alarm key", async () => {
     await seedOpenVote(false);
     const traced = createReadBarrierDatabase(
       database,
@@ -95,7 +95,7 @@ describe("chat voting close service", () => {
       2,
     );
     const repository = createChatVotingRepository(traced.database);
-    const scheduleClose = vi.fn(() => Promise.resolve());
+    const scheduleClose = vi.fn<(pollId: string, deadline: number, revision: number) => Promise<void>>(() => Promise.resolve());
 
     const [first, second] = await Promise.all([
       requestChatVoteClose(repository, "fictional-channel", scheduleClose),
@@ -103,20 +103,42 @@ describe("chat voting close service", () => {
     ]);
 
     expect(traced.started).toEqual(["open-vote", "open-vote"]);
-    expect([first, second].filter((result) => result !== null)).toHaveLength(1);
-    expect(scheduleClose).toHaveBeenCalledOnce();
+    expect([first, second].filter((result) => result !== null)).toHaveLength(2);
+    expect(scheduleClose).toHaveBeenCalledTimes(2);
+    for (const [pollId, deadline, revision] of scheduleClose.mock.calls) {
+      expect(pollId).toBe("fictional-poll");
+      expect(deadline).toEqual(expect.any(Number));
+      expect(revision).toBe(1);
+    }
     await expect(repository.open("fictional-channel")).resolves.toMatchObject({
       id: "fictional-poll",
       status: "open",
       closeReason: "manual",
     });
+  });
 
-    const owner = await database.prepare(
-      "SELECT manual_close_owner_token FROM chat_votes WHERE channel_id = ? AND poll_id = ?",
-    ).bind("fictional-channel", "fictional-poll").first<{ manual_close_owner_token: string | null }>();
-    expect(owner?.manual_close_owner_token).toEqual(expect.any(String));
-    await repository.restoreCloseReason("fictional-channel", "fictional-poll", "losing-request-owner");
-    await expect(repository.open("fictional-channel")).resolves.toMatchObject({ closeReason: "manual" });
+  it("closes after scheduling fails once and the manual request is retried", async () => {
+    const repository = await seedOpenVote(false);
+    const scheduleClose = vi.fn()
+      .mockRejectedValueOnce(new Error("alarm unavailable"))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(requestChatVoteClose(repository, "fictional-channel", scheduleClose))
+      .rejects.toThrow("alarm unavailable");
+    await expect(repository.open("fictional-channel")).resolves.toMatchObject({
+      status: "open",
+      closeReason: "manual",
+    });
+
+    await requestChatVoteClose(repository, "fictional-channel", scheduleClose);
+    expect(scheduleClose).toHaveBeenCalledTimes(2);
+
+    const order: string[] = [];
+    const { context } = createAlarmContext(order);
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    await expect(repository.byId("fictional-channel", "fictional-poll"))
+      .resolves.toMatchObject({ status: "closed", closeReason: "manual", counts: [7, 3] });
   });
 
   it("persists the observed aggregate before closing and finishes the vote with its snapshot", async () => {
