@@ -33,7 +33,7 @@ Wirksam ist der Bezug nur, wenn in die Berechnung ein **Geheimnis** eingeht, das
 hash = HMAC-SHA-256(schlüssel, channelId ‖ userId)
 ```
 
-Die Verkettung ohne Trennzeichen ist mehrdeutig: `channelId` 12 mit `userId` 345 und `channelId` 123 mit `userId` 45 ergeben denselben Eingang. Die eindeutige Kodierung ist in dieser Entscheidung noch nicht festgelegt.
+Die Verkettung ohne Trennzeichen ist mehrdeutig: `channelId` 12 mit `userId` 345 und `channelId` 123 mit `userId` 45 ergeben denselben Eingang. Für den flüchtigen Stimmenspeicher ist die Kodierung deshalb eindeutig festgelegt: vier Bytes mit der Länge der UTF-8-kodierten `channelId` als vorzeichenlose 32-Bit-Ganzzahl in Netzwerk-Byte-Reihenfolge, danach die UTF-8-Bytes von `channelId` und `userId`. Damit lautet der HMAC-Eingang `uint32be(len(channelIdBytes)) ‖ channelIdBytes ‖ userIdBytes`.
 
 Zwei Eigenschaften daran sind Absicht:
 
@@ -49,9 +49,11 @@ Zwei Eigenschaften daran sind Absicht:
 
 **Wofür:** Stimmen bei einem Chat-Voting (#10), Zählung unterschiedlicher Nutzer in einem gleitenden Fenster (#12) und aktive Chatter im rollierenden Fenster (#292).
 
-**Schlüssel:** 32 zufällige Bytes. Für aktive Chatter liegt je Kanal ein Schlüssel mit `created_at` im Channel Durable Object; er wird bei der ersten erfassten Aktivität erzeugt und nach 24 Stunden zusammen mit allen Zeilen gelöscht und neu angelegt.
+**Schlüssel:** Jeder Vorgang verwendet 32 zufällige Bytes, die neben seinem Zustand im Channel Durable Object gespeichert werden. Für aktive Chatter wird je Kanal ein Schlüssel mit `created_at` in SQLite angelegt und bei der ersten erfassten Aktivität erzeugt. Der Ballot-HMAC folgt der längenpräfixierten Kodierung aus Abschnitt 2.
 
-**Lebensdauer:** Aktive-Chatter-Zeilen werden nach 60 Minuten Inaktivität durch einen keyed Durable-Object-Alarm gelöscht. Wenn dadurch keine Zeilen mehr bestehen, wird auch der Schlüssel gelöscht. `stream.offline` löscht Schlüssel und alle Zeilen sofort und ohne Stream-ID-Abgleich. Eine bereits laufende Chatverarbeitung kann danach wieder eine Zeile anlegen; der Alarm löscht sie spätestens nach weiteren 60 Minuten plus Alarmverzögerung. Der Schlüssel wird spätestens nach 24 Stunden rotiert, wobei alle vorhandenen Zeilen mitgelöscht werden. Danach ist der Bezug **endgültig** weg.
+**Lebensdauer:** Ballot-Schlüssel und Stimmen werden beim Schließen oder Ablauf des Votings aus dem aktiven Durable-Object-Speicher gelöscht. Aktive-Chatter-Zeilen werden nach 60 Minuten Inaktivität durch einen keyed Durable-Object-Alarm gelöscht; wenn keine Zeilen mehr bestehen, wird auch der Schlüssel entfernt. `stream.offline` löscht Schlüssel und Zeilen sofort, ohne Stream-ID-Abgleich. Bereits laufende Chatverarbeitung kann danach wieder eine Zeile anlegen; der Alarm löscht sie spätestens nach weiteren 60 Minuten plus Alarmverzögerung. Der aktive-Chatter-Schlüssel rotiert spätestens nach 24 Stunden und löscht dabei vorhandene Zeilen.
+
+SQLite-basierte Durable Objects können Point-in-Time-Recovery für bis zu 30 Tage bereitstellen. Eine Wiederherstellung auf einen früheren Stand kann deshalb gelöschte Ballot-Schlüssel oder aktive-Chatter-Schlüssel zurückbringen. Die Löschung ist keine Zusage sofortiger physischer Tilgung aus Wiederherstellungsständen. Ohne wiederhergestellten Schlüssel ist der Bezug **endgültig** weg.
 
 **Was bleibt:** Das Ergebnis. „Option A: 47 Stimmen" ist keine personenbezogene Angabe und darf unbegrenzt bleiben.
 

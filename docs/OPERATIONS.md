@@ -399,6 +399,12 @@ stündlichen Lauf. Manuell ist die Autorisierung nur nötig, wenn Scopes
 hinzukommen oder das Refresh-Token ungültig wurde — einmal je Scope-Änderung,
 nicht je Kanal.
 
+Timeouts und Banns benötigen den vorhandenen Bot-Scope
+`moderator:manage:banned_users`; der Bot muss außerdem im betroffenen Kanal
+Moderator sein. Ein Helix-429 setzt eine 60-sekündige Abklingzeit nur für
+diesen Kanal im Channel Durable Object. Moderationsereignisse enthalten die
+Ziel-ID im Ereignisprotokoll und werden mit dessen 14-Tage-Frist gelöscht.
+
 Der Scheduled-Handler läuft in jeder Umgebung stündlich. Er validiert den
 Bot-Token über Twitch, erneuert Token mit weniger als einer Stunde Restlaufzeit
 und ersetzt Access- und Refresh-Token in einem D1-Schreibvorgang. Danach prüft

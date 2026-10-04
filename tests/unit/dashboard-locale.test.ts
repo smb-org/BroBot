@@ -118,6 +118,22 @@ describe("dashboard locale", () => {
     expect(shoutoutFailureReasonText("twitch_user_not_found")).toBe("Twitch user not found");
   });
 
+  it("localizes host moderation outcomes and keeps the request reason separate from the failure cause", () => {
+    const detail = { target: "3000003", seconds: 90, reason: "vote ended", cause: "protected_target" };
+    setBrowserLanguage("de-DE");
+    expect(eventText("host.timeout.failed", detail)).toBe("Timeout für 3000003 fehlgeschlagen: geschütztes Ziel");
+    expect(eventCauseText("host.timeout.failed", detail)).toBe("geschütztes Ziel");
+    expect(eventText("host.action.suppressed", { action: "ban", reason: "channel_paused" }))
+      .toBe("Aktion unterdrückt: Bann wegen Kanalpause");
+    expect(eventToneEntries["host.timeout.ambiguous"]).toMatchObject({ tone: "warning", numberKey: "seconds" });
+
+    setBrowserLanguage("en-US");
+    expect(eventText("host.timeout.failed", detail)).toBe("Timeout failed for 3000003: Protected target");
+    expect(eventText("host.ban.applied", { target: "3000003" })).toBe("Ban applied to 3000003");
+    expect(eventText("host.action.suppressed", { action: "timeout", reason: "channel_paused" }))
+      .toBe("Action suppressed: timeout while the channel is paused");
+  });
+
   it("drops the placeholder entirely for an unknown notification with no type at all, instead of doubling up (issue #201)", () => {
     setBrowserLanguage("de-DE");
     expect(eventText("channel_events.chat.unknown", {})).toBe("Unbekannte Chat-Benachrichtigung");
@@ -154,6 +170,7 @@ describe("dashboard locale", () => {
   it("carries family, tier, word, and number key for every known event code", () => {
     const codes: EventCode[] = [
       "host.action.failed", "host.action.suppressed", "host.chat.failed", "host.chat.sent", "host.chat.skipped", "host.announcement.failed", "host.announcement.sent",
+      "host.timeout.applied", "host.timeout.failed", "host.timeout.ambiguous", "host.ban.applied", "host.ban.failed", "host.ban.ambiguous",
       "template_truncated", "host.module.error",
       "host.module.unknown", "host.overlay.not_executed", "host.shoutout.failed", "host.shoutout.sent", "host.clip.failed", "channel_events.raid.incoming",
       "channel_events.raid.outgoing", "channel_events.shoutout.sent", "channel_events.shoutout.received",

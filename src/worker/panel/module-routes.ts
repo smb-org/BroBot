@@ -36,6 +36,8 @@ import { createTemplateRenderer, type TemplateValueProvider } from "../template-
 import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event-times";
 import { notifyModuleScheduleInputsChanged } from "../module-schedules";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
+import { moduleBallots } from "../module-ballots";
+import { liftModerationBan } from "../moderation";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -45,6 +47,7 @@ interface ModuleRouteEnvironment {
     | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
     | "listChannelVariables" | "findChannelVariable"
     | "externalFetchBudget"
+    | "ballots"
     | "listTextBlockConditions"
     | "listEventTimeSources" | "resolveEventTimes"
     | "notifyScheduleInputsChanged" | "validateTemplateContentMutation"
@@ -52,6 +55,7 @@ interface ModuleRouteEnvironment {
     | "publishModuleOverlayMessage"
     | "publishOverlayHostEvent"
     | "templateUsageSources" | "listRegisteredTemplateVariables"
+    | "liftModerationBan"
   >;
 }
 
@@ -135,6 +139,14 @@ moduleRouter.use("/api/channels/:channelId/modules/*", requireChannelAuthorizati
 moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   const externalFetchBudget: ModuleExternalFetchBudget = createModuleExternalFetchBudget();
   context.set("externalFetchBudget", externalFetchBudget);
+  context.set("ballots", (channelId) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Ballot access must use the authorized route channel.");
+    const marker = "/modules/";
+    const suffix = new URL(context.req.url).pathname.split(marker, 2)[1];
+    const moduleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
+    if (!MODULES.some((module) => module.id === moduleId)) throw new Error("Ballot access requires a registered module route.");
+    return moduleBallots(context.env.CHANNEL, channelId, moduleId);
+  });
   context.set("writeModuleDiagnostics", writeModuleDiagnostics);
   context.set("broadcasterHasScope", broadcasterHasScope);
   context.set("broadcasterScopesForChannel", broadcasterScopesForChannel);
@@ -143,6 +155,12 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   context.set("scheduleBackgroundWork", (work) => { scheduleBackgroundWork(context, work); });
   context.set("getAppAccessToken", getAppAccessToken);
   context.set("helixRequest", helixRequest);
+  context.set("liftModerationBan", async (channelId, userId) => {
+    if (channelId !== context.req.param("channelId")) {
+      return { outcome: "rejected", reason: "invalid_request", detail: { target: userId } };
+    }
+    return liftModerationBan(context.env, channelId, userId);
+  });
   context.set("listChannelVariables", async (channelId): Promise<readonly ModuleChannelVariable[]> =>
     (await listChannelVariables(context.env.DB, channelId)).map(({ name, value, description }) => ({ name, value, description })),
   );

@@ -24,6 +24,7 @@ const contextFor = (overrides: Partial<ModuleOverlayElementContext> = {}): Modul
   timeDependentTemplateConditionIds: new Set(["sun.phase"]),
   dynamicTemplateVariableNames: new Set(),
   overlayTemplateVariableNames: new Set(),
+  readBallot: () => Promise.resolve(null),
   ...overrides,
 });
 
