@@ -289,6 +289,11 @@ export interface ModuleOverlayElementDefinition {
   initialStateNeedsContext?: boolean;
   /** Module realtime message types that require the host to reload this element's state. */
   reloadStateOnModuleMessages?: readonly string[];
+  /** Merges partial realtime state into the current state without replacing module lifecycle data. */
+  mergeRealtimeState?: (
+    current: Readonly<Record<string, unknown>> | null,
+    incoming: Readonly<Record<string, unknown>>,
+  ) => Readonly<Record<string, unknown>>;
   /** Host state changes that cause a generic module state message for this element. */
   reloadStateOnHostEvents?: readonly ModuleOverlayHostEvent[];
   initialState?: (
@@ -610,8 +615,14 @@ export interface ModuleAlarmContext {
   renderTemplate: (
     text: string,
     moduleValuesOrNow?: Readonly<Record<string, string | number>> | number,
-    now?: number,
+    nowOrModuleValues?: number | Readonly<Record<string, string | number>>,
   ) => Promise<{ text: string; attributions?: readonly string[] }>;
+  /** Publishes a module-owned overlay message to enabled elements in this channel. */
+  publishModuleOverlayMessage: (
+    type: string,
+    elementKind: string,
+    payload: Readonly<Record<string, unknown>>,
+  ) => Promise<void>;
   /** Sends scheduled automated output through the shared channel limit with an occurrence claim. */
   sendChat: (
     text: string,
@@ -734,6 +745,8 @@ export interface ModuleBallotAccess {
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
   /** Atomically freezes the authoritative snapshot when condition is met; frozen ballots reject casts until close. */
   freeze: (ballotId: string, condition: BallotFreezeCondition) => Promise<BallotFreezeResult>;
+  /** Releases an idempotent close snapshot after the module has persisted its result. */
+  acknowledgeClosed?: (ballotId: string) => Promise<void>;
 }
 
 export type ModuleStreamState = "online" | "offline" | "unknown";

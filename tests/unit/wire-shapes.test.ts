@@ -373,6 +373,15 @@ const realtimeForms = {
 
 const expectedModuleSettings = {
   channel_events: {},
+  chat_voting: {
+    yesNoLabels: "",
+    scaleLabels: "",
+    optionLabels: "",
+    autoCloseSeconds: 0,
+    announceResult: true,
+    resultText: "{vote.result}",
+    resultTarget: "source_only",
+  },
   clips: {},
   faq: {},
   raid: {
@@ -795,6 +804,7 @@ describe("serialized contract shapes", () => {
         "ads",
         "api_source",
         "channel_events",
+        "chat_voting",
         "clips",
         "currency",
         "faq",

@@ -13,13 +13,14 @@ import { currencyModule } from "./currency";
 import { apiSourceModule } from "./api_source";
 import { timersModule } from "./timers";
 import { votekickModule } from "./votekick";
+import { chatVotingModule } from "./chat_voting";
 import type { ModuleOverlayElementDefinition } from "./contract";
 import type { TemplateVariable } from "../template";
 import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN, TEMPLATE_DOTTED_VARIABLE_NAME_PATTERN } from "../contracts/template-names";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 // This is the only place that knows all modules.
-export const MODULES: readonly BotModule[] = [textCommandModule, faqModule, textLibraryModule, timersModule, sunModule, moonModule, weatherModule, currencyModule, apiSourceModule, channelEventsModule, adsModule, raidModule, clipsModule, votekickModule];
+export const MODULES: readonly BotModule[] = [textCommandModule, faqModule, chatVotingModule, textLibraryModule, timersModule, sunModule, moonModule, weatherModule, currencyModule, apiSourceModule, channelEventsModule, adsModule, raidModule, clipsModule, votekickModule];
 
 const HOST_TEMPLATE_VARIABLE_NAMES = new Set(SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name));
 const EXISTING_BARE_MODULE_VARIABLES: Readonly<Record<string, ReadonlySet<string>>> = {

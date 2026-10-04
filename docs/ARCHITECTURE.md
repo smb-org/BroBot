@@ -56,6 +56,16 @@ Modul die Vorbereitung wiederholen kann. Der Host-Alarm kann sich um bis zu
 etwa eine Minute verzögern. Der Ablaufzeitpunkt liegt höchstens 24 Stunden in
 der Zukunft.
 
+Das Modul `chat_voting` nutzt diesen Speicher für Abstimmungen mit 2 bis 9
+Optionen. Panel und `!vote`-Chatbefehle öffnen denselben Ballot; nur
+Moderatoren und Broadcaster dürfen Chatbefehle ausführen, während Panelstarts
+allen Kanalmitgliedern offenstehen. Das Modul akzeptiert nur Nachrichten, die
+`ballotChoiceFromMessage` als einzelne Ziffer erkennt. Eine Stimme pro Person
+ist erlaubt, und die letzte Wahl zählt. Ein einzelner Modul-Alarm schließt
+manuelle, zeitgesteuerte und spätestens nach vier Stunden endende Abstimmungen.
+Die Live-Zähler laufen über die Modul-Overlay-Echtzeitstrecke. `chat_votes`
+bewahrt das Ergebnis als aggregierte Zeile ohne personenbezogene Stimmen auf.
+
 Module können über `ModuleAction` auch Timeout und Bann beschreiben. Der Host
 führt beides über `src/worker/moderation.ts` und Twitch Helix mit dem Bot-
 Nutzer-Token aus; kein Modul spricht Helix direkt an. Der Host prüft
@@ -250,6 +260,12 @@ Abstimmungen. Pro Kanal erzwingt ein partieller Unique-Index höchstens eine
 laufende Abstimmung; ein Zielindex unterstützt die Ziel-Abkühlzeit. Die
 Panelansicht zeigt laufende und 14 Tage historische Ergebnisse und bietet
 Abbrechen sowie Timeout-Aufheben. Diese Bedienaktionen werden auditiert.
+
+Migration `0029_chat_voting.sql` legt die kanalgebundenen Ergebniszeilen für
+Chat-Abstimmungen an und aktiviert das Modul für bestehende Kanäle. Ein
+partieller eindeutiger Index verhindert mehrere offene Ergebniszeilen je
+Kanal; der gemeinsame Ballot verhindert zugleich parallele Abstimmungen aus
+anderen Modulen.
 
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 

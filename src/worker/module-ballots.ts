@@ -13,6 +13,7 @@ export const moduleBallots = (
       read: () => Promise.resolve(null),
       close: () => Promise.resolve(null),
       freeze: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
+      acknowledgeClosed: () => Promise.resolve(),
     };
   }
   const object = namespace.get(namespace.idFromName(channelId));
@@ -22,5 +23,6 @@ export const moduleBallots = (
     read: (ballotId) => object.readBallot(moduleId, ballotId),
     close: (ballotId) => object.closeBallot(moduleId, ballotId),
     freeze: (ballotId, condition) => object.freezeBallot(moduleId, ballotId, condition),
+    acknowledgeClosed: (ballotId) => object.acknowledgeClosedBallot(moduleId, ballotId),
   };
 };

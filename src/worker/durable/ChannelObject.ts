@@ -69,6 +69,7 @@ import {
   ballotIdentityFromExpiryAlarmKey,
   castStoredBallot,
   closeStoredBallot,
+  forgetClosedStoredBallot,
   expireStoredBallot,
   freezeStoredBallot,
   openStoredBallot,
@@ -1251,10 +1252,23 @@ export class ChannelObject extends DurableObject<Env> {
       clear: async (key, ownerRevision) => {
         await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision);
       },
-      renderTemplate: async (text, moduleValuesOrNow = {}, requestedNow = Date.now()) => {
-        const now = typeof moduleValuesOrNow === "number" ? moduleValuesOrNow : requestedNow;
-        const moduleValues = typeof moduleValuesOrNow === "number" ? {} : moduleValuesOrNow;
+      renderTemplate: async (text, moduleValuesOrNow = {}, nowOrModuleValues = Date.now()) => {
+        const now = typeof moduleValuesOrNow === "number"
+          ? moduleValuesOrNow
+          : typeof nowOrModuleValues === "number" ? nowOrModuleValues : Date.now();
+        const moduleValues = typeof moduleValuesOrNow === "number"
+          ? typeof nowOrModuleValues === "object" ? nowOrModuleValues : {}
+          : moduleValuesOrNow;
         return renderScheduledTemplate(this.env, channelId, text, now, externalFetchBudget, moduleValues);
+      },
+      publishModuleOverlayMessage: async (type, elementKind, payload) => {
+        const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, moduleId, {
+          kind: "overlay",
+          type,
+          elementKind,
+          payload,
+        });
+        if (prepared.outcome === "ready") await this.publish([prepared.message]);
       },
       sendChat: async (text, idempotencyKey, attributions = [], stillValid, target = "source_only") => {
         const suppression = { reason: null as string | null };
@@ -1463,6 +1477,7 @@ export class ChannelObject extends DurableObject<Env> {
       read: (ballotId) => this.readBallot(moduleId, ballotId),
       close: (ballotId) => this.closeBallot(moduleId, ballotId),
       freeze: (ballotId, condition) => this.freezeBallot(moduleId, ballotId, condition),
+      acknowledgeClosed: (ballotId) => this.acknowledgeClosedBallot(moduleId, ballotId),
     };
   }
 
@@ -1525,6 +1540,10 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async freezeBallot(moduleId: string, ballotId: string, condition: BallotFreezeCondition): Promise<BallotFreezeResult> {
     return await freezeStoredBallot(this.ctx.storage, moduleId, ballotId, condition);
+  }
+
+  public async acknowledgeClosedBallot(moduleId: string, ballotId: string): Promise<void> {
+    await forgetClosedStoredBallot(this.ctx.storage, moduleId, ballotId);
   }
 
   private async expireBallot(key: string): Promise<void> {

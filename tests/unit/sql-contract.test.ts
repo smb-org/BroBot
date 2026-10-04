@@ -27,6 +27,7 @@ import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
+import { chatVoteSelectColumns } from "../../src/modules/chat_voting/repository";
 import { MANAGING_ROLES } from "../../src/contracts/values";
 import { ANY_MEMBER_ROLES } from "../../src/worker/db/guards";
 
@@ -98,6 +99,8 @@ const sqlGetFixtures = new Map<string, string>([
                            WHERE channel_id = ?`],
   ["textBlockSelectColumns", textBlockSelectColumns],
   ["textBlockCategorySelectColumns", textBlockCategorySelectColumns],
+  ["chatVoteSelectColumns", chatVoteSelectColumns],
+  ["guard", authorizeModuleMutation("channel-id", actor, now).sql],
   ["channelBotConsentCondition(\"channel\")", channelBotConsentCondition("channel")],
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
 ]);

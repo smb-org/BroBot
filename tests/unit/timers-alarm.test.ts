@@ -65,7 +65,7 @@ const contextFor = (
 ): ModuleAlarmContext => ({
   DB: database as unknown as D1Database,
   channelId,
-  ballots: {
+    ballots: {
     open: () => Promise.reject(new Error("not used")),
     cast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
     read: () => Promise.resolve(null),
@@ -75,6 +75,7 @@ const contextFor = (
   channelLanguage: () => Promise.resolve("de"),
   secureRandomInteger: () => 0,
   executeTimeout: () => Promise.resolve("rejected"),
+  publishModuleOverlayMessage: async () => {},
   storage: {
     get: () => Promise.resolve(undefined),
     put: () => Promise.resolve(),
@@ -398,7 +399,7 @@ describe("timer alarm execution", () => {
     const context: ModuleAlarmContext = {
       DB: database as unknown as D1Database,
       channelId,
-      ballots: {
+    ballots: {
         open: () => Promise.reject(new Error("not used")),
         cast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
         read: () => Promise.resolve(null),
@@ -408,6 +409,7 @@ describe("timer alarm execution", () => {
       channelLanguage: () => Promise.resolve("de"),
       secureRandomInteger: () => 0,
       executeTimeout: () => Promise.resolve("rejected"),
+      publishModuleOverlayMessage: async () => {},
       storage: { get: () => Promise.resolve(undefined), put: () => Promise.resolve(), delete: () => Promise.resolve(true) },
       schedule: (key, deadline) => { scheduled.push({ key, deadline }); return Promise.resolve(); },
       clear: () => Promise.resolve(),
