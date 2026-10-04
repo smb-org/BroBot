@@ -224,6 +224,15 @@ beansprucht. Die Messung mit 100 Einträgen folgt dem bestehenden
 Matcher-Typ für Regex; die erste Oberfläche speichert und wertet aber nur
 Schlüsselwörter und Wortgruppen aus.
 
+Migration `0028_text_command_timeout.sql` ergänzt strukturierte Timeouts für
+Textbefehle. Die Dauer wird einmal je Auslösung mit dem Host-Zufallsgenerator
+aus `minSeconds..maxSeconds` gezogen und sowohl an `ModuleAction.timeout` als
+auch an `{timeout.seconds}` und `{timeout.duration}` übergeben. Broadcaster und
+Moderatoren erhalten direkt den vorgerenderten Ersatztext; bei anderen
+Aufrufern wählt der Helix-Ausgang zwischen Erfolgs- und Ersatztext. Beide
+Texte bleiben Teil derselben Befehlsmutation wie eine optionale
+Kanalvariablenaktion.
+
 Migration `0029_chat_voting.sql` legt die kanalgebundenen Ergebniszeilen für
 Chat-Abstimmungen an und aktiviert das Modul für bestehende Kanäle. Ein
 partieller eindeutiger Index verhindert mehrere offene Ergebniszeilen je

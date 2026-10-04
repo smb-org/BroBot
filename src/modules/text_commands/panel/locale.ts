@@ -126,6 +126,14 @@ export interface TextCommandsTexts {
   variableAmount: string;
   variableSilentHint: string;
   variableEveryoneWarning: string;
+  timeoutAction: string;
+  timeoutActionHint: string;
+  timeoutMinSeconds: string;
+  timeoutMaxSeconds: string;
+  timeoutRangeHint: string;
+  timeoutFallbackText: string;
+  timeoutBotWarning: string;
+  timeoutNone: string;
   actionResponse: (name: string, operation: "add" | "subtract" | "set" | "set_argument", amount: number | null) => string;
   externalCooldownWarning: string;
   argsEveryoneWarning: string;
@@ -247,6 +255,9 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
     variableOperationHelp: { add: "Zählt hoch.", subtract: "Zählt herunter.", set: "Setzt auf den Wert.", set_argument: "Setzt auf das erste Argument. Ungültige Zahlen zeigen den Nutzungshinweis." },
     variableAmount: "Betrag", variableSilentHint: "Antwort leer lassen, um still zu zählen.", variableEveryoneWarning: "Jeder im Chat kann diese Variable ändern.",
+    timeoutAction: "Aufrufer timeouten", timeoutActionHint: "Würfelt beim Auslösen eine Dauer aus dem Bereich.",
+    timeoutMinSeconds: "Mindestens", timeoutMaxSeconds: "Höchstens", timeoutRangeHint: "1 s bis 14 Tage.",
+    timeoutFallbackText: "Ersatztext, wenn der Timeout abgelehnt wird", timeoutBotWarning: "Der Bot ist kein Moderator. Timeouts können nicht ausgeführt werden.", timeoutNone: "Aus",
     actionResponse: (name, operation, amount) => operation === "add" ? `Ändert ${name} um +${String(amount ?? 1)}`
       : operation === "subtract" ? `Ändert ${name} um −${String(amount ?? 1)}`
         : operation === "set" ? `Setzt ${name} auf ${String(amount ?? 0)}` : `Setzt ${name} auf das erste Argument`,
@@ -332,6 +343,9 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
     variableOperationHelp: { add: "Increase the value.", subtract: "Decrease the value.", set: "Set the value directly.", set_argument: "Set from the first argument. Invalid numbers show the usage response." },
     variableAmount: "Amount", variableSilentHint: "Leave the response empty to count silently.", variableEveryoneWarning: "Everyone in chat can change this variable.",
+    timeoutAction: "Time out caller", timeoutActionHint: "Rolls a duration from this range when the command runs.",
+    timeoutMinSeconds: "Minimum", timeoutMaxSeconds: "Maximum", timeoutRangeHint: "1 s to 14 days.",
+    timeoutFallbackText: "Fallback text when the timeout is rejected", timeoutBotWarning: "The bot is not a moderator. It cannot time out callers.", timeoutNone: "Off",
     actionResponse: (name, operation, amount) => operation === "add" ? `Changes ${name} by +${String(amount ?? 1)}`
       : operation === "subtract" ? `Changes ${name} by −${String(amount ?? 1)}`
         : operation === "set" ? `Sets ${name} to ${String(amount ?? 0)}` : `Sets ${name} from the first argument`,

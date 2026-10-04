@@ -26,7 +26,7 @@ import { readChannelLocation } from "./db/channel-settings";
 import { getBotIdentity, getCachedBotUserId } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { readChannelVariables, prepareChannelVariableChange, prepareResetChannelVariablesForStream } from "./db/channel-variables";
-import { createTemplateRenderer, type TemplateChannelDetails, type TemplateStreamDetails, type TemplateValueProvider } from "./template-resolver";
+import { createTemplateRenderer, secureRandomInteger, type TemplateChannelDetails, type TemplateStreamDetails, type TemplateValueProvider } from "./template-resolver";
 import type { ChannelVariableOperation } from "../contracts/values";
 import type { TemplateVariable } from "../template";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
@@ -355,13 +355,20 @@ const runActions = async (
     };
     const moderationAction = action.kind === "timeout" || action.kind === "ban";
     let mutedForAction = muted;
-    if (action.kind === "chat" && moderationFollowUps.has(action)) {
+    let pausedForAction = false;
+    if ((action.kind === "chat" || action.kind === "announcement") && moderationFollowUps.has(action)) {
       const controls = await readChannelControls(environment.DB, channelId, new Date().toISOString());
       mutedForAction = controls.mute.active;
+      pausedForAction = controls.pause.active;
     }
     const suppressionReason = moderationAction
       ? null
-      : chatOutputSuppressionReason({ moduleEnabled: true, mandatory: true, paused: false, muted: mutedForAction });
+      : chatOutputSuppressionReason({
+        moduleEnabled: true,
+        mandatory: moderationFollowUps.has(action) ? module.mandatory === true : true,
+        paused: pausedForAction,
+        muted: mutedForAction,
+      });
     if (suppressionReason !== null &&
         (action.kind === "chat" || action.kind === "announcement" || action.kind === "shoutout" || moderationAction)) {
       await reportDelivery("not_attempted");
@@ -896,7 +903,10 @@ export const dispatchEventSubNotification = async (
         actor,
         chatStatus: chatStatusFor(event.subscriptionType, event.payload),
       };
-      const moduleVariables = Object.values(module.templateFields ?? {}).flatMap((variables) => variables ?? []) as TemplateVariable[];
+      const moduleVariables = [
+        ...(module.templateVariableCatalog ?? []),
+        ...Object.values(module.templateFields ?? {}).flatMap((variables) => variables ?? []),
+      ] as TemplateVariable[];
       const templateContext = module.templateContext ?? "event";
       const render = createTemplateRenderer(moduleEvent, templateContext, moduleVariables, {
         DB: environment.DB,
@@ -951,6 +961,7 @@ export const dispatchEventSubNotification = async (
             readChannelVariables: channelVariables,
             renderTemplate: render,
             prepareVariableChange,
+            secureRandomInteger,
             channelLanguage,
             channelTimeZone,
             scheduleAlarm: async (handlerKey, alarmKey, deadline, ownerRevision) => {

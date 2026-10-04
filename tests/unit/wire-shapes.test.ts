@@ -631,6 +631,7 @@ describe("serialized contract shapes", () => {
         responseType: "announcement",
         chatTarget: "source_only",
         variableAction: null,
+        timeoutAction: null,
         useCount: 0,
         lastUsedAt: null,
         createdAt: "2026-09-21T12:00:00.000Z",
@@ -781,7 +782,7 @@ describe("serialized contract shapes", () => {
         "$.realtime.panelPrincipal: channelId,expiresAt,kind,role,sessionId,userId,v",
         "$.realtime.systemHello: channelId,createdAt,id,payload,type,version",
         "$.realtime.systemHello.payload: ",
-        "$.textCommand: aliases,channelId,chatTarget,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,revision,streamCondition,text,updatedAt,useCount,userCooldownSeconds,variableAction",
+        "$.textCommand: aliases,channelId,chatTarget,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,revision,streamCondition,text,timeoutAction,updatedAt,useCount,userCooldownSeconds,variableAction",
       ]);
       expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round"]);
       expect(MODULES.map((module) => module.id).sort()).toEqual([

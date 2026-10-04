@@ -37,6 +37,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/raid/panel/immediate-action-locale.ts": "Bilingual DE/EN raid immediate-action text catalogue; only its `de` half is German.",
   "src/modules/clips/panel/locale.ts": "Bilingual DE/EN clips immediate-action text catalogue; only its `de` half is German.",
   "src/modules/text_commands/panel/locale.ts": "Bilingual DE/EN text-commands panel text catalogue; only its `de` half is German.",
+  "src/modules/text_commands/contracts/template-variable-catalog.ts": "Bilingual DE/EN text-command template variable catalogue; only its `de` half is German.",
   "src/modules/faq/panel/locale.ts": "Bilingual DE/EN FAQ panel text catalogue; only its `de` half is German.",
   "src/modules/chat_voting/contracts/chat-defaults.ts": "Bilingual DE/EN default chat message catalogue selected by channel language; only its `de` half is German.",
   "src/modules/chat_voting/contracts/template-variable-catalog.ts": "Bilingual DE/EN result template-variable catalogue; only its `de` half is German.",

@@ -20,6 +20,7 @@ const command = (name: string, text: string, lastUsedAt: string | null = null): 
   responseType: "reply",
   chatTarget: "source_only",
   variableAction: null,
+  timeoutAction: null,
   useCount: 0,
   lastUsedAt,
   createdAt: NOW,
@@ -412,6 +413,99 @@ describe("Text commands service", () => {
     expect(result.actions).toEqual([]);
     expect(result.diagnostics[0]?.code).toBe(diagnostic);
     expect(claim).toHaveBeenCalledTimes(_scenario === "permission" ? 1 : 2);
+  });
+
+  it("uses one securely rolled duration for both the timeout action and its reply", async () => {
+    const entry = {
+      ...command("roulette", "Timed out for {timeout.duration} ({timeout.seconds})"),
+      timeoutAction: { minSeconds: 40, maxSeconds: 49, fallbackText: "Could not time you out for {timeout.duration}" },
+    };
+    const renderTemplate = vi.fn((text: string, values: Readonly<Record<string, string | number>>) => Promise.resolve({
+      text: text.replace(/\{([^{}]+)\}/gu, (_match, name: string) => String(values[name] ?? "?")),
+      diagnostics: [],
+    }));
+    const secureRandomInteger = vi.fn(() => 4);
+    const result = await processTextCommandMessage(eventFor("!roulette"), repositoryFor([entry]), {
+      renderTemplate,
+      secureRandomInteger,
+      channelLanguage: () => Promise.resolve("en"),
+    });
+    const action = result.actions[0];
+
+    expect(secureRandomInteger).toHaveBeenCalledWith(10);
+    expect(action).toMatchObject({
+      kind: "timeout",
+      userId: "user-1",
+      durationSeconds: 44,
+      reason: "!roulette",
+      onSuccess: { kind: "chat", text: "Timed out for 44 s (44)", automated: false, target: "source_only", replyToMessageId: "twitch-message-1" },
+      onFailure: { kind: "chat", text: "Could not time you out for 44 s", automated: false, target: "source_only", replyToMessageId: "twitch-message-1" },
+    });
+  });
+
+  it("keeps announcement response types on timeout follow-ups", async () => {
+    const entry = {
+      ...command("roulette", "Timeout applied"),
+      responseType: "announcement" as const,
+      timeoutAction: { minSeconds: 30, maxSeconds: 30, fallbackText: "Timeout failed" },
+    };
+    const result = await processTextCommandMessage(eventFor("!roulette"), repositoryFor([entry]), {
+      secureRandomInteger: () => 0,
+    });
+
+    expect(result.actions).toEqual([{
+      kind: "timeout",
+      userId: "user-1",
+      durationSeconds: 30,
+      reason: "!roulette",
+      onSuccess: { kind: "announcement", text: "Timeout applied", automated: false, target: "source_only" },
+      onFailure: { kind: "announcement", text: "Timeout failed", automated: false, target: "source_only" },
+    }]);
+  });
+
+  it("uses the fallback without creating a timeout action for moderators", async () => {
+    const entry = {
+      ...command("roulette", "Timed out for {timeout.seconds}"),
+      timeoutAction: { minSeconds: 30, maxSeconds: 30, fallbackText: "The caller cannot be timed out ({timeout.duration})." },
+    };
+    const renderTemplate = vi.fn((text: string, values: Readonly<Record<string, string | number>>) => Promise.resolve({
+      text: text.replace(/\{([^{}]+)\}/gu, (_match, name: string) => String(values[name] ?? "?")),
+      diagnostics: [],
+    }));
+    const secureRandomInteger = vi.fn(() => 0);
+    const result = await processTextCommandMessage(
+      { ...eventFor("!roulette"), chatStatus: ["moderator"] },
+      repositoryFor([entry]),
+      { renderTemplate, secureRandomInteger, channelLanguage: () => Promise.resolve("en") },
+    );
+
+    expect(secureRandomInteger).not.toHaveBeenCalled();
+    expect(result.actions).toEqual([{
+      kind: "chat",
+      text: "The caller cannot be timed out (30 s).",
+      target: "source_only",
+      automated: false,
+    }]);
+  });
+
+  it("does not roll or return a moderation action after tier or cooldown rejection", async () => {
+    const entry = {
+      ...command("roulette", "Timed out for {timeout.seconds}"),
+      minimumTier: "moderator" as const,
+      timeoutAction: { minSeconds: 30, maxSeconds: 40, fallbackText: "Cannot time out caller." },
+    };
+    const secureRandomInteger = vi.fn(() => 0);
+    const repository = repositoryFor([entry]);
+    const rejectedTier = await processTextCommandMessage(eventFor("!roulette"), repository, { secureRandomInteger });
+    const rejectedCooldown = await processTextCommandMessage(
+      { ...eventFor("!roulette"), chatStatus: ["moderator"] },
+      repositoryFor([{ ...entry, lastUsedAt: NOW }]),
+      { secureRandomInteger },
+    );
+
+    expect(rejectedTier.actions).toEqual([]);
+    expect(rejectedCooldown.actions).toEqual([]);
+    expect(secureRandomInteger).not.toHaveBeenCalled();
   });
 
 });

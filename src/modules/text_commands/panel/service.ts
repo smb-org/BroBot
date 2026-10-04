@@ -75,7 +75,7 @@ const mutation = async (
 
 export const createTextCommand = async (
   channelId: string,
-  command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "games" | "responseType" | "chatTarget" | "variableAction">,
+  command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "games" | "responseType" | "chatTarget" | "variableAction" | "timeoutAction">,
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "POST", command);
 
 export const saveTextCommand = async (
@@ -99,6 +99,7 @@ export const saveTextCommand = async (
     responseType: TextCommandResponseType;
     chatTarget: TextCommand["chatTarget"];
     variableAction: TextCommand["variableAction"];
+    timeoutAction: TextCommand["timeoutAction"];
 },
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", {
   revision: command.revision,
@@ -118,6 +119,7 @@ export const saveTextCommand = async (
   responseType: command.responseType,
   chatTarget: command.chatTarget,
   variableAction: command.variableAction,
+  timeoutAction: command.timeoutAction,
 }, command.oldName);
 
 export const toggleTextCommand = async (

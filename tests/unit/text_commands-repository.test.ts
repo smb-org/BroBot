@@ -535,6 +535,86 @@ describe("Text commands D1 adapter", () => {
     expect(JSON.parse(audit?.after_json ?? "null") as { chatTarget?: string }).toMatchObject({ chatTarget: "all_chats" });
   });
 
+  it("persists, audits, and claims a timeout action alongside a variable action", async () => {
+    await insertChannel(database, "kanal-a");
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES ('kanal-a', 'score', 0, ?, ?)`,
+    ).bind(NOW, NOW).run();
+    const repository = createTextCommandRepository(
+      database as unknown as D1Database,
+      authorize,
+      (entry, changedAt) => prepareModuleAudit(database as unknown as D1Database, ACTOR.userId, changedAt, entry),
+    );
+    await expect(repository.create({
+      channelId: "kanal-a",
+      name: "roulette",
+      text: "Timed out for {timeout.duration}",
+      kind: "text",
+      cooldownSeconds: 0,
+      variableAction: { name: "score", operation: "add", amount: 1 },
+      timeoutAction: { minSeconds: 30, maxSeconds: 60, fallbackText: "Cannot time out for {timeout.seconds}." },
+      now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: true });
+    const created = await repository.find("kanal-a", "roulette");
+    if (created === null) throw new Error("Created command was not found.");
+    expect(created.timeoutAction).toEqual({
+      minSeconds: 30,
+      maxSeconds: 60,
+      fallbackText: "Cannot time out for {timeout.seconds}.",
+    });
+
+    await expect(repository.change({
+      channelId: "kanal-a",
+      name: "roulette",
+      newName: "roulette",
+      text: "Timed out for {timeout.duration}",
+      kind: "text",
+      enabled: true,
+      cooldownSeconds: 0,
+      aliases: [],
+      userCooldownSeconds: 0,
+      streamCondition: "any",
+      responseType: "say",
+      variableAction: created.variableAction,
+      timeoutAction: { minSeconds: 45, maxSeconds: 45, fallbackText: "Cannot time out for {timeout.duration}." },
+      expectedRevision: created.revision,
+      now: "2026-09-19T12:00:01.000Z",
+    }, ACTOR)).resolves.toEqual({ ok: true });
+
+    const updated = await repository.find("kanal-a", "roulette");
+    expect(updated?.timeoutAction).toEqual({
+      minSeconds: 45,
+      maxSeconds: 45,
+      fallbackText: "Cannot time out for {timeout.duration}.",
+    });
+    const audit = await database.prepare(
+      "SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
+    ).first<{ before_json: string; after_json: string }>();
+    expect(JSON.parse(audit?.before_json ?? "null") as Record<string, unknown>).toMatchObject({
+      timeoutMinSeconds: 30,
+      timeoutMaxSeconds: 60,
+      timeoutFallbackText: "Cannot time out for {timeout.seconds}.",
+    });
+    expect(JSON.parse(audit?.after_json ?? "null") as Record<string, unknown>).toMatchObject({
+      timeoutMinSeconds: 45,
+      timeoutMaxSeconds: 45,
+      timeoutFallbackText: "Cannot time out for {timeout.duration}.",
+    });
+
+    if (updated === null) throw new Error("Updated command was not found.");
+    const prepareChange = (
+      channelId: string,
+      change: Parameters<typeof prepareChannelVariableChange>[2],
+      now: string,
+      claim: Parameters<typeof prepareChannelVariableChange>[4],
+    ) => prepareChannelVariableChange(database as unknown as D1Database, channelId, change, now, claim);
+    await expect(repository.claim("kanal-a", "roulette", "2026-09-19T12:00:02.000Z", "fixture_viewer", 0, prepareChange, null, updated))
+      .resolves.toMatchObject({ claimed: true, command: { timeoutAction: updated.timeoutAction } });
+    await expect(database.prepare("SELECT value FROM channel_variables WHERE channel_id = 'kanal-a' AND name = 'score'").first())
+      .resolves.toEqual({ value: 1 });
+  });
+
   it("clears per-user cooldown rows on command delete and rename", async () => {
     await insertChannel(database, "kanal-a");
     const repository = createTextCommandRepository(database as unknown as D1Database, authorize);

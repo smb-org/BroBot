@@ -111,7 +111,7 @@ const subageFrom = (event: ModuleEvent): number => {
   return 0;
 };
 
-const secureRandomInteger = (maximumExclusive: number): number => {
+export const secureRandomInteger = (maximumExclusive: number): number => {
   if (maximumExclusive <= 1) return 0;
   const range = 0x1_0000_0000;
   const cutoff = range - range % maximumExclusive;

@@ -35,6 +35,29 @@ describe("text command options migration", () => {
     }
   });
 
+  it("adds an inactive timeout action to existing commands", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      for (const migration of readdirSync(migrationsDirectory).filter((name) => name <= "0027_faq.sql").sort()) {
+        database.exec(readFileSync(resolve(migrationsDirectory, migration), "utf8"));
+      }
+      database.exec(`
+        INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+        VALUES ('channel-a', 'channel-a', 'Channel A', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+        INSERT INTO text_commands (channel_id, command_name, response_text, created_at, updated_at)
+        VALUES ('channel-a', 'hello', 'Hello', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+      `);
+      database.exec(readFileSync(resolve(migrationsDirectory, "0028_text_command_timeout.sql"), "utf8"));
+
+      expect(database.prepare(
+        `SELECT timeout_min_seconds, timeout_max_seconds, timeout_fallback_text
+           FROM text_commands WHERE channel_id = 'channel-a' AND command_name = 'hello'`,
+      ).get()).toEqual({ timeout_min_seconds: null, timeout_max_seconds: null, timeout_fallback_text: null });
+    } finally {
+      database.close();
+    }
+  });
+
   it("preserves existing rows as replies and applies defaults to new rows", () => {
     const database = new DatabaseSync(":memory:");
     try {

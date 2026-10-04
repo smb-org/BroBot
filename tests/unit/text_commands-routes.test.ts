@@ -162,6 +162,96 @@ describe("Text commands panel", () => {
     ).first<{ games_json: string }>()).resolves.toEqual({ games_json: JSON.stringify([game]) });
   });
 
+  it("validates and audits structured caller timeouts and only exposes their variables when enabled", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const environment = environmentFor(database);
+    const collection = "/api/channels/kanal-a/modules/text_commands/commands";
+    const timeoutAction = {
+      minSeconds: 30,
+      maxSeconds: 60,
+      fallbackText: "Cannot time out for {timeout.duration} ({timeout.seconds}).",
+    };
+    const created = await panelRouter.fetch(
+      await requestFor("user-1", collection, "POST", {
+        name: "roulette",
+        text: "Timed out for {timeout.duration} ({timeout.seconds}).",
+        cooldownSeconds: 0,
+        timeoutAction,
+      }),
+      environment,
+    );
+    expect(created.status).toBe(201);
+    await expect(created.json<{ command: { timeoutAction: unknown }; warnings: unknown[] }>()).resolves.toMatchObject({
+      command: { timeoutAction },
+      warnings: [],
+    });
+    await expect(database.prepare(
+      `SELECT timeout_min_seconds, timeout_max_seconds, timeout_fallback_text
+         FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'roulette'`,
+    ).first()).resolves.toEqual({
+      timeout_min_seconds: 30,
+      timeout_max_seconds: 60,
+      timeout_fallback_text: timeoutAction.fallbackText,
+    });
+
+    const updatedAction = { minSeconds: 45, maxSeconds: 45, fallbackText: "Try again for {timeout.seconds} seconds." };
+    const updated = await panelRouter.fetch(
+      await requestFor("user-1", `${collection}/roulette`, "PATCH", { timeoutAction: updatedAction }),
+      environment,
+    );
+    expect(updated.status).toBe(200);
+    await expect(database.prepare(
+      "SELECT timeout_min_seconds, timeout_max_seconds, timeout_fallback_text FROM text_commands WHERE command_name = 'roulette'",
+    ).first()).resolves.toEqual({
+      timeout_min_seconds: 45,
+      timeout_max_seconds: 45,
+      timeout_fallback_text: updatedAction.fallbackText,
+    });
+    const audit = await database.prepare(
+      "SELECT after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
+    ).first<{ after_json: string }>();
+    expect(JSON.parse(audit?.after_json ?? "null") as Record<string, unknown>).toMatchObject({
+      timeoutMinSeconds: 45,
+      timeoutMaxSeconds: 45,
+      timeoutFallbackText: updatedAction.fallbackText,
+    });
+
+    const invalidRange = await panelRouter.fetch(
+      await requestFor("user-1", collection, "POST", {
+        name: "invalidrange", text: "Response", cooldownSeconds: 0,
+        timeoutAction: { minSeconds: 0, maxSeconds: 2, fallbackText: "Fallback" },
+      }),
+      environment,
+    );
+    const wrongKind = await panelRouter.fetch(
+      await requestFor("user-1", collection, "POST", {
+        name: "invalidkind", kind: "list", text: "", cooldownSeconds: 0,
+        timeoutAction: { minSeconds: 1, maxSeconds: 1, fallbackText: "Fallback" },
+      }),
+      environment,
+    );
+    const longFallback = await panelRouter.fetch(
+      await requestFor("user-1", collection, "POST", {
+        name: "longfallback", text: "Response", cooldownSeconds: 0,
+        timeoutAction: { minSeconds: 1, maxSeconds: 1, fallbackText: "x".repeat(501) },
+      }),
+      environment,
+    );
+    expect([invalidRange.status, wrongKind.status, longFallback.status]).toEqual([400, 400, 400]);
+
+    const withoutAction = await panelRouter.fetch(
+      await requestFor("user-1", collection, "POST", {
+        name: "literal", text: "{timeout.seconds}", cooldownSeconds: 0,
+      }),
+      environment,
+    );
+    expect(withoutAction.status).toBe(201);
+    await expect(withoutAction.json<{ warnings: Array<{ code: string; unknownVariables?: string[] }> }>())
+      .resolves.toMatchObject({ warnings: [expect.objectContaining({ unknownVariables: ["timeout.seconds"] })] });
+  });
+
   it("returns the current command when a second editor saves an old revision", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");

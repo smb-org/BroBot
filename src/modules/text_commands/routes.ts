@@ -10,7 +10,9 @@ import {
   TEXT_COMMAND_MINIMUM_TIERS,
   TEXT_COMMAND_RESPONSE_TYPES,
   TEXT_COMMAND_STREAM_CONDITIONS,
+  TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES,
 } from "./contracts";
+import { timeoutDurationRangeSchema } from "../contracts/moderation";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST, effectiveTemplateVariables, templateWarnings, type ModuleChannelVariable, type ModuleRouteEnvironment, type TemplateVariable } from "../contract";
 import { createTextCommandRepository } from "./adapters/d1";
 import { COMMAND_NAME_PATTERN, initialTextCommandRevision, validCommandName } from "./domain";
@@ -35,6 +37,12 @@ const gameSchema = z.object({
   ? game
   : { ...game, boxArtUrlTemplate });
 
+const timeoutActionSchema = z.object({
+  minSeconds: z.number().int(),
+  maxSeconds: z.number().int(),
+  fallbackText: z.string().max(500),
+}).refine((value) => timeoutDurationRangeSchema().safeParse(value).success);
+
 const bodySchema = z.object({
   name: z.string(),
   kind: z.enum(TEXT_COMMAND_KINDS).default("text"),
@@ -56,6 +64,7 @@ const bodySchema = z.object({
     operation: z.enum(["add", "subtract", "set", "set_argument"]),
     amount: z.number().int().min(-999999999).max(999999999),
   }).nullable().default(null),
+  timeoutAction: timeoutActionSchema.nullable().default(null),
 });
 
 const editBodySchema = z.object({
@@ -81,6 +90,7 @@ const editBodySchema = z.object({
     operation: z.enum(["add", "subtract", "set", "set_argument"]),
     amount: z.number().int().min(-999999999).max(999999999),
   }).nullable().optional(),
+  timeoutAction: timeoutActionSchema.nullable().optional(),
 });
 
 const nowIso = (): string => new Date().toISOString();
@@ -113,7 +123,9 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
   const parsed = bodySchema.safeParse(await readBody(request));
   if (!parsed.success || !validCommandName(parsed.data.name) || parsed.data.aliases.includes(parsed.data.name)) return null;
   const variableAction = parsed.data.variableAction;
+  const timeoutAction = parsed.data.timeoutAction;
   if (variableAction !== null && parsed.data.kind !== "text") return null;
+  if (timeoutAction !== null && parsed.data.kind !== "text") return null;
   if (!validVariableAction(variableAction)) return null;
   const defaults = defaultsForKind(parsed.data.kind);
   const text = parsed.data.kind === "list" ? "" : parsed.data.text ?? defaults.text ?? "";
@@ -134,6 +146,7 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
     responseType: parsed.data.responseType,
     chatTarget: parsed.data.chatTarget,
     variableAction,
+    timeoutAction,
     text,
     ...(offlineText === undefined ? {} : { offlineText }),
     ...(notFollowingText === undefined ? {} : { notFollowingText }),
@@ -180,6 +193,25 @@ const warningsForText = (
   registeredVariableNames: readonly string[],
 ) => templateWarnings("text", text, variables, registeredVariableNames);
 
+const warningsForCommand = (
+  text: string,
+  timeoutAction: TextCommand["timeoutAction"],
+  variables: readonly TemplateVariable[],
+  registeredVariableNames: readonly string[],
+) => {
+  const timeoutNames = TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES.map(({ name }) => name);
+  const registered = registeredVariableNames.filter((name) => timeoutAction !== null || !timeoutNames.includes(name));
+  const available = [...registered, ...(timeoutAction === null ? [] : timeoutNames)];
+  return [
+    ...warningsForText(text, variables, available),
+    ...(timeoutAction === null ? [] : warningsForText(
+      timeoutAction.fallbackText,
+      variables,
+      available,
+    ).map((warning) => ({ ...warning, field: "timeoutFallbackText" }))),
+  ];
+};
+
 textCommandRoutes.get("/commands", async (context) => {
   const channelId = param(context, "channelId");
   const repository = createTextCommandRepository(context.env.DB, context.get("authorizeMutation"));
@@ -210,7 +242,7 @@ textCommandRoutes.post("/commands", async (context) => {
   ]);
   const warnings = body.kind === "list"
     ? []
-    : warningsForText(body.text, effectiveCommandVariables(channelVariables), registeredVariables.map(({ name }) => name));
+    : warningsForCommand(body.text, body.timeoutAction, effectiveCommandVariables(channelVariables), registeredVariables.map(({ name }) => name));
   const created = await repository.create({ channelId, ...body, now }, context.get("actor"));
   if (created.ok) {
     const command: TextCommand = {
@@ -232,6 +264,7 @@ textCommandRoutes.post("/commands", async (context) => {
       responseType: body.responseType,
       chatTarget: body.chatTarget,
       variableAction: body.variableAction,
+      timeoutAction: body.timeoutAction,
       useCount: 0,
       lastUsedAt: null,
       createdAt: now,
@@ -269,7 +302,9 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const defaults = defaultsForKind(kind);
   const kindChanged = kind !== before.kind;
   const variableAction = body.variableAction === undefined ? before.variableAction : body.variableAction;
+  const timeoutAction = body.timeoutAction === undefined ? before.timeoutAction : body.timeoutAction;
   if (variableAction !== null && kind !== "text") return context.json({ error: "command_data_invalid" }, 400);
+  if (timeoutAction !== null && kind !== "text") return context.json({ error: "command_data_invalid" }, 400);
   if (!validVariableAction(variableAction)) return context.json({ error: "command_data_invalid" }, 400);
   const text = kind === "list" ? "" : body.text ?? (kindChanged ? defaults.text ?? before.text : before.text);
   const offlineText = body.offlineText ?? (kindChanged ? defaults.offlineText : before.offlineText);
@@ -306,7 +341,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   ]);
   const warnings = kind === "list"
     ? []
-    : warningsForText(text, effectiveCommandVariables(channelVariables), registeredVariables.map(({ name }) => name));
+    : warningsForCommand(text, timeoutAction, effectiveCommandVariables(channelVariables), registeredVariables.map(({ name }) => name));
   const authorizeMutation = contentChanged
     ? context.get("authorizeManagementMutation")
     : context.get("authorizeMutation");
@@ -332,6 +367,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     responseType,
     chatTarget,
     variableAction,
+    timeoutAction,
     ...(before.legacyFallback === undefined ? {} : { legacyFallback: before.legacyFallback }),
     expectedRevision: body.revision,
     onlyToggle: !contentChanged,
@@ -354,6 +390,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
       responseType,
       chatTarget,
       variableAction,
+      timeoutAction,
       useCount: before.useCount,
       enabled: body.enabled ?? before.enabled,
       updatedAt: now,

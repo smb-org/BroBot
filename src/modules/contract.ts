@@ -429,15 +429,15 @@ export type ModuleAction =
     userId: string;
     durationSeconds: number;
     reason: string;
-    onSuccess?: Extract<ModuleAction, { kind: "chat" }>;
-    onFailure?: Extract<ModuleAction, { kind: "chat" }>;
+    onSuccess?: Extract<ModuleAction, { kind: "chat" | "announcement" }>;
+    onFailure?: Extract<ModuleAction, { kind: "chat" | "announcement" }>;
   }
   | {
     kind: "ban";
     userId: string;
     reason: string;
-    onSuccess?: Extract<ModuleAction, { kind: "chat" }>;
-    onFailure?: Extract<ModuleAction, { kind: "chat" }>;
+    onSuccess?: Extract<ModuleAction, { kind: "chat" | "announcement" }>;
+    onFailure?: Extract<ModuleAction, { kind: "chat" | "announcement" }>;
   }
   | {
     kind: "overlay";
@@ -571,6 +571,8 @@ export interface ModuleExecutionContext {
     now: string,
     claim: { commandName: string; revision: number; userId: string | null },
   ) => D1PreparedStatement;
+  /** Host-provided cryptographically secure integer in [0, maximumExclusive). */
+  secureRandomInteger: (maximumExclusive: number) => number;
   /** Lazily reads the channel's configured chat-template language. */
   channelLanguage: () => Promise<ModuleLanguage>;
   /** Lazily reads the channel's configured time zone for date/time and module conditions. */
