@@ -116,7 +116,7 @@ const commandDraftIsValid = (draft: CommandDraft, channelVariables: readonly Tex
       timeout.fallbackText.trim().length > 0 && timeout.fallbackText.length <= 500 && timeout.reason.length <= 500
     : timeout === null;
   const responseRequired = draft.kind !== "list" && variable === null && draft.text.trim().length === 0;
-  const usageRequired = draft.kind === "shoutout" || (draft.kind === "text" && draft.usageTextEnabled);
+  const usageRequired = draft.kind === "shoutout" || ((draft.kind === "text" || draft.kind === "timeout") && draft.usageTextEnabled);
   const usageInvalid = usageRequired && (draft.usageText.trim().length === 0 || draft.usageText.length > 500);
   return validCommandName(name) && !draft.aliases.includes(name) && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES &&
     typeof draft.cooldownSeconds === "number" && Number.isInteger(draft.cooldownSeconds) && draft.cooldownSeconds >= 0 && draft.cooldownSeconds <= 86400 &&
@@ -254,8 +254,30 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const templateValue = (field: CommandTemplateField): string => field === "timeoutFallbackText"
     ? draft.timeoutAction?.fallbackText ?? ""
     : draft[field];
+  const slashInput = parseLeadingSlashCommand(draft.text);
+  const convertedDraft = slashInput.status === "valid"
+    ? convertLeadingSlashCommand(draft, slashInput, {
+      text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout,
+      usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT,
+    })
+    : draft;
+  const materializesTimeout = slashInput.status === "valid" && slashInput.command === "timeout" && draft.kind !== "timeout";
+  const validationDraft = materializesTimeout ? draft : convertedDraft;
+  const validationTemplateFields = Object.fromEntries(Object.entries(templateFieldsForKind(
+    validationDraft.kind,
+    channelVariables,
+    validationDraft.timeoutAction !== null,
+  ))
+    .filter(([field]) => field !== "usageText" || validationDraft.kind === "shoutout" || validationDraft.usageTextEnabled)
+    .map(([field, variables]) => [field, [...variables, ...blockVariables]]));
+  const validationTemplateValue = (field: string): string => field === "timeoutFallbackText"
+    ? validationDraft.timeoutAction?.fallbackText ?? ""
+    : validationDraft[field as "text" | "usageText"];
+  const validationResponseInvalid = Object.keys(validationTemplateFields).some((field) => {
+    const value = validationTemplateValue(field);
+    return (value.trim().length === 0 && !(field === "text" && validationDraft.variableAction !== null) && !(field === "usageText" && validationDraft.kind === "text")) || value.length > 500;
+  });
   const normalizedName = normalizeCommandName(draft.name);
-  const nameInvalid = normalizedName.length === 0 || !validCommandName(normalizedName);
   const sameNameAlias = draft.aliases.includes(normalizedName);
   const nameError = fieldError?.field === "name" ? fieldError.message : attemptedSave && normalizedName.length === 0 ? labels.nameMissing : attemptedSave && !validCommandName(normalizedName) ? labels.nameInvalid : undefined;
   const aliasesError = fieldError?.field === "aliases" ? fieldError.message : sameNameAlias ? labels.aliasIsName : undefined;
@@ -266,9 +288,6 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     const value = templateValue(field);
     return (value.trim().length === 0 && !(field === "text" && draft.variableAction !== null) && !(field === "usageText" && draft.kind === "text")) || value.length > 500;
   });
-  const actionInvalid = draft.variableAction !== null && (!channelVariables.some((variable) => variable.name === draft.variableAction?.name) ||
-    ((draft.variableAction.operation === "add" || draft.variableAction.operation === "subtract") && (draft.variableAction.amount === null || draft.variableAction.amount < 1 || draft.variableAction.amount > 1000)) ||
-    (draft.variableAction.operation === "set" && (draft.variableAction.amount === null || draft.variableAction.amount < -999999999 || draft.variableAction.amount > 999999999)));
   const timeoutActionInvalid = draft.kind === "timeout"
     ? draft.timeoutAction === null || typeof draft.timeoutAction.minSeconds !== "number" || !Number.isInteger(draft.timeoutAction.minSeconds) ||
       typeof draft.timeoutAction.maxSeconds !== "number" || !Number.isInteger(draft.timeoutAction.maxSeconds) ||
@@ -276,9 +295,9 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       draft.timeoutAction.maxSeconds > MODERATION_TIMEOUT_MAX_SECONDS || draft.timeoutAction.fallbackText.trim().length === 0 ||
       draft.timeoutAction.fallbackText.length > 500 || draft.timeoutAction.reason.length > 500
     : draft.timeoutAction !== null;
-  const valid = !nameInvalid && !sameNameAlias && !cooldownInvalid && !userCooldownInvalid && !responseInvalid && !actionInvalid &&
-    !timeoutActionInvalid && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES &&
-    (variableAction === null || draft.kind === "text" || draft.kind === "timeout") && commandDraftIsValid(draft, channelVariables);
+  const valid = slashInput.status !== "invalid" && !validationResponseInvalid &&
+    (validationDraft.variableAction === null || validationDraft.kind === "text" || validationDraft.kind === "timeout") &&
+    commandDraftIsValid(validationDraft, channelVariables);
   const localWarnings = templateFieldNames.flatMap((field) => {
     const variables = templateFields[field] ?? [];
     const value = templateValue(field);
@@ -307,7 +326,6 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   }));
   const kindOptions = TEXT_COMMAND_KINDS.map((kind) => ({ value: kind, label: labels.kindLabels[kind], description: labels.kindHints[kind] }));
   const announcementWarning = draft.responseType === "announcement" && botIsModerator === false ? labels.announcementWarning : undefined;
-  const slashInput = parseLeadingSlashCommand(draft.text);
   const slashSuggestions = slashInput.status === "suggestions"
     ? SLASH_COMMAND_NAMES.filter((name) => name.startsWith(slashInput.fragment))
     : slashInput.status === "invalid" ? [slashInput.command] : [];
@@ -334,10 +352,10 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const saveDraft = useCallback(async (): Promise<string | null> => {
     setAttemptedSave(true);
     if (!canManageContent) return labels.invalid;
-    const slashInput = parseLeadingSlashCommand(draft.text);
-    if (slashInput.status === "invalid") return labels.invalid;
-    const savedDraft = slashInput.status === "valid"
-      ? convertLeadingSlashCommand(draft, slashInput, {
+    const parsedSlashInput = parseLeadingSlashCommand(draft.text);
+    if (parsedSlashInput.status === "invalid") return labels.invalid;
+    const savedDraft = parsedSlashInput.status === "valid"
+      ? convertLeadingSlashCommand(draft, parsedSlashInput, {
         text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout,
         usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT,
       })
@@ -520,7 +538,11 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
                   announce: "/announce ",
                   shoutout: "/shoutout {target}\n",
                 };
-                setTemplateField("text", examples[slashCommand]);
+                const leadingDirective = /^\/[^\s]*/u.exec(draft.text)?.[0] ?? "";
+                const remainder = draft.text.slice(leadingDirective.length);
+                const example = examples[slashCommand];
+                const replacement = /^(?:\r?\n)/u.test(remainder) && example.endsWith("\n") ? example.slice(0, -1) : example;
+                setTemplateField("text", `${replacement}${remainder}`);
               }}
             >
               <code>{labels.slashCommands[slashCommand].syntax}</code>
@@ -596,7 +618,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         {draft.kind === "list"
           ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />
           : templateEditor("text", labels.response)}
-        {draft.kind === "text" ? <Switch
+        {draft.kind === "text" || draft.kind === "timeout" ? <Switch
           layout="inline"
           label={labels.usageOverride}
           hint={labels.usageOverrideHint}
@@ -612,7 +634,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             setSaved(false); setError(undefined); setConcurrentConflict(false);
           }}
         /> : null}
-        {draft.kind === "shoutout" || (draft.kind === "text" && draft.usageTextEnabled) ? <>
+        {draft.kind === "shoutout" || ((draft.kind === "text" || draft.kind === "timeout") && draft.usageTextEnabled) ? <>
           {templateEditor("usageText", labels.templateFieldLabels.usageText)}
           {draft.kind === "shoutout" ? <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p> : null}
         </> : null}

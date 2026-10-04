@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ModuleEvent, ModuleResult } from "../../src/modules/contract";
 import { processTextCommandMessage } from "../../src/modules/text_commands/service";
 import type { TextCommand, TextCommandRepository } from "../../src/modules/text_commands";
+import { convertLeadingSlashCommand, parseLeadingSlashCommand } from "../../src/modules/text_commands/panel/slash-command";
+import { TEXT_COMMAND_DEFAULT_TEXTS, TEXT_COMMAND_DEFAULT_USAGE_TEXT } from "../../src/modules/text_commands/contracts/chat-defaults";
 
 const NOW = "2026-09-19T12:00:00.000Z";
 
@@ -125,6 +127,36 @@ describe("Text commands service", () => {
     ]);
     expect(usage.actions).toEqual([{ kind: "chat", text: "Nutzung: !so <name>", target: "source_only", automated: false }]);
     expect(usage.diagnostics).toContainEqual({ code: "text_commands.argument_missing", detail: { name: "so" } });
+  });
+
+  it("runs a saved /announce conversion as an announcement at runtime", async () => {
+    const parsed = parseLeadingSlashCommand("/announce Stream starts now!");
+    if (parsed.status !== "valid") throw new Error("Announcement example did not parse.");
+    const converted = convertLeadingSlashCommand({
+      kind: "shoutout" as const,
+      text: "/announce Stream starts now!",
+      responseType: "say" as const,
+      variableAction: null,
+      timeoutAction: null,
+      usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT,
+      usageTextEnabled: true,
+      usageTextChanged: false,
+      minimumTier: "moderator" as const,
+    }, parsed, { text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout, usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT });
+    const savedCommand: TextCommand = {
+      ...command("announce", converted.text),
+      kind: converted.kind,
+      responseType: converted.responseType,
+    };
+
+    const result = await processTextCommandMessage(eventFor("!announce"), repositoryFor([savedCommand]));
+
+    expect(result.actions).toEqual([{
+      kind: "announcement",
+      text: "Stream starts now!",
+      target: "source_only",
+      automated: false,
+    }]);
   });
 
   it("logs the command, arguments, and resolved response", async () => {

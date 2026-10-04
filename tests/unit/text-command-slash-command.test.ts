@@ -76,6 +76,8 @@ describe("text command slash input", () => {
     if (announcement.status !== "valid") throw new Error("Announcement example did not parse.");
     expect(convertLeadingSlashCommand(initial, announcement, { text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout, usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT }))
       .toMatchObject({ kind: "text", responseType: "announcement", text: "Breaking news!" });
+    expect(convertLeadingSlashCommand({ ...initial, kind: "shoutout" }, announcement, { text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout, usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT }))
+      .toMatchObject({ kind: "text", responseType: "announcement", timeoutAction: null });
 
     const shoutout = parseLeadingSlashCommand("/shoutout {target}");
     if (shoutout.status !== "valid") throw new Error("Shoutout example did not parse.");

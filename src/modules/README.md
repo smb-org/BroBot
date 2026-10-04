@@ -300,7 +300,7 @@ und die Variablen `{timeout.seconds}` sowie `{timeout.duration}` in Antwort,
 Grund und Ersatztext. Für Broadcaster und Moderatoren wird nur der Ersatztext
 gerendert. Dauer, Grund und Ersatztext liegen auf der vorhandenen Befehlstabelle
 und werden gemeinsam mit der Kanalvariablenaktion und dem Audit-Eintrag
-gespeichert. Migration `0032_text_command_timeout_kind.sql` wandelt vorhandene
+gespeichert. Migration `0031_text_command_timeout_kind.sql` wandelt vorhandene
 Antwortbefehle mit Timeoutaktion in `timeout` um und bewahrt ihre übrigen Felder.
 
 `src/modules/votekick/` nutzt den gemeinsamen Ballot-Speicher und die

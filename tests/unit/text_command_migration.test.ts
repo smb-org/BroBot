@@ -62,7 +62,7 @@ describe("text command options migration", () => {
     const database = new DatabaseSync(":memory:");
     try {
       for (const migration of readdirSync(migrationsDirectory)
-        .filter((name) => name.endsWith(".sql") && name < "0032_text_command_timeout_kind.sql")
+        .filter((name) => name.endsWith(".sql") && name < "0031_text_command_timeout_kind.sql")
         .sort()) {
         database.exec(readFileSync(resolve(migrationsDirectory, migration), "utf8"));
       }
@@ -96,7 +96,7 @@ describe("text command options migration", () => {
         VALUES ('channel-a', 'roulette', 'user-1', '2026-09-23T00:02:00.000Z');
       `);
 
-      database.exec(readFileSync(resolve(migrationsDirectory, "0032_text_command_timeout_kind.sql"), "utf8"));
+      database.exec(readFileSync(resolve(migrationsDirectory, "0031_text_command_timeout_kind.sql"), "utf8"));
 
       expect(database.prepare(
         `SELECT kind, response_text, cooldown_seconds, last_used_at, enabled, minimum_level, aliases_json,

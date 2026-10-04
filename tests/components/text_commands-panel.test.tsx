@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand } from "../../src/modules/text_commands/contracts";
+import { TEXT_COMMAND_DEFAULT_TEXTS } from "../../src/modules/text_commands/contracts/chat-defaults";
 import { statusForTier, renderCommandText } from "../../src/modules/text_commands/domain";
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
@@ -156,6 +157,64 @@ describe("Text command editor", () => {
     expect(screen.getByText("Dieser Slash-Befehl bleibt Antworttext.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
     await waitFor(() => expect(created).toMatchObject({ kind: "text", text: "/permit everyone" }));
+  });
+
+  it("replaces a slash suggestion while preserving the response body", async () => {
+    renderPanel(panelFetch({ commands: () => [] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    const response = screen.getByRole("textbox", { name: "Antwort" });
+    fireEvent.change(response, { target: { value: "/time\nKeep this response" } });
+
+    const suggestions = screen.getByRole("group", { name: "Twitch-Befehle am Anfang werden beim Speichern in strukturierte Felder umgewandelt." });
+    fireEvent.click(within(suggestions).getByRole("button", { name: /\/timeout/u }));
+
+    expect(response).toHaveValue("/timeout {user} 120\nKeep this response");
+  });
+
+  it("validates a converted slash draft before blocking save", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body;
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Timeout/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "/shoutout {target}" } });
+
+    const save = screen.getByRole("button", { name: "Anlegen" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+
+    await waitFor(() => expect(created).toMatchObject({ kind: "shoutout", text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout }));
+  });
+
+  it("lets timeout commands configure usage text", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body;
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "timeout" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Timeout/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Timed out." } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ersatztext, wenn der Timeout abgelehnt wird" }), { target: { value: "Could not time out." } });
+    fireEvent.click(screen.getByRole("switch", { name: "Eigenen Nutzungshinweis bei fehlendem Betrag verwenden" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Nutzungshinweis" }), { target: { value: "Usage: !timeout <amount>" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created).toMatchObject({ kind: "timeout", usageText: "Usage: !timeout <amount>" }));
   });
 
   it("offers the shared system variable catalog in the response picker", async () => {

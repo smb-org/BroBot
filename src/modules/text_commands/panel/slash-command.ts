@@ -94,7 +94,7 @@ export const convertLeadingSlashCommand = <Draft extends SlashConvertibleDraft>(
   shoutoutDefaults: { text: string; usageText: string },
 ): Draft => {
   if (parsed.command === "announce") {
-    return { ...draft, text: parsed.bodyText, responseType: "announcement" };
+    return { ...draft, kind: "text", text: parsed.bodyText, responseType: "announcement", timeoutAction: null };
   }
 
   if (parsed.command === "shoutout") {

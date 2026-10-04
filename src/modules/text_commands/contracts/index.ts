@@ -144,7 +144,7 @@ export interface TextCommandActor {
 
 export const TEXT_COMMAND_TEMPLATE_FIELDS = {
   text: { text: TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, usageText: [] },
-  timeout: { text: TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES },
+  timeout: { text: TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, usageText: [] },
   list: {},
   shoutout: { text: [], usageText: [] },
 } as const satisfies Readonly<Record<TextCommandKind, TemplateFields<TextCommand>>>;
