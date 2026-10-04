@@ -2,7 +2,7 @@
 
 **Stand:** 18. September 2026
 **Status:** entschieden, siehe [#1](https://github.com/smb-org/BroBot/issues/1)
-**Betrifft:** #10, #12, #14, #28, #30 — jedes Modul, das Nutzerdaten schreibt
+**Betrifft:** #10, #12, #14, #28, #30, #292 — jedes Modul, das Nutzerdaten schreibt
 
 ## Offene Entwurfsfragen
 
@@ -47,11 +47,13 @@ Zwei Eigenschaften daran sind Absicht:
 
 ### Flüchtiger Raum — Schlüssel stirbt mit dem Vorgang
 
-**Wofür:** Stimmen bei einem Chat-Voting (#10), Zählung unterschiedlicher Nutzer in einem gleitenden Fenster (#12).
+**Wofür:** Stimmen bei einem Chat-Voting (#10), Zählung unterschiedlicher Nutzer in einem gleitenden Fenster (#12) und aktive Chatter im rollierenden Fenster (#292).
 
-**Schlüssel:** 32 zufällige Bytes, erzeugt beim Start des Vorgangs, gespeichert neben dem Vorgang selbst. Beim Ballot liegt er ausschließlich im Channel Durable Object; der HMAC folgt der längenpräfixierten Kodierung aus Abschnitt 2.
+**Schlüssel:** Jeder Vorgang verwendet 32 zufällige Bytes, die neben seinem Zustand im Channel Durable Object gespeichert werden. Für aktive Chatter wird je Kanal ein Schlüssel mit `created_at` in SQLite angelegt und bei der ersten erfassten Aktivität erzeugt. Der Ballot-HMAC folgt der längenpräfixierten Kodierung aus Abschnitt 2.
 
-**Lebensdauer:** Der Schlüssel wird beim Schließen eines Votings beziehungsweise beim Ablauf eines Fensters aus dem aktiven Durable-Object-Speicher gelöscht. Danach lässt sich ein zurückgebliebener HMAC-Wert mit dem regulären Laufzeitzustand keiner Person mehr zuordnen. SQLite-basierte Durable Objects können jedoch Point-in-Time-Recovery für bis zu 30 Tage bereitstellen; eine Wiederherstellung auf einen früheren Stand kann deshalb auch den gelöschten Schlüssel zurückbringen. Die Löschung ist keine Zusage sofortiger physischer Tilgung aus Wiederherstellungsständen.
+**Lebensdauer:** Ballot-Schlüssel und Stimmen werden beim Schließen oder Ablauf des Votings aus dem aktiven Durable-Object-Speicher gelöscht. Aktive-Chatter-Zeilen werden nach 60 Minuten Inaktivität durch einen keyed Durable-Object-Alarm gelöscht; wenn keine Zeilen mehr bestehen, wird auch der Schlüssel entfernt. `stream.offline` löscht Schlüssel und Zeilen sofort, ohne Stream-ID-Abgleich. Bereits laufende Chatverarbeitung kann danach wieder eine Zeile anlegen; der Alarm löscht sie spätestens nach weiteren 60 Minuten plus Alarmverzögerung. Der aktive-Chatter-Schlüssel rotiert spätestens nach 24 Stunden und löscht dabei vorhandene Zeilen.
+
+SQLite-basierte Durable Objects können Point-in-Time-Recovery für bis zu 30 Tage bereitstellen. Eine Wiederherstellung auf einen früheren Stand kann deshalb gelöschte Ballot-Schlüssel oder aktive-Chatter-Schlüssel zurückbringen. Die Löschung ist keine Zusage sofortiger physischer Tilgung aus Wiederherstellungsständen. Ohne wiederhergestellten Schlüssel ist der Bezug **endgültig** weg.
 
 **Was bleibt:** Das Ergebnis. „Option A: 47 Stimmen" ist keine personenbezogene Angabe und darf unbegrenzt bleiben.
 
@@ -82,16 +84,16 @@ Entscheidungsbegründungen und kein kanalweiter Aktivitätszähler.
 
 ## 4. Rotation — was wirklich passiert
 
-Ein kanalweiter Schlüssel lässt sich **nicht** rotieren wie ein Signaturschlüssel. Um bestehende Zeilen auf einen neuen Schlüssel umzurechnen, bräuchte man die ursprünglichen User-IDs im Klartext — genau die speichern wir nicht.
+Ein kanalweiter Schlüssel für dauerhafte Zähler lässt sich **nicht** rotieren wie ein Signaturschlüssel. Um bestehende Zeilen auf einen neuen Schlüssel umzurechnen, bräuchte man die ursprünglichen User-IDs im Klartext — genau die speichern wir nicht.
 
 Eine Rotation bedeutet deshalb in der Sache:
 
 - Alle bestehenden Zeilen sind ab sofort niemandem mehr zuzuordnen. Sie sind damit anonym — aber auch auf Anfrage **nicht mehr löschbar**, weil niemand sie findet.
 - Alle Zähler beginnen bei null.
 
-**Deshalb wird nicht turnusmäßig rotiert.** Eine Rotation ist eine Notfallmaßnahme, wenn der Schlüssel abgeflossen ist. Sie wird dann zusammen mit dem **Löschen** der betroffenen Zeilen durchgeführt, nicht statt dessen — sonst bleibt ein Bestand zurück, den man nicht mehr aufräumen kann.
+**Deshalb wird der Schlüssel des kanalweiten Raums nicht turnusmäßig rotiert.** Eine Rotation ist dort eine Notfallmaßnahme, wenn der Schlüssel abgeflossen ist. Sie wird zusammen mit dem **Löschen** der betroffenen Zeilen durchgeführt, nicht statt dessen — sonst bleibt ein Bestand zurück, den man nicht mehr aufräumen kann.
 
-Beim flüchtigen Raum stellt sich die Frage nicht: Dort ist jeder Vorgang sein eigener Schlüssel.
+Für aktive Chatter (#292) gilt eine bewusst kürzere Regel: Der kanalgebundene Schlüssel rotiert spätestens nach 24 Stunden und löscht dabei alle Zeilen. Die Zeilen selbst bleiben höchstens rund 60 Minuten ab letzter Aktivität plus Alarmverzögerung bestehen.
 
 ---
 
@@ -101,6 +103,7 @@ Beim flüchtigen Raum stellt sich die Frage nicht: Dort ist jeder Vorgang sein e
 |---|---|---|
 | Stimmen eines Votings | mit dem Schließen, spätestens **24 Stunden** nach Ende | Der Zweck endet mit der Auswertung |
 | Gleitendes Fenster der Themen-Erkennung | mit dem Fensterablauf, spätestens **am Streamende** | #12 sieht ohnehin Verfall am Streamende vor |
+| Aktive Chatter | **60 Minuten** nach letzter Aktivität plus Alarmverzögerung; Schlüsselrotation spätestens nach **24 Stunden** | Kurzlebige Grundlage für Fensterzählungen und Teilnahmeprüfungen |
 | Kanalweite Aktivitätszähler je Person | **180 Tage** rollierend | Wiederkehrende Zuschauer zu erkennen braucht Monate, nicht Jahre |
 | Modul-Ereignisse mit roher `actor_user_id` | **14 Tage** | Betriebliche Fehlersuche; die Ausnahme bleibt wegen der kurzen Frist begrenzt |
 | Audit-Einträge | **24 Monate** | Administrative Nachvollziehbarkeit; betrifft Bedienende, nicht Zuschauer |
@@ -137,7 +140,7 @@ Nur der kanalweite Raum ist auskunfts- und löschfähig. Der Ablauf:
 
 Das setzt voraus, dass der Hash **indiziert** ist — sonst wird eine Anfrage zu einem vollständigen Tabellendurchlauf. Jede Tabelle im kanalweiten Raum bekommt deshalb einen Index auf die Hash-Spalte.
 
-**Für den flüchtigen Raum gibt es keine Auskunft**, und das ist kein Versäumnis: Die Daten existieren höchstens Stunden und sind danach auch für uns nicht mehr zuzuordnen. Auf eine Anfrage wird wahrheitsgemäß geantwortet, dass zu dieser Person nichts vorliegt.
+**Für den flüchtigen Raum gibt es keine Auskunft**, und das ist kein Versäumnis: Aktive-Chatter-Daten bestehen höchstens rund 60 Minuten plus Alarmverzögerung und sind danach auch für uns nicht mehr zuzuordnen. Auf eine Anfrage wird wahrheitsgemäß geantwortet, dass zu dieser Person nichts vorliegt.
 
 Dieser Ablauf gehört in `docs/OPERATIONS.md`, nicht nur hierher — er wird gebraucht, wenn niemand Zeit hat, eine Entscheidung zu lesen.
 
