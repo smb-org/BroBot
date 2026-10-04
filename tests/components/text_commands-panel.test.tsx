@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { CURRENCY_TEMPLATE_VARIABLE } from "../../src/modules/currency/contracts";
 import { TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand } from "../../src/modules/text_commands/contracts";
 import { statusForTier, renderCommandText } from "../../src/modules/text_commands/domain";
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
@@ -36,15 +37,16 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
 
 interface FetchOptions {
   commands?: () => TextCommand[];
+  templateVariables?: unknown[];
   onMutation?: (method: string, path: string, body: unknown) => Response | Promise<Response>;
 }
 
-const panelFetch = ({ commands = () => [makeCommand()], onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
+const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
   vi.fn<typeof fetch>((input, init) => {
     const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-    if (url.pathname.endsWith("/template-variables") && method === "GET") return Promise.resolve(jsonResponse({ variables: [
+    if (url.pathname.endsWith("/template-variables") && method === "GET") return Promise.resolve(jsonResponse({ variables: templateVariables ?? [
       { name: "welcome", moduleId: "text_library", isTextBlock: true },
       ...TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES.map((variable) => ({ ...variable, moduleId: "text_commands", isTextBlock: false })),
     ] }));
@@ -242,6 +244,24 @@ describe("Text command editor", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
     const tierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
     expect(within(tierGroup).getByRole("radio", { checked: true })).toHaveAccessibleName("Moderatoren. Moderatoren und Broadcaster.");
+  });
+
+  it("shows the custom usage response only when a response uses an argument-taking variable", async () => {
+    renderPanel(panelFetch({ commands: () => [makeCommand({ text: "Hello {user}" })] }));
+    await selectCommand();
+    expect(screen.queryByRole("switch", { name: "Eigenen Nutzungshinweis verwenden, wenn Argumente fehlen" })).not.toBeInTheDocument();
+
+    cleanup();
+    renderPanel(panelFetch({
+      commands: () => [makeCommand({ text: "Converted: {currency.convert USD EUR}" })],
+      templateVariables: [{ ...CURRENCY_TEMPLATE_VARIABLE, moduleId: "currency", isTextBlock: false, contexts: ["chat_command"] }],
+    }));
+    await selectCommand();
+    const usageSwitch = await screen.findByRole("switch", { name: "Eigenen Nutzungshinweis verwenden, wenn Argumente fehlen" });
+    fireEvent.click(usageSwitch);
+
+    expect(await screen.findByRole("textbox", { name: "Nutzungshinweis" })).toBeInTheDocument();
+    expect(screen.getByText("Optionaler Antworttext, wenn eine Variable ohne erforderliche Argumente aufgerufen wird.")).toBeInTheDocument();
   });
 
   it("puts the Art select's hint below the field, not between the label and the control", async () => {

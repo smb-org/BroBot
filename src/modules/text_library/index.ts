@@ -11,6 +11,7 @@ const settingsSchema = z.object({});
 
 export const textLibraryModule: BotModule<typeof settingsSchema> = {
   id: "text_library",
+  navigationCategory: "chat",
   panelIcon: { paths: ["M5 5h14v14H5z", "M8 9h8", "M8 12h8", "M8 15h5"] },
   mandatory: true,
   mandatoryReason: {
@@ -29,7 +30,6 @@ export const textLibraryModule: BotModule<typeof settingsSchema> = {
     id: "texts",
     label: { de: textLibraryModuleCatalog.de.label, en: textLibraryModuleCatalog.en.label },
     description: { de: textLibraryModuleCatalog.de.description, en: textLibraryModuleCatalog.en.description },
-    group: "channel",
     showMainSwitch: false,
     iconKind: "texts",
     keywords: ["text", "texts", "texte", "textbausteine", "library", "bibliothek"],

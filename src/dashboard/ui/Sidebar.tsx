@@ -18,20 +18,13 @@ export interface SidebarEntry {
 
 export interface SidebarGroup {
   id: string;
-  heading: string;
+  heading?: string;
   entries: SidebarEntry[];
-}
-
-export interface SidebarModulesGroup {
-  heading: string;
-  entry: SidebarEntry;
-  entries: SidebarEntry[];
+  nestedEntries?: boolean;
 }
 
 export interface SidebarProps {
   groups: SidebarGroup[];
-  modules: SidebarModulesGroup;
-  platform?: SidebarGroup | undefined;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onEntryNavigate: () => void;
@@ -53,15 +46,11 @@ const stopAndNavigate = (onNavigate: () => void, onEntryNavigate: () => void) =>
  * nesting a second `navigation` landmark inside it would be a duplicate
  * landmark, not a second one.
  *
- * Collapsed (80px) shows icon-only entries with a native tooltip instead
- * of the icon-over-label stack the document describes, and the Modules
- * group expands in place rather than opening a popover flyout.
- * ponytail: both are a visual simplification within budget, not a
- * functional gap -- every entry stays reachable and labeled. Upgrade path:
- * a stacked `NavLink` layout and a `Popover` around the Modules group when
- * this needs to look pixel-exact rather than just work.
+ * Collapsed (80px) shows icon-only entries with a native tooltip. All
+ * navigation groups share one scroll region; the collapse control stays
+ * outside it so it remains reachable when the module list is long.
  */
-export function Sidebar({ groups, modules, platform, collapsed, onToggleCollapsed, onEntryNavigate, collapseLabel, expandLabel }: SidebarProps) {
+export function Sidebar({ groups, collapsed, onToggleCollapsed, onEntryNavigate, collapseLabel, expandLabel }: SidebarProps) {
   const renderEntry = (entry: SidebarEntry, moduleChild = false): ReactNode => {
     const accessibleName = moduleChild && entry.led !== undefined
       ? `${entry.label} · ${entry.led.word}`
@@ -88,23 +77,12 @@ export function Sidebar({ groups, modules, platform, collapsed, onToggleCollapse
     <div className="sidebar" data-collapsed={collapsed ? "true" : undefined}>
       <div className="sidebar__scroll">
         {groups.map((group) => (
-          <div className="sidebar__group" key={group.id}>
-            {collapsed ? null : <div className="sidebar__heading">{group.heading}</div>}
-          {group.entries.map((entry) => renderEntry(entry))}
+          <div className={`sidebar__group${group.id === "platform" ? " sidebar__group--platform" : ""}`} key={group.id}>
+            {collapsed || group.heading === undefined ? null : <div className="sidebar__heading">{group.heading}</div>}
+            {group.entries.map((entry) => renderEntry(entry, group.nestedEntries === true))}
           </div>
         ))}
-        <div className="sidebar__group">
-          {collapsed ? null : <div className="sidebar__heading">{modules.heading}</div>}
-          {renderEntry(modules.entry)}
-          {modules.entries.map((entry) => renderEntry(entry, true))}
-        </div>
       </div>
-      {platform === undefined ? null : (
-        <div className="sidebar__group sidebar__group--platform">
-          {collapsed ? null : <div className="sidebar__heading">{platform.heading}</div>}
-          {platform.entries.map((entry) => renderEntry(entry))}
-        </div>
-      )}
       <button
         type="button"
         className="sidebar__collapse-toggle"

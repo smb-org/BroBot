@@ -9,7 +9,7 @@ import {
 import { PanelApiError } from "../../../contracts/panel-error";
 import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand, type TextCommandGame, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
 import { MODERATION_TIMEOUT_MAX_SECONDS } from "../../contracts/moderation";
-import { minimumTierAfterVariableOperation } from "./editor-state";
+import { minimumTierAfterVariableOperation, usesParameterizedTemplateVariable } from "./editor-state";
 import { commandListReply, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsFor } from "../contracts/chat-defaults";
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
@@ -192,9 +192,6 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const isCreate = command === null;
   const blockVariables: TemplateVariable[] = libraryBlocks.map((name) => ({ name, group: "channel", sample: name, maxLength: 500 }));
   const baseTemplateFields = templateFieldsForKind(draft.kind, channelVariables, draft.timeoutAction !== null);
-  const templateFields = Object.fromEntries(Object.entries(baseTemplateFields)
-    .filter(([field]) => field !== "usageText" || draft.kind === "shoutout" || draft.usageTextEnabled)
-    .map(([field, variables]) => [field, [...variables, ...blockVariables]]));
   const variableAction = draft.variableAction;
   const templateVariables = (field: CommandTemplateField) => [
     ...panelTemplateOptions("chat_command", [], channelVariables, resolvedLanguage),
@@ -219,6 +216,10 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       };
     }),
   ];
+  const responseUsesParameterizedVariable = draft.kind === "text" && usesParameterizedTemplateVariable(draft.text, templateVariables("text"));
+  const templateFields = Object.fromEntries(Object.entries(baseTemplateFields)
+    .filter(([field]) => field !== "usageText" || draft.kind === "shoutout" || (responseUsesParameterizedVariable && draft.usageTextEnabled))
+    .map(([field, variables]) => [field, [...variables, ...blockVariables]]));
   const templateValue = (field: CommandTemplateField): string => field === "timeoutFallbackText"
     ? draft.timeoutAction?.fallbackText ?? ""
     : draft[field];
@@ -291,11 +292,19 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const saveDraft = useCallback(async (): Promise<string | null> => {
     setAttemptedSave(true);
     if (!canManageContent || !valid) return labels.invalid;
+    const responseUsesParameterizedVariable = draft.kind === "text" && usesParameterizedTemplateVariable(draft.text, [
+      ...panelTemplateOptions("chat_command", [], channelVariables, language ?? dashboardLanguage()),
+      ...registeredVariables
+        .filter((variable) => !variable.isTextBlock && variable.name.includes(".") &&
+          (draft.timeoutAction !== null || !variable.name.startsWith("timeout.")) &&
+          (variable.contexts?.includes("chat_command") ?? true))
+        .map(({ name, parameters }) => ({ name, ...(parameters === undefined ? {} : { parameters }) })),
+    ]);
     const payload = {
       name: normalizedName,
       text: draft.kind === "list" ? "" : draft.text,
       kind: draft.kind,
-      ...(draft.kind !== "list" && (draft.kind === "shoutout" || draft.usageTextEnabled || draft.usageTextChanged) ? { usageText: draft.usageText } : {}),
+      ...(draft.kind !== "list" && (draft.kind === "shoutout" || (responseUsesParameterizedVariable && (draft.usageTextEnabled || draft.usageTextChanged))) ? { usageText: draft.usageText } : {}),
       minimumTier: draft.minimumTier,
       cooldownSeconds: draft.cooldownSeconds as number,
       aliases: draft.aliases,
@@ -350,7 +359,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       setError(labels.saveError);
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, channelId, command, draft, isCreate, labels, normalizedName, onRefresh, valid, setAttemptedSave, setConcurrentConflict, setError, setFieldError, setPending, setSaved, setServerWarnings]);
+  }, [accept, canManageContent, channelId, channelVariables, command, draft, isCreate, labels, language, normalizedName, onRefresh, registeredVariables, valid, setAttemptedSave, setConcurrentConflict, setError, setFieldError, setPending, setSaved, setServerWarnings]);
 
   const guard = useDraftGuard(dirty, saveDraft, reset);
   useEffect(() => {
@@ -511,7 +520,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         {draft.kind === "list"
           ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />
           : templateEditor("text", labels.response)}
-        {draft.kind === "text" ? <Switch
+        {draft.kind === "text" && responseUsesParameterizedVariable ? <Switch
           layout="inline"
           label={labels.usageOverride}
           hint={labels.usageOverrideHint}
@@ -527,7 +536,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             setSaved(false); setError(undefined); setConcurrentConflict(false);
           }}
         /> : null}
-        {draft.kind === "shoutout" || (draft.kind === "text" && draft.usageTextEnabled) ? <>
+        {draft.kind === "shoutout" || (draft.kind === "text" && responseUsesParameterizedVariable && draft.usageTextEnabled) ? <>
           {templateEditor("usageText", labels.templateFieldLabels.usageText)}
           {draft.kind === "shoutout" ? <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p> : null}
         </> : null}

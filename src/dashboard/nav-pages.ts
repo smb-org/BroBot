@@ -1,7 +1,7 @@
 import { platformTexts } from "./labels";
 import type { DashboardTexts } from "./locale";
 import type { DashboardRoute } from "./router";
-import type { BotModule, ModuleLanguage } from "../modules/contract";
+import { MODULE_NAVIGATION_CATEGORIES, type BotModule, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 
 export type NavPageGroup = "operation" | "channel" | "modules" | "platform";
 
@@ -28,7 +28,7 @@ export interface NavPageDefinition {
 export interface RegisteredModuleNavEntry {
   id: string;
   moduleId: string;
-  group: "channel" | "modules";
+  category: ModuleNavigationCategory;
   label: string;
   description?: string;
   showMainSwitch?: boolean;
@@ -40,23 +40,37 @@ export interface RegisteredModuleNavEntry {
 export interface DashboardNavEntry {
   id: string;
   group: NavPageGroup;
-  moduleId?: string;
   label: string;
-  description?: string;
   iconKind: string;
   keywords: readonly string[];
   route: DashboardRoute;
 }
 
+export interface ModuleSidebarEntry {
+  id: string;
+  moduleId: string;
+  category: ModuleNavigationCategory;
+  label: string;
+  description?: string;
+  iconKind: string | null;
+  keywords: readonly string[];
+  route: DashboardRoute;
+}
+
+export interface ModuleSidebarGroup {
+  category: ModuleNavigationCategory;
+  entries: readonly ModuleSidebarEntry[];
+}
+
 /** Converts module-owned navigation declarations into host routes and labels. */
 export const registeredModuleNavEntries = (
-  modules: readonly Pick<BotModule, "id" | "navigationEntries">[],
+  modules: readonly Pick<BotModule, "id" | "navigationCategory" | "navigationEntries">[],
   channelId: string,
   language: ModuleLanguage,
 ): readonly RegisteredModuleNavEntry[] => modules.flatMap((module) => (module.navigationEntries ?? []).map((entry) => ({
   id: `${module.id}:${entry.id}`,
   moduleId: module.id,
-  group: entry.group ?? "modules",
+  category: module.navigationCategory,
   label: entry.label[language],
   ...(entry.description === undefined ? {} : { description: entry.description[language] }),
   ...(entry.showMainSwitch === undefined ? {} : { showMainSwitch: entry.showMainSwitch }),
@@ -65,16 +79,39 @@ export const registeredModuleNavEntries = (
   route: { kind: "module", channelId, moduleId: module.id },
 })));
 
-/** Static pages plus module-contributed Channel pages in the same sidebar and Spotlight order. */
-export const dashboardNavEntries = (
-  context: { isPlatformAdmin: boolean },
-  modules: readonly Pick<BotModule, "id" | "navigationEntries">[],
+/** Enabled, permitted modules grouped in contract category order for the sidebar. */
+export const enabledModuleNavigationGroups = (
+  modules: readonly Pick<BotModule, "id" | "navigationCategory" | "navigationEntries">[],
+  moduleStates: readonly { id: string; enabled: boolean; missingBroadcasterScopes?: readonly string[] }[],
   channelId: string,
   language: ModuleLanguage,
+  fallbackLabel: (moduleId: string) => string,
+): readonly ModuleSidebarGroup[] => {
+  const enabledModuleIds = new Set(moduleStates
+    .filter((state) => state.enabled && (state.missingBroadcasterScopes?.length ?? 0) === 0)
+    .map((state) => state.id));
+  const registeredEntries = registeredModuleNavEntries(modules, channelId, language);
+
+  return MODULE_NAVIGATION_CATEGORIES.flatMap((category) => {
+    const entries = modules
+      .filter((module) => module.navigationCategory === category && enabledModuleIds.has(module.id))
+      .flatMap((module): ModuleSidebarEntry[] => {
+        const customEntries = registeredEntries.filter((entry) => entry.moduleId === module.id);
+        if (customEntries.length > 0) return customEntries.map((entry) => ({ ...entry, iconKind: entry.iconKind }));
+        const route: DashboardRoute = { kind: "module", channelId, moduleId: module.id };
+        return [{ id: module.id, moduleId: module.id, category, label: fallbackLabel(module.id), iconKind: null, keywords: [], route }];
+      });
+    return entries.length === 0 ? [] : [{ category, entries }];
+  });
+};
+
+/** Static pages shared by the sidebar and Spotlight. Module pages use their own contract entries. */
+export const dashboardNavEntries = (
+  context: { isPlatformAdmin: boolean },
+  channelId: string,
   texts: DashboardTexts,
-  moduleStates: readonly { id: string; enabled: boolean; missingBroadcasterScopes?: readonly string[] }[] = [],
 ): readonly DashboardNavEntry[] => {
-  const pages: DashboardNavEntry[] = visibleNavPages(context).map((page) => ({
+  return visibleNavPages(context).map((page) => ({
     id: page.id,
     group: page.group,
     label: page.label(texts),
@@ -82,12 +119,6 @@ export const dashboardNavEntries = (
     keywords: page.keywords,
     route: page.route(channelId),
   }));
-  const channelEntries: DashboardNavEntry[] = registeredModuleNavEntries(modules, channelId, language)
-    .filter((entry) => entry.group === "channel" && moduleStates.some((state) => state.id === entry.moduleId && state.enabled && (state.missingBroadcasterScopes?.length ?? 0) === 0))
-    .map(({ id, moduleId, label, description, iconKind, keywords, route }) => ({ id, moduleId, group: "channel", label, ...(description === undefined ? {} : { description }), iconKind, keywords, route }));
-  const overlaysIndex = pages.findIndex((page) => page.id === "overlays");
-  pages.splice(overlaysIndex < 0 ? pages.length : overlaysIndex + 1, 0, ...channelEntries);
-  return pages;
 };
 
 const channelRoute = (section: ChannelSection) => (channelId: string): DashboardRoute => ({ kind: "channel", channelId, section });
@@ -154,7 +185,7 @@ export const NAV_PAGES: readonly NavPageDefinition[] = [
     group: "modules",
     iconKind: "modules",
     route: channelRoute("modules"),
-    label: (texts) => texts.navigation.module,
+    label: (texts) => texts.navigation.manageModules,
     keywords: ["modules", "module", "modulliste", "plugins"],
   },
   {
@@ -183,6 +214,9 @@ export const navPageGroupHeading = (group: NavPageGroup, texts: DashboardTexts):
     case "platform": return platformTexts().navigation;
   }
 };
+
+export const moduleCategoryHeading = (category: ModuleNavigationCategory, texts: DashboardTexts): string =>
+  texts.navigation.moduleCategories[category];
 
 /**
  * The sidebar's only role-gated group: the platform page appears only for

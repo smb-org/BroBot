@@ -398,6 +398,7 @@ const templateUsageSources = async (db: D1Database, channelId: string): Promise<
 
 export const timersModule: BotModule<typeof settingsSchema> = {
   id: TIMER_MODULE_ID,
+  navigationCategory: "chat",
   panelIcon: { paths: ["M12 6v6l4 2", "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0"] },
   defaultEnabled: true,
   settingsSchema,
@@ -408,9 +409,8 @@ export const timersModule: BotModule<typeof settingsSchema> = {
     id: "timers",
     label: { de: timersModuleCatalog.de.label, en: timersModuleCatalog.en.label },
     description: { de: timersModuleCatalog.de.description, en: timersModuleCatalog.en.description },
-    group: "channel",
     iconKind: "timers",
-    keywords: ["timer", "timers", "schedule", "zeitplan", "zeitgeber"],
+    keywords: ["timer", "timers", "schedule", "zeitplan", "zeitplanung"],
   }],
   eventSubTypes: ["stream.online", "stream.offline"],
   alarms: [{

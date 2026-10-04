@@ -117,7 +117,7 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
 
   const sidebar = page.getByRole("navigation", { name: "Hauptnavigation" });
   const burger = page.getByRole("button", { name: "Seitenleiste öffnen" });
-  const modulesLink = sidebar.getByRole("link", { name: "Module", exact: true });
+  const modulesLink = sidebar.getByRole("link", { name: "Module verwalten", exact: true });
   await modulesLink.focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL("/channels/kanal-e2e/modules");

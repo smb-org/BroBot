@@ -57,23 +57,24 @@ const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () 
 
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
-    { id: "aktiv", settingsSchema: {}, defaultSettings: {}, panel: activeLoader },
-    { id: "ohne-panel", settingsSchema: {}, defaultSettings: {} },
+    { id: "aktiv", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {}, panel: activeLoader },
+    { id: "ohne-panel", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {} },
     {
       id: "channel-page-fixture",
+      navigationCategory: "chat",
       mandatory: true,
       settingsSchema: {},
       defaultSettings: {},
       navigationEntries: [{
         id: "texts",
         label: { de: "Texte", en: "Texts" },
-        group: "channel",
         showMainSwitch: false,
         iconKind: "texts",
       }],
     },
     {
       id: "editor-fixture",
+      navigationCategory: "chat",
       settingsSchema: { shape: { amount: {}, handle: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
       defaultSettings: { amount: 2, handle: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
       templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },

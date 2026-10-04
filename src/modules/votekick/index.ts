@@ -26,6 +26,7 @@ const templateUsageSources = async (db: D1Database, channelId: string): Promise<
 
 export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   id: VOTEKICK_MODULE_ID,
+  navigationCategory: "interaction",
   panelIcon: votekickIcon,
   templateVariableGroup: { label: { de: votekickCatalog.de.name, en: votekickCatalog.en.name }, icon: votekickIcon, order: 74 },
   settingsSchema: votekickSettingsSchema,
@@ -57,7 +58,6 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
     id: "votekick",
     label: { de: votekickCatalog.de.name, en: votekickCatalog.en.name },
     description: { de: votekickCatalog.de.description, en: votekickCatalog.en.description },
-    group: "channel",
     iconKind: "votekick",
     keywords: ["votekick", "voting", "abstimmung", "timeout"],
   }],

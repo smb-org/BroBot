@@ -79,6 +79,7 @@ describe("module overlay realtime routing", () => {
   it("treats underscores in module identifiers literally", async () => {
     const module: BotModule = {
       id: "ads_beta",
+      navigationCategory: "twitch",
       settingsSchema: { parse: (value: unknown) => value } as never,
       defaultSettings: {},
       overlayElements: [declaration("ads_beta.countdown")],
@@ -100,6 +101,7 @@ describe("module overlay realtime routing", () => {
   it("routes block invalidations only to overlays selecting that block", async () => {
     const module: BotModule = {
       id: "text_library",
+      navigationCategory: "chat",
       mandatory: true,
       settingsSchema: { parse: (value: unknown) => value } as never,
       defaultSettings: {},
@@ -132,6 +134,7 @@ describe("module overlay realtime routing", () => {
   it("routes host state changes through module-declared overlay events", async () => {
     const module: BotModule = {
       id: "text_library",
+      navigationCategory: "chat",
       mandatory: true,
       settingsSchema: { parse: (value: unknown) => value } as never,
       defaultSettings: {},

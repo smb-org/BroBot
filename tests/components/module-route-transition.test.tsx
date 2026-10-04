@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
 
 vi.mock("../../src/modules/registry", () => ({
-  MODULES: [{ id: "aktiv", settingsSchema: {}, defaultSettings: {}, panel: activeLoader }],
+  MODULES: [{ id: "aktiv", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {}, panel: activeLoader }],
 }));
 
 import { DashboardApp } from "../../src/dashboard/main";

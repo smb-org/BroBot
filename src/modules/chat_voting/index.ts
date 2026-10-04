@@ -56,6 +56,7 @@ const initialTallyState = async (
 
 export const chatVotingModule: BotModule<typeof settingsSchema> = {
   id: CHAT_VOTING_MODULE_ID,
+  navigationCategory: "interaction",
   panelIcon: { paths: ["M4 5h16v14H4z", "M7 9h3", "M14 9h3", "M7 13h3", "M14 13h3", "M10 17h4"] },
   defaultEnabled: true,
   settingsSchema,

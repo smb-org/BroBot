@@ -5,6 +5,7 @@ import { hydrateModuleOverlayElements } from "../../src/worker/overlays/module-s
 
 const moduleWithInitialState = (initialState: NonNullable<NonNullable<BotModule["overlayElements"]>[number]["initialState"]>): BotModule => ({
   id: "ads",
+  navigationCategory: "twitch",
   settingsSchema: { parse: (value: unknown) => value } as never,
   defaultSettings: {},
   overlayElements: [{

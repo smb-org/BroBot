@@ -328,6 +328,12 @@ Funktion nutzt; der Host erzwingt sie nicht rückwirkend.
 
 ## Aktivierung und Bundles
 
+Jedes Modul deklariert im Contract genau eine `navigationCategory`: `chat`,
+`interaction`, `data` oder `twitch`. Der Host übersetzt nur die vier
+Gruppenüberschriften; die Registry sortiert aktivierte, berechtigte Module
+dort ein. `navigationEntries` kann den generischen Namen und das Symbol eines
+Moduls durch moduldefinierte Navigationsangaben ersetzen.
+
 Ein Modul wird pro Kanal über das Panel aktiviert, nicht per Hand-SQL: Ein Broadcaster
 oder Verwalter des Kanals ruft `GET /api/channels/:channelId/modules` auf, um die
 Registry mit dem gespeicherten Zustand jedes Moduls zu sehen, und schaltet es über

@@ -46,6 +46,7 @@ const convert = async (parameter: string, context: ModuleTemplateValueContext): 
 
 export const currencyModule: BotModule<typeof settingsSchema> = {
   id: "currency",
+  navigationCategory: "data",
   panelIcon: { paths: ["M12 3v18", "M17 7H9a3 3 0 0 0 0 6h6a3 3 0 0 1 0 6H7"] },
   templateContext: "chat_command",
   templateVariableGroup: {

@@ -35,6 +35,7 @@ export { ADS_COUNTDOWN_ELEMENT_KIND } from "./overlay/kinds";
 
 export const adsModule: BotModule<typeof adsSettingsSchema> = {
   id: "ads",
+  navigationCategory: "twitch",
   panelIcon: adsPanelIcon,
   templateVariableGroup: { label: adsTemplateVariableGroupLabels, icon: adsPanelIcon, order: 70 },
   settingsSchema: adsSettingsSchema,

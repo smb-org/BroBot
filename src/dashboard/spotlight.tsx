@@ -91,7 +91,10 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
     const declarations = registeredModuleNavEntries(MODULES, channelId, dashboardLanguage());
     return MODULES.flatMap((module) => {
       const entries = declarations.filter((entry) => entry.moduleId === module.id);
-      if (entries.length > 0) return entries.filter((entry) => entry.group === "modules").map((entry) => {
+      if (entries.length > 0) {
+        const state = modules.find((candidate) => candidate.id === module.id);
+        if (state?.enabled !== true || (state.missingBroadcasterScopes?.length ?? 0) > 0) return [];
+        return entries.map((entry) => {
         const description = entry.description ?? moduleDescription(module.id) ?? "";
         const accessibleDescription = module.mandatory === true
           ? `${description.length === 0 ? "" : `${description} `}${module.mandatoryReason?.[dashboardLanguage()] ?? moduleWorkspaceTexts().mandatoryReason}`
@@ -107,7 +110,8 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
           ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
           onTrigger: () => { onNavigate(entry.route); },
         };
-      });
+        });
+      }
       const route: DashboardRoute = { kind: "module", channelId, moduleId: module.id };
       const description = moduleDescription(module.id);
       const accessibleDescription = module.mandatory === true
@@ -124,7 +128,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
         onTrigger: () => { onNavigate(route); },
       }];
     });
-  }, [botSignedIn, channelId, onNavigate, texts.blocking.botTitle, texts.spotlight.groupModules]);
+  }, [botSignedIn, channelId, modules, onNavigate, texts.blocking.botTitle, texts.spotlight.groupModules]);
 
   const commandItems = useMemo<SpotlightItem[]>(() => commands.map((command) => {
     const route: DashboardRoute = { kind: "module", channelId, moduleId: "text_commands" };
@@ -143,34 +147,24 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
     };
   }), [botSignedIn, commands, channelId, onNavigate, onOpenCommand, texts.blocking.botTitle, texts.spotlight]);
 
-  // Every sidebar page comes from the shared page list, including enabled
-  // module Channel entries; platform visibility uses the sidebar's same flag.
+  // Static pages and platform visibility come from the same list as the sidebar.
   const pageItems = useMemo<SpotlightItem[]>(() => dashboardNavEntries(
     { isPlatformAdmin },
-    MODULES,
     channelId,
-    dashboardLanguage(),
     texts,
-    modules,
   ).map((page) => {
     const pageRoute = page.route;
     const blockedByBot = botBlocksRoute(pageRoute, botSignedIn);
-    const module = page.moduleId === undefined ? undefined : MODULES.find((candidate) => candidate.id === page.moduleId);
-    const description = page.description ?? (page.moduleId === undefined ? "" : moduleDescription(page.moduleId) ?? "");
-    const accessibleDescription = module?.mandatory === true
-      ? `${description.length === 0 ? "" : `${description} `}${module.mandatoryReason?.[dashboardLanguage()] ?? moduleWorkspaceTexts().mandatoryReason}`
-      : description;
     return {
       id: `page:${page.id}`,
       label: page.label,
       icon: <NavigationIcon kind={page.iconKind} className="spotlight-module-icon" />,
-      ...(accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
       group: navPageGroupHeading(page.group, texts),
       keywords: [...page.keywords],
       ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
       onTrigger: () => { onNavigate(pageRoute); },
     };
-  }), [botSignedIn, channelId, isPlatformAdmin, modules, onNavigate, texts]);
+  }), [botSignedIn, channelId, isPlatformAdmin, onNavigate, texts]);
 
   const variableItems = useMemo<SpotlightItem[]>(() => variables.map((variable) => ({
     id: `variable:${variable.name}`,

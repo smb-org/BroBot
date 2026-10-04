@@ -55,9 +55,9 @@ import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration } fro
 import { MODULES } from "../modules/registry";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
-import { dashboardNavEntries, navPageGroupHeading, registeredModuleNavEntries } from "./nav-pages";
+import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, Icon, InspectorSection, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, Icon, InspectorSection, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
 import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
@@ -284,9 +284,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
     ? route.channelId
     : channels[0]?.channelId ?? "";
 
-  // The shared page list includes `NAV_PAGES` and enabled module Channel
-  // entries, so sidebar and Spotlight keep their destinations in sync.
-  const pages = dashboardNavEntries({ isPlatformAdmin: platform }, MODULES, navigationChannelId, dashboardLanguage(), texts, moduleStates ?? []);
+  const pages = dashboardNavEntries({ isPlatformAdmin: platform }, navigationChannelId, texts);
   const pageEntry = (page: (typeof pages)[number]): SidebarEntry => {
     const entryRoute = page.route;
     return {
@@ -301,52 +299,44 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
   };
   const platformPage = pages.find((page) => page.group === "platform");
 
-  const operationGroup: SidebarGroup = {
-    id: "operation",
-    heading: navPageGroupHeading("operation", texts),
-    entries: pages.filter((page) => page.group === "operation").map(pageEntry),
-  };
+  const sidebarPageOrder = ["overview", "overlays", "audit", "system", "members", "variables", "events"];
+  const sidebarChannelPages = sidebarPageOrder.flatMap((id) => {
+    const page = pages.find((candidate) => candidate.id === id);
+    return page === undefined ? [] : [pageEntry(page)];
+  });
   const channelGroup: SidebarGroup = {
     id: "channel",
     heading: navPageGroupHeading("channel", texts),
-    entries: pages.filter((page) => page.group === "channel").map(pageEntry),
+    entries: sidebarChannelPages,
   };
 
-  // "jedes aktive Modul als Eintrag" -- only modules that are actually on
-  // (enabled, and not held back by a missing broadcaster scope) appear
-  // here; everything else lives in the module list only.
-  const registeredModuleEntries = registeredModuleNavEntries(MODULES, navigationChannelId, dashboardLanguage());
-  const activeModuleEntries: SidebarEntry[] = (moduleStates ?? [])
-    .filter((module) => module.enabled && (module.missingBroadcasterScopes?.length ?? 0) === 0)
-    .flatMap((module) => {
-      const declarations = registeredModuleEntries.filter((entry) => entry.moduleId === module.id);
-      const declared = declarations.filter((entry) => entry.group === "modules");
-      if (declarations.length > 0) return declared.map((entry): SidebarEntry => ({
-        id: entry.id,
-        label: entry.label,
-        icon: <NavigationIcon kind={entry.iconKind} className="sidebar-nav-icon" />,
-        href: dashboardRoutePath(entry.route),
-        active: route.kind === "module" && route.moduleId === entry.moduleId,
-        onNavigate: () => { onNavigate(entry.route); },
-        led: { status: "green" as const, word: statusWord(true) },
-      }));
-      const moduleRoute: DashboardRoute = { kind: "module", channelId: navigationChannelId, moduleId: module.id };
-      return [{
-        id: module.id,
-        label: moduleName(module.id),
-        icon: <ModuleIcon moduleId={module.id} className="sidebar-nav-icon" />,
-        href: dashboardRoutePath(moduleRoute),
-        active: route.kind === "module" && route.moduleId === module.id,
-        onNavigate: () => { onNavigate(moduleRoute); },
-        led: { status: "green" as const, word: statusWord(true) },
-      }];
-    });
+  const moduleGroups: SidebarGroup[] = enabledModuleNavigationGroups(
+    MODULES,
+    moduleStates ?? [],
+    navigationChannelId,
+    dashboardLanguage(),
+    (moduleId) => moduleName(moduleId),
+  ).map(({ category, entries }) => ({
+    id: `modules-${category}`,
+    heading: moduleCategoryHeading(category, texts),
+    nestedEntries: true,
+    entries: entries.map((entry): SidebarEntry => ({
+      id: entry.id,
+      label: entry.label,
+      icon: entry.iconKind === null
+        ? <ModuleIcon moduleId={entry.moduleId} className="sidebar-nav-icon" />
+        : <NavigationIcon kind={entry.iconKind} className="sidebar-nav-icon" />,
+      href: dashboardRoutePath(entry.route),
+      active: route.kind === "module" && route.moduleId === entry.moduleId,
+      onNavigate: () => { onNavigate(entry.route); },
+      led: { status: "green" as const, word: statusWord(true) },
+    })),
+  }));
   const modulePage = pages.find((page) => page.id === "modules");
   if (modulePage === undefined) throw new Error("The module navigation page must be registered.");
-  const modulesGroup: SidebarModulesGroup = {
-    heading: navPageGroupHeading("modules", texts),
-    entry: pageEntry(modulePage),
-    entries: activeModuleEntries,
+  const moduleManagementGroup: SidebarGroup = {
+    id: "module-management",
+    entries: [{ ...pageEntry(modulePage), label: texts.navigation.manageModules }],
   };
 
   const platformGroup: SidebarGroup | undefined = platformPage === undefined ? undefined : {
@@ -357,9 +347,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
 
   return (
     <Sidebar
-      groups={[operationGroup, channelGroup]}
-      modules={modulesGroup}
-      platform={platformGroup}
+      groups={[channelGroup, ...moduleGroups, moduleManagementGroup, ...(platformGroup === undefined ? [] : [platformGroup])]}
       collapsed={collapsed}
       onToggleCollapsed={onToggleCollapsed}
       onEntryNavigate={onEntryNavigate}
