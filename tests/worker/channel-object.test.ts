@@ -1411,6 +1411,21 @@ describe("ChannelObject realtime path", () => {
     expect(storageOf(object).values.get(alarmTableKey) ?? {}).not.toHaveProperty(alarmKey);
   });
 
+  it("keeps a manual chat vote close ahead of a late initial deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    const alarmKey = "module:chat_voting:poll-a";
+
+    await object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 14_410_000, 0);
+    await object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 10_000, 1);
+    await object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 14_410_000, 0);
+
+    expect(storageOf(object).values.get("channel:alarm_schedule")).toMatchObject({
+      [alarmKey]: { deadline: 10_000, ownerRevision: 1 },
+    });
+  });
+
   it("allows only one open ballot per channel across modules", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
@@ -1521,9 +1536,28 @@ describe("ChannelObject realtime path", () => {
     }
 
     await expect(object.closeBallot("chat_voting", "poll-a")).resolves.toEqual({ counts: [1, 1], revision: 2 });
-    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:"))).toEqual([]);
+    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:"))).toEqual([
+      "ballot:closed:chat_voting:poll-a",
+    ]);
     expect(storageOf(object).values.get("channel:alarm_schedule")).toBeUndefined();
     await expect(object.readBallot("chat_voting", "poll-a")).resolves.toBeNull();
+  });
+
+  it("returns the same closed ballot snapshot on retry until the module acknowledges persistence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "poll-a", 2, 20_000);
+    await object.castBallot("chat_voting", "poll-a", "viewer-1", 1);
+
+    await expect(object.closeBallot("chat_voting", "poll-a")).resolves.toEqual({ counts: [1, 0], revision: 1 });
+    await expect(object.closeBallot("chat_voting", "poll-a")).resolves.toEqual({ counts: [1, 0], revision: 1 });
+
+    await object.openBallot("chat_voting", "poll-b", 2, 30_000);
+    expect(storageOf(object).values.has("ballot:closed:chat_voting:poll-a")).toBe(true);
+    await expect(object.closeBallot("chat_voting", "poll-a")).resolves.toEqual({ counts: [1, 0], revision: 1 });
+    await object.acknowledgeClosedBallot("chat_voting", "poll-a");
+    await expect(object.closeBallot("chat_voting", "poll-a")).resolves.toBeNull();
   });
 
   it("uses a fresh random voter key for each ballot and never stores the user id", async () => {

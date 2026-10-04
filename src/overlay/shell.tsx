@@ -5,7 +5,7 @@ import { sanitizeOverlayCss } from "../contracts/overlay-css";
 import { connectOverlayRealtime } from "./realtime";
 import { OverlayCanvas } from "./canvas";
 import type { OverlayBootstrapData, OverlayElementData, OverlayLanguage } from "./model";
-import { moduleOverlayMessageRequiresStateReload } from "../modules/overlay-element-registry";
+import { mergeModuleOverlayElementState, moduleOverlayMessageRequiresStateReload } from "../modules/overlay-element-registry";
 import { estimateOverlayStateTransit } from "./server-time";
 
 const LazyLegacyOverlayEntry = lazy(async () => {
@@ -121,7 +121,7 @@ const applyModuleMessage = (
     overlay: {
       ...bootstrap.overlay,
       elements: bootstrap.overlay.elements.map((element) => element.kind === kind && element.moduleEnabled === true
-        ? { ...element, state: message.payload }
+        ? { ...element, state: mergeModuleOverlayElementState(kind, element.state ?? null, message.payload) }
         : element),
     },
   };

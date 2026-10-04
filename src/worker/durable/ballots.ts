@@ -44,12 +44,21 @@ const validId = (value: string, name: string): void => {
 };
 
 const ballotKey = (moduleId: string, ballotId: string): string => `ballot:${moduleId}:${ballotId}`;
+const closedBallotKey = (moduleId: string, ballotId: string): string => `ballot:closed:${moduleId}:${ballotId}`;
 const voterPrefix = (moduleId: string, ballotId: string): string => `${ballotKey(moduleId, ballotId)}:v:`;
 
 const snapshotOf = (ballot: StoredBallot): BallotSnapshot => ({
   counts: [...ballot.counts],
   revision: ballot.revision,
 });
+
+const isBallotSnapshot = (value: unknown): value is BallotSnapshot => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const snapshot = value as Partial<BallotSnapshot>;
+  return Array.isArray(snapshot.counts) && snapshot.counts.length >= 1 && snapshot.counts.length <= 9 &&
+    snapshot.counts.every((count) => Number.isSafeInteger(count) && count >= 0) &&
+    Number.isSafeInteger(snapshot.revision) && (snapshot.revision ?? -1) >= 0;
+};
 
 const equalBytes = (left: Uint8Array, right: Uint8Array): boolean =>
   left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
@@ -286,8 +295,26 @@ export const closeStoredBallot = async (
   validId(ballotId, "Ballot id");
   return await storage.transaction(async (transaction) => {
     const ballot = await transaction.get(ballotKey(moduleId, ballotId));
-    if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) return null;
+    if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) {
+      const closed = await transaction.get(closedBallotKey(moduleId, ballotId));
+      return isBallotSnapshot(closed) ? { counts: [...closed.counts], revision: closed.revision } : null;
+    }
+    const snapshot = snapshotOf(ballot);
     await deleteBallotData(transaction, moduleId, ballotId);
-    return snapshotOf(ballot);
+    await transaction.put(closedBallotKey(moduleId, ballotId), snapshot);
+    return snapshot;
+  });
+};
+
+/** Drops the retry snapshot after the owning module has persisted its result. */
+export const forgetClosedStoredBallot = async (
+  storage: BallotStorage,
+  moduleId: string,
+  ballotId: string,
+): Promise<void> => {
+  validId(moduleId, "Module id");
+  validId(ballotId, "Ballot id");
+  await storage.transaction(async (transaction) => {
+    await transaction.delete(closedBallotKey(moduleId, ballotId));
   });
 };

@@ -1,6 +1,7 @@
 import type { ModuleOverlayElementDefinition } from "./contract";
 import { adsOverlayElements } from "./ads/overlay/element";
 import { textBlockOverlayElement } from "./text_library/overlay/element";
+import { chatVotingOverlayElements } from "./chat_voting/overlay/element";
 
 export interface RegisteredOverlayElement {
   moduleId: string;
@@ -8,6 +9,7 @@ export interface RegisteredOverlayElement {
 }
 
 export const MODULE_OVERLAY_ELEMENTS: readonly RegisteredOverlayElement[] = [
+  ...chatVotingOverlayElements.map((definition) => ({ moduleId: "chat_voting", definition })),
   { moduleId: "text_library", definition: textBlockOverlayElement },
   ...adsOverlayElements.map((definition) => ({ moduleId: "ads", definition })),
 ];
@@ -17,3 +19,10 @@ export const moduleOverlayMessageRequiresStateReload = (messageType: string): bo
     definition.reloadStateOnModuleMessages?.includes(messageType) === true ||
     (definition.reloadStateOnHostEvents !== undefined && messageType === `modul.${moduleId}.state_changed`),
   );
+
+export const mergeModuleOverlayElementState = (
+  elementKind: string,
+  current: Readonly<Record<string, unknown>> | null,
+  incoming: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> => MODULE_OVERLAY_ELEMENTS.find(({ definition }) => definition.kind === elementKind)
+  ?.definition.mergeRealtimeState?.(current, incoming) ?? incoming;

@@ -61,7 +61,7 @@ describe("independent dashboard D1 reads", () => {
     const { db, calls } = tracingDatabase();
     const pending = referencesFor(db, "kanal-a", "score");
 
-    expect(calls).toHaveLength(4); // three module queries plus the overlay usage query
+    expect(calls).toHaveLength(5); // four module queries plus the overlay usage query
     await pending;
   });
 });

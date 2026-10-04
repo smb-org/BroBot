@@ -289,6 +289,11 @@ export interface ModuleOverlayElementDefinition {
   initialStateNeedsContext?: boolean;
   /** Module realtime message types that require the host to reload this element's state. */
   reloadStateOnModuleMessages?: readonly string[];
+  /** Merges partial realtime state into the current state without replacing module lifecycle data. */
+  mergeRealtimeState?: (
+    current: Readonly<Record<string, unknown>> | null,
+    incoming: Readonly<Record<string, unknown>>,
+  ) => Readonly<Record<string, unknown>>;
   /** Host state changes that cause a generic module state message for this element. */
   reloadStateOnHostEvents?: readonly ModuleOverlayHostEvent[];
   initialState?: (
@@ -592,7 +597,17 @@ export interface ModuleAlarmContext {
   schedule: (key: string, deadline: number, ownerRevision?: number) => Promise<void>;
   clear: (key: string, ownerRevision?: number) => Promise<void>;
   /** Renders a host template in the channel's event context. */
-  renderTemplate: (text: string, now?: number) => Promise<{ text: string; attributions?: readonly string[] }>;
+  renderTemplate: (
+    text: string,
+    now?: number,
+    moduleValues?: Readonly<Record<string, string | number>>,
+  ) => Promise<{ text: string; attributions?: readonly string[] }>;
+  /** Publishes a module-owned overlay message to enabled elements in this channel. */
+  publishModuleOverlayMessage: (
+    type: string,
+    elementKind: string,
+    payload: Readonly<Record<string, unknown>>,
+  ) => Promise<void>;
   /** Sends scheduled automated output through the shared channel limit with an occurrence claim. */
   sendChat: (
     text: string,
@@ -699,6 +714,8 @@ export interface ModuleBallotAccess {
   cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
+  /** Releases an idempotent close snapshot after the module has persisted its result. */
+  acknowledgeClosed?: (ballotId: string) => Promise<void>;
 }
 
 export type ModuleStreamState = "online" | "offline" | "unknown";
