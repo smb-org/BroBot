@@ -518,7 +518,7 @@ void [
 ];
 const allRecipientKinds: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
 const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
-const allActionKinds: Record<ModuleAction["kind"], true> = { announcement: true, chat: true, shoutout: true, overlay: true };
+const allActionKinds: Record<ModuleAction["kind"], true> = { announcement: true, ban: true, chat: true, shoutout: true, timeout: true, overlay: true };
 const allLanguages: Record<ModuleLanguage, true> = { de: true, en: true };
 const allTextCommandKinds: Record<TextCommandKind, true> = { text: true, list: true, shoutout: true };
 const allTextCommandResponseTypes: Record<TextCommandResponseType, true> = { say: true, reply: true, announcement: true };
@@ -811,7 +811,7 @@ describe("serialized contract shapes", () => {
       expect(REALTIME_RECIPIENTS["ads.schedule.updated"]).toEqual(["panel"]);
       expect(REALTIME_RECIPIENTS["stream.state.changed"]).toEqual(["panel"]);
       expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
-      expect(Object.keys(allActionKinds).sort()).toEqual(["announcement", "chat", "overlay", "shoutout"]);
+      expect(Object.keys(allActionKinds).sort()).toEqual(["announcement", "ban", "chat", "overlay", "shoutout", "timeout"]);
       expect(Object.keys(allLanguages).sort()).toEqual(["de", "en"]);
       expect(Object.keys(allTextCommandKinds).sort()).toEqual(["list", "shoutout", "text"]);
       expect(Object.keys(allTextCommandResponseTypes).sort()).toEqual([...TEXT_COMMAND_RESPONSE_TYPES].sort());

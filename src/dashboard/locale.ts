@@ -1,4 +1,4 @@
-import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
+import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type ModerationFailureReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
 import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
 import type { SystemVariableName } from "../template-variables";
 
@@ -1620,6 +1620,40 @@ export const shoutoutFailureReasonText = (
   ? shoutoutFailureTexts[language][reason as ShoutoutFailureReason]
   : null;
 
+const moderationFailureTexts: LocaleCatalog<Record<ModerationFailureReason, string>> = {
+  de: {
+    already_banned: "Ziel ist bereits gebannt",
+    bot_identity_missing: "Bot-Identität fehlt",
+    conflict: "gleichzeitige Moderationsänderung",
+    invalid_request: "ungültige Moderationsanfrage",
+    network_error: "Netzwerkfehler bei Twitch",
+    not_moderator: "Bot ist kein Moderator in diesem Kanal",
+    protected_target: "geschütztes Ziel",
+    rate_limited: "Twitch-Abklingzeit aktiv",
+    timeout: "Twitch-Anfrage hat zu lange gedauert",
+    token_invalid: "Bot-Token ungültig",
+    twitch_error: "Twitch hat die Moderationsanfrage abgelehnt",
+  },
+  en: {
+    already_banned: "Target is already banned",
+    bot_identity_missing: "Bot identity is missing",
+    conflict: "Concurrent moderation change",
+    invalid_request: "Invalid moderation request",
+    network_error: "Network error from Twitch",
+    not_moderator: "The bot is not a moderator in this channel",
+    protected_target: "Protected target",
+    rate_limited: "Twitch cooldown is active",
+    timeout: "The Twitch request timed out",
+    token_invalid: "Bot token is invalid",
+    twitch_error: "Twitch rejected the moderation request",
+  },
+};
+
+const moderationFailureReasonText = (reason: unknown, language: DashboardLanguage): string | null =>
+  typeof reason === "string" && Object.hasOwn(moderationFailureTexts[language], reason)
+    ? moderationFailureTexts[language][reason as ModerationFailureReason]
+    : null;
+
 const commercialFailureTexts: LocaleCatalog<Record<CommercialFailureReason, string>> = {
   de: {
     app_token_unavailable: "App-Token nicht verfügbar",
@@ -1798,6 +1832,10 @@ const genericFailureTexts: LocaleCatalog<Record<string, string>> = {
 const REASON_CATALOG_BY_CODE: Partial<Record<EventCode, LocaleCatalog<Record<string, string>>>> = {
   "host.shoutout.failed": shoutoutFailureTexts,
   "host.announcement.failed": shoutoutFailureTexts,
+  "host.timeout.failed": moderationFailureTexts,
+  "host.ban.failed": moderationFailureTexts,
+  "host.timeout.ambiguous": moderationFailureTexts,
+  "host.ban.ambiguous": moderationFailureTexts,
   "ads.commercial.failed": commercialFailureTexts,
   "host.clip.failed": clipFailureTexts,
   "host.chat.failed": chatFailureTexts,
@@ -1852,7 +1890,11 @@ export const eventCauseText = (
   detail: EventDetail,
   language: DashboardLanguage = dashboardLanguage(),
 ): string | null => {
-  const raw = detail.reason ?? detail.cause ?? detail.twitchMessage ?? detail.message;
+  const moderationCode = code === "host.timeout.failed" || code === "host.ban.failed" ||
+    code === "host.timeout.ambiguous" || code === "host.ban.ambiguous";
+  const raw = moderationCode
+    ? detail.cause ?? detail.reason ?? detail.twitchMessage ?? detail.message
+    : detail.reason ?? detail.cause ?? detail.twitchMessage ?? detail.message;
   if (typeof raw !== "string" || raw.length === 0) return null;
   const ownCatalog = REASON_CATALOG_BY_CODE[code as EventCode];
   const localized = (ownCatalog === undefined ? undefined : catalogString(ownCatalog[language], raw))
@@ -1905,12 +1947,13 @@ const CODES_ALWAYS_FOLDING_CAUSE = new Set<EventCode>([
  *  would otherwise go unnoticed (see `CODES_ALWAYS_FOLDING_CAUSE`). */
 export const eventCauseAlreadyShown = (code: string, detail: EventDetail): boolean =>
   CODES_ALWAYS_FOLDING_CAUSE.has(code as EventCode) ||
-  (code === "host.shoutout.failed" && shoutoutFailureReasonText(detail.cause) !== null);
+  (code === "host.shoutout.failed" && shoutoutFailureReasonText(detail.cause) !== null) ||
+  ((code === "host.timeout.failed" || code === "host.ban.failed") && moderationFailureReasonText(detail.cause, "en") !== null);
 
 export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   de: {
     "host.action.failed": "Aktion fehlgeschlagen",
-    "host.action.suppressed": (detail) => `Aktion unterdrückt: ${detail.action === "chat" ? "Chatnachricht" : detail.action === "announcement" ? "Ankündigung" : "Shoutout"} wegen Kanal-Stummschaltung`,
+    "host.action.suppressed": (detail) => `Aktion unterdrückt: ${detail.action === "chat" ? "Chatnachricht" : detail.action === "announcement" ? "Ankündigung" : detail.action === "timeout" ? "Timeout" : detail.action === "ban" ? "Bann" : "Shoutout"} ${detail.reason === "channel_paused" ? "wegen Kanalpause" : "wegen Kanal-Stummschaltung"}`,
     "host.chat.failed": "Chat-Nachricht fehlgeschlagen",
     "host.chat.sent": "Chat-Nachricht gesendet",
     "host.chat.skipped": (detail) => detail.reason === "automated_output_rate_limited"
@@ -1937,6 +1980,12 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
       return reason === null ? "Shoutout fehlgeschlagen" : `Shoutout fehlgeschlagen: ${reason}`;
     },
     "host.shoutout.sent": "Shoutout gesendet",
+    "host.timeout.applied": (detail) => `Timeout für ${detailText(detail, "target", "unbekannte ID")} angewendet (${detailNumber(detail, "seconds", "unbekannte Dauer")} s)`,
+    "host.timeout.failed": (detail) => `Timeout für ${detailText(detail, "target", "unbekannte ID")} fehlgeschlagen: ${eventCauseText("host.timeout.failed", detail, "de") ?? "unbekannter Grund"}`,
+    "host.timeout.ambiguous": (detail) => `Ausgang des Timeouts für ${detailText(detail, "target", "unbekannte ID")} unklar`,
+    "host.ban.applied": (detail) => `Bann für ${detailText(detail, "target", "unbekannte ID")} angewendet`,
+    "host.ban.failed": (detail) => `Bann für ${detailText(detail, "target", "unbekannte ID")} fehlgeschlagen: ${eventCauseText("host.ban.failed", detail, "de") ?? "unbekannter Grund"}`,
+    "host.ban.ambiguous": (detail) => `Ausgang des Banns für ${detailText(detail, "target", "unbekannte ID")} unklar`,
     "host.clip.failed": "Clip fehlgeschlagen",
     "channel_events.raid.incoming": (detail) => `Raid von ${detailText(detail, "source", "unbekannt")} mit ${detailNumber(detail, "viewers", "unbekannter Anzahl")} Zuschauern`,
     "channel_events.raid.outgoing": (detail) => `Raid zu ${detailText(detail, "target", "unbekannt")} mit ${detailNumber(detail, "viewers", "unbekannter Anzahl")} Zuschauern`,
@@ -2014,7 +2063,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   },
   en: {
     "host.action.failed": "Action failed",
-    "host.action.suppressed": (detail) => `Action suppressed: ${detail.action === "chat" ? "chat message" : detail.action === "announcement" ? "announcement" : "shoutout"} while the channel is muted`,
+    "host.action.suppressed": (detail) => `Action suppressed: ${detail.action === "chat" ? "chat message" : detail.action === "announcement" ? "announcement" : detail.action === "timeout" ? "timeout" : detail.action === "ban" ? "ban" : "shoutout"} ${detail.reason === "channel_paused" ? "while the channel is paused" : "while the channel is muted"}`,
     "host.chat.failed": "Chat message failed",
     "host.chat.sent": "Chat message sent",
     "host.chat.skipped": (detail) => detail.reason === "automated_output_rate_limited"
@@ -2041,6 +2090,12 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
       return reason === null ? "Shoutout failed" : `Shoutout failed: ${reason}`;
     },
     "host.shoutout.sent": "Shoutout sent",
+    "host.timeout.applied": (detail) => `Timeout applied to ${detailText(detail, "target", "unknown ID")} (${detailNumber(detail, "seconds", "unknown duration")} s)`,
+    "host.timeout.failed": (detail) => `Timeout failed for ${detailText(detail, "target", "unknown ID")}: ${eventCauseText("host.timeout.failed", detail, "en") ?? "unknown reason"}`,
+    "host.timeout.ambiguous": (detail) => `Timeout outcome for ${detailText(detail, "target", "unknown ID")} is unclear`,
+    "host.ban.applied": (detail) => `Ban applied to ${detailText(detail, "target", "unknown ID")}`,
+    "host.ban.failed": (detail) => `Ban failed for ${detailText(detail, "target", "unknown ID")}: ${eventCauseText("host.ban.failed", detail, "en") ?? "unknown reason"}`,
+    "host.ban.ambiguous": (detail) => `Ban outcome for ${detailText(detail, "target", "unknown ID")} is unclear`,
     "host.clip.failed": "Clip failed",
     "channel_events.raid.incoming": (detail) => `Raid from ${detailText(detail, "source", "unknown")} with ${detailNumber(detail, "viewers", "unknown number")} viewers`,
     "channel_events.raid.outgoing": (detail) => `Raid to ${detailText(detail, "target", "unknown")} with ${detailNumber(detail, "viewers", "unknown number")} viewers`,
@@ -2120,7 +2175,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
 
 export type EventFamily = "community" | "raid" | "moderation" | "operations";
 export type EventTier = "full" | "outlined";
-export type EventNumberKey = "viewers" | "count" | "duration" | "remainingSeconds" | "tier" | null;
+export type EventNumberKey = "viewers" | "count" | "duration" | "seconds" | "remainingSeconds" | "tier" | null;
 export interface EventToneEntry {
   family: EventFamily;
   tier: EventTier;
@@ -2145,6 +2200,12 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.overlay.not_executed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.shoutout.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.shoutout.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "host.timeout.applied": { family: "operations", tier: "outlined", word: { de: "Auszeit", en: "Timeout" }, numberKey: "seconds", tone: "info" },
+  "host.timeout.failed": { family: "operations", tier: "outlined", word: { de: "Auszeit", en: "Timeout" }, numberKey: "seconds", tone: "error" },
+  "host.timeout.ambiguous": { family: "operations", tier: "outlined", word: { de: "Auszeit", en: "Timeout" }, numberKey: "seconds", tone: "warning" },
+  "host.ban.applied": { family: "operations", tier: "outlined", word: { de: "Bann", en: "Ban" }, numberKey: null, tone: "info" },
+  "host.ban.failed": { family: "operations", tier: "outlined", word: { de: "Bann", en: "Ban" }, numberKey: null, tone: "error" },
+  "host.ban.ambiguous": { family: "operations", tier: "outlined", word: { de: "Bann", en: "Ban" }, numberKey: null, tone: "warning" },
   "channel_events.raid.incoming": { family: "raid", tier: "full", word: { de: "Raid", en: "Raid" }, numberKey: "viewers" },
   "channel_events.raid.outgoing": { family: "raid", tier: "outlined", word: { de: "Raid", en: "Raid" }, numberKey: "viewers" },
   "channel_events.shoutout.sent": { family: "raid", tier: "outlined", word: { de: "Shoutout", en: "Shoutout" }, numberKey: null },
