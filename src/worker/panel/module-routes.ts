@@ -114,7 +114,11 @@ export const registeredTemplateVariablesForChannel = async (
       .flatMap((variables) => variables ?? []) as TemplateVariable[];
     const dynamic = await module.templateVariables?.(db, channelId) ?? [];
     const catalog = new Map((module.templateVariableCatalog ?? []).map((variable) => [variable.name, variable]));
-    return variablesForModuleTemplateContext(module, [...fields, ...dynamic]).map((variable) => {
+    const declarations = new Map<string, TemplateVariable>();
+    for (const variable of [...(module.templateVariableCatalog ?? []), ...fields, ...dynamic]) {
+      declarations.set(variable.name, { ...declarations.get(variable.name), ...variable });
+    }
+    return variablesForModuleTemplateContext(module, [...declarations.values()]).map((variable) => {
       validateModuleTemplateVariable(module, variable.name);
       const pickerGroup = templateVariableGroupForModule(module);
       const picker = variable.picker ?? catalog.get(variable.name)?.picker;

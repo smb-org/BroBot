@@ -59,8 +59,6 @@ describe("text command slash input", () => {
       variableAction: { name: "score", operation: "add" as const, amount: 1 },
       timeoutAction: null,
       usageText: "",
-      usageTextEnabled: false,
-      usageTextChanged: false,
       minimumTier: "everyone" as const,
     };
     const timeout = parseLeadingSlashCommand("/timeout {user} 30-300 repeated spam\nTimed out");

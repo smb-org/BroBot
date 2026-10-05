@@ -29,6 +29,7 @@ const fakeModule = (
   eventSubTypes: readonly string[] = [CHAT_TYPE],
 ): BotModule => ({
   id,
+  navigationCategory: "chat",
   settingsSchema: z.object({ prefix: z.string() }),
   defaultSettings: { prefix: "!" },
   eventSubTypes,
@@ -1399,6 +1400,7 @@ describe("dispatch and execution", () => {
       const states: string[][] = [];
       const needsState: BotModule = {
         id: "stream-a",
+        navigationCategory: "chat",
         settingsSchema: z.object({}),
         defaultSettings: {},
         eventSubTypes: [CHAT_TYPE],
@@ -1630,6 +1632,7 @@ describe("dispatch and execution", () => {
       const seenGameIds: (string | null)[] = [];
       const module: BotModule = {
         id: "modul-a",
+        navigationCategory: "chat",
         settingsSchema: z.object({ prefix: z.string() }),
         defaultSettings: { prefix: "!" },
         eventSubTypes: [CHAT_TYPE],

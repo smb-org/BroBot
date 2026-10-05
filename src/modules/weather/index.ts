@@ -122,6 +122,7 @@ const resolveOverlayValues: NonNullable<BotModule<typeof settingsSchema>["resolv
 
 export const weatherModule: BotModule<typeof settingsSchema> = {
   id: "weather",
+  navigationCategory: "data",
   panelIcon: weatherIcon,
   templateVariableGroup: {
     label: { de: weatherModuleCatalog.de.variableGroup, en: weatherModuleCatalog.en.variableGroup },
@@ -163,7 +164,6 @@ export const weatherModule: BotModule<typeof settingsSchema> = {
     id: "weather",
     label: { de: weatherModuleCatalog.de.label, en: weatherModuleCatalog.en.label },
     description: { de: weatherModuleCatalog.de.description, en: weatherModuleCatalog.en.description },
-    group: "channel",
     iconKind: "weather",
     keywords: ["weather", "wetter", "forecast", "vorhersage"],
   }],

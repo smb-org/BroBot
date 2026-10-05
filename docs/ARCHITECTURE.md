@@ -188,14 +188,14 @@ Migration `0022_weather_currency_data_sources.sql` legt die Anbietereinstellunge
 und getrennte Wetter- sowie Wechselkurs-Caches an und aktiviert beide Quellen
 für bestehende Kanäle.
 
-Migration `0023_timers.sql` legt kanaleigene Zeitgeber an und aktiviert das
-Modul für bestehende Kanäle. Zeitgeber planen ihre Läufe über den registrierten
+Migration `0023_timers.sql` legt kanaleigene Timer an und aktiviert das
+Modul für bestehende Kanäle. Timer planen ihre Läufe über den registrierten
 Durable-Object-Alarmhandler. Der Channel Durable Object zählt Chatnachrichten
 und speichert Ausführungsschlüssel sieben Tage lang atomar vor dem Chatversand;
 die gemeinsame Versandgrenze ergänzt Namensnennungen und begrenzt Ausgaben auf
 500 Zeichen. Ereigniszeiten kommen über den generischen
-`eventTimeSources`-Contract, den Sun- und Ads-Modul bereitstellen. Der
-Zeitgeber kennt weder deren Modulnamen noch deren Tabellen. Er rendert
+`eventTimeSources`-Contract, den Sun- und Ads-Modul bereitstellen. Das
+Timer-Modul kennt weder deren Modulnamen noch deren Tabellen. Es rendert
 Textblöcke über die allgemeine Vorlagenpipeline und lehnt beim Speichern Blöcke
 mit chatbefehlabhängigen Variablen ab.
 
@@ -212,7 +212,7 @@ Chatverarbeitung darf Daten neu anlegen, die der Alarm wieder entfernt. Die
 Speicherung nutzt den bestehenden Chat-Aktivitätsaufruf und fügt keinen zweiten
 Schreibaufruf je Chatnachricht hinzu.
 
-Migration `0025_chat_output_targets.sql` ergänzt Textbefehle und Zeitgeber um
+Migration `0025_chat_output_targets.sql` ergänzt Textbefehle und Timer um
 ein Chat-Ausgabeziel; bestehende Zeilen erhalten `source_only`. Auch neue
 Ereignistexte verwenden standardmäßig dieses Ziel. Der gemeinsame
 `ChatOutputTarget`-Contract kennt `all_chats`, `source_only` und für
@@ -222,7 +222,7 @@ und Ankündigungen in `for_source_only`. Bei `where_asked` entscheidet
 eine Nachricht aus einem Partnerkanal wird an alle Teilnehmer gespiegelt.
 Fehlender Herkunftskanal gilt als eigener Chat. Außerhalb von Shared Chat hat
 die Einstellung keine Wirkung. Ziele sind je Textbefehl, Ereignistext,
-Raid-/Werbetext und Zeitgeber konfigurierbar; Wetter- und Währungsantworten
+Raid-/Werbetext und Timer konfigurierbar; Wetter- und Währungsantworten
 verwenden das Ziel des Textbefehls. Änderungen an gespeicherten Zielen werden
 mit den jeweiligen Modulmutationen auditiert. Auto-Antworten (#245) können
 denselben Contract und dieselbe Host-Versandgrenze verwenden.

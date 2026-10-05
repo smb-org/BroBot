@@ -602,6 +602,7 @@ describe("serialized contract shapes", () => {
         fetch,
         [{
           id: "probe",
+          navigationCategory: "chat",
           settingsSchema: probeSchema,
           defaultSettings: {},
           eventSubTypes: ["probe"],

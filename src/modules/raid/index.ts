@@ -27,6 +27,7 @@ export type { RaidSettings } from "./contracts";
 
 export const raidModule: BotModule<typeof raidSettingsSchema> = {
   id: "raid",
+  navigationCategory: "twitch",
   panelIcon: raidPanelIcon,
   templateVariableGroup: { label: raidTemplateVariableGroupLabels, icon: raidPanelIcon, order: 65 },
   settingsSchema: raidSettingsSchema,

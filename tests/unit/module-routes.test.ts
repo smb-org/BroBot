@@ -21,6 +21,7 @@ testModuleRoutes.get("/ballots/:ballotId", async (context) => {
 });
 const testModule: BotModule<typeof testModuleSchema> = {
   id: "test-modul",
+  navigationCategory: "interaction",
   settingsSchema: testModuleSchema,
   defaultSettings: { betrag: 42 },
   routes: testModuleRoutes,
@@ -69,6 +70,7 @@ const testModule: BotModule<typeof testModuleSchema> = {
 
 const mandatoryTestModule: BotModule<typeof testModuleSchema> = {
   id: "channel_events",
+  navigationCategory: "twitch",
   mandatory: true,
   settingsSchema: testModuleSchema,
   defaultSettings: { betrag: 42 },
@@ -77,6 +79,7 @@ const mandatoryTestModule: BotModule<typeof testModuleSchema> = {
 const clipsTestSchema = z.object({});
 const defaultEnabledTestModule: BotModule<typeof clipsTestSchema> = {
   id: "clips",
+  navigationCategory: "twitch",
   defaultEnabled: true,
   settingsSchema: clipsTestSchema,
   defaultSettings: {},

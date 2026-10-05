@@ -460,8 +460,11 @@ describe("Text commands panel", () => {
       panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
         name: "shoutout", kind: "shoutout", text: "Visit {target}", cooldownSeconds: 5,
       }), environment),
+      panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "quietso", kind: "shoutout", text: "Visit {target}", usageText: "", cooldownSeconds: 5,
+      }), environment),
     ]);
-    expect(responses.map((response) => response.status)).toEqual([201, 201, 201]);
+    expect(responses.map((response) => response.status)).toEqual([201, 201, 201, 201]);
     const commands = await Promise.all(responses.map(async (response) => {
       const payload: unknown = await response.json();
       if (typeof payload !== "object" || payload === null || !("command" in payload)) {
@@ -472,6 +475,7 @@ describe("Text commands panel", () => {
     expect(commands[0]).toMatchObject({ kind: "text", text: "Hello {user}", usageText: "Try !simple 12.50" });
     expect(commands[1]).toMatchObject({ kind: "list", text: "" });
     expect(commands[2]).toMatchObject({ kind: "shoutout", text: "Visit {target}", usageText: "Nutzung: !so <name>" });
+    expect(commands[3]).toMatchObject({ kind: "shoutout", text: "Visit {target}", usageText: "" });
 
     for (const [index, kind] of ["uptime", "followage", "game"].entries()) {
       const rejected = await panelRouter.fetch(

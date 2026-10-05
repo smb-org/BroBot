@@ -139,8 +139,6 @@ describe("Text commands service", () => {
       variableAction: null,
       timeoutAction: null,
       usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT,
-      usageTextEnabled: true,
-      usageTextChanged: false,
       minimumTier: "moderator" as const,
     }, parsed, { text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout, usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT });
     const savedCommand: TextCommand = {

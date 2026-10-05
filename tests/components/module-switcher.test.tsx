@@ -82,18 +82,18 @@ describe("Module navigation in the sidebar", () => {
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/ads");
   });
 
-  it("the Module node leads to and is active on the module overview", async () => {
+  it("the module management link leads to and is active on the module overview", async () => {
     renderModulePage();
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    const moduleLink = within(nav).getByRole("link", { name: "Module" });
+    const moduleLink = within(nav).getByRole("link", { name: "Module verwalten" });
     expect(moduleLink).toHaveAttribute("href", "/channels/kanal-a/modules");
     expect(moduleLink).not.toHaveAttribute("aria-current", "page");
     fireEvent.click(moduleLink);
 
     expect(await screen.findByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/channels/kanal-a/modules");
-    expect(within(nav).getByRole("link", { name: "Module" })).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getByRole("link", { name: "Module verwalten" })).toHaveAttribute("aria-current", "page");
   });
 
   it("keeps the module overview node and the single active module visible", async () => {
@@ -101,8 +101,8 @@ describe("Module navigation in the sidebar", () => {
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
     expect(within(nav).getByRole("link", { name: "Textbefehle · Läuft" })).toBeInTheDocument();
-    expect(within(nav).getByRole("link", { name: "Module" })).toBeInTheDocument();
-    expect(within(nav).getAllByRole("link", { name: "Module" })).toHaveLength(1);
+    expect(within(nav).getByRole("link", { name: "Module verwalten" })).toBeInTheDocument();
+    expect(within(nav).getAllByRole("link", { name: "Module verwalten" })).toHaveLength(1);
   });
 
   it("keeps the overview route on the collapsed Module icon", async () => {
@@ -111,9 +111,9 @@ describe("Module navigation in the sidebar", () => {
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
     fireEvent.click(within(nav).getByRole("button", { name: "Seitenleiste einklappen" }));
-    const moduleLink = within(nav).getByRole("link", { name: "Module" });
+    const moduleLink = within(nav).getByRole("link", { name: "Module verwalten" });
     expect(moduleLink).toHaveAttribute("href", "/channels/kanal-a/modules");
-    expect(moduleLink).toHaveAttribute("title", "Module");
+    expect(moduleLink).toHaveAttribute("title", "Module verwalten");
     fireEvent.click(moduleLink);
 
     expect(await screen.findByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();

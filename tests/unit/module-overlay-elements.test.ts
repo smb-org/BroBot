@@ -9,6 +9,7 @@ import { MODULE_OVERLAY_ELEMENTS, moduleOverlayMessageRequiresStateReload } from
 
 const moduleWithElements = (id: string, kinds: readonly string[]): BotModule => ({
   id,
+  navigationCategory: "twitch",
   settingsSchema: { parse: (value: unknown) => value } as never,
   defaultSettings: {},
   overlayElements: kinds.map((kind): ModuleOverlayElementDefinition => ({

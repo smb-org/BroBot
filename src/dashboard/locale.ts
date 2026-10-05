@@ -1,5 +1,5 @@
 import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type ModerationFailureReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
-import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
+import { browserModuleLanguage, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 import type { SystemVariableName } from "../template-variables";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -621,6 +621,8 @@ export interface DashboardTexts {
     variables: string;
     overlays: string;
     module: string;
+    manageModules: string;
+    moduleCategories: Readonly<Record<ModuleNavigationCategory, string>>;
     events: string;
     audit: string;
     selectChannel: string;
@@ -981,6 +983,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     navigation: {
       mainNavigation: "Hauptnavigation", overview: "Übersicht", channel: "Kanal", system: "System",
       members: "Mitglieder", variables: "Variablen", module: "Module", events: "Ereignisse", audit: "Audit-Log", selectChannel: "Kanal auswählen",
+      manageModules: "Module verwalten", moduleCategories: { chat: "Chat", interaction: "Interaktion", data: "Daten", twitch: "Twitch" },
       overlays: "Overlays",
       selectModule: "Modul auswählen",
       signInWithTwitch: "Mit Twitch anmelden", twitchAccount: "Twitch-Konto",
@@ -1073,11 +1076,11 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "text_library.category.renamed": ({ actor, from, to, object }) => `${actor} benannte die Textkategorie ${from ?? object} in ${to ?? object} um`,
         "text_library.category.removed": ({ actor, object }) => `${actor} entfernte die Textkategorie ${object}`,
         "text_library.settings.updated": ({ actor, object, from, to }) => `${actor} änderte die Einstellungen der ${object}${from === null || to === null ? "" : ` von ${from} zu ${to}`}`,
-        "timers.timer.created": ({ actor, object }) => `${actor} legte den Zeitgeber ${object} an`,
-        "timers.timer.updated": ({ actor, object }) => `${actor} änderte den Zeitgeber ${object}`,
-        "timers.timer.removed": ({ actor, object }) => `${actor} entfernte den Zeitgeber ${object}`,
-        "timers.timer.enabled": ({ actor, object }) => `${actor} aktivierte den Zeitgeber ${object}`,
-        "timers.timer.disabled": ({ actor, object }) => `${actor} deaktivierte den Zeitgeber ${object}`,
+        "timers.timer.created": ({ actor, object }) => `${actor} legte den Timer ${object} an`,
+        "timers.timer.updated": ({ actor, object }) => `${actor} änderte den Timer ${object}`,
+        "timers.timer.removed": ({ actor, object }) => `${actor} entfernte den Timer ${object}`,
+        "timers.timer.enabled": ({ actor, object }) => `${actor} aktivierte den Timer ${object}`,
+        "timers.timer.disabled": ({ actor, object }) => `${actor} deaktivierte den Timer ${object}`,
         "api_source.source_created": ({ actor, object }) => `${actor} legte die API-Quelle ${object} an`,
         "api_source.source_changed": ({ actor, object }) => `${actor} änderte die API-Quelle ${object}`,
         "api_source.source_deleted": ({ actor, object }) => `${actor} löschte die API-Quelle ${object}`,
@@ -1268,6 +1271,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     navigation: {
       mainNavigation: "Main navigation", overview: "Overview", channel: "Channel", system: "System",
       members: "Members", variables: "Variables", module: "Modules", events: "Events", audit: "Audit log", selectChannel: "Select channel",
+      manageModules: "Manage modules", moduleCategories: { chat: "Chat", interaction: "Interaction", data: "Data", twitch: "Twitch" },
       overlays: "Overlays",
       selectModule: "Select module",
       signInWithTwitch: "Sign in with Twitch", twitchAccount: "Twitch account",
@@ -2363,11 +2367,11 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_library.category.renamed": "Textkategorie umbenannt",
     "text_library.category.removed": "Textkategorie entfernt",
     "text_library.settings.updated": "Textbibliothekseinstellungen geändert",
-    "timers.timer.created": "Zeitgeber erstellt",
-    "timers.timer.updated": "Zeitgeber geändert",
-    "timers.timer.removed": "Zeitgeber entfernt",
-    "timers.timer.enabled": "Zeitgeber aktiviert",
-    "timers.timer.disabled": "Zeitgeber deaktiviert",
+    "timers.timer.created": "Timer erstellt",
+    "timers.timer.updated": "Timer geändert",
+    "timers.timer.removed": "Timer entfernt",
+    "timers.timer.enabled": "Timer aktiviert",
+    "timers.timer.disabled": "Timer deaktiviert",
     "api_source.source_created": "API-Quelle erstellt",
     "api_source.source_changed": "API-Quelle geändert",
     "api_source.source_deleted": "API-Quelle gelöscht",
@@ -2483,7 +2487,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "text_commands.command.created": "Textbefehl", "text_commands.command.updated": "Textbefehl", "text_commands.command.removed": "Textbefehl",
     "text_library.block.created": "Textbaustein", "text_library.block.updated": "Textbaustein", "text_library.block.removed": "Textbaustein",
     "text_library.category.created": "Textkategorie", "text_library.category.renamed": "Textkategorie", "text_library.category.removed": "Textkategorie", "text_library.settings.updated": "Textbibliothek",
-    "timers.timer.created": "Zeitgeber", "timers.timer.updated": "Zeitgeber", "timers.timer.removed": "Zeitgeber", "timers.timer.enabled": "Zeitgeber", "timers.timer.disabled": "Zeitgeber",
+    "timers.timer.created": "Timer", "timers.timer.updated": "Timer", "timers.timer.removed": "Timer", "timers.timer.enabled": "Timer", "timers.timer.disabled": "Timer",
     "api_source.source_created": "API-Quelle", "api_source.source_changed": "API-Quelle", "api_source.source_deleted": "API-Quelle",
     "channel.variable.created": "Kanalvariable", "channel.variable.renamed": "Kanalvariable", "channel.variable.removed": "Kanalvariable", "channel.variable.value_changed": "Kanalvariable",
     "ads.commercial_started": "die Werbepause", "clip.created": "den Clip",

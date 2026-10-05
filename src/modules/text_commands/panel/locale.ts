@@ -20,8 +20,8 @@ export interface TextCommandsTexts {
   name: string;
   aliases: string;
   templateFieldLabels: { usageText: string };
-  usageOverride: string;
-  usageOverrideHint: string;
+  usageAdvanced: string;
+  usageTextHint: string;
   createVariable: string;
   shoutoutCooldownHint: string;
   kind: string;
@@ -189,7 +189,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     title: "Textbefehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
     load: "Textbefehle werden geladen …", loadError: "Die Textbefehle konnten nicht geladen werden.",
     saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
-    name: "Name", aliases: "Aliase", templateFieldLabels: { usageText: "Nutzungshinweis" }, usageOverride: "Eigenen Nutzungshinweis bei fehlendem Betrag verwenden", usageOverrideHint: "Optionaler Antworttext, wenn eine Umrechnung ohne Betrag aufgerufen wird.", createVariable: "Variable anlegen",
+    name: "Name", aliases: "Aliase", templateFieldLabels: { usageText: "Antwort bei fehlenden oder ungültigen Argumenten" }, usageAdvanced: "Erweitert", usageTextHint: "Wird gesendet, wenn erforderliche Argumente fehlen oder ungültig sind.", createVariable: "Variable anlegen",
     shoutoutCooldownHint: "Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.",
     kind: "Art", kindLabels: { text: "Antworttext", list: "Befehlsliste", shoutout: "Shoutout", timeout: "Timeout" },
     kindHints: {
@@ -294,7 +294,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     title: "Text commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
     load: "Loading text commands …", loadError: "The text commands could not be loaded.",
     saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
-    name: "Name", aliases: "Aliases", templateFieldLabels: { usageText: "Usage response" }, usageOverride: "Customize the response when the amount is missing", usageOverrideHint: "Optional reply shown when conversion is called without an amount.", createVariable: "Create variable",
+    name: "Name", aliases: "Aliases", templateFieldLabels: { usageText: "Reply when arguments are missing or invalid" }, usageAdvanced: "Advanced", usageTextHint: "Sent when required arguments are missing or invalid.", createVariable: "Create variable",
     shoutoutCooldownHint: "Twitch enforces shoutout cooldowns: 2 minutes per channel and 60 minutes per target.",
     kind: "Type", kindLabels: { text: "Response text", list: "Command list", shoutout: "Shoutout", timeout: "Timeout" },
     kindHints: {

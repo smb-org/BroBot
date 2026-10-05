@@ -17,6 +17,7 @@ const validateFaqTemplateMutation = async (context: ModuleTemplateContentValidat
 
 export const faqModule: BotModule<typeof settingsSchema> = {
   id: FAQ_MODULE_ID,
+  navigationCategory: "chat",
   panelIcon: { paths: ["M4 5h16v14H4z", "M8 9h8", "M8 12h5", "M8 15h3"] },
   defaultEnabled: true,
   settingsSchema,
@@ -27,7 +28,6 @@ export const faqModule: BotModule<typeof settingsSchema> = {
     id: "faq",
     label: { de: "FAQ & Auto-Antworten", en: "FAQ & Auto replies" },
     description: { de: "Chatfragen mit Textbausteinen beantworten", en: "Answer chat questions with text blocks" },
-    group: "channel",
     iconKind: "faq",
     keywords: ["faq", "auto reply", "auto replies", "automatic answer", "automatische antwort", "auto-antwort", "chat answer"],
   }],

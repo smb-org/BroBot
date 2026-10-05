@@ -83,8 +83,6 @@ export interface SlashConvertibleDraft {
   variableAction: TextCommandVariableAction | null;
   timeoutAction: { minSeconds: number | ""; maxSeconds: number | ""; fallbackText: string; reason: string } | null;
   usageText: string;
-  usageTextEnabled: boolean;
-  usageTextChanged: boolean;
   minimumTier: TextCommandMinimumTier;
 }
 
@@ -106,8 +104,6 @@ export const convertLeadingSlashCommand = <Draft extends SlashConvertibleDraft>(
       variableAction: null,
       timeoutAction: null,
       usageText: draft.usageText.trim().length > 0 ? draft.usageText : shoutoutDefaults.usageText,
-      usageTextEnabled: true,
-      usageTextChanged: true,
       minimumTier: draft.minimumTier,
     };
   }

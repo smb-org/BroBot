@@ -64,14 +64,14 @@ describe("text library", () => {
     service = createTextLibraryService(repository);
   });
 
-  it("declares a bilingual Channel page without an always-active switch", () => {
+  it("declares its category navigation entry without an always-active switch", () => {
     expect(textLibraryModule.navigationEntries?.[0]).toMatchObject({
       id: "texts",
-      group: "channel",
       showMainSwitch: false,
       iconKind: "texts",
       label: { de: "Texte", en: "Texts" },
     });
+    expect(textLibraryModule.navigationCategory).toBe("chat");
     expect(textLibraryTexts("de").allCategories).toBe("Alle Kategorien");
     expect(textLibraryTexts("en").allCategories).toBe("All categories");
     expect(textLibraryTexts("de").variantsCount(1)).toBe("1 Variante");
