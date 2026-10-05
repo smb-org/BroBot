@@ -10,13 +10,14 @@ import { PanelApiError } from "../../../contracts/panel-error";
 import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand, type TextCommandGame, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
 import { MODERATION_TIMEOUT_MAX_SECONDS } from "../../contracts/moderation";
 import { minimumTierAfterVariableOperation } from "./editor-state";
-import { commandListReply, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsFor } from "../contracts/chat-defaults";
+import { commandListReply, TEXT_COMMAND_DEFAULT_TEXTS, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsFor } from "../contracts/chat-defaults";
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredTemplatePickerGroup } from "../../../dashboard/ui";
 import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, saveTextCommand, searchTextGames, textBlockNamesForPicker, toggleTextCommand, type TextCommandChannelVariable } from "./service";
 import type { ModuleRegisteredTemplateVariable } from "../../contract";
 import { textCommandsTexts } from "./locale";
+import { convertLeadingSlashCommand, parseLeadingSlashCommand, SLASH_COMMAND_NAMES } from "./slash-command";
 
 const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
 
@@ -34,8 +35,13 @@ interface CommandDraft {
   responseType: TextCommandResponseType;
   chatTarget: TextCommand["chatTarget"];
   variableAction: TextCommand["variableAction"];
-  timeoutAction: { minSeconds: number | ""; maxSeconds: number | ""; fallbackText: string } | null;
+  timeoutAction: { minSeconds: number | ""; maxSeconds: number | ""; fallbackText: string; reason: string } | null;
 }
+
+const draftTimeoutAction = (timeoutAction: TextCommand["timeoutAction"] | undefined): CommandDraft["timeoutAction"] => {
+  if (timeoutAction === null || timeoutAction === undefined) return null;
+  return { ...timeoutAction, reason: timeoutAction.reason ?? "" };
+};
 
 const draftFromCommand = (command: TextCommand): CommandDraft => ({
   name: command.name,
@@ -51,7 +57,7 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
   responseType: command.responseType,
   chatTarget: command.chatTarget,
   variableAction: command.variableAction === null ? null : { ...command.variableAction },
-  timeoutAction: command.timeoutAction === null ? null : { ...command.timeoutAction },
+  timeoutAction: draftTimeoutAction(command.timeoutAction),
 });
 
 const newCommandDraft = (): CommandDraft => ({
@@ -84,6 +90,30 @@ const templateFieldsForKind = (kind: TextCommandKind, channelVariables: readonly
   return timeoutEnabled
     ? { ...result, timeoutFallbackText: [...effective, ...timeoutVariables] }
     : result;
+};
+
+const commandDraftIsValid = (draft: CommandDraft, channelVariables: readonly TextCommandChannelVariable[]): boolean => {
+  const name = normalizeCommandName(draft.name);
+  const timeout = draft.timeoutAction;
+  const variable = draft.variableAction;
+  const validVariable = variable === null || (channelVariables.some((entry) => entry.name === variable.name) && (
+    variable.operation === "add" || variable.operation === "subtract"
+      ? variable.amount !== null && variable.amount >= 1 && variable.amount <= 1000
+      : variable.operation === "set_argument"
+        ? variable.amount === 0
+        : variable.amount !== null && variable.amount >= -999999999 && variable.amount <= 999999999
+  ));
+  const validTimeout = draft.kind === "timeout"
+    ? timeout !== null && typeof timeout.minSeconds === "number" && Number.isInteger(timeout.minSeconds) &&
+      typeof timeout.maxSeconds === "number" && Number.isInteger(timeout.maxSeconds) && timeout.minSeconds >= 1 &&
+      timeout.minSeconds <= timeout.maxSeconds && timeout.maxSeconds <= MODERATION_TIMEOUT_MAX_SECONDS &&
+      timeout.fallbackText.trim().length > 0 && timeout.fallbackText.length <= 500 && timeout.reason.length <= 500
+    : timeout === null;
+  const responseRequired = draft.kind !== "list" && (variable === null || timeout !== null) && draft.text.trim().length === 0;
+  return validCommandName(name) && !draft.aliases.includes(name) && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES &&
+    typeof draft.cooldownSeconds === "number" && Number.isInteger(draft.cooldownSeconds) && draft.cooldownSeconds >= 0 && draft.cooldownSeconds <= 86400 &&
+    typeof draft.userCooldownSeconds === "number" && Number.isInteger(draft.userCooldownSeconds) && draft.userCooldownSeconds >= 0 && draft.userCooldownSeconds <= 86400 &&
+    validVariable && validTimeout && !responseRequired && draft.text.length <= 500 && draft.usageText.length <= 500;
 };
 
 const tierDescription = (tier: TextCommandMinimumTier, labels: ReturnType<typeof textCommandsTexts>): string => {
@@ -215,8 +245,29 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const templateValue = (field: CommandTemplateField): string => field === "timeoutFallbackText"
     ? draft.timeoutAction?.fallbackText ?? ""
     : draft[field];
+  const slashInput = parseLeadingSlashCommand(draft.text);
+  const convertedDraft = slashInput.status === "valid"
+    ? convertLeadingSlashCommand(draft, slashInput, {
+      text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout,
+      usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT,
+    })
+    : draft;
+  const materializesTimeout = slashInput.status === "valid" && slashInput.command === "timeout" && draft.kind !== "timeout";
+  const validationDraft = materializesTimeout ? draft : convertedDraft;
+  const validationTemplateFields = Object.fromEntries(Object.entries(templateFieldsForKind(
+    validationDraft.kind,
+    channelVariables,
+    validationDraft.timeoutAction !== null,
+  ))
+    .map(([field, variables]) => [field, [...variables, ...blockVariables]]));
+  const validationTemplateValue = (field: string): string => field === "timeoutFallbackText"
+    ? validationDraft.timeoutAction?.fallbackText ?? ""
+    : validationDraft[field as "text" | "usageText"];
+  const validationResponseInvalid = Object.keys(validationTemplateFields).some((field) => {
+    const value = validationTemplateValue(field);
+    return (value.trim().length === 0 && !(field === "text" && validationDraft.variableAction !== null && validationDraft.timeoutAction === null) && field !== "usageText") || value.length > 500;
+  });
   const normalizedName = normalizeCommandName(draft.name);
-  const nameInvalid = normalizedName.length === 0 || !validCommandName(normalizedName);
   const sameNameAlias = draft.aliases.includes(normalizedName);
   const nameError = fieldError?.field === "name" ? fieldError.message : attemptedSave && normalizedName.length === 0 ? labels.nameMissing : attemptedSave && !validCommandName(normalizedName) ? labels.nameInvalid : undefined;
   const aliasesError = fieldError?.field === "aliases" ? fieldError.message : sameNameAlias ? labels.aliasIsName : undefined;
@@ -227,16 +278,16 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     const value = templateValue(field);
     return (value.trim().length === 0 && !(field === "text" && draft.variableAction !== null && draft.timeoutAction === null) && field !== "usageText") || value.length > 500;
   });
-  const actionInvalid = draft.variableAction !== null && (!channelVariables.some((variable) => variable.name === draft.variableAction?.name) ||
-    ((draft.variableAction.operation === "add" || draft.variableAction.operation === "subtract") && (draft.variableAction.amount === null || draft.variableAction.amount < 1 || draft.variableAction.amount > 1000)) ||
-    (draft.variableAction.operation === "set" && (draft.variableAction.amount === null || draft.variableAction.amount < -999999999 || draft.variableAction.amount > 999999999)));
-  const timeoutActionInvalid = draft.timeoutAction !== null && (
-    typeof draft.timeoutAction.minSeconds !== "number" || !Number.isInteger(draft.timeoutAction.minSeconds) ||
-    typeof draft.timeoutAction.maxSeconds !== "number" || !Number.isInteger(draft.timeoutAction.maxSeconds) ||
-    draft.timeoutAction.minSeconds < 1 || draft.timeoutAction.minSeconds > draft.timeoutAction.maxSeconds ||
-    draft.timeoutAction.maxSeconds > MODERATION_TIMEOUT_MAX_SECONDS || draft.timeoutAction.fallbackText.length > 500
-  );
-  const valid = !nameInvalid && !sameNameAlias && !cooldownInvalid && !userCooldownInvalid && !responseInvalid && !actionInvalid && !timeoutActionInvalid && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES;
+  const timeoutActionInvalid = draft.kind === "timeout"
+    ? draft.timeoutAction === null || typeof draft.timeoutAction.minSeconds !== "number" || !Number.isInteger(draft.timeoutAction.minSeconds) ||
+      typeof draft.timeoutAction.maxSeconds !== "number" || !Number.isInteger(draft.timeoutAction.maxSeconds) ||
+      draft.timeoutAction.minSeconds < 1 || draft.timeoutAction.minSeconds > draft.timeoutAction.maxSeconds ||
+      draft.timeoutAction.maxSeconds > MODERATION_TIMEOUT_MAX_SECONDS || draft.timeoutAction.fallbackText.trim().length === 0 ||
+      draft.timeoutAction.fallbackText.length > 500 || draft.timeoutAction.reason.length > 500
+    : draft.timeoutAction !== null;
+  const valid = slashInput.status !== "invalid" && !validationResponseInvalid &&
+    (validationDraft.variableAction === null || validationDraft.kind === "text" || validationDraft.kind === "timeout") &&
+    commandDraftIsValid(validationDraft, channelVariables);
   const localWarnings = templateFieldNames.flatMap((field) => {
     const variables = templateFields[field] ?? [];
     const value = templateValue(field);
@@ -265,6 +316,13 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   }));
   const kindOptions = TEXT_COMMAND_KINDS.map((kind) => ({ value: kind, label: labels.kindLabels[kind], description: labels.kindHints[kind] }));
   const announcementWarning = draft.responseType === "announcement" && botIsModerator === false ? labels.announcementWarning : undefined;
+  const slashSuggestions = slashInput.status === "suggestions"
+    ? SLASH_COMMAND_NAMES.filter((name) => name.startsWith(slashInput.fragment))
+    : slashInput.status === "invalid" ? [slashInput.command] : [];
+  const slashEffect = slashInput.status !== "valid" ? null
+    : slashInput.command === "timeout"
+      ? labels.slashTimeoutEffect(slashInput.minSeconds ?? 0, slashInput.maxSeconds ?? 0)
+      : slashInput.command === "announce" ? labels.slashAnnouncementEffect : labels.slashShoutoutEffect;
   const advancedIssue = fieldError?.field === "aliases" || cooldownInvalid || userCooldownInvalid
     ? "error" as const
     : undefined;
@@ -283,25 +341,36 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
 
   const saveDraft = useCallback(async (): Promise<string | null> => {
     setAttemptedSave(true);
-    if (!canManageContent || !valid) return labels.invalid;
+    if (!canManageContent) return labels.invalid;
+    const parsedSlashInput = parseLeadingSlashCommand(draft.text);
+    if (parsedSlashInput.status === "invalid") return labels.invalid;
+    const savedDraft = parsedSlashInput.status === "valid"
+      ? convertLeadingSlashCommand(draft, parsedSlashInput, {
+        text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout,
+        usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT,
+      })
+      : draft;
+    if (savedDraft !== draft) setValue(savedDraft);
+    if (!commandDraftIsValid(savedDraft, channelVariables)) return labels.invalid;
     const payload = {
-      name: normalizedName,
-      text: draft.kind === "list" ? "" : draft.text,
-      kind: draft.kind,
-      ...(draft.kind === "list" ? {} : { usageText: draft.usageText }),
-      minimumTier: draft.minimumTier,
-      cooldownSeconds: draft.cooldownSeconds as number,
-      aliases: draft.aliases,
-      userCooldownSeconds: draft.userCooldownSeconds as number,
-      streamCondition: draft.streamCondition,
-      games: draft.games,
-      responseType: draft.responseType,
-      chatTarget: draft.chatTarget,
-      variableAction: draft.variableAction,
-      timeoutAction: draft.timeoutAction === null ? null : {
-        minSeconds: typeof draft.timeoutAction.minSeconds === "number" ? draft.timeoutAction.minSeconds : 0,
-        maxSeconds: typeof draft.timeoutAction.maxSeconds === "number" ? draft.timeoutAction.maxSeconds : 0,
-        fallbackText: draft.timeoutAction.fallbackText,
+      name: normalizeCommandName(savedDraft.name),
+      text: savedDraft.kind === "list" ? "" : savedDraft.text,
+      kind: savedDraft.kind,
+      ...(savedDraft.kind === "list" ? {} : { usageText: savedDraft.usageText }),
+      minimumTier: savedDraft.minimumTier,
+      cooldownSeconds: savedDraft.cooldownSeconds as number,
+      aliases: savedDraft.aliases,
+      userCooldownSeconds: savedDraft.userCooldownSeconds as number,
+      streamCondition: savedDraft.streamCondition,
+      games: savedDraft.games,
+      responseType: savedDraft.responseType,
+      chatTarget: savedDraft.chatTarget,
+      variableAction: savedDraft.variableAction,
+      timeoutAction: savedDraft.timeoutAction === null ? null : {
+        minSeconds: typeof savedDraft.timeoutAction.minSeconds === "number" ? savedDraft.timeoutAction.minSeconds : 0,
+        maxSeconds: typeof savedDraft.timeoutAction.maxSeconds === "number" ? savedDraft.timeoutAction.maxSeconds : 0,
+        fallbackText: savedDraft.timeoutAction.fallbackText,
+        reason: savedDraft.timeoutAction.reason,
       },
     };
     setPending(true); setError(undefined); setFieldError(null); setConcurrentConflict(false); setSaved(false);
@@ -310,7 +379,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         ? await createTextCommand(channelId, payload)
         : await saveTextCommand(channelId, { oldName: command.name, revision: draftRevision.current ?? command.revision, ...payload });
       if (!isCreate && draftRevision.current !== null) draftRevision.current += 1;
-      accept({ ...draft, ...payload, name: payload.name });
+      accept({ ...savedDraft, ...payload, name: payload.name });
       setServerWarnings(returnedWarnings);
       await onRefresh(payload.name);
       setSaved(true);
@@ -343,7 +412,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       setError(labels.saveError);
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, channelId, command, draft, isCreate, labels, normalizedName, onRefresh, valid, setAttemptedSave, setConcurrentConflict, setError, setFieldError, setPending, setSaved, setServerWarnings]);
+  }, [accept, canManageContent, channelId, channelVariables, command, draft, isCreate, labels, onRefresh, setAttemptedSave, setConcurrentConflict, setError, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
 
   const guard = useDraftGuard(dirty, saveDraft, reset);
   useEffect(() => {
@@ -372,8 +441,11 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       return {
         ...current,
         kind,
-        text: kind === "list" ? "" : defaults?.text ?? (current.kind === "text" ? current.text : ""),
-        timeoutAction: kind === "text" ? current.timeoutAction : null,
+        text: kind === "list" ? "" : defaults?.text ?? (current.kind === "list" ? "" : current.text),
+        variableAction: kind === "text" || kind === "timeout" ? current.variableAction : null,
+        timeoutAction: kind === "timeout"
+          ? current.timeoutAction ?? { minSeconds: 120, maxSeconds: 120, fallbackText: "", reason: "" }
+          : null,
         usageText: kind === "shoutout"
           ? current.usageText || defaults?.usageText || TEXT_COMMAND_DEFAULT_USAGE_TEXT
           : current.kind === "shoutout" ? "" : current.usageText,
@@ -384,7 +456,6 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   };
 
   const handleSave = async (): Promise<void> => {
-    if (!valid) { setAttemptedSave(true); return; }
     const result = await saveDraft();
     if (result === null && isCreate) onCreateSuccess?.();
   };
@@ -437,9 +508,42 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         disabled={!canManageContent || pending}
         messages={labels.textAreaMessages}
         createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`}
-        required={field === "text" && (draft.variableAction === null || draft.timeoutAction !== null)}
-        {...(attemptedSave && value.trim().length === 0 && field === "text" && (draft.variableAction === null || draft.timeoutAction !== null) ? { error: labels.responseMissing } : {})}
+        required={field === "text" && draft.variableAction === null}
+        {...(attemptedSave && value.trim().length === 0 && field === "text" && draft.variableAction === null ? { error: labels.responseMissing } : {})}
       />
+      {field === "text" && slashInput.status !== "none" ? <div className="command-slash-help" aria-live="polite">
+        {slashSuggestions.length > 0 ? <>
+          <p className="form-hint">{labels.slashCommandHelp}</p>
+          <div className="command-slash-help__options" role="group" aria-label={labels.slashCommandHelp}>
+            {slashSuggestions.map((slashCommand) => <button
+              key={slashCommand}
+              type="button"
+              className="command-slash-help__option"
+              disabled={!canManageContent || pending}
+              onClick={() => {
+                const examples = {
+                  timeout: "/timeout {user} 120\n",
+                  announce: "/announce ",
+                  shoutout: "/shoutout {target}\n",
+                };
+                const leadingDirective = /^\/[^\s]*/u.exec(draft.text)?.[0] ?? "";
+                const remainder = draft.text.slice(leadingDirective.length);
+                const example = examples[slashCommand];
+                const replacement = /^(?:\r?\n)/u.test(remainder) && example.endsWith("\n") ? example.slice(0, -1) : example;
+                setTemplateField("text", `${replacement}${remainder}`);
+              }}
+            >
+              <code>{labels.slashCommands[slashCommand].syntax}</code>
+              <span>{labels.slashCommands[slashCommand].description}</span>
+            </button>)}
+          </div>
+        </> : null}
+        {slashInput.status === "invalid"
+          ? <p className="form-error" role="alert">× {labels.slashSyntaxError(slashInput.command)}</p>
+          : slashInput.status === "unsupported"
+            ? <p className="form-warning" role="status">{labels.slashUnsupportedWarning}</p>
+            : slashEffect === null ? null : <p className="form-hint" role="status">{slashEffect}</p>}
+      </div> : null}
       <InspectorSection title={labels.libraryText}>
         {libraryBlocks.length === 0 ? <p className="muted">{labels.noLibraryTexts}</p> : <InspectorFieldRow label={labels.libraryText}>
           <div className="command-library-picker">
@@ -509,7 +613,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             {draft.kind === "shoutout" ? <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p> : null}
           </div>
         </details> : null}
-        {draft.kind === "text" ? <>
+        {draft.kind === "text" || draft.kind === "timeout" ? <>
           <Switch
             layout="card"
             label={labels.variableAction}
@@ -569,23 +673,12 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             </FieldPair>
             {channelVariables.length === 0 ? <p className="muted">{labels.variableNone} <a href={`/channels/${encodeURIComponent(channelId)}/variables`}>{labels.createVariable}</a></p> : null}
             {variableAction.operation === "set_argument" && draft.minimumTier === "everyone" ? <p className="form-warning" role="note">{labels.variableEveryoneWarning}</p> : null}
-            {draft.text.trim().length === 0 ? <p className="muted">{labels.variableSilentHint}</p> : null}
+            {draft.kind === "text" && draft.text.trim().length === 0 ? <p className="muted">{labels.variableSilentHint}</p> : null}
           </div>}
           </Switch>
         </> : null}
-        {draft.kind === "text" ? <Switch
-          layout="card"
-          label={labels.timeoutAction}
-          description={labels.timeoutActionHint}
-          checked={draft.timeoutAction !== null}
-          disabled={!canManageContent || pending}
-          onChange={(enabled) => {
-            setDraftField("timeoutAction", enabled
-              ? { minSeconds: 120, maxSeconds: 120, fallbackText: "" }
-              : null);
-          }}
-        >
-          {draft.timeoutAction === null ? null : <div className="command-timeout-action">
+        {draft.kind === "timeout" && draft.timeoutAction !== null ? <>
+          <div className="command-timeout-action">
             <TimeoutDurationRangeFields
               idPrefix="command-timeout"
               value={draft.timeoutAction}
@@ -600,10 +693,23 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
               hint={labels.timeoutRangeHint}
               disabled={!canManageContent || pending}
             />
+            <Field
+              id="command-timeout-reason"
+              label={labels.timeoutReason}
+              hint={labels.timeoutReasonHint}
+              value={draft.timeoutAction.reason}
+              maxLength={500}
+              countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
+              disabled={!canManageContent || pending}
+              onChange={(reason) => {
+                const timeoutAction = draft.timeoutAction;
+                if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, reason });
+              }}
+            />
             {templateEditor("timeoutFallbackText", labels.timeoutFallbackText)}
             {botIsModerator === false ? <p className="form-warning" role="note">{labels.timeoutBotWarning}</p> : null}
-          </div>}
-        </Switch> : null}
+          </div>
+        </> : null}
         {draft.kind === "shoutout" ? null : <SegmentedControl
           label={labels.responseType}
           hint={labels.responseTypeHints[draft.responseType]}
@@ -719,7 +825,10 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     <div><dt>{labels.variableAction}</dt><dd>{variableAction === null ? labels.variableNone : `${variableAction.name} ${labels.variableOperations[variableAction.operation]}${variableAction.operation === "set_argument" ? "" : String(variableAction.amount ?? 0)}`}</dd></div>
     <div><dt>{labels.timeoutAction}</dt><dd>{draft.timeoutAction === null
       ? labels.timeoutNone
-      : `${String(draft.timeoutAction.minSeconds)}–${String(draft.timeoutAction.maxSeconds)} s`}</dd></div>
+      : draft.timeoutAction.minSeconds === draft.timeoutAction.maxSeconds
+        ? `${String(draft.timeoutAction.minSeconds)} s`
+        : `${String(draft.timeoutAction.minSeconds)}–${String(draft.timeoutAction.maxSeconds)} s`}</dd></div>
+    {draft.timeoutAction?.reason ? <div><dt>{labels.timeoutReason}</dt><dd>{draft.timeoutAction.reason}</dd></div> : null}
     {draft.timeoutAction === null ? null : <div><dt>{labels.timeoutFallbackText}</dt><dd>{templateView("timeoutFallbackText")}</dd></div>}
     {draft.kind === "shoutout" ? null : <div><dt>{labels.responseType}</dt><dd>{props.responseType}</dd></div>}
     <div><dt>{labels.chatTarget}</dt><dd>{props.chatTarget}</dd></div>

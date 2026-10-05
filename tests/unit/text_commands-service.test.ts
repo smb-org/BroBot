@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ModuleEvent, ModuleResult } from "../../src/modules/contract";
 import { processTextCommandMessage } from "../../src/modules/text_commands/service";
 import type { TextCommand, TextCommandRepository } from "../../src/modules/text_commands";
+import { convertLeadingSlashCommand, parseLeadingSlashCommand } from "../../src/modules/text_commands/panel/slash-command";
+import { TEXT_COMMAND_DEFAULT_TEXTS, TEXT_COMMAND_DEFAULT_USAGE_TEXT } from "../../src/modules/text_commands/contracts/chat-defaults";
 
 const NOW = "2026-09-19T12:00:00.000Z";
 
@@ -127,6 +129,34 @@ describe("Text commands service", () => {
     expect(usage.diagnostics).toContainEqual({ code: "text_commands.argument_missing", detail: { name: "so" } });
   });
 
+  it("runs a saved /announce conversion as an announcement at runtime", async () => {
+    const parsed = parseLeadingSlashCommand("/announce Stream starts now!");
+    if (parsed.status !== "valid") throw new Error("Announcement example did not parse.");
+    const converted = convertLeadingSlashCommand({
+      kind: "shoutout" as const,
+      text: "/announce Stream starts now!",
+      responseType: "say" as const,
+      variableAction: null,
+      timeoutAction: null,
+      usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT,
+      minimumTier: "moderator" as const,
+    }, parsed, { text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout, usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT });
+    const savedCommand: TextCommand = {
+      ...command("announce", converted.text),
+      kind: converted.kind,
+      responseType: converted.responseType,
+    };
+
+    const result = await processTextCommandMessage(eventFor("!announce"), repositoryFor([savedCommand]));
+
+    expect(result.actions).toEqual([{
+      kind: "announcement",
+      text: "Stream starts now!",
+      target: "source_only",
+      automated: false,
+    }]);
+  });
+
   it("logs the command, arguments, and resolved response", async () => {
     const result = await processTextCommandMessage(
       eventFor("!hallo erster   zweiter"),
@@ -136,6 +166,21 @@ describe("Text commands service", () => {
     expect(result.diagnostics).toEqual([{
       code: "text_commands.triggered",
       detail: { name: "hallo", arguments: "erster   zweiter", response: "Antwort für alice" },
+    }]);
+  });
+
+  it("keeps slash syntax rendered from arguments as plain chat text at runtime", async () => {
+    const result = await processTextCommandMessage(
+      eventFor("!say /timeout {user} 300"),
+      repositoryFor([command("say", "{args}")]),
+    );
+
+    expect(result.actions).toEqual([{
+      kind: "chat",
+      text: "/timeout {user} 300",
+      target: "source_only",
+      replyToMessageId: "twitch-message-1",
+      automated: false,
     }]);
   });
 
@@ -418,7 +463,8 @@ describe("Text commands service", () => {
   it("uses one securely rolled duration for both the timeout action and its reply", async () => {
     const entry = {
       ...command("roulette", "Timed out for {timeout.duration} ({timeout.seconds})"),
-      timeoutAction: { minSeconds: 40, maxSeconds: 49, fallbackText: "Could not time you out for {timeout.duration}" },
+      kind: "timeout" as const,
+      timeoutAction: { minSeconds: 40, maxSeconds: 49, fallbackText: "Could not time you out for {timeout.duration}", reason: "Repeated spam" },
     };
     const renderTemplate = vi.fn((text: string, values: Readonly<Record<string, string | number>>) => Promise.resolve({
       text: text.replace(/\{([^{}]+)\}/gu, (_match, name: string) => String(values[name] ?? "?")),
@@ -437,7 +483,7 @@ describe("Text commands service", () => {
       kind: "timeout",
       userId: "user-1",
       durationSeconds: 44,
-      reason: "!roulette",
+      reason: "Repeated spam",
       onSuccess: { kind: "chat", text: "Timed out for 44 s (44)", automated: false, target: "source_only", replyToMessageId: "twitch-message-1" },
       onFailure: { kind: "chat", text: "Could not time you out for 44 s", automated: false, target: "source_only", replyToMessageId: "twitch-message-1" },
     });
@@ -446,6 +492,7 @@ describe("Text commands service", () => {
   it("keeps announcement response types on timeout follow-ups", async () => {
     const entry = {
       ...command("roulette", "Timeout applied"),
+      kind: "timeout" as const,
       responseType: "announcement" as const,
       timeoutAction: { minSeconds: 30, maxSeconds: 30, fallbackText: "Timeout failed" },
     };
@@ -466,6 +513,7 @@ describe("Text commands service", () => {
   it("uses the fallback without creating a timeout action for moderators", async () => {
     const entry = {
       ...command("roulette", "Timed out for {timeout.seconds}"),
+      kind: "timeout" as const,
       timeoutAction: { minSeconds: 30, maxSeconds: 30, fallbackText: "The caller cannot be timed out ({timeout.duration})." },
     };
     const renderTemplate = vi.fn((text: string, values: Readonly<Record<string, string | number>>) => Promise.resolve({
@@ -491,6 +539,7 @@ describe("Text commands service", () => {
   it("does not roll or return a moderation action after tier or cooldown rejection", async () => {
     const entry = {
       ...command("roulette", "Timed out for {timeout.seconds}"),
+      kind: "timeout" as const,
       minimumTier: "moderator" as const,
       timeoutAction: { minSeconds: 30, maxSeconds: 40, fallbackText: "Cannot time out caller." },
     };

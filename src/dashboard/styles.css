@@ -784,6 +784,19 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .command-usage-advanced > summary { color: var(--text); font-size: 13px; font-weight: 600; }
 .command-usage-advanced__body { display: grid; gap: var(--s3); margin-top: var(--s3); }
 .ui-switch-card__children .command-variable-action { display: grid; gap: 16px; }
+.command-slash-help { display: grid; gap: var(--s2); margin-top: var(--s2); max-width: var(--config-field-wide); }
+.command-slash-help > p { margin: 0; }
+.command-slash-help__options { display: grid; gap: var(--s1); }
+.command-slash-help__option {
+  display: grid; gap: var(--s1); width: 100%; min-height: 44px; padding: var(--s2) var(--s3);
+  border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-well);
+  color: var(--text); text-align: left; cursor: pointer;
+}
+.command-slash-help__option:hover { border-color: var(--line-light); background: var(--surface-hover); }
+.command-slash-help__option:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
+.command-slash-help__option:disabled { cursor: not-allowed; opacity: .5; }
+.command-slash-help__option code { color: var(--text); font-family: var(--mantine-font-family-monospace); font-size: 12px; }
+.command-slash-help__option span { color: var(--text-3); font-size: 12px; }
 .command-create { display: grid; gap: 14px; max-width: var(--config-field-wide); }
 .form-actions--create { align-items: center; }
 .form-hint { color: var(--text-3); font-size: 12px; }

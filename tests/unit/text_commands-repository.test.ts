@@ -550,10 +550,10 @@ describe("Text commands D1 adapter", () => {
       channelId: "kanal-a",
       name: "roulette",
       text: "Timed out for {timeout.duration}",
-      kind: "text",
+      kind: "timeout",
       cooldownSeconds: 0,
       variableAction: { name: "score", operation: "add", amount: 1 },
-      timeoutAction: { minSeconds: 30, maxSeconds: 60, fallbackText: "Cannot time out for {timeout.seconds}." },
+      timeoutAction: { minSeconds: 30, maxSeconds: 60, fallbackText: "Cannot time out for {timeout.seconds}.", reason: "Repeated spam" },
       now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
     const created = await repository.find("kanal-a", "roulette");
@@ -562,6 +562,7 @@ describe("Text commands D1 adapter", () => {
       minSeconds: 30,
       maxSeconds: 60,
       fallbackText: "Cannot time out for {timeout.seconds}.",
+      reason: "Repeated spam",
     });
 
     await expect(repository.change({
@@ -569,7 +570,7 @@ describe("Text commands D1 adapter", () => {
       name: "roulette",
       newName: "roulette",
       text: "Timed out for {timeout.duration}",
-      kind: "text",
+      kind: "timeout",
       enabled: true,
       cooldownSeconds: 0,
       aliases: [],
@@ -577,7 +578,7 @@ describe("Text commands D1 adapter", () => {
       streamCondition: "any",
       responseType: "say",
       variableAction: created.variableAction,
-      timeoutAction: { minSeconds: 45, maxSeconds: 45, fallbackText: "Cannot time out for {timeout.duration}." },
+      timeoutAction: { minSeconds: 45, maxSeconds: 45, fallbackText: "Cannot time out for {timeout.duration}.", reason: "Updated reason" },
       expectedRevision: created.revision,
       now: "2026-09-19T12:00:01.000Z",
     }, ACTOR)).resolves.toEqual({ ok: true });
@@ -587,6 +588,7 @@ describe("Text commands D1 adapter", () => {
       minSeconds: 45,
       maxSeconds: 45,
       fallbackText: "Cannot time out for {timeout.duration}.",
+      reason: "Updated reason",
     });
     const audit = await database.prepare(
       "SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
@@ -595,11 +597,13 @@ describe("Text commands D1 adapter", () => {
       timeoutMinSeconds: 30,
       timeoutMaxSeconds: 60,
       timeoutFallbackText: "Cannot time out for {timeout.seconds}.",
+      timeoutReason: "Repeated spam",
     });
     expect(JSON.parse(audit?.after_json ?? "null") as Record<string, unknown>).toMatchObject({
       timeoutMinSeconds: 45,
       timeoutMaxSeconds: 45,
       timeoutFallbackText: "Cannot time out for {timeout.duration}.",
+      timeoutReason: "Updated reason",
     });
 
     if (updated === null) throw new Error("Updated command was not found.");

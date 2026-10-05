@@ -312,14 +312,16 @@ seine Tabellen in der zentralen D1-Kette unter `migrations/`. Der D1-Adapter
 dieses Moduls nutzt kanalgebunden `text_commands`, `text_command_aliases`
 und `text_command_user_cooldowns`.
 
-Ein Textbefehl der Art `text` kann zusätzlich `timeoutAction` mit einem Bereich
-von 1 bis 1.209.600 Sekunden und einem Ersatztext speichern. Der Dienst zieht
-die Dauer einmal mit `rollTimeoutSeconds` und dem vom Host bereitgestellten
-`secureRandomInteger`; derselbe Wert steuert die Host-Aktion und die
-Variablen `{timeout.seconds}` sowie `{timeout.duration}` in Antwort und
-Ersatztext. Für Broadcaster und Moderatoren wird nur der Ersatztext gerendert.
-Die drei Timeout-Felder liegen auf der vorhandenen Befehlstabelle und werden
-gemeinsam mit der Kanalvariablenaktion und dem Audit-Eintrag gespeichert.
+Ein Textbefehl der Art `timeout` speichert Antwort bei Erfolg, Timeout-Bereich
+von 1 bis 1.209.600 Sekunden, optionalen Grund und Ersatztext bei Ablehnung.
+Der Dienst zieht die Dauer einmal mit `rollTimeoutSeconds` und dem vom Host
+bereitgestellten `secureRandomInteger`; derselbe Wert steuert die Host-Aktion
+und die Variablen `{timeout.seconds}` sowie `{timeout.duration}` in Antwort,
+Grund und Ersatztext. Für Broadcaster und Moderatoren wird nur der Ersatztext
+gerendert. Dauer, Grund und Ersatztext liegen auf der vorhandenen Befehlstabelle
+und werden gemeinsam mit der Kanalvariablenaktion und dem Audit-Eintrag
+gespeichert. Migration `0031_text_command_timeout_kind.sql` wandelt vorhandene
+Antwortbefehle mit Timeoutaktion in `timeout` um und bewahrt ihre übrigen Felder.
 
 `src/modules/votekick/` nutzt den gemeinsamen Ballot-Speicher und die
 Aktivitätsübersicht der letzten zehn Minuten. VIPs, Moderatoren und Broadcaster
@@ -444,7 +446,7 @@ ein deaktiviertes Modul kostet im Panel-Bundle null Bytes. Panel-Ansichten
 erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
 
 Textbefehle werden im Panel angelegt, bearbeitet und entfernt. Jede Zeile hat
-eine Art (`text`, `list` oder `shoutout`), einen Schalter und eine Mindeststufe
+eine Art (`text`, `list`, `shoutout` oder `timeout`), einen Schalter und eine Mindeststufe
 (`everyone`, `subscriber`, `vip`, `moderator` oder `broadcaster`). Die Art `list`
 zählt beim Auslösen alle eingeschalteten Zeilen auf. Die angelegten Befehle
 werden kanalbezogen als `!<name>` ausgelöst. Der Host löst Systemvariablen und
@@ -452,6 +454,12 @@ werden kanalbezogen als `!<name>` ausgelöst. Der Host löst Systemvariablen und
 bleiben lazy und lesen nur die angeforderten Werte. Ein Befehl kann zusätzlich
 eine Kanalvariable atomar im Claim-Batch ändern. Revision-CAS und die indizierte
 Alias-Tabelle bleiben Teil der bestehenden Befehlsmutationen.
+
+Das Antwortfeld bietet am Textanfang `/timeout {user} <seconds|min-max>
+[reason]`, `/announce <text>` und `/shoutout {target}` an. Beim Speichern werden
+gültige Formen in Art, Antwortart und Timeoutfelder umgewandelt und aus dem
+Antworttext entfernt. Zur Laufzeit wird kein Slash-Befehl geparst; gerenderte
+`{args}`-Werte können daher keine Aktion auslösen.
 
 A chat command whose complete configuration is its name, minimum tier, cooldown, template, and exactly one host action is a text-command kind; a feature with its own state or events belongs in its own module.
 
