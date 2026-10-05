@@ -25,7 +25,7 @@ export { ChatOutputTargetControl } from "./ChatOutputTargetControl";
 export type { ChatOutputTargetControlProps } from "./ChatOutputTargetControl";
 
 export { Sidebar } from "./Sidebar";
-export type { SidebarProps, SidebarEntry, SidebarGroup, SidebarModulesGroup } from "./Sidebar";
+export type { SidebarProps, SidebarEntry, SidebarGroup } from "./Sidebar";
 
 export { Field } from "./Field";
 export { ChannelLocationMenu } from "./ChannelLocationMenu";

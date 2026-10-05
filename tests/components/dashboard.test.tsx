@@ -2081,7 +2081,7 @@ describe("Dashboard skeleton", () => {
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Module" }).some((link) => link.getAttribute("href") === "/channels/kanal-a/modules")).toBe(true);
+    expect(screen.getAllByRole("link", { name: "Module verwalten" }).some((link) => link.getAttribute("href") === "/channels/kanal-a/modules")).toBe(true);
   });
 
   it("shows the channel identity in the header and only one module switch on the page", async () => {
@@ -2849,7 +2849,7 @@ describe("Dashboard skeleton", () => {
       { path: "/channels/kanal-a/system", heading: "System", currentLink: "System" },
       { path: "/channels/kanal-a/members", heading: "Mitglieder", currentLink: "Mitglieder" },
       { path: "/channels/kanal-a/audit", heading: "Audit-Log", currentLink: "Audit-Log" },
-      { path: "/channels/kanal-a/modules", heading: "Module", currentLink: "Module" },
+      { path: "/channels/kanal-a/modules", heading: "Module", currentLink: "Module verwalten" },
       { path: "/channels/kanal-a/events", heading: "Ereignisse", currentLink: "Ereignisse" },
       { path: "/channels/kanal-a/modules/text_commands", heading: "Textbefehle", currentLink: "Textbefehle · Läuft" },
     ];
@@ -2863,7 +2863,7 @@ describe("Dashboard skeleton", () => {
       for (const label of ["Ereignisse", "Kanal", "System", "Mitglieder", "Audit-Log"]) {
         expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
       }
-      expect(within(nav).getByRole("link", { name: "Module" })).toBeInTheDocument();
+      expect(within(nav).getByRole("link", { name: "Module verwalten" })).toBeInTheDocument();
       if (page.currentLink === null) {
         expect(within(nav).queryByRole("link", { current: "page" })).not.toBeInTheDocument();
       } else {
@@ -2896,14 +2896,13 @@ describe("Dashboard skeleton", () => {
     const dialog = await screen.findByRole("dialog");
 
     const sidebar = screen.getByRole("navigation", { name: "Hauptnavigation" });
-    const textsLink = within(sidebar).getByRole("link", { name: "Texte" });
-    expect(textsLink.closest(".sidebar__group")?.querySelector(".sidebar__heading")).toHaveTextContent("Kanal");
-    expect(within(sidebar).queryByRole("link", { name: "Texte · Läuft" })).not.toBeInTheDocument();
+    const textsLink = within(sidebar).getByRole("link", { name: "Texte · Läuft" });
+    expect(textsLink.closest(".sidebar__group")?.querySelector(".sidebar__heading")).toHaveTextContent("Chat");
     const sidebarPageIds = Array.from(sidebar.querySelectorAll<HTMLElement>("[data-nav-page-id]"), (entry) => entry.dataset.navPageId)
       .filter((id): id is string => id !== undefined);
     const spotlightPageIds = Array.from(dialog.querySelectorAll<HTMLElement>("[data-spotlight-item-id^='page:']"), (action) => action.dataset.spotlightItemId?.slice("page:".length))
       .filter((id): id is string => id !== undefined);
-    expect(spotlightPageIds).toEqual(sidebarPageIds);
+    expect([...spotlightPageIds].sort()).toEqual([...sidebarPageIds].sort());
 
     fireEvent.keyDown(document.body, { key: "Escape" });
   });

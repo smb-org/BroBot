@@ -90,6 +90,7 @@ const resolveOverlayValues: NonNullable<BotModule<typeof settingsSchema>["resolv
 
 export const moonModule: BotModule<typeof settingsSchema> = {
   id: "moon",
+  navigationCategory: "data",
   panelIcon: moonPanelIcon,
   templateVariableGroup: {
     label: { de: moonModuleCatalog.de.variableGroup, en: moonModuleCatalog.en.variableGroup },

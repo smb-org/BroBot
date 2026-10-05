@@ -24,6 +24,7 @@ describe("registered template variables", () => {
         expect.objectContaining({ moduleId: "text_library", name: "welcome", isTextBlock: true }),
         expect.objectContaining({ moduleId: "raid", name: "channel", isTextBlock: false, contexts: ["event"] }),
         expect.objectContaining({ moduleId: "raid", name: "viewers", isTextBlock: false, contexts: ["event"] }),
+        expect.objectContaining({ moduleId: "currency", name: "currency.convert", parameters: "currency_pair" }),
       ]));
     } finally {
       database.close();

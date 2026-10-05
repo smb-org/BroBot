@@ -2,7 +2,7 @@ import type { ModuleLanguage } from "../../contract";
 
 export const timersModuleCatalog = {
   de: {
-    label: "Zeitgeber",
+    label: "Timer",
     description: "Geplante Textbausteine für den Kanal verwalten.",
   },
   en: {

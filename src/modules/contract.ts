@@ -756,6 +756,9 @@ export interface ModuleBallotAccess {
 
 export type ModuleStreamState = "online" | "offline" | "unknown";
 
+export const MODULE_NAVIGATION_CATEGORIES = ["chat", "interaction", "data", "twitch"] as const;
+export type ModuleNavigationCategory = (typeof MODULE_NAVIGATION_CATEGORIES)[number];
+
 export interface ModuleChannelInfo {
   title: string;
   gameName: string;
@@ -769,8 +772,6 @@ export interface ModuleNavigationEntry {
   id: string;
   label: Readonly<Record<ModuleLanguage, string>>;
   description?: Readonly<Record<ModuleLanguage, string>>;
-  /** Channel pages join the shared Channel group; omitted entries stay under Modules. */
-  group?: "channel" | "modules";
   /** Hide the module's main switch when this page is permanently available. */
   showMainSwitch?: boolean;
   iconKind: string;
@@ -1146,6 +1147,8 @@ export interface ModuleEvent<Settings = unknown> {
 
 export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
+  /** Host-catalog category used to place this module in the channel sidebar. */
+  navigationCategory: ModuleNavigationCategory;
   panelIcon?: ModuleIconDescriptor;
   /** The module is always enabled for every released channel and cannot be disabled. */
   mandatory?: boolean;

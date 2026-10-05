@@ -5,11 +5,9 @@ import type {
   ModuleTemplateContentValidationContext,
 } from "../contract";
 import { templateVariableNames, SYSTEM_TEMPLATE_VARIABLE_LIST, type TemplateVariable } from "../contract";
+import { blockReferencesInText } from "./text-block-references";
 
 export type EventTextBlockValidation = { ok: true } | { ok: false; reason: "missing" | "input_dependent" };
-
-const bareReferences = (text: string): string[] =>
-  [...text.matchAll(/\{([a-z0-9_]{1,32})\}/gu)].flatMap((match) => match[1] === undefined ? [] : [match[1]]);
 
 /** Validates a text block used without chat-command input, including nested blocks. */
 export const validateEventTextBlock = async (
@@ -58,7 +56,7 @@ export const validateEventTextBlock = async (
       if (templateVariableNames(text).some((variable) => inputVariables.has(variable))) {
         return { ok: false, reason: "input_dependent" };
       }
-      const nested = [...new Set(bareReferences(text).filter((reference) => !knownNames.has(reference)))];
+      const nested = blockReferencesInText(text).filter((reference) => !knownNames.has(reference));
       for (const nestedName of nested) {
         const result = await visit(nestedName, depth + 1);
         if (!result.ok) return result;
