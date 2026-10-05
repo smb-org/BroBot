@@ -41,6 +41,7 @@ const timeoutActionSchema = z.object({
   minSeconds: z.number().int(),
   maxSeconds: z.number().int(),
   fallbackText: z.string().max(500),
+  reason: z.string().max(500).default(""),
 }).refine((value) => timeoutDurationRangeSchema().safeParse(value).success);
 
 const bodySchema = z.object({
@@ -124,8 +125,9 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
   if (!parsed.success || !validCommandName(parsed.data.name) || parsed.data.aliases.includes(parsed.data.name)) return null;
   const variableAction = parsed.data.variableAction;
   const timeoutAction = parsed.data.timeoutAction;
-  if (variableAction !== null && parsed.data.kind !== "text") return null;
-  if (timeoutAction !== null && parsed.data.kind !== "text") return null;
+  if (variableAction !== null && parsed.data.kind !== "text" && parsed.data.kind !== "timeout") return null;
+  if (timeoutAction !== null && parsed.data.kind !== "timeout") return null;
+  if (parsed.data.kind === "timeout" && timeoutAction === null) return null;
   if (!validVariableAction(variableAction)) return null;
   const defaults = defaultsForKind(parsed.data.kind);
   const text = parsed.data.kind === "list" ? "" : parsed.data.text ?? defaults.text ?? "";
@@ -208,6 +210,11 @@ const warningsForCommand = (
       variables,
       available,
     ).map((warning) => ({ ...warning, field: "timeoutFallbackText" }))),
+    ...(timeoutAction?.reason === undefined || timeoutAction.reason.length === 0 ? [] : warningsForText(
+      timeoutAction.reason,
+      variables,
+      available,
+    ).map((warning) => ({ ...warning, field: "timeoutReason" }))),
   ];
 };
 
@@ -302,8 +309,9 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const kindChanged = kind !== before.kind;
   const variableAction = body.variableAction === undefined ? before.variableAction : body.variableAction;
   const timeoutAction = body.timeoutAction === undefined ? before.timeoutAction : body.timeoutAction;
-  if (variableAction !== null && kind !== "text") return context.json({ error: "command_data_invalid" }, 400);
-  if (timeoutAction !== null && kind !== "text") return context.json({ error: "command_data_invalid" }, 400);
+  if (variableAction !== null && kind !== "text" && kind !== "timeout") return context.json({ error: "command_data_invalid" }, 400);
+  if (timeoutAction !== null && kind !== "timeout") return context.json({ error: "command_data_invalid" }, 400);
+  if (kind === "timeout" && timeoutAction === null) return context.json({ error: "command_data_invalid" }, 400);
   if (!validVariableAction(variableAction)) return context.json({ error: "command_data_invalid" }, 400);
   const text = kind === "list" ? "" : body.text ?? (kindChanged ? defaults.text ?? before.text : before.text);
   const offlineText = body.offlineText ?? (kindChanged ? defaults.offlineText : before.offlineText);

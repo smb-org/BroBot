@@ -253,7 +253,7 @@ const processTextCommandMessageAttempt = async (
     ...claim.changedVariable,
     overlayIds: claim.changedVariableOverlayIds ?? [],
   };
-  if (claimed.kind === "text" && claimed.timeoutAction !== null) {
+  if (claimed.kind === "timeout" && claimed.timeoutAction !== null) {
     const timeoutAction = claimed.timeoutAction;
     const durationSeconds = rollTimeoutSeconds(
       { minSeconds: timeoutAction.minSeconds, maxSeconds: timeoutAction.maxSeconds },
@@ -288,6 +288,9 @@ const processTextCommandMessageAttempt = async (
     }
 
     const rendered = await render(context, event, input, claimed, alias, claimed.text, changedVariable, timeoutValues);
+    const renderedReason = timeoutAction.reason?.trim().length
+      ? await render(context, event, input, claimed, alias, timeoutAction.reason, changedVariable, timeoutValues)
+      : null;
     const replyToMessageId = textValue(event.payload.message_id);
     const followUp = (text: string): Extract<ModuleAction, { kind: "chat" | "announcement" }> | undefined => {
       if (text.length === 0) return undefined;
@@ -308,7 +311,7 @@ const processTextCommandMessageAttempt = async (
       kind: "timeout",
       userId: callerUserId,
       durationSeconds,
-      reason: `!${input.name}`,
+      reason: renderedReason?.text || `!${input.name}`,
       ...(successFollowUp === undefined ? {} : { onSuccess: successFollowUp }),
       ...(failureFollowUp === undefined ? {} : { onFailure: failureFollowUp }),
     };
@@ -318,6 +321,7 @@ const processTextCommandMessageAttempt = async (
         ...(gameUnknownDiagnostic === undefined ? [] : [gameUnknownDiagnostic]),
         ...rendered.diagnostics,
         ...fallback.diagnostics,
+        ...(renderedReason?.diagnostics ?? []),
         diagnosticTriggered(input, claimed, rendered.text, alias, streamState, claim.changedVariable),
       ],
       ...([...(rendered.attributions ?? []), ...(fallback.attributions ?? [])].length === 0

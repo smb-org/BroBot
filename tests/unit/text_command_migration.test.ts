@@ -58,6 +58,100 @@ describe("text command options migration", () => {
     }
   });
 
+  it("moves text commands with timeout actions into the timeout kind without losing command data", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      for (const migration of readdirSync(migrationsDirectory)
+        .filter((name) => name.endsWith(".sql") && name < "0031_text_command_timeout_kind.sql")
+        .sort()) {
+        database.exec(readFileSync(resolve(migrationsDirectory, migration), "utf8"));
+      }
+      database.exec(`
+        INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+        VALUES ('channel-a', 'channel-a', 'Channel A', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+        INSERT INTO channel_variables (channel_id, name, value, description, reset_on_stream_start, created_at, updated_at)
+        VALUES ('channel-a', 'score', 1, '', 0, '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+        INSERT INTO text_commands (
+          channel_id, command_name, response_text, cooldown_seconds, last_used_at, created_at, updated_at,
+          kind, enabled, minimum_level, aliases_json, user_cooldown_seconds, stream_condition, response_type,
+          template_fields_json, revision, use_count, variable_name, variable_operation, variable_amount,
+          games_json, timeout_min_seconds, timeout_max_seconds, timeout_fallback_text, chat_target
+        ) VALUES (
+          'channel-a', 'roulette', 'Timed out for {timeout.duration}', 12, '2026-09-23T00:01:00.000Z',
+          '2026-09-22T00:00:00.000Z', '2026-09-23T00:00:00.000Z', 'text', 1, 'vip', '["roll"]', 90,
+          'online', 'announcement', '{"usageText":"Try !roulette"}', 4, 7, 'score', 'add', 1, '[]', 30, 300,
+          'Timeout failed for {timeout.seconds}', 'all_chats'
+        );
+        INSERT INTO text_commands (channel_id, command_name, response_text, kind, created_at, updated_at)
+        VALUES ('channel-a', 'hello', 'Hello', 'text', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+        INSERT INTO text_commands (
+          channel_id, command_name, response_text, kind, variable_name, variable_operation, variable_amount,
+          timeout_min_seconds, timeout_max_seconds, timeout_fallback_text, created_at, updated_at
+        ) VALUES (
+          'channel-a', 'silent', '', 'text', 'score', 'add', 1, 30, 30, 'Timeout failed',
+          '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z'
+        );
+        INSERT INTO text_command_aliases (channel_id, alias, command_name) VALUES ('channel-a', 'roll', 'roulette');
+        INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
+        VALUES ('channel-a', 'roulette', 'user-1', '2026-09-23T00:02:00.000Z');
+      `);
+
+      database.exec(readFileSync(resolve(migrationsDirectory, "0031_text_command_timeout_kind.sql"), "utf8"));
+
+      expect(database.prepare(
+        `SELECT kind, response_text, cooldown_seconds, last_used_at, enabled, minimum_level, aliases_json,
+                user_cooldown_seconds, stream_condition, response_type, template_fields_json, revision,
+                use_count, variable_name, variable_operation, variable_amount, timeout_min_seconds,
+                timeout_max_seconds, timeout_fallback_text, timeout_reason, chat_target
+           FROM text_commands WHERE channel_id = 'channel-a' AND command_name = 'roulette'`,
+      ).get()).toEqual({
+        kind: "timeout",
+        response_text: "Timed out for {timeout.duration}",
+        cooldown_seconds: 12,
+        last_used_at: "2026-09-23T00:01:00.000Z",
+        enabled: 1,
+        minimum_level: "vip",
+        aliases_json: '["roll"]',
+        user_cooldown_seconds: 90,
+        stream_condition: "online",
+        response_type: "announcement",
+        template_fields_json: '{"usageText":"Try !roulette"}',
+        revision: 5,
+        use_count: 7,
+        variable_name: "score",
+        variable_operation: "add",
+        variable_amount: 1,
+        timeout_min_seconds: 30,
+        timeout_max_seconds: 300,
+        timeout_fallback_text: "Timeout failed for {timeout.seconds}",
+        timeout_reason: null,
+        chat_target: "all_chats",
+      });
+      expect(database.prepare("SELECT kind, revision FROM text_commands WHERE command_name = 'hello'").get())
+        .toEqual({ kind: "text", revision: 1 });
+      expect(database.prepare(
+        `SELECT kind, response_text, variable_name, variable_operation, variable_amount,
+                timeout_min_seconds, timeout_max_seconds, timeout_fallback_text
+           FROM text_commands WHERE command_name = 'silent'`,
+      ).get()).toEqual({
+        kind: "timeout",
+        response_text: "",
+        variable_name: "score",
+        variable_operation: "add",
+        variable_amount: 1,
+        timeout_min_seconds: 30,
+        timeout_max_seconds: 30,
+        timeout_fallback_text: "Timeout failed",
+      });
+      expect(database.prepare("SELECT alias, command_name FROM text_command_aliases WHERE channel_id = 'channel-a'").all())
+        .toEqual([{ alias: "roll", command_name: "roulette" }]);
+      expect(database.prepare("SELECT user_id, last_used_at FROM text_command_user_cooldowns WHERE command_name = 'roulette'").all())
+        .toEqual([{ user_id: "user-1", last_used_at: "2026-09-23T00:02:00.000Z" }]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("preserves existing rows as replies and applies defaults to new rows", () => {
     const database = new DatabaseSync(":memory:");
     try {
