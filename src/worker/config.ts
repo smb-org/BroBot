@@ -102,6 +102,15 @@ export const getMissingBindings = (env: Env): string[] => [
   }),
 ];
 
+// Accept a newer schema: during a deploy the previous code still serves right
+// after the migration ran. Migrations are usually additive, but some drop
+// columns or tables (e.g. 0018, 0020), so this only avoids false deploy
+// failures; it does not prove older code is compatible after a rollback.
+const migrationNumber = (name: string | null | undefined): number => {
+  const match = /^(\d+)_/.exec(name ?? "");
+  return match ? Number(match[1]) : Number.NaN;
+};
+
 const getMissingSchema = async (env: Env): Promise<string[]> => {
   try {
     const schema = await env.DB.prepare(`
@@ -115,8 +124,8 @@ const getMissingSchema = async (env: Env): Promise<string[]> => {
     }>();
 
     if (
-      schema?.latest_migration === LATEST_SCHEMA_MIGRATION &&
-      schema.latest_table_count > 0
+      migrationNumber(schema?.latest_migration) >= migrationNumber(LATEST_SCHEMA_MIGRATION) &&
+      schema && schema.latest_table_count > 0
     ) return [];
   } catch {
     // A missing migration table or unreachable D1 counts as a schema error.

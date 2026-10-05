@@ -26,7 +26,10 @@ const schemaDatabase = (state: SchemaState = {
 }): D1Database => ({
   prepare: () => ({
     bind: () => ({
-      first: () => Promise.resolve(state),
+      first: () => Promise.resolve({
+        latest_migration: state.latestMigration,
+        latest_table_count: state.latestTableCount,
+      }),
     }),
   }),
 } as unknown as D1Database);
@@ -160,5 +163,44 @@ describe("Health check binding validation", () => {
     }));
 
     expect(health.missingBindings).toEqual(["DB_SCHEMA"]);
+  });
+
+  describe("schema migration order", () => {
+    const missing = async (latestMigration: string | null, latestTableCount = 1) =>
+      (await getHealthStatus(environment(Buffer.alloc(32, 4).toString("base64url"), {
+        DB: schemaDatabase({ latestMigration, latestTableCount }),
+      }))).missingBindings;
+
+    it("reports the default helper state as healthy", async () => {
+      const health = await getHealthStatus(
+        environment(Buffer.alloc(32, 4).toString("base64url")),
+      );
+
+      expect(health.statusCode).toBe(200);
+    });
+
+    it("accepts the expected migration", async () => {
+      expect(await missing(LATEST_SCHEMA_MIGRATION)).toEqual([]);
+    });
+
+    it("accepts a newer migration", async () => {
+      expect(await missing("9999_future.sql")).toEqual([]);
+    });
+
+    it("rejects an older migration", async () => {
+      expect(await missing("0001_old.sql")).toEqual(["DB_SCHEMA"]);
+    });
+
+    it("rejects a missing migration", async () => {
+      expect(await missing(null)).toEqual(["DB_SCHEMA"]);
+    });
+
+    it("rejects an unparsable migration name", async () => {
+      expect(await missing("latest.sql")).toEqual(["DB_SCHEMA"]);
+    });
+
+    it("rejects a missing sentinel table", async () => {
+      expect(await missing("9999_future.sql", 0)).toEqual(["DB_SCHEMA"]);
+    });
   });
 });

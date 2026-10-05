@@ -267,7 +267,11 @@ wird zurückgerollt, bereits erfolgreich angewandte bleiben bestehen —, sodass
 das Schema zwischen zwei Ständen landen kann, ohne dass jemand hingesehen
 hat. Eine vergessene Migration fängt stattdessen der Healthcheck ab:
 `/healthz` lässt den CI-Job nach dem Production-Code-Deploy fehlschlagen, wenn
-die jüngste Migration nicht als letzte verzeichnet ist oder eine
+die jüngste verzeichnete Migration älter als die erwartete ist (eine neuere
+wird akzeptiert, damit der alte Code, der direkt nach einer Migration noch
+ausliefert, keinen falschen Fehlschlag auslöst; Migrationen sind meist
+additiv, manche entfernen aber Spalten oder Tabellen, die Annahme beweist also
+keine Kompatibilität älteren Codes nach einem Rollback) oder eine
 Sentinel-Tabelle fehlt; es prüft nicht das gesamte Schema und rollt den
 Deploy nicht zurück.
 
