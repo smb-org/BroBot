@@ -941,14 +941,18 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-field__description, .ui-tag-input__description, .ui-textarea__helper-row {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0;
 }
-.ui-field__hint, .ui-tag-input__description > span:first-child, .ui-textarea__helper-row > span:first-child { min-width: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.ui-text-reveal { position: relative; display: flex; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0; line-height: 18px; }
+.ui-text-reveal__copy { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.ui-text-reveal__trigger { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: var(--r-control); color: var(--text-3); background: transparent; cursor: pointer; }
+.ui-text-reveal__trigger:hover { color: var(--brand-text); background: var(--surface-hover); }
+.ui-text-reveal__trigger:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 1px; }
+.ui-text-reveal__popup { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; box-sizing: border-box; width: max-content; max-width: min(28rem, calc(100vw - 32px)); padding: var(--s2) var(--s3); border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--text); background: var(--surface); box-shadow: var(--mantine-shadow-xs); font-size: 12px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.ui-field__hint { flex: 1 1 auto; }
 .ui-field__description, .ui-tag-input__description, .ui-textarea__helper-row { min-height: 18px; }
 .ui-field .mantine-InputWrapper-description,
 .ui-number-field__control .mantine-InputWrapper-description,
-.ui-select .mantine-InputWrapper-description { box-sizing: border-box; min-height: 18px; max-height: 18px; overflow: hidden; }
-.ui-field__hint { flex: 1 1 auto; }
-.ui-number-field__description { display: block; min-width: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
-.ui-select__description { display: block; min-width: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-select .mantine-InputWrapper-description { position: relative; z-index: 3; box-sizing: border-box; min-height: 18px; max-height: 18px; overflow: visible; }
+.ui-number-field__description, .ui-select__description { display: flex; min-width: 0; overflow: visible; }
 .ui-field__count, .ui-tag-input__count, .ui-textarea__count { flex: none; min-width: 8ch; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .ui-field__count--warning, .ui-textarea__count--warning { color: var(--warn); }
 .ui-field__count--error, .ui-textarea__count--error { color: var(--error-text); }
@@ -959,11 +963,12 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-textarea {
   box-sizing: border-box; position: relative; min-width: 0; padding-bottom: 18px;
 }
+.ui-select--compact.mantine-Select-root { padding-bottom: 0; }
 .ui-field .mantine-InputWrapper-error,
 .ui-number-field__control .mantine-InputWrapper-error,
 .ui-select .mantine-InputWrapper-error,
 .ui-tag-input__control .mantine-InputWrapper-error,
-.ui-textarea .mantine-InputWrapper-error { position: absolute; right: 0; bottom: 0; left: 0; box-sizing: border-box; min-height: 18px; max-height: 18px; overflow: hidden; margin: 0; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-textarea .mantine-InputWrapper-error { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; box-sizing: border-box; min-height: 18px; max-height: 18px; overflow: visible; margin: 0; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .ui-field__prefix { display: inline-flex; box-sizing: border-box; width: 100%; align-items: center; justify-content: center; height: 100%; padding: 0; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 14px; }
 .ui-field--prefixed input.mantine-Input-input.mantine-TextInput-input { padding-left: calc(var(--input-left-section-width) + var(--input-padding)); }
 .ui-number-field { width: min(14rem, 100%); min-width: 0; }
@@ -1144,9 +1149,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-tag-input__pill[aria-invalid="true"] { border-color: var(--error); color: var(--error-text); background: var(--error-surface); }
 .ui-save-bar { box-sizing: border-box; display: flex; flex: none; align-items: center; gap: 8px; width: 100%; height: 64px; min-height: 64px; padding: 9px 0; }
 .ui-save-bar--persistent { margin-top: auto; border-top: 1px solid var(--line); background: var(--surface-inspector); }
-.ui-save-bar__status { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; overflow: hidden; color: var(--text-3); font-size: 12px; }
-.ui-save-bar__message { display: flex; flex: 1 1 0; align-items: center; gap: var(--s2); min-width: 0; overflow: hidden; white-space: nowrap; }
-.ui-save-bar__message-copy { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-save-bar__status { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; overflow: visible; color: var(--text-3); font-size: 12px; }
+.ui-save-bar__message { position: relative; display: flex; flex: 1 1 0; align-items: center; gap: var(--s2); min-width: 0; overflow: visible; white-space: nowrap; }
+.ui-save-bar__message-copy { flex: 1 1 auto; min-width: 0; }
 .ui-save-bar__footer { flex: 0 1 30%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-save-bar__status .ui-icon { flex: none; color: var(--warn); }
 .ui-save-bar__invalid-fields { display: inline-flex; flex: 0 1 50%; flex-wrap: nowrap; gap: var(--s1); max-width: 50%; overflow-x: auto; margin: 0; padding: 0; list-style: none; }
@@ -1154,10 +1159,13 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-save-bar__invalid-fields button:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .ui-save-bar__actions { display: flex; flex: none; gap: 8px; }
 .ui-save-bar__save { min-width: max-content; white-space: nowrap; }
+.ui-save-bar__save-labels { display: grid; white-space: nowrap; }
+.ui-save-bar__save-labels > span { grid-area: 1 / 1; }
+.ui-save-bar__save-labels > span[aria-hidden="true"] { visibility: hidden; }
 .ui-save-bar__actions > .ui-save-bar__save .mantine-Button-label,
 .ui-save-bar__actions > .ui-save-bar__discard .mantine-Button-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ui-dialog__error-slot { height: 18px; min-height: 18px; margin-top: 8px; overflow: hidden; }
-.ui-dialog__error-slot .form-error { height: 18px; min-height: 18px; overflow: hidden; margin: 0; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-dialog__error-slot { position: relative; z-index: 2; height: 18px; min-height: 18px; margin-top: 8px; overflow: visible; }
+.ui-dialog__error-slot .form-error { height: 18px; min-height: 18px; overflow: visible; margin: 0; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .ui-confirm-dialog__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .ui-confirm-dialog__actions > .mantine-Button-root { flex: 0 0 auto; white-space: nowrap; }
 .ui-editor-shell details[data-editor-error] > summary::after { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: var(--s2); padding: 0 var(--s1); border: 1px solid var(--error); border-radius: var(--r-control); color: var(--error-text); background: var(--error-surface); content: "×"; font-size: 12px; font-weight: 600; line-height: 1; }

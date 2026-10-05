@@ -6,6 +6,7 @@ import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { notify } from "./toast-store";
 import { colors } from "./theme";
+import { TextReveal } from "./TextReveal";
 
 export interface SaveBarProps {
   dirty: boolean;
@@ -93,7 +94,7 @@ export function SaveBar({
       <div className="ui-save-bar__status" role="status" aria-live="polite">
         {warningStatus !== null && statusText === warningStatus || warningStatus !== null && saved && !dirty ? <Icon name="warning" size={16} /> : null}
         <div className="ui-save-bar__message" title={statusTitle} style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
-          {typeof statusText === "string" ? <span className="ui-save-bar__message-copy">{statusText}</span> : statusText}
+          {typeof statusText === "string" ? <TextReveal className="ui-save-bar__message-copy" text={statusText} /> : statusText}
         </div>
         {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}
         {conflict === undefined ? null : <Button variant="neutral" icon="reload" onClick={conflict.onReload}>{conflict.reloadLabel}</Button>}
@@ -111,7 +112,10 @@ export function SaveBar({
           {...(saveDescribedBy === undefined ? {} : { describedBy: saveDescribedBy })}
           {...(saveTitle === undefined ? {} : { title: saveTitle })}
         >
-          {pending ? pendingLabel : saveLabel}
+          <span className="ui-save-bar__save-labels">
+            <span aria-hidden={pending}>{saveLabel}</span>
+            <span aria-hidden={!pending}>{pendingLabel}</span>
+          </span>
         </Button>
       </div>
     </div>

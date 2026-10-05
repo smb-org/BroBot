@@ -61,15 +61,21 @@ export interface EditorShellProps {
 const fieldById = (root: HTMLElement | null, id: string): HTMLElement | undefined =>
   root === null ? undefined : [...root.querySelectorAll<HTMLElement>("[id]")].find((candidate) => candidate.id === id);
 
+const invalidFieldKey = ({ sectionId, id, focusId, message }: EditorInvalidField): string =>
+  JSON.stringify([sectionId, id, focusId ?? id, message]);
+
 /** Focuses an invalid field without expanding sections that the editor has kept closed. */
-const focusInvalidTarget = (field: HTMLElement): void => {
+const focusInvalidTarget = (field: HTMLElement, errorKey: string): void => {
   const details: HTMLDetailsElement[] = [];
   for (let current = field.closest("details"); current !== null; current = current.parentElement?.closest("details") ?? null) {
     details.push(current);
   }
   const collapsed = details.filter((current) => !current.open);
   if (collapsed.length > 0) {
-    for (const current of collapsed) current.dataset.editorError = "true";
+    for (const current of collapsed) {
+      current.dataset.editorError = "true";
+      current.dataset.editorErrorKey = errorKey;
+    }
     const summary = collapsed[collapsed.length - 1]?.querySelector<HTMLElement>("summary");
     summary?.scrollIntoView({ block: "center" });
     summary?.focus();
@@ -119,6 +125,7 @@ export function EditorShell({
   const pendingValidationFocus = useRef(false);
   // Bumped on every invalid save so the focus effect re-runs even when the parent state is unchanged.
   const [saveAttempt, setSaveAttempt] = useState(0);
+  const invalidFieldSignature = JSON.stringify(invalidFields.map(invalidFieldKey).sort());
   const activeSectionId = section ?? internalSection;
   const activeSection = sections.find((candidate) => candidate.id === activeSectionId) ?? sections[0];
   const activeIndex = useMemo(() => Math.max(0, sections.findIndex((candidate) => candidate.id === activeSection?.id)), [activeSection?.id, sections]);
@@ -128,9 +135,15 @@ export function EditorShell({
     : { kind: "close" as const, label: closeLabel, onClick: onClose };
 
   useLayoutEffect(() => {
+    const activeErrorKeys = new Set(JSON.parse(invalidFieldSignature) as string[]);
     contentRef.current?.querySelectorAll<HTMLElement>("details[data-editor-error]").forEach((details) => {
+      if (details.dataset.editorErrorKey !== undefined && activeErrorKeys.has(details.dataset.editorErrorKey)) return;
       delete details.dataset.editorError;
+      delete details.dataset.editorErrorKey;
     });
+  }, [invalidFieldSignature]);
+
+  useLayoutEffect(() => {
     if (pendingValidationFocus.current) {
       const firstInvalidField = invalidFields[0];
       if (firstInvalidField === undefined) {
@@ -149,7 +162,7 @@ export function EditorShell({
       pendingValidationFocus.current = false;
       pendingFocus.current = null;
       const invalidTarget = fieldById(contentRef.current, firstInvalidField.focusId ?? firstInvalidField.id);
-      if (invalidTarget !== undefined && !invalidTarget.matches("[disabled]")) focusInvalidTarget(invalidTarget);
+      if (invalidTarget !== undefined && !invalidTarget.matches("[disabled]")) focusInvalidTarget(invalidTarget, invalidFieldKey(firstInvalidField));
       return;
     }
     const fieldId = pendingFocus.current;
@@ -160,7 +173,8 @@ export function EditorShell({
       return;
     }
     const field = fieldById(contentRef.current, fieldId);
-    if (field !== undefined && !field.matches("[disabled]")) focusInvalidTarget(field);
+    const invalidField = invalidFields.find((candidate) => (candidate.focusId ?? candidate.id) === fieldId);
+    if (field !== undefined && !field.matches("[disabled]")) focusInvalidTarget(field, invalidField === undefined ? fieldId : invalidFieldKey(invalidField));
   }, [activeSection?.id, invalidFields, onSectionChange, section, saveAttempt]);
 
   const selectSection = (id: string): void => {
@@ -176,7 +190,7 @@ export function EditorShell({
       return;
     }
     const target = fieldById(contentRef.current, focusId);
-    if (target !== undefined && !target.matches("[disabled]")) focusInvalidTarget(target);
+    if (target !== undefined && !target.matches("[disabled]")) focusInvalidTarget(target, invalidFieldKey(field));
   };
 
   const focusFirstInvalid = (): void => {

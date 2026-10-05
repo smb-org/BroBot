@@ -288,7 +288,7 @@ describe("template field", () => {
     expect(input).not.toHaveAttribute("maxlength");
     rerender(<UiProvider><form onSubmit={onSubmit}><TextArea label="Reply" hint="What the bot writes." value="12345678901" maxLength={10} onChange={() => {}} messages={textAreaMessages} /></form></UiProvider>);
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByText("× 11 von 10 Zeichen")).toBeInTheDocument();
+    expect(document.querySelector(".ui-textarea .mantine-InputWrapper-error")).toHaveTextContent("× 11 von 10 Zeichen");
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Reply" }), { key: "Enter", ctrlKey: true });
     expect(onSubmit).toHaveBeenCalledOnce();
   });
@@ -637,8 +637,9 @@ describe("EditorShell and declaration renderer", () => {
   });
 
   it("keeps collapsed sections closed and marks their summary when an error link focuses a field", () => {
-    renderUi(<EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
-      sections={[{ id: "settings", label: "Settings", content: <details><summary>Advanced</summary><Field id="usage-text" label="Usage" value="" error="Too long" onChange={() => {}} /></details> }]}
+    const detailsSection = [{ id: "settings", label: "Settings", content: <details><summary>Advanced</summary><Field id="usage-text" label="Usage" value="" error="Too long" onChange={() => {}} /></details> }];
+    const { rerender } = renderUi(<EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
+      sections={detailsSection}
       invalidFields={[{ id: "usage-text", label: "Usage", message: "Too long", sectionId: "settings" }]} />);
     const details = document.querySelector("details") as HTMLDetailsElement;
     expect(details.open).toBe(false);
@@ -646,6 +647,14 @@ describe("EditorShell and declaration renderer", () => {
     expect(details.open).toBe(false);
     expect(details).toHaveAttribute("data-editor-error", "true");
     expect(screen.getByText("Advanced")).toHaveFocus();
+
+    rerender(<UiProvider><EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
+      sections={detailsSection}
+      invalidFields={[{ id: "usage-text", label: "Usage", message: "Too long", sectionId: "settings" }]} /></UiProvider>);
+    expect(details).toHaveAttribute("data-editor-error", "true");
+
+    rerender(<UiProvider><EditorShell {...baseProps} dirty sections={detailsSection} invalidFields={[]} /></UiProvider>);
+    expect(details).not.toHaveAttribute("data-editor-error");
   });
 
   it("keeps the persistent save bar visible across clean, dirty, warning, saved, error, pending, and conflict states", () => {

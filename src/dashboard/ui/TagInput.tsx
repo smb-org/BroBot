@@ -2,6 +2,7 @@ import { TagsInput as MantineTagsInput, Pill } from "@mantine/core";
 import { useId, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "./Icon";
+import { TextReveal } from "./TextReveal";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 
 export interface TagInputMessages {
@@ -104,8 +105,8 @@ export function TagInput({ id: suppliedId, label, hint, error, warning, invalidV
       <MantineTagsInput
         id={id}
         label={label}
-        description={<span className="ui-tag-input__description"><span>{effectiveHint}</span>{maxTags === undefined ? null : <span className="ui-tag-input__count">{messages.countLabel(value.length, maxTags)}</span>}{describedHelper(null, disabledReason, `tag-${id}`)}</span>}
-        error={effectiveError === null ? undefined : `× ${effectiveError}`}
+        description={<span className="ui-tag-input__description"><TextReveal text={effectiveHint} />{maxTags === undefined ? null : <span className="ui-tag-input__count">{messages.countLabel(value.length, maxTags)}</span>}{describedHelper(null, disabledReason, `tag-${id}`)}</span>}
+        error={effectiveError === null ? undefined : <span><span aria-hidden="true">× </span><TextReveal text={effectiveError} /></span>}
         inputWrapperOrder={["label", "input", "description", "error"]}
         data={[]}
         value={[...value]}

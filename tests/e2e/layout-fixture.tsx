@@ -18,6 +18,7 @@ export function LayoutFixture() {
   const [previewLong, setPreviewLong] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogError, setDialogError] = useState(false);
+  const [savePending, setSavePending] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [number, setNumber] = useState<number | "">(4);
   const errorProps = showIssues ? { error: "A validation error." } : {};
@@ -27,7 +28,11 @@ export function LayoutFixture() {
       <main className="main-content" style={{ width: "min(960px, 100%)", padding: "16px" }}>
         <button id="toggle-issues" type="button" onClick={() => { setShowIssues((current) => !current); }}>Toggle issues</button>
         <button id="toggle-preview" type="button" onClick={() => { setPreviewLong((current) => !current); }}>Toggle preview</button>
+        <button id="toggle-save-pending" type="button" onClick={() => { setSavePending((current) => !current); }}>Toggle save pending</button>
         <button id="open-dialog" type="button" onClick={() => { setDialogOpen(true); }}>Open dialog</button>
+        <div className="layout-fixture__compact-header" style={{ display: "flex", alignItems: "center", width: 320, height: 44 }}>
+          <Select id="layout-header-channel" compact ariaLabel="Header channel" value="one" onChange={() => {}} options={[{ value: "one", label: "One" }]} hint="A reserved header hint." {...(showIssues ? { error: "A reserved header error." } : {})} />
+        </div>
         <div className="module-stack">
           <Field id="layout-name" label="Name" hint="A short name." value="hello" onChange={() => {}} {...errorProps} maxLength={30} countLabel={(count, max) => `${String(count)}/${String(max)}`} />
           <NumberField id="layout-number" label="Count" hint="A short count." value={number} onChange={setNumber} {...errorProps} />
@@ -36,9 +41,9 @@ export function LayoutFixture() {
           <TagInput id="layout-tags" label="Aliases" hint="A short alias hint." value={tags} onChange={setTags} {...errorProps} {...(showIssues ? { warning: "A duplicate warning." } : {})} removeLabel={(entry) => `Remove ${entry}`} listLabel="Alias list" messages={{ countLabel: (count, max) => `${String(count)}/${String(max)}`, atLimitHint: "At limit.", duplicateWarning: (entry) => `${entry} is duplicated.` }} />
           <TextArea id="layout-template" label="Reply" hint="A short reply hint." value={showIssues ? "Hi {missing}" : "Hi there"} onChange={() => {}} {...errorProps} variables={[]} preview={(text) => previewLong ? `${text} ${"long preview ".repeat(30)}` : text} previewLabel="Preview" previewSpeaker="Bot" messages={textAreaMessages} />
         </div>
-        <SaveBar dirty={showIssues} persistent saveLabel="Save settings" discardLabel="Discard" savedLabel="Saved." pendingLabel="Saving …" onSave={() => {}} onDiscard={() => {}} />
+        <SaveBar dirty={showIssues} pending={savePending} persistent saveLabel="Save" discardLabel="Discard" savedLabel="Saved." pendingLabel="Saving settings …" onSave={() => {}} onDiscard={() => {}} />
       </main>
-      <FormDialog opened={dialogOpen} title="Layout dialog" children={<button type="button" onClick={() => { setDialogError((current) => !current); }}>Toggle dialog error</button>} confirmLabel="Save" cancelLabel="Cancel" onConfirm={() => {}} onCancel={() => { setDialogOpen(false); }} {...(dialogError ? { error: "A dialog error." } : {})} />
+      <FormDialog opened={dialogOpen} title="Layout dialog" children={<button type="button" onClick={() => { setDialogError((current) => !current); }}>Toggle dialog error</button>} confirmLabel="Save" cancelLabel="Cancel" onConfirm={() => {}} onCancel={() => { setDialogOpen(false); }} {...(dialogError ? { error: "A dialog error. This explains the complete reason and the step needed to correct the request." } : {})} />
     </UiProvider>
   );
 }

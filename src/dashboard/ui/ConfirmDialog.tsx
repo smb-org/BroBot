@@ -1,6 +1,7 @@
 import { Modal, Text } from "@mantine/core";
 
 import { Button } from "./Button";
+import { TextReveal } from "./TextReveal";
 
 /**
  * "Confirmation modal (`ConfirmDialog`)" in docs/input/DESIGN-neu.md: takes
@@ -46,7 +47,7 @@ export function ConfirmDialog({
       <Text size="sm" c="dimmed">
         {description}
       </Text>
-      <div className="ui-dialog__error-slot">{error === undefined ? null : <p className="form-error" role="alert">{error}</p>}</div>
+      <div className="ui-dialog__error-slot">{error === undefined ? null : <p className="form-error" role="alert"><span aria-hidden="true">× </span><TextReveal text={error} /></p>}</div>
       <div className="ui-confirm-dialog__actions">
         <Button variant="subtle" onClick={onCancel} autoFocus disabled={pending}>
           {cancelLabel}

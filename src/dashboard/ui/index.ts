@@ -102,6 +102,8 @@ export { FormDensity } from "./FormDensity";
 
 export { Icon } from "./Icon";
 export type { IconName } from "./Icon";
+export { TextReveal } from "./TextReveal";
+export type { TextRevealProps } from "./TextReveal";
 
 export { Led } from "./Led";
 export type { LedProps, LedStatus } from "./Led";

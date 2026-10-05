@@ -44,3 +44,71 @@ test("the save bar keeps its height on mobile", async ({ page }) => {
   const mobileHeight = (await page.locator(".ui-save-bar").boundingBox())?.height;
   expect(mobileHeight).toBe(64);
 });
+
+test("compact header selects remain 44px when hints and errors change", async ({ page }) => {
+  await page.goto("/tests/e2e/layout-fixture.html");
+  const select = page.locator("#layout-header-channel").locator("xpath=ancestor::div[contains(@class, 'ui-select')]");
+  await expect(select).toBeVisible();
+  expect((await select.boundingBox())?.height).toBe(44);
+
+  await page.getByRole("button", { name: "Toggle issues" }).click();
+  expect((await select.boundingBox())?.height).toBe(44);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect((await select.boundingBox())?.height).toBe(44);
+
+  await page.getByRole("button", { name: "Toggle issues" }).click();
+  expect((await select.boundingBox())?.height).toBe(44);
+});
+
+test("save action width stays fixed across pending and idle states on desktop and mobile", async ({ page }) => {
+  await page.goto("/tests/e2e/layout-fixture.html");
+  const save = page.locator(".ui-save-bar__save");
+  const discard = page.locator(".ui-save-bar__discard");
+  const measure = async () => ({
+    save: await save.boundingBox(),
+    discard: await discard.boundingBox(),
+  });
+
+  const beforeDesktop = await measure();
+  await page.getByRole("button", { name: "Toggle save pending" }).click();
+  await expect(save).toContainText("Saving settings …");
+  const pendingDesktop = await measure();
+  expect(pendingDesktop.save?.width).toBe(beforeDesktop.save?.width);
+  expect(pendingDesktop.discard?.x).toBe(beforeDesktop.discard?.x);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const beforeMobile = await measure();
+  await page.getByRole("button", { name: "Toggle save pending" }).click();
+  await expect(save).toContainText("Save");
+  const idleMobile = await measure();
+  expect(idleMobile.save?.width).toBe(beforeMobile.save?.width);
+  expect(idleMobile.discard?.x).toBe(beforeMobile.discard?.x);
+});
+
+test("clipped hints and dialog errors reveal full copy by keyboard without moving reserved rows", async ({ page }) => {
+  await page.goto("/tests/e2e/layout-fixture.html");
+  const field = page.locator(".ui-field").first();
+  const fieldHeight = (await field.boundingBox())?.height;
+  const hint = field.locator(".ui-field__hint");
+  const hintTrigger = hint.locator(".ui-text-reveal__trigger");
+  await expect(hintTrigger).toHaveAttribute("title", "A short name.");
+  await hintTrigger.focus();
+  await hintTrigger.press("Enter");
+  await expect(hint.getByRole("tooltip")).toHaveText("A short name.");
+  expect((await field.boundingBox())?.height).toBe(fieldHeight);
+  await hintTrigger.press("Enter");
+  await expect(hint.getByRole("tooltip")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Open dialog" }).click();
+  const dialog = page.getByRole("dialog", { name: "Layout dialog" });
+  const dialogHeight = (await dialog.boundingBox())?.height;
+  await dialog.getByRole("button", { name: "Toggle dialog error" }).click();
+  const error = dialog.locator(".ui-dialog__error-slot");
+  const errorTrigger = error.locator(".ui-text-reveal__trigger");
+  await errorTrigger.focus();
+  await errorTrigger.press("Space");
+  await expect(error.getByRole("tooltip")).toContainText("the step needed to correct the request");
+  expect((await dialog.boundingBox())?.height).toBe(dialogHeight);
+  await errorTrigger.press("Space");
+  await expect(error.getByRole("tooltip")).toHaveCount(0);
+});

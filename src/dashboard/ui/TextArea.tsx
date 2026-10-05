@@ -7,6 +7,7 @@ import type { TemplateVariableGroup } from "../../contracts/values";
 import { Button } from "./Button";
 import { ChatPreview } from "./ChatPreview";
 import { Icon } from "./Icon";
+import { TextReveal } from "./TextReveal";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 import {
   TemplateVariableGroupHeading,
@@ -325,7 +326,7 @@ export function TextArea({
   const description: ReactNode = (
     <div className="ui-textarea__description-content">
       <div className="ui-textarea__helper-row">
-        <span>{describedHelper(hint, disabledReason, `textarea-${id}`)}</span>
+        <span><TextReveal text={hint} />{describedHelper(null, disabledReason, `textarea-${id}`)}</span>
         {countNode}
       </div>
       <div className="ui-textarea__warnings" id={`${id}-warnings`}>
@@ -378,7 +379,7 @@ export function TextArea({
         description={description}
         descriptionProps={{ component: "div" }}
         inputWrapperOrder={["label", "input", "description", "error"]}
-        error={effectiveError === undefined ? undefined : `× ${effectiveError}`}
+        error={effectiveError === undefined ? undefined : <span><span aria-hidden="true">× </span><TextReveal text={effectiveError} /></span>}
         withAsterisk={required}
       >
         <div ref={frameRef} className="template-field" data-composing={composing ? "true" : undefined} data-readonly={readOnly ? "true" : undefined}>
