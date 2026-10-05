@@ -476,7 +476,9 @@ immediateActions: { requires: ["streamLive"], load: () => import("./panel/immedi
 Karte, die ihre Steuerung entsprechend sperrt. `load` bleibt ein lazy `import()`,
 damit ein deaktiviertes Modul null Bytes kostet. Die Karte ruft Modul- oder Host-Routen auf (Clip und Raid
 nutzen `/api/channels/:channelId/clips` bzw. `/shoutout`);
-die Serverseite prüft Berechtigung und Stream-Zustand erneut.
+`requires` ist eine reine Verfügbarkeitsprüfung im Dashboard. Voraussetzungen
+auf der Serverseite setzt jede Route selbst durch (Berechtigung, Aktivierung)
+oder Twitch (etwa ein Clip nur bei laufendem Stream).
 
 ### Overlay-Elemente (`overlayElements`)
 
