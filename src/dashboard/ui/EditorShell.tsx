@@ -70,6 +70,23 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
   const [opened, setOpened] = useState(false);
   const popoverId = useId();
   const common = dashboardCommonTexts();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const openedFromKeyboard = useRef(false);
+
+  const focusFirstErrorLink = (): void => {
+    if (!openedFromKeyboard.current) return;
+    openedFromKeyboard.current = false;
+    dropdownRef.current?.querySelector<HTMLElement>("button")?.focus();
+  };
+
+  const closeFromEscape = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    setOpened(false);
+    triggerRef.current?.focus();
+  };
 
   return (
     <>
@@ -78,25 +95,32 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
         id={popoverId}
         opened={opened}
         onChange={setOpened}
-        withinPortal
+        withinPortal={false}
+        floatingStrategy="fixed"
         position="top-start"
         width={280}
         middlewares={{ flip: true, shift: true }}
         shadow="xs"
-        closeOnEscape
+        closeOnEscape={false}
         hideDetached={false}
+        onEnterTransitionEnd={focusFirstErrorLink}
       >
         <MantinePopover.Target>
           <button
+            ref={triggerRef}
             className="ui-save-bar__invalid-trigger"
             type="button"
             aria-label={opened ? common.hideInvalidFields : common.showInvalidFields}
+            onKeyDownCapture={closeFromEscape}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") openedFromKeyboard.current = !opened;
+            }}
             onClick={() => { setOpened((current) => !current); }}
           >
             <Icon name="cause" size={16} />
           </button>
         </MantinePopover.Target>
-        <MantinePopover.Dropdown className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`}>
+        <MantinePopover.Dropdown ref={dropdownRef} className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`} onKeyDownCapture={closeFromEscape}>
           <h2 id={`${popoverId}-title`} className="sr-only">{common.invalidFieldsTitle}</h2>
           <ul className="ui-save-bar__invalid-fields">
             {fields.map((field) => (

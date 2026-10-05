@@ -107,7 +107,7 @@ test("clipped hints and dialog errors reveal full copy by keyboard without movin
   await hintTrigger.press("Enter");
   const hintPopup = page.getByRole("tooltip");
   await expect(hintPopup).toHaveText("A short name.");
-  expect(await hintPopup.evaluate((element) => element.closest(".ui-editor-shell__body"))).toBeNull();
+  expect(await hintPopup.evaluate((element) => element.closest(".ui-field"))).not.toBeNull();
   expect((await field.boundingBox())?.height).toBe(fieldHeight);
   await hintTrigger.press("Enter");
   await expect(page.getByRole("tooltip")).toHaveCount(0);
@@ -122,7 +122,7 @@ test("clipped hints and dialog errors reveal full copy by keyboard without movin
   await errorTrigger.press("Space");
   const errorPopup = page.getByRole("tooltip");
   await expect(errorPopup).toContainText("the step needed to correct the request");
-  expect(await errorPopup.evaluate((element) => element.closest(".mantine-Modal-content"))).toBeNull();
+  expect(await errorPopup.evaluate((element) => element.closest(".mantine-Modal-content"))).not.toBeNull();
   expect((await dialog.boundingBox())?.height).toBe(dialogHeight);
   await errorTrigger.press("Space");
   await expect(page.getByRole("tooltip")).toHaveCount(0);

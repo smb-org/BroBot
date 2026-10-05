@@ -946,7 +946,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-text-reveal__trigger { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: var(--r-control); color: var(--text-3); background: transparent; cursor: pointer; }
 .ui-text-reveal__trigger:hover { color: var(--brand-text); background: var(--surface-hover); }
 .ui-text-reveal__trigger:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 1px; }
-.ui-text-reveal__popup { box-sizing: border-box; max-width: min(28rem, calc(100vw - 32px)); padding: var(--s2) var(--s3); border-color: var(--line-strong); color: var(--text); background: var(--surface); font-size: 12px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.ui-text-reveal__popup { display: block; box-sizing: border-box; max-width: min(28rem, calc(100vw - 32px)); padding: var(--s2) var(--s3); border-color: var(--line-strong); color: var(--text); background: var(--surface); font-size: 12px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
 .ui-field__hint { flex: 1 1 auto; }
 .ui-field__description, .ui-tag-input__description, .ui-textarea__helper-row { min-height: 18px; }
 .ui-field .mantine-InputWrapper-description,
@@ -1189,6 +1189,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-save-bar__save-labels > span[aria-hidden="true"] { visibility: hidden; }
 .ui-save-bar__actions > .ui-save-bar__save .mantine-Button-label,
 .ui-save-bar__actions > .ui-save-bar__discard .mantine-Button-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-save-bar__actions > .ui-save-bar__reload { flex: 0 0 auto; min-width: max-content; white-space: nowrap; }
+.ui-save-bar__actions > .ui-save-bar__reload .mantine-Button-label { overflow: visible; text-overflow: clip; white-space: nowrap; }
 .ui-dialog__error-slot { position: relative; z-index: 2; height: 18px; min-height: 18px; margin-top: 8px; overflow: visible; }
 .ui-dialog__error-slot .form-error { height: 18px; min-height: 18px; overflow: hidden; margin: 0; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .ui-confirm-dialog__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }

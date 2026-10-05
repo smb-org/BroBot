@@ -711,9 +711,10 @@ describe("EditorShell and declaration renderer", () => {
     const onReload = vi.fn();
     rerender(<UiProvider><EditorShell {...baseProps} dirty conflict={{ message: "Changed elsewhere.", reloadLabel: "Load server version", onReload }} /></UiProvider>);
     expect(screen.getByRole("status")).toHaveTextContent("× Changed elsewhere.");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load server version" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Discard" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load server version" }).closest(".ui-save-bar__actions")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Load server version" }));
     expect(onReload).toHaveBeenCalledOnce();
   });

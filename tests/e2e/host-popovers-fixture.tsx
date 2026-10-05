@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
-import { EditorShell, Field, FormDialog, UiProvider } from "../../src/dashboard/ui";
+import { EditorShell, Field, FormDialog, ListDetail, UiProvider } from "../../src/dashboard/ui";
 import "../../src/dashboard/styles.css";
 import "./host-popovers-fixture.css";
 
@@ -21,40 +21,49 @@ const longDialogError = "This complete dialog error stays readable near the righ
 
 export function HostPopoversFixture() {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const conflictMode = new URLSearchParams(window.location.search).has("conflict");
 
   return (
     <UiProvider>
       <main className="host-popovers-fixture">
-        <EditorShell
-          className="host-popovers-fixture__editor"
-          ariaLabel="Host popover editor"
-          title="Popover checks"
-          dirty
-          invalid
-          invalidMessage="Please correct the marked fields."
-          invalidFields={invalidFields}
-          sections={[{
-            id: "settings",
-            label: "Settings",
-            content: (
-              <>
-                <details>
-                  <summary>Advanced values</summary>
-                  <Field id="field-alpha" label="Alpha" value="" error={fieldMessages.alpha} onChange={() => {}} />
-                  <Field id="field-beta" label="Beta" value="" error={fieldMessages.beta} onChange={() => {}} />
-                </details>
-                <div className="host-popovers-fixture__spacer" aria-hidden="true" />
-                <Field id="field-gamma" label="Gamma" value="" hint={longHint} error={fieldMessages.gamma} onChange={() => {}} />
-              </>
-            ),
-          }]}
-          onSave={() => {}}
-          onDiscard={() => {}}
-          saveLabel="Save"
-          discardLabel="Discard"
-          savedLabel="Saved."
-          pendingLabel="Saving…"
-          issueLabels={{ error: "error", warning: "warning" }}
+        <ListDetail
+          list={<div aria-label="Editor list" />}
+          inspector={inspectorOpen ? <EditorShell
+            className="host-popovers-fixture__editor"
+            ariaLabel="Host popover editor"
+            title="Popover checks"
+            dirty
+            invalid
+            invalidMessage="Please correct the marked fields."
+            invalidFields={invalidFields}
+            sections={[{
+              id: "settings",
+              label: "Settings",
+              content: (
+                <>
+                  <details>
+                    <summary>Advanced values</summary>
+                    <Field id="field-alpha" label="Alpha" value="" error={fieldMessages.alpha} onChange={() => {}} />
+                    <Field id="field-beta" label="Beta" value="" error={fieldMessages.beta} onChange={() => {}} />
+                  </details>
+                  <div className="host-popovers-fixture__spacer" aria-hidden="true" />
+                  <Field id="field-gamma" label="Gamma" value="" hint={longHint} error={fieldMessages.gamma} onChange={() => {}} />
+                </>
+              ),
+            }]}
+            {...(conflictMode ? { conflict: { message: "The server version changed.", reloadLabel: "Serverstand laden", onReload: () => {} } } : {})}
+            onSave={() => {}}
+            onDiscard={() => {}}
+            saveLabel="Save"
+            discardLabel="Discard"
+            savedLabel="Saved."
+            pendingLabel="Saving…"
+            issueLabels={{ error: "error", warning: "warning" }}
+            onClose={() => { setInspectorOpen(false); }}
+            closeLabel="Close inspector"
+          /> : null}
+          onCloseInspector={() => { setInspectorOpen(false); }}
         />
         <button type="button" onClick={() => { setDialogOpen(true); }}>Open dialog</button>
         <FormDialog

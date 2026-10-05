@@ -97,26 +97,27 @@ export function SaveBar({
           {typeof statusText === "string" ? <TextReveal className="ui-save-bar__message-copy" text={statusText} /> : statusText}
         </div>
         {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}
-        {conflict === undefined ? null : <Button variant="neutral" icon="reload" onClick={conflict.onReload}>{conflict.reloadLabel}</Button>}
       </div>
       <div className="ui-save-bar__actions">
-        <Button className="ui-save-bar__discard" variant="subtle" onClick={onDiscard} disabled={!dirty || pending || conflict !== undefined} ariaLabel={discardLabel} title={discardLabel}>{discardLabel}</Button>
-        <Button
-          className="ui-save-bar__save"
-          variant={persistent && invalid ? "neutral" : "primary"}
-          onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
-          disabled={saveDisabled && !invalidAction}
-          ariaDisabled={invalidAction}
-          ariaLabel={saveLabel}
-          title={saveLabel}
-          {...(saveDescribedBy === undefined ? {} : { describedBy: saveDescribedBy })}
-          {...(saveTitle === undefined ? {} : { title: saveTitle })}
-        >
-          <span className="ui-save-bar__save-labels">
-            <span aria-hidden={pending}>{saveLabel}</span>
-            <span aria-hidden={!pending}>{pendingLabel}</span>
-          </span>
-        </Button>
+        {conflict === undefined ? <>
+          <Button className="ui-save-bar__discard" variant="subtle" onClick={onDiscard} disabled={!dirty || pending} ariaLabel={discardLabel} title={discardLabel}>{discardLabel}</Button>
+          <Button
+            className="ui-save-bar__save"
+            variant={persistent && invalid ? "neutral" : "primary"}
+            onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
+            disabled={saveDisabled && !invalidAction}
+            ariaDisabled={invalidAction}
+            ariaLabel={saveLabel}
+            title={saveLabel}
+            {...(saveDescribedBy === undefined ? {} : { describedBy: saveDescribedBy })}
+            {...(saveTitle === undefined ? {} : { title: saveTitle })}
+          >
+            <span className="ui-save-bar__save-labels">
+              <span aria-hidden={pending}>{saveLabel}</span>
+              <span aria-hidden={!pending}>{pendingLabel}</span>
+            </span>
+          </Button>
+        </> : <Button className="ui-save-bar__reload" variant="neutral" icon="reload" onClick={conflict.onReload}>{conflict.reloadLabel}</Button>}
       </div>
     </div>
   );

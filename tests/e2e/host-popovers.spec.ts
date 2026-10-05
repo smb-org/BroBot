@@ -46,6 +46,7 @@ test("error links and text reveals stay clickable and in the viewport at mobile 
     for (const link of links) {
       if (!(await errorPopover.isVisible())) await errorTrigger.click();
       await assertInsideViewport(page, errorPopover);
+      expect(await errorPopover.evaluate((element) => element.closest(".list-detail__inspector"))).not.toBeNull();
       const errorLink = errorPopover.getByRole("button", { name: link.name });
       await assertInsideViewport(page, errorLink);
       await errorLink.click();
@@ -62,7 +63,8 @@ test("error links and text reveals stay clickable and in the viewport at mobile 
     await hintTrigger.click();
     const hintPopup = page.locator(".ui-text-reveal__popup").filter({ hasText: "the editor clips its scrolling body" });
     await assertInsideViewport(page, hintPopup);
-    expect(await hintPopup.evaluate((element) => element.closest(".ui-editor-shell__body"))).toBeNull();
+    expect(await hintPopup.evaluate((element) => element.closest(".ui-editor-shell__body"))).not.toBeNull();
+    expect(await hintPopup.evaluate((element) => element.closest(".list-detail__inspector"))).not.toBeNull();
     await expect(hintPopup).toContainText("the editor clips its scrolling body");
     await hintTrigger.click();
     await expect(hintPopup).toBeHidden();
@@ -71,11 +73,12 @@ test("error links and text reveals stay clickable and in the viewport at mobile 
     await errorTextTrigger.click();
     const fieldErrorPopup = page.locator(".ui-text-reveal__popup").filter({ hasText: "without leaving the editor" });
     await assertInsideViewport(page, fieldErrorPopup);
-    expect(await fieldErrorPopup.evaluate((element) => element.closest(".ui-editor-shell__body"))).toBeNull();
+    expect(await fieldErrorPopup.evaluate((element) => element.closest(".ui-editor-shell__body"))).not.toBeNull();
     await expect(fieldErrorPopup).toContainText("without leaving the editor");
     await errorTextTrigger.click();
     await expect(fieldErrorPopup).toBeHidden();
 
+    await editor.getByRole("button", { name: "Close inspector" }).click();
     await page.getByRole("button", { name: "Open dialog" }).click();
     const dialog = page.getByRole("dialog", { name: "Long message dialog" });
     await expect(dialog).toBeVisible();
@@ -83,9 +86,67 @@ test("error links and text reveals stay clickable and in the viewport at mobile 
     await dialogErrorTrigger.click();
     const dialogErrorPopup = page.locator(".ui-text-reveal__popup").filter({ hasText: "the step needed to correct the request" });
     await assertInsideViewport(page, dialogErrorPopup);
-    expect(await dialogErrorPopup.evaluate((element) => element.closest(".mantine-Modal-content"))).toBeNull();
+    expect(await dialogErrorPopup.evaluate((element) => element.closest(".mantine-Modal-content"))).not.toBeNull();
     await expect(dialogErrorPopup).toContainText("the step needed to correct the request");
     await dialogErrorTrigger.click();
     await page.getByRole("button", { name: "Cancel" }).click();
   }
+});
+
+test("keyboard reaches error links in the mobile inspector and popup Escape only closes the popup", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tests/e2e/host-popovers-fixture.html");
+
+  const editor = page.locator(".host-popovers-fixture__editor");
+  const errorTrigger = editor.locator(".ui-save-bar__invalid-trigger");
+  const errorPopover = page.getByRole("dialog", { name: "Fehlerhafte Felder" });
+  const firstErrorLink = errorPopover.getByRole("button", { name: "Alpha: Enter a valid alpha value." });
+  const secondErrorLink = errorPopover.getByRole("button", { name: "Beta: Choose a value below the allowed maximum." });
+
+  await editor.getByRole("button", { name: "Close inspector" }).focus();
+  for (let index = 0; index < 20 && !(await errorTrigger.evaluate((element) => element === document.activeElement)); index += 1) {
+    await page.keyboard.press("Tab");
+  }
+  await expect(errorTrigger).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(firstErrorLink).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(secondErrorLink).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(errorPopover).toBeHidden();
+  await expect(editor).toBeVisible();
+  await expect(errorTrigger).toBeFocused();
+
+  await errorTrigger.click();
+  await expect(errorPopover).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(errorPopover).toBeHidden();
+  await expect(editor).toBeVisible();
+
+  const hintTrigger = editor.locator(".ui-field__hint .ui-text-reveal__trigger");
+  await hintTrigger.click();
+  const hintPopup = editor.locator(".ui-text-reveal__popup").filter({ hasText: "the editor clips its scrolling body" });
+  await expect(hintPopup).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(hintPopup).toBeHidden();
+  await expect(editor).toBeVisible();
+});
+
+test("conflict recovery label stays fully visible in the mobile SaveBar slot", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tests/e2e/host-popovers-fixture.html?conflict");
+
+  const editor = page.locator(".host-popovers-fixture__editor");
+  const saveBar = editor.locator(".ui-save-bar");
+  const actions = saveBar.locator(".ui-save-bar__actions");
+  const reload = actions.getByRole("button", { name: "Serverstand laden" });
+  const label = reload.locator(".mantine-Button-label");
+
+  await expect(editor).toBeVisible();
+  expect((await saveBar.boundingBox())?.height).toBe(64);
+  await expect(actions.getByRole("button")).toHaveCount(1);
+  await expect(reload).toBeVisible();
+  await expect(label).toHaveText("Serverstand laden");
+  await expect.poll(async () => label.evaluate((element) => element.scrollWidth > 0 && element.scrollWidth <= element.clientWidth)).toBe(true);
 });

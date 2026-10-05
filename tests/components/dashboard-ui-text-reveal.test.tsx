@@ -6,7 +6,7 @@ import { ConfirmDialog, Field, Select, UiProvider } from "../../src/dashboard/ui
 afterEach(cleanup);
 
 describe("clipped text disclosures", () => {
-  it("reveals long hints and errors in portal popovers with keyboard-operable controls", async () => {
+  it("reveals long hints and errors in contained popovers with keyboard-operable controls", async () => {
     const hint = "A long hint with the details needed to configure this field correctly.";
     const fieldError = "The field value is too long and must be shortened before saving.";
     const dialogError = "The update failed because another change conflicts with this request.";
@@ -22,7 +22,7 @@ describe("clipped text disclosures", () => {
     expect(hintButton).toHaveAttribute("aria-expanded", "true");
     const hintPopup = await screen.findByRole("tooltip");
     expect(hintPopup).toHaveTextContent(hint);
-    expect(hintPopup.closest(".ui-field")).toBeNull();
+    expect(hintPopup.closest(".ui-field")).not.toBeNull();
     fireEvent.click(hintButton);
     await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
 
@@ -37,7 +37,7 @@ describe("clipped text disclosures", () => {
     fireEvent.click(dialogErrorButton);
     const dialogErrorPopup = await screen.findByRole("tooltip");
     expect(dialogErrorPopup).toHaveTextContent(dialogError);
-    expect(dialogErrorPopup.closest(".mantine-Modal-content")).toBeNull();
+    expect(dialogErrorPopup.closest(".mantine-Modal-content")).not.toBeNull();
   });
 
   it("omits reserved description and error rows only in compact Select mode", () => {
