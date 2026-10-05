@@ -4,6 +4,7 @@ import type { MouseEvent, ReactNode } from "react";
 import { DisabledFieldReasonContext } from "./DisabledFieldReason";
 
 export interface SwitchProps {
+  id?: string;
   label?: string;
   /** Accessible name when the switch carries no visible `label`. */
   ariaLabel?: string;
@@ -21,8 +22,9 @@ export interface SwitchProps {
 }
 
 /** A single semantic switch control, with no separate checkbox indicator. */
-export function Switch({ label, ariaLabel, checked, onChange, disabled, pending, lockedReason, layout = "stacked", hint, description, children }: SwitchProps) {
-  const id = useId();
+export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, disabled, pending, lockedReason, layout = "stacked", hint, description, children }: SwitchProps) {
+  const generatedId = useId();
+  const id = suppliedId ?? generatedId;
   const hasChildren = children !== undefined && children !== null;
   const reasonId = lockedReason === undefined ? undefined : `switch-reason-${id}`;
   const hintId = hint === undefined ? undefined : `switch-hint-${id}`;

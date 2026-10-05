@@ -5,6 +5,7 @@ import {
   Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
   GamePicker, InspectorFieldRow, InspectorSection, TimeoutDurationRangeFields,
   registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
+  type EditorInvalidField,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand, type TextCommandGame, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
@@ -56,8 +57,12 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
   games: [...(command.games ?? [])],
   responseType: command.responseType,
   chatTarget: command.chatTarget,
-  variableAction: command.variableAction === null ? null : { ...command.variableAction },
-  timeoutAction: draftTimeoutAction(command.timeoutAction),
+  variableAction: command.kind === "text" || command.kind === "timeout"
+    ? command.variableAction === null ? null : { ...command.variableAction }
+    : null,
+  timeoutAction: command.kind === "timeout"
+    ? draftTimeoutAction(command.timeoutAction) ?? { minSeconds: 120, maxSeconds: 120, fallbackText: "", reason: "" }
+    : null,
 });
 
 const newCommandDraft = (): CommandDraft => ({
@@ -92,25 +97,30 @@ const templateFieldsForKind = (kind: TextCommandKind, channelVariables: readonly
     : result;
 };
 
+const validCommandVariableAction = (
+  variable: CommandDraft["variableAction"],
+  channelVariables: readonly TextCommandChannelVariable[],
+): boolean => variable === null || (channelVariables.some((entry) => entry.name === variable.name) && (
+  variable.operation === "add" || variable.operation === "subtract"
+    ? variable.amount !== null && variable.amount >= 1 && variable.amount <= 1000
+    : variable.operation === "set_argument"
+      ? variable.amount === 0
+      : variable.amount !== null && variable.amount >= -999999999 && variable.amount <= 999999999
+));
+
 const commandDraftIsValid = (draft: CommandDraft, channelVariables: readonly TextCommandChannelVariable[]): boolean => {
   const name = normalizeCommandName(draft.name);
   const timeout = draft.timeoutAction;
   const variable = draft.variableAction;
-  const validVariable = variable === null || (channelVariables.some((entry) => entry.name === variable.name) && (
-    variable.operation === "add" || variable.operation === "subtract"
-      ? variable.amount !== null && variable.amount >= 1 && variable.amount <= 1000
-      : variable.operation === "set_argument"
-        ? variable.amount === 0
-        : variable.amount !== null && variable.amount >= -999999999 && variable.amount <= 999999999
-  ));
+  const validVariable = validCommandVariableAction(variable, channelVariables);
   const validTimeout = draft.kind === "timeout"
     ? timeout !== null && typeof timeout.minSeconds === "number" && Number.isInteger(timeout.minSeconds) &&
       typeof timeout.maxSeconds === "number" && Number.isInteger(timeout.maxSeconds) && timeout.minSeconds >= 1 &&
       timeout.minSeconds <= timeout.maxSeconds && timeout.maxSeconds <= MODERATION_TIMEOUT_MAX_SECONDS &&
-      timeout.fallbackText.trim().length > 0 && timeout.fallbackText.length <= 500 && timeout.reason.length <= 500
+      timeout.fallbackText.length <= 500 && timeout.reason.length <= 500
     : timeout === null;
-  const responseRequired = draft.kind !== "list" && (variable === null || timeout !== null) && draft.text.trim().length === 0;
-  return validCommandName(name) && !draft.aliases.includes(name) && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES &&
+  const responseRequired = draft.kind !== "list" && draft.kind !== "timeout" && variable === null && draft.text.trim().length === 0;
+  return validCommandName(name) && draft.aliases.every(validCommandName) && !draft.aliases.includes(name) && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES &&
     typeof draft.cooldownSeconds === "number" && Number.isInteger(draft.cooldownSeconds) && draft.cooldownSeconds >= 0 && draft.cooldownSeconds <= 86400 &&
     typeof draft.userCooldownSeconds === "number" && Number.isInteger(draft.userCooldownSeconds) && draft.userCooldownSeconds >= 0 && draft.userCooldownSeconds <= 86400 &&
     validVariable && validTimeout && !responseRequired && draft.text.length <= 500 && draft.usageText.length <= 500;
@@ -265,26 +275,42 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     : validationDraft[field as "text" | "usageText"];
   const validationResponseInvalid = Object.keys(validationTemplateFields).some((field) => {
     const value = validationTemplateValue(field);
-    return (value.trim().length === 0 && !(field === "text" && validationDraft.variableAction !== null && validationDraft.timeoutAction === null) && field !== "usageText") || value.length > 500;
+    const optionalTimeoutText = validationDraft.kind === "timeout" && (field === "text" || field === "timeoutFallbackText");
+    return (value.trim().length === 0 && !optionalTimeoutText && !(field === "text" && validationDraft.variableAction !== null && validationDraft.timeoutAction === null) && field !== "usageText") || value.length > 500;
   });
   const normalizedName = normalizeCommandName(draft.name);
   const sameNameAlias = draft.aliases.includes(normalizedName);
+  const invalidAlias = draft.aliases.find((alias) => !validCommandName(alias));
   const nameError = fieldError?.field === "name" ? fieldError.message : attemptedSave && normalizedName.length === 0 ? labels.nameMissing : attemptedSave && !validCommandName(normalizedName) ? labels.nameInvalid : undefined;
-  const aliasesError = fieldError?.field === "aliases" ? fieldError.message : sameNameAlias ? labels.aliasIsName : undefined;
+  const aliasesError = fieldError?.field === "aliases" ? fieldError.message : sameNameAlias ? labels.aliasIsName : invalidAlias !== undefined ? labels.aliasInvalid(invalidAlias) : attemptedSave && draft.aliases.length > TEXT_COMMAND_MAX_ALIASES ? labels.tagInputMessages.atLimitHint : undefined;
   const cooldownInvalid = draft.cooldownSeconds === "" || !Number.isInteger(draft.cooldownSeconds) || draft.cooldownSeconds < 0 || draft.cooldownSeconds > 86400;
   const userCooldownInvalid = draft.userCooldownSeconds === "" || !Number.isInteger(draft.userCooldownSeconds) || draft.userCooldownSeconds < 0 || draft.userCooldownSeconds > 86400;
   const templateFieldNames = Object.keys(templateFields) as CommandTemplateField[];
-  const responseInvalid = templateFieldNames.some((field) => {
-    const value = templateValue(field);
-    return (value.trim().length === 0 && !(field === "text" && draft.variableAction !== null && draft.timeoutAction === null) && field !== "usageText") || value.length > 500;
-  });
-  const timeoutActionInvalid = draft.kind === "timeout"
-    ? draft.timeoutAction === null || typeof draft.timeoutAction.minSeconds !== "number" || !Number.isInteger(draft.timeoutAction.minSeconds) ||
-      typeof draft.timeoutAction.maxSeconds !== "number" || !Number.isInteger(draft.timeoutAction.maxSeconds) ||
-      draft.timeoutAction.minSeconds < 1 || draft.timeoutAction.minSeconds > draft.timeoutAction.maxSeconds ||
-      draft.timeoutAction.maxSeconds > MODERATION_TIMEOUT_MAX_SECONDS || draft.timeoutAction.fallbackText.trim().length === 0 ||
-      draft.timeoutAction.fallbackText.length > 500 || draft.timeoutAction.reason.length > 500
-    : draft.timeoutAction !== null;
+  const responseFieldError = slashInput.status === "invalid"
+    ? labels.slashSyntaxError(slashInput.command)
+    : draft.text.length > 500
+    ? labels.fieldTooLong
+    : attemptedSave && draft.kind !== "timeout" && draft.kind !== "list" && draft.variableAction === null && draft.text.trim().length === 0
+      ? labels.responseMissing
+      : undefined;
+  const timeoutRangeInvalid = draft.kind === "timeout" && (draft.timeoutAction === null ||
+    typeof draft.timeoutAction.minSeconds !== "number" || !Number.isInteger(draft.timeoutAction.minSeconds) || draft.timeoutAction.minSeconds < 1 ||
+    typeof draft.timeoutAction.maxSeconds !== "number" || !Number.isInteger(draft.timeoutAction.maxSeconds) ||
+    draft.timeoutAction.minSeconds > draft.timeoutAction.maxSeconds || draft.timeoutAction.maxSeconds > MODERATION_TIMEOUT_MAX_SECONDS);
+  const timeoutReasonError = draft.timeoutAction !== null && draft.timeoutAction.reason.length > 500 ? labels.fieldTooLong : undefined;
+  const timeoutFallbackError = draft.timeoutAction !== null && draft.timeoutAction.fallbackText.length > 500 ? labels.fieldTooLong : undefined;
+  const variableActionInvalid = !validCommandVariableAction(draft.variableAction, channelVariables);
+  const variableActionNameInvalid = draft.variableAction !== null && !channelVariables.some((entry) => entry.name === draft.variableAction?.name);
+  const variableActionAmountInvalid = draft.variableAction !== null && (
+    draft.variableAction.operation === "set_argument"
+      ? draft.variableAction.amount !== 0
+      : draft.variableAction.amount === null || !Number.isInteger(draft.variableAction.amount) ||
+        (draft.variableAction.operation === "add" || draft.variableAction.operation === "subtract"
+          ? draft.variableAction.amount < 1 || draft.variableAction.amount > 1000
+          : draft.variableAction.amount < -999999999 || draft.variableAction.amount > 999999999)
+  );
+  const variableActionError = attemptedSave && variableActionInvalid ? labels.variableActionInvalid : undefined;
+  const aliasesInvalid = draft.aliases.length > TEXT_COMMAND_MAX_ALIASES || sameNameAlias || invalidAlias !== undefined;
   const valid = slashInput.status !== "invalid" && !validationResponseInvalid &&
     (validationDraft.variableAction === null || validationDraft.kind === "text" || validationDraft.kind === "timeout") &&
     commandDraftIsValid(validationDraft, channelVariables);
@@ -323,15 +349,148 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     : slashInput.command === "timeout"
       ? labels.slashTimeoutEffect(slashInput.minSeconds ?? 0, slashInput.maxSeconds ?? 0)
       : slashInput.command === "announce" ? labels.slashAnnouncementEffect : labels.slashShoutoutEffect;
-  const advancedIssue = fieldError?.field === "aliases" || cooldownInvalid || userCooldownInvalid
+  const advancedIssue = attemptedSave && (cooldownInvalid || userCooldownInvalid)
     ? "error" as const
     : undefined;
-  const settingsIssue = nameError !== undefined || responseInvalid || timeoutActionInvalid
+  const settingsIssue = nameError !== undefined || aliasesError !== undefined || responseFieldError !== undefined ||
+    timeoutReasonError !== undefined || timeoutFallbackError !== undefined || draft.usageText.length > 500 ||
+    (attemptedSave && (timeoutRangeInvalid || variableActionInvalid))
     ? "error" as const
     : announcementWarning !== undefined || localWarnings.length > 0 || serverWarnings.length > 0
       ? "warning" as const
       : undefined;
   const listPreview = commandListReply(commands.filter((item) => item.enabled && item.name !== command?.name).map((item) => item.name));
+  const invalidFields: EditorInvalidField[] = [];
+  if ((attemptedSave || fieldError?.field === "name") && nameError !== undefined) {
+    invalidFields.push({ id: "command-name", label: labels.name, message: nameError, sectionId: "settings" });
+  }
+  if ((attemptedSave || fieldError?.field === "aliases" || aliasesInvalid) && aliasesError !== undefined) {
+    invalidFields.push({ id: "command-aliases", label: labels.aliases, message: aliasesError, sectionId: "settings" });
+  } else if (attemptedSave && draft.aliases.length > TEXT_COMMAND_MAX_ALIASES) {
+    invalidFields.push({ id: "command-aliases", label: labels.aliases, message: labels.tagInputMessages.atLimitHint, sectionId: "settings" });
+  }
+  if (attemptedSave && timeoutRangeInvalid) {
+    invalidFields.push({ id: "command-timeout-minimum", label: labels.timeoutDuration, message: labels.timeoutRangeInvalid, sectionId: "settings" });
+  }
+  if (attemptedSave && timeoutReasonError !== undefined) {
+    invalidFields.push({ id: "command-timeout-reason", label: labels.timeoutReason, message: timeoutReasonError, sectionId: "settings" });
+  }
+  if (attemptedSave && responseFieldError !== undefined) {
+    invalidFields.push({ id: "command-text", label: draft.kind === "timeout" ? labels.responseOptional : labels.response, message: responseFieldError, sectionId: "settings" });
+  }
+  if (attemptedSave && timeoutFallbackError !== undefined) {
+    invalidFields.push({ id: "command-timeoutFallbackText", label: labels.timeoutFallbackTextOptional, message: timeoutFallbackError, sectionId: "settings" });
+  }
+  if (attemptedSave && draft.usageText.length > 500) {
+    invalidFields.push({ id: "command-usageText", label: labels.templateFieldLabels.usageText, message: labels.fieldTooLong, sectionId: "settings" });
+  }
+  if (attemptedSave && variableActionNameInvalid) {
+    invalidFields.push({
+      id: channelVariables.length === 0 ? "command-variable-action" : "command-variable-name",
+      label: labels.variableAction,
+      message: labels.variableActionInvalid,
+      sectionId: "settings",
+    });
+  }
+  if (attemptedSave && variableActionAmountInvalid) {
+    invalidFields.push({ id: "command-variable-amount", label: labels.variableAmount, message: labels.variableActionInvalid, sectionId: "settings" });
+  }
+  if (attemptedSave && cooldownInvalid) {
+    invalidFields.push({ id: "command-cooldown", label: labels.cooldown, message: labels.numberMissing, sectionId: "advanced" });
+  }
+  if (attemptedSave && userCooldownInvalid) {
+    invalidFields.push({ id: "command-user-cooldown", label: labels.userCooldown, message: labels.numberMissing, sectionId: "advanced" });
+  }
+  const setDraftField = <Key extends keyof CommandDraft>(key: Key, value: CommandDraft[Key]): void => {
+    if (key === "minimumTier") setMinimumTierExplicit(true);
+    setValue((current) => ({ ...current, [key]: value }));
+    setSaved(false); setError(undefined); setConcurrentConflict(false);
+    if (key === "name" || key === "aliases") setFieldError(null);
+  };
+  const variableActionEditor = draft.kind === "text" || draft.kind === "timeout" ? <Switch
+    id="command-variable-action"
+    layout="card"
+    label={labels.variableAction}
+    description={variableAction === null ? labels.variableSelectHint : labels.variableOperationHelp[variableAction.operation]}
+    checked={variableAction !== null}
+    disabled={!canManageContent || pending}
+    onChange={(enabled) => {
+      setDraftField("variableAction", enabled
+        ? { name: channelVariables[0]?.name ?? "", operation: "add", amount: 1 }
+        : null);
+    }}
+  >
+    {variableAction === null ? null : <div className="command-variable-action">
+      <Select
+        id="command-variable-name"
+        label={labels.variableSelect}
+        hint={labels.variableSelectHint}
+        {...(attemptedSave && variableActionNameInvalid ? { error: labels.variableActionInvalid } : {})}
+        value={variableAction.name || null}
+        placeholder={labels.variableNone}
+        options={channelVariables.map((variable) => ({ value: variable.name, label: variable.name, description: `${String(variable.value)}${variable.description.length > 0 ? ` · ${variable.description}` : ""}` }))}
+        disabled={!canManageContent || pending || channelVariables.length === 0}
+        onChange={(name) => { if (name !== null) setDraftField("variableAction", { ...variableAction, name }); }}
+      />
+      <FieldPair>
+        <SegmentedControl
+          label={labels.variableAction}
+          hint={labels.variableOperationHelp[variableAction.operation]}
+          value={variableAction.operation}
+          options={( ["add", "subtract", "set", "set_argument"] as const).map((operation) => ({ value: operation, label: labels.variableOperations[operation] }))}
+          disabled={!canManageContent || pending}
+          onChange={(operation) => {
+            const nextOperation = operation as typeof variableAction.operation;
+            setValue((current) => ({
+              ...current,
+              variableAction: {
+                ...variableAction,
+                operation: nextOperation,
+                amount: nextOperation === "set_argument" ? 0 : nextOperation === "add" || nextOperation === "subtract" ? (variableAction.amount && variableAction.amount > 0 ? variableAction.amount : 1) : variableAction.amount ?? 0,
+              },
+              minimumTier: minimumTierAfterVariableOperation(current.minimumTier, nextOperation, minimumTierExplicit),
+            }));
+            setSaved(false); setError(undefined); setConcurrentConflict(false);
+          }}
+        />
+        {variableAction.operation === "set_argument" ? null : <NumberField
+          id="command-variable-amount"
+          label={labels.variableAmount}
+          hint={labels.variableOperationHelp[variableAction.operation]}
+          min={variableAction.operation === "add" || variableAction.operation === "subtract" ? 1 : -999999999}
+          max={variableAction.operation === "add" || variableAction.operation === "subtract" ? 1000 : 999999999}
+          step={1}
+          increaseLabel={labels.variableAmount}
+          decreaseLabel={labels.variableAmount}
+          value={variableAction.amount ?? ""}
+          disabled={!canManageContent || pending}
+          {...(attemptedSave && variableActionAmountInvalid ? { error: labels.variableActionInvalid } : {})}
+          onChange={(amount) => setDraftField("variableAction", { ...variableAction, amount: amount === "" ? null : amount })}
+        />}
+      </FieldPair>
+      {channelVariables.length === 0 ? <p className={variableActionError === undefined ? "muted" : "form-error"} role={variableActionError === undefined ? undefined : "alert"}>
+        {variableActionError === undefined ? labels.variableNone : `× ${variableActionError} `}<a href={`/channels/${encodeURIComponent(channelId)}/variables`}>{labels.createVariable}</a>
+      </p> : null}
+      {variableAction.operation === "set_argument" && draft.minimumTier === "everyone" ? <p className="form-warning" role="note">{labels.variableEveryoneWarning}</p> : null}
+      {draft.kind === "text" && draft.text.trim().length === 0 ? <p className="muted">{labels.variableSilentHint}</p> : null}
+    </div>}
+  </Switch> : null;
+  const responseTypeEditor = draft.kind === "shoutout" ? null : <SegmentedControl
+    label={labels.responseType}
+    hint={labels.responseTypeHints[draft.responseType]}
+    value={draft.responseType}
+    options={( ["say", "reply", "announcement"] as const).map((value) => ({ value, label: labels.responseTypeLabels[value] }))}
+    {...(announcementWarning === undefined ? {} : { warning: announcementWarning })}
+    disabled={!canManageContent || pending}
+    onChange={(value) => { setDraftField("responseType", value as TextCommandResponseType); }}
+  />;
+  const chatTargetEditor = <ChatOutputTargetControl
+    label={labels.chatTarget}
+    value={draft.chatTarget}
+    includeWhereAsked
+    disabled={!canManageContent || pending}
+    onChange={(chatTarget) => { setDraftField("chatTarget", chatTarget); }}
+  />;
 
   useEffect(() => {
     let active = true;
@@ -420,13 +579,6 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     return () => { onGuardChange(null); };
   }, [guard.guardSwitch, onGuardChange]);
 
-  const setDraftField = <Key extends keyof CommandDraft>(key: Key, value: CommandDraft[Key]): void => {
-    if (key === "minimumTier") setMinimumTierExplicit(true);
-    setValue((current) => ({ ...current, [key]: value }));
-    setSaved(false); setError(undefined); setConcurrentConflict(false);
-    if (key === "name" || key === "aliases") setFieldError(null);
-  };
-
   const setTemplateField = (field: CommandTemplateField, value: string): void => {
     if (field === "timeoutFallbackText") {
       if (draft.timeoutAction !== null) setDraftField("timeoutAction", { ...draft.timeoutAction, fallbackText: value });
@@ -496,7 +648,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       <TextArea
         id={`command-${field}`}
         name={field}
-        label={field === "text" ? labels.response : label}
+        label={field === "text" ? draft.kind === "timeout" ? labels.responseOptional : labels.response : label}
         hint={hint}
         value={value}
         onChange={(next) => { setTemplateField(field, next); }}
@@ -508,8 +660,9 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         disabled={!canManageContent || pending}
         messages={labels.textAreaMessages}
         createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`}
-        required={field === "text" && draft.variableAction === null}
-        {...(attemptedSave && value.trim().length === 0 && field === "text" && draft.variableAction === null ? { error: labels.responseMissing } : {})}
+        required={field === "text" && draft.kind !== "timeout" && draft.variableAction === null}
+        {...(field === "text" && responseFieldError !== undefined ? { error: responseFieldError } : {})}
+        {...(field === "timeoutFallbackText" && timeoutFallbackError !== undefined ? { error: timeoutFallbackError } : {})}
       />
       {field === "text" && slashInput.status !== "none" ? <div className="command-slash-help" aria-live="polite">
         {slashSuggestions.length > 0 ? <>
@@ -544,17 +697,13 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             ? <p className="form-warning" role="status">{labels.slashUnsupportedWarning}</p>
             : slashEffect === null ? null : <p className="form-hint" role="status">{slashEffect}</p>}
       </div> : null}
-      <InspectorSection title={labels.libraryText}>
-        {libraryBlocks.length === 0 ? <p className="muted">{labels.noLibraryTexts}</p> : <InspectorFieldRow label={labels.libraryText}>
-          <div className="command-library-picker">
-            <Select label={labels.libraryText} value={selectedLibraryBlock || null} placeholder={labels.libraryTextPlaceholder} options={libraryBlocks.map((name) => ({ value: name, label: `{${name}}` }))} disabled={!canManageContent || pending} onChange={(name) => setSelectedLibraryBlock(name ?? "")} />
-            <Button disabled={!canManageContent || pending || selectedLibraryBlock.length === 0} onClick={() => {
-              const insertion = `{${selectedLibraryBlock}}`;
-              setTemplateField(field, `${value}${value.length === 0 || /\s$/u.test(value) ? "" : " "}${insertion}`);
-            }}>{labels.insertLibraryText}</Button>
-          </div>
-        </InspectorFieldRow>}
-      </InspectorSection>
+      {libraryBlocks.length === 0 ? null : <div className="command-library-picker">
+        <Select label={labels.libraryText} value={selectedLibraryBlock || null} placeholder={labels.libraryTextPlaceholder} options={libraryBlocks.map((name) => ({ value: name, label: `{${name}}` }))} disabled={!canManageContent || pending} onChange={(name) => setSelectedLibraryBlock(name ?? "")} />
+        <Button disabled={!canManageContent || pending || selectedLibraryBlock.length === 0} onClick={() => {
+          const insertion = `{${selectedLibraryBlock}}`;
+          setTemplateField(field, `${value}${value.length === 0 || /\s$/u.test(value) ? "" : " "}${insertion}`);
+        }}>{labels.insertLibraryText}</Button>
+      </div>}
     </div>;
   };
 
@@ -580,6 +729,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           onChange={(value) => { setDraftField("name", value); }}
         />
         <TagInput
+          id="command-aliases"
           label={labels.aliases}
           hint={labels.aliasHint}
           value={draft.aliases}
@@ -589,7 +739,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           validate={(alias) => !validCommandName(alias) ? labels.aliasInvalid(alias) : alias === normalizedName ? labels.aliasIsName : null}
           maxTags={TEXT_COMMAND_MAX_ALIASES}
           {...(aliasesError === undefined ? {} : { error: aliasesError })}
-          invalidValues={[fieldError?.field === "aliases" ? fieldError.invalidAlias ?? "" : "", ...(sameNameAlias ? [normalizedName] : [])].filter(Boolean)}
+          invalidValues={[fieldError?.field === "aliases" ? fieldError.invalidAlias ?? "" : "", ...(sameNameAlias ? [normalizedName] : []), ...(invalidAlias === undefined ? [] : [invalidAlias])].filter(Boolean)}
           removeLabel={labels.aliasRemove}
           messages={labels.tagInputMessages}
           listLabel={labels.aliasList}
@@ -603,82 +753,8 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           disabled={!canManageContent || pending}
           onChange={(value) => { if (value !== null) changeKind(value as TextCommandKind); }}
         />
-        {draft.kind === "list"
-          ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />
-          : templateEditor("text", labels.response)}
-        {draft.kind !== "list" ? <details className="command-usage-advanced">
-          <summary>{labels.usageAdvanced}</summary>
-          <div className="command-usage-advanced__body">
-            {templateEditor("usageText", labels.templateFieldLabels.usageText, labels.usageTextHint)}
-            {draft.kind === "shoutout" ? <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p> : null}
-          </div>
-        </details> : null}
-        {draft.kind === "text" || draft.kind === "timeout" ? <>
-          <Switch
-            layout="card"
-            label={labels.variableAction}
-            description={variableAction === null ? labels.variableSelectHint : labels.variableOperationHelp[variableAction.operation]}
-            checked={variableAction !== null}
-            disabled={!canManageContent || pending}
-            onChange={(enabled) => {
-              setDraftField("variableAction", enabled
-                ? { name: channelVariables[0]?.name ?? "", operation: "add", amount: 1 }
-                : null);
-            }}
-          >
-          {variableAction === null ? null : <div className="command-variable-action">
-            <Select
-              label={labels.variableSelect}
-              hint={labels.variableSelectHint}
-              value={variableAction.name || null}
-              placeholder={labels.variableNone}
-              options={channelVariables.map((variable) => ({ value: variable.name, label: variable.name, description: `${String(variable.value)}${variable.description.length > 0 ? ` · ${variable.description}` : ""}` }))}
-              disabled={!canManageContent || pending || channelVariables.length === 0}
-              onChange={(name) => { if (name !== null) setDraftField("variableAction", { ...variableAction, name }); }}
-            />
-            <FieldPair>
-              <SegmentedControl
-                label={labels.variableAction}
-                hint={labels.variableOperationHelp[variableAction.operation]}
-                value={variableAction.operation}
-                options={(["add", "subtract", "set", "set_argument"] as const).map((operation) => ({ value: operation, label: labels.variableOperations[operation] }))}
-                disabled={!canManageContent || pending}
-                onChange={(operation) => {
-                  const nextOperation = operation as typeof variableAction.operation;
-                  setValue((current) => ({
-                    ...current,
-                    variableAction: {
-                      ...variableAction,
-                      operation: nextOperation,
-                      amount: nextOperation === "set_argument" ? 0 : nextOperation === "add" || nextOperation === "subtract" ? (variableAction.amount && variableAction.amount > 0 ? variableAction.amount : 1) : variableAction.amount ?? 0,
-                    },
-                    minimumTier: minimumTierAfterVariableOperation(current.minimumTier, nextOperation, minimumTierExplicit),
-                  }));
-                  setSaved(false); setError(undefined); setConcurrentConflict(false);
-                }}
-              />
-              {variableAction.operation === "set_argument" ? null : <NumberField
-                id="command-variable-amount"
-                label={labels.variableAmount}
-                hint={labels.variableOperationHelp[variableAction.operation]}
-                min={variableAction.operation === "add" || variableAction.operation === "subtract" ? 1 : -999999999}
-                max={variableAction.operation === "add" || variableAction.operation === "subtract" ? 1000 : 999999999}
-                step={1}
-                increaseLabel={labels.variableAmount}
-                decreaseLabel={labels.variableAmount}
-                value={variableAction.amount ?? ""}
-                disabled={!canManageContent || pending}
-                onChange={(amount) => setDraftField("variableAction", { ...variableAction, amount: amount === "" ? null : amount })}
-              />}
-            </FieldPair>
-            {channelVariables.length === 0 ? <p className="muted">{labels.variableNone} <a href={`/channels/${encodeURIComponent(channelId)}/variables`}>{labels.createVariable}</a></p> : null}
-            {variableAction.operation === "set_argument" && draft.minimumTier === "everyone" ? <p className="form-warning" role="note">{labels.variableEveryoneWarning}</p> : null}
-            {draft.kind === "text" && draft.text.trim().length === 0 ? <p className="muted">{labels.variableSilentHint}</p> : null}
-          </div>}
-          </Switch>
-        </> : null}
-        {draft.kind === "timeout" && draft.timeoutAction !== null ? <>
-          <div className="command-timeout-action">
+        {draft.kind === "timeout" && draft.timeoutAction !== null ? <div className="command-timeout-action">
+          <InspectorSection title={labels.timeoutDuration}>
             <TimeoutDurationRangeFields
               idPrefix="command-timeout"
               value={draft.timeoutAction}
@@ -691,41 +767,46 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
               minimumLabel={labels.timeoutMinSeconds}
               maximumLabel={labels.timeoutMaxSeconds}
               hint={labels.timeoutRangeHint}
+              {...(attemptedSave && timeoutRangeInvalid ? { error: labels.timeoutRangeInvalid } : {})}
               disabled={!canManageContent || pending}
             />
-            <Field
-              id="command-timeout-reason"
-              label={labels.timeoutReason}
-              hint={labels.timeoutReasonHint}
-              value={draft.timeoutAction.reason}
-              maxLength={500}
-              countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
-              disabled={!canManageContent || pending}
-              onChange={(reason) => {
-                const timeoutAction = draft.timeoutAction;
-                if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, reason });
-              }}
-            />
-            {templateEditor("timeoutFallbackText", labels.timeoutFallbackText)}
-            {botIsModerator === false ? <p className="form-warning" role="note">{labels.timeoutBotWarning}</p> : null}
+          </InspectorSection>
+          <Field
+            id="command-timeout-reason"
+            label={labels.timeoutReason}
+            hint={labels.timeoutReasonHint}
+            value={draft.timeoutAction.reason}
+            maxLength={500}
+            {...(timeoutReasonError === undefined ? {} : { error: timeoutReasonError })}
+            countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
+            disabled={!canManageContent || pending}
+            onChange={(reason) => {
+              const timeoutAction = draft.timeoutAction;
+              if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, reason });
+            }}
+          />
+        </div> : null}
+        {draft.kind === "list"
+          ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />
+          : templateEditor("text", draft.kind === "timeout" ? labels.responseOptional : labels.response)}
+        {draft.kind === "timeout" && draft.timeoutAction !== null ? <div className="command-timeout-action">
+          {templateEditor("timeoutFallbackText", labels.timeoutFallbackTextOptional)}
+          {botIsModerator === false ? <p className="form-warning" role="note">{labels.timeoutBotWarning}</p> : null}
+        </div> : null}
+        {draft.kind !== "list" ? <details className="command-usage-advanced" open={attemptedSave && (draft.usageText.length > 500 || (draft.kind === "timeout" && variableActionInvalid))}>
+          <summary>{labels.usageAdvanced}</summary>
+          <div className="command-usage-advanced__body">
+            {templateEditor("usageText", labels.templateFieldLabels.usageText, labels.usageTextHint)}
+            {draft.kind === "shoutout" ? <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p> : null}
+            {draft.kind === "timeout" ? <>
+              {variableActionEditor}
+              {responseTypeEditor}
+              {chatTargetEditor}
+            </> : null}
           </div>
-        </> : null}
-        {draft.kind === "shoutout" ? null : <SegmentedControl
-          label={labels.responseType}
-          hint={labels.responseTypeHints[draft.responseType]}
-          value={draft.responseType}
-          options={(["say", "reply", "announcement"] as const).map((value) => ({ value, label: labels.responseTypeLabels[value] }))}
-          {...(announcementWarning === undefined ? {} : { warning: announcementWarning })}
-          disabled={!canManageContent || pending}
-          onChange={(value) => { setDraftField("responseType", value as TextCommandResponseType); }}
-        />}
-        <ChatOutputTargetControl
-          label={labels.chatTarget}
-          value={draft.chatTarget}
-          includeWhereAsked
-          disabled={!canManageContent || pending}
-          onChange={(chatTarget) => { setDraftField("chatTarget", chatTarget); }}
-        />
+        </details> : null}
+        {draft.kind === "text" ? variableActionEditor : null}
+        {draft.kind !== "timeout" ? <>{responseTypeEditor}{chatTargetEditor}</> : null}
       </>,
     },
     {
@@ -860,6 +941,8 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       {...(error === undefined ? {} : { error })}
       invalid={!valid}
       invalidMessage={labels.invalid}
+      invalidFields={invalidFields}
+      onInvalidSave={() => { setAttemptedSave(true); }}
       warnings={warnings}
       warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${labels.saved} ${items.join(" ")}` : items.join(" ")}
       {...(concurrentConflict ? { conflict: { message: labels.conflictMessage, reloadLabel: labels.reload, onReload: () => { void reloadServer(); } } } : {})}

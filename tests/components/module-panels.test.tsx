@@ -262,6 +262,66 @@ describe("Module panel loader", () => {
     expect(screen.getByRole("tab", { name: "Allgemein" })).toBeInTheDocument();
   });
 
+  it("maps every blocking settings validation error to a marked field and summary link", async () => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
+        : Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    const invalidControls: readonly (readonly [HTMLElement, string])[] = [
+      [await screen.findByRole("spinbutton", { name: "Menge" }), ""],
+      [screen.getByRole("textbox", { name: "Konto" }), ""],
+      [screen.getByRole("textbox", { name: "Abstimmungslabels" }), "Yes|"],
+      [screen.getByRole("textbox", { name: "Nachricht" }), ""],
+      [screen.getByRole("spinbutton", { name: "Schwelle" }), ""],
+    ];
+    for (const [control, value] of invalidControls) fireEvent.change(control, { target: { value } });
+
+    const expectedErrors = [
+      ["Menge", "Zahl eingeben."],
+      ["Konto", "Ungültige Werte."],
+      ["Abstimmungslabels", "Gib zwei gültige Labels ein."],
+      ["Nachricht", "Ungültige Werte."],
+      ["Schwelle", "Zahl eingeben."],
+    ] as const;
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Ungültige Werte.");
+    expect(within(status).getAllByRole("button")).toHaveLength(expectedErrors.length);
+    expect(screen.getByRole("tab", { name: "Allgemein, Fehler" })).toBeInTheDocument();
+    for (const [label, message] of expectedErrors) {
+      const control = screen.getByRole(label === "Menge" || label === "Schwelle" ? "spinbutton" : "textbox", { name: label });
+      expect(control).toHaveAttribute("aria-invalid", "true");
+      fireEvent.click(within(status).getByRole("button", { name: `${label}: ${message}` }));
+      expect(control).toHaveFocus();
+    }
+  });
+
+  it("focuses an enabled switch when a disabled child still blocks saving", async () => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
+        : Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    const threshold = await screen.findByRole("spinbutton", { name: "Schwelle" });
+    fireEvent.change(threshold, { target: { value: "" } });
+    const switchCard = screen.getByRole("switch", { name: "Zusatzaktion" });
+    fireEvent.click(switchCard);
+
+    expect(threshold).toBeDisabled();
+    expect(screen.getByText(/Zahl eingeben\./u)).toBeVisible();
+    const invalidFieldLink = screen.getByRole("button", { name: "Schwelle: Zahl eingeben." });
+    fireEvent.click(invalidFieldLink);
+
+    expect(switchCard).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Allgemein, Fehler" })).toBeInTheDocument();
+  });
+
   it("shows the module name and state once in the row", () => {
     renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
     const row = screen.getByRole("link", { name: /aktiv.*Läuft/i }).closest(".list-row");

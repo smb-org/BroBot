@@ -528,19 +528,57 @@ describe("EditorShell and declaration renderer", () => {
     function Harness() {
       const [section, setSection] = useState("settings");
       return <EditorShell {...baseProps} section={section} onSectionChange={setSection} dirty invalid sections={[
-        { id: "settings", label: "Settings", icon: "tabSettings", issue: "error", content: <Field label="Name" hint="Command name." value="" error="Required" onChange={() => {}} /> },
-        { id: "advanced", label: "Advanced", icon: "tabAdvanced", issue: "warning", content: <Field label="Cooldown" hint="Delay between uses." value="5" onChange={() => {}} /> },
+        { id: "settings", label: "Settings", icon: "tabSettings", content: <Field id="command-name" label="Name" hint="Command name." value="" error="Required" onChange={() => {}} /> },
+        { id: "advanced", label: "Advanced", icon: "tabAdvanced", content: <Field id="command-cooldown" label="Cooldown" hint="Delay between uses." value="" error="Enter a duration" onChange={() => {}} /> },
+      ]} invalidMessage="Correct the marked fields." invalidFields={[
+        { id: "command-name", label: "Name", message: "Required", sectionId: "settings" },
+        { id: "command-cooldown", label: "Cooldown", message: "Enter a duration", sectionId: "advanced" },
       ]} />;
     }
     renderUi(<Harness />);
     const settingsTab = screen.getByRole("tab", { name: /^Settings/u });
     expect(settingsTab.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
-    expect(screen.getByRole("tab", { name: "Advanced, hint" })).toBeInTheDocument();
-    fireEvent.keyDown(settingsTab, { key: "ArrowRight" });
-    expect(screen.getByRole("tab", { name: "Advanced, hint" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Advanced, error" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Correct the marked fields.");
+    expect(screen.getByRole("button", { name: "Name: Required" })).toBeInTheDocument();
+    const cooldownLink = screen.getByRole("button", { name: "Cooldown: Enter a duration" });
+    fireEvent.click(cooldownLink);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Cooldown" })).toHaveFocus());
+
+    const advancedTab = screen.getByRole("tab", { name: "Advanced, error" });
+    expect(advancedTab).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(screen.getByRole("tab", { name: "Settings, error" })).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus());
+  });
+
+  it("reveals interaction-driven errors before focusing the first invalid field", async () => {
+    const attemptOrder: string[] = [];
+    function Harness() {
+      const [attempted, setAttempted] = useState(false);
+      return <EditorShell
+        {...baseProps}
+        dirty
+        invalid={attempted}
+        invalidMessage="Correct the marked fields."
+        onInvalidSave={() => { attemptOrder.push("validate"); }}
+        onSave={() => { attemptOrder.push("save"); setAttempted(true); }}
+        sections={[
+          { id: "settings", label: "Settings", content: <Field id="description" label="Description" value="Ready" onChange={() => {}} /> },
+          { id: "advanced", label: "Advanced", content: <Field id="delayed-name" label="Name" value="" {...(attempted ? { error: "Required" } : {})} onChange={() => {}} /> },
+        ]}
+        invalidFields={attempted ? [{ id: "delayed-name", label: "Name", message: "Required", sectionId: "advanced" }] : []}
+      />;
+    }
+    renderUi(<Harness />);
+
+    expect(screen.getByRole("tab", { name: "Advanced" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus());
+    expect(screen.getByRole("tab", { name: "Advanced, error" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Name: Required" })).toBeInTheDocument();
+    expect(attemptOrder).toEqual(["validate", "save"]);
   });
 
   it("keeps the persistent save bar visible across clean, dirty, warning, saved, error, pending, and conflict states", () => {

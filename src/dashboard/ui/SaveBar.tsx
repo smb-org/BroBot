@@ -11,6 +11,7 @@ export interface SaveBarProps {
   saved?: boolean;
   invalid?: boolean;
   invalidMessage?: string;
+  invalidStatus?: ReactNode;
   persistent?: boolean;
   warnings?: readonly string[];
   warningStatusLabel?: (warnings: readonly string[], saved: boolean) => ReactNode;
@@ -34,6 +35,7 @@ export function SaveBar({
   saved = false,
   invalid = false,
   invalidMessage,
+  invalidStatus,
   persistent = false,
   warnings = [],
   warningStatusLabel,
@@ -61,7 +63,7 @@ export function SaveBar({
         : saved && !dirty
           ? warningStatus ?? savedLabel
           : invalid && dirty
-            ? invalidMessage === undefined ? "" : `× ${invalidMessage}`
+            ? invalidStatus ?? (invalidMessage === undefined ? "" : `× ${invalidMessage}`)
             : dirty
               ? warningStatus
               : null;
@@ -73,9 +75,9 @@ export function SaveBar({
     <div className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}`} aria-busy={pending}>
       <div className="ui-save-bar__status" role="status" aria-live="polite">
         {warningStatus !== null && statusText === warningStatus || warningStatus !== null && saved && !dirty ? <Icon name="warning" size={16} /> : null}
-        <span style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
+        <div className="ui-save-bar__message" style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
           {statusText}
-        </span>
+        </div>
         {conflict === undefined ? null : <Button variant="neutral" icon="reload" onClick={conflict.onReload}>{conflict.reloadLabel}</Button>}
       </div>
       {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer">{footer}</div>}

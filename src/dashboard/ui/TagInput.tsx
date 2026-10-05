@@ -11,6 +11,7 @@ export interface TagInputMessages {
 }
 
 interface TagInputBaseProps {
+  id?: string;
   label: string;
   hint: string;
   error?: string;
@@ -38,8 +39,9 @@ const normalizeEntry = (entry: string, prefix: string | undefined, normalize: ((
   return next;
 };
 
-export function TagInput({ label, hint, error, warning, invalidValues = [], value, onChange, prefix, normalize, validate, maxTags, removeLabel, disabled = false, messages, listLabel }: TagInputProps) {
-  const id = useId();
+export function TagInput({ id: suppliedId, label, hint, error, warning, invalidValues = [], value, onChange, prefix, normalize, validate, maxTags, removeLabel, disabled = false, messages, listLabel }: TagInputProps) {
+  const generatedId = useId();
+  const id = suppliedId ?? generatedId;
   const disabledReason = useDisabledFieldReason();
   const [searchValue, setSearchValue] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);

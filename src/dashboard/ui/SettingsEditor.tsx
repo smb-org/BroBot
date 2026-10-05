@@ -273,6 +273,7 @@ export function SettingsEditor<Settings extends object>({
     return (
       <InspectorFieldRow key={field.key} label={copy.label} help={copy.description ?? copy.hint}>
         <Switch
+          id={id}
           layout="card"
           ariaLabel={copy.label}
           checked={fieldValue === true}

@@ -80,7 +80,7 @@ export { ChatPreview } from "./ChatPreview";
 export type { ChatPreviewProps } from "./ChatPreview";
 
 export { EditorShell } from "./EditorShell";
-export type { EditorSection, EditorShellProps } from "./EditorShell";
+export type { EditorInvalidField, EditorSection, EditorShellProps } from "./EditorShell";
 
 export { SettingsEditor } from "./SettingsEditor";
 export type { SettingsEditorCatalog, SettingsEditorDefinition, SettingsEditorProps, SettingsEditorSpec, SettingsEditorTexts, SettingsFieldSpec, SettingsFieldText } from "./SettingsEditor";

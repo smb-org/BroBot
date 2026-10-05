@@ -9,7 +9,7 @@ import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type Das
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, useDraftGuard, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -334,13 +334,35 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       })] : []),
     ]),
   ];
+  const invalidFields: EditorInvalidField[] = [];
   const sections: EditorSection[] = spec.sections.map((section) => {
     const sectionKeys = new Set<string>();
-    const visit = (fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"]): void => {
-      for (const field of fields) { sectionKeys.add(field.key); if (field.kind === "switchCard" && field.children !== undefined) visit(field.children); }
+    const sectionInvalidFields: EditorInvalidField[] = [];
+    const visit = (
+      fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"],
+      disabledBySwitch?: string,
+    ): void => {
+      for (const field of fields) {
+        sectionKeys.add(field.key);
+        const fieldError = fieldErrors[field.key];
+        if (fieldError !== undefined) {
+          sectionInvalidFields.push({
+            id: `settings-${field.key}${field.kind === "timeoutDurationRange" ? "-minimum" : ""}`,
+            ...(disabledBySwitch === undefined ? {} : { focusId: disabledBySwitch }),
+            label: copy.fields[field.key]?.label ?? field.key,
+            message: fieldError,
+            sectionId: section.id,
+          });
+        }
+        if (field.kind === "switchCard" && field.children !== undefined) {
+          const childFocusId = disabledBySwitch ?? (value[field.key] === true ? undefined : `settings-${field.key}`);
+          visit(field.children, childFocusId);
+        }
+      }
     };
     visit(section.fields);
-    const hasError = [...sectionKeys].some((key) => fieldErrors[key] !== undefined);
+    invalidFields.push(...sectionInvalidFields);
+    const hasError = sectionInvalidFields.length > 0;
     const hasWarning = [...sectionKeys].some((key) => {
       const issues = localIssues[key];
       return (issues !== undefined && issues.unknown.length > 0) || serverWarnings.some((warning) => warning.field === key);
@@ -398,6 +420,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
     {...(error === undefined ? {} : { error })}
     invalid={invalid}
     invalidMessage={copy.invalidMessage}
+    invalidFields={invalidFields}
     warnings={warnings}
     warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${copy.savedLabel} ${items.join(" ")}` : items.join(" ")}
     {...(conflict ? { conflict: { message: copy.conflictMessage, reloadLabel: copy.reloadLabel, onReload } } : {})}

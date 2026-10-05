@@ -35,8 +35,10 @@ export interface TextCommandsTexts {
   slashAnnouncementEffect: string;
   slashShoutoutEffect: string;
   response: string;
+  responseOptional: string;
   responseHint: string;
   responseMissing: string;
+  fieldTooLong: string;
   minimumTier: string;
   minimumTierLocked: string;
   tierLabels: Record<TextCommandMinimumTier, string>;
@@ -131,14 +133,18 @@ export interface TextCommandsTexts {
   variableOperations: Record<"add" | "subtract" | "set" | "set_argument", string>;
   variableOperationHelp: Record<"add" | "subtract" | "set" | "set_argument", string>;
   variableAmount: string;
+  variableActionInvalid: string;
   variableSilentHint: string;
   variableEveryoneWarning: string;
   timeoutAction: string;
   timeoutActionHint: string;
   timeoutMinSeconds: string;
   timeoutMaxSeconds: string;
+  timeoutDuration: string;
   timeoutRangeHint: string;
+  timeoutRangeInvalid: string;
   timeoutFallbackText: string;
+  timeoutFallbackTextOptional: string;
   timeoutReason: string;
   timeoutReasonHint: string;
   timeoutBotWarning: string;
@@ -212,7 +218,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     slashTimeoutEffect: (minimum, maximum) => `Timeout für den Aufrufer für ${minimum === maximum ? `${String(minimum)} s` : `${String(minimum)}–${String(maximum)} s`}.`,
     slashAnnouncementEffect: "Wird als Twitch-Ankündigung gesendet.",
     slashShoutoutEffect: "Shoutout-Ziel kommt aus dem Befehlsargument.",
-    response: "Antwort", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.",
+    response: "Antwort", responseOptional: "Antwort (optional)", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.", fieldTooLong: "Höchstens 500 Zeichen.",
     minimumTier: "Wer darf auslösen", minimumTierLocked: "Nur Broadcaster und Verwalter dürfen Mindeststufen ändern.",
     tierLabels: { everyone: "Alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
     tierSubjects: { viewer: "Zuschauer", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
@@ -279,10 +285,10 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     variableAction: "Kanalvariable ändern", variableSelect: "Variable", variableSelectHint: "Wird atomar mit dem Befehl geändert.", variableNone: "Keine Kanalvariablen angelegt.",
     variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
     variableOperationHelp: { add: "Zählt hoch.", subtract: "Zählt herunter.", set: "Setzt auf den Wert.", set_argument: "Setzt auf das erste Argument. Ungültige Zahlen zeigen den Nutzungshinweis." },
-    variableAmount: "Betrag", variableSilentHint: "Antwort leer lassen, um still zu zählen.", variableEveryoneWarning: "Jeder im Chat kann diese Variable ändern.",
+    variableAmount: "Betrag", variableActionInvalid: "Kanalvariable und Betrag prüfen oder die Aktion ausschalten.", variableSilentHint: "Antwort leer lassen, um still zu zählen.", variableEveryoneWarning: "Jeder im Chat kann diese Variable ändern.",
     timeoutAction: "Timeoutaktion", timeoutActionHint: "Würfelt beim Auslösen eine Dauer aus dem Bereich.",
-    timeoutMinSeconds: "Mindestens", timeoutMaxSeconds: "Höchstens", timeoutRangeHint: "1 s bis 14 Tage.",
-    timeoutFallbackText: "Ersatztext, wenn der Timeout abgelehnt wird", timeoutBotWarning: "Der Bot ist kein Moderator. Timeouts können nicht ausgeführt werden.", timeoutNone: "Aus",
+    timeoutMinSeconds: "Mindestens", timeoutMaxSeconds: "Höchstens", timeoutDuration: "Dauer", timeoutRangeHint: "1 s bis 14 Tage.", timeoutRangeInvalid: "Die Dauer muss zwischen 1 s und 14 Tagen liegen; das Minimum darf das Maximum nicht überschreiten.",
+    timeoutFallbackText: "Ersatztext, wenn der Timeout abgelehnt wird", timeoutFallbackTextOptional: "Ersatztext bei Ablehnung (optional)", timeoutBotWarning: "Der Bot ist kein Moderator. Timeouts können nicht ausgeführt werden.", timeoutNone: "Aus",
     timeoutReason: "Timeout-Grund", timeoutReasonHint: "Optionaler Grund, der an Twitch gesendet wird.",
     actionResponse: (name, operation, amount) => operation === "add" ? `Ändert ${name} um +${String(amount ?? 1)}`
       : operation === "subtract" ? `Ändert ${name} um −${String(amount ?? 1)}`
@@ -317,7 +323,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     slashTimeoutEffect: (minimum, maximum) => `Times out the caller for ${minimum === maximum ? `${String(minimum)} s` : `${String(minimum)}–${String(maximum)} s`}.`,
     slashAnnouncementEffect: "Sent as a Twitch announcement.",
     slashShoutoutEffect: "The shoutout target comes from the command argument.",
-    response: "Response", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.",
+    response: "Response", responseOptional: "Response (optional)", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.", fieldTooLong: "Use at most 500 characters.",
     minimumTier: "Who can use it", minimumTierLocked: "Only broadcasters and managers may change minimum levels.",
     tierLabels: { everyone: "Everyone", subscriber: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
     tierSubjects: { viewer: "viewers", subscriber: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcasters" },
@@ -384,10 +390,10 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     variableAction: "Change channel variable", variableSelect: "Variable", variableSelectHint: "Applied atomically with the command.", variableNone: "No channel variables have been created.",
     variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
     variableOperationHelp: { add: "Increase the value.", subtract: "Decrease the value.", set: "Set the value directly.", set_argument: "Set from the first argument. Invalid numbers show the usage response." },
-    variableAmount: "Amount", variableSilentHint: "Leave the response empty to count silently.", variableEveryoneWarning: "Everyone in chat can change this variable.",
+    variableAmount: "Amount", variableActionInvalid: "Choose a channel variable and valid amount, or turn this action off.", variableSilentHint: "Leave the response empty to count silently.", variableEveryoneWarning: "Everyone in chat can change this variable.",
     timeoutAction: "Timeout action", timeoutActionHint: "Rolls a duration from this range when the command runs.",
-    timeoutMinSeconds: "Minimum", timeoutMaxSeconds: "Maximum", timeoutRangeHint: "1 s to 14 days.",
-    timeoutFallbackText: "Fallback text when the timeout is rejected", timeoutBotWarning: "The bot is not a moderator. It cannot time out callers.", timeoutNone: "Off",
+    timeoutMinSeconds: "Minimum", timeoutMaxSeconds: "Maximum", timeoutDuration: "Duration", timeoutRangeHint: "1 s to 14 days.", timeoutRangeInvalid: "Duration must be 1 s to 14 days, and the minimum cannot exceed the maximum.",
+    timeoutFallbackText: "Fallback text when the timeout is rejected", timeoutFallbackTextOptional: "Fallback text on rejection (optional)", timeoutBotWarning: "The bot is not a moderator. It cannot time out callers.", timeoutNone: "Off",
     timeoutReason: "Timeout reason", timeoutReasonHint: "Optional reason sent to Twitch.",
     actionResponse: (name, operation, amount) => operation === "add" ? `Changes ${name} by +${String(amount ?? 1)}`
       : operation === "subtract" ? `Changes ${name} by −${String(amount ?? 1)}`

@@ -1117,9 +1117,12 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-tag-input__pill[aria-invalid="true"] { border-color: var(--error); color: var(--error-text); background: var(--error-surface); }
 .ui-save-bar { display: flex; flex: none; align-items: center; gap: 12px; min-height: 64px; padding: 10px 0; }
 .ui-save-bar--persistent { margin-top: auto; border-top: 1px solid var(--line); background: var(--surface-inspector); }
-.ui-save-bar__status { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; color: var(--text-3); font-size: 12px; }
-.ui-save-bar__status > span { min-width: 0; }
+.ui-save-bar__status { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; color: var(--text-3); font-size: 12px; }
+.ui-save-bar__message { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
 .ui-save-bar__status .ui-icon { flex: none; color: var(--warn); }
+.ui-save-bar__invalid-fields { display: inline-flex; flex-wrap: wrap; gap: var(--s1); margin: 0; padding: 0; list-style: none; }
+.ui-save-bar__invalid-fields button { appearance: none; border: 0; border-radius: var(--r-control); padding: var(--s1) var(--s2); background: var(--error-surface); color: var(--error-text); font: inherit; text-decoration: underline; cursor: pointer; }
+.ui-save-bar__invalid-fields button:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .ui-save-bar__actions { display: flex; flex: none; gap: 8px; }
 .ui-save-bar__footer { flex: none; }
 .ui-confirm-dialog__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }
