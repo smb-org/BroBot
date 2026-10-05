@@ -14,6 +14,7 @@ const openVote = {
   status: "open",
   openedAt: "2026-10-04T10:00:00.000Z",
   closesAt: "2026-10-04T14:00:00.000Z",
+  requestedDurationSeconds: null,
   closedAt: null,
   closeReason: "limit",
   counts: null,
@@ -28,6 +29,7 @@ const optionsCustomVote = {
   labels: ["Option 1", "Option 2", "Option 3"],
   closeReason: "timer",
   closesAt: "2026-10-04T10:01:30.000Z",
+  requestedDurationSeconds: 90,
 } as const;
 const closedVote = {
   ...openVote,
@@ -98,6 +100,61 @@ describe("chat voting live panel", () => {
     expect(screen.getByRole("spinbutton", { name: "Custom duration" })).toHaveValue("90");
   });
 
+  it("resets a successful start to the saved default even before a refresh observes the vote", async () => {
+    let startPayload: unknown;
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request
+        ? new URL(input.url).pathname
+        : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path.endsWith("/start")) {
+        startPayload = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
+        return Promise.resolve(jsonResponse({ vote: { ...openVote, requestedDurationSeconds: 60 } }));
+      }
+      return Promise.resolve(jsonResponse({
+        vote: null,
+        counts: null,
+        revision: 0,
+        hasOpenBallot: false,
+        defaultDurationSeconds: 120,
+      }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const duration = await screen.findByRole("radiogroup", { name: "Duration" });
+    fireEvent.click(within(duration).getByRole("radio", { name: "1 min" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    await waitFor(() => expect(startPayload).toEqual({ preset: "yes_no", durationSeconds: 60 }));
+    expect(within(duration).getByRole("radio", { name: "2 min" })).toBeChecked();
+  });
+
+  it("tracks saved default changes while the idle duration draft is untouched", async () => {
+    let defaultDurationSeconds = 120;
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
+      vote: null,
+      counts: null,
+      revision: 0,
+      hasOpenBallot: false,
+      defaultDurationSeconds,
+    })));
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const duration = await screen.findByRole("radiogroup", { name: "Duration" });
+    expect(within(duration).getByRole("radio", { name: "2 min" })).toBeChecked();
+    defaultDurationSeconds = 300;
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(within(duration).getByRole("radio", { name: "5 min" })).toBeChecked());
+
+    fireEvent.click(within(duration).getByRole("radio", { name: "1 min" }));
+    defaultDurationSeconds = 600;
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
+    expect(within(duration).getByRole("radio", { name: "1 min" })).toBeChecked();
+  });
+
   it("keeps configuration visible and disables it while a vote is running", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
       vote: openVote,
@@ -140,7 +197,8 @@ describe("chat voting live panel", () => {
 
   it.each([
     ["running", openVote, [4, 2], "Running", "· open", true],
-    ["manual close requested", closingVote, [4, 2], "Running", "· ends 2:00 PM", true],
+    ["manual close requested for an open vote", closingVote, [4, 2], "Running", "· open", true],
+    ["manual close requested for a timed vote", { ...openVote, requestedDurationSeconds: 90, closeReason: "manual", closesAt: "2026-10-04T10:01:30.000Z" }, [4, 2], "Running", "· ends 10:01 AM", true],
     ["closed", closedVote, [7, 3], "Closed", null, false],
   ] as const)("renders one matching %s status in the stable card", async (_name, vote, counts, status, detail, canStop) => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({

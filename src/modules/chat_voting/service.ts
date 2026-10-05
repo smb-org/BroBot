@@ -47,6 +47,7 @@ export const startChatVote = async (
     labels: labelsForVote(input.settings, input.preset, input.optionCount, input.language),
     openedAt: new Date(openedAt).toISOString(),
     closesAt: new Date(deadline.closesAt).toISOString(),
+    requestedDurationSeconds: input.settings.autoCloseSeconds === 0 ? null : input.settings.autoCloseSeconds,
     closeReason: deadline.reason,
     status: "open",
   };

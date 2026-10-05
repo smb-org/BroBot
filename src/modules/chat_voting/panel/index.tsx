@@ -37,31 +37,23 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   const [durationPreset, setDurationPreset] = useState<DurationPreset | null>(null);
   const [customDurationSeconds, setCustomDurationSeconds] = useState<number | "">(60);
   const configurationInitialized = useRef(false);
-  const activeVoteObserved = useRef(false);
+  const durationDraftTouched = useRef(false);
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
       const next = await loadChatVotingState(channelId);
       setState(next);
       if (next.vote?.status === "open") {
-        activeVoteObserved.current = true;
-        const activeDurationSeconds = next.vote.closeReason === "limit"
-          ? 0
-          : Math.max(0, Math.round((Date.parse(next.vote.closesAt) - Date.parse(next.vote.openedAt)) / 1_000));
         setPreset(next.vote.preset);
         setOptionCount(next.vote.optionCount);
-        setDurationPreset(durationPresetFor(activeDurationSeconds));
-        if (durationPresetFor(activeDurationSeconds) === "custom") setCustomDurationSeconds(activeDurationSeconds);
         configurationInitialized.current = true;
-      } else {
+      } else if (!configurationInitialized.current || !durationDraftTouched.current) {
         const defaultDurationSeconds = next.defaultDurationSeconds;
-        if (activeVoteObserved.current || !configurationInitialized.current) {
-          const defaultDurationPreset = durationPresetFor(defaultDurationSeconds);
-          setDurationPreset(defaultDurationPreset);
-          if (defaultDurationPreset === "custom") setCustomDurationSeconds(defaultDurationSeconds);
-          activeVoteObserved.current = false;
-          configurationInitialized.current = true;
-        }
+        const defaultDurationPreset = durationPresetFor(defaultDurationSeconds);
+        setDurationPreset(defaultDurationPreset);
+        if (defaultDurationPreset === "custom") setCustomDurationSeconds(defaultDurationSeconds);
+        durationDraftTouched.current = false;
+        configurationInitialized.current = true;
       }
       setLoadFailed(false);
     } catch {
@@ -91,6 +83,11 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
     setMessage(null);
     try {
       await startChatVoting(channelId, preset, preset === "options_n" ? optionCount as number : undefined, durationSeconds);
+      const defaultDurationSeconds = state?.defaultDurationSeconds ?? 0;
+      const defaultDurationPreset = durationPresetFor(defaultDurationSeconds);
+      setDurationPreset(defaultDurationPreset);
+      if (defaultDurationPreset === "custom") setCustomDurationSeconds(defaultDurationSeconds);
+      durationDraftTouched.current = false;
       await refresh();
     } catch (error: unknown) {
       setMessage(error instanceof Error && "code" in error && error.code === "chat_voting_busy" ? labels.busy : labels.startError);
@@ -135,7 +132,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
             status={running ? "green" : "off"}
             word={vote === null ? labels.readyStatus : running ? labels.runningStatus : labels.closedStatus}
           />
-          {running ? <span className="muted">· {vote.closeReason === "limit" ? labels.openStatus : labels.ends(timeText(vote.closesAt, language))}</span> : null}
+          {running ? <span className="muted">· {vote.requestedDurationSeconds === null ? labels.openStatus : labels.ends(timeText(vote.closesAt, language))}</span> : null}
         </div>
       </div>
       <div className="chat-voting-result-area" style={{ height: "calc(var(--s10) * 7)" }}>
@@ -192,7 +189,10 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
           label={labels.duration}
           value={durationPreset ?? "open"}
           disabled={configurationDisabled}
-          onChange={(value) => setDurationPreset(value as DurationPreset)}
+          onChange={(value) => {
+            durationDraftTouched.current = true;
+            setDurationPreset(value as DurationPreset);
+          }}
           options={[
             { value: "open", label: labels.openDuration },
             { value: "one", label: labels.oneMinute },
@@ -213,7 +213,10 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
             increaseLabel={labels.increaseDuration}
             decreaseLabel={labels.decreaseDuration}
             disabled={configurationDisabled}
-            onChange={setCustomDurationSeconds}
+            onChange={(value) => {
+              durationDraftTouched.current = true;
+              setCustomDurationSeconds(value);
+            }}
           /> : null}
         </div>
       </div>

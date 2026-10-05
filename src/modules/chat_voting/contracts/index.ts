@@ -46,6 +46,7 @@ export interface ChatVote {
   status: "open" | "closed";
   openedAt: string;
   closesAt: string;
+  requestedDurationSeconds: number | null;
   closedAt: string | null;
   closeReason: ChatVoteCloseReason;
   counts: readonly number[] | null;

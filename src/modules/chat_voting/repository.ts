@@ -10,6 +10,7 @@ interface ChatVoteRow {
   status: "open" | "closed";
   opened_at: string;
   closes_at: string;
+  requested_duration_seconds: number | null;
   closed_at: string | null;
   close_reason: ChatVoteCloseReason;
   counts_json: string | null;
@@ -41,6 +42,7 @@ const mapRow = (row: ChatVoteRow): ChatVote => ({
   status: row.status,
   openedAt: row.opened_at,
   closesAt: row.closes_at,
+  requestedDurationSeconds: row.requested_duration_seconds,
   closedAt: row.closed_at,
   closeReason: row.close_reason,
   counts: parseNumberArray(row.counts_json),
@@ -48,7 +50,8 @@ const mapRow = (row: ChatVoteRow): ChatVote => ({
 });
 
 export const chatVoteSelectColumns = `channel_id, poll_id, preset, option_count, labels_json, status,
-                                      opened_at, closes_at, closed_at, close_reason, counts_json, voter_count`;
+                                      opened_at, closes_at, requested_duration_seconds, closed_at,
+                                      close_reason, counts_json, voter_count`;
 
 export interface ChatVotingRepository {
   open(channelId: string): Promise<ChatVote | null>;
@@ -83,8 +86,9 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `INSERT INTO chat_votes
-         (channel_id, poll_id, preset, option_count, labels_json, status, opened_at, closes_at, close_reason)
-       SELECT ?, ?, ?, ?, ?, 'open', ?, ?, ? WHERE 1 = 1 ${guard}`,
+         (channel_id, poll_id, preset, option_count, labels_json, status, opened_at, closes_at,
+          requested_duration_seconds, close_reason)
+       SELECT ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
     ).bind(
       vote.channelId,
       vote.id,
@@ -93,6 +97,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       JSON.stringify(vote.labels),
       vote.openedAt,
       vote.closesAt,
+      vote.requestedDurationSeconds,
       vote.closeReason,
       ...(authorization?.values ?? []),
     );
