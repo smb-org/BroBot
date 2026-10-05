@@ -14,6 +14,11 @@ export interface OverlayEditorPositionLimits extends OverlayEditorPosition {
   minX: number;
 }
 
+export const overlayEditorMeasuredSize = (
+  measured: OverlayEditorSize,
+  fallback: OverlayEditorSize,
+): OverlayEditorSize => measured.width === 0 && measured.height === 0 ? fallback : measured;
+
 /**
  * Used to clamp position when an element's real rendered size is not known yet
  * (e.g. it is hidden with `inComposition: false` and about to be shown), so a

@@ -281,6 +281,8 @@ export interface ModuleOverlayElementDefinition {
   configVersion: number;
   defaultSize: { width: number; height: number };
   defaultConfig: JsonObject;
+  /** Editor-only sample state used when no live module state is available. */
+  previewState?: (config: JsonObject, language: ModuleLanguage, now: number) => JsonObject;
   editorLabel?: Readonly<Record<ModuleLanguage, string>>;
   editorAddLabel?: Readonly<Record<ModuleLanguage, string>>;
   editorModuleLabel?: Readonly<Record<ModuleLanguage, string>>;

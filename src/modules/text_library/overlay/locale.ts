@@ -2,6 +2,7 @@ export interface TextBlockOverlayEditorTexts {
   label: string;
   addLabel: string;
   moduleLabel: string;
+  previewPlaceholder: string;
   loading: string;
   unavailable: string;
   empty: string;
@@ -13,6 +14,7 @@ export const textBlockOverlayEditorTexts: Record<"de" | "en", TextBlockOverlayEd
     label: "Textbaustein",
     addLabel: "Textbaustein hinzufügen",
     moduleLabel: "Textbibliothek",
+    previewPlaceholder: "Textbaustein wählen",
     loading: "Textbausteine werden geladen …",
     unavailable: "Textbausteine konnten nicht geladen werden.",
     empty: "Noch keine Textbausteine vorhanden.",
@@ -26,6 +28,7 @@ export const textBlockOverlayEditorTexts: Record<"de" | "en", TextBlockOverlayEd
     label: "Text block",
     addLabel: "Add text block",
     moduleLabel: "Text library",
+    previewPlaceholder: "Choose a text block",
     loading: "Loading text blocks …",
     unavailable: "Text blocks could not be loaded.",
     empty: "No text blocks yet.",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampOverlayEditorPosition, overlayEditorPositionLimits, UNMEASURED_ELEMENT_FALLBACK_SIZE } from "../../src/dashboard/overlay-editor-model";
+import { clampOverlayEditorPosition, overlayEditorMeasuredSize, overlayEditorPositionLimits, UNMEASURED_ELEMENT_FALLBACK_SIZE } from "../../src/dashboard/overlay-editor-model";
 
 describe("overlay editor element bounds", () => {
   it("keeps the full rendered element inside the reference canvas", () => {
@@ -53,5 +53,19 @@ describe("overlay editor element bounds", () => {
       x: 1920 - UNMEASURED_ELEMENT_FALLBACK_SIZE.width,
       y: 1080 - UNMEASURED_ELEMENT_FALLBACK_SIZE.height,
     });
+  });
+
+  it("reclamps against the real size when a late measurement replaces a zero-size fallback", () => {
+    const canvas = { width: 1920, height: 1080 };
+    const fallback = { width: 40, height: 40 };
+    const start = { x: 1910, y: 1070 };
+    const unmeasured = overlayEditorMeasuredSize({ width: 0, height: 0 }, fallback);
+
+    expect(unmeasured).toEqual(fallback);
+    expect(clampOverlayEditorPosition(start, canvas, unmeasured)).toEqual({ x: 1880, y: 1040 });
+
+    const measured = overlayEditorMeasuredSize({ width: 360, height: 96 }, fallback);
+    expect(measured).toEqual({ width: 360, height: 96 });
+    expect(clampOverlayEditorPosition(start, canvas, measured)).toEqual({ x: 1560, y: 984 });
   });
 });
