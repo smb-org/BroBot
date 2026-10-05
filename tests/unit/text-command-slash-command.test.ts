@@ -82,4 +82,14 @@ describe("text command slash input", () => {
     expect(convertLeadingSlashCommand(initial, shoutout, { text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout, usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT }))
       .toMatchObject({ kind: "shoutout", responseType: "say", text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout, usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT });
   });
+
+  it("parses long pathological input in linear time", () => {
+    const start = performance.now();
+    const blanks = " ".repeat(50_000);
+    expect(parseLeadingSlashCommand(`/announce${blanks}`)).toEqual({ status: "invalid", command: "announce" });
+    expect(parseLeadingSlashCommand(`/timeout${blanks}{user}${blanks}x${blanks}\r`)).toEqual({ status: "invalid", command: "timeout" });
+    expect(parseLeadingSlashCommand(`/timeout {user} ${"9".repeat(50_000)}`)).toEqual({ status: "invalid", command: "timeout" });
+    expect(parseLeadingSlashCommand(`/timeout {user} 5${blanks}reason`)).toMatchObject({ status: "valid", reason: "reason" });
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
 });
