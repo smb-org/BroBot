@@ -331,7 +331,7 @@ describe("BELABOX secret and route redaction", () => {
       userId: MANAGER_ID,
       sessionId: `session-${MANAGER_ID}`,
     }, new Date().toISOString()).then((statement) => statement.run());
-    const secretRead = vi.spyOn(secrets, "readWithRevision");
+    const secretRead = vi.spyOn(secrets, "readWithVersion");
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
 
@@ -367,7 +367,7 @@ describe("BELABOX secret and route redaction", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it.each(["remove", "replace"] as const)("does not write a stale sample when the stored URL is changed during a test (%s)", async (change) => {
+  it.each(["remove", "replace", "delete-then-recreate"] as const)("does not write a stale sample when the stored URL is changed during a test (%s)", async (change) => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { send, secrets } = await createBelaboxRouteHarness(testDatabase);
@@ -387,9 +387,13 @@ describe("BELABOX secret and route redaction", () => {
     const testPending = send("/test", "POST", {});
     await fetchStarted;
 
+    if (change === "delete-then-recreate") {
+      expect((await send("/stats-url", "DELETE")).status).toBe(200);
+      expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    }
     const changed = change === "remove"
       ? await send("/stats-url", "DELETE")
-      : await send("/stats-url", "PUT", { url: "http://relay.belabox.net:8080/replacement-publisher-key" });
+      : change === "delete-then-recreate" ? { status: 200 } : await send("/stats-url", "PUT", { url: "http://relay.belabox.net:8080/replacement-publisher-key" });
     expect(changed.status).toBe(200);
     finishFetch(jsonResponse(relayPayload(SENTINEL_KEY)));
     const tested = await testPending;
@@ -398,7 +402,7 @@ describe("BELABOX secret and route redaction", () => {
 
     const status = await send("/status", "GET");
     expect(await status.json()).toMatchObject({
-      configured: change === "replace",
+      configured: change !== "remove",
       sample: null,
     });
   });

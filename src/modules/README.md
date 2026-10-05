@@ -133,6 +133,10 @@ Alarme über `ModuleAlarmContext.secrets`; Vorlagenprovider erhalten in
 den Zugriff an Kanal und Modul. Schreib- und Löschstatements tragen die
 verwaltende Rollenprüfung und werden im selben D1-Batch wie ihr Audit ausgeführt;
 Audit-Snapshots enthalten dafür nur `replaced` oder `removed`, nie den Wert.
+Abhängige Schreibvorgänge (z. B. ein Testergebnis) sichern sich mit der opaken
+`version` aus `readWithVersion` ab: sie ist die gespeicherte verschlüsselte Hülle,
+wiederholt sich nie (zufällige IV, auch nach Löschen und Neuanlegen) und gibt den
+Klartext nicht preis; nur auf Gleichheit prüfen, nie loggen oder ausliefern.
 Overlay-`initialState` erhält keinen Secret-Zugriff.
 
 Die Sonnendatenquelle liegt eigenständig unter `src/modules/sun/`. Sie nutzt

@@ -32,7 +32,7 @@ export const prepareBelaboxSampleWrite = (
   db: D1Database,
   channelId: string,
   sample: BelaboxSample,
-  expectedSecretRevision: number,
+  expectedSecretVersion: string,
   authorization: ModuleMutationAuthorization,
 ): D1PreparedStatement => db.prepare(
   `INSERT INTO belabox_status
@@ -40,7 +40,7 @@ export const prepareBelaboxSampleWrite = (
    SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE 1 = 1 ${authorization.sql}
      AND EXISTS (
        SELECT 1 FROM module_secrets
-        WHERE channel_id = ? AND module_id = ? AND name = ? AND revision = ?
+        WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?
      )
    ON CONFLICT (channel_id) DO UPDATE SET
      connected = excluded.connected,
@@ -52,7 +52,7 @@ export const prepareBelaboxSampleWrite = (
      sampled_at = excluded.sampled_at`,
 ).bind(channelId, Number(sample.connected), sample.bitrateKbps, sample.rttMs, sample.latencyMs,
   sample.network, sample.droppedPackets, sample.at, ...authorization.values,
-  channelId, BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET, expectedSecretRevision);
+  channelId, BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET, expectedSecretVersion);
 
 export const prepareBelaboxSampleClear = (
   db: D1Database,

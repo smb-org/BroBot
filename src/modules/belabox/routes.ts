@@ -116,7 +116,7 @@ belaboxRoutes.post("/test", async (context) => {
 
   const usesStoredUrl = parsed.data.url === undefined;
   const storedSecret = usesStoredUrl
-    ? await context.get("secrets")(channelId).readWithRevision(BELABOX_STATS_URL_SECRET)
+    ? await context.get("secrets")(channelId).readWithVersion(BELABOX_STATS_URL_SECRET)
     : null;
   const input = usesStoredUrl ? storedSecret?.value : parsed.data.url;
   if (input === undefined) {
@@ -143,7 +143,7 @@ belaboxRoutes.post("/test", async (context) => {
     const authorization = authorizeManagementMutation(channelId, actor, now);
     try {
       if (storedSecret !== null) {
-        await prepareBelaboxSampleWrite(context.env.DB, channelId, result.sample, storedSecret.revision, authorization).run();
+        await prepareBelaboxSampleWrite(context.env.DB, channelId, result.sample, storedSecret.version, authorization).run();
       }
     } catch {
       // The test result remains useful when the optional latest-sample write fails.
