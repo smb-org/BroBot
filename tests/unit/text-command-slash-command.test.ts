@@ -92,4 +92,10 @@ describe("text command slash input", () => {
     expect(parseLeadingSlashCommand(`/timeout {user} 5${blanks}reason`)).toMatchObject({ status: "valid", reason: "reason" });
     expect(performance.now() - start).toBeLessThan(1000);
   });
+
+  it("keeps the command prefixes case-sensitive", () => {
+    for (const text of ["/TIMEOUT {user} 30", "/Timeout {user} 30", "/ANNOUNCE hello", "/Announce hello"]) {
+      expect(parseLeadingSlashCommand(text)).toMatchObject({ status: "invalid" });
+    }
+  });
 });

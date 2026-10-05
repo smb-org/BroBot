@@ -42,6 +42,7 @@ const skipBlanks = (text: string, from: number): number => {
 };
 
 const parseTimeoutLine = (line: string): { duration: string; reason: string } | null => {
+  if (!line.startsWith("/timeout")) return null;
   let index = "/timeout".length;
   let next = skipBlanks(line, index);
   if (next === index || !line.startsWith("{user}", next)) return null;
@@ -86,7 +87,7 @@ export const parseLeadingSlashCommand = (text: string): LeadingSlashCommand => {
   }
 
   if (command === "announce") {
-    const hasBlank = skipBlanks(text, "/announce".length) > "/announce".length;
+    const hasBlank = text.startsWith("/announce") && skipBlanks(text, "/announce".length) > "/announce".length;
     const announcement = hasBlank ? text.slice("/announce".length).trim() : "";
     return announcement.length === 0
       ? { status: "invalid", command }
