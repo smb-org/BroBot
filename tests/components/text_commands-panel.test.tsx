@@ -250,6 +250,45 @@ describe("Text command editor", () => {
     await waitFor(() => expect(created).toMatchObject({ kind: "shoutout" }));
   });
 
+  it("measures the response length after a slash conversion", async () => {
+    let created: { text?: string } | undefined;
+    renderPanel(panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body as { text?: string };
+        return jsonResponse({ warnings: [] });
+      },
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(created).toBeUndefined();
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "ann" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: `/announce ${"a".repeat(495)}` } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created?.text).toBe("a".repeat(495)));
+  });
+
+  it("ignores an overlong usage reply that a shoutout conversion replaces", async () => {
+    let created: { kind?: string } | undefined;
+    renderPanel(panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body as { kind?: string };
+        return jsonResponse({ warnings: [] });
+      },
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    fireEvent.change(editor().querySelector('[name="usageText"]') as HTMLElement, { target: { value: " ".repeat(501) } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(created).toBeUndefined();
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created).toMatchObject({ kind: "shoutout" }));
+  });
+
   it("lets timeout commands configure usage text", async () => {
     let created: unknown;
     const fetcher = panelFetch({

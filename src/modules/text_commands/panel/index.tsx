@@ -288,9 +288,9 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const templateFieldNames = Object.keys(templateFields) as CommandTemplateField[];
   const responseFieldError = slashInput.status === "invalid"
     ? labels.slashSyntaxError(slashInput.command)
-    : draft.text.length > 500
+    : validationDraft.text.length > 500
     ? labels.fieldTooLong
-    : attemptedSave && draft.kind !== "timeout" && draft.kind !== "list" && draft.variableAction === null && draft.text.trim().length === 0
+    : attemptedSave && validationDraft.kind !== "timeout" && validationDraft.kind !== "list" && validationDraft.variableAction === null && validationDraft.text.trim().length === 0
       ? labels.responseMissing
       : undefined;
   const timeoutRangeInvalid = validationDraft.kind === "timeout" && (validationDraft.timeoutAction === null ||
@@ -353,7 +353,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     ? "error" as const
     : undefined;
   const settingsIssue = nameError !== undefined || aliasesError !== undefined || responseFieldError !== undefined ||
-    timeoutReasonError !== undefined || timeoutFallbackError !== undefined || (draft.kind !== "list" && draft.usageText.length > 500) ||
+    timeoutReasonError !== undefined || timeoutFallbackError !== undefined || (validationDraft.kind !== "list" && validationDraft.usageText.length > 500) ||
     (attemptedSave && (timeoutRangeInvalid || variableActionInvalid))
     ? "error" as const
     : announcementWarning !== undefined || localWarnings.length > 0 || serverWarnings.length > 0
@@ -396,7 +396,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   if (attemptedSave && timeoutFallbackError !== undefined) {
     invalidFields.push({ id: "command-timeoutFallbackText", label: labels.timeoutFallbackTextOptional, message: timeoutFallbackError, sectionId: "settings" });
   }
-  if (attemptedSave && draft.kind !== "list" && draft.usageText.length > 500) {
+  if (attemptedSave && validationDraft.kind !== "list" && validationDraft.usageText.length > 500) {
     invalidFields.push({ id: "command-usageText", label: labels.templateFieldLabels.usageText, message: labels.fieldTooLong, sectionId: "settings" });
   }
   if (attemptedSave && variableActionNameInvalid) {
@@ -808,7 +808,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           {templateEditor("timeoutFallbackText", labels.timeoutFallbackTextOptional)}
           {botIsModerator === false ? <p className="form-warning" role="note">{labels.timeoutBotWarning}</p> : null}
         </div> : null}
-        {draft.kind !== "list" ? <details className="command-usage-advanced" open={attemptedSave && (draft.usageText.length > 500 || (draft.kind === "timeout" && variableActionInvalid))}>
+        {draft.kind !== "list" ? <details className="command-usage-advanced" open={attemptedSave && (validationDraft.usageText.length > 500 || (validationDraft.kind === "timeout" && variableActionInvalid))}>
           <summary>{labels.usageAdvanced}</summary>
           <div className="command-usage-advanced__body">
             {templateEditor("usageText", labels.templateFieldLabels.usageText, labels.usageTextHint)}
