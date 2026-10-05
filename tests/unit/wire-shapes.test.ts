@@ -416,6 +416,7 @@ const expectedModuleSettings = {
   weather: {},
   currency: {},
   api_source: {},
+  belabox: {},
   ads: {
     automatic: "Automatische Werbepause: {ads.duration} Sekunden. Bin gleich zurück!",
     automaticTarget: "source_only",
@@ -804,6 +805,7 @@ describe("serialized contract shapes", () => {
       expect(MODULES.map((module) => module.id).sort()).toEqual([
         "ads",
         "api_source",
+        "belabox",
         "channel_events",
         "chat_voting",
         "clips",

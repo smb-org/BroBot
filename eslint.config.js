@@ -156,6 +156,10 @@ export default defineConfig(
     },
   },
   {
+    files: ["src/modules/belabox/**/*.{ts,tsx}"],
+    rules: { "no-console": "error" },
+  },
+  {
     // Das Overlay bleibt eine minimale Darstellung: Es darf keine Worker-,
     // Persistenz- oder Serviceschicht und kein Zod in sein Bundle ziehen.
     files: ["src/overlay/**/*.{ts,tsx}"],

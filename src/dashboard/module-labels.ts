@@ -26,6 +26,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     weather: "Wetter",
     currency: "Währung",
     api_source: "API-Quellen",
+    belabox: "BELABOX",
   },
   en: {
     host: "System",
@@ -40,6 +41,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     weather: "Weather",
     currency: "Currency",
     api_source: "API sources",
+    belabox: "BELABOX",
   },
 };
 
@@ -143,6 +145,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     weather: "Zeigt aktuelles Wetter für den Kanalstandort oder einen Ort im Chatbefehl.",
     currency: "Wandelt Beträge mit dem aktuellen Wechselkurs um.",
     api_source: "Liest benannte HTTPS-JSON-Quellen aus und wertet ihre Daten aus.",
+    belabox: "Verwaltet die BELABOX-Relay-Statistikverbindung.",
   },
   en: {
     text_commands: "Replies to short commands in chat.",
@@ -156,6 +159,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     weather: "Shows current weather for the channel location or a place in the chat command.",
     currency: "Converts amounts using the current exchange rate.",
     api_source: "Reads named HTTPS JSON sources and evaluates their data.",
+    belabox: "Manages the BELABOX relay stats connection.",
   },
 };
 

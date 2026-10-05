@@ -478,4 +478,6 @@ mit einem ausgemusterten Eintrag durchgeführt werden.
 - Ein Kanal wird durch eine Zeile in `channels` freigegeben; dafür gibt es bewusst keine Konfigurationsvariable.
 - `channelId` darf nicht durch eine globale Rolle oder eine globale Token-Tabelle ersetzt werden.
 - Die alte Twitch- oder Session-Autorisierung bei einem Incident bewusst über die vorgesehenen Secrets rotieren.
+- Die BELABOX-Statistik-URL wird im Modul über `module_secrets` verschlüsselt gespeichert und im Panel weder vollständig noch teilweise angezeigt. Die Statistikantwort wird auf das normalisierte Sample reduziert; der Publisher-Schlüssel wird nicht als Sample gespeichert.
+- BELABOX-URLs über `http:` senden den Schlüssel im Klartext zum Relay. Das ist für Port 8080 als akzeptiertes Risiko freigegeben. Cloudflare-Traces können die ausgehende URL enthalten; auch das ist ein akzeptiertes Risiko. Die Anwendung protokolliert diese URL nicht. Port 8080 und die Einheiten der Relay-Werte sind noch nicht mit einem laufenden Encoder bestätigt; die Einheiten bleiben vorerst in `contracts/index.ts` als Annahmen markiert.
 - Vor einem öffentlichen Betrieb die aktuellen Cloudflare-Quoten und Wrangler-Dokumentation erneut prüfen.
