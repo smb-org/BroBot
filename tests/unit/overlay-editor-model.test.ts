@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampOverlayEditorPosition, overlayEditorMeasuredSize, overlayEditorPositionLimits, UNMEASURED_ELEMENT_FALLBACK_SIZE } from "../../src/dashboard/overlay-editor-model";
+import { clampOverlayEditorPosition, overlayEditorMeasuredSize, overlayEditorPositionLimits } from "../../src/dashboard/overlay-editor-model";
 
 describe("overlay editor element bounds", () => {
   it("keeps the full rendered element inside the reference canvas", () => {
@@ -41,31 +41,17 @@ describe("overlay editor element bounds", () => {
     expect(clampOverlayEditorPosition({ x: 2000, y: 100 }, canvas, element, anchor)).toEqual({ x: maxX, y: 100 });
   });
 
-  it("keeps a position set while hidden on-canvas once shown, using the unmeasured fallback size", () => {
-    // While `inComposition: false`, the element is not rendered, so its size is unknown and X/Y
-    // could be set anywhere up to the canvas edge (a {0, 0} size would not clamp at all). Turning
-    // composition on must reclamp with a non-zero fallback so the element stays visible.
-    expect(clampOverlayEditorPosition(
-      { x: 1900, y: 1060 },
-      { width: 1920, height: 1080 },
-      UNMEASURED_ELEMENT_FALLBACK_SIZE,
-    )).toEqual({
-      x: 1920 - UNMEASURED_ELEMENT_FALLBACK_SIZE.width,
-      y: 1080 - UNMEASURED_ELEMENT_FALLBACK_SIZE.height,
-    });
-  });
-
-  it("reclamps against the real size when a late measurement replaces a zero-size fallback", () => {
+  it("uses default bounds until pointer dragging can use measured dimensions", () => {
     const canvas = { width: 1920, height: 1080 };
-    const fallback = { width: 40, height: 40 };
-    const start = { x: 1910, y: 1070 };
-    const unmeasured = overlayEditorMeasuredSize({ width: 0, height: 0 }, fallback);
+    const defaultSize = { width: 360, height: 96 };
+    const requestedPointerPosition = { x: 1910, y: 1070 };
+    const unmeasured = overlayEditorMeasuredSize({ width: 0, height: 0 }, defaultSize);
 
-    expect(unmeasured).toEqual(fallback);
-    expect(clampOverlayEditorPosition(start, canvas, unmeasured)).toEqual({ x: 1880, y: 1040 });
+    expect(unmeasured).toEqual(defaultSize);
+    expect(clampOverlayEditorPosition(requestedPointerPosition, canvas, unmeasured)).toEqual({ x: 1560, y: 984 });
 
-    const measured = overlayEditorMeasuredSize({ width: 360, height: 96 }, fallback);
-    expect(measured).toEqual({ width: 360, height: 96 });
-    expect(clampOverlayEditorPosition(start, canvas, measured)).toEqual({ x: 1560, y: 984 });
+    const measured = overlayEditorMeasuredSize({ width: 700, height: 200 }, defaultSize);
+    expect(measured).toEqual({ width: 700, height: 200 });
+    expect(clampOverlayEditorPosition(requestedPointerPosition, canvas, measured)).toEqual({ x: 1220, y: 880 });
   });
 });

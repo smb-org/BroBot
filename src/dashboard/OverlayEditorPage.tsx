@@ -10,7 +10,7 @@ import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
 import type { JsonObject, ModuleOverlayElementDefinition } from "../modules/contract";
 import { ModuleOverlayElementEditor } from "./ModuleOverlayElementEditor";
 import variableViewCss from "../overlay/variable.css?inline";
-import { clampOverlayEditorPosition, overlayEditorMeasuredSize, overlayEditorPositionLimits, UNMEASURED_ELEMENT_FALLBACK_SIZE, type OverlayEditorSize } from "./overlay-editor-model";
+import { clampOverlayEditorPosition, overlayEditorMeasuredSize, UNMEASURED_ELEMENT_FALLBACK_SIZE, type OverlayEditorSize } from "./overlay-editor-model";
 import {
   parseOverlayStyleBlock,
   replaceOverlayStyleBlock,
@@ -427,14 +427,10 @@ function OverlayEditorWorkspace({
   const [cssCopyState, setCssCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [previewFrameRoot, setPreviewFrameRoot] = useState<HTMLDivElement | null>(null);
-  const [selectedElementSize, setSelectedElementSize] = useState({ width: 0, height: 0 });
-  const elementMeasurementKey = useMemo(() => JSON.stringify(draft.elements.map(({ id, inComposition, scalePercent, config, text }) =>
-    [id, inComposition, scalePercent, config, text])), [draft.elements]);
   const previewFrameRootRef = useRef<HTMLDivElement | null>(null);
   const previewViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const drag = useRef<PointerDrag | null>(null);
-  const pendingMeasuredSizes = useRef(new Map<string, OverlayEditorSize>());
   const previewEventHandlers = useRef<PreviewEventHandlers>({
     pointerDown: () => undefined,
     pointerMove: () => undefined,
@@ -459,10 +455,6 @@ function OverlayEditorWorkspace({
     });
   }, [selectedElementId]);
   const selectedModuleOption = selectedElement === null ? undefined : moduleElementOption(selectedElement.kind);
-  const selectedElementScalePercent = selectedElement?.scalePercent;
-  const selectedElementText = selectedElement?.text;
-  const selectedElementVariableName = selectedElement?.variableName ?? null;
-  const selectedElementLiveValue = selectedElementVariableName === null ? undefined : liveVariables[selectedElementVariableName];
   const orderedElements = useMemo(() => [...draft.elements].sort((left, right) => right.z - left.z), [draft.elements]);
   const variablesByName = useMemo(() => new Set(variables.map(({ name }) => name)), [variables]);
   const addVariableName = variablesByName.has(chosenVariableName) ? chosenVariableName : variables[0]?.name ?? "";
@@ -499,7 +491,6 @@ function OverlayEditorWorkspace({
     : effectiveStyleDocument.elements[effectiveStyleTargetId] ?? {};
   const elementHorizontalAnchor = (element: PanelOverlayElement): OverlayStyleAlignment =>
     effectiveStyleDocument.elements[element.id]?.textAlign ?? effectiveStyleDocument.overlay.textAlign ?? "left";
-  const selectedElementAnchor = selectedElement === null ? "left" : elementHorizontalAnchor(selectedElement);
   const styleLockedReason = !canManage ? labels.editorStyleReadOnlyReason : styleLocked ? labels.editorStyleLocked : "";
   const fitScale = viewportSize.width === 0 || viewportSize.height === 0
     ? 1
@@ -507,8 +498,6 @@ function OverlayEditorWorkspace({
   const canvasScale = fitScale * previewZoom / 100;
   const textIsValid = draft.elements.every((element) => element.kind !== "variable" || element.text.match(/\{value\}/gu)?.length === 1);
   const canvasSize = { width: draft.width, height: draft.height };
-  const selectedPositionLimits = overlayEditorPositionLimits(canvasSize, selectedElementSize, selectedElementAnchor);
-
   useEffect(() => {
     const viewport = previewViewportRef.current;
     if (viewport === null) return;
@@ -607,9 +596,8 @@ function OverlayEditorWorkspace({
     boundsRoot.replaceChildren(...bounds);
   }, [draft, liveVariables, previewFrameRoot, selectedElementId]);
 
-  // An element hidden with `inComposition: false` is not in the DOM, so its size cannot be
-  // measured; fall back to a sensible minimum instead of {0, 0} so clamping still keeps it
-  // on-canvas once it is shown (a {0, 0} size would let X/Y range across the whole canvas).
+  // Hidden elements have no rendered size, so pointer-drag clamping uses their declared default
+  // size or a small fallback.
   const measuredRenderedElementSize = (elementId: string): OverlayEditorSize | null => {
     const root = previewFrameRootRef.current;
     if (root === null) return null;
@@ -628,7 +616,7 @@ function OverlayEditorWorkspace({
     return overlayEditorMeasuredSize(measuredRenderedElementSize(elementId) ?? { width: 0, height: 0 }, fallback);
   };
 
-  const clampPosition = (element: PanelOverlayElement, x: number, y: number): { x: number; y: number } =>
+  const clampDraggedPosition = (element: PanelOverlayElement, x: number, y: number): { x: number; y: number } =>
     clampOverlayEditorPosition({ x, y }, canvasSize, renderedElementSize(element.id), elementHorizontalAnchor(element));
 
   const updateElement = useCallback((elementId: string, update: Partial<PanelOverlayElement>): void => {
@@ -639,48 +627,6 @@ function OverlayEditorWorkspace({
     setSaved(false);
     setError(undefined);
   }, [setError]);
-
-  useEffect(() => {
-    const root = previewFrameRootRef.current;
-    if (root === null) return;
-    const measure = (element: HTMLElement): void => {
-      const elementId = element.dataset.element;
-      if (elementId === undefined) return;
-      const currentDraft = draftRef.current;
-      const draftElement = currentDraft.elements.find(({ id }) => id === elementId);
-      const size = measuredRenderedElementSize(elementId);
-      if (size === null) return;
-      if (elementId === selectedElementId) setSelectedElementSize(size);
-      if (draftElement === undefined || !draftElement.inComposition) return;
-      if (drag.current !== null) {
-        pendingMeasuredSizes.current.set(elementId, size);
-        return;
-      }
-      const clamped = clampOverlayEditorPosition(
-        { x: draftElement.x, y: draftElement.y },
-        { width: currentDraft.width, height: currentDraft.height },
-        size,
-        elementHorizontalAnchor(draftElement),
-      );
-      if (clamped.x !== draftElement.x || clamped.y !== draftElement.y) updateElement(elementId, clamped);
-    };
-    const measureAll = (): void => {
-      for (const element of root.querySelectorAll<HTMLElement>("[data-element]")) measure(element);
-    };
-    const initialMeasure = window.setTimeout(measureAll, 0);
-    if (typeof ResizeObserver === "undefined") return () => { window.clearTimeout(initialMeasure); };
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) measure(entry.target as HTMLElement);
-    });
-    for (const element of root.querySelectorAll<HTMLElement>("[data-element]")) observer.observe(element);
-    return () => {
-      window.clearTimeout(initialMeasure);
-      observer.disconnect();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the alignment lookup is rebuilt whenever the CSS changes.
-  }, [draft.css, draft.height, draft.width, elementMeasurementKey, previewFrameRoot, selectedElementId, updateElement]);
-
-
   const writeStyleDocument = (next: OverlayStyleDocument): void => {
     setStyleDocument(next);
     const css = replaceOverlayStyleBlock(draft.css, next, draft.elements.map(({ id }) => id));
@@ -779,69 +725,6 @@ function OverlayEditorWorkspace({
       const maximum = options.max ?? Number.POSITIVE_INFINITY;
       onChange(Math.max(minimum, Math.min(maximum, next)));
     }} />;
-
-  // Reclamp the selected element's position once its real rendered size is known: right after it
-  // is shown (`inComposition` turned on, correcting the immediate fallback-size clamp used at
-  // toggle time below) or after a scale/text/value change grows it, so it cannot stay, or become,
-  // clipped off the canvas edge. A layout effect runs synchronously right after the DOM commits
-  // the new render, so the measurement already reflects the change; it only writes back when the
-  // clamped position actually differs, so it settles in one pass instead of looping. CSS- and
-  // canvas-size-driven reclamping is handled for every element (including this one) by the
-  // composition-wide effect below, so it is intentionally not a trigger here.
-  useLayoutEffect(() => {
-    if (selectedElement === null || !selectedElement.inComposition) return;
-    const root = previewFrameRootRef.current;
-    if (root === null) return;
-    const element = findRenderedElement(root, selectedElement.id);
-    if (element === undefined) return;
-    const measuredSize = measuredRenderedElementSize(selectedElement.id);
-    if (measuredSize === null) return;
-    if (drag.current !== null) {
-      pendingMeasuredSizes.current.set(selectedElement.id, measuredSize);
-      return;
-    }
-    const clamped = clampOverlayEditorPosition(
-      { x: selectedElement.x, y: selectedElement.y },
-      { width: draft.width, height: draft.height },
-      measuredSize,
-      selectedElementAnchor,
-    );
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Keep the selected element inside the canvas before paint after its measured size changes.
-    if (clamped.x !== selectedElement.x || clamped.y !== selectedElement.y) updateElement(selectedElement.id, clamped);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes `selectedElement`, `draft.css`/width/height (x/y change every drag frame; CSS and canvas-size reclamping is handled below for all elements).
-  }, [selectedElementId, selectedElement?.inComposition, selectedElementScalePercent, selectedElementText, selectedElementLiveValue, selectedElementAnchor, previewFrameRoot, updateElement]);
-
-  // Reclamp every composition element's position when the style CSS (or the canvas size) changes:
-  // an overlay-default rule such as a larger font-size or padding can grow any element's rendered
-  // box, not just the selected one, and leave an unselected element clipped near a canvas edge.
-  // Measures each element's real rendered box and writes back only the elements whose clamped
-  // position actually changed (via the same `updateElement` used elsewhere, so React 18 batches
-  // all of them into the one re-render this effect's own dependencies then settle against), so a
-  // CSS edit that grows nothing writes nothing back and cannot loop.
-  useLayoutEffect(() => {
-    const root = previewFrameRootRef.current;
-    if (root === null) return;
-    for (const element of draft.elements) {
-      if (!element.inComposition) continue;
-      const rendered = findRenderedElement(root, element.id);
-      if (rendered === undefined) continue;
-      const measuredSize = measuredRenderedElementSize(element.id);
-      if (measuredSize === null) continue;
-      if (drag.current !== null) {
-        pendingMeasuredSizes.current.set(element.id, measuredSize);
-        continue;
-      }
-      const clamped = clampOverlayEditorPosition(
-        { x: element.x, y: element.y },
-        { width: draft.width, height: draft.height },
-        measuredSize,
-        elementHorizontalAnchor(element),
-      );
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- CSS or canvas changes can grow any composition element beyond its current bounds.
-      if (clamped.x !== element.x || clamped.y !== element.y) updateElement(element.id, clamped);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes `draft.elements`/`elementHorizontalAnchor` (x/y change every drag frame; only CSS- or canvas-size-driven growth should retrigger this).
-  }, [draft.css, draft.width, draft.height, previewFrameRoot, updateElement]);
 
   const discard = useCallback((): void => {
     setDraft(baseline.draft);
@@ -976,8 +859,7 @@ function OverlayEditorWorkspace({
             ? { x: selectedElement.x, y: selectedElement.y + distance }
             : null;
     if (requestedPosition === null) return false;
-    const position = clampPosition(selectedElement, requestedPosition.x, requestedPosition.y);
-    if (position.x !== selectedElement.x || position.y !== selectedElement.y) updateElement(selectedElement.id, position);
+    if (requestedPosition.x !== selectedElement.x || requestedPosition.y !== selectedElement.y) updateElement(selectedElement.id, requestedPosition);
     return true;
   };
 
@@ -1045,7 +927,7 @@ function OverlayEditorWorkspace({
     const point = pointInCanvas(event);
     const element = draft.elements.find(({ id }) => id === active.elementId);
     if (element === undefined) return;
-    updateElement(active.elementId, clampPosition(
+    updateElement(active.elementId, clampDraggedPosition(
       element,
       point.x - active.offsetX,
       point.y - active.offsetY,
@@ -1055,20 +937,6 @@ function OverlayEditorWorkspace({
   const stopDrag = (event: PointerEvent): void => {
     if (drag.current?.pointerId !== event.pointerId) return;
     drag.current = null;
-    const currentDraft = draftRef.current;
-    const pendingMeasurements = [...pendingMeasuredSizes.current];
-    pendingMeasuredSizes.current.clear();
-    for (const [elementId, size] of pendingMeasurements) {
-      const element = currentDraft.elements.find(({ id }) => id === elementId);
-      if (element === undefined || !element.inComposition) continue;
-      const clamped = clampOverlayEditorPosition(
-        { x: element.x, y: element.y },
-        { width: currentDraft.width, height: currentDraft.height },
-        size,
-        elementHorizontalAnchor(element),
-      );
-      if (clamped.x !== element.x || clamped.y !== element.y) updateElement(elementId, clamped);
-    }
   };
 
   useEffect(() => {
@@ -1212,10 +1080,10 @@ function OverlayEditorWorkspace({
             countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canEdit}
             onChange={(text) => { updateElement(selectedElement.id, { text }); }} /> : null}
           <div className="overlay-editor__numeric-fields">
-            <NumberField id="overlay-editor-x" label={labels.editorX} min={selectedPositionLimits.minX} max={selectedPositionLimits.x} value={selectedElement.x} disabled={!canEdit}
-              onChange={(x) => { if (typeof x === "number") updateElement(selectedElement.id, clampPosition(selectedElement, x, selectedElement.y)); }} />
-            <NumberField id="overlay-editor-y" label={labels.editorY} min={0} max={selectedPositionLimits.y} value={selectedElement.y} disabled={!canEdit}
-              onChange={(y) => { if (typeof y === "number") updateElement(selectedElement.id, clampPosition(selectedElement, selectedElement.x, y)); }} />
+            <NumberField id="overlay-editor-x" label={labels.editorX} value={selectedElement.x} disabled={!canEdit}
+              onChange={(x) => { if (typeof x === "number") updateElement(selectedElement.id, { x }); }} />
+            <NumberField id="overlay-editor-y" label={labels.editorY} value={selectedElement.y} disabled={!canEdit}
+              onChange={(y) => { if (typeof y === "number") updateElement(selectedElement.id, { y }); }} />
             <NumberField id="overlay-editor-scale" label={labels.editorScale} min={25} max={400} value={selectedElement.scalePercent} disabled={!canEdit}
               onChange={(scalePercent) => { if (typeof scalePercent === "number") updateElement(selectedElement.id, { scalePercent: Math.max(25, Math.min(400, Math.round(scalePercent))) }); }} />
             <NumberField id="overlay-editor-z" label={labels.editorZ} value={selectedElement.z} disabled={!canEdit}
@@ -1226,9 +1094,7 @@ function OverlayEditorWorkspace({
             <Button variant="neutral" disabled={!canEdit || orderedElements.at(-1)?.id === selectedElement.id} onClick={() => { moveLayer(-1); }}>{labels.editorMoveBackward}</Button>
           </div>
           <Switch layout="inline" label={labels.editorInComposition} checked={selectedElement.inComposition} disabled={!canEdit}
-            onChange={(inComposition) => { updateElement(selectedElement.id, inComposition
-              ? { inComposition, ...clampPosition(selectedElement, selectedElement.x, selectedElement.y) }
-              : { inComposition }); }} />
+            onChange={(inComposition) => { updateElement(selectedElement.id, { inComposition }); }} />
           <DangerSection title={dashboardCommonTexts().dangerZone}>
             <Button danger="subtle" disabled={!canEdit}
               {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}

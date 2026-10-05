@@ -45,41 +45,15 @@ const previewFrameWindow = (): WindowWithElementConstructor => {
 };
 
 // jsdom never lays elements out, so `getBoundingClientRect()` always reports {0, 0}; this stubs it
-// for one overlay element (matched by the `data-element` attribute `OverlayCanvas` sets) so reclamp
-// effects have a real size to react to. `sizeAt` can read the element's own inline style (e.g. its
-// `transform: scale(...)`) to reflect a scale change. The preview renders inside an <iframe>, which
-// is its own realm with its own `Element` class distinct from the top-level document's, so the
-// patch has to target that frame's own prototype (and can only be installed once it exists).
+// for one overlay element (matched by the `data-element` attribute `OverlayCanvas` sets) so editor
+// measurement can react to its rendered size. `sizeAt` can read the element's own inline style
+// (e.g. its `transform: scale(...)`) to reflect a scale change. The preview renders inside an
+// <iframe> with its own `Element` class, so the patch targets that frame's prototype after it exists.
 const stubMeasuredElementSize = (frameWindow: WindowWithElementConstructor, elementId: string, sizeAt: (element: HTMLElement) => { width: number; height: number }): void => {
   vi.spyOn(frameWindow.Element.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     const { width, height } = this.dataset.element === elementId ? sizeAt(this) : { width: 0, height: 0 };
     return { x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON: () => ({}) };
   });
-};
-
-const installResizeObserverMock = (): ((element: Element) => void) => {
-  const observers: { callback: ResizeObserverCallback; targets: Set<Element>; active: boolean; instance: ResizeObserver }[] = [];
-  class TestResizeObserver implements ResizeObserver {
-    private readonly observation: typeof observers[number];
-
-    constructor(callback: ResizeObserverCallback) {
-      this.observation = { callback, targets: new Set(), active: true, instance: this };
-      observers.push(this.observation);
-    }
-
-    observe(target: Element): void { this.observation.targets.add(target); }
-    unobserve(target: Element): void { this.observation.targets.delete(target); }
-    disconnect(): void { this.observation.active = false; }
-    takeRecords(): ResizeObserverEntry[] { return []; }
-  }
-  vi.stubGlobal("ResizeObserver", TestResizeObserver);
-  return (target) => {
-    for (const observer of observers) {
-      if (observer.active && observer.targets.has(target)) {
-        observer.callback([{ target } as ResizeObserverEntry], observer.instance);
-      }
-    }
-  };
 };
 
 describe("Overlay composition editor", () => {
@@ -375,9 +349,9 @@ describe("Overlay composition editor", () => {
   });
 
   it.each([
-    ["center", 150, 1130],
-    ["right", 300, 1280],
-  ] as const)("uses the %s anchor for editor drag, keyboard, numeric input and position limits", async (alignment, minX, maxX) => {
+    ["center", 1130],
+    ["right", 1280],
+  ] as const)("uses the %s anchor when clamping a pointer drag", async (alignment, maxX) => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     const alignedOverlay = {
       ...initialOverlay,
@@ -412,59 +386,21 @@ describe("Overlay composition editor", () => {
     fireEvent.change(screen.getByRole("spinbutton", { name: "Font size" }), { target: { value: "32" } });
     fireEvent.click(screen.getByRole("tab", { name: "Layout" }));
     const xField = screen.getByRole("spinbutton", { name: "X (px)" });
-    await waitFor(() => expect(xField).toHaveAttribute("aria-valuemin", String(minX)));
-    expect(xField).toHaveAttribute("aria-valuemax", String(maxX));
 
-    fireEvent.change(xField, { target: { value: "0" } });
-    expect(xField).toHaveValue(String(minX));
     const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
     const canvas = previewFrame?.contentDocument?.getElementById("root");
     const element = previewFrame?.contentDocument?.querySelector<HTMLElement>(`[data-element="${elementId}"]`);
     if (canvas === null || canvas === undefined || element === null || element === undefined) throw new Error("Aligned preview element is missing.");
-    fireEvent.keyDown(canvas, { key: "ArrowLeft" });
-    expect(xField).toHaveValue(String(minX));
-    fireEvent.keyDown(canvas, { key: "ArrowRight" });
-    expect(xField).toHaveValue(String(minX + 1));
-    const elementBeforeDrag = previewFrame?.contentDocument?.querySelector<HTMLElement>(`[data-element="${elementId}"]`);
-    if (elementBeforeDrag === null || elementBeforeDrag === undefined) throw new Error("Updated aligned preview element is missing.");
-    fireEvent.pointerDown(elementBeforeDrag, { pointerId: 1, button: 0, clientX: 1, clientY: 0 });
-    fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 11, clientY: 0 });
+    fireEvent.pointerDown(element, { pointerId: 1, button: 0, clientX: 1, clientY: 0 });
+    fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 2000, clientY: 2000 });
     fireEvent.pointerUp(canvas, { pointerId: 1 });
-    expect(xField).toHaveValue(String(minX + 11));
+    expect(xField).toHaveValue(String(maxX));
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("680");
   });
 
-  it("reclamps when a managed style change makes the rendered element wider", async () => {
+  it("keeps saved X when long temporary text is replaced by short loaded content", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
-    const nearEdgeElement = {
-      ...initialOverlay.elements[0], id: "element-style-edge", label: "Style edge", x: 900, y: 100,
-    };
-    const overlayWithNearEdgeElement = { ...initialOverlay, elements: [nearEdgeElement] };
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: overlayWithNearEdgeElement }));
-      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
-      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
-      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
-    render(<DashboardApp />);
-
-    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    stubMeasuredElementSize(previewFrameWindow(), nearEdgeElement.id, (element) => {
-      const block = element.ownerDocument.querySelector("style[data-brobot-overlay-css]")?.textContent ?? "";
-      return { width: block.includes("font-size: 500px;") ? 500 : 300, height: 40 };
-    });
-    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Font size" }), { target: { value: "500" } });
-    fireEvent.click(screen.getByRole("tab", { name: "Layout" }));
-
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("780");
-  });
-
-  it("keeps a saved bottom-right text block position through its lazy measurement", async () => {
-    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const longBlockName = "this_is_a_very_long_block_name";
     const textBlock = {
       ...initialOverlay.elements[0],
       id: "element-lazy-bottom-right",
@@ -472,13 +408,13 @@ describe("Overlay composition editor", () => {
       label: "Bottom-right text block",
       variableName: null,
       text: "",
-      config: { blockName: "" },
+      config: { blockName: longBlockName },
       x: 1850,
       y: 1040,
       scalePercent: 25,
     };
     const savedOverlay = { ...initialOverlay, width: 1920, height: 1080, elements: [textBlock] };
-    const notifyResize = installResizeObserverMock();
+    let resolvePreview: ((response: Response) => void) | undefined;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
@@ -486,7 +422,10 @@ describe("Overlay composition editor", () => {
         { id: "text_library", enabled: true, mandatory: false, settings: "{}" },
       ] }));
       if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: savedOverlay }));
-      if (url.pathname === "/api/channels/kanal-a/modules/text_library/blocks") return Promise.resolve(jsonResponse({ blocks: [] }));
+      if (url.pathname === "/api/channels/kanal-a/modules/text_library/blocks") return Promise.resolve(jsonResponse({ blocks: [{ name: longBlockName }] }));
+      if (url.pathname === `/api/channels/kanal-a/modules/text_library/blocks/${longBlockName}`) {
+        return new Promise<Response>((resolve) => { resolvePreview = resolve; });
+      }
       if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
       if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
       return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
@@ -496,77 +435,74 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(resolvePreview).toBeTypeOf("function"));
     const previewWindow = previewFrameWindow();
-    let measuredSize = { width: 0, height: 0 };
-    stubMeasuredElementSize(previewWindow, textBlock.id, () => measuredSize);
+    stubMeasuredElementSize(previewWindow, textBlock.id, (element) => ({
+      width: element.textContent.includes(longBlockName) ? 1400 : 50,
+      height: 20,
+    }));
     const rendered = previewWindow.document.querySelector<HTMLElement>(`[data-element="${textBlock.id}"]`);
     if (rendered === null) throw new Error("Lazy text block preview is missing.");
+    expect(rendered.textContent).toContain(longBlockName);
+    expect(rendered.getBoundingClientRect().width).toBe(1400);
     expect(rendered.style.transform).toContain("scale(0.25)");
     expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1850");
     expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("1040");
 
-    // The lazy preview has now produced its first real bounds; its post-scale box still fits.
-    measuredSize = { width: 50, height: 20 };
-    act(() => notifyResize(rendered));
+    await act(async () => {
+      resolvePreview?.(jsonResponse({ block: { variants: [{ conditions: {}, texts: ["Hi"] }] } }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(rendered.textContent).toContain("Hi"));
+    expect(rendered.getBoundingClientRect().width).toBe(50);
 
     expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1850");
     expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("1040");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it("applies a measured growth clamp when a stationary drag is released", async () => {
+  it("keeps saved X after a label edit and subsequent content growth", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
-    const draggedElement = {
-      ...initialOverlay.elements[0],
-      id: "element-drag-growth",
-      label: "Growing block",
-      x: 1500,
-      y: 100,
-    };
-    const overlayWithDraggedElement = { ...initialOverlay, width: 1920, height: 1080, elements: [draggedElement] };
-    const notifyResize = installResizeObserverMock();
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+    const edgeElement = { ...initialOverlay.elements[0], id: "element-label-growth", label: "Edge", x: 900, y: 100 };
+    const savedOverlay = { ...initialOverlay, elements: [edgeElement] };
+    let savedX: number | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = requestUrl(input);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: overlayWithDraggedElement }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: savedOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        const body = JSON.parse(init.body) as { css: string; elements: typeof initialOverlay.elements };
+        savedX = body.elements.find(({ id }) => id === edgeElement.id)?.x;
+        return Promise.resolve(jsonResponse({ overlay: { ...savedOverlay, css: body.css, elements: body.elements, revision: 5 } }));
+      }
       if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
       if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
-      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
     });
     vi.stubGlobal("fetch", fetcher);
     window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    const previewWindow = previewFrameWindow();
-    let measuredSize = { width: 0, height: 0 };
-    stubMeasuredElementSize(previewWindow, draggedElement.id, () => measuredSize);
-    const rendered = previewWindow.document.querySelector<HTMLElement>(`[data-element="${draggedElement.id}"]`);
-    const canvas = previewWindow.document.getElementById("root");
-    if (rendered === null || canvas === null) throw new Error("Drag preview is missing.");
-    vi.spyOn(rendered, "getBoundingClientRect").mockImplementation(() => ({
-      x: 1500, y: 100, left: 1500, top: 100,
-      right: 1500 + measuredSize.width, bottom: 100 + measuredSize.height,
-      width: measuredSize.width, height: measuredSize.height, toJSON: () => ({}),
+    stubMeasuredElementSize(previewFrameWindow(), edgeElement.id, (element) => ({
+      width: element.textContent.length > 50 ? 1400 : 300,
+      height: 40,
     }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Element label" }), { target: { value: "Renamed edge" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Display text" }), { target: { value: `${"A".repeat(80)}{value}` } });
 
-    measuredSize = { width: 100, height: 30 };
-    act(() => notifyResize(rendered));
-    fireEvent.pointerDown(rendered, { pointerId: 22, button: 0, clientX: 1501, clientY: 101 });
-    measuredSize = { width: 1345, height: 30 };
-    act(() => notifyResize(rendered));
-
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1500");
-    fireEvent.pointerUp(canvas, { pointerId: 22, clientX: 1501, clientY: 101 });
-
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("575");
+    expect(previewFrameWindow().document.querySelector<HTMLElement>(`[data-element="${edgeElement.id}"]`)?.getBoundingClientRect().width).toBe(1400);
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("900");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(savedX).toBe(900));
   });
 
-  it("reclamps an unselected element near the edge when an overlay-default style grows it", async () => {
+  it("keeps an unselected element at its saved position when overlay styles grow it", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     // The first element is selected by default and stays selected throughout; only the second,
-    // never-selected element sits near the right edge and must still be reclamped when the
-    // overlay-default font size grows it.
+    // never-selected element sits near the right edge and must keep its stored X when CSS grows it.
     const selectedElement = { ...initialOverlay.elements[0], id: "element-selected", x: 24, y: 32 };
     const nearEdgeElement = { ...initialOverlay.elements[0], id: "element-unselected-edge", label: "Edge", x: 900, y: 100, z: 1 };
     const overlayWithBothElements = { ...initialOverlay, elements: [selectedElement, nearEdgeElement] };
@@ -603,9 +539,7 @@ describe("Overlay composition editor", () => {
     if (saveCall === undefined || typeof saveCall[1]?.body !== "string") throw new Error("Overlay save request is missing.");
     const saved = JSON.parse(saveCall[1].body) as { elements: typeof initialOverlay.elements };
     const savedEdgeElement = saved.elements.find(({ id }) => id === nearEdgeElement.id);
-    // At 500px width the element no longer fits at x=900 inside the 1280px canvas and is pulled back
-    // to fit, even though it was never selected.
-    expect(savedEdgeElement?.x).toBe(780);
+    expect(savedEdgeElement?.x).toBe(900);
   });
 
   it("clears an unsettable style color and shows its empty state", async () => {
@@ -941,11 +875,8 @@ describe("Overlay composition editor", () => {
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
   });
 
-  it("clamps a hidden element back on-canvas once shown, using its real rendered size", async () => {
-    // While `inComposition: false`, the element is not rendered, so the X/Y fields allowed the
-    // full canvas range and a value chosen while hidden could leave it off-canvas once shown.
-    // Its real rendered size (300x40) is wider than the 40x40 fallback used at toggle time, so
-    // the fallback clamp alone would still leave part of it clipped past the canvas edge.
+  it("keeps a hidden element's saved position when it is shown", async () => {
+    // The hidden element's saved position is outside the canvas for its rendered size.
     const hiddenElement = {
       id: "element-hidden", kind: "variable", label: "Hidden", variableName: "score",
       text: "Hidden: {value}", config: {}, x: 1270, y: 700, scalePercent: 100, z: 1, inComposition: false,
@@ -973,13 +904,11 @@ describe("Overlay composition editor", () => {
     if (toggle === null || toggle === undefined) throw new Error("Composition toggle is missing.");
     fireEvent.click(toggle);
 
-    // Reclamped against the real 300x40 size once measured, fully inside the 1280x720 canvas
-    // (not left at 1240/680, which is only where the 40x40 fallback clamp would have put it).
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("980");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("680");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1270");
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("700");
   });
 
-  it("reclamps position when a scale increase would push the element past the canvas edge", async () => {
+  it("keeps saved position when scaling makes an element extend past the canvas", async () => {
     const nearEdgeElement = {
       id: "element-near-edge", kind: "variable", label: "Near edge", variableName: "score",
       text: "Near: {value}", config: {}, x: 900, y: 100, scalePercent: 100, z: 1, inComposition: true,
@@ -1007,8 +936,7 @@ describe("Overlay composition editor", () => {
 
     fireEvent.change(screen.getByRole("spinbutton", { name: "Skalierung (%)" }), { target: { value: "200" } });
 
-    // At 2x scale the element is 600px wide; 900 + 600 exceeds the 1280px canvas, so it is pulled back to fit.
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("680");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("900");
   });
 
   it("keeps a changed draft when a revision conflict is resolved", async () => {
