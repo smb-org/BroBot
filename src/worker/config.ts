@@ -102,8 +102,10 @@ export const getMissingBindings = (env: Env): string[] => [
   }),
 ];
 
-// Migrations are additive and backward compatible, so code that is still
-// serving right after a newer migration was applied tolerates that schema.
+// Accept a newer schema: during a deploy the previous code still serves right
+// after the migration ran. Migrations are usually additive, but some drop
+// columns or tables (e.g. 0018, 0020), so this only avoids false deploy
+// failures; it does not prove older code is compatible after a rollback.
 const migrationNumber = (name: string | null | undefined): number => {
   const match = /^(\d+)_/.exec(name ?? "");
   return match ? Number(match[1]) : Number.NaN;

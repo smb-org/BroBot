@@ -26,7 +26,10 @@ const schemaDatabase = (state: SchemaState = {
 }): D1Database => ({
   prepare: () => ({
     bind: () => ({
-      first: () => Promise.resolve(state),
+      first: () => Promise.resolve({
+        latest_migration: state.latestMigration,
+        latest_table_count: state.latestTableCount,
+      }),
     }),
   }),
 } as unknown as D1Database);
@@ -165,17 +168,16 @@ describe("Health check binding validation", () => {
   describe("schema migration order", () => {
     const missing = async (latestMigration: string | null, latestTableCount = 1) =>
       (await getHealthStatus(environment(Buffer.alloc(32, 4).toString("base64url"), {
-        DB: {
-          prepare: () => ({
-            bind: () => ({
-              first: () => Promise.resolve({
-                latest_migration: latestMigration,
-                latest_table_count: latestTableCount,
-              }),
-            }),
-          }),
-        },
+        DB: schemaDatabase({ latestMigration, latestTableCount }),
       }))).missingBindings;
+
+    it("reports the default helper state as healthy", async () => {
+      const health = await getHealthStatus(
+        environment(Buffer.alloc(32, 4).toString("base64url")),
+      );
+
+      expect(health.statusCode).toBe(200);
+    });
 
     it("accepts the expected migration", async () => {
       expect(await missing(LATEST_SCHEMA_MIGRATION)).toEqual([]);
