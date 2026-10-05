@@ -15,6 +15,7 @@ import { invalidTemplateParameters } from "../../src/template";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
 import type { ModuleEvent } from "../../src/modules/contract";
 import { TestD1Database } from "./test-d1";
+import { unusedModuleSecretReadAccess } from "./fixtures";
 
 const NOW = Date.parse("2026-09-27T12:00:00.000Z");
 const event: ModuleEvent = {
@@ -72,6 +73,7 @@ const requestUrl = (input: RequestInfo | URL | undefined): string => {
 const contextFor = (DB: D1Database, overrides: Partial<ModuleTemplateValueContext> = {}): ModuleTemplateValueContext => ({
   DB,
   channelId: event.channelId,
+  secrets: unusedModuleSecretReadAccess,
   templateContext: "chat_command",
   knownTemplateVariableNames: new Set(),
   chatStatus: event.chatStatus,

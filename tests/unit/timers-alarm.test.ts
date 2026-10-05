@@ -4,6 +4,7 @@ import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext, ModuleSch
 import { handleTimerAlarm, timersModule } from "../../src/modules/timers";
 import { calculateSunDay, localDateInTimeZone, shiftLocalDate } from "../../src/modules/sun/domain";
 import { TestD1Database } from "./test-d1";
+import { unusedModuleSecretAccess } from "./fixtures";
 
 let database: TestD1Database;
 const channelId = "channel-1";
@@ -65,6 +66,7 @@ const contextFor = (
 ): ModuleAlarmContext => ({
   DB: database as unknown as D1Database,
   channelId,
+  secrets: unusedModuleSecretAccess,
     ballots: {
     open: () => Promise.reject(new Error("not used")),
     cast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
@@ -399,6 +401,7 @@ describe("timer alarm execution", () => {
     const context: ModuleAlarmContext = {
       DB: database as unknown as D1Database,
       channelId,
+      secrets: unusedModuleSecretAccess,
     ballots: {
         open: () => Promise.reject(new Error("not used")),
         cast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),

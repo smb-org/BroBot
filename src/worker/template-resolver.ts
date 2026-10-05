@@ -8,7 +8,7 @@ import {
 } from "../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 import { templateLanguageText } from "../modules/template-language";
-import type { BotModule, ModuleChannelInfo, ModuleChannelLocation, ModuleDiagnostic, ModuleEvent, ModuleExternalFetchBudget, ModuleFollowedAt, ModuleLanguage, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
+import type { BotModule, ModuleChannelInfo, ModuleChannelLocation, ModuleDiagnostic, ModuleEvent, ModuleExternalFetchBudget, ModuleFollowedAt, ModuleLanguage, ModuleSecretReadAccess, ModuleStreamState, ModuleTemplateConditionContext, ModuleTemplateRenderMode, ModuleTemplateValueContext, ModuleTextBlockConditionDefinition } from "../modules/contract";
 import { formatCount } from "../text";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN } from "../contracts/template-names";
@@ -39,6 +39,8 @@ export interface TemplateValueProvider {
 
 export interface TemplateResolverSources {
   DB: D1Database;
+  /** Returns read-only secrets scoped to the module whose provider is resolving values. */
+  moduleSecrets?: (moduleId: string) => ModuleSecretReadAccess;
   publicOrigin?: string;
   externalFetchBudget?: ModuleExternalFetchBudget;
   channelInfo: () => Promise<ModuleChannelInfo | null>;
@@ -64,6 +66,11 @@ export interface TemplateResolverSources {
 const valueFrom = (value: unknown): string | null => typeof value === "string" && value.length > 0 ? value : null;
 const recordFrom = (value: unknown): Readonly<Record<string, unknown>> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : null;
+
+const unavailableModuleSecrets: ModuleSecretReadAccess = {
+  status: () => Promise.resolve({ configured: false, updatedAt: null }),
+  read: () => Promise.resolve(null),
+};
 
 const payloadString = (event: ModuleEvent, key: string): string | null => valueFrom(event.payload[key]);
 
@@ -348,6 +355,7 @@ export const createTemplateRenderer = (
   const providerContext: ModuleTemplateValueContext = {
     DB: sources.DB,
     channelId: event.channelId,
+    secrets: unavailableModuleSecrets,
     templateContext: context,
     knownTemplateVariableNames: knownVariableNames,
     chatStatus: event.chatStatus,
@@ -399,6 +407,10 @@ export const createTemplateRenderer = (
     dynamicTemplateVariableNames: new Set((sources.templateValueProviders ?? [])
       .flatMap((provider) => provider.dynamicTemplateVariableNames ?? [])),
   };
+  const providerContextFor = (moduleId: string): ModuleTemplateValueContext => ({
+    ...providerContext,
+    secrets: sources.moduleSecrets?.(moduleId) ?? unavailableModuleSecrets,
+  });
   for (const provider of sources.templateValueProviders ?? []) {
     const declaredNames = new Set(provider.variables
       .filter((variable) => variable.contexts?.includes(context) ?? true)
@@ -410,7 +422,7 @@ export const createTemplateRenderer = (
     if (provider.resolveTemplateValues === undefined) continue;
     let resolved: Readonly<Record<string, string>>;
     try {
-      resolved = await provider.resolveTemplateValues(requestedNames, providerContext);
+      resolved = await provider.resolveTemplateValues(requestedNames, providerContextFor(provider.moduleId));
     } catch {
       if (mode === "overlay") {
         requestedNames.forEach((name) => { addDiagnostic({ code: "template.lookup_unavailable", detail: { name } }); });
@@ -443,7 +455,7 @@ export const createTemplateRenderer = (
     if (declared?.parameters !== "currency_pair" && declared?.parameters !== "api_source_name") continue;
     try {
       const resolvedParameter = parameter ?? "";
-      const value = await provider.resolveTemplateParameter(name, resolvedParameter, providerContext);
+      const value = await provider.resolveTemplateParameter(name, resolvedParameter, providerContextFor(provider.moduleId));
       if (value !== null) parameterValuesByToken.set(`${name}\u0000${resolvedParameter}`, value);
     } catch {
       const unavailable = provider.templateUnavailableText?.[language];

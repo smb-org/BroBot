@@ -22,6 +22,7 @@ import { helixRequest } from "../twitch/helix";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { moduleBallots } from "../module-ballots";
+import { createModuleSecretReadAccess } from "../module-secrets";
 
 const moduleIsEnabled = (module: BotModule, enabled: ReadonlyMap<string, boolean>): boolean =>
   module.mandatory === true || enabled.get(module.id) === true;
@@ -202,6 +203,7 @@ export const createOverlayElementContext = async (
   const externalFetchBudget = createModuleExternalFetchBudget();
   const render = createTemplateRenderer(event, "system", [], {
     DB: env.DB,
+    moduleSecrets: (providerModuleId) => createModuleSecretReadAccess(env, channelId, providerModuleId),
     publicOrigin: env.PUBLIC_ORIGIN,
     externalFetchBudget,
     channelInfo,
