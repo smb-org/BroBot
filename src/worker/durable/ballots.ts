@@ -354,6 +354,24 @@ export const readStoredBallot = async (
   });
 };
 
+/** Reads the channel-wide ballot lock without exposing another module's ballot id. */
+export const hasOpenStoredBallot = async (
+  storage: BallotStorage,
+  onFinalized?: OnBallotFinalized,
+): Promise<boolean> => await storage.transaction(async (transaction) => {
+  const active = await transaction.get<ActiveBallot>(ACTIVE_BALLOT_KEY);
+  if (!isActiveBallot(active) || !ID_PATTERN.test(active.moduleId) || !ID_PATTERN.test(active.ballotId)) {
+    if (active !== undefined) await transaction.delete(ACTIVE_BALLOT_KEY);
+    return false;
+  }
+  const ballot = await transaction.get(ballotKey(active.moduleId, active.ballotId));
+  if (!isStoredBallot(ballot) || ballot.moduleId !== active.moduleId || ballot.ballotId !== active.ballotId) {
+    await transaction.delete(ACTIVE_BALLOT_KEY);
+    return false;
+  }
+  return (await finalizeInTransaction(transaction, ballot, Date.now(), onFinalized)).outcome === "open";
+});
+
 const deleteVoters = async (
   transaction: BallotTransaction,
   moduleId: string,

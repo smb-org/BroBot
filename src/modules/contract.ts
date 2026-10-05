@@ -745,6 +745,8 @@ export interface ModuleBallotAccess {
   open: (ballotId: string, optionCount: number, expiresAt: number, rule?: BallotFinalizeRule) => Promise<BallotOpenResult>;
   cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
+  /** Reads whether any module currently owns the channel's exclusive ballot. */
+  hasOpenBallot?: () => Promise<boolean>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
   /** Atomically finalizes using the stored pass rule and returns the outcome and snapshot. */
   finalize: (ballotId: string) => Promise<BallotFinalizeResult>;

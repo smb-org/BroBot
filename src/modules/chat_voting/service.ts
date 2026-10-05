@@ -96,7 +96,7 @@ export const requestChatVoteClose = async (
   const requested = await repository.requestManualClose(channelId, vote.id, authorization);
   if (!requested) return null;
   await scheduleClose(vote.id, Date.now(), 1);
-  return vote;
+  return { ...vote, closeReason: "manual" };
 };
 
 const messageText = (event: ModuleEvent): string | null => {

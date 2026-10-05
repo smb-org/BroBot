@@ -1455,10 +1455,16 @@ describe("ChannelObject realtime path", () => {
     await object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 14_410_000, 0);
     await object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 10_000, 1);
     await object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 14_410_000, 0);
+    await Promise.all([
+      object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 10_000, 1),
+      object.scheduleModuleAlarm("chat_voting", "close", "poll-a", 10_000, 1),
+    ]);
 
     expect(storageOf(object).values.get("channel:alarm_schedule")).toMatchObject({
       [alarmKey]: { deadline: 10_000, ownerRevision: 1 },
     });
+    expect(Object.keys(storageOf(object).values.get("channel:alarm_schedule") as Record<string, unknown>)
+      .filter((key) => key === alarmKey)).toHaveLength(1);
   });
 
   it("allows only one open ballot per channel across modules", async () => {
@@ -1471,6 +1477,18 @@ describe("ChannelObject realtime path", () => {
       status: "busy",
       moduleId: "chat_voting",
     });
+  });
+
+  it("reports whether a shared ballot is open without requiring its module id", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+
+    await expect(object.hasOpenBallot()).resolves.toBe(false);
+    await object.openBallot("votekick", "kick-a", 2, 20_000);
+    await expect(object.hasOpenBallot()).resolves.toBe(true);
+    await object.closeBallot("votekick", "kick-a");
+    await expect(object.hasOpenBallot()).resolves.toBe(false);
   });
 
   it("preserves an active ballot alarm when another open uses the same id or invalid arguments", async () => {

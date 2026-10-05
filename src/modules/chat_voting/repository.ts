@@ -102,8 +102,10 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
   async requestManualClose(channelId, pollId, authorization) {
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
-      `UPDATE chat_votes SET close_reason = 'manual'
-        WHERE channel_id = ? AND poll_id = ? AND status = 'open' ${guard}`,
+      `UPDATE chat_votes
+          SET close_reason = 'manual'
+        WHERE channel_id = ? AND poll_id = ? AND status = 'open'
+          AND close_reason IN ('timer', 'limit', 'manual') ${guard}`,
     ).bind(channelId, pollId, ...(authorization?.values ?? []));
     const result = await statement.run();
     return result.meta.changes > 0;

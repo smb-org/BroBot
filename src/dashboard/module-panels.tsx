@@ -234,6 +234,8 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [conflict, setConflict] = useState(false);
+  const [touchedFields, setTouchedFields] = useState<ReadonlySet<string>>(() => new Set());
+  const [validationAttempted, setValidationAttempted] = useState(false);
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [localIssues, setLocalIssues] = useState<Readonly<Record<string, { unknown: readonly string[]; worstCaseExceeded: boolean }>>>({});
   const reportTemplateIssues = useCallback((key: string, issues: { unknown: readonly string[]; worstCaseExceeded: boolean }): void => {
@@ -272,7 +274,11 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       spec={spec}
       sectionId={sectionId}
       settings={value}
-      onChange={(key, next) => { setValue((current) => ({ ...current, [key]: next })); setDirty(true); setSaved(false); setConflict(false); setError(undefined); }}
+      onChange={(key, next) => {
+        setValue((current) => ({ ...current, [key]: next }));
+        setTouchedFields((current) => new Set(current).add(key));
+        setDirty(true); setSaved(false); setConflict(false); setError(undefined);
+      }}
       texts={copy}
       variables={templateVariableOptions}
       templateMetadata={templateMetadata}
@@ -285,28 +291,37 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       onIssuesChange={reportTemplateIssues}
     />
   );
-  const fieldErrors: Record<string, string> = {};
-  const collectErrors = (fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"]): void => {
-    for (const field of fields) {
-      const current = value[field.key];
-      if (field.kind === "number" && (typeof current !== "number" || !Number.isInteger(current) || current < field.min || current > field.max)) {
-        fieldErrors[field.key] = typeof current !== "number" ? copy.numberMissing : copy.invalidMessage;
-      } else if (field.kind === "timeoutDurationRange") {
-        const range = current !== null && typeof current === "object" ? current as { minSeconds?: unknown; maxSeconds?: unknown } : null;
-        if (range === null || !Number.isInteger(range.minSeconds) || !Number.isInteger(range.maxSeconds) ||
-            (range.minSeconds as number) < field.min || (range.minSeconds as number) > (range.maxSeconds as number) ||
-            (range.maxSeconds as number) > field.max) fieldErrors[field.key] = copy.invalidMessage;
-      } else if ((field.kind === "text" || field.kind === "template") && (typeof current !== "string" || (field.kind !== "template" || !field.optional) && current.trim().length === 0)) {
-        fieldErrors[field.key] = copy.fields[field.key]?.requiredError ?? copy.invalidMessage;
-      } else if (field.kind === "text" && field.maxLength !== undefined && typeof current === "string" && current.length > field.maxLength) {
-        fieldErrors[field.key] = copy.invalidMessage;
-      } else if (field.kind === "template" && typeof current === "string" && current.length > 500) {
-        fieldErrors[field.key] = copy.invalidMessage;
+  const collectErrors = (includeUntouched = false): Record<string, string> => {
+    const errors: Record<string, string> = {};
+    const collect = (fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"]): void => {
+      for (const field of fields) {
+        const current = value[field.key];
+        if (field.kind === "number" && (typeof current !== "number" || !Number.isInteger(current) || current < field.min || current > field.max)) {
+          errors[field.key] = typeof current !== "number" ? copy.numberMissing : copy.invalidMessage;
+        } else if (field.kind === "timeoutDurationRange") {
+          const range = current !== null && typeof current === "object" ? current as { minSeconds?: unknown; maxSeconds?: unknown } : null;
+          if (range === null || !Number.isInteger(range.minSeconds) || !Number.isInteger(range.maxSeconds) ||
+              (range.minSeconds as number) < field.min || (range.minSeconds as number) > (range.maxSeconds as number) ||
+              (range.maxSeconds as number) > field.max) errors[field.key] = copy.invalidMessage;
+        } else if (field.kind === "text" || field.kind === "template") {
+          if (typeof current !== "string" || (!field.optional && current.trim().length === 0)) {
+            errors[field.key] = copy.fields[field.key]?.requiredError ?? copy.invalidMessage;
+          } else if (field.kind === "text" && field.maxLength !== undefined && current.length > field.maxLength) {
+            errors[field.key] = copy.invalidMessage;
+          } else if (field.kind === "text" && field.validate !== undefined &&
+              (includeUntouched || validationAttempted || touchedFields.has(field.key)) && !field.validate(current)) {
+            errors[field.key] = copy.fields[field.key]?.invalidError ?? copy.invalidMessage;
+          } else if (field.kind === "template" && current.length > 500) {
+            errors[field.key] = copy.invalidMessage;
+          }
+        }
+        if (field.kind === "switchCard" && field.children !== undefined) collect(field.children);
       }
-      if (field.kind === "switchCard" && field.children !== undefined) collectErrors(field.children);
-    }
+    };
+    collect(spec.sections.flatMap((section) => section.fields));
+    return errors;
   };
-  collectErrors(spec.sections.flatMap((section) => section.fields));
+  const fieldErrors = collectErrors(validationAttempted);
   const invalid = Object.keys(fieldErrors).length > 0;
   const warnings = [
     ...serverWarnings.map(copy.warningLabel),
@@ -339,7 +354,10 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
     };
   });
   const save = async (): Promise<string | null> => {
-    if (invalid) return copy.invalidMessage;
+    if (Object.keys(collectErrors(true)).length > 0) {
+      setValidationAttempted(true);
+      return copy.invalidMessage;
+    }
     if (pending || conflict || !canManageContent) return copy.saveError;
     setPending(true); setError(undefined); setSaved(false);
     try {
@@ -348,6 +366,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       setBaseline({ settings: response.settings, revision: response.revision });
       setDirty(false);
       setSaved(true);
+      setValidationAttempted(false);
       setServerWarnings(response.warnings);
       return null;
     } catch (caught) {
@@ -360,7 +379,10 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       return message;
     } finally { setPending(false); }
   };
-  const discard = (): void => { setValue(baseline.settings); setDirty(false); setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({}); };
+  const discard = (): void => {
+    setValue(baseline.settings); setTouchedFields(new Set()); setValidationAttempted(false);
+    setDirty(false); setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({});
+  };
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
   const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={value} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;

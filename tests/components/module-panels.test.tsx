@@ -30,10 +30,11 @@ const editorFixture = vi.hoisted(() => {
     disabledLabel: language === "de" ? "Aus" : "Off",
     templateMessages: textAreaMessages,
     warningLabel: () => language === "de" ? "Eine Vorlage enthält einen unbekannten Platzhalter." : "A template contains an unknown variable.",
-    sections: { general: language === "de" ? "Allgemein" : "General" },
+    sections: { general: language === "de" ? "Allgemein" : "General", extra: language === "de" ? "Weitere" : "Extra" },
     fields: {
       amount: { label: language === "de" ? "Menge" : "Amount", hint: language === "de" ? "Eine ganze Zahl." : "A whole number.", unit: "Stück", increaseLabel: "Increase amount", decreaseLabel: "Decrease amount" },
       handle: { label: language === "de" ? "Konto" : "Handle", hint: language === "de" ? "Twitch-Name." : "Twitch name." },
+      labels: { label: language === "de" ? "Abstimmungslabels" : "Vote labels", hint: language === "de" ? "Leer lassen für Standardwerte." : "Leave blank to use defaults.", placeholder: "Yes|No", invalidError: language === "de" ? "Gib zwei gültige Labels ein." : "Enter two valid labels." },
       message: { label: language === "de" ? "Nachricht" : "Message", hint: language === "de" ? "Vorlage für die Nachricht." : "Message template.", previewLabel: "Preview", previewSpeaker: "Bot", variables: [{ name: "viewer", description: "Viewer name.", sample: "Ada" }] },
       mode: { label: language === "de" ? "Modus" : "Mode", hint: language === "de" ? "Wähle einen Modus." : "Choose a mode.", options: { automatic: { label: language === "de" ? "Automatisch" : "Automatic", description: "Runs automatically." }, manual: { label: language === "de" ? "Von Hand" : "Manual", description: "Runs by hand." } } },
       enabled: { label: language === "de" ? "Zusatzaktion" : "Extra action", hint: language === "de" ? "Schaltet die Zusatzaktion ein." : "Turns on the extra action.", description: language === "de" ? "Zusätzliche Aktion ausführen." : "Run an extra action." },
@@ -41,13 +42,17 @@ const editorFixture = vi.hoisted(() => {
     },
   });
   const definition = {
-    spec: { sections: [{ id: "general", icon: "tabSettings", fields: [
-      { kind: "number", key: "amount", min: 0, max: 10, step: 1 },
-      { kind: "text", key: "handle", prefix: "@", maxLength: 32 },
-      { kind: "template", key: "message", preview: (template: string, samples: Readonly<Record<string, string>>) => template.replace("{viewer}", samples.viewer ?? "") },
-      { kind: "segment", key: "mode", options: [{ value: "automatic" }, { value: "manual" }] },
-      { kind: "switchCard", key: "enabled", children: [{ kind: "number", key: "threshold", min: 0, max: 10, step: 1 }] },
-    ] }] },
+    spec: { sections: [
+      { id: "general", icon: "tabSettings", fields: [
+        { kind: "number", key: "amount", min: 0, max: 10, step: 1 },
+        { kind: "text", key: "handle", prefix: "@", maxLength: 32 },
+        { kind: "text", key: "labels", optional: true, validate: (value: string) => value.trim().length === 0 || value === "Yes|No" },
+        { kind: "template", key: "message", preview: (template: string, samples: Readonly<Record<string, string>>) => template.replace("{viewer}", samples.viewer ?? "") },
+        { kind: "segment", key: "mode", options: [{ value: "automatic" }, { value: "manual" }] },
+        { kind: "switchCard", key: "enabled", children: [{ kind: "number", key: "threshold", min: 0, max: 10, step: 1 }] },
+      ] },
+      { id: "extra", icon: "tabSettings", fields: [] },
+    ] },
     locales: { de: catalog("de"), en: catalog("en") },
   };
   return { definition, loader: vi.fn(() => Promise.resolve({ default: definition })) };
@@ -75,8 +80,8 @@ vi.mock("../../src/modules/registry", () => ({
     {
       id: "editor-fixture",
       navigationCategory: "chat",
-      settingsSchema: { shape: { amount: {}, handle: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
-      defaultSettings: { amount: 2, handle: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
+      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
+      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
       templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },
       settingsEditor: editorFixture.loader,
     },
@@ -89,7 +94,7 @@ import { ModuleNavigation, ModulePanelMount, ModulePage, ModuleWorkspace } from 
 import { useDashboardRoute } from "../../src/dashboard/router";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
-const editorFixtureSettings = { amount: 2, handle: "ada", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 };
+const editorFixtureSettings = { amount: 2, handle: "ada", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 };
 
 const renderSettingsFixture = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof render> => {
   vi.stubGlobal("fetch", fetcher);
@@ -231,6 +236,30 @@ describe("Module panel loader", () => {
     expect(icon).toHaveClass("module-glyph");
     expect(icon?.querySelector("rect")).toBeNull();
     expect(icon?.querySelector("path")).toBeInTheDocument();
+  });
+
+  it("allows blank optional labels and waits for interaction before showing their validation error", async () => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
+        : Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    const labels = await screen.findByRole("textbox", { name: "Abstimmungslabels" });
+    expect(labels).toHaveAttribute("placeholder", "Yes|No");
+    expect(labels).toHaveValue("");
+    expect(screen.queryByText("Gib zwei gültige Labels ein.")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Allgemein" })).toBeInTheDocument();
+
+    fireEvent.change(labels, { target: { value: "Yes|" } });
+    expect(await screen.findByText("Gib zwei gültige Labels ein.")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Allgemein, Fehler" })).toBeInTheDocument();
+
+    fireEvent.change(labels, { target: { value: "" } });
+    expect(screen.queryByText("Gib zwei gültige Labels ein.")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Allgemein" })).toBeInTheDocument();
   });
 
   it("shows the module name and state once in the row", () => {
@@ -411,6 +440,7 @@ describe("Module panel loader", () => {
       settings: {
         amount: 3,
         handle: "Ada",
+        labels: "",
         message: "Willkommen {viewer}!",
         mode: "manual",
         enabled: true,

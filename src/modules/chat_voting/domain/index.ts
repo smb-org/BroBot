@@ -7,6 +7,18 @@ export type VoteCommand =
   | { kind: "end" }
   | { kind: "help" };
 
+export type VoteLabelSetting = "yesNoLabels" | "scaleLabels" | "optionLabels";
+
+export const isValidVoteLabelSetting = (value: string, setting: VoteLabelSetting): boolean => {
+  if (value.trim().length === 0) return true;
+  const labels = value.split("|").map((label) => label.trim());
+  const [minimum, maximum] = setting === "yesNoLabels" ? [2, 2]
+    : setting === "scaleLabels" ? [5, 5]
+      : [2, 9];
+  return labels.length >= minimum && labels.length <= maximum &&
+    labels.every((label) => label.length > 0 && label.length <= 32);
+};
+
 export const parseVoteCommand = (text: string): VoteCommand | null => {
   const match = /^!vote(?:\s+([^\s]+))?\s*$/iu.exec(text.trim());
   if (match === null) return null;

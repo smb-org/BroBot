@@ -8,7 +8,7 @@ import {
   type ChatVotingSettings,
 } from "../../src/modules/chat_voting/contracts";
 import type { ChatVotingRepository } from "../../src/modules/chat_voting/repository";
-import { processChatVotingMessage, startChatVote } from "../../src/modules/chat_voting/service";
+import { processChatVotingMessage, requestChatVoteClose, startChatVote } from "../../src/modules/chat_voting/service";
 
 const openVote: ChatVote = {
   id: "fictional-poll",
@@ -178,7 +178,7 @@ describe("chat voting event service", () => {
   });
 
   it("rejects !vote end from a viewer and schedules a moderator close with a newer alarm revision", async () => {
-    const requestManualClose = vi.fn(() => Promise.resolve(true));
+    const requestManualClose = vi.fn<ChatVotingRepository["requestManualClose"]>(() => Promise.resolve(true));
     const repository = repositoryWith({
       open: vi.fn(() => Promise.resolve(openVote)),
       requestManualClose,
@@ -193,5 +193,31 @@ describe("chat voting event service", () => {
     expect(allowed.actions).toEqual([{ kind: "chat", text: "The vote is closing.", automated: false }]);
     expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined);
     expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), 1);
+  });
+
+  it("keeps a manual close request after scheduling fails and retries on the next request", async () => {
+    const requestManualClose = vi.fn<ChatVotingRepository["requestManualClose"]>(() => Promise.resolve(true));
+    const scheduleClose = vi.fn<(pollId: string, deadline: number, revision: number) => Promise<void>>(() => Promise.resolve())
+      .mockRejectedValueOnce(new Error("alarm unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const repository = repositoryWith({
+      open: vi.fn(() => Promise.resolve(openVote)),
+      requestManualClose,
+    });
+
+    await expect(requestChatVoteClose(repository, "fictional-channel", scheduleClose))
+      .rejects.toThrow("alarm unavailable");
+    await expect(requestChatVoteClose(repository, "fictional-channel", scheduleClose))
+      .resolves.toMatchObject({ closeReason: "manual" });
+
+    expect(requestManualClose).toHaveBeenCalledTimes(2);
+    expect(requestManualClose).toHaveBeenNthCalledWith(1, "fictional-channel", "fictional-poll", undefined);
+    expect(requestManualClose).toHaveBeenNthCalledWith(2, "fictional-channel", "fictional-poll", undefined);
+    expect(scheduleClose).toHaveBeenCalledTimes(2);
+    for (const [pollId, deadline, revision] of scheduleClose.mock.calls) {
+      expect(pollId).toBe("fictional-poll");
+      expect(deadline).toEqual(expect.any(Number));
+      expect(revision).toBe(1);
+    }
   });
 });
