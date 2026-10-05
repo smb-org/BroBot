@@ -149,8 +149,9 @@ Das Modul schreibt weder selbst in `event_log` noch verwendet es eine
 Logging-API. Das Modul begründet Nicht-Handeln. Der Host kennt Kanal, Modul,
 `triggerId`, auslösenden Nutzer und Zeitpunkt und protokolliert Handeln und
 dessen Ausgang mit host-erzeugten Diagnosen wie `host.chat.sent` oder
-`host.shoutout.failed` samt Ursache. Dieselbe Schreibfunktion übernimmt
-auch die Begrenzung und Löschung der Zeilen.
+`host.shoutout.failed` samt Ursache. Die Schreibfunktion
+fügt nur ein; Aufbewahrungsfrist und Zeilenlimit setzt die geplante Wartung
+(`scheduled`) separat durch.
 
 Der Host mountet registrierte Modulrouten kanalbezogen unter
 `/api/channels/:channelId/modules/<id>`. Textbefehle stellen dort die
@@ -373,8 +374,9 @@ const { outcome, counts } = await context.ballots.finalize(id); // passed | expi
   rechnet nie selbst nach.
 - `finalize` ist **idempotent**: Wiederholen liefert denselben Ausgang. Ein
   finalisierter Ballot bleibt mit eingefrorenem Zählerstand lesbar und weist
-  Stimmen mit `not_open` ab. **Erst `close` (bzw. `acknowledgeClosed` nach dem
-  Persistieren des Ergebnisses) entfernt den Wiederholungs-Snapshot**; den
+  Stimmen mit `not_open` ab. `close` löscht die Ballotdaten und legt einen
+  Wiederholungs-Snapshot für wiederholte Closes ab; erst `acknowledgeClosed`
+  (nach dem Persistieren des Ergebnisses) entfernt ihn**. Den
   Kanalplatz gibt bereits die terminale Finalisierung frei, ein anderes Modul
   kann also schon vorher einen neuen Ballot öffnen.
 - Gespeichert werden nur Zähler, Revision und je Person ein HMAC; Ergebniszeilen
@@ -472,7 +474,8 @@ immediateActions: { requires: ["streamLive"], load: () => import("./panel/immedi
 **Grenzen:** `requires` listet Bedingungen, die der Host selbst auswertet
 (derzeit nur `streamLive`); er übergibt `availabilityReason` lokalisiert an die
 Karte, die ihre Steuerung entsprechend sperrt. `load` bleibt ein lazy `import()`,
-damit ein deaktiviertes Modul null Bytes kostet. Die Karte ruft Modulrouten auf;
+damit ein deaktiviertes Modul null Bytes kostet. Die Karte ruft Modul- oder Host-Routen auf (Clip und Raid
+nutzen `/api/channels/:channelId/clips` bzw. `/shoutout`);
 die Serverseite prüft Berechtigung und Stream-Zustand erneut.
 
 ### Overlay-Elemente (`overlayElements`)
@@ -577,8 +580,9 @@ D1-Lesezugriff auf Variablen noch eine Helix-Anfrage aus, und Kanalvariablen
 werden mit einer einzigen `channel_id`-gebundenen Abfrage gelesen.
 
 Variablenaktionen von Textbefehlen liegen in `text_commands` und werden vom Host
-vorbereitet. Die Aktualisierung teilt sich den Claim-Batch des Befehls und hängt
-am `changes()`-Ergebnis des Claims; eine Ablehnung wegen Abkühlzeit ändert den
+vorbereitet. Die Aktualisierung teilt sich den Claim-Batch des Befehls und läuft
+vor dem Claim; dieser prüft ihr `changes()`-Ergebnis. Die Abkühlzeit sichern
+Prädikate in der Variablenaktualisierung selbst, eine Ablehnung ändert den
 Wert daher nie. Revisionsprüfung, Alias-Index und Reihenfolge der
 Abkühlzeit-Aktualisierung bleiben erhalten.
 
@@ -631,8 +635,8 @@ Name, Koordinaten und Standortzeitzone in `channels` und stellt sie Sun über
 Sonnenaufgang, Sonnenuntergang, bürgerliche Dämmerung, Sonnenhöchststand,
 Tageslänge sowie goldene und blaue Stunde berechnet das Modul bei jeder
 Auflösung lokal mit NOAA-Gleichungen nach Meeus. Die Ausgabezeiten folgen
-weiterhin der Kanalzeitzone. Bei Polartag gilt die Sonnenphase als Tag, bei
-Polarnacht als Nacht; fehlende Ereigniszeiten verwenden den konfigurierbaren
+weiterhin der Kanalzeitzone. Bei Polartag bzw. Polarnacht liefert die Höhenwinkel-Phase
+weiterhin `golden_hour` oder `blue_hour` vorrangig; sonst gilt Tag bzw. Nacht; fehlende Ereigniszeiten verwenden den konfigurierbaren
 zweisprachigen Fehlertext.
 
 Die Monddatenquelle unter `src/modules/moon/` berechnet Mondphase, Beleuchtung
