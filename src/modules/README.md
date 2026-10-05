@@ -109,7 +109,11 @@ Der Zielkanal kommt aus dem geprüften Ereignis und wird dem Modul in
 `ModuleEvent.channelId` mitgeteilt. Der Host löst außerdem den Akteur anhand
 von `channel_members` auf und übergibt `actor` mit User-ID, Login und Rolle.
 Eine Rolle `null` bedeutet, dass der Nutzer kein Mitglied dieses Kanals ist;
-`actor: null` bedeutet, dass das Ereignis keinen Nutzer enthält.
+`actor: null` bedeutet nur, dass der Payload kein `chatter_user_id` trägt: Der
+Host wertet ausschließlich dieses Feld aus. Ein Raid-Ereignis enthält
+`from_broadcaster_user_id`, erhält aber trotzdem `actor: null`. Wer
+Berechtigungen aus `actor` ableitet, darf `null` daher nicht als „kein Nutzer
+beteiligt“ lesen.
 Bei `channel.chat.message` leitet der Host zusätzlich aus den Twitch-Badges
 den eigenständigen `ModuleEvent.chatStatus` ab. `founder` zählt dabei als
 `subscriber`; `moderator` und `broadcaster` erfüllen auch niedrigere Stufen.
@@ -117,7 +121,7 @@ Ereignisse ohne Chatbezug tragen dort `null`. Ein Modul kann keinen anderen
 Kanal angeben — die Mandantentrennung liegt beim Host.
 
 Wirft `handleEvent`, hält das weder den Worker noch die übrigen Module auf. Der
-Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
+Fehler landet als `host.module.error` im Ereignisprotokoll.
 
 Ein Modul beschreibt gewünschte Aktionen in der geordneten Liste
 `ModuleResult.actions`; die Reihenfolge bleibt erhalten, neue Aktionsarten kommen
@@ -144,8 +148,8 @@ kleinen Werte, die den Grund erklären, und wird vom Host als JSON gespeichert.
 Das Modul schreibt weder selbst in `event_log` noch verwendet es eine
 Logging-API. Das Modul begründet Nicht-Handeln. Der Host kennt Kanal, Modul,
 `triggerId`, auslösenden Nutzer und Zeitpunkt und protokolliert Handeln und
-dessen Ausgang mit host-erzeugten Diagnosen wie `chat.gesendet` oder
-`shoutout.fehlgeschlagen` samt Ursache. Dieselbe Schreibfunktion übernimmt
+dessen Ausgang mit host-erzeugten Diagnosen wie `host.chat.sent` oder
+`host.shoutout.failed` samt Ursache. Dieselbe Schreibfunktion übernimmt
 auch die Begrenzung und Löschung der Zeilen.
 
 Der Host mountet registrierte Modulrouten kanalbezogen unter
@@ -294,11 +298,13 @@ return { actions: [{ kind: "chat", text, target: "source_only" }], diagnostics: 
   Das Modul platziert sie nicht selbst.
 - **Automatisierungsgrenze:** Automatische Chat-Ausgaben laufen durch eine
   gemeinsame Kanalbegrenzung von höchstens einer Nachricht je fünf Sekunden
-  (isolatübergreifend). Ausgaben ohne freien Platz werden verworfen, nicht
+  (isolatübergreifend). Event-Aktionen ohne freien Platz werden verworfen, nicht
   vorgemerkt; der Host protokolliert `automated_output_rate_limited`. Als
   automatisch gilt jede Ausgabe, außer das Modul setzt `automated: false`
   (direkt angeforderte Befehlsantworten). Alarme senden über
-  `ModuleAlarmContext.sendChat` mit Idempotenzschlüssel; Nachrichten sind auf
+  `ModuleAlarmContext.sendChat` mit Idempotenzschlüssel; bei Ratenbegrenzung
+  liefert es `retryable: true`, der Alarm-Handler wirft dann und der Host
+  wiederholt ihn (Timer und Chat-Abstimmung tun das); Nachrichten sind auf
   500 Zeichen begrenzt.
 - `onDelivery(delivery)` an einer Chataktion meldet `sent`, `rejected`,
   `ambiguous` oder `not_attempted`, damit ein Modul einen Claim (z. B.
@@ -346,7 +352,7 @@ in `src/modules/contracts/moderation.ts`.
 
 ```ts
 const opened = await context.ballots.open(id, 2, expiresAt, {
-  passIf: { yes: 1, no: 2, netAtLeast: 5 },
+  passIf: { yes: 0, no: 1, netAtLeast: 5 },
 });
 if (opened.status === "busy") return busyResult(opened.moduleId);
 const choice = ballotChoiceFromMessage(text, 2);        // null unless a lone digit
@@ -368,10 +374,12 @@ const { outcome, counts } = await context.ballots.finalize(id); // passed | expi
 - `finalize` ist **idempotent**: Wiederholen liefert denselben Ausgang. Ein
   finalisierter Ballot bleibt mit eingefrorenem Zählerstand lesbar und weist
   Stimmen mit `not_open` ab. **Erst `close` (bzw. `acknowledgeClosed` nach dem
-  Persistieren des Ergebnisses) gibt den Kanalplatz frei**; vorher blockiert er
-  neue Ballots, damit ein Modul die Weiterverarbeitung wiederholen kann.
+  Persistieren des Ergebnisses) entfernt den Wiederholungs-Snapshot**; den
+  Kanalplatz gibt bereits die terminale Finalisierung frei, ein anderes Modul
+  kann also schon vorher einen neuen Ballot öffnen.
 - Gespeichert werden nur Zähler, Revision und je Person ein HMAC; Ergebniszeilen
-  in D1 enthalten nur Aggregate. Overlays lesen über
+  in D1 enthalten keine einzelnen Wählerkennungen (Votekick speichert zusätzlich
+  Ziel und Initiator und löscht sie nach 14 Tagen). Overlays lesen über
   `ModuleOverlayElementContext.readBallot` ausschließlich den Ballot des eigenen
   Moduls.
 
@@ -529,11 +537,14 @@ alarms: [{
 
 **Grenzen:**
 
-- **Der Handler wirft nicht für Zustände, die sich nie bessern.** Der Host fängt
-  einen Fehler ab, protokolliert ihn und wiederholt mit `retryDelaysMs` (letzter
-  Wert wird wiederverwendet). Ein gelöschter Eintrag, eine überholte `ownerRevision` oder ein bereits erledigter Vorgang beenden den
-  Handler daher mit normalem Rückgabewert, optional mit `clear`. Geworfen wird nur
-  bei vorübergehenden Fehlern, bei denen eine Wiederholung hilft. Deshalb muss der
+- **Der Host wiederholt jede geworfene Ausnahme.** Er klassifiziert keine
+  vorübergehenden Fehler, sondern protokolliert und wiederholt mit
+  `retryDelaysMs` (letzter Wert wird unbegrenzt wiederverwendet). Bei veralteter
+  Arbeit (gelöschter Eintrag, überholte `ownerRevision`, erledigter Vorgang)
+  kehrt der Handler daher einfach normal zurück; ein normaler Rückgang schließt
+  nur den unveränderten, beanspruchten Eintrag ab und lässt neuere Pläne
+  unberührt. Ein ausdrückliches `clear` trägt `ownerRevision`. Geworfen wird nur,
+  wenn eine Wiederholung gewollt ist. Deshalb muss der
   Handler **idempotent** sein und jeden Zustand selbst prüfen, statt dem Alarm zu
   vertrauen.
 - `ownerRevision` verhindert, dass ein veralteter Alarm einen neu geplanten
@@ -546,8 +557,10 @@ alarms: [{
 - `onScheduleInputsChanged(context, reason)` plant dauerhafte Pläne neu bei
   `event_times`, `channel_time_zone` und `activation`. **`activation`** deckt den
   Fall ab, dass ein Modul oder der Kanal ausgeschaltet war: der Host stellt ein
-  Ereignis nur an aktivierte Module in nicht pausierten Kanälen zu, ein
-  `stream.online` im ausgeschalteten Zustand erreicht das Modul nie.
+  Ereignis nur an aktivierte Module zu, ein `stream.online` im
+  ausgeschalteten Zustand erreicht das Modul nie. Eine Kanalpause hält
+  Dispatch an nicht verpflichtende Module an; `mandatory`-Module (etwa
+  `channel_events` mit `stream.online`) erhalten Ereignisse trotzdem.
 - Routen können einen Handler sofort ausführen
   (`runModuleAlarm(channelId, moduleId, handlerKey, alarmKey)`); dort gibt es
   keine automatische Wiederholung.
@@ -576,10 +589,11 @@ oder Verwalter des Kanals ruft `GET /api/channels/:channelId/modules` auf, um di
 Registry mit dem gespeicherten Zustand jedes Moduls zu sehen, und schaltet es über
 `PATCH /api/channels/:channelId/modules/:moduleId` mit `{ "enabled": true }` ein oder
 aus. Ein `operator` darf die Liste lesen, aber nicht schreiben. Beim Einschalten
-schreibt der Worker `defaultSettings` des Moduls in `channel_modules.settings`; eine
-eigene Route zum Bearbeiten von Einstellungen gibt es bewusst nicht — dafür ist
-`module.panel` aus dem Contract vorgesehen, sobald ein Modul eigene Einstellungen
-braucht. Ein Modul kann zusätzlich über den Aktivierungshook einmalige, eigene
+schreibt der Worker `defaultSettings` des Moduls in `channel_modules.settings`; Einstellungen
+liest der Host über `GET /api/channels/:channelId/modules/:moduleId/settings` und
+schreibt sie über `PATCH` derselben Route (mit `settings` und `revision` im Body, Prüfung gegen
+`settingsSchema`, Verwalter-Berechtigung und Revisionskonflikt); für eigene
+Formulare ist `module.panel` bzw. `module.settingsEditor` vorgesehen. Ein Modul kann zusätzlich über den Aktivierungshook einmalige, eigene
 Initialdaten anlegen. Das erfordert keinen Deploy.
 
 Für ein Modul, dessen Einstellungen sich vollständig aus den Naht-Bauteilen
@@ -660,7 +674,7 @@ Beispiele ohne JavaScript:
 
 - **Sonnenuntergang:** URL
   `https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&daily=sunset&timezone=Europe%2FBerlin`, Ausdruck
-  `$fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]')`, Quelle `sunset`.
+  `$substring($.daily.sunset[0], 11, 5)`, Quelle `sunset`.
 - **USD nach EUR:** URL
   bei einer JSON-Antwort mit `rates.EUR` und `amount` zum Beispiel
   `$formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'`, Quelle
