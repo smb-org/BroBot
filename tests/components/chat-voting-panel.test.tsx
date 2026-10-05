@@ -173,6 +173,62 @@ describe("chat voting live panel", () => {
     expect(screen.queryByText("Configuration is locked while a vote or votekick is running.")).not.toBeInTheDocument();
   });
 
+  it("shows the stored duration of an active timed vote", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
+      vote: optionsCustomVote,
+      counts: [4, 2, 0],
+      revision: 6,
+      hasOpenBallot: true,
+      defaultDurationSeconds: 120,
+    }))));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const type = await screen.findByRole("radiogroup", { name: "Vote type" });
+    const duration = screen.getByRole("radiogroup", { name: "Duration" });
+    expect(within(type).getByRole("radio", { name: "Options 2–9" })).toBeChecked();
+    expect(within(duration).getByRole("radio", { name: "Custom" })).toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: "Custom duration" })).toHaveValue("90");
+    expect(screen.queryByText("Choose a valid duration between 0 and 14400 seconds.")).not.toBeInTheDocument();
+  });
+
+  it("keeps the idle next-vote draft separate from the active vote configuration", async () => {
+    let current: unknown = { vote: null, counts: null, revision: 0, hasOpenBallot: false, defaultDurationSeconds: 120 };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(current))));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const type = await screen.findByRole("radiogroup", { name: "Vote type" });
+    let duration = screen.getByRole("radiogroup", { name: "Duration" });
+    fireEvent.click(within(type).getByRole("radio", { name: "Scale 1–5" }));
+    fireEvent.click(within(duration).getByRole("radio", { name: "5 min" }));
+
+    current = {
+      vote: optionsCustomVote,
+      counts: [4, 2, 0],
+      revision: 1,
+      hasOpenBallot: true,
+      defaultDurationSeconds: 120,
+    };
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(within(type).getByRole("radio", { name: "Options 2–9" })).toBeChecked());
+    duration = screen.getByRole("radiogroup", { name: "Duration" });
+    expect(within(duration).getByRole("radio", { name: "Custom" })).toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: "Custom duration" })).toHaveValue("90");
+    expect(within(type).getByRole("radio", { name: "Options 2–9" })).toBeDisabled();
+
+    current = {
+      vote: { ...optionsCustomVote, status: "closed", closedAt: "2026-10-04T10:01:30.000Z", counts: [4, 2, 0], voterCount: 6 },
+      counts: [4, 2, 0],
+      revision: 2,
+      hasOpenBallot: false,
+      defaultDurationSeconds: 120,
+    };
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(within(type).getByRole("radio", { name: "Scale 1–5" })).toBeChecked());
+    duration = screen.getByRole("radiogroup", { name: "Duration" });
+    expect(within(duration).getByRole("radio", { name: "5 min" })).toBeChecked();
+    expect(within(type).getByRole("radio", { name: "Scale 1–5" })).toBeEnabled();
+  });
+
   it("discovers a chat-started vote from an idle panel on refresh", async () => {
     let current: unknown = { vote: null, counts: null, revision: 0, hasOpenBallot: false, defaultDurationSeconds: 0 };
     const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(current)));

@@ -8,6 +8,47 @@ const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/00
 const requestedDurationMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0032_chat_voting_requested_duration.sql"), "utf8");
 
 describe("chat voting migration", () => {
+  it("backfills requested timer durations without treating the four-hour hard limit as a request", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec("PRAGMA foreign_keys = ON");
+      database.exec(`
+        CREATE TABLE channels (channel_id TEXT PRIMARY KEY);
+        CREATE TABLE channel_modules (
+          channel_id TEXT NOT NULL,
+          module_id TEXT NOT NULL,
+          enabled INTEGER NOT NULL,
+          settings TEXT NOT NULL,
+          UNIQUE (channel_id, module_id),
+          FOREIGN KEY (channel_id) REFERENCES channels(channel_id) ON DELETE CASCADE
+        );
+        INSERT INTO channels (channel_id) VALUES ('fictional-channel');
+      `);
+      database.exec(migration);
+      const insertLegacyVote = database.prepare(`
+        INSERT INTO chat_votes
+          (channel_id, poll_id, preset, option_count, labels_json, status, opened_at, closes_at,
+           closed_at, close_reason, counts_json, voter_count)
+        VALUES ('fictional-channel', ?, 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, ?, '[0,0]', 0)
+      `);
+      insertLegacyVote.run("legacy-timed", "2026-10-04T10:00:00.000Z", "2026-10-04T10:01:30.000Z", "2026-10-04T10:01:30.000Z", "timer");
+      insertLegacyVote.run("legacy-hard-limit", "2026-10-04T10:00:00.000Z", "2026-10-04T14:00:00.000Z", "2026-10-04T14:00:00.000Z", "limit");
+
+      database.exec(requestedDurationMigration);
+
+      expect(database.prepare(`
+        SELECT poll_id, requested_duration_seconds
+          FROM chat_votes
+         ORDER BY poll_id
+      `).all()).toEqual([
+        { poll_id: "legacy-hard-limit", requested_duration_seconds: null },
+        { poll_id: "legacy-timed", requested_duration_seconds: 90 },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("seeds enabled module settings and stores aggregate results with one open vote per channel", () => {
     const database = new DatabaseSync(":memory:");
     try {
