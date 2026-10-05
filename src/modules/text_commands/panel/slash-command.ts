@@ -34,6 +34,30 @@ const isTimeoutDuration = (value: string): { minSeconds: number; maxSeconds: num
     : null;
 };
 
+// Linear-time scanning helpers (replace regexes that SonarCloud flagged as super-linear).
+const skipBlanks = (text: string, from: number): number => {
+  let index = from;
+  while (text[index] === " " || text[index] === "\t") index += 1;
+  return index;
+};
+
+const parseTimeoutLine = (line: string): { duration: string; reason: string } | null => {
+  if (!line.startsWith("/timeout")) return null;
+  let index = "/timeout".length;
+  let next = skipBlanks(line, index);
+  if (next === index || !line.startsWith("{user}", next)) return null;
+  index = next + "{user}".length;
+  next = skipBlanks(line, index);
+  if (next === index) return null;
+  let end = next;
+  while (end < line.length && line[end] !== " " && line[end] !== "\t") end += 1;
+  if (end === next) return null;
+  const rest = line.slice(end);
+  // Like the former `.*`: the reason may not contain line terminators.
+  if (/[\n\r\u2028\u2029]/u.test(rest)) return null;
+  return { duration: line.slice(next, end), reason: rest.trim() };
+};
+
 export const parseLeadingSlashCommand = (text: string): LeadingSlashCommand => {
   if (!text.startsWith("/")) return { status: "none" };
 
@@ -49,23 +73,23 @@ export const parseLeadingSlashCommand = (text: string): LeadingSlashCommand => {
   const bodyText = firstLineEnd === -1 ? "" : text.slice(firstLineEnd).replace(/^\r?\n/u, "");
 
   if (command === "timeout") {
-    const match = /^\/timeout[ \t]+\{user\}[ \t]+([^ \t]+)(?:[ \t]+(.*))?$/u.exec(firstLine);
-    if (match === null) return { status: "invalid", command };
-    const duration = isTimeoutDuration(match[1] ?? "");
+    const parsed = parseTimeoutLine(firstLine);
+    if (parsed === null) return { status: "invalid", command };
+    const duration = isTimeoutDuration(parsed.duration);
     if (duration === null) return { status: "invalid", command };
     return {
       status: "valid",
       command,
       bodyText,
       ...duration,
-      reason: match[2]?.trim() ?? "",
+      reason: parsed.reason,
     };
   }
 
   if (command === "announce") {
-    const match = /^\/announce[ \t]+([\s\S]+)$/u.exec(text);
-    const announcement = match?.[1]?.trim();
-    return announcement === undefined || announcement.length === 0
+    const hasBlank = text.startsWith("/announce") && skipBlanks(text, "/announce".length) > "/announce".length;
+    const announcement = hasBlank ? text.slice("/announce".length).trim() : "";
+    return announcement.length === 0
       ? { status: "invalid", command }
       : { status: "valid", command, bodyText: announcement };
   }
