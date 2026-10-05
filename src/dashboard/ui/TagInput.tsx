@@ -11,6 +11,7 @@ export interface TagInputMessages {
 }
 
 interface TagInputBaseProps {
+  id?: string;
   label: string;
   hint: string;
   error?: string;
@@ -38,8 +39,9 @@ const normalizeEntry = (entry: string, prefix: string | undefined, normalize: ((
   return next;
 };
 
-export function TagInput({ label, hint, error, warning, invalidValues = [], value, onChange, prefix, normalize, validate, maxTags, removeLabel, disabled = false, messages, listLabel }: TagInputProps) {
-  const id = useId();
+export function TagInput({ id: suppliedId, label, hint, error, warning, invalidValues = [], value, onChange, prefix, normalize, validate, maxTags, removeLabel, disabled = false, messages, listLabel }: TagInputProps) {
+  const generatedId = useId();
+  const id = suppliedId ?? generatedId;
   const disabledReason = useDisabledFieldReason();
   const [searchValue, setSearchValue] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -137,7 +139,7 @@ export function TagInput({ label, hint, error, warning, invalidValues = [], valu
         renderPill={({ value: tag, onRemove }) => tag === undefined ? null : (
           <Pill className="ui-tag-input__pill" size="sm" withRemoveButton={false} key={tag} aria-invalid={invalidValues.includes(tag)} data-invalid={invalidValues.includes(tag) || undefined}>
             <span className="ui-tag-input__pill-label">{prefixed(tag)}</span>
-            <button className="ui-tag-input__remove" type="button" aria-label={removeLabel(prefixed(tag))} disabled={disabled} onClick={onRemove}>
+            <button className="ui-tag-input__remove" id={`${id}-remove-${encodeURIComponent(tag)}`} type="button" aria-label={removeLabel(prefixed(tag))} disabled={disabled} onClick={onRemove}>
               <Icon name="close" size={16} />
             </button>
           </Pill>

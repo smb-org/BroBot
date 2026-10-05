@@ -152,6 +152,45 @@ describe("text command options migration", () => {
     }
   });
 
+  it("allows silent timeout responses without relaxing other command kinds", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      for (const migration of readdirSync(migrationsDirectory)
+        .filter((name) => name.endsWith(".sql") && name < "0033_text_command_silent_timeout.sql")
+        .sort()) {
+        database.exec(readFileSync(resolve(migrationsDirectory, migration), "utf8"));
+      }
+      database.exec(`
+        INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+        VALUES ('channel-a', 'channel-a', 'Channel A', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+      `);
+      database.prepare(
+        `INSERT INTO text_commands (
+          channel_id, command_name, response_text, kind, revision, timeout_min_seconds, timeout_max_seconds,
+          timeout_fallback_text, timeout_reason, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run("channel-a", "existing-timeout", "Existing response", "timeout", 7, 30, 90, "Existing fallback", "Existing reason", "now", "now");
+      database.exec(readFileSync(resolve(migrationsDirectory, "0033_text_command_silent_timeout.sql"), "utf8"));
+      expect(database.prepare(
+        "SELECT kind, revision, timeout_reason FROM text_commands WHERE command_name = 'existing-timeout'",
+      ).get()).toEqual({ kind: "timeout", revision: 7, timeout_reason: "Existing reason" });
+      database.prepare(
+        `INSERT INTO text_commands (
+          channel_id, command_name, response_text, kind, timeout_min_seconds, timeout_max_seconds,
+          timeout_fallback_text, timeout_reason, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run("channel-a", "quiet", "", "timeout", 120, 120, "", "", "now", "now");
+
+      expect(database.prepare("SELECT kind, response_text, timeout_fallback_text FROM text_commands WHERE command_name = 'quiet'").get())
+        .toEqual({ kind: "timeout", response_text: "", timeout_fallback_text: "" });
+      expect(() => database.prepare(
+        "INSERT INTO text_commands (channel_id, command_name, response_text, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run("channel-a", "empty", "", "text", "now", "now")).toThrow(/CHECK constraint failed/u);
+    } finally {
+      database.close();
+    }
+  });
+
   it("preserves existing rows as replies and applies defaults to new rows", () => {
     const database = new DatabaseSync(":memory:");
     try {

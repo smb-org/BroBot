@@ -257,6 +257,37 @@ describe("Text commands panel", () => {
       .resolves.toMatchObject({ warnings: [expect.objectContaining({ unknownVariables: ["timeout.seconds"] })] });
   });
 
+  it("accepts empty timeout reply and fallback text on create and update", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const environment = environmentFor(database);
+    const collection = "/api/channels/kanal-a/modules/text_commands/commands";
+    const created = await panelRouter.fetch(
+      await requestFor("user-1", collection, "POST", {
+        name: "silent",
+        kind: "timeout",
+        text: "",
+        cooldownSeconds: 0,
+        timeoutAction: { minSeconds: 1, maxSeconds: 1, fallbackText: "" },
+      }),
+      environment,
+    );
+    expect(created.status).toBe(201);
+
+    const updated = await panelRouter.fetch(
+      await requestFor("user-1", `${collection}/silent`, "PATCH", {
+        text: " ",
+        timeoutAction: { minSeconds: 1, maxSeconds: 1, fallbackText: " " },
+      }),
+      environment,
+    );
+    expect(updated.status).toBe(200);
+    await expect(updated.json<{ command: { text: string; timeoutAction: { fallbackText: string } } }>()).resolves.toMatchObject({
+      command: { text: " ", timeoutAction: { fallbackText: " " } },
+    });
+  });
+
   it("returns the current command when a second editor saves an old revision", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");

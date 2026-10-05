@@ -489,6 +489,31 @@ describe("Text commands service", () => {
     });
   });
 
+  it("allows a silent timeout and omits empty success and failure messages", async () => {
+    const entry = {
+      ...command("roulette", "  "),
+      kind: "timeout" as const,
+      timeoutAction: { minSeconds: 30, maxSeconds: 30, fallbackText: "  " },
+    };
+    const result = await processTextCommandMessage(eventFor("!roulette"), repositoryFor([entry]), {
+      secureRandomInteger: () => 0,
+    });
+
+    expect(result.actions).toEqual([{
+      kind: "timeout",
+      userId: "user-1",
+      durationSeconds: 30,
+      reason: "!roulette",
+    }]);
+
+    const moderatorResult = await processTextCommandMessage(
+      { ...eventFor("!roulette"), chatStatus: ["moderator"] },
+      repositoryFor([entry]),
+      { secureRandomInteger: () => 0 },
+    );
+    expect(moderatorResult.actions).toEqual([]);
+  });
+
   it("keeps announcement response types on timeout follow-ups", async () => {
     const entry = {
       ...command("roulette", "Timeout applied"),

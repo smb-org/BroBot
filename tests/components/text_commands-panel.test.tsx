@@ -193,13 +193,122 @@ describe("Text command editor", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
     fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
     fireEvent.click(await screen.findByRole("option", { name: /Timeout/u }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort (optional)" }), { target: { value: "/shoutout {target}" } });
 
     const save = screen.getByRole("button", { name: "Anlegen" });
     expect(save).toBeEnabled();
     fireEvent.click(save);
 
     await waitFor(() => expect(created).toMatchObject({ kind: "shoutout", text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout }));
+  });
+
+  it("ignores errors from fields a slash conversion discards", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body;
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Timeout/u }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Höchstens" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(await screen.findByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
+    expect(created).toBeUndefined();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort (optional)" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created).toMatchObject({ kind: "shoutout" }));
+  });
+
+  it("ignores an invalid variable action discarded by a slash conversion", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body;
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    fireEvent.click(screen.getByRole("switch", { name: "Kanalvariable ändern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(await screen.findByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
+    expect(created).toBeUndefined();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created).toMatchObject({ kind: "shoutout" }));
+  });
+
+  it("measures the response length after a slash conversion", async () => {
+    let created: { text?: string; kind?: string } | undefined;
+    renderPanel(panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body as { text?: string };
+        return jsonResponse({ warnings: [] });
+      },
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "ann" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(created).toBeUndefined();
+    expect(screen.getByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: `/announce ${"a".repeat(495)}` } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created?.text).toBe("a".repeat(495)));
+  });
+
+  it("measures the response length after a timeout slash conversion", async () => {
+    let created: { text?: string; kind?: string } | undefined;
+    renderPanel(panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body as { text?: string; kind?: string };
+        return jsonResponse({ warnings: [] });
+      },
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "tmo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(created).toBeUndefined();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: `/timeout {user} 120\n${"a".repeat(495)}` } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created).toMatchObject({ kind: "timeout", text: "a".repeat(495) }));
+  });
+
+  it("ignores an overlong usage reply that a shoutout conversion replaces", async () => {
+    let created: { kind?: string } | undefined;
+    renderPanel(panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body as { kind?: string };
+        return jsonResponse({ warnings: [] });
+      },
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    fireEvent.change(editor().querySelector('[name="usageText"]') as HTMLElement, { target: { value: " ".repeat(501) } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(created).toBeUndefined();
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created).toMatchObject({ kind: "shoutout" }));
   });
 
   it("lets timeout commands configure usage text", async () => {
@@ -216,8 +325,8 @@ describe("Text command editor", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "timeout" } });
     fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
     fireEvent.click(await screen.findByRole("option", { name: /Timeout/u }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Timed out." } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Ersatztext, wenn der Timeout abgelehnt wird" }), { target: { value: "Could not time out." } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort (optional)" }), { target: { value: "Timed out." } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ersatztext bei Ablehnung (optional)" }), { target: { value: "Could not time out." } });
     fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Antwort bei fehlenden oder ungültigen Argumenten" }), { target: { value: "Usage: !timeout <amount>" } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
@@ -266,6 +375,71 @@ describe("Text command editor", () => {
     expect(within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" })).toHaveValue("Hallo {user} aus {channel} {welcome}");
   });
 
+  it("orders timeout fields before advanced settings and accepts silent timeout text", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body;
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "quiet" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Timeout/u }));
+
+    const ordered = [
+      screen.getByRole("combobox", { name: "Art" }),
+      screen.getByRole("spinbutton", { name: "Mindestens" }),
+      screen.getByRole("spinbutton", { name: "Höchstens" }),
+      screen.getByRole("textbox", { name: "Timeout-Grund" }),
+      screen.getByRole("textbox", { name: "Antwort (optional)" }),
+      screen.getByRole("textbox", { name: "Ersatztext bei Ablehnung (optional)" }),
+      editor().querySelector("details.command-usage-advanced > summary"),
+    ];
+    for (let index = 0; index < ordered.length - 1; index++) {
+      const current = ordered[index];
+      const next = ordered[index + 1];
+      if (current === null || current === undefined || next === null || next === undefined) throw new Error("Timeout editor fields are missing.");
+      expect(current.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(screen.getByRole("textbox", { name: "Antwort (optional)" })).not.toBeRequired();
+    for (const field of ["text", "timeoutFallbackText", "usageText"] as const) {
+      expect(templateEditorFor(field).querySelectorAll(".command-library-picker")).toHaveLength(1);
+    }
+    expect([...editor().querySelectorAll("h2, h3")].some((heading) => heading.textContent.includes("Text aus Bibliothek"))).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    await waitFor(() => expect(created).toMatchObject({
+      kind: "timeout",
+      text: "",
+      timeoutAction: { minSeconds: 120, maxSeconds: 120, fallbackText: "" },
+    }));
+  });
+
+  it("marks a blocking timeout range error and focuses its field from the summary", async () => {
+    renderPanel(panelFetch({ commands: () => [] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "quiet" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Timeout/u }));
+    const minimum = screen.getByRole("spinbutton", { name: "Mindestens" });
+    const maximum = screen.getByRole("spinbutton", { name: "Höchstens" });
+    fireEvent.change(minimum, { target: { value: "120" } });
+    fireEvent.change(maximum, { target: { value: "60" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(minimum).toHaveFocus());
+    expect(minimum).toHaveAttribute("aria-invalid", "true");
+    expect(maximum).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dauer: Die Dauer muss zwischen 1 s und 14 Tagen liegen; das Minimum darf das Maximum nicht überschreiten." }));
+    expect(minimum).toHaveFocus();
+  });
+
   it("keeps the usage reply editor collapsed by default for text commands", async () => {
     const command = makeCommand({ usageText: "Try !hallo 10" });
     renderPanel(panelFetch({ commands: () => [command] }));
@@ -302,6 +476,22 @@ describe("Text command editor", () => {
     expect(onMutation.mock.calls[1]?.[2]).toMatchObject({ usageText: "" });
   });
 
+  it("clears an invalid usage reply when changing to a command list", async () => {
+    const onMutation = vi.fn<(method: string, path: string, body: unknown) => Response>(() => jsonResponse({ warnings: [] }));
+    renderPanel(panelFetch({ commands: () => [makeCommand({ usageText: "x".repeat(501) })], onMutation }));
+    await selectCommand();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Befehlsliste/u }));
+    expect(screen.queryByRole("textbox", { name: textCommandsTexts("de").templateFieldLabels.usageText })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+
+    await waitFor(() => expect(onMutation).toHaveBeenCalledTimes(1));
+    expect(onMutation.mock.calls[0]?.[2]).toMatchObject({ kind: "list", text: "" });
+    expect(onMutation.mock.calls[0]?.[2]).not.toHaveProperty("usageText");
+    expect(screen.queryByRole("button", { name: /Antwort bei fehlenden oder ungültigen Argumenten/u })).not.toBeInTheDocument();
+  });
+
   it("keeps the variable action in a left-aligned switch card and the command body scrollable", async () => {
     renderPanel(panelFetch());
     await selectCommand();
@@ -332,7 +522,7 @@ describe("Text command editor", () => {
     const tierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
     fireEvent.click(within(tierGroup).getByRole("radio", { name: "VIPs. VIPs, Moderatoren und Broadcaster. Abonnenten nicht." }));
     fireEvent.click(within(tierGroup).getByRole("radio", { name: "Alle. Zuschauer, Abonnenten, VIPs, Moderatoren und Broadcaster." }));
-    fireEvent.click(screen.getByRole("tab", { name: "Einstellungen, Fehler" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Einstellungen" }));
     fireEvent.click(screen.getByRole("switch", { name: "Kanalvariable ändern" }));
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Kanalvariable ändern" })).getByRole("radio", { name: "Argument" }));
     fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
@@ -703,12 +893,30 @@ describe("Text command editor", () => {
     expect(name).toHaveAttribute("aria-invalid", "true");
 
     error = { error: "command_alias_conflict", conflict: { field: "aliases", trigger: "hey", command: "anderer" } };
+    fireEvent.change(name, { target: { value: "neu3" } });
     await waitFor(() => expect(save).toBeEnabled());
     fireEvent.click(save);
     await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(3));
     await waitFor(() => expect(save).toBeEnabled());
     expect(await screen.findByText(/!hey ist schon ein Alias von !anderer\./u)).toBeInTheDocument();
     expect(document.querySelector(".ui-tag-input__pill[aria-invalid='true']")).not.toBeNull();
+  });
+
+  it("focuses the conflicting alias chip's remove button when aliases are at capacity", async () => {
+    const aliases = Array.from({ length: 10 }, (_unused, index) => `alias${String(index + 1)}`);
+    renderPanel(panelFetch({ commands: () => [makeCommand({ aliases })] }));
+    await selectCommand();
+
+    const name = screen.getByRole("textbox", { name: "Name" });
+    fireEvent.change(name, { target: { value: "alias5" } });
+    const save = screen.getByRole("button", { name: "Änderungen speichern" });
+    expect(screen.getByRole("combobox", { name: "Aliase" })).toBeDisabled();
+    fireEvent.click(save);
+
+    const aliasError = screen.getByRole("button", { name: "Aliase: Das ist schon der Name." });
+    fireEvent.click(aliasError);
+    expect(screen.getByRole("button", { name: "Alias !alias5 entfernen" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Alias !alias5 entfernen" })).toBeEnabled();
   });
 
   it("shows the amber announcement warning only when moderator status is false", async () => {
@@ -749,13 +957,10 @@ describe("Text command editor", () => {
 
     expect(screen.getByRole("spinbutton", { name: "Mindestens" })).toHaveValue("30");
     expect(screen.getByRole("spinbutton", { name: "Höchstens" })).toHaveValue("60");
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Timed out for {timeout.duration}");
+    expect(screen.getByRole("textbox", { name: "Antwort (optional)" })).toHaveValue("Timed out for {timeout.duration}");
     expect(screen.getByRole("textbox", { name: "Timeout-Grund" })).toHaveValue("Raid spamming");
     expect(screen.getByText("Der Bot ist kein Moderator. Timeouts können nicht ausgeführt werden.")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Kanalvariable ändern" })).toBeInTheDocument();
-    const fallback = screen.getByRole("textbox", { name: "Ersatztext, wenn der Timeout abgelehnt wird" });
-    fireEvent.change(fallback, { target: { value: "Cannot time out for {timeout.duration}." } });
-    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(created).toMatchObject({
       name: "roulette",
@@ -765,7 +970,7 @@ describe("Text command editor", () => {
         minSeconds: 30,
         maxSeconds: 60,
         reason: "Raid spamming",
-        fallbackText: "Cannot time out for {timeout.duration}.",
+        fallbackText: "",
       },
     }));
   });

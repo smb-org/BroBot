@@ -76,7 +76,7 @@ const response = (
         : {}),
     };
   return {
-    actions: [...(options.prefixActions ?? []), ...(!options.noChat && text.length > 0 ? [action] : [])],
+    actions: [...(options.prefixActions ?? []), ...(!options.noChat && text.trim().length > 0 ? [action] : [])],
     diagnostics: [
       ...(options.diagnostics ?? []),
       diagnosticTriggered(input, command, text, alias, streamState, options.changedVariable),
@@ -293,7 +293,7 @@ const processTextCommandMessageAttempt = async (
       : null;
     const replyToMessageId = textValue(event.payload.message_id);
     const followUp = (text: string): Extract<ModuleAction, { kind: "chat" | "announcement" }> | undefined => {
-      if (text.length === 0) return undefined;
+      if (text.trim().length === 0) return undefined;
       if (claimed.responseType === "announcement") {
         return { kind: "announcement", text, target: claimed.chatTarget, automated: false };
       }

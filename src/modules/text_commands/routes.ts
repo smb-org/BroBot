@@ -131,7 +131,7 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
   if (!validVariableAction(variableAction)) return null;
   const defaults = defaultsForKind(parsed.data.kind);
   const text = parsed.data.kind === "list" ? "" : parsed.data.text ?? defaults.text ?? "";
-  if (parsed.data.kind !== "list" && text.trim().length === 0 && variableAction === null) return null;
+  if (parsed.data.kind !== "list" && parsed.data.kind !== "timeout" && text.trim().length === 0 && variableAction === null) return null;
   const offlineText = parsed.data.offlineText ?? defaults.offlineText;
   const notFollowingText = parsed.data.notFollowingText ?? defaults.notFollowingText;
   const unavailableText = parsed.data.unavailableText ?? defaults.unavailableText;
@@ -324,7 +324,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     ...(unavailableText === undefined ? {} : { unavailableText }),
     ...(usageText === undefined ? {} : { usageText }),
   };
-  if (kind !== "list" && text.trim().length === 0 && variableAction === null) {
+  if (kind !== "list" && kind !== "timeout" && text.trim().length === 0 && variableAction === null) {
     return context.json({ error: "command_data_invalid" }, 400);
   }
   if (variableAction !== null && await context.get("findChannelVariable")(channelId, variableAction.name) === null) {

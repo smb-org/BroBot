@@ -313,8 +313,10 @@ seine Tabellen in der zentralen D1-Kette unter `migrations/`. Der D1-Adapter
 dieses Moduls nutzt kanalgebunden `text_commands`, `text_command_aliases`
 und `text_command_user_cooldowns`.
 
-Ein Textbefehl der Art `timeout` speichert Antwort bei Erfolg, Timeout-Bereich
-von 1 bis 1.209.600 Sekunden, optionalen Grund und Ersatztext bei Ablehnung.
+Ein Textbefehl der Art `timeout` speichert eine optionale Antwort bei Erfolg,
+einen Timeout-Bereich von 1 bis 1.209.600 Sekunden, einen optionalen Grund und
+einen optionalen Ersatztext bei Ablehnung. Leere Antwort- und Ersatztexte
+erzeugen keine Chataktion.
 Der Dienst zieht die Dauer einmal mit `rollTimeoutSeconds` und dem vom Host
 bereitgestellten `secureRandomInteger`; derselbe Wert steuert die Host-Aktion
 und die Variablen `{timeout.seconds}` sowie `{timeout.duration}` in Antwort,
@@ -323,6 +325,8 @@ gerendert. Dauer, Grund und Ersatztext liegen auf der vorhandenen Befehlstabelle
 und werden gemeinsam mit der Kanalvariablenaktion und dem Audit-Eintrag
 gespeichert. Migration `0031_text_command_timeout_kind.sql` wandelt vorhandene
 Antwortbefehle mit Timeoutaktion in `timeout` um und bewahrt ihre übrigen Felder.
+Migration `0033_text_command_silent_timeout.sql` erlaubt leere Erfolgstexte für
+`timeout`-Befehle, während Antworttext für andere Arten weiter erforderlich bleibt.
 
 `src/modules/votekick/` nutzt den gemeinsamen Ballot-Speicher und die
 Aktivitätsübersicht der letzten zehn Minuten. VIPs, Moderatoren und Broadcaster
@@ -382,6 +386,12 @@ Guard-Test (`module-settings-editor-guard.test.ts`) die Deklaration; ein leeres
 Schema (etwa Kanalereignisse) bleibt ohne Editor. `panel` bleibt daneben für
 Module mit eigenem Zustand oder Sofortaktionen (Werbung); wo beide stehen,
 erscheint `panel` oben und der `settingsEditor` darunter.
+
+Jede Validierung, die das Speichern blockiert, muss einen sichtbaren Feldfehler
+liefern. `EditorShell.invalidFields` verwendet `{ id, label, message, sectionId }`
+für die Feldliste in der Speicherleiste, die Tab-Fehlerpunkte und den Fokus auf
+das erste fehlerhafte Feld. Die Liste und `SettingsEditor.fieldErrors` müssen
+daher dieselbe Validierung abbilden.
 
 Das gemeinsame `ChatOutputTargetControl` stellt das kompakte Zielmenü für
 einzelne Ausgaben bereit. Es bietet „Alle Chats“ und „Nur unser Chat“ sowie für
