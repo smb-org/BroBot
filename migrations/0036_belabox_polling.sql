@@ -12,13 +12,12 @@ CREATE TABLE belabox_status (
     CHECK (json_valid(fetch_phase_json)),
   recent_json TEXT NOT NULL DEFAULT '[]'
     CHECK (json_valid(recent_json)),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
-  poll_revision INTEGER NOT NULL DEFAULT 1 CHECK (poll_revision >= 1)
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
 );
 
 INSERT INTO belabox_status
   (channel_id, sampled_at, sample_json, error_code, polling, stream_id,
-   belabox_stream_id, fetch_phase_json, recent_json, revision, poll_revision)
+   belabox_stream_id, fetch_phase_json, recent_json, revision)
 SELECT channel_id,
        sampled_at,
        json_object(
@@ -36,7 +35,6 @@ SELECT channel_id,
        NULL,
        '{}',
        '[]',
-       1,
        1
   FROM belabox_status_legacy_0035;
 

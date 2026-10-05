@@ -1260,11 +1260,19 @@ export class ChannelObject extends DurableObject<Env> {
         delete: (key: string) => this.ctx.storage.delete(`${storagePrefix}${key}`),
       },
       schedule: async (key, deadline, ownerRevision) => {
-        await this.scheduleAlarmEntry(`module:${moduleId}:${key}`, handler, deadline, undefined, ownerRevision);
+        const scheduledRegistration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === key);
+        await this.scheduleAlarmEntry(
+          `module:${moduleId}:${key}`,
+          scheduledRegistration === undefined ? handler : `module:${moduleId}:${scheduledRegistration.key}`,
+          deadline,
+          undefined,
+          ownerRevision,
+        );
       },
       clear: async (key, ownerRevision) => {
         await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision);
       },
+      getAlarmDeadline: (key) => this.getModuleAlarmDeadline(moduleId, key),
       renderTemplate: async (text, moduleValuesOrNow = {}, nowOrModuleValues = Date.now()) => {
         const now = typeof moduleValuesOrNow === "number"
           ? moduleValuesOrNow
@@ -1881,6 +1889,16 @@ export class ChannelObject extends DurableObject<Env> {
       undefined,
       ownerRevision,
     );
+  }
+
+  /** Returns the current retry/execution time for one module alarm, if scheduled. */
+  public async getModuleAlarmDeadline(moduleId: string, alarmKey: string): Promise<number | null> {
+    if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) return null;
+    const stored = await this.ctx.storage.get(ALARM_TABLE_KEY);
+    if (!isRecord(stored)) return null;
+    const entry = stored[`module:${moduleId}:${alarmKey}`];
+    if (!validAlarmScheduleEntry(entry)) return null;
+    return entry.claimUntil === undefined ? entry.nextAttemptAt ?? entry.deadline : entry.deadline;
   }
 
   /** Clear one module-owned alarm key without disturbing other module deadlines. */

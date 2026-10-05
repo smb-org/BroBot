@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../../src/modules/contract";
 import { belaboxModule } from "../../src/modules/belabox";
+import { BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { channelEventsModule } from "../../src/modules/channel_events";
 import { dispatchEventSubNotification, needsActiveChatterTracking, selectModulesForEvent } from "../../src/worker/dispatch";
 import {
@@ -57,6 +58,7 @@ const environment = (database: TestD1Database, publish = vi.fn()) => {
     setTwitchRateLimitRetryAfter: vi.fn().mockResolvedValue(undefined),
     scheduleModuleAlarm: vi.fn().mockResolvedValue(undefined),
     clearModuleAlarm: vi.fn().mockResolvedValue(undefined),
+    getModuleAlarmDeadline: vi.fn().mockResolvedValue(null),
   };
   return {
     DB: database as unknown as D1Database,
@@ -184,29 +186,35 @@ describe("module selection", () => {
       await insertChannel(database, "kanal-a");
       await activate(database, "kanal-a", "belabox");
       await database.prepare(
+        `INSERT INTO module_secrets
+          (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
+         VALUES ('kanal-a', 'belabox', ?, 'ciphertext', 'test', 1, ?, 'tester')`,
+      ).bind(BELABOX_STATS_URL_SECRET, new Date().toISOString()).run();
+      await database.prepare(
         "UPDATE channel_modules SET settings = ? WHERE channel_id = 'kanal-a' AND module_id = 'belabox'",
       ).bind(JSON.stringify({ mode: "interval", intervalSeconds: 15 })).run();
       const unrelated = fakeModule("unrelated", vi.fn(() => ({ actions: [], diagnostics: [] })), ["stream.online"]);
       await activate(database, "kanal-a", unrelated.id);
+      const now = new Date().toISOString();
       await database.prepare(
         "INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('kanal-a', 1, ?)",
-      ).bind(NOW).run();
+      ).bind(now).run();
       const environmentValue = environment(database);
 
       await dispatchEventSubNotification(environmentValue, {
         channelId: "kanal-a",
         subscriptionType: "stream.online",
         triggerId: "paused-online",
-        payload: { id: "stream-paused", started_at: NOW },
-        receivedAt: NOW,
+        payload: { id: "stream-paused", started_at: now },
+        receivedAt: now,
       }, sent(), [belaboxModule, unrelated]);
 
       await expect(database.prepare(
         "SELECT polling, stream_id FROM belabox_status WHERE channel_id = 'kanal-a'",
-      ).first()).resolves.toEqual({ polling: 1, stream_id: "stream-paused" });
+      ).first()).resolves.toEqual({ polling: 1, stream_id: null });
       expect(unrelated.handleEvent).not.toHaveBeenCalled();
       expect(environmentValue.CHANNEL.get(environmentValue.CHANNEL.idFromName("kanal-a")).scheduleModuleAlarm)
-        .toHaveBeenCalledWith("belabox", "poll", "poll", expect.any(Number), expect.any(Number));
+        .toHaveBeenCalledWith("belabox", "poll", "poll", expect.any(Number));
       await expect(database.prepare(
         "SELECT paused FROM channel_controls WHERE channel_id = 'kanal-a'",
       ).first()).resolves.toEqual({ paused: 1 });

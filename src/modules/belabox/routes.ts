@@ -3,7 +3,13 @@ import { z } from "zod";
 
 import { canManage } from "../../contracts/values";
 import type { AuthorizeModuleMutation, ModuleMutationActor, ModuleRouteEnvironment } from "../contract";
-import { BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET, type BelaboxTestResult } from "./contracts";
+import {
+  BELABOX_MODULE_ID,
+  BELABOX_POLL_ALARM_KEY,
+  BELABOX_RECONCILE_ALARM_HANDLER,
+  BELABOX_STATS_URL_SECRET,
+  type BelaboxTestResult,
+} from "./contracts";
 import { getBelaboxStatus, prepareBelaboxSampleClear, prepareBelaboxSampleWrite } from "./adapters/d1";
 import { fetchRelaySample } from "./adapters/stats-client";
 import { validateBelaboxStatsUrl } from "./domain/stats-url";
@@ -28,6 +34,31 @@ const hasManagementAuthorization = async (
   const row = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
     .bind(...authorization.values).first<{ authorized: number }>();
   return row !== null;
+};
+
+const reconcilePollingBestEffort = async (
+  runModuleAlarm: ModuleRouteEnvironment["Variables"]["runModuleAlarm"],
+  writeModuleDiagnostics: ModuleRouteEnvironment["Variables"]["writeModuleDiagnostics"],
+  db: D1Database,
+  channelId: string,
+): Promise<void> => {
+  try {
+    await runModuleAlarm(channelId, BELABOX_MODULE_ID, BELABOX_RECONCILE_ALARM_HANDLER, BELABOX_POLL_ALARM_KEY);
+  } catch {
+    try {
+      await writeModuleDiagnostics(
+        db,
+        channelId,
+        BELABOX_MODULE_ID,
+        "belabox:polling_reconcile",
+        null,
+        [{ code: "belabox.polling_reconcile_failed" }],
+        new Date().toISOString(),
+      );
+    } catch {
+      // Reconciliation diagnostics never change the committed mutation response.
+    }
+  }
 };
 
 export const belaboxRoutes = new Hono<ModuleRouteEnvironment>();
@@ -95,11 +126,16 @@ belaboxRoutes.put("/stats-url", async (context) => {
     }, now);
     const result = await context.env.DB.batch([write, audit, clearSample]);
     if ((result[0]?.meta.changes ?? 0) === 0) return managementDenied(context);
-    await context.get("runModuleAlarm")(channelId, BELABOX_MODULE_ID, "poll", "poll");
-    return context.json({ configured: true });
   } catch {
     return context.json({ error: "belabox_stats_url_save_failed" }, 500);
   }
+  await reconcilePollingBestEffort(
+    context.get("runModuleAlarm"),
+    context.get("writeModuleDiagnostics"),
+    context.env.DB,
+    channelId,
+  );
+  return context.json({ configured: true });
 });
 
 belaboxRoutes.delete("/stats-url", async (context) => {
@@ -124,11 +160,16 @@ belaboxRoutes.delete("/stats-url", async (context) => {
     }, now);
     const result = await context.env.DB.batch([remove, audit, clearSample]);
     if ((result[0]?.meta.changes ?? 0) === 0) return managementDenied(context);
-    await context.get("runModuleAlarm")(channelId, BELABOX_MODULE_ID, "poll", "poll");
-    return context.json({ configured: false });
   } catch {
     return context.json({ error: "belabox_stats_url_remove_failed" }, 500);
   }
+  await reconcilePollingBestEffort(
+    context.get("runModuleAlarm"),
+    context.get("writeModuleDiagnostics"),
+    context.env.DB,
+    channelId,
+  );
+  return context.json({ configured: false });
 });
 
 belaboxRoutes.post("/test", async (context) => {

@@ -4,10 +4,10 @@ import {
   BELABOX_DEFAULT_SETTINGS,
   BELABOX_MODULE_ID,
   BELABOX_POLL_ALARM_KEY,
+  BELABOX_RECONCILE_ALARM_HANDLER,
   belaboxSettingsSchema,
 } from "./contracts";
-import { startBelaboxStream, stopBelaboxPolling } from "./adapters/d1";
-import { handleBelaboxPollAlarm, reconcileBelaboxPollSchedule } from "./service";
+import { handleBelaboxPollAlarm, reconcileBelaboxPollSchedule, reconcileBelaboxPolling } from "./service";
 
 export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   id: BELABOX_MODULE_ID,
@@ -19,27 +19,36 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   defaultSettings: BELABOX_DEFAULT_SETTINGS,
   eventSubTypes: ["stream.online", "stream.offline"],
   pauseSafeEventSubTypes: ["stream.online", "stream.offline"],
-  settingsChangedAlarm: { handlerKey: BELABOX_POLL_ALARM_KEY, alarmKey: BELABOX_POLL_ALARM_KEY },
+  settingsChangedAlarm: { handlerKey: BELABOX_RECONCILE_ALARM_HANDLER, alarmKey: BELABOX_POLL_ALARM_KEY },
   alarms: [{
     key: BELABOX_POLL_ALARM_KEY,
     handle: handleBelaboxPollAlarm,
     onScheduleInputsChanged: reconcileBelaboxPollSchedule,
+  }, {
+    key: BELABOX_RECONCILE_ALARM_HANDLER,
+    handle: async (context, alarmKey) => {
+      if (alarmKey === BELABOX_POLL_ALARM_KEY) await reconcileBelaboxPolling(context);
+    },
   }],
   routes: belaboxRoutes,
   panel: () => import("./panel/index"),
   settingsEditor: () => import("./panel/settings-editor"),
   handleEvent: async (event, context) => {
-    if (context.streamStateTransitionAccepted !== true) return { actions: [], diagnostics: [] };
-    if (event.subscriptionType === "stream.offline") {
-      const revision = await stopBelaboxPolling(context.DB, event.channelId, true);
-      await context.clearAlarm(BELABOX_POLL_ALARM_KEY, revision);
+    if (context.streamStateTransitionAccepted !== true ||
+        (event.subscriptionType !== "stream.online" && event.subscriptionType !== "stream.offline")) {
       return { actions: [], diagnostics: [] };
     }
-    if (event.subscriptionType === "stream.online" && event.settings.mode === "interval") {
-      const payloadStreamId: unknown = event.payload.id;
-      const streamId = typeof payloadStreamId === "string" && payloadStreamId.length > 0 ? payloadStreamId : null;
-      const revision = await startBelaboxStream(context.DB, event.channelId, streamId);
-      await context.scheduleAlarm(BELABOX_POLL_ALARM_KEY, BELABOX_POLL_ALARM_KEY, Date.now(), revision);
+    try {
+      await reconcileBelaboxPolling({
+        DB: context.DB,
+        channelId: event.channelId,
+        streamState: context.streamState,
+        ...(context.getAlarmDeadline === undefined ? {} : { getAlarmDeadline: context.getAlarmDeadline }),
+        schedule: (key, deadline) => context.scheduleAlarm(BELABOX_POLL_ALARM_KEY, key, deadline),
+        clear: (key) => context.clearAlarm(key),
+      });
+    } catch {
+      return { actions: [], diagnostics: [{ code: "belabox.polling_reconcile_failed" }] };
     }
     return { actions: [], diagnostics: [] };
   },

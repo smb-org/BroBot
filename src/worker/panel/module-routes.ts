@@ -536,12 +536,16 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     }, 409);
   }
   if (module.settingsChangedAlarm !== undefined) {
-    await context.get("runModuleAlarm")(
-      channelId,
-      module.id,
-      module.settingsChangedAlarm.handlerKey,
-      module.settingsChangedAlarm.alarmKey,
-    );
+    try {
+      await context.get("runModuleAlarm")(
+        channelId,
+        module.id,
+        module.settingsChangedAlarm.handlerKey,
+        module.settingsChangedAlarm.alarmKey,
+      );
+    } catch {
+      console.warn("belabox.polling_reconcile_failed");
+    }
   }
   return context.json({ settings: settings.data, revision: expectedRevision + 1, warnings });
 });
@@ -597,7 +601,18 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       dependentMutations,
     );
   if (!changed) return context.json({ error: "module_changed_concurrently" }, 409);
-  if (enabled && existing?.enabled !== true) {
+  if (module.id === "belabox" && module.settingsChangedAlarm !== undefined) {
+    try {
+      await context.get("runModuleAlarm")(
+        channelId,
+        module.id,
+        module.settingsChangedAlarm.handlerKey,
+        module.settingsChangedAlarm.alarmKey,
+      );
+    } catch {
+      console.warn("belabox.polling_reconcile_failed");
+    }
+  } else if (enabled && existing?.enabled !== true) {
     await notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation");
   }
   const overlayKinds = module.overlayElements?.map(({ kind }) => kind) ?? [];

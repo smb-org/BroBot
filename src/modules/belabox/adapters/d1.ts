@@ -27,7 +27,6 @@ export interface BelaboxStatus {
   fetchPhase: BelaboxFetchPhase;
   recent: readonly BelaboxRecentPoint[];
   revision: number;
-  pollRevision: number;
 }
 
 interface BelaboxStatusRow {
@@ -40,7 +39,6 @@ interface BelaboxStatusRow {
   fetch_phase_json: string;
   recent_json: string;
   revision: number;
-  poll_revision: number;
 }
 
 const EMPTY_FETCH_PHASE: BelaboxFetchPhase = { consecutiveFailures: 0, failing: false };
@@ -100,7 +98,7 @@ const isFailureReason = (value: string | null): value is BelaboxFetchFailureReas
 export const getBelaboxStatus = async (db: D1Database, channelId: string): Promise<BelaboxStatus | null> => {
   const row = await db.prepare(
     `SELECT sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
-            fetch_phase_json, recent_json, revision, poll_revision
+            fetch_phase_json, recent_json, revision
        FROM belabox_status WHERE channel_id = ?`,
   ).bind(channelId).first<BelaboxStatusRow>();
   if (row === null) return null;
@@ -113,7 +111,6 @@ export const getBelaboxStatus = async (db: D1Database, channelId: string): Promi
     fetchPhase: parseFetchPhase(row.fetch_phase_json),
     recent: parseRecent(row.recent_json),
     revision: row.revision,
-    pollRevision: row.poll_revision,
   };
 };
 
@@ -129,95 +126,48 @@ const encodedPhase = (phase: BelaboxFetchPhase): string => JSON.stringify({
   fetchFailing: phase.failing,
 });
 
-export const startBelaboxStream = async (
+export const setBelaboxPollingState = async (
   db: D1Database,
   channelId: string,
-  streamId: string | null,
-): Promise<number> => {
-  const row = await db.prepare(
-    `INSERT INTO belabox_status
-      (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision, poll_revision)
-     VALUES (?, 1, ?, NULL, ?, '[]', 1, 1)
-     ON CONFLICT (channel_id) DO UPDATE SET
-       polling = 1,
-       belabox_stream_id = CASE WHEN belabox_status.stream_id IS excluded.stream_id
-                                THEN belabox_status.belabox_stream_id ELSE NULL END,
-       fetch_phase_json = CASE WHEN belabox_status.stream_id IS excluded.stream_id
-                               THEN belabox_status.fetch_phase_json ELSE excluded.fetch_phase_json END,
-       recent_json = CASE WHEN belabox_status.stream_id IS excluded.stream_id
-                          THEN belabox_status.recent_json ELSE '[]' END,
-       stream_id = excluded.stream_id,
-       revision = belabox_status.revision + 1,
-       poll_revision = belabox_status.poll_revision + 1
-     RETURNING poll_revision`,
-  ).bind(channelId, streamId, encodedPhase(EMPTY_FETCH_PHASE)).first<{ poll_revision: number }>();
-  if (row === null) throw new Error("BELABOX stream state could not be started.");
-  return row.poll_revision;
-};
+  polling: boolean,
+  resetStream = false,
+): Promise<void> => {
+  if (polling) {
+    await db.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, NULL, NULL, ?, '[]', 1)
+       ON CONFLICT (channel_id) DO UPDATE SET
+         polling = 1,
+         revision = belabox_status.revision + 1
+       WHERE belabox_status.polling != 1`,
+    ).bind(channelId, encodedPhase(EMPTY_FETCH_PHASE)).run();
+    return;
+  }
 
-export const stopBelaboxPolling = async (
-  db: D1Database,
-  channelId: string,
-  resetStream: boolean,
-): Promise<number> => {
-  const row = await db.prepare(
-    `INSERT INTO belabox_status
-      (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision, poll_revision)
-     VALUES (?, 0, NULL, NULL, ?, '[]', 1, 1)
-     ON CONFLICT (channel_id) DO UPDATE SET
-       polling = 0,
-       error_code = CASE WHEN ? THEN NULL ELSE belabox_status.error_code END,
-       stream_id = CASE WHEN ? THEN NULL ELSE belabox_status.stream_id END,
-       belabox_stream_id = CASE WHEN ? THEN NULL ELSE belabox_status.belabox_stream_id END,
-       fetch_phase_json = CASE WHEN ? THEN excluded.fetch_phase_json ELSE belabox_status.fetch_phase_json END,
-       recent_json = CASE WHEN ? THEN '[]' ELSE belabox_status.recent_json END,
-       revision = belabox_status.revision + 1,
-       poll_revision = belabox_status.poll_revision + 1
-     RETURNING poll_revision`,
-  ).bind(channelId, encodedPhase(EMPTY_FETCH_PHASE), Number(resetStream), Number(resetStream), Number(resetStream), Number(resetStream), Number(resetStream))
-    .first<{ poll_revision: number }>();
-  if (row === null) throw new Error("BELABOX polling state could not be stopped.");
-  return row.poll_revision;
-};
+  if (resetStream) {
+    await db.prepare(
+      `UPDATE belabox_status SET
+         polling = 0,
+         error_code = NULL,
+         stream_id = NULL,
+         belabox_stream_id = NULL,
+         fetch_phase_json = ?,
+         recent_json = '[]',
+         revision = revision + 1
+       WHERE channel_id = ? AND (
+         polling != 0 OR stream_id IS NOT NULL OR belabox_stream_id IS NOT NULL OR
+         fetch_phase_json != ? OR recent_json != '[]'
+       )`,
+    ).bind(encodedPhase(EMPTY_FETCH_PHASE), channelId, encodedPhase(EMPTY_FETCH_PHASE)).run();
+    return;
+  }
 
-export const stopBelaboxPollingIfCurrent = async (
-  db: D1Database,
-  channelId: string,
-  resetStream: boolean,
-  expectedPollRevision: number | null,
-): Promise<number | null> => {
-  const row = await db.prepare(
-    `INSERT INTO belabox_status
-      (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision, poll_revision)
-     SELECT ?, 0, NULL, NULL, ?, '[]', 1, 1
-      WHERE COALESCE((
-        SELECT poll_revision IS ? FROM belabox_status WHERE channel_id = ?
-      ), ? IS NULL)
-     ON CONFLICT (channel_id) DO UPDATE SET
-       polling = 0,
-       error_code = CASE WHEN ? THEN NULL ELSE belabox_status.error_code END,
-       stream_id = CASE WHEN ? THEN NULL ELSE belabox_status.stream_id END,
-       belabox_stream_id = CASE WHEN ? THEN NULL ELSE belabox_status.belabox_stream_id END,
-       fetch_phase_json = CASE WHEN ? THEN excluded.fetch_phase_json ELSE belabox_status.fetch_phase_json END,
-       recent_json = CASE WHEN ? THEN '[]' ELSE belabox_status.recent_json END,
-       revision = belabox_status.revision + 1,
-       poll_revision = belabox_status.poll_revision + 1
-     WHERE belabox_status.poll_revision IS ?
-     RETURNING poll_revision`,
-  ).bind(
-    channelId,
-    encodedPhase(EMPTY_FETCH_PHASE),
-    expectedPollRevision,
-    channelId,
-    expectedPollRevision,
-    Number(resetStream),
-    Number(resetStream),
-    Number(resetStream),
-    Number(resetStream),
-    Number(resetStream),
-    expectedPollRevision,
-  ).first<{ poll_revision: number }>();
-  return row?.poll_revision ?? null;
+  await db.prepare(
+    `UPDATE belabox_status
+        SET polling = 0, revision = revision + 1
+      WHERE channel_id = ? AND polling != 0`,
+  ).bind(channelId).run();
 };
 
 export const writeBelaboxFetch = async (
@@ -233,21 +183,20 @@ export const writeBelaboxFetch = async (
     recent: readonly BelaboxRecentPoint[];
     expectedSecretVersion: string;
     expectedStatusRevision: number | null;
-    expectedPollRevision: number | null;
   },
-): Promise<{ revision: number; pollRevision: number } | null> => {
+): Promise<number | null> => {
   const row = await db.prepare(
     `INSERT INTO belabox_status
       (channel_id, sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
        fetch_phase_json, recent_json, revision)
      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
-      WHERE EXISTS (
-        SELECT 1 FROM module_secrets
-         WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?
-      )
+     WHERE EXISTS (
+       SELECT 1 FROM module_secrets
+        WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?
+     )
        AND (? IS NULL OR EXISTS (
          SELECT 1 FROM belabox_status
-          WHERE channel_id = ? AND revision = ? AND poll_revision = ?
+          WHERE channel_id = ? AND revision = ?
        ))
      ON CONFLICT (channel_id) DO UPDATE SET
        sampled_at = CASE
@@ -264,12 +213,9 @@ export const writeBelaboxFetch = async (
        belabox_stream_id = excluded.belabox_stream_id,
        fetch_phase_json = excluded.fetch_phase_json,
        recent_json = excluded.recent_json,
-       revision = belabox_status.revision + 1,
-       poll_revision = CASE WHEN excluded.polling = 1
-                            THEN belabox_status.poll_revision + 1
-                            ELSE belabox_status.poll_revision END
-     WHERE belabox_status.revision = ? AND belabox_status.poll_revision = ?
-     RETURNING revision, poll_revision`,
+       revision = belabox_status.revision + 1
+     WHERE belabox_status.revision = ?
+     RETURNING revision`,
   ).bind(
     input.channelId,
     input.sample?.at ?? null,
@@ -287,13 +233,16 @@ export const writeBelaboxFetch = async (
     input.expectedStatusRevision,
     input.channelId,
     input.expectedStatusRevision,
-    input.expectedPollRevision,
     input.expectedStatusRevision ?? -1,
-    input.expectedPollRevision ?? -1,
-  ).first<{ revision: number; poll_revision: number }>();
-  return row === null ? null : { revision: row.revision, pollRevision: row.poll_revision };
+  ).first<{ revision: number }>();
+  return row?.revision ?? null;
 };
 
+/*
+ * Poll status writes use the status row revision to avoid overwriting a newer
+ * status or on-demand sample. Poll scheduling itself deliberately has no owner
+ * token: lifecycle changes reconcile against current channel state.
+ */
 export const prepareBelaboxSampleWrite = (
   db: D1Database,
   channelId: string,
@@ -330,12 +279,9 @@ export const prepareBelaboxSampleClear = (
       SET sampled_at = NULL,
           sample_json = NULL,
           error_code = NULL,
-          polling = 0,
-          stream_id = NULL,
           belabox_stream_id = NULL,
           fetch_phase_json = ?,
           recent_json = '[]',
-          revision = revision + 1,
-          poll_revision = poll_revision + 1
+          revision = revision + 1
     WHERE channel_id = ? ${authorization.sql}`,
 ).bind(encodedPhase(EMPTY_FETCH_PHASE), channelId, ...authorization.values);

@@ -11,11 +11,11 @@ const MANAGER_ID = "belabox-settings-manager";
 const SESSION_COOKIE_KEYS = JSON.stringify({ active: { id: "cookie", key: testKey(71) }, retired: [] });
 const TOKEN_ENCRYPTION_KEYS = JSON.stringify({ active: { id: "token", key: testKey(72) }, retired: [] });
 
-const requestFor = async (body: unknown): Promise<Request> => {
+const requestFor = async (body: unknown, path = "/settings"): Promise<Request> => {
   const sessionId = `session-${MANAGER_ID}`;
   const cookie = await createSessionCookie({ sessionId }, SESSION_COOKIE_KEYS, TOKEN_ENCRYPTION_KEYS);
   const csrf = await createCsrfToken(sessionId, SESSION_COOKIE_KEYS, new Date().toISOString());
-  return new Request(`https://brobot.example/api/channels/${CHANNEL_ID}/modules/belabox/settings`, {
+  return new Request(`https://brobot.example/api/channels/${CHANNEL_ID}/modules/belabox${path}`, {
     method: "PATCH",
     headers: {
       Cookie: `__Host-brobot_session=${cookie}; __Host-brobot_csrf=${csrf}`,
@@ -39,7 +39,10 @@ describe("BELABOX settings route", () => {
     ).bind(CHANNEL_ID, JSON.stringify({ mode: "interval", intervalSeconds: 15 })).run();
   });
 
-  afterEach(() => { database.close(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    database.close();
+  });
 
   it("runs the declared poll alarm immediately after a successful settings save", async () => {
     const runModuleAlarm = vi.fn(() => Promise.resolve());
@@ -64,6 +67,59 @@ describe("BELABOX settings route", () => {
       revision: 2,
     });
     expect(runModuleAlarm).toHaveBeenCalledOnce();
-    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "poll", "poll");
+    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "reconcile", "poll");
+  });
+
+  it("returns success after committing settings when polling reconciliation fails", async () => {
+    const runModuleAlarm = vi.fn(() => Promise.reject(new Error("storage details must stay hidden")));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const environment = {
+      DB: database as unknown as D1Database,
+      SESSION_COOKIE_KEYS,
+      TOKEN_ENCRYPTION_KEYS,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ runModuleAlarm }),
+      },
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(await requestFor({
+      revision: 1,
+      settings: { mode: "on_demand", intervalSeconds: 30 },
+    }), environment);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ revision: 2 });
+    await expect(database.prepare(
+      "SELECT settings, revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({
+      settings: JSON.stringify({ mode: "on_demand", intervalSeconds: 30 }),
+      revision: 2,
+    });
+    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "reconcile", "poll");
+    expect(warning).toHaveBeenCalledWith("belabox.polling_reconcile_failed");
+    expect(warning.mock.calls).toEqual([["belabox.polling_reconcile_failed"]]);
+  });
+
+  it("reconciles polling when the module is disabled", async () => {
+    const runModuleAlarm = vi.fn(() => Promise.resolve());
+    const environment = {
+      DB: database as unknown as D1Database,
+      SESSION_COOKIE_KEYS,
+      TOKEN_ENCRYPTION_KEYS,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ runModuleAlarm }),
+      },
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(await requestFor({ enabled: false }, ""), environment);
+
+    expect(response.status).toBe(200);
+    expect(runModuleAlarm).toHaveBeenCalledOnce();
+    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "reconcile", "poll");
+    await expect(database.prepare(
+      "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ enabled: 0 });
   });
 });

@@ -609,6 +609,8 @@ export interface ModuleExecutionContext {
   /** Schedules or clears an alarm registered by this module. */
   scheduleAlarm: (handlerKey: string, alarmKey: string, deadline: number, ownerRevision?: number) => Promise<void>;
   clearAlarm: (alarmKey: string, ownerRevision?: number) => Promise<void>;
+  /** Reads the current execution time for a module-owned alarm key, if one is scheduled. */
+  getAlarmDeadline?: (alarmKey: string) => Promise<number | null>;
 }
 
 /** Durable storage and alarm access given to a module alarm handler. */
@@ -634,6 +636,8 @@ export interface ModuleAlarmContext {
   /** Schedule or clear another key owned by this module and handled by this registration. */
   schedule: (key: string, deadline: number, ownerRevision?: number) => Promise<void>;
   clear: (key: string, ownerRevision?: number) => Promise<void>;
+  /** Reads the current execution time for a module-owned alarm key, if one is scheduled. */
+  getAlarmDeadline?: (key: string) => Promise<number | null>;
   /** Renders a host template in the channel's event context. */
   renderTemplate: (
     text: string,

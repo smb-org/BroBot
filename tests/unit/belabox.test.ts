@@ -10,6 +10,7 @@ import { belaboxRoutes } from "../../src/modules/belabox/routes";
 import { parseRelayStats } from "../../src/modules/belabox/domain/stats";
 import { publisherKeyFromUrl, validateBelaboxStatsUrl } from "../../src/modules/belabox/domain/stats-url";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
+import { writeModuleDiagnostics } from "../../src/worker/event-log";
 import { authorizeModuleManagementMutation } from "../../src/worker/module-authorization";
 import { createModuleSecretAccess } from "../../src/worker/module-secrets";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey } from "./fixtures";
@@ -56,6 +57,7 @@ const createBelaboxRouteHarness = async (testDatabase: TestD1Database) => {
     context.set("externalFetchBudget", sharedBudget());
     context.set("runModuleAlarm", runModuleAlarm);
     context.set("prepareModuleAudit", (entry, changedAt) => prepareModuleAudit(db, MANAGER_ID, changedAt, entry));
+    context.set("writeModuleDiagnostics", writeModuleDiagnostics);
     await next();
   });
   app.route(`/channels/:channelId/modules/belabox`, belaboxRoutes);
@@ -111,13 +113,13 @@ describe("BELABOX stats URL", () => {
       defaultEnabled: false,
       defaultSettings: { mode: "interval", intervalSeconds: 15 },
       eventSubTypes: ["stream.online", "stream.offline"],
-      settingsChangedAlarm: { handlerKey: "poll", alarmKey: "poll" },
+      settingsChangedAlarm: { handlerKey: "reconcile", alarmKey: "poll" },
     });
     expect(belaboxModule.settingsSchema.parse({})).toEqual({ mode: "interval", intervalSeconds: 15 });
     expect(belaboxModule.settingsSchema.safeParse({ mode: "on_demand", intervalSeconds: 60 }).success).toBe(true);
     expect(belaboxModule.settingsSchema.safeParse({ mode: "interval", intervalSeconds: 10 }).success).toBe(false);
     expect(belaboxModule.settingsEditor).toBeTypeOf("function");
-    expect(belaboxModule.alarms?.map(({ key }) => key)).toEqual(["poll"]);
+    expect(belaboxModule.alarms?.map(({ key }) => key)).toEqual(["poll", "reconcile"]);
     const editor = await belaboxModule.settingsEditor?.();
     expect(editor?.default.spec.sections).toMatchObject([{ fields: [
       { kind: "segment", key: "mode", options: [{ value: "interval" }, { value: "on_demand" }] },
@@ -346,11 +348,40 @@ describe("BELABOX secret and route redaction", () => {
     const { runModuleAlarm, send } = await createBelaboxRouteHarness(testDatabase);
 
     expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
-    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "poll", "poll");
+    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "reconcile", "poll");
 
     expect((await send("/stats-url", "DELETE")).status).toBe(200);
     expect(runModuleAlarm).toHaveBeenCalledTimes(2);
-    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "poll", "poll");
+    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "reconcile", "poll");
+  });
+
+  it("returns success after URL mutations commit when reconciliation fails", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { runModuleAlarm, send, secrets } = await createBelaboxRouteHarness(testDatabase);
+    runModuleAlarm.mockRejectedValue(new Error("storage details must stay hidden"));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const saved = await send("/stats-url", "PUT", { url: STATS_URL });
+    expect(saved.status).toBe(200);
+    await expect(saved.json()).resolves.toEqual({ configured: true });
+    await expect(secrets.status(BELABOX_STATS_URL_SECRET)).resolves.toMatchObject({ configured: true });
+
+    const removed = await send("/stats-url", "DELETE");
+    expect(removed.status).toBe(200);
+    await expect(removed.json()).resolves.toEqual({ configured: false });
+    await expect(secrets.status(BELABOX_STATS_URL_SECRET)).resolves.toMatchObject({ configured: false });
+    expect(runModuleAlarm).toHaveBeenCalledTimes(2);
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "reconcile", "poll");
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "reconcile", "poll");
+    expect(warning).not.toHaveBeenCalled();
+    const diagnostics = await testDatabase.prepare(
+      "SELECT code FROM event_log WHERE channel_id = ? ORDER BY rowid",
+    ).bind(CHANNEL_ID).all<{ code: string }>();
+    expect(diagnostics.results).toEqual([
+      { code: "belabox.polling_reconcile_failed" },
+      { code: "belabox.polling_reconcile_failed" },
+    ]);
   });
 
   it("fetches status on demand and then reuses the ten-second cache", async () => {
