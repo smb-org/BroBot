@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { createModuleSecretAccess, createModuleSecretReadAccess } from "../../src/worker/module-secrets";
-import { insertChannel, insertMember, testKey } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const CHANNEL_ID = "module-secret-channel";
@@ -105,6 +105,75 @@ describe("host module secrets", () => {
     ).bind("copied", CHANNEL_ID, MODULE_ID, SECRET_NAME).run();
 
     expect(await access.read("copied")).toBeNull();
+  });
+
+  it("returns null when a ciphertext is copied to another channel", async () => {
+    const database = await createDatabase();
+    await insertChannel(database, "other-channel");
+    await insertMember(database, CHANNEL_ID, "manager", "manager");
+    const access = accessFor(database, keyRing(NEW_KEY));
+    const write = await access.prepareWrite(SECRET_NAME, SECRET_VALUE, { userId: "manager" }, NOW);
+    await database.batch([write as unknown as TestPreparedStatement]);
+    await database.prepare(
+      `INSERT INTO module_secrets (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
+       SELECT ?, module_id, name, ciphertext, key_id, revision, updated_at, updated_by
+         FROM module_secrets WHERE channel_id = ? AND module_id = ? AND name = ?`,
+    ).bind("other-channel", CHANNEL_ID, MODULE_ID, SECRET_NAME).run();
+
+    const otherAccess = createModuleSecretAccess(
+      { DB: database as unknown as D1Database, TOKEN_ENCRYPTION_KEYS: keyRing(NEW_KEY) },
+      "other-channel",
+      MODULE_ID,
+    );
+    expect(await otherAccess.read(SECRET_NAME)).toBeNull();
+    expect(await access.read(SECRET_NAME)).toBe(SECRET_VALUE);
+  });
+
+  it("returns null when a ciphertext is copied to another module", async () => {
+    const database = await createDatabase();
+    await insertMember(database, CHANNEL_ID, "manager", "manager");
+    const access = accessFor(database, keyRing(NEW_KEY));
+    const write = await access.prepareWrite(SECRET_NAME, SECRET_VALUE, { userId: "manager" }, NOW);
+    await database.batch([write as unknown as TestPreparedStatement]);
+    await database.prepare(
+      `INSERT INTO module_secrets (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
+       SELECT channel_id, ?, name, ciphertext, key_id, revision, updated_at, updated_by
+         FROM module_secrets WHERE channel_id = ? AND module_id = ? AND name = ?`,
+    ).bind("other_module", CHANNEL_ID, MODULE_ID, SECRET_NAME).run();
+
+    const otherAccess = createModuleSecretAccess(
+      { DB: database as unknown as D1Database, TOKEN_ENCRYPTION_KEYS: keyRing(NEW_KEY) },
+      CHANNEL_ID,
+      "other_module",
+    );
+    expect(await otherAccess.read(SECRET_NAME)).toBeNull();
+    expect(await access.read(SECRET_NAME)).toBe(SECRET_VALUE);
+  });
+
+  it.each([
+    ["membership removed", "DELETE FROM channel_members WHERE user_id = 'manager'"],
+    ["session revoked", "DELETE FROM auth_sessions WHERE user_id = 'manager'"],
+  ])("fails replace and delete when authorization is revoked before the batch (%s)", async (_label, revoke) => {
+    const database = await createDatabase();
+    await insertMember(database, CHANNEL_ID, "manager", "manager");
+    await insertLoginIdentityAndSession(database, "manager");
+    const access = accessFor(database, keyRing(NEW_KEY));
+    const actor = { userId: "manager", sessionId: "session-manager" };
+    const seed = await access.prepareWrite(SECRET_NAME, SECRET_VALUE, actor, NOW);
+    await database.batch([seed as unknown as TestPreparedStatement]);
+    const replace = await access.prepareWrite(SECRET_NAME, "replacement-value", actor, NOW);
+    const remove = access.prepareDelete(SECRET_NAME, actor, NOW);
+
+    await database.prepare(revoke).run();
+    const results = await database.batch([
+      replace as unknown as TestPreparedStatement,
+      remove as unknown as TestPreparedStatement,
+      addAudit(database, "manager", "module.secret.replaced", "replaced"),
+    ]);
+
+    expect(results.map((result) => result.meta.changes)).toEqual([0, 0, 0]);
+    expect(await access.read(SECRET_NAME)).toBe(SECRET_VALUE);
+    expect(await database.prepare("SELECT revision FROM module_secrets").first<{ revision: number }>()).toEqual({ revision: 1 });
   });
 
   it("decrypts a value encrypted with a retired key", async () => {
