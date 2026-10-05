@@ -2,12 +2,12 @@ import type { BotModule } from "../contract";
 import { belaboxRoutes } from "./routes";
 import {
   BELABOX_DEFAULT_SETTINGS,
+  BELABOX_ENSURE_POLL_HANDLER,
   BELABOX_MODULE_ID,
   BELABOX_POLL_ALARM_KEY,
-  BELABOX_RECONCILE_ALARM_HANDLER,
   belaboxSettingsSchema,
 } from "./contracts";
-import { handleBelaboxPollAlarm, reconcileBelaboxPollSchedule, reconcileBelaboxPolling } from "./service";
+import { ensureBelaboxPoll, ensureBelaboxPollSchedule, handleBelaboxPollAlarm } from "./service";
 
 export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   id: BELABOX_MODULE_ID,
@@ -19,16 +19,16 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   defaultSettings: BELABOX_DEFAULT_SETTINGS,
   eventSubTypes: ["stream.online", "stream.offline"],
   pauseSafeEventSubTypes: ["stream.online", "stream.offline"],
-  settingsChangedAlarm: { handlerKey: BELABOX_RECONCILE_ALARM_HANDLER, alarmKey: BELABOX_POLL_ALARM_KEY },
+  settingsChangedAlarm: { handlerKey: BELABOX_ENSURE_POLL_HANDLER, alarmKey: BELABOX_POLL_ALARM_KEY },
   alarms: [{
     key: BELABOX_POLL_ALARM_KEY,
     handle: handleBelaboxPollAlarm,
-    onScheduleInputsChanged: reconcileBelaboxPollSchedule,
   }, {
-    key: BELABOX_RECONCILE_ALARM_HANDLER,
+    key: BELABOX_ENSURE_POLL_HANDLER,
     handle: async (context, alarmKey) => {
-      if (alarmKey === BELABOX_POLL_ALARM_KEY) await reconcileBelaboxPolling(context);
+      if (alarmKey === BELABOX_POLL_ALARM_KEY) await ensureBelaboxPoll(context);
     },
+    onScheduleInputsChanged: ensureBelaboxPollSchedule,
   }],
   routes: belaboxRoutes,
   panel: () => import("./panel/index"),
@@ -39,16 +39,12 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
       return { actions: [], diagnostics: [] };
     }
     try {
-      await reconcileBelaboxPolling({
-        DB: context.DB,
-        channelId: event.channelId,
-        streamState: context.streamState,
+      await ensureBelaboxPoll({
         ...(context.getAlarmDeadline === undefined ? {} : { getAlarmDeadline: context.getAlarmDeadline }),
         schedule: (key, deadline) => context.scheduleAlarm(BELABOX_POLL_ALARM_KEY, key, deadline),
-        clear: (key) => context.clearAlarm(key),
       });
     } catch {
-      return { actions: [], diagnostics: [{ code: "belabox.polling_reconcile_failed" }] };
+      return { actions: [], diagnostics: [{ code: "belabox.polling_ensure_failed" }] };
     }
     return { actions: [], diagnostics: [] };
   },

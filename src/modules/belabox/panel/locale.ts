@@ -9,6 +9,9 @@ export interface BelaboxPanelTexts {
   notConfigured: string;
   updatedAt: string;
   latestSample: string;
+  pollingInactive: string;
+  retryPolling: string;
+  retryPollingFailed: string;
   connected: string;
   disconnected: string;
   bitrate: string;
@@ -53,6 +56,9 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     notConfigured: "Keine Statistik-URL hinterlegt",
     updatedAt: "Geändert am",
     latestSample: "Letzte Messung",
+    pollingInactive: "Abfrage nicht aktiv – erneut versuchen",
+    retryPolling: "Erneut versuchen",
+    retryPollingFailed: "Der Abruf konnte nicht erneut gestartet werden.",
     connected: "Verbunden",
     disconnected: "Getrennt",
     bitrate: "Bitrate",
@@ -95,6 +101,9 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     notConfigured: "No stats URL stored",
     updatedAt: "Changed",
     latestSample: "Latest sample",
+    pollingInactive: "Polling inactive – try again",
+    retryPolling: "Try again",
+    retryPollingFailed: "Polling could not be restarted.",
     connected: "Connected",
     disconnected: "Disconnected",
     bitrate: "Bitrate",

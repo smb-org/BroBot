@@ -5,8 +5,8 @@ import { canManage } from "../../contracts/values";
 import type { AuthorizeModuleMutation, ModuleMutationActor, ModuleRouteEnvironment } from "../contract";
 import {
   BELABOX_MODULE_ID,
+  BELABOX_ENSURE_POLL_HANDLER,
   BELABOX_POLL_ALARM_KEY,
-  BELABOX_RECONCILE_ALARM_HANDLER,
   BELABOX_STATS_URL_SECRET,
   type BelaboxTestResult,
 } from "./contracts";
@@ -36,27 +36,27 @@ const hasManagementAuthorization = async (
   return row !== null;
 };
 
-const reconcilePollingBestEffort = async (
+const ensurePollingBestEffort = async (
   runModuleAlarm: ModuleRouteEnvironment["Variables"]["runModuleAlarm"],
   writeModuleDiagnostics: ModuleRouteEnvironment["Variables"]["writeModuleDiagnostics"],
   db: D1Database,
   channelId: string,
 ): Promise<void> => {
   try {
-    await runModuleAlarm(channelId, BELABOX_MODULE_ID, BELABOX_RECONCILE_ALARM_HANDLER, BELABOX_POLL_ALARM_KEY);
+    await runModuleAlarm(channelId, BELABOX_MODULE_ID, BELABOX_ENSURE_POLL_HANDLER, BELABOX_POLL_ALARM_KEY);
   } catch {
     try {
       await writeModuleDiagnostics(
         db,
         channelId,
         BELABOX_MODULE_ID,
-        "belabox:polling_reconcile",
+        "belabox:polling_ensure",
         null,
-        [{ code: "belabox.polling_reconcile_failed" }],
+        [{ code: "belabox.polling_ensure_failed" }],
         new Date().toISOString(),
       );
     } catch {
-      // Reconciliation diagnostics never change the committed mutation response.
+      // Ensure diagnostics never change the committed mutation response.
     }
   }
 };
@@ -66,9 +66,12 @@ export const belaboxRoutes = new Hono<ModuleRouteEnvironment>();
 belaboxRoutes.get("/status", async (context) => {
   const channelId = channelIdOf(context);
   const secrets = context.get("secrets")(channelId);
-  const [secretStatus, moduleState] = await Promise.all([
+  const [secretStatus, moduleState, streamState] = await Promise.all([
     secrets.status(BELABOX_STATS_URL_SECRET),
     belaboxSettingsForChannel(context.env.DB, channelId),
+    context.env.DB.prepare(
+      "SELECT state FROM channel_stream_state WHERE channel_id = ?",
+    ).bind(channelId).first<{ state: string }>(),
   ]);
   if (moduleState?.enabled === true && moduleState.settings.mode === "on_demand" && secretStatus.configured) {
     await currentBelaboxSample({
@@ -88,11 +91,14 @@ belaboxRoutes.get("/status", async (context) => {
     });
   }
   const status = await getBelaboxStatus(context.env.DB, channelId);
+  const pollingDesired = moduleState?.enabled === true && moduleState.settings.mode === "interval" &&
+    secretStatus.configured && streamState?.state === "online";
   return context.json({
     ...secretStatus,
     sample: status?.sample ?? null,
     errorCode: status?.errorCode ?? null,
     polling: status?.polling ?? false,
+    pollingDesired,
     streamId: status?.streamId ?? null,
     belaboxStreamId: status?.belaboxStreamId ?? null,
   });
@@ -129,7 +135,7 @@ belaboxRoutes.put("/stats-url", async (context) => {
   } catch {
     return context.json({ error: "belabox_stats_url_save_failed" }, 500);
   }
-  await reconcilePollingBestEffort(
+  await ensurePollingBestEffort(
     context.get("runModuleAlarm"),
     context.get("writeModuleDiagnostics"),
     context.env.DB,
@@ -163,13 +169,24 @@ belaboxRoutes.delete("/stats-url", async (context) => {
   } catch {
     return context.json({ error: "belabox_stats_url_remove_failed" }, 500);
   }
-  await reconcilePollingBestEffort(
+  await ensurePollingBestEffort(
     context.get("runModuleAlarm"),
     context.get("writeModuleDiagnostics"),
     context.env.DB,
     channelId,
   );
   return context.json({ configured: false });
+});
+
+belaboxRoutes.post("/polling/retry", async (context) => {
+  if (!canManage(context.get("channelRole"))) return managementDenied(context);
+  await ensurePollingBestEffort(
+    context.get("runModuleAlarm"),
+    context.get("writeModuleDiagnostics"),
+    context.env.DB,
+    channelIdOf(context),
+  );
+  return context.json({ ensured: true });
 });
 
 belaboxRoutes.post("/test", async (context) => {

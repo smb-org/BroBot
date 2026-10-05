@@ -159,7 +159,9 @@ describe("ad prewarning retry through ChannelObject.alarm()", () => {
       await object.alarm();
       expect(fetchMock).toHaveBeenCalledOnce();
       expect(mocks.getBotIdentity).toHaveBeenCalledTimes(2);
-      expect(storage.values.get("channel:alarm_schedule")).toBeUndefined();
+      expect(storage.values.get("channel:alarm_schedule")).toMatchObject({
+        "module:belabox:poll": { deadline: dueAt + 5_000, handler: "module:belabox:poll" },
+      });
       expect(mocks.writeModuleDiagnostics.mock.calls.at(-1)?.[5]).toMatchObject([
         { code: "ads.prewarning.announced" },
         { code: "host.chat.sent" },

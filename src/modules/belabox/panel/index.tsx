@@ -5,7 +5,7 @@ import { Button, DangerSection, Field, InspectorFieldRow, InspectorSection } fro
 import type { ModulePanelProperties } from "../../contract";
 import type { BelaboxStatusResponse, BelaboxTestResult } from "../contracts";
 import { belaboxReasonText, belaboxPanelTexts } from "./locale";
-import { loadBelaboxStatus, removeBelaboxStatsUrl, replaceBelaboxStatsUrl, testBelaboxConnection } from "./service";
+import { loadBelaboxStatus, removeBelaboxStatsUrl, replaceBelaboxStatsUrl, retryBelaboxPolling, testBelaboxConnection } from "./service";
 
 const errorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;
 
@@ -75,6 +75,21 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     }
   };
 
+  const retryPolling = async (): Promise<void> => {
+    if (!canManage || busy) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await retryBelaboxPolling(channelId);
+      await refresh();
+    } catch (failure: unknown) {
+      setError(errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.retryPollingFailed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async (): Promise<void> => {
     if (!canManage || busy || status?.configured !== true) return;
     if (!confirmRemove) {
@@ -111,6 +126,12 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     {!canManage ? <p className="lock-reason">{labels.readOnly}</p> : null}
     <InspectorSection title={labels.connection}>
       <p className="muted">{status?.configured ? labels.configured : labels.notConfigured}</p>
+      {status?.pollingDesired === true && !status.polling ? <>
+        <p className="form-error" role="status">{labels.pollingInactive}</p>
+        {canManage ? <div className="form-actions">
+          <Button disabled={busy} onClick={() => { void retryPolling(); }}>{labels.retryPolling}</Button>
+        </div> : null}
+      </> : null}
       {status?.updatedAt === null || status?.updatedAt === undefined ? null : <p className="muted">{labels.updatedAt}: {statusTimestamp(status.updatedAt, language === "de" ? "de-DE" : "en-US")}</p>}
       {sampleSummary === null ? null : <p className="muted">{labels.latestSample}: {sampleSummary}</p>}
     </InspectorSection>

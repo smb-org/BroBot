@@ -33,13 +33,9 @@ interface StoredModuleSettings {
   settings: string;
 }
 
-interface PollingReconcileContext {
-  DB: D1Database;
-  channelId: string;
-  streamState: () => Promise<"online" | "offline" | "unknown">;
+interface BelaboxPollScheduleContext {
   getAlarmDeadline?: (key: string) => Promise<number | null>;
   schedule: (key: string, deadline: number) => Promise<void>;
-  clear: (key: string) => Promise<void>;
 }
 
 interface PollingPrerequisites {
@@ -62,26 +58,6 @@ export const belaboxSettingsForChannel = async (
   } catch {
     return null;
   }
-};
-
-const hasStoredStatsUrl = async (db: D1Database, channelId: string): Promise<boolean> =>
-  await db.prepare(
-    "SELECT 1 AS stored FROM module_secrets WHERE channel_id = ? AND module_id = 'belabox' AND name = ?",
-  ).bind(channelId, BELABOX_STATS_URL_SECRET).first<{ stored: number }>() !== null;
-
-const pollingPrerequisites = async (context: PollingReconcileContext): Promise<PollingPrerequisites> => {
-  const [moduleState, streamState, secretStored] = await Promise.all([
-    belaboxSettingsForChannel(context.DB, context.channelId),
-    context.streamState(),
-    hasStoredStatsUrl(context.DB, context.channelId),
-  ]);
-  return {
-    settings: moduleState?.enabled === true && moduleState.settings.mode === "interval"
-      ? moduleState.settings
-      : null,
-    streamState,
-    secretStored,
-  };
 };
 
 const isDesired = (prerequisites: PollingPrerequisites): boolean =>
@@ -140,51 +116,12 @@ const writePhaseDiagnostic = async (
 const retryDelay = (settings: BelaboxSettings | null): number =>
   settings === null ? INFRASTRUCTURE_RETRY_MAX_MS : Math.min(settings.intervalSeconds * 1_000, INFRASTRUCTURE_RETRY_MAX_MS);
 
-const retryReconciliationWithoutThrowing = async (
-  context: PollingReconcileContext,
-  delay: number,
-): Promise<void> => {
-  try {
-    await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now() + Math.min(delay, INFRASTRUCTURE_RETRY_MAX_MS));
-  } catch {
-    // A later lifecycle event or poll alarm will retry reconciliation.
-  }
-};
-
-/** Reconciles the single BELABOX poll alarm from current settings, secret, and stream state. */
-export const reconcileBelaboxPolling = async (context: PollingReconcileContext): Promise<void> => {
-  let prerequisites: PollingPrerequisites;
-  try {
-    prerequisites = await pollingPrerequisites(context);
-  } catch {
-    await retryReconciliationWithoutThrowing(context, INFRASTRUCTURE_RETRY_MAX_MS);
-    return;
-  }
-
-  if (!isDesired(prerequisites)) {
-    try {
-      await context.clear(BELABOX_POLL_ALARM_KEY);
-      await setBelaboxPollingState(
-        context.DB,
-        context.channelId,
-        false,
-        prerequisites.streamState === "offline",
-      );
-    } catch {
-      // The current state will be reconciled again on the next lifecycle event.
-    }
-    return;
-  }
-
-  try {
-    const now = Date.now();
-    const deadline = await context.getAlarmDeadline?.(BELABOX_POLL_ALARM_KEY) ?? null;
-    if (deadline === null || deadline > now) {
-      await context.schedule(BELABOX_POLL_ALARM_KEY, now);
-    }
-    await setBelaboxPollingState(context.DB, context.channelId, true);
-  } catch {
-    await retryReconciliationWithoutThrowing(context, retryDelay(prerequisites.settings));
+/** Moves the poll alarm to now without making a stop decision from a stale caller context. */
+export const ensureBelaboxPoll = async (context: BelaboxPollScheduleContext): Promise<void> => {
+  const now = Date.now();
+  const deadline = await context.getAlarmDeadline?.(BELABOX_POLL_ALARM_KEY) ?? null;
+  if (deadline === null || deadline > now) {
+    await context.schedule(BELABOX_POLL_ALARM_KEY, now);
   }
 };
 
@@ -220,7 +157,7 @@ const alarmPrerequisites = async (context: ModuleAlarmContext): Promise<AlarmPre
   };
 };
 
-const retryAlarmWithoutThrowing = async (
+const reschedulePollAfterFailure = async (
   context: ModuleAlarmContext,
   deadline: number,
   delay: number,
@@ -228,13 +165,14 @@ const retryAlarmWithoutThrowing = async (
   try {
     await context.schedule(BELABOX_POLL_ALARM_KEY, Math.max(Date.now(), deadline) + delay);
   } catch {
-    // The alarm handler never exposes storage or scheduling failure details.
+    throw new Error("BELABOX_POLL_RESCHEDULE_FAILED");
   }
 };
 
 type StoredPollOutcome =
   | { kind: "stored"; classified: boolean }
   | { kind: "not_desired" }
+  | { kind: "stream_changed" }
   | { kind: "secret_changed" }
   | { kind: "conflict" };
 
@@ -242,6 +180,7 @@ const storePollResult = async (
   context: ModuleAlarmContext,
   result: BelaboxFetchResult,
   secretVersion: string,
+  originStreamId: string | null,
 ): Promise<StoredPollOutcome> => {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const [prerequisites, currentStatus, live] = await Promise.all([
@@ -249,6 +188,7 @@ const storePollResult = async (
       getBelaboxStatus(context.DB, context.channelId),
       context.streamStartedAt(),
     ]);
+    if (live.streamId !== originStreamId) return { kind: "stream_changed" };
     if (!isDesired(prerequisites) || prerequisites.settings === null || prerequisites.secret === null) {
       return { kind: "not_desired" };
     }
@@ -303,7 +243,12 @@ export const handleBelaboxPollAlarm = async (
   try {
     const prerequisites = await alarmPrerequisites(context);
     delay = retryDelay(prerequisites.settings);
-    if (!isDesired(prerequisites) || prerequisites.settings === null || prerequisites.secret === null) return;
+    if (!isDesired(prerequisites) || prerequisites.settings === null || prerequisites.secret === null) {
+      await setBelaboxPollingState(context.DB, context.channelId, false, prerequisites.streamState === "offline");
+      return;
+    }
+    await setBelaboxPollingState(context.DB, context.channelId, true);
+    const originStreamId = (await context.streamStartedAt()).streamId;
 
     const result = await fetchRelaySample(
       prerequisites.secret.url,
@@ -311,12 +256,22 @@ export const handleBelaboxPollAlarm = async (
       context.externalFetchBudget ?? { claim: () => true },
       fetcher,
     );
-    const stored = await storePollResult(context, result, prerequisites.secret.version);
-    if (stored.kind === "not_desired") return;
+    const stored = await storePollResult(context, result, prerequisites.secret.version, originStreamId);
 
     const latest = await alarmPrerequisites(context);
-    if (!isDesired(latest) || latest.settings === null || latest.secret === null) return;
+    if (!isDesired(latest) || latest.settings === null || latest.secret === null) {
+      await setBelaboxPollingState(context.DB, context.channelId, false, latest.streamState === "offline");
+      return;
+    }
     delay = retryDelay(latest.settings);
+    if (stored.kind === "not_desired") {
+      await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
+      return;
+    }
+    if (stored.kind === "stream_changed") {
+      await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
+      return;
+    }
     if (stored.kind === "conflict") {
       await context.schedule(BELABOX_POLL_ALARM_KEY, Math.max(Date.now(), deadline) + delay);
       return;
@@ -330,17 +285,17 @@ export const handleBelaboxPollAlarm = async (
       : BELABOX_PROBE_INTERVAL_MS;
     await context.schedule(BELABOX_POLL_ALARM_KEY, Math.max(Date.now(), deadline) + interval);
   } catch {
-    await retryAlarmWithoutThrowing(context, deadline, delay);
+    await reschedulePollAfterFailure(context, deadline, delay);
   }
 };
 
-/** Reconciles after activation or host schedule-input changes. */
-export const reconcileBelaboxPollSchedule = async (
+/** Ensures the poll alarm after activation or host schedule-input changes. */
+export const ensureBelaboxPollSchedule = async (
   context: ModuleAlarmContext,
   reason: "event_times" | "channel_time_zone" | "activation",
 ): Promise<void> => {
   void reason;
-  await reconcileBelaboxPolling(context);
+  await ensureBelaboxPoll(context);
 };
 
 export type CurrentBelaboxSampleResult = BelaboxFetchResult | { ok: false; reason: "not_configured" };
@@ -377,7 +332,7 @@ export const currentBelaboxSample = async (
       channelId: context.channelId,
       sample: result.ok ? result.sample : null,
       errorCode: result.ok ? null : result.reason,
-      polling: false,
+      polling: currentStatus?.polling ?? false,
       streamId: currentStatus?.streamId ?? null,
       belaboxStreamId: currentStatus?.belaboxStreamId ?? null,
       fetchPhase: phase,

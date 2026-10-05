@@ -240,8 +240,8 @@ export const writeBelaboxFetch = async (
 
 /*
  * Poll status writes use the status row revision to avoid overwriting a newer
- * status or on-demand sample. Poll scheduling itself deliberately has no owner
- * token: lifecycle changes reconcile against current channel state.
+ * status or on-demand sample. Poll scheduling deliberately has no owner token:
+ * lifecycle requests only ensure the alarm, whose handler reads current state.
  */
 export const prepareBelaboxSampleWrite = (
   db: D1Database,

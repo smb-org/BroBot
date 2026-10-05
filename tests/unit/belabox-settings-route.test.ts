@@ -67,12 +67,11 @@ describe("BELABOX settings route", () => {
       revision: 2,
     });
     expect(runModuleAlarm).toHaveBeenCalledOnce();
-    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "reconcile", "poll");
+    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "ensure", "poll");
   });
 
-  it("returns success after committing settings when polling reconciliation fails", async () => {
+  it("returns success after committing settings when poll ensure fails", async () => {
     const runModuleAlarm = vi.fn(() => Promise.reject(new Error("storage details must stay hidden")));
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const environment = {
       DB: database as unknown as D1Database,
       SESSION_COOKIE_KEYS,
@@ -96,12 +95,14 @@ describe("BELABOX settings route", () => {
       settings: JSON.stringify({ mode: "on_demand", intervalSeconds: 30 }),
       revision: 2,
     });
-    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "reconcile", "poll");
-    expect(warning).toHaveBeenCalledWith("belabox.polling_reconcile_failed");
-    expect(warning.mock.calls).toEqual([["belabox.polling_reconcile_failed"]]);
+    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "ensure", "poll");
+    const diagnostics = await database.prepare(
+      "SELECT code FROM event_log WHERE channel_id = ? ORDER BY rowid",
+    ).bind(CHANNEL_ID).all<{ code: string }>();
+    expect(diagnostics.results).toEqual([{ code: "belabox.polling_ensure_failed" }]);
   });
 
-  it("reconciles polling when the module is disabled", async () => {
+  it("ensures the poll alarm when the module is disabled", async () => {
     const runModuleAlarm = vi.fn(() => Promise.resolve());
     const environment = {
       DB: database as unknown as D1Database,
@@ -117,7 +118,7 @@ describe("BELABOX settings route", () => {
 
     expect(response.status).toBe(200);
     expect(runModuleAlarm).toHaveBeenCalledOnce();
-    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "reconcile", "poll");
+    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "ensure", "poll");
     await expect(database.prepare(
       "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
     ).bind(CHANNEL_ID).first()).resolves.toEqual({ enabled: 0 });

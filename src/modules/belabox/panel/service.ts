@@ -36,5 +36,9 @@ export const removeBelaboxStatsUrl = async (channelId: string): Promise<void> =>
   await mutate<{ configured: false }>(channelId, "/stats-url", "DELETE");
 };
 
+export const retryBelaboxPolling = async (channelId: string): Promise<void> => {
+  await mutate<{ ensured: true }>(channelId, "/polling/retry", "POST");
+};
+
 export const testBelaboxConnection = async (channelId: string, url?: string): Promise<BelaboxTestResult> =>
   mutate<BelaboxTestResult>(channelId, "/test", "POST", url === undefined ? {} : { url });

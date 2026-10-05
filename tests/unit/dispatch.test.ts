@@ -180,7 +180,7 @@ describe("module selection", () => {
     expect(matches.map(({ module }) => module.id)).toEqual(["mandatory"]);
   });
 
-  it("delivers only declared pause-safe lifecycle events to optional modules while paused", async () => {
+  it("ensures pause-safe polling alarms without marking polling active", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -211,7 +211,7 @@ describe("module selection", () => {
 
       await expect(database.prepare(
         "SELECT polling, stream_id FROM belabox_status WHERE channel_id = 'kanal-a'",
-      ).first()).resolves.toEqual({ polling: 1, stream_id: null });
+      ).first()).resolves.toBeNull();
       expect(unrelated.handleEvent).not.toHaveBeenCalled();
       expect(environmentValue.CHANNEL.get(environmentValue.CHANNEL.idFromName("kanal-a")).scheduleModuleAlarm)
         .toHaveBeenCalledWith("belabox", "poll", "poll", expect.any(Number));

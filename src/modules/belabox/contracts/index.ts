@@ -5,7 +5,7 @@ export const BELABOX_STATS_URL_SECRET = "stats_url";
 export const BELABOX_STATS_RESPONSE_MAX_BYTES = 16 * 1024;
 export const BELABOX_STATS_TIMEOUT_MS = 3_000;
 export const BELABOX_POLL_ALARM_KEY = "poll";
-export const BELABOX_RECONCILE_ALARM_HANDLER = "reconcile";
+export const BELABOX_ENSURE_POLL_HANDLER = "ensure";
 export const BELABOX_PROBE_INTERVAL_MS = 60_000;
 export const BELABOX_ON_DEMAND_CACHE_MS = 10_000;
 
@@ -59,6 +59,7 @@ export interface BelaboxStatusResponse {
   sample: BelaboxSample | null;
   errorCode: BelaboxFetchFailureReason | null;
   polling: boolean;
+  pollingDesired: boolean;
   streamId: string | null;
   belaboxStreamId: string | null;
 }

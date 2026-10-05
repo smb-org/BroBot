@@ -113,13 +113,13 @@ describe("BELABOX stats URL", () => {
       defaultEnabled: false,
       defaultSettings: { mode: "interval", intervalSeconds: 15 },
       eventSubTypes: ["stream.online", "stream.offline"],
-      settingsChangedAlarm: { handlerKey: "reconcile", alarmKey: "poll" },
+      settingsChangedAlarm: { handlerKey: "ensure", alarmKey: "poll" },
     });
     expect(belaboxModule.settingsSchema.parse({})).toEqual({ mode: "interval", intervalSeconds: 15 });
     expect(belaboxModule.settingsSchema.safeParse({ mode: "on_demand", intervalSeconds: 60 }).success).toBe(true);
     expect(belaboxModule.settingsSchema.safeParse({ mode: "interval", intervalSeconds: 10 }).success).toBe(false);
     expect(belaboxModule.settingsEditor).toBeTypeOf("function");
-    expect(belaboxModule.alarms?.map(({ key }) => key)).toEqual(["poll", "reconcile"]);
+    expect(belaboxModule.alarms?.map(({ key }) => key)).toEqual(["poll", "ensure"]);
     const editor = await belaboxModule.settingsEditor?.();
     expect(editor?.default.spec.sections).toMatchObject([{ fields: [
       { kind: "segment", key: "mode", options: [{ value: "interval" }, { value: "on_demand" }] },
@@ -342,20 +342,20 @@ describe("BELABOX secret and route redaction", () => {
     expectConsoleCallsRedacted(consoleSpies.flatMap((spy) => spy.mock.calls));
   });
 
-  it("reconciles polling after the stats URL changes", async () => {
+  it("ensures the poll alarm after the stats URL changes", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { runModuleAlarm, send } = await createBelaboxRouteHarness(testDatabase);
 
     expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
-    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "reconcile", "poll");
+    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "ensure", "poll");
 
     expect((await send("/stats-url", "DELETE")).status).toBe(200);
     expect(runModuleAlarm).toHaveBeenCalledTimes(2);
-    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "reconcile", "poll");
+    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "ensure", "poll");
   });
 
-  it("returns success after URL mutations commit when reconciliation fails", async () => {
+  it("returns success after URL mutations commit when ensure fails", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { runModuleAlarm, send, secrets } = await createBelaboxRouteHarness(testDatabase);
@@ -372,16 +372,49 @@ describe("BELABOX secret and route redaction", () => {
     await expect(removed.json()).resolves.toEqual({ configured: false });
     await expect(secrets.status(BELABOX_STATS_URL_SECRET)).resolves.toMatchObject({ configured: false });
     expect(runModuleAlarm).toHaveBeenCalledTimes(2);
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "reconcile", "poll");
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "reconcile", "poll");
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "ensure", "poll");
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
     expect(warning).not.toHaveBeenCalled();
     const diagnostics = await testDatabase.prepare(
       "SELECT code FROM event_log WHERE channel_id = ? ORDER BY rowid",
     ).bind(CHANNEL_ID).all<{ code: string }>();
     expect(diagnostics.results).toEqual([
-      { code: "belabox.polling_reconcile_failed" },
-      { code: "belabox.polling_reconcile_failed" },
+      { code: "belabox.polling_ensure_failed" },
+      { code: "belabox.polling_ensure_failed" },
     ]);
+  });
+
+  it("shows inactive desired polling after a committed save and lets a manager retry ensure", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { runModuleAlarm, send } = await createBelaboxRouteHarness(testDatabase);
+    await testDatabase.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
+    ).bind(CHANNEL_ID, JSON.stringify({ mode: "interval", intervalSeconds: 15 })).run();
+    await testDatabase.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(CHANNEL_ID, new Date().toISOString()).run();
+    runModuleAlarm.mockRejectedValueOnce(new Error(`secret details ${STATS_URL}`));
+
+    const saved = await send("/stats-url", "PUT", { url: STATS_URL });
+    expect(saved.status).toBe(200);
+    await expect(saved.json()).resolves.toEqual({ configured: true });
+
+    const status = await send("/status", "GET");
+    await expect(status.json()).resolves.toMatchObject({
+      polling: false,
+      pollingDesired: true,
+    });
+
+    const retried = await send("/polling/retry", "POST");
+    expect(retried.status).toBe(200);
+    await expect(retried.json()).resolves.toEqual({ ensured: true });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "ensure", "poll");
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
+    const diagnostics = await testDatabase.prepare(
+      "SELECT code FROM event_log WHERE channel_id = ? ORDER BY rowid",
+    ).bind(CHANNEL_ID).all<{ code: string }>();
+    expect(diagnostics.results).toEqual([{ code: "belabox.polling_ensure_failed" }]);
   });
 
   it("fetches status on demand and then reuses the ten-second cache", async () => {
