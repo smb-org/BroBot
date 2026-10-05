@@ -324,6 +324,20 @@ form.content-section { display: grid; gap: var(--s4); }
 .error-panel { border-style: solid; border-color: rgba(226, 86, 77, .45); background: var(--error-surface); }
 .error-panel strong { color: var(--error); }
 .module-stack { display: grid; gap: var(--s3); }
+.chat-voting-panel { width: min(var(--dashboard-content-width), 100%); }
+.chat-voting-panel__status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); }
+.chat-voting-start-actions { display: flex; flex-wrap: wrap; align-items: end; gap: var(--s2); }
+.chat-voting-options-start { display: flex; flex-wrap: wrap; align-items: end; gap: var(--s2); }
+.chat-voting-options-start > .mantine-Button-root { flex: none; }
+.chat-voting-results { display: grid; gap: var(--s2); width: 100%; }
+.chat-voting-results__header,
+.chat-voting-results__row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(120px, 2fr) 4rem 4rem; align-items: center; gap: var(--s3); min-width: 0; }
+.chat-voting-results__header { color: var(--text-3); font-size: 11px; }
+.chat-voting-results__header > :nth-child(n + 3),
+.chat-voting-results__row > :nth-child(n + 3) { text-align: right; }
+.chat-voting-results__label { min-width: 0; overflow-wrap: anywhere; }
+.chat-voting-results__track { display: block; height: 8px; overflow: hidden; border-radius: var(--r-control); background: var(--surface-well); }
+.chat-voting-results__track > span { display: block; height: 100%; border-radius: inherit; background: var(--line-light); }
 .config-section { display: grid; gap: var(--s4); }
 .config-section > .section-heading { margin-bottom: 0; }
 .ui-game-picker { display: grid; gap: var(--s2); }
@@ -1322,6 +1336,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .event-table__primary .event-table__text { flex: 1 1 8rem; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
   .event-table__mobile-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1); margin-top: var(--s1); color: var(--text-3); font-size: 12px; line-height: 1.4; }
   .event-table__mobile-meta > span:first-child { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-voting-results__header,
+  .chat-voting-results__row { grid-template-columns: minmax(64px, 1fr) minmax(48px, 1.5fr) 3rem 3rem; gap: var(--s2); }
 }
 
 @container inspector (max-width: 639px) {

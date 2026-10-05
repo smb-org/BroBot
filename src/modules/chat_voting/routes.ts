@@ -34,14 +34,20 @@ chatVotingRoutes.get("/current", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const repository = createChatVotingRepository(context.env.DB);
   const vote = await repository.latest(channelId);
-  if (vote === null) return context.json({ vote: null });
-  const snapshot = vote.status === "open"
-    ? await context.get("ballots")(channelId).read(vote.id)
-    : null;
+  const ballots = context.get("ballots")(channelId);
+  if (vote === null) {
+    const hasOpenBallot = await ballots.hasOpenBallot?.() ?? false;
+    return context.json({ vote: null, counts: null, revision: 0, hasOpenBallot });
+  }
+  const [snapshot, hasOpenBallot] = await Promise.all([
+    vote.status === "open" ? ballots.read(vote.id) : Promise.resolve(null),
+    ballots.hasOpenBallot?.() ?? Promise.resolve(false),
+  ]);
   return context.json({
     vote,
     counts: snapshot?.counts ?? vote.counts,
     revision: snapshot?.revision ?? 0,
+    hasOpenBallot,
   });
 });
 

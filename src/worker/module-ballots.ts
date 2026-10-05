@@ -21,6 +21,7 @@ export const moduleBallots = (
     open: (ballotId, optionCount, expiresAt, rule) => object.openBallot(moduleId, ballotId, optionCount, expiresAt, rule),
     cast: (ballotId, userId, choice) => object.castBallot(moduleId, ballotId, userId, choice),
     read: (ballotId) => object.readBallot(moduleId, ballotId),
+    hasOpenBallot: () => object.hasOpenBallot(),
     close: (ballotId) => object.closeBallot(moduleId, ballotId),
     finalize: (ballotId) => object.finalizeBallot(moduleId, ballotId),
     acknowledgeClosed: (ballotId) => object.acknowledgeClosedBallot(moduleId, ballotId),
