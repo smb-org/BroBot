@@ -152,7 +152,8 @@ const alarmPrerequisites = async (context: ModuleAlarmContext): Promise<AlarmPre
   try {
     secret = await usableSecret(context.secrets);
   } catch {
-    secret = null;
+    // Storage failure, not a missing/undecryptable secret (those return null): let the host retry.
+    throw new Error("BELABOX_SECRET_READ_FAILED");
   }
   return {
     settings,

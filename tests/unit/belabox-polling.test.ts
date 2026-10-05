@@ -633,13 +633,10 @@ describe("BELABOX polling", () => {
     expect(await getBelaboxStatus(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({ polling: true });
   });
 
-  it("stops with a fixed status code after an unreadable secret", async () => {
+  it("stops with a fixed status code when the secret is missing or undecryptable", async () => {
     await insertModule(database);
     const { context, scheduled, cleared } = alarmContext(database, {
-      secrets: {
-        ...secretAccess(),
-        readWithVersion: () => Promise.reject(new Error(SECRET_SENTINEL)),
-      },
+      secrets: { ...secretAccess(), readWithVersion: () => Promise.resolve(null) },
     });
     const fetcher = vi.fn<typeof fetch>();
 
@@ -652,6 +649,33 @@ describe("BELABOX polling", () => {
       polling: false,
       errorCode: "not_configured",
     });
+  });
+
+  it("keeps the alarm on a storage failure reading the secret and polls on the retry", async () => {
+    await insertModule(database);
+    let failed = false;
+    const { context, scheduled, cleared } = alarmContext(database, {
+      secrets: {
+        ...secretAccess(),
+        readWithVersion: () => {
+          if (failed) return secretAccess().readWithVersion("x");
+          failed = true;
+          return Promise.reject(new Error(SECRET_SENTINEL));
+        },
+      },
+    });
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(relayPayload(true))));
+
+    await expect(handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher)).resolves.toBeUndefined();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(cleared).toEqual([]);
+    expect(scheduled).toHaveLength(1);
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).not.toMatchObject({ errorCode: "not_configured" });
+
+    await expect(handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher)).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(scheduled).toHaveLength(2);
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({ polling: true });
   });
 
   it("checks disabled offline stop conditions before reading the secret", async () => {
