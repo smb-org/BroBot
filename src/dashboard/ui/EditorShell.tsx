@@ -1,5 +1,7 @@
-import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
+import { Popover as MantinePopover } from "@mantine/core";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
 
+import { dashboardCommonTexts } from "../locale";
 import { FormDensity } from "./FormDensity";
 import { Icon, type IconName } from "./Icon";
 import { InspectorHeading } from "./Inspector";
@@ -64,6 +66,54 @@ const fieldById = (root: HTMLElement | null, id: string): HTMLElement | undefine
 const invalidFieldKey = ({ sectionId, id, focusId, message }: EditorInvalidField): string =>
   JSON.stringify([sectionId, id, focusId ?? id, message]);
 
+function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly EditorInvalidField[]; onFocusField: (field: EditorInvalidField) => void }) {
+  const [opened, setOpened] = useState(false);
+  const popoverId = useId();
+  const common = dashboardCommonTexts();
+
+  return (
+    <>
+      <span className="ui-save-bar__invalid-summary">{common.invalidFieldCount(fields.length)}</span>
+      <MantinePopover
+        id={popoverId}
+        opened={opened}
+        onChange={setOpened}
+        withinPortal
+        position="top-start"
+        width={280}
+        middlewares={{ flip: true, shift: true }}
+        shadow="xs"
+        closeOnEscape
+        hideDetached={false}
+      >
+        <MantinePopover.Target>
+          <button
+            className="ui-save-bar__invalid-trigger"
+            type="button"
+            aria-label={opened ? common.hideInvalidFields : common.showInvalidFields}
+            onClick={() => { setOpened((current) => !current); }}
+          >
+            <Icon name="cause" size={16} />
+          </button>
+        </MantinePopover.Target>
+        <MantinePopover.Dropdown className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`}>
+          <h2 id={`${popoverId}-title`} className="sr-only">{common.invalidFieldsTitle}</h2>
+          <ul className="ui-save-bar__invalid-fields">
+            {fields.map((field) => (
+              <li key={`${field.sectionId}:${field.id}`}>
+                <button type="button" aria-label={`${field.label}: ${field.message}`} onClick={() => { onFocusField(field); setOpened(false); }}>
+                  <span>{field.label}</span>
+                  <span>{field.message}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </MantinePopover.Dropdown>
+      </MantinePopover>
+    </>
+  );
+}
+
 /** Focuses an invalid field without expanding sections that the editor has kept closed. */
 const focusInvalidTarget = (field: HTMLElement, errorKey: string): void => {
   const details: HTMLDetailsElement[] = [];
@@ -73,8 +123,10 @@ const focusInvalidTarget = (field: HTMLElement, errorKey: string): void => {
   const collapsed = details.filter((current) => !current.open);
   if (collapsed.length > 0) {
     for (const current of collapsed) {
+      const errorKeys = new Set(JSON.parse(current.dataset.editorErrorKeys ?? "[]") as string[]);
+      errorKeys.add(errorKey);
+      current.dataset.editorErrorKeys = JSON.stringify([...errorKeys]);
       current.dataset.editorError = "true";
-      current.dataset.editorErrorKey = errorKey;
     }
     const summary = collapsed[collapsed.length - 1]?.querySelector<HTMLElement>("summary");
     summary?.scrollIntoView({ block: "center" });
@@ -137,9 +189,14 @@ export function EditorShell({
   useLayoutEffect(() => {
     const activeErrorKeys = new Set(JSON.parse(invalidFieldSignature) as string[]);
     contentRef.current?.querySelectorAll<HTMLElement>("details[data-editor-error]").forEach((details) => {
-      if (details.dataset.editorErrorKey !== undefined && activeErrorKeys.has(details.dataset.editorErrorKey)) return;
+      const retainedErrorKeys = (JSON.parse(details.dataset.editorErrorKeys ?? "[]") as string[])
+        .filter((errorKey) => activeErrorKeys.has(errorKey));
+      if (retainedErrorKeys.length > 0) {
+        details.dataset.editorErrorKeys = JSON.stringify(retainedErrorKeys);
+        return;
+      }
       delete details.dataset.editorError;
-      delete details.dataset.editorErrorKey;
+      delete details.dataset.editorErrorKeys;
     });
   }, [invalidFieldSignature]);
 
@@ -230,20 +287,7 @@ export function EditorShell({
     onSave();
   };
 
-  const invalidStatus = invalidMessage === undefined || invalidFields.length === 0 ? undefined : (
-    <>
-      <span>× {invalidMessage}</span>
-      <ul className="ui-save-bar__invalid-fields">
-        {invalidFields.map((field) => (
-          <li key={`${field.sectionId}:${field.id}`}>
-            <button type="button" aria-label={`${field.label}: ${field.message}`} title={field.message} onClick={() => { focusInvalidField(field); }}>
-              {field.label}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </>
-  );
+  const invalidStatus = invalidFields.length === 0 ? undefined : <InvalidFieldsStatus fields={invalidFields} onFocusField={focusInvalidField} />;
 
   const handleSubmit = (event: SyntheticEvent<HTMLFormElement>): void => {
     event.preventDefault();

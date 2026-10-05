@@ -93,7 +93,7 @@ export function SaveBar({
     <div className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}`} aria-busy={pending}>
       <div className="ui-save-bar__status" role="status" aria-live="polite">
         {warningStatus !== null && statusText === warningStatus || warningStatus !== null && saved && !dirty ? <Icon name="warning" size={16} /> : null}
-        <div className="ui-save-bar__message" title={statusTitle} style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
+        <div className="ui-save-bar__message" title={typeof statusText === "string" ? statusTitle : undefined} style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
           {typeof statusText === "string" ? <TextReveal className="ui-save-bar__message-copy" text={statusText} /> : statusText}
         </div>
         {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}

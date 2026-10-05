@@ -13,7 +13,16 @@ test("field error and warning slots keep their layout boxes stable", async ({ pa
   }));
 
   await page.getByRole("button", { name: "Toggle issues" }).click();
-  await expect(page.locator(".ui-tag-input__warning")).toContainText("A duplicate warning.");
+  await expect(page.locator(".ui-tag-input__warning")).toContainText("A duplicate warning that should");
+  const tagError = page.locator(".ui-tag-input__control .mantine-InputWrapper-error");
+  const tagWarning = page.locator(".ui-tag-input__warning");
+  const tagErrorBox = await tagError.boundingBox();
+  const tagWarningBox = await tagWarning.boundingBox();
+  if (tagErrorBox === null || tagWarningBox === null) throw new Error("TagInput error and warning rows should have layout boxes.");
+  expect(tagErrorBox.y + tagErrorBox.height).toBeLessThanOrEqual(tagWarningBox.y);
+  const markerY = await tagError.locator("[aria-hidden='true']").first().evaluate((element) => Math.round(element.getBoundingClientRect().y));
+  const copyY = await tagError.locator(".ui-text-reveal__copy").evaluate((element) => Math.round(element.getBoundingClientRect().y));
+  expect(Math.abs(copyY - markerY)).toBeLessThanOrEqual(1);
   const after = await Promise.all(selectors.map(async (selector) => {
     const box = await page.locator(selector).first().boundingBox();
     if (box === null) throw new Error(`Missing layout box for ${selector}.`);
@@ -32,9 +41,12 @@ test("field error and warning slots keep their layout boxes stable", async ({ pa
   const dialog = page.locator(".mantine-Modal-content");
   await expect(dialog).toBeVisible();
   const dialogHeight = (await dialog.boundingBox())?.height;
+  if (dialogHeight === undefined) throw new Error("Dialog should have a stable layout box.");
   await page.getByRole("button", { name: "Toggle dialog error" }).click();
   await expect(page.getByText("A dialog error.")).toBeVisible();
-  expect((await dialog.boundingBox())?.height).toBe(dialogHeight);
+  const dialogAfterError = await dialog.boundingBox();
+  if (dialogAfterError === null) throw new Error("Dialog should keep its layout box while showing an error.");
+  expect(dialogAfterError.height).toBeCloseTo(dialogHeight, 2);
 });
 
 test("the save bar keeps its height on mobile", async ({ page }) => {
@@ -91,13 +103,14 @@ test("clipped hints and dialog errors reveal full copy by keyboard without movin
   const fieldHeight = (await field.boundingBox())?.height;
   const hint = field.locator(".ui-field__hint");
   const hintTrigger = hint.locator(".ui-text-reveal__trigger");
-  await expect(hintTrigger).toHaveAttribute("title", "A short name.");
   await hintTrigger.focus();
   await hintTrigger.press("Enter");
-  await expect(hint.getByRole("tooltip")).toHaveText("A short name.");
+  const hintPopup = page.getByRole("tooltip");
+  await expect(hintPopup).toHaveText("A short name.");
+  expect(await hintPopup.evaluate((element) => element.closest(".ui-editor-shell__body"))).toBeNull();
   expect((await field.boundingBox())?.height).toBe(fieldHeight);
   await hintTrigger.press("Enter");
-  await expect(hint.getByRole("tooltip")).toHaveCount(0);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Open dialog" }).click();
   const dialog = page.getByRole("dialog", { name: "Layout dialog" });
@@ -107,8 +120,10 @@ test("clipped hints and dialog errors reveal full copy by keyboard without movin
   const errorTrigger = error.locator(".ui-text-reveal__trigger");
   await errorTrigger.focus();
   await errorTrigger.press("Space");
-  await expect(error.getByRole("tooltip")).toContainText("the step needed to correct the request");
+  const errorPopup = page.getByRole("tooltip");
+  await expect(errorPopup).toContainText("the step needed to correct the request");
+  expect(await errorPopup.evaluate((element) => element.closest(".mantine-Modal-content"))).toBeNull();
   expect((await dialog.boundingBox())?.height).toBe(dialogHeight);
   await errorTrigger.press("Space");
-  await expect(error.getByRole("tooltip")).toHaveCount(0);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
 });

@@ -539,9 +539,11 @@ describe("EditorShell and declaration renderer", () => {
     const settingsTab = screen.getByRole("tab", { name: /^Settings/u });
     expect(settingsTab.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByRole("tab", { name: "Advanced, error" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Correct the marked fields.");
-    expect(screen.getByRole("button", { name: "Name: Required" })).toBeInTheDocument();
-    const cooldownLink = screen.getByRole("button", { name: "Cooldown: Enter a duration" });
+    expect(screen.getByRole("status")).toHaveTextContent(/2 (invalid fields|Felder fehlerhaft)/u);
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const invalidPopover = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
+    expect(within(invalidPopover).getByRole("button", { name: "Name: Required" })).toBeInTheDocument();
+    const cooldownLink = within(invalidPopover).getByRole("button", { name: "Cooldown: Enter a duration" });
     fireEvent.click(cooldownLink);
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Cooldown" })).toHaveFocus());
 
@@ -577,7 +579,8 @@ describe("EditorShell and declaration renderer", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus());
     expect(screen.getByRole("tab", { name: "Advanced, error" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("button", { name: "Name: Required" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    expect(within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getByRole("button", { name: "Name: Required" })).toBeInTheDocument();
     expect(attemptOrder).toEqual(["validate", "save"]);
   });
 
@@ -606,10 +609,12 @@ describe("EditorShell and declaration renderer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const status = screen.getByRole("status");
-    await within(status).findByRole("button", { name: "Cooldown: Enter a duration" });
-    expect(within(status).getAllByRole("button")).toHaveLength(2);
+    fireEvent.click(within(status).getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const invalidPopover = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
+    await within(invalidPopover).findByRole("button", { name: "Cooldown: Enter a duration" });
+    expect(within(invalidPopover).getAllByRole("button")).toHaveLength(2);
     expect(screen.getByRole("tab", { name: "Advanced, error" })).toBeInTheDocument();
-    fireEvent.click(within(status).getByRole("button", { name: "Cooldown: Enter a duration" }));
+    fireEvent.click(within(invalidPopover).getByRole("button", { name: "Cooldown: Enter a duration" }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Cooldown" })).toHaveFocus());
     expect(screen.getByRole("textbox", { name: "Cooldown" })).toHaveAttribute("aria-invalid", "true");
   });
@@ -636,21 +641,36 @@ describe("EditorShell and declaration renderer", () => {
     expect(screen.getByRole("tab", { name: /^Settings/u })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("keeps collapsed sections closed and marks their summary when an error link focuses a field", () => {
-    const detailsSection = [{ id: "settings", label: "Settings", content: <details><summary>Advanced</summary><Field id="usage-text" label="Usage" value="" error="Too long" onChange={() => {}} /></details> }];
+  it("keeps collapsed sections marked until every hidden error is cleared", async () => {
+    const detailsSection = [{ id: "settings", label: "Settings", content: <details>
+      <summary>Advanced</summary>
+      <Field id="usage-text" label="Usage" value="" error="Too long" onChange={() => {}} />
+      <Field id="usage-limit" label="Limit" value="" error="Enter a smaller value" onChange={() => {}} />
+    </details> }];
+    const firstError = { id: "usage-text", label: "Usage", message: "Too long", sectionId: "settings" };
+    const secondError = { id: "usage-limit", label: "Limit", message: "Enter a smaller value", sectionId: "settings" };
     const { rerender } = renderUi(<EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
       sections={detailsSection}
-      invalidFields={[{ id: "usage-text", label: "Usage", message: "Too long", sectionId: "settings" }]} />);
+      invalidFields={[firstError, secondError]} />);
     const details = document.querySelector("details") as HTMLDetailsElement;
     expect(details.open).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Usage: Too long" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const invalidPopover = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
+    fireEvent.click(within(invalidPopover).getByRole("button", { name: "Usage: Too long" }));
     expect(details.open).toBe(false);
     expect(details).toHaveAttribute("data-editor-error", "true");
     expect(screen.getByText("Advanced")).toHaveFocus();
+    fireEvent.click(within(invalidPopover).getByRole("button", { name: "Limit: Enter a smaller value" }));
+    expect(details).toHaveAttribute("data-editor-error", "true");
 
     rerender(<UiProvider><EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
       sections={detailsSection}
-      invalidFields={[{ id: "usage-text", label: "Usage", message: "Too long", sectionId: "settings" }]} /></UiProvider>);
+      invalidFields={[firstError, secondError]} /></UiProvider>);
+    expect(details).toHaveAttribute("data-editor-error", "true");
+
+    rerender(<UiProvider><EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
+      sections={detailsSection}
+      invalidFields={[firstError]} /></UiProvider>);
     expect(details).toHaveAttribute("data-editor-error", "true");
 
     rerender(<UiProvider><EditorShell {...baseProps} dirty sections={detailsSection} invalidFields={[]} /></UiProvider>);

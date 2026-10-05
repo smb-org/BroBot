@@ -38,8 +38,8 @@ describe("editor seam styles", () => {
     expect(styles).toContain(".ui-editor-shell { display: flex; height: max-content; flex-direction: column;");
     expect(styles).toContain("overflow: hidden;");
     expect(styles).toContain(".ui-editor-shell__body { flex: 1 1 auto; min-height: 0; overflow: auto;");
-    expect(styles).toContain(".ui-save-bar { box-sizing: border-box; display: flex; flex: none; align-items: center; gap: 8px; width: 100%; height: 64px; min-height: 64px;");
-    expect(styles).toContain(".ui-save-bar__actions > .ui-save-bar__save,");
+    expect(styles).toContain(".ui-save-bar { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto;");
+    expect(styles).toContain(".ui-save-bar__invalid-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }");
   });
 
   it("applies the shared hand-drawn SVG stroke family to Spotlight module icons", () => {

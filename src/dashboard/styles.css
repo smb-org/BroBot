@@ -941,12 +941,12 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-field__description, .ui-tag-input__description, .ui-textarea__helper-row {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0;
 }
-.ui-text-reveal { position: relative; display: flex; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0; line-height: 18px; }
+.ui-text-reveal { display: flex; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0; line-height: 18px; }
 .ui-text-reveal__copy { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .ui-text-reveal__trigger { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: var(--r-control); color: var(--text-3); background: transparent; cursor: pointer; }
 .ui-text-reveal__trigger:hover { color: var(--brand-text); background: var(--surface-hover); }
 .ui-text-reveal__trigger:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 1px; }
-.ui-text-reveal__popup { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; box-sizing: border-box; width: max-content; max-width: min(28rem, calc(100vw - 32px)); padding: var(--s2) var(--s3); border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--text); background: var(--surface); box-shadow: var(--mantine-shadow-xs); font-size: 12px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.ui-text-reveal__popup { box-sizing: border-box; max-width: min(28rem, calc(100vw - 32px)); padding: var(--s2) var(--s3); border-color: var(--line-strong); color: var(--text); background: var(--surface); font-size: 12px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
 .ui-field__hint { flex: 1 1 auto; }
 .ui-field__description, .ui-tag-input__description, .ui-textarea__helper-row { min-height: 18px; }
 .ui-field .mantine-InputWrapper-description,
@@ -969,6 +969,24 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-select .mantine-InputWrapper-error,
 .ui-tag-input__control .mantine-InputWrapper-error,
 .ui-textarea .mantine-InputWrapper-error { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; box-sizing: border-box; min-height: 18px; max-height: 18px; overflow: visible; margin: 0; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-field .mantine-InputWrapper-error > span,
+.ui-number-field__control .mantine-InputWrapper-error > span,
+.ui-select .mantine-InputWrapper-error > span,
+.ui-tag-input__control .mantine-InputWrapper-error > span,
+.ui-textarea .mantine-InputWrapper-error > span,
+.ui-dialog__error-slot .form-error { display: flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; }
+.ui-field .mantine-InputWrapper-error [aria-hidden="true"],
+.ui-number-field__control .mantine-InputWrapper-error [aria-hidden="true"],
+.ui-select .mantine-InputWrapper-error [aria-hidden="true"],
+.ui-tag-input__control .mantine-InputWrapper-error [aria-hidden="true"],
+.ui-textarea .mantine-InputWrapper-error [aria-hidden="true"],
+.ui-dialog__error-slot .form-error > [aria-hidden="true"] { flex: none; white-space: nowrap; }
+.ui-field .mantine-InputWrapper-error .ui-text-reveal,
+.ui-number-field__control .mantine-InputWrapper-error .ui-text-reveal,
+.ui-select .mantine-InputWrapper-error .ui-text-reveal,
+.ui-tag-input__control .mantine-InputWrapper-error .ui-text-reveal,
+.ui-textarea .mantine-InputWrapper-error .ui-text-reveal,
+.ui-dialog__error-slot .form-error .ui-text-reveal { flex: 1 1 auto; }
 .ui-field__prefix { display: inline-flex; box-sizing: border-box; width: 100%; align-items: center; justify-content: center; height: 100%; padding: 0; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 14px; }
 .ui-field--prefixed input.mantine-Input-input.mantine-TextInput-input { padding-left: calc(var(--input-left-section-width) + var(--input-padding)); }
 .ui-number-field { width: min(14rem, 100%); min-width: 0; }
@@ -1147,15 +1165,22 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-segmented-control__warning { display: flex; align-items: flex-start; gap: 8px; color: var(--warn); font-size: 12px; line-height: 1.4; }
 .ui-segmented-control__warning .ui-icon { flex: none; color: var(--warn); }
 .ui-tag-input__pill[aria-invalid="true"] { border-color: var(--error); color: var(--error-text); background: var(--error-surface); }
-.ui-save-bar { box-sizing: border-box; display: flex; flex: none; align-items: center; gap: 8px; width: 100%; height: 64px; min-height: 64px; padding: 9px 0; }
+.ui-save-bar { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto; flex: none; align-items: center; gap: 8px; width: 100%; height: 64px; min-height: 64px; padding: 9px 0; }
 .ui-save-bar--persistent { margin-top: auto; border-top: 1px solid var(--line); background: var(--surface-inspector); }
-.ui-save-bar__status { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; overflow: visible; color: var(--text-3); font-size: 12px; }
-.ui-save-bar__message { position: relative; display: flex; flex: 1 1 0; align-items: center; gap: var(--s2); min-width: 0; overflow: visible; white-space: nowrap; }
+.ui-save-bar__status { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: visible; color: var(--text-3); font-size: 12px; }
+.ui-save-bar__message { display: flex; align-items: center; gap: var(--s2); min-width: 0; overflow: hidden; white-space: nowrap; }
 .ui-save-bar__message-copy { flex: 1 1 auto; min-width: 0; }
 .ui-save-bar__footer { flex: 0 1 30%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-save-bar__status .ui-icon { flex: none; color: var(--warn); }
-.ui-save-bar__invalid-fields { display: inline-flex; flex: 0 1 50%; flex-wrap: nowrap; gap: var(--s1); max-width: 50%; overflow-x: auto; margin: 0; padding: 0; list-style: none; }
-.ui-save-bar__invalid-fields button { appearance: none; border: 0; border-radius: var(--r-control); padding: var(--s1) var(--s2); background: var(--error-surface); color: var(--error-text); font: inherit; text-decoration: underline; cursor: pointer; }
+.ui-save-bar__invalid-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-save-bar__invalid-trigger { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--error-text); background: var(--error-surface); cursor: pointer; }
+.ui-save-bar__invalid-trigger:hover { background: var(--surface-hover); }
+.ui-save-bar__invalid-trigger:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
+.ui-save-bar__invalid-popover { max-width: min(90vw, 24rem); }
+.ui-save-bar__invalid-fields { display: grid; gap: var(--s1); max-height: min(50vh, 20rem); overflow: auto; margin: 0; padding: 0; list-style: none; }
+.ui-save-bar__invalid-fields button { display: grid; gap: 2px; width: 100%; min-width: 0; appearance: none; border: 0; border-radius: var(--r-control); padding: var(--s2); background: var(--error-surface); color: var(--error-text); font: inherit; text-align: left; cursor: pointer; }
+.ui-save-bar__invalid-fields button > span { overflow-wrap: anywhere; }
+.ui-save-bar__invalid-fields button > span + span { color: var(--text-2); font-size: 11px; line-height: 1.35; }
 .ui-save-bar__invalid-fields button:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .ui-save-bar__actions { display: flex; flex: none; gap: 8px; }
 .ui-save-bar__save { min-width: max-content; white-space: nowrap; }
@@ -1165,7 +1190,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-save-bar__actions > .ui-save-bar__save .mantine-Button-label,
 .ui-save-bar__actions > .ui-save-bar__discard .mantine-Button-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-dialog__error-slot { position: relative; z-index: 2; height: 18px; min-height: 18px; margin-top: 8px; overflow: visible; }
-.ui-dialog__error-slot .form-error { height: 18px; min-height: 18px; overflow: visible; margin: 0; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-dialog__error-slot .form-error { height: 18px; min-height: 18px; overflow: hidden; margin: 0; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .ui-confirm-dialog__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .ui-confirm-dialog__actions > .mantine-Button-root { flex: 0 0 auto; white-space: nowrap; }
 .ui-editor-shell details[data-editor-error] > summary::after { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: var(--s2); padding: 0 var(--s1); border: 1px solid var(--error); border-radius: var(--r-control); color: var(--error-text); background: var(--error-surface); content: "×"; font-size: 12px; font-weight: 600; line-height: 1; }
@@ -1176,14 +1201,6 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .ui-confirm-dialog__actions > .mantine-Button-root { width: 100%; }
 }
 
-@media (max-width: 419px) {
-  .ui-save-bar { gap: 4px; }
-  .ui-save-bar__status { flex-basis: 40%; }
-  .ui-save-bar__actions { flex: 1 1 60%; min-width: 0; gap: 4px; }
-  .ui-save-bar__actions > .ui-save-bar__save,
-  .ui-save-bar__actions > .ui-save-bar__discard { flex: 1 1 0; min-width: 0; }
-  .ui-save-bar__actions > .ui-save-bar__save { flex: 0 0 auto; min-width: max-content; }
-}
 .ui-toast-host { position: fixed; z-index: var(--mantine-z-index-modal); top: var(--s4); right: var(--s4); display: grid; width: min(40rem, calc(100vw - var(--s4) - var(--s4))); max-height: calc(100vh - var(--s4) - var(--s4)); align-content: start; gap: var(--s2); overflow: auto; pointer-events: none; }
 .ui-toast-host > * { pointer-events: auto; }
 .ui-toast { margin: 0; background: var(--surface); }
