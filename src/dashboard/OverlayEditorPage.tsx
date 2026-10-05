@@ -407,7 +407,6 @@ function OverlayEditorWorkspace({
   };
   const enabledModuleElementOptions = MODULE_ELEMENT_OPTIONS.filter((option) => moduleIsEnabled(option.moduleId));
   const [draft, setDraft] = useState(initialDraft);
-  const draftRef = useRef(draft);
   const [baseline, setBaseline] = useState<OverlayDraftBaseline>({ revision: overlay.revision, draft: baseDraft });
   const [selectedElementId, setSelectedElementId] = useState(initialElementId);
   const [chosenVariableName, setChosenVariableName] = useState(variables[0]?.name ?? "");
@@ -437,10 +436,6 @@ function OverlayEditorWorkspace({
     pointerUp: () => undefined,
     keyDown: () => undefined,
   });
-
-  useLayoutEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline.draft);
   const canEdit = canManage && !saving;
@@ -618,6 +613,16 @@ function OverlayEditorWorkspace({
 
   const clampDraggedPosition = (element: PanelOverlayElement, x: number, y: number): { x: number; y: number } =>
     clampOverlayEditorPosition({ x, y }, canvasSize, renderedElementSize(element.id), elementHorizontalAnchor(element));
+
+  // User scale input may move the element: keep the scaled box inside the canvas.
+  const scaleElement = (element: PanelOverlayElement, scalePercent: number): void => {
+    const size = renderedElementSize(element.id);
+    const factor = scalePercent / element.scalePercent;
+    updateElement(element.id, {
+      scalePercent,
+      ...clampOverlayEditorPosition({ x: element.x, y: element.y }, canvasSize, { width: size.width * factor, height: size.height * factor }, elementHorizontalAnchor(element)),
+    });
+  };
 
   const updateElement = useCallback((elementId: string, update: Partial<PanelOverlayElement>): void => {
     setDraft((current) => ({
@@ -1085,7 +1090,7 @@ function OverlayEditorWorkspace({
             <NumberField id="overlay-editor-y" label={labels.editorY} value={selectedElement.y} disabled={!canEdit}
               onChange={(y) => { if (typeof y === "number") updateElement(selectedElement.id, { y }); }} />
             <NumberField id="overlay-editor-scale" label={labels.editorScale} min={25} max={400} value={selectedElement.scalePercent} disabled={!canEdit}
-              onChange={(scalePercent) => { if (typeof scalePercent === "number") updateElement(selectedElement.id, { scalePercent: Math.max(25, Math.min(400, Math.round(scalePercent))) }); }} />
+              onChange={(scalePercent) => { if (typeof scalePercent === "number") scaleElement(selectedElement, Math.max(25, Math.min(400, Math.round(scalePercent)))); }} />
             <NumberField id="overlay-editor-z" label={labels.editorZ} value={selectedElement.z} disabled={!canEdit}
               onChange={(z) => { if (typeof z === "number") updateElement(selectedElement.id, { z: Math.round(z) }); }} />
           </div>

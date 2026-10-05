@@ -908,7 +908,7 @@ describe("Overlay composition editor", () => {
     expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("700");
   });
 
-  it("keeps saved position when scaling makes an element extend past the canvas", async () => {
+  it("moves an element back inside the canvas when the user raises its scale", async () => {
     const nearEdgeElement = {
       id: "element-near-edge", kind: "variable", label: "Near edge", variableName: "score",
       text: "Near: {value}", config: {}, x: 900, y: 100, scalePercent: 100, z: 1, inComposition: true,
@@ -936,7 +936,8 @@ describe("Overlay composition editor", () => {
 
     fireEvent.change(screen.getByRole("spinbutton", { name: "Skalierung (%)" }), { target: { value: "200" } });
 
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("900");
+    // 200% of 300 px is 600 px wide; the 1280 px canvas leaves room for x = 680.
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("680");
   });
 
   it("keeps a changed draft when a revision conflict is resolved", async () => {
