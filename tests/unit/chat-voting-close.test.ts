@@ -29,6 +29,7 @@ describe("chat voting close service", () => {
       labels: ["Yes", "No"],
       openedAt: "2026-10-04T10:00:00.000Z",
       closesAt: "2026-10-04T14:00:00.000Z",
+      requestedDurationSeconds: null,
       closeReason: "limit",
       status: "open",
     };

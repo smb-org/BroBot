@@ -6,6 +6,7 @@ export interface ChatVotingPanelState {
   counts: readonly number[] | null;
   revision: number;
   hasOpenBallot: boolean;
+  defaultDurationSeconds: number;
 }
 
 const readJson = async <Value>(response: Response): Promise<Value> => {
@@ -35,12 +36,17 @@ export const startChatVoting = async (
   channelId: string,
   preset: ChatVotePreset,
   optionCount?: number,
+  durationSeconds?: number,
 ): Promise<ChatVote> => {
   const token = await csrfHeader();
   return (await readJson<{ vote: ChatVote }>(await fetch(route(channelId, "/start"), {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
-    body: JSON.stringify({ preset, ...(optionCount === undefined ? {} : { optionCount }) }),
+    body: JSON.stringify({
+      preset,
+      ...(optionCount === undefined ? {} : { optionCount }),
+      ...(durationSeconds === undefined ? {} : { durationSeconds }),
+    }),
   }))).vote;
 };
 

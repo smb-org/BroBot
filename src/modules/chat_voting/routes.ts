@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import type { AuditAction } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, chatVotingSettingsSchema } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, chatVotingSettingsSchema } from "./contracts";
 import type { ChatVotePreset } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, startChatVote } from "./service";
@@ -33,11 +33,14 @@ export const chatVotingRoutes = new Hono<ModuleRouteEnvironment>();
 chatVotingRoutes.get("/current", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const repository = createChatVotingRepository(context.env.DB);
-  const vote = await repository.latest(channelId);
+  const [vote, settings] = await Promise.all([
+    repository.latest(channelId),
+    getEnabledSettings(context.env.DB, channelId),
+  ]);
   const ballots = context.get("ballots")(channelId);
   if (vote === null) {
     const hasOpenBallot = await ballots.hasOpenBallot?.() ?? false;
-    return context.json({ vote: null, counts: null, revision: 0, hasOpenBallot });
+    return context.json({ vote: null, counts: null, revision: 0, hasOpenBallot, defaultDurationSeconds: settings?.autoCloseSeconds ?? 0 });
   }
   const [snapshot, hasOpenBallot] = await Promise.all([
     vote.status === "open" ? ballots.read(vote.id) : Promise.resolve(null),
@@ -48,6 +51,7 @@ chatVotingRoutes.get("/current", async (context) => {
     counts: snapshot?.counts ?? vote.counts,
     revision: snapshot?.revision ?? 0,
     hasOpenBallot,
+    defaultDurationSeconds: settings?.autoCloseSeconds ?? 0,
   });
 });
 
@@ -62,6 +66,11 @@ chatVotingRoutes.post("/start", async (context) => {
   if (!Number.isSafeInteger(optionCount) || (optionCount as number) < 2 || (optionCount as number) > 9) {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
+  const durationSeconds = body.durationSeconds;
+  if (!Number.isSafeInteger(durationSeconds) || (durationSeconds as number) < 0 ||
+      (durationSeconds as number) > CHAT_VOTING_HARD_LIMIT_MS / 1_000) {
+    return context.json({ error: "chat_voting_request_invalid" }, 400);
+  }
 
   const settings = await getEnabledSettings(context.env.DB, channelId);
   if (settings === null) return context.json({ error: "chat_voting_unavailable" }, 409);
@@ -74,7 +83,7 @@ chatVotingRoutes.post("/start", async (context) => {
       channelId,
       preset,
       optionCount: optionCount as number,
-      settings,
+      settings: { ...settings, autoCloseSeconds: durationSeconds as number },
       language: await channelLanguage(context.env.DB, channelId),
       authorization,
     }, context.get("ballots")(channelId), async (pollId, deadline, ownerRevision) => {
