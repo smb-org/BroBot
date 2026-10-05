@@ -293,21 +293,21 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     : attemptedSave && draft.kind !== "timeout" && draft.kind !== "list" && draft.variableAction === null && draft.text.trim().length === 0
       ? labels.responseMissing
       : undefined;
-  const timeoutRangeInvalid = draft.kind === "timeout" && (draft.timeoutAction === null ||
-    typeof draft.timeoutAction.minSeconds !== "number" || !Number.isInteger(draft.timeoutAction.minSeconds) || draft.timeoutAction.minSeconds < 1 ||
-    typeof draft.timeoutAction.maxSeconds !== "number" || !Number.isInteger(draft.timeoutAction.maxSeconds) ||
-    draft.timeoutAction.minSeconds > draft.timeoutAction.maxSeconds || draft.timeoutAction.maxSeconds > MODERATION_TIMEOUT_MAX_SECONDS);
-  const timeoutReasonError = draft.timeoutAction !== null && draft.timeoutAction.reason.length > 500 ? labels.fieldTooLong : undefined;
-  const timeoutFallbackError = draft.timeoutAction !== null && draft.timeoutAction.fallbackText.length > 500 ? labels.fieldTooLong : undefined;
-  const variableActionInvalid = !validCommandVariableAction(draft.variableAction, channelVariables);
-  const variableActionNameInvalid = draft.variableAction !== null && !channelVariables.some((entry) => entry.name === draft.variableAction?.name);
-  const variableActionAmountInvalid = draft.variableAction !== null && (
-    draft.variableAction.operation === "set_argument"
-      ? draft.variableAction.amount !== 0
-      : draft.variableAction.amount === null || !Number.isInteger(draft.variableAction.amount) ||
-        (draft.variableAction.operation === "add" || draft.variableAction.operation === "subtract"
-          ? draft.variableAction.amount < 1 || draft.variableAction.amount > 1000
-          : draft.variableAction.amount < -999999999 || draft.variableAction.amount > 999999999)
+  const timeoutRangeInvalid = validationDraft.kind === "timeout" && (validationDraft.timeoutAction === null ||
+    typeof validationDraft.timeoutAction.minSeconds !== "number" || !Number.isInteger(validationDraft.timeoutAction.minSeconds) || validationDraft.timeoutAction.minSeconds < 1 ||
+    typeof validationDraft.timeoutAction.maxSeconds !== "number" || !Number.isInteger(validationDraft.timeoutAction.maxSeconds) ||
+    validationDraft.timeoutAction.minSeconds > validationDraft.timeoutAction.maxSeconds || validationDraft.timeoutAction.maxSeconds > MODERATION_TIMEOUT_MAX_SECONDS);
+  const timeoutReasonError = validationDraft.timeoutAction !== null && validationDraft.timeoutAction.reason.length > 500 ? labels.fieldTooLong : undefined;
+  const timeoutFallbackError = validationDraft.timeoutAction !== null && validationDraft.timeoutAction.fallbackText.length > 500 ? labels.fieldTooLong : undefined;
+  const variableActionInvalid = !validCommandVariableAction(validationDraft.variableAction, channelVariables);
+  const variableActionNameInvalid = validationDraft.variableAction !== null && !channelVariables.some((entry) => entry.name === validationDraft.variableAction?.name);
+  const variableActionAmountInvalid = validationDraft.variableAction !== null && (
+    validationDraft.variableAction.operation === "set_argument"
+      ? validationDraft.variableAction.amount !== 0
+      : validationDraft.variableAction.amount === null || !Number.isInteger(validationDraft.variableAction.amount) ||
+        (validationDraft.variableAction.operation === "add" || validationDraft.variableAction.operation === "subtract"
+          ? validationDraft.variableAction.amount < 1 || validationDraft.variableAction.amount > 1000
+          : validationDraft.variableAction.amount < -999999999 || validationDraft.variableAction.amount > 999999999)
   );
   const variableActionError = attemptedSave && variableActionInvalid ? labels.variableActionInvalid : undefined;
   const aliasesInvalid = draft.aliases.length > TEXT_COMMAND_MAX_ALIASES || sameNameAlias || invalidAlias !== undefined;

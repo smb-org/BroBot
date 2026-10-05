@@ -202,6 +202,54 @@ describe("Text command editor", () => {
     await waitFor(() => expect(created).toMatchObject({ kind: "shoutout", text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout }));
   });
 
+  it("ignores errors from fields a slash conversion discards", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body;
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Timeout/u }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Höchstens" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(await screen.findByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
+    expect(created).toBeUndefined();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort (optional)" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created).toMatchObject({ kind: "shoutout" }));
+  });
+
+  it("ignores an invalid variable action discarded by a slash conversion", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body;
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    fireEvent.click(screen.getByRole("switch", { name: "Kanalvariable ändern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(await screen.findByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
+    expect(created).toBeUndefined();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created).toMatchObject({ kind: "shoutout" }));
+  });
+
   it("lets timeout commands configure usage text", async () => {
     let created: unknown;
     const fetcher = panelFetch({
