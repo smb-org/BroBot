@@ -15,6 +15,9 @@ interface FieldBaseProps {
   required?: boolean;
   /** A value the field only displays, never edits (the invitation link). */
   readOnly?: boolean;
+  type?: "text" | "password";
+  autoComplete?: string;
+  spellCheck?: boolean;
   /** Monospace value, for a field whose exact characters matter (the invitation link). */
   mono?: boolean;
   name?: string;
@@ -42,7 +45,7 @@ export type FieldProps = FieldBaseProps & (
  * `×` and the border stays strong (wired in the theme's `Input`
  * override, not here).
  */
-export function Field({ label, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, mono = false, name, id, icon, prefix, normalize, maxLength, countLabel, className, onKeyDown }: FieldProps) {
+export function Field({ label, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, name, id, icon, prefix, normalize, maxLength, countLabel, className, onKeyDown }: FieldProps) {
   const disabledReason = useDisabledFieldReason();
   const count = value.length;
   const overLimit = maxLength !== undefined && count > maxLength;
@@ -79,6 +82,9 @@ export function Field({ label, hint, error, value, onChange, placeholder, disabl
       placeholder={placeholder}
       disabled={disabled}
       readOnly={readOnly}
+      type={type}
+      autoComplete={autoComplete}
+      spellCheck={spellCheck}
       required={required}
       name={name}
       id={id}

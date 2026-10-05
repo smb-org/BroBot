@@ -1,0 +1,160 @@
+import type { ModuleLanguage } from "../../contract";
+import type { BelaboxFetchFailureReason, BelaboxStatsUrlError } from "../contracts";
+
+export interface BelaboxPanelTexts {
+  title: string;
+  connection: string;
+  danger: string;
+  configured: string;
+  notConfigured: string;
+  updatedAt: string;
+  latestSample: string;
+  connected: string;
+  disconnected: string;
+  bitrate: string;
+  replace: string;
+  statsUrl: string;
+  save: string;
+  saved: string;
+  saveFailed: string;
+  removed: string;
+  removeFailed: string;
+  remove: string;
+  confirmRemove: string;
+  cancel: string;
+  testConnection: string;
+  testFailed: string;
+  testNotConfigured: string;
+  invalidUrl: string;
+  invalidScheme: string;
+  invalidPort: string;
+  invalidHost: string;
+  credentialsNotAllowed: string;
+  queryNotAllowed: string;
+  fragmentNotAllowed: string;
+  invalidPath: string;
+  timeout: string;
+  network: string;
+  http4xx: string;
+  http5xx: string;
+  redirectRejected: string;
+  tooLarge: string;
+  malformed: string;
+  budgetExhausted: string;
+  readOnly: string;
+}
+
+const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
+  de: {
+    title: "BELABOX-Verbindung",
+    connection: "Verbindung",
+    danger: "Gefahrenbereich",
+    configured: "Statistik-URL hinterlegt",
+    notConfigured: "Keine Statistik-URL hinterlegt",
+    updatedAt: "Geändert am",
+    latestSample: "Letzte Messung",
+    connected: "Verbunden",
+    disconnected: "Getrennt",
+    bitrate: "Bitrate",
+    replace: "URL ersetzen",
+    statsUrl: "Statistik-URL",
+    save: "Ersetzen",
+    saved: "Die Statistik-URL wurde ersetzt.",
+    saveFailed: "Die Statistik-URL konnte nicht gespeichert werden.",
+    removed: "Die Statistik-URL wurde entfernt.",
+    removeFailed: "Die Statistik-URL konnte nicht entfernt werden.",
+    remove: "Entfernen",
+    confirmRemove: "Entfernen bestätigen",
+    cancel: "Abbrechen",
+    testConnection: "Verbindung testen",
+    testFailed: "Die Verbindung konnte nicht getestet werden.",
+    testNotConfigured: "Hinterlege zuerst eine Statistik-URL.",
+    invalidUrl: "Die URL ist ungültig.",
+    invalidScheme: "Nur HTTP oder HTTPS ist erlaubt.",
+    invalidPort: "Der Port ist nicht erlaubt.",
+    invalidHost: "Der Host ist nicht erlaubt.",
+    credentialsNotAllowed: "Anmeldedaten in der URL sind nicht erlaubt.",
+    queryNotAllowed: "URL-Abfragen sind nicht erlaubt.",
+    fragmentNotAllowed: "URL-Fragmente sind nicht erlaubt.",
+    invalidPath: "Der URL-Pfad ist ungültig.",
+    timeout: "Der Relay-Dienst hat nicht rechtzeitig geantwortet.",
+    network: "Der Relay-Dienst ist nicht erreichbar.",
+    http4xx: "Der Relay-Dienst hat die Anfrage abgelehnt.",
+    http5xx: "Der Relay-Dienst meldet einen Fehler.",
+    redirectRejected: "Weiterleitungen werden nicht unterstützt.",
+    tooLarge: "Die Antwort des Relay-Dienstes ist zu groß.",
+    malformed: "Die Antwort des Relay-Dienstes ist ungültig.",
+    budgetExhausted: "Das Abruflimit wurde erreicht. Bitte später erneut versuchen.",
+    readOnly: "Nur Broadcaster und Manager können diese Verbindung ändern oder testen.",
+  },
+  en: {
+    title: "BELABOX connection",
+    connection: "Connection",
+    danger: "Danger zone",
+    configured: "Stats URL stored",
+    notConfigured: "No stats URL stored",
+    updatedAt: "Changed",
+    latestSample: "Latest sample",
+    connected: "Connected",
+    disconnected: "Disconnected",
+    bitrate: "Bitrate",
+    replace: "Replace URL",
+    statsUrl: "Stats URL",
+    save: "Replace",
+    saved: "The stats URL was replaced.",
+    saveFailed: "The stats URL could not be saved.",
+    removed: "The stats URL was removed.",
+    removeFailed: "The stats URL could not be removed.",
+    remove: "Remove",
+    confirmRemove: "Confirm removal",
+    cancel: "Cancel",
+    testConnection: "Test connection",
+    testFailed: "The connection could not be tested.",
+    testNotConfigured: "Enter a stats URL first.",
+    invalidUrl: "The URL is invalid.",
+    invalidScheme: "Only HTTP or HTTPS is allowed.",
+    invalidPort: "The port is not allowed.",
+    invalidHost: "The host is not allowed.",
+    credentialsNotAllowed: "URL credentials are not allowed.",
+    queryNotAllowed: "URL queries are not allowed.",
+    fragmentNotAllowed: "URL fragments are not allowed.",
+    invalidPath: "The URL path is invalid.",
+    timeout: "The relay did not respond in time.",
+    network: "The relay could not be reached.",
+    http4xx: "The relay rejected the request.",
+    http5xx: "The relay reported an error.",
+    redirectRejected: "Redirects are not supported.",
+    tooLarge: "The relay response is too large.",
+    malformed: "The relay response is invalid.",
+    budgetExhausted: "The fetch limit was reached. Try again later.",
+    readOnly: "Only broadcasters and managers can change or test this connection.",
+  },
+};
+
+export const belaboxPanelTexts = (language: ModuleLanguage): BelaboxPanelTexts => texts[language];
+
+export const belaboxReasonText = (
+  labels: BelaboxPanelTexts,
+  reason: BelaboxFetchFailureReason | BelaboxStatsUrlError | "not_configured",
+): string => {
+  const mapped: Readonly<Record<BelaboxFetchFailureReason | BelaboxStatsUrlError | "not_configured", string>> = {
+    timeout: labels.timeout,
+    network: labels.network,
+    http_4xx: labels.http4xx,
+    http_5xx: labels.http5xx,
+    redirect_rejected: labels.redirectRejected,
+    too_large: labels.tooLarge,
+    malformed: labels.malformed,
+    budget_exhausted: labels.budgetExhausted,
+    invalid_url: labels.invalidUrl,
+    invalid_scheme: labels.invalidScheme,
+    invalid_port: labels.invalidPort,
+    invalid_host: labels.invalidHost,
+    credentials_not_allowed: labels.credentialsNotAllowed,
+    query_not_allowed: labels.queryNotAllowed,
+    fragment_not_allowed: labels.fragmentNotAllowed,
+    invalid_path: labels.invalidPath,
+    not_configured: labels.testNotConfigured,
+  };
+  return mapped[reason];
+};

@@ -528,6 +528,12 @@ export type AuthorizeModuleMutation = (
 export interface ModuleSecretAccess {
   status: (name: string) => Promise<{ configured: boolean; updatedAt: string | null }>;
   read: (name: string) => Promise<string | null>;
+  /**
+   * Reads a secret together with an opaque version that must still be current for dependent writes.
+   * The version is the stored AES-GCM envelope: it never repeats (random IV per write, also across
+   * delete and recreate), reveals no plaintext, and is only for equality guards. Never log or return it.
+   */
+  readWithVersion: (name: string) => Promise<{ value: string; version: string } | null>;
   /** The returned statement carries the management-role guard and belongs in the same batch as its audit statement. */
   prepareWrite: (name: string, value: string, actor: ModuleMutationActor, now: string) => Promise<D1PreparedStatement>;
   /** The returned statement carries the management-role guard and belongs in the same batch as its audit statement. */

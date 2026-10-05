@@ -16,7 +16,7 @@ describe("module sidebar categories", () => {
     expect(groups.map(({ category, entries }) => [category, entries.map(({ moduleId }) => moduleId)])).toEqual([
       ["chat", ["text_commands", "faq", "text_library", "timers"]],
       ["interaction", ["chat_voting", "votekick"]],
-      ["data", ["sun", "moon", "weather", "currency", "api_source"]],
+      ["data", ["sun", "moon", "weather", "currency", "api_source", "belabox"]],
       ["twitch", ["channel_events", "ads", "raid", "clips"]],
     ]);
     expect(groups[0]?.entries[0]).toMatchObject({ id: "text_commands", label: "Generic text_commands", iconKind: null });

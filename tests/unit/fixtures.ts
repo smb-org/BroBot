@@ -8,6 +8,7 @@ export const unusedModuleSecretReadAccess: ModuleSecretReadAccess = {
 
 export const unusedModuleSecretAccess: ModuleSecretAccess = {
   ...unusedModuleSecretReadAccess,
+  readWithVersion: () => Promise.resolve(null),
   prepareWrite: () => Promise.reject(new Error("Unused module secret write.")),
   prepareDelete: () => { throw new Error("Unused module secret delete."); },
 };

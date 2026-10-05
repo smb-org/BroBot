@@ -92,6 +92,21 @@ describe("host module secrets", () => {
     expect(JSON.stringify(auditRows.results)).not.toContain(SECRET_VALUE);
   });
 
+  it("gives a recreated secret a different version", async () => {
+    const database = await createDatabase();
+    await insertMember(database, CHANNEL_ID, "manager", "manager");
+    const access = accessFor(database, keyRing(NEW_KEY));
+    const actor = { userId: "manager" };
+    await (await access.prepareWrite(SECRET_NAME, SECRET_VALUE, actor, NOW)).run();
+    const first = await access.readWithVersion(SECRET_NAME);
+    await access.prepareDelete(SECRET_NAME, actor, NOW).run();
+    await (await access.prepareWrite(SECRET_NAME, SECRET_VALUE, actor, NOW)).run();
+    const second = await access.readWithVersion(SECRET_NAME);
+    expect(first?.value).toBe(second?.value);
+    expect(first?.version).not.toBe(second?.version);
+    expect(first?.version).not.toContain(SECRET_VALUE);
+  });
+
   it("returns null when a ciphertext is copied to another secret name", async () => {
     const database = await createDatabase();
     await insertMember(database, CHANNEL_ID, "manager", "manager");
