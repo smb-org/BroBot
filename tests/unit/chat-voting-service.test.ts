@@ -19,6 +19,7 @@ const openVote: ChatVote = {
   status: "open",
   openedAt: "2026-10-04T10:00:00.000Z",
   closesAt: "2026-10-04T14:00:00.000Z",
+  requestedDurationSeconds: null,
   closedAt: null,
   closeReason: "limit",
   counts: null,
@@ -145,6 +146,7 @@ describe("chat voting event service", () => {
       channelId: "fictional-channel",
       preset: "yes_no",
       closeReason: "limit",
+      requestedDurationSeconds: null,
     }), undefined);
     expect(scheduleClose).toHaveBeenCalledWith(expect.any(String), effectiveOpenedAt + 4 * 60 * 60 * 1_000, 0);
     expect(result).toMatchObject({ status: "started", vote: { openedAt: new Date(effectiveOpenedAt).toISOString() } });
@@ -165,6 +167,26 @@ describe("chat voting event service", () => {
     expect(result.status).toBe("busy");
     expect(ballots.close).toHaveBeenCalledOnce();
     expect(ballots.acknowledgeClosed).toHaveBeenCalledOnce();
+  });
+
+  it("stores a finite requested duration separately from the close reason", async () => {
+    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryWith({ insertOpen });
+
+    const result = await startChatVote(repository, {
+      channelId: "fictional-channel",
+      preset: "yes_no",
+      optionCount: 2,
+      settings: { ...DEFAULT_CHAT_VOTING_SETTINGS, autoCloseSeconds: 90 },
+      language: "en",
+      openedAt: Date.parse("2026-10-04T10:00:00.000Z"),
+    }, executionContext().ballots, vi.fn(() => Promise.resolve()));
+
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining<Partial<ChatVoteDraft>>({
+      requestedDurationSeconds: 90,
+      closeReason: "timer",
+    }), undefined);
+    expect(result).toMatchObject({ status: "started", vote: { requestedDurationSeconds: 90 } });
   });
 
   it("does not cast a choice after closesAt even if the host ballot remains open", async () => {

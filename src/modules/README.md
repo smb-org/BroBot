@@ -291,13 +291,14 @@ gespeichert. Das Overlay-Element `chat_voting.tally` lädt den offenen Stand
 beim Start und nimmt Zähler mit monotoner Revision entgegen. Panel und Overlay
 bleiben lazy geladen.
 
-Das Panel hält alle Abschnitte in einer gemeinsamen 960-px-Spalte. Die
-Ergebnisansicht zeigt laufende, manuell schließende und beendete Abstimmungen
-mit jeweils passendem Titel; den Schließstatus liest sie aus dem gespeicherten
-Schließgrund und nicht aus einer lokalen Erfolgsmeldung. Stimmen erscheinen als
-horizontale Balken mit Zahl und Prozentwert. Ein Startknopf je Ja/Nein, Skala
-oder Optionsabstimmung ersetzt die Optionsleiste; die Zahl für Optionen liegt
-zwischen 2 und 9. Scheitert das Einplanen eines manuellen Schlusses, stellt das
+Das Panel hält Konfiguration, Ergebnis und die einzige Start-/Stop-Aktion in
+einer stabilen Abstimmungskarte. Typ- und Dauersegmente konfigurieren nur; erst
+„Starten“ öffnet die Abstimmung. Pro Start gelten „Offen“, 1, 2 oder 5 Minuten
+oder eine eigene Dauer bis vier Stunden. Die gespeicherte automatische
+Schließzeit liefert den Ausgangswert. Während eines Ballots bleibt die
+Konfiguration sichtbar und gesperrt; die Ergebnisfläche behält ihre feste Höhe.
+Stimmen erscheinen als horizontale Balken mit Zahl und Prozentwert, die Zahl
+für Optionen liegt zwischen 2 und 9. Scheitert das Einplanen eines manuellen Schlusses, stellt das
 Modul den vorherigen Schließgrund wieder her; Fehler im Alarmhandler werden vom
 Host mit Backoff erneut versucht. Der Host stellt `ModuleBallotAccess.hasOpenBallot()` als
 generische Abfrage der kanalweiten Sperre bereit, damit das Panel auch einen

@@ -22,6 +22,7 @@ describe("chat voting repository mutation guards", () => {
         labels: ["Yes", "No"],
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",
+        requestedDurationSeconds: null,
         closeReason: "limit",
       };
       await repository.insertOpen(vote);
@@ -55,6 +56,7 @@ describe("chat voting repository mutation guards", () => {
         labels: ["Yes", "No"],
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",
+        requestedDurationSeconds: 120,
         closeReason: "limit",
       };
       await repository.insertOpen(vote);
@@ -70,6 +72,7 @@ describe("chat voting repository mutation guards", () => {
       await expect(repository.open("fictional-channel")).resolves.toMatchObject({
         status: "open",
         closeReason: "manual",
+        requestedDurationSeconds: 120,
       });
     } finally {
       database.close();
