@@ -27,7 +27,7 @@ describe("editor seam styles", () => {
   });
 
   it("keeps stepped number fields in one row and confirmation actions readable at narrow widths", () => {
-    expect(styles).toContain(".ui-number-field__stepper { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-rows: auto 44px auto auto;");
+    expect(styles).toContain(".ui-number-field__stepper { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-rows: auto 44px auto 18px;");
     expect(styles).toContain(".ui-number-field__stepper .mantine-NumberInput-input { padding-right: var(--input-padding); text-align: left;");
     expect(styles).toContain(".ui-number-field__stepper .ui-number-field--has-unit .mantine-NumberInput-input { padding-right: calc(var(--input-right-section-width) + var(--input-padding)); }");
     expect(styles).toContain(".ui-number-field__stepper .mantine-InputWrapper-description { grid-column: 1 / -1; grid-row: 3;");
@@ -38,8 +38,8 @@ describe("editor seam styles", () => {
     expect(styles).toContain(".ui-editor-shell { display: flex; height: max-content; flex-direction: column;");
     expect(styles).toContain("overflow: hidden;");
     expect(styles).toContain(".ui-editor-shell__body { flex: 1 1 auto; min-height: 0; overflow: auto;");
-    expect(styles).toContain(".ui-save-bar__footer { grid-row: 2; grid-column: 1 / -1; justify-self: start; }");
-    expect(styles).toContain(".ui-save-bar__actions { grid-row: 3; grid-column: 1 / -1; justify-content: flex-end; }");
+    expect(styles).toContain(".ui-save-bar { box-sizing: border-box; display: flex; flex: none; align-items: center; gap: 8px; width: 100%; height: 64px; min-height: 64px;");
+    expect(styles).toContain(".ui-save-bar__actions > .ui-save-bar__save,");
   });
 
   it("applies the shared hand-drawn SVG stroke family to Spotlight module icons", () => {

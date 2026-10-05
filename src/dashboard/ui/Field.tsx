@@ -57,7 +57,7 @@ export function Field({ label, hint, error, value, onChange, placeholder, disabl
   const leading = prefix === undefined ? (icon === undefined ? undefined : <Icon name={icon} size={16} />) : (
     <span className="ui-field__prefix" aria-hidden="true">{prefix}</span>
   );
-  const description: ReactNode = hint === undefined && maxLength === undefined && disabledReason === null ? undefined : (
+  const description: ReactNode = (
     <span className="ui-field__description">
       {hint === undefined ? null : <span className="ui-field__hint">{hint}</span>}
       {maxLength === undefined ? null : <span className={`ui-field__count${nearLimit && !overLimit ? " ui-field__count--warning" : ""}${overLimit ? " ui-field__count--error" : ""}`}>{countLabel(count, maxLength)}</span>}
@@ -67,7 +67,7 @@ export function Field({ label, hint, error, value, onChange, placeholder, disabl
 
   return (
     <TextInput
-      className={[className, prefix === undefined ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ") || undefined}
+      className={["ui-field", className, prefix === undefined ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ")}
       label={label}
       description={description}
       error={errorNode}

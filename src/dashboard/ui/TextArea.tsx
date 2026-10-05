@@ -328,8 +328,7 @@ export function TextArea({
         <span>{describedHelper(hint, disabledReason, `textarea-${id}`)}</span>
         {countNode}
       </div>
-      {unknownAdvice.length > 0 || worstCaseExceeded ? (
-        <div className="ui-textarea__warnings" id={`${id}-warnings`}>
+      <div className="ui-textarea__warnings" id={`${id}-warnings`}>
           {unknownAdvice.map(({ tokenName, suggestion }, index) => {
             const token = unknownPieces.find((piece) => piece.text === `{${tokenName}}`);
             return (
@@ -347,8 +346,7 @@ export function TextArea({
           {worstCaseExceeded ? (
             <div className="ui-textarea__warning"><Icon name="warning" size={16} /><span>{messages.worstCaseLength(worstCase, maxLength)}</span></div>
           ) : null}
-        </div>
-      ) : null}
+      </div>
       {preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
         <ChatPreview label={previewLabel} speaker={previewSpeaker} text={previewText ?? ""} countLabel={messages.previewCountLabel(previewCount)} />
       )}

@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 
+import { useEffect, useRef } from "react";
+
 import { Button } from "./Button";
 import { Icon } from "./Icon";
+import { notify } from "./toast-store";
 import { colors } from "./theme";
 
 export interface SaveBarProps {
@@ -51,6 +54,20 @@ export function SaveBar({
   saveDescribedBy,
   saveTitle,
 }: SaveBarProps) {
+  const lastToastedMessage = useRef<string | null>(null);
+  const longError = conflict?.message ?? error;
+  const visible = persistent || dirty || saved;
+
+  useEffect(() => {
+    if (!visible || longError === undefined || longError.length < 80) {
+      lastToastedMessage.current = null;
+      return;
+    }
+    if (lastToastedMessage.current === longError) return;
+    lastToastedMessage.current = longError;
+    notify({ tone: "error", message: longError });
+  }, [longError, visible]);
+
   if (!persistent && !dirty && !saved) return null;
 
   const warningStatus = warnings.length === 0 ? null : warningStatusLabel?.(warnings, saved && !dirty) ?? warnings[0];
@@ -69,33 +86,34 @@ export function SaveBar({
               : null;
   const invalidAction = persistent && invalid && dirty && !pending && conflict === undefined;
   const saveDisabled = pending || conflict !== undefined || !dirty;
-  const showButtons = dirty || persistent;
+  const statusTitle = conflict?.message ?? error ?? (invalid && invalidMessage !== undefined ? invalidMessage : typeof statusText === "string" ? statusText : undefined);
 
   return (
     <div className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}`} aria-busy={pending}>
       <div className="ui-save-bar__status" role="status" aria-live="polite">
         {warningStatus !== null && statusText === warningStatus || warningStatus !== null && saved && !dirty ? <Icon name="warning" size={16} /> : null}
-        <div className="ui-save-bar__message" style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
-          {statusText}
+        <div className="ui-save-bar__message" title={statusTitle} style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
+          {typeof statusText === "string" ? <span className="ui-save-bar__message-copy">{statusText}</span> : statusText}
         </div>
+        {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}
         {conflict === undefined ? null : <Button variant="neutral" icon="reload" onClick={conflict.onReload}>{conflict.reloadLabel}</Button>}
       </div>
-      {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer">{footer}</div>}
-      {showButtons ? (
-        <div className="ui-save-bar__actions">
-          {dirty && conflict === undefined ? <Button variant="subtle" onClick={onDiscard} disabled={pending}>{discardLabel}</Button> : null}
-          <Button
-            variant={persistent && invalid ? "neutral" : "primary"}
-            onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
-            disabled={saveDisabled && !invalidAction}
-            ariaDisabled={invalidAction}
-            {...(saveDescribedBy === undefined ? {} : { describedBy: saveDescribedBy })}
-            {...(saveTitle === undefined ? {} : { title: saveTitle })}
-          >
-            {saveLabel}
-          </Button>
-        </div>
-      ) : null}
+      <div className="ui-save-bar__actions">
+        <Button className="ui-save-bar__discard" variant="subtle" onClick={onDiscard} disabled={!dirty || pending || conflict !== undefined} ariaLabel={discardLabel} title={discardLabel}>{discardLabel}</Button>
+        <Button
+          className="ui-save-bar__save"
+          variant={persistent && invalid ? "neutral" : "primary"}
+          onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
+          disabled={saveDisabled && !invalidAction}
+          ariaDisabled={invalidAction}
+          ariaLabel={saveLabel}
+          title={saveLabel}
+          {...(saveDescribedBy === undefined ? {} : { describedBy: saveDescribedBy })}
+          {...(saveTitle === undefined ? {} : { title: saveTitle })}
+        >
+          {pending ? pendingLabel : saveLabel}
+        </Button>
+      </div>
     </div>
   );
 }

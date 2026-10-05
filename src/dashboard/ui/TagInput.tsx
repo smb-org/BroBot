@@ -145,7 +145,7 @@ export function TagInput({ id: suppliedId, label, hint, error, warning, invalidV
           </Pill>
         )}
       />
-      {effectiveWarning === null ? null : <span className="ui-tag-input__warning" id={`${id}-warning`}>{effectiveWarning}</span>}
+      <span className="ui-tag-input__warning" id={`${id}-warning`} aria-hidden={effectiveWarning === null || undefined}><span>{effectiveWarning}</span></span>
     </div>
   );
 }

@@ -81,21 +81,21 @@ export function Select({
   const contextualDescriptionId = describedBy !== undefined && disabledReason !== null && id !== undefined
     ? `${describedBy}-select-${id}`
     : undefined;
-  const description: ReactNode = contextualDescriptionId === undefined || disabledReason === null
-    ? hint
-    : <>
+  const description: ReactNode = (
+    <span className="ui-select__description">
       {hint === undefined ? null : <span>{hint}</span>}
-      <span className="sr-only">{disabledReason.reason}</span>
-    </>;
+      {contextualDescriptionId === undefined || disabledReason === null ? null : <span className="sr-only">{disabledReason.reason}</span>}
+    </span>
+  );
   return (
     <MantineSelect
+      className="ui-select"
       label={label}
       aria-label={ariaLabel}
       description={description}
       {...(contextualDescriptionId === undefined ? {} : {
         descriptionProps: {
           id: contextualDescriptionId,
-          ...(hint === undefined ? { className: "sr-only" } : {}),
         },
       })}
       inputWrapperOrder={["label", "input", "description", "error"]}

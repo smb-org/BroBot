@@ -35,7 +35,7 @@ export function FormDialog({
     <Modal opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={720} centered closeOnEscape={!pending} trapFocus returnFocus>
       {description === undefined ? null : <div className="ui-form-dialog__description">{description}</div>}
       {children}
-      {error === undefined ? null : <p className="form-error" role="alert">{error}</p>}
+      <div className="ui-dialog__error-slot">{error === undefined ? null : <p className="form-error" role="alert">{error}</p>}</div>
       <div className="ui-confirm-dialog__actions">
         <Button variant="subtle" onClick={onCancel} disabled={pending}>{cancelLabel}</Button>
         <Button variant="primary" onClick={onConfirm} disabled={pending || confirmDisabled}>{confirmLabel}</Button>

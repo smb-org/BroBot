@@ -636,20 +636,22 @@ describe("EditorShell and declaration renderer", () => {
     expect(screen.getByRole("tab", { name: /^Settings/u })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("opens collapsed sections when an error link focuses a field inside them", () => {
+  it("keeps collapsed sections closed and marks their summary when an error link focuses a field", () => {
     renderUi(<EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
       sections={[{ id: "settings", label: "Settings", content: <details><summary>Advanced</summary><Field id="usage-text" label="Usage" value="" error="Too long" onChange={() => {}} /></details> }]}
       invalidFields={[{ id: "usage-text", label: "Usage", message: "Too long", sectionId: "settings" }]} />);
     const details = document.querySelector("details") as HTMLDetailsElement;
     expect(details.open).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Usage: Too long" }));
-    expect(details.open).toBe(true);
-    expect(screen.getByRole("textbox", { name: "Usage" })).toHaveFocus();
+    expect(details.open).toBe(false);
+    expect(details).toHaveAttribute("data-editor-error", "true");
+    expect(screen.getByText("Advanced")).toHaveFocus();
   });
 
   it("keeps the persistent save bar visible across clean, dirty, warning, saved, error, pending, and conflict states", () => {
     const { rerender } = renderUi(<EditorShell {...baseProps} />);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("");
 
     rerender(<UiProvider><EditorShell {...baseProps} dirty warnings={["Unknown variable {viewer}."]} /></UiProvider>);
@@ -665,6 +667,7 @@ describe("EditorShell and declaration renderer", () => {
 
     rerender(<UiProvider><EditorShell {...baseProps} saved /></UiProvider>);
     expect(screen.getByRole("status")).toHaveTextContent("Saved.");
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
     rerender(<UiProvider><EditorShell {...baseProps} dirty /></UiProvider>);
     expect(screen.getByRole("status")).not.toHaveTextContent("Saved.");
 
@@ -681,7 +684,7 @@ describe("EditorShell and declaration renderer", () => {
     expect(screen.getByRole("status")).toHaveTextContent("× Changed elsewhere.");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Load server version" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Discard" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Load server version" }));
     expect(onReload).toHaveBeenCalledOnce();
   });

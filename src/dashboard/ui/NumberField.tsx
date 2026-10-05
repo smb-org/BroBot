@@ -63,10 +63,10 @@ export function NumberField({
 
   const input = (
     <NumberInput
+      className={`ui-number-field__control${unit === undefined ? "" : " ui-number-field--has-unit"}`}
       label={label}
-      className={unit ? "ui-number-field--has-unit" : undefined}
       aria-label={ariaLabel}
-      description={hint === undefined && disabledReason === null ? undefined : <span className="ui-number-field__description">{describedHelper(hint, disabledReason, `number-${id ?? label}`)}</span>}
+      description={<span className="ui-number-field__description">{describedHelper(hint, disabledReason, `number-${id ?? label}`)}</span>}
       error={error ? `× ${error}` : undefined}
       inputWrapperOrder={["label", "input", "description", "error"]}
       value={value}
