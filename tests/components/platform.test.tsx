@@ -142,8 +142,9 @@ describe("Platform level", () => {
     const remove = await screen.findByRole("button", { name: "Entfernen" });
     fireEvent.click(remove);
 
-    const dialog = await screen.findByRole("dialog", { name: /Zugriff für Helfer entfernen/ });
-    expect(within(dialog).getByText("Zugriff für Helfer wirklich entfernen?")).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: "Zugriff für „Helfer“ entfernen?" });
+    expect(dialog).toHaveTextContent("Helfer verliert den Zugriff auf diesen Kanal.");
+    expect(within(dialog).getByRole("button", { name: "Mitgliedszugriff entfernen: Helfer" })).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([input, init]) => requestUrl(input).pathname.endsWith("/members/456") && init?.method === "DELETE")).toBe(false);
   });
 

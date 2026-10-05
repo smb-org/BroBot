@@ -39,14 +39,20 @@ Zahlen und kurze Werte, `config-field--medium` für Namen und Bezeichner oder
 `config-field--wide` für Fließtext.
 
 Für wiederkehrende Panel-Inhalte stellt `src/dashboard/ui` `InspectorSection`,
-`InspectorFieldRow`, `InspectorActions`, `DangerSection`, `Badge` und
-`FilterBar` bereit. Inspektorabschnitte verwenden kurze Haarlinien-Überschriften;
+`InspectorFieldRow`, `InspectorActions`, `ActionMenu`, `Badge` und `FilterBar`
+bereit. Inspektorabschnitte verwenden kurze Haarlinien-Überschriften;
 Feldzeilen setzen das Label links und füllen die rechte Kontrollspalte. Hilfen
-stehen am Info-Symbol, Speichern und Verwerfen bleiben am Inspektorfuß, und
-Lösch- oder Widerrufshandlungen gehören in `DangerSection`. Tabellen zeigen
-Status-Badges; ihre Spalten folgen dem Inhalt und kurze Werte werden nicht
-abgeschnitten. Module importieren diese Bauteile aus dem UI-Seam; der Host
-enthält keine modulabhängigen Sonderfälle.
+stehen am Info-Symbol, Speichern und Verwerfen bleiben am Inspektorfuß.
+Zerstörende Handlungen stehen an ihrem Objekt: als letzter roter Menüpunkt nach
+einer Trennlinie bei einer Zeile oder ohne eigene Überschrift im
+`InspectorActions`-Fuß des geöffneten Objekts. Beide fragen mit `ConfirmDialog`
+nach; der Titel nennt das Objekt als Frage, die Beschreibung nennt in einem Satz
+die Folge und die Bestätigung nennt Verb und Objekt. Entwurfsschritte bleiben
+neutral und ohne Nachfrage. Gesperrte Aktionen bleiben sichtbar und deaktiviert;
+der Grund steht einmal am Abschnitt. Tabellen zeigen Status-Badges; ihre Spalten
+folgen dem Inhalt und kurze Werte werden nicht abgeschnitten. Module importieren
+diese Bauteile aus dem UI-Seam; der Host enthält keine modulabhängigen
+Sonderfälle.
 
 Eine Tabelle mit wählbaren Zeilen und ihrem Inspektor verwendet das gemeinsame
 `ListDetail`: Die Ansicht übergibt `list` und `inspector`, die Komponente hält
@@ -59,9 +65,9 @@ schließen sich gegenseitig aus. Die Ansicht stellt Tabellen, Plus-Knopf,
 beginnen mit dem gemeinsamen Kopf (Titel, optionale Kennung in Mono,
 Schließen-Taste) und verwenden denselben Schließen-Rückruf für Taste und
 Escape. Die Auswahl bleibt beim Nachladen bestehen, solange die Zeile noch
-existiert. Zerstörende Handlungen stehen in `DangerSection` und fragen mit
-`inspector-confirmation` an Ort und Stelle nach. Eine Liste fehlender
-Berechtigungen ist kein Inspektor und trägt `.sub-inspector` nicht.
+existiert. Zerstörende Handlungen folgen dem Muster am Objekt und bestätigen
+mit `ConfirmDialog`. Eine Liste fehlender Berechtigungen ist kein Inspektor und
+trägt `.sub-inspector` nicht.
 
 ## Registrierung
 

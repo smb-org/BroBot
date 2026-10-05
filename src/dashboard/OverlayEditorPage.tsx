@@ -31,9 +31,9 @@ import {
   type PanelOverlayDraft,
   type PanelOverlayElement,
 } from "./api";
-import { apiErrorText, dashboardCommonTexts, dashboardLanguage, overlaysTexts } from "./locale";
+import { apiErrorText, dashboardLanguage, overlaysTexts } from "./locale";
 import { useRealtimeVariableUpdates } from "./realtime";
-import { Button, CodeField, ColorField, ConfirmDialog, DangerSection, Field, Icon, NumberField, PageHeader, SaveBar, Select, Switch, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
+import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, NumberField, PageHeader, SaveBar, Select, Switch, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
 interface OverlayEditorPageProperties {
@@ -1138,11 +1138,9 @@ function OverlayEditorWorkspace({
             onChange={(inComposition) => { updateElement(selectedElement.id, inComposition
               ? { inComposition, ...clampPosition(selectedElement, selectedElement.x, selectedElement.y) }
               : { inComposition }); }} />
-          <DangerSection title={dashboardCommonTexts().dangerZone}>
-            <Button danger="subtle" disabled={!canEdit}
-              {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
-              onClick={removeElement}>{labels.editorRemove}</Button>
-          </DangerSection>
+          <Button variant="subtle" disabled={!canEdit}
+            {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
+            onClick={removeElement}>{labels.editorRemove}</Button>
         </div>}
         {!canManage ? <p className="muted" id="overlay-editor-readonly-reason" role="note">{labels.editorReadOnly}</p> : null}
         </div>

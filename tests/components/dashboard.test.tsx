@@ -1152,7 +1152,9 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Entziehen" }));
 
     const ownDialog = await screen.findByRole("dialog");
-    expect(ownDialog).toHaveTextContent("selbst aus");
+    expect(within(ownDialog).getByRole("heading")).toHaveTextContent("Zugriff für esembe entziehen?");
+    expect(ownDialog).toHaveTextContent("Du verlierst deinen Zugang und kannst nur über eine andere berechtigte Person zurückkehren.");
+    expect(within(ownDialog).getByRole("button", { name: "Zugriff für esembe entziehen" })).toBeInTheDocument();
     fireEvent.click(within(ownDialog).getByRole("button", { name: "Abbrechen" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
@@ -1160,7 +1162,8 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(screen.getByRole("row", { name: /Zweit/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Entziehen" }));
     const otherDialog = await screen.findByRole("dialog");
-    expect(otherDialog).not.toHaveTextContent("selbst aus");
+    expect(within(otherDialog).getByRole("heading")).toHaveTextContent("Zugriff für Zweit entziehen?");
+    expect(otherDialog).toHaveTextContent("Zweit verliert den Zugang zu diesem Kanal und seinen kanalbezogenen Panel-Daten und -Funktionen.");
   });
 
   it("shows memberships and the management action only for managing roles", async () => {

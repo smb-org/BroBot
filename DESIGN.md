@@ -366,7 +366,7 @@ Ereignisprotokoll. Sonst nichts.
 ### Secondary (Zustand)
 - **Grün** ({colors.green}, Fläche {colors.green-fill}): läuft, verbunden, gesendet, gesund. LED-Punkt und LED-Wort, Symbolkachel einer eingeschalteten Taste, Schalter-Spur „an“. Grün steht nie ohne Wort daneben und kommt im Ereignisprotokoll nicht vor.
 - **Bernstein** ({colors.warn}, Fläche {colors.warning-surface}): unbekannt oder nicht aktiv — Verbindung unklar, Modul ohne Zustand, Zustandszeile `warning`, Betrieb-Chip „Hinweis“ im Ereignisprotokoll (abgekühlt, unterdrückt, bereits vorhanden). **Nicht** für „ausgeschaltet“.
-- **Rot** ({colors.error}, Fläche {colors.error-surface}): Fehler, Löschen. LED-Punkt, Zustandszeile `error`, Fehlerkasten und Formularfehler mit vorangestelltem ×. Die Löschhandlung trägt dauerhaft die Gefahr-Variante.
+- **Rot** ({colors.error}, Fläche {colors.error-surface}): Fehler, Löschen. LED-Punkt, Zustandszeile `error`, Fehlerkasten und Formularfehler mit vorangestelltem ×. Zerstörende Handlungen tragen dauerhaft die Gefahr-Variante.
 - **Fehler-Text** ({colors.error-text}): das LED-Wort bei rotem Punkt und das Wort des Betrieb-Chips „Fehler“. Eine Stufe heller als Rot, weil das 12-px-Wort auf Tint-1 (gewählte Zeile) sonst unter AA fällt: 4,71:1 auf Tint-1, 5,70:1 auf Grund. Für Flächen, Ränder und Punkte bleibt {colors.error}.
 
 ### Herkunft (Ereignisfamilien)
@@ -475,13 +475,13 @@ Bewegung ist die einzige „Tiefe“ im System: Tastendruck skaliert auf 0,97 in
 
 **Die Kein-Skelett-Regel.** Veraltete Werte bleiben mit 55 % Deckkraft stehen (`.stale` um die Tabelle, sobald Audit, Ereignisse oder Mitglieder nachladen und schon Daten da sind); nichts schimmert. Beim ersten Laden ohne Daten steht eine Ladezeile in Text-2. Bewegung im Augenwinkel sieht neben einem laufenden Stream wie eine Änderung aus.
 
-**Die Zwei-Überlagerungen-Regel.** Das System kennt genau zwei Arten überlagernder Fläche, keine dritte.
+**Die Überlagerungsregel.** Für den normalen Betrieb gibt es genau zwei überlagernde Flächen und ein eng begrenztes Bestätigungsdialogfeld.
 
 Die **aufklappende Liste** (`topbar__channel-list`, `position: absolute`, `z-index: 20`, `role="listbox"`) öffnet unter dem Brotkrumen-Umschalter für Kanal oder Modul. Sie ist flüchtig: an das geöffnete Bedienelement gebunden, sie schließt bei Auswahl, Escape oder Klick daneben und gibt den Fokus auf den Umschalter zurück. Davon gibt es heute zwei — Kanal und Modul —, und ein weiteres Brotkrumen-Segment, das umschaltbar wird, bekommt dieselbe Liste; sie ist ein etabliertes Bauteil, kein Sonderfall pro Umschalter.
 
 Der **meldende Hinweis** (Neue-Ereignisse-Hinweis, `position: fixed`, `z-index: 10` — unter der aufklappenden Liste, weil eine geöffnete Liste eine offene Handlung ist und Vorrang hat) meldet etwas und nimmt nichts entgegen außer der einen Handlung, die ihn zugleich ausführt und schließt (Klick springt an den Anfang und löscht ihn damit). Davon gibt es genau einen. Die Ausnahme hat einen Grund, keine Bequemlichkeit: Ein Hinweis, der nur im Fluss der Liste stünde, wäre unsichtbar genau dann, wenn er gebraucht wird — während jemand weiter unten liest, wohin nichts nachrückt.
 
-**Verboten bleibt die dritte Art:** eine überlagernde Fläche zum Bearbeiten, Bestätigen oder für ein Formular. Dafür bleibt es bei Sub-Inspector, Ergebnis- oder Bestätigungskasten im Fluss — Overlays dafür wurden ausdrücklich verworfen (Issue #130): Sie verdecken die Liste und bräuchten ein eigenes Bauteil mit Fokusfalle.
+`ConfirmDialog` ist die einzige modale Ausnahme: Er fragt ausschließlich vor einer zerstörenden Handlung nach und enthält Titel, Folgenbeschreibung und zwei Aktionen. Bearbeiten und Formulare bleiben im Sub-Inspector oder Fluss; dafür gibt es keine modalen Oberflächen.
 
 ## Shapes
 
@@ -526,7 +526,12 @@ Ein `.button` mit `position: fixed`, mittig unter der Kopfleiste (64 px von oben
 - **Gedeckt:** Der Anlege-Knopf ist neutral, solange das Formular unvollständig ist, und wird erst mit gültigen Feldern primär; der Grund steht als Hinweis (Text-3, 12 px) direkt daneben.
 - **Still (`quiet`):** transparent, Text-2, 12.5 px; erst beim Hinzeigen Rot auf Fehler-Grund mit 45 % Fehler-Rand. **Für Löschen abgelöst am 20. September 2026 (Issue #112):** Die gefährlichste Handlung war dadurch im Ruhezustand die unauffälligste; `quiet` bleibt für nicht zerstörende, zurückhaltende Aktionen.
 - **Gefahr (`danger`):** Rot ohne Rand; Hover Weiß auf Rot.
-- Löschende Handlungen stehen mit `danger` dauerhaft in Fehlerfarbe, vom primären Knopf abgesetzt, und fragen anschließend in der bestehenden `inspector-confirmation` nach. Abbrechen bewirkt keine Mutation.
+- Zerstörende Handlungen stehen dauerhaft in `danger` und fragen anschließend mit `ConfirmDialog` nach. Abbrechen bewirkt keine Mutation.
+
+### Zerstörende Handlungen
+Die Handlung steht an ihrem Objekt. Bei einer Zeile liegt sie als letzter roter Eintrag nach einer Trennlinie im `ActionMenu`; beim geöffneten Objekt sitzt der rote Knopf ohne eigene Überschrift im `InspectorActions`-Fuß, rechts neben Speichern. Ein Entwurfsschritt wie das Entfernen eines noch ungespeicherten Elements bleibt neutral und braucht keine Nachfrage.
+
+Jede Nachfrage folgt derselben Form: eine Frage mit dem Objektnamen, ein Satz zur Folge und ein Bestätigungsknopf mit Verb und Objekt. Der `ConfirmDialog` bleibt der gemeinsame Baustein. Für gesperrte Rollen bleiben die Bedienelemente sichtbar und deaktiviert; der Grund erscheint einmal am betroffenen Abschnitt.
 - **Nachladen (`secondary`):** neutraler Knopf mit 16 px Abstand nach oben, unter Tabellen („Ältere Einträge laden“).
 - **Deaktiviert:** 50 % Deckkraft, `not-allowed`.
 
@@ -597,13 +602,13 @@ Die Fläche für die gewählte Zeile einer Tabelle: 18 px 16 px Innenabstand, Ha
 - **Ohne Auswahl bleibt die Spalte leer**, solange auch kein Anlegen-Formular offen ist — sie hat keinen Ruhezustand mehr, weder Formular noch Platzhalter.
 - **Plus-Knopf** öffnet das Anlegen-Formular eines Bereichs (Befehl anlegen, Kanal freigeben), sofern es eines gibt: rechts in der `section-heading` der Liste, wo sonst die Anzahl steht — 44 × 44, still (`quiet`), Symbol + aus der Familie (20 px), `aria-label` nennt die Handlung. Ein Klick lässt das Formular in derselben Fläche wie der Inspektor erscheinen, mit derselben Kopfzeile und derselben Schließen-Taste, und es reagiert auf Escape wie er. Das ist neu gegenüber der alten Fassung: Vorher war das Formular der Ruhezustand, da hätte Schließen ins Leere geführt; jetzt hat man es aktiv geöffnet und muss es ebenso aktiv wieder loswerden können. Zeile wählen und Formular öffnen schließen einander aus, ohne Übergang und ohne Einblenden — die Spalte trägt immer nur eines von beidem. Ein Bereich hat so nie zwei primäre Knöpfe zugleich.
 - **Scope-Listen sind keine Inspektoren.** Eine Liste fehlender Berechtigungen hat keine gewählte Zeile; sie ist ein Bereich im Fluss (`content-section` mit `section-heading` und `scope-liste`) und trägt die Klasse `sub-inspector` nicht. Wer die Inspektor-Fläche für einen Block ohne Auswahl leiht, baut ein Dock.
-- **Mitglied:** Ergebniskasten (`inspector-result`, Taste, {rounded.container}, Avatar-Zeile + Rollenwahl + Knopf) und Bestätigungskasten (`inspector-confirmation`, 14-px-Titel) sind kein Sub-Inspector; beide bleiben im Fluss unter dem Suchformular.
+- **Mitglied:** Der Ergebniskasten (`inspector-result`, Taste, {rounded.container}, Avatar-Zeile + Rollenwahl + Knopf) bleibt im Fluss unter dem Suchformular. Zerstörende Änderungen öffnen den gemeinsamen `ConfirmDialog`.
 
 ### Filterleiste (`FilterBar`)
 Audit und Ereignisse verwenden dieselbe Leiste: Filterchips, Auswahl und Personensuche stehen in einer 44-px-Zeile. Auf kleinen Viewports scrollt nur diese Zeile horizontal; die Seite selbst bleibt in der Viewportbreite. Aktive Filter und Zurücksetzen stehen in einer eigenen Zeile darunter.
 
 ### Inspektorabschnitte und Felder
-`InspectorSection` trennt Inhalte mit einer Haarlinie und einer kurzen Überschrift. `InspectorFieldRow` stellt das Feldlabel links und ein über die Kontrollspalte gefülltes Feld rechts dar; Hilfetext erscheint über das fokussierbare Info-Symbol mit 44 px Trefferfläche. `InspectorActions` bleibt am unteren Rand des scrollenden Inspektors angeheftet. Zerstörende Handlungen stehen gemeinsam in `DangerSection` mit Gefahrentitel.
+`InspectorSection` trennt Inhalte mit einer Haarlinie und einer kurzen Überschrift. `InspectorFieldRow` stellt das Feldlabel links und ein über die Kontrollspalte gefülltes Feld rechts dar; Hilfetext erscheint über das fokussierbare Info-Symbol mit 44 px Trefferfläche. `InspectorActions` bleibt am unteren Rand des scrollenden Inspektors angeheftet und bietet einen eigenen Slot für die rote Handlung. `ActionMenu` stellt Zeilenaktionen bereit; die zerstörende Handlung steht dort als letzter roter Menüpunkt nach einer Trennlinie.
 
 ### Audit-Satz und Badge
 Audit-Zeilen zeigen eine knappe Satzvorlage mit Akteur, Handlung und geänderten Werten als Chips; Bereich und Uhrzeit stehen rechts. Vorher-/Nachher-Werte verwenden Pfeil und Mono-Chips. Der Detail-Inspektor behält den vollständigen Diff. `Badge` stellt kurze Status- und Rollenwerte ohne Inline-Bedienelement dar.
@@ -634,7 +639,7 @@ Größen: 16 px führend in Knöpfen mit Wort, in Feldern und Hinweiszeilen; 20 
 - **Do** veraltete Werte mit 55 % Deckkraft stehen lassen; nur beim ersten Laden eine Ladezeile.
 - **Do** wählbare Tabellenzeilen mit `tabIndex` und `aria-selected` bauen, Liste und Inspektor über `ListDetail` anordnen und jeden Inspektor wie auch ein per Plus-Knopf geöffnetes Anlegen-Formular mit Schließen-Taste und Escape wieder schließbar machen.
 - **Do** Panel-Ansichten in `.module-stack` und Konfigurationsabschnitte mit Überschrift, Haarlinie und einer benannten Feldbreite bauen.
-- **Do** Löschhandlungen dauerhaft als `danger` markieren und mit `inspector-confirmation` bestätigen lassen.
+- **Do** zerstörende Handlungen am betroffenen Objekt platzieren und mit `ConfirmDialog` bestätigen lassen.
 
 ### Don't:
 - **Don't** ein ausgeschaltetes Modul bernstein färben. Aus ist neutral; Bernstein heißt unbekannt oder Hinweis.

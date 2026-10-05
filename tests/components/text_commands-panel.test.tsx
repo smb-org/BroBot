@@ -1099,8 +1099,9 @@ describe("Text command editor", () => {
     expect(deleteButton).toHaveTextContent("Befehl löschen");
     fireEvent.click(deleteButton);
     const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Befehl !hallo löschen?");
     expect(within(dialog).getByText(/Aliase !hey/)).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Befehl !hallo endgültig löschen" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Befehl !hallo löschen" }));
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true));
     const deleteCall = fetcher.mock.calls.find(([, init]) => init?.method === "DELETE");
     expect(deleteCall?.[0]).toBe("/api/channels/kanal-a/modules/text_commands/commands/hallo?revision=1");

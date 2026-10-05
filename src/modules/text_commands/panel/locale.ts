@@ -258,9 +258,9 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     aliasDuplicate: (alias) => `${alias} steht schon in der Liste.`, aliasRemove: (alias) => `Alias ${alias} entfernen`, aliasList: "Aliase",
     delete: "Befehl löschen", deleteTitle: (name) => `Befehl !${name} löschen?`,
     deleteConfirmation: (name, aliases) => aliases.length === 0
-      ? `Der Textbefehl !${name} wird dauerhaft gelöscht. Diese Handlung kann nicht rückgängig gemacht werden.`
-      : `Der Textbefehl !${name} wird dauerhaft gelöscht. Löscht auch die Aliase ${aliases.map((alias) => `!${alias}`).join(", ")}.`,
-    deleteConfirm: (name) => `Befehl !${name} endgültig löschen`, deleteCancel: "Abbrechen",
+      ? `Der Befehl !${name} wird gelöscht und antwortet danach nicht mehr im Chat.`
+      : `Der Befehl !${name} und seine Aliase ${aliases.map((alias) => `!${alias}`).join(", ")} sind danach im Chat nicht mehr verfügbar.`,
+    deleteConfirm: (name) => `Befehl !${name} löschen`, deleteCancel: "Abbrechen",
     draftGuardTitle: "Ungespeicherte Änderungen",
     draftGuardDescription: "Du hast Änderungen an diesem Befehl. Was möchtest du tun?",
     continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln", close: "Schließen",
@@ -361,11 +361,11 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     aliasIsName: "This is already the command name.", aliasHint: "Other names for the same command. Enter, comma, or space separates them.",
     aliasCount: (count, max) => `${String(count)} of ${String(max)}`, aliasAtLimit: "Up to 10 aliases.",
     aliasDuplicate: (alias) => `${alias} is already in the list.`, aliasRemove: (alias) => `Remove alias ${alias}`, aliasList: "Aliases",
-    delete: "Delete command", deleteTitle: (name) => `Delete !${name}?`,
+    delete: "Delete command", deleteTitle: (name) => `Delete command !${name}?`,
     deleteConfirmation: (name, aliases) => aliases.length === 0
-      ? `The text command !${name} will be deleted permanently. This action cannot be undone.`
-      : `The text command !${name} will be deleted permanently. This also deletes aliases ${aliases.map((alias) => `!${alias}`).join(", ")}.`,
-    deleteConfirm: (name) => `Delete !${name} permanently`, deleteCancel: "Cancel",
+      ? `Command !${name} will be deleted and will no longer reply in chat.`
+      : `Command !${name} and its aliases ${aliases.map((alias) => `!${alias}`).join(", ")} will no longer be available in chat.`,
+    deleteConfirm: (name) => `Delete command !${name}`, deleteCancel: "Cancel",
     draftGuardTitle: "Unsaved changes",
     draftGuardDescription: "This command has unsaved changes. What would you like to do?",
     continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch", close: "Close",

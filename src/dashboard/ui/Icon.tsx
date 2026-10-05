@@ -3,7 +3,7 @@ import {
   IconDiamond, IconExternalLink, IconInfoCircle, IconKey, IconLock, IconMinus, IconMovie, IconPlus, IconRefresh,
   IconMessage, IconSearch, IconSettings, IconShadow, IconSpeakerphone, IconStar, IconSword, IconTrash, IconTypography, IconUser, IconUserMinus,
   IconUserPlus, IconUsers, IconVideo, IconX, IconBroadcast, IconBroadcastOff, IconClockHour4,
-  IconPlayerPause, IconPlayerPlay, IconVolume3, IconVolumeOff, IconBraces, IconPencil,
+  IconPlayerPause, IconPlayerPlay, IconVolume3, IconVolumeOff, IconBraces, IconPencil, IconDotsVertical,
 } from "@tabler/icons-react";
 import type { TablerIcon } from "@tabler/icons-react";
 import type { ReactElement } from "react";
@@ -24,6 +24,7 @@ const glyphs = {
   "clock-hour-4": IconClockHour4,
   cause: IconInfoCircle,
   edit: IconPencil,
+  more: IconDotsVertical,
   token: IconKey, variable: IconBraces,
 } as const satisfies Record<string, TablerIcon>;
 

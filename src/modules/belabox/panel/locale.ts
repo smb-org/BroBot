@@ -4,7 +4,6 @@ import type { BelaboxFetchFailureReason, BelaboxStatsUrlError } from "../contrac
 export interface BelaboxPanelTexts {
   title: string;
   connection: string;
-  danger: string;
   configured: string;
   notConfigured: string;
   updatedAt: string;
@@ -20,6 +19,8 @@ export interface BelaboxPanelTexts {
   removed: string;
   removeFailed: string;
   remove: string;
+  removeTitle: string;
+  removeConsequence: string;
   confirmRemove: string;
   cancel: string;
   testConnection: string;
@@ -48,7 +49,6 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
   de: {
     title: "BELABOX-Verbindung",
     connection: "Verbindung",
-    danger: "Gefahrenbereich",
     configured: "Statistik-URL hinterlegt",
     notConfigured: "Keine Statistik-URL hinterlegt",
     updatedAt: "Geändert am",
@@ -63,8 +63,10 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     saveFailed: "Die Statistik-URL konnte nicht gespeichert werden.",
     removed: "Die Statistik-URL wurde entfernt.",
     removeFailed: "Die Statistik-URL konnte nicht entfernt werden.",
-    remove: "Entfernen",
-    confirmRemove: "Entfernen bestätigen",
+    remove: "Statistik-URL entfernen",
+    removeTitle: "Statistik-URL entfernen?",
+    removeConsequence: "Die gespeicherte Verbindung liefert danach keine Statistiken mehr.",
+    confirmRemove: "Statistik-URL entfernen",
     cancel: "Abbrechen",
     testConnection: "Verbindung testen",
     testFailed: "Die Verbindung konnte nicht getestet werden.",
@@ -90,7 +92,6 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
   en: {
     title: "BELABOX connection",
     connection: "Connection",
-    danger: "Danger zone",
     configured: "Stats URL stored",
     notConfigured: "No stats URL stored",
     updatedAt: "Changed",
@@ -105,8 +106,10 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     saveFailed: "The stats URL could not be saved.",
     removed: "The stats URL was removed.",
     removeFailed: "The stats URL could not be removed.",
-    remove: "Remove",
-    confirmRemove: "Confirm removal",
+    remove: "Remove stats URL",
+    removeTitle: "Remove stats URL?",
+    removeConsequence: "The saved connection will stop providing statistics.",
+    confirmRemove: "Remove stats URL",
     cancel: "Cancel",
     testConnection: "Test connection",
     testFailed: "The connection could not be tested.",

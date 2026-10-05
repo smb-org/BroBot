@@ -17,6 +17,7 @@ export interface SaveBarProps {
   warningStatusLabel?: (warnings: readonly string[], saved: boolean) => ReactNode;
   conflict?: { message: string; reloadLabel: string; onReload: () => void };
   footer?: ReactNode;
+  destructive?: ReactNode;
   onSave: () => void;
   onInvalidSave?: () => void;
   onDiscard: () => void;
@@ -41,6 +42,7 @@ export function SaveBar({
   warningStatusLabel,
   conflict,
   footer,
+  destructive,
   onSave,
   onInvalidSave,
   onDiscard,
@@ -81,19 +83,22 @@ export function SaveBar({
         {conflict === undefined ? null : <Button variant="neutral" icon="reload" onClick={conflict.onReload}>{conflict.reloadLabel}</Button>}
       </div>
       {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer">{footer}</div>}
-      {showButtons ? (
-        <div className="ui-save-bar__actions">
-          {dirty && conflict === undefined ? <Button variant="subtle" onClick={onDiscard} disabled={pending}>{discardLabel}</Button> : null}
-          <Button
-            variant={persistent && invalid ? "neutral" : "primary"}
-            onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
-            disabled={saveDisabled && !invalidAction}
-            ariaDisabled={invalidAction}
-            {...(saveDescribedBy === undefined ? {} : { describedBy: saveDescribedBy })}
-            {...(saveTitle === undefined ? {} : { title: saveTitle })}
-          >
-            {saveLabel}
-          </Button>
+      {showButtons || destructive !== undefined ? (
+        <div className={`ui-save-bar__actions${destructive === undefined ? "" : " ui-save-bar__actions--destructive"}`}>
+          {destructive}
+          <div className="ui-save-bar__buttons">
+            {dirty && conflict === undefined ? <Button variant="subtle" onClick={onDiscard} disabled={pending}>{discardLabel}</Button> : null}
+            {showButtons ? <Button
+              variant={persistent && invalid ? "neutral" : "primary"}
+              onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
+              disabled={saveDisabled && !invalidAction}
+              ariaDisabled={invalidAction}
+              {...(saveDescribedBy === undefined ? {} : { describedBy: saveDescribedBy })}
+              {...(saveTitle === undefined ? {} : { title: saveTitle })}
+            >
+              {saveLabel}
+            </Button> : null}
+          </div>
         </div>
       ) : null}
     </div>
