@@ -614,6 +614,39 @@ describe("EditorShell and declaration renderer", () => {
     expect(screen.getByRole("textbox", { name: "Cooldown" })).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("refocuses the first error on every invalid save attempt", async () => {
+    function Harness() {
+      const [section, setSection] = useState("settings");
+      const [attempted, setAttempted] = useState(false);
+      return <EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields." section={section} onSectionChange={setSection}
+        onInvalidSave={() => { setAttempted(true); }}
+        sections={[
+          { id: "settings", label: "Settings", content: <Field id="repeat-name" label="Name" value="" {...(attempted ? { error: "Required" } : {})} onChange={() => {}} /> },
+          { id: "advanced", label: "Advanced", content: <Field id="repeat-cooldown" label="Cooldown" value="5" onChange={() => {}} /> },
+        ]}
+        invalidFields={[{ id: "repeat-name", label: "Name", message: "Required", sectionId: "settings" }]} />;
+    }
+    renderUi(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("tab", { name: /^Advanced/u }));
+    expect(screen.getByRole("textbox", { name: "Cooldown" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus());
+    expect(screen.getByRole("tab", { name: /^Settings/u })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("opens collapsed sections when an error link focuses a field inside them", () => {
+    renderUi(<EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
+      sections={[{ id: "settings", label: "Settings", content: <details><summary>Advanced</summary><Field id="usage-text" label="Usage" value="" error="Too long" onChange={() => {}} /></details> }]}
+      invalidFields={[{ id: "usage-text", label: "Usage", message: "Too long", sectionId: "settings" }]} />);
+    const details = document.querySelector("details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Usage: Too long" }));
+    expect(details.open).toBe(true);
+    expect(screen.getByRole("textbox", { name: "Usage" })).toHaveFocus();
+  });
+
   it("keeps the persistent save bar visible across clean, dirty, warning, saved, error, pending, and conflict states", () => {
     const { rerender } = renderUi(<EditorShell {...baseProps} />);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();

@@ -61,6 +61,12 @@ export interface EditorShellProps {
 const fieldById = (root: HTMLElement | null, id: string): HTMLElement | undefined =>
   root === null ? undefined : [...root.querySelectorAll<HTMLElement>("[id]")].find((candidate) => candidate.id === id);
 
+/** Opens every collapsed <details> around the field, then focuses it. */
+const revealAndFocus = (field: HTMLElement): void => {
+  for (let details = field.closest("details"); details !== null; details = details.parentElement?.closest("details") ?? null) details.open = true;
+  field.focus();
+};
+
 export function EditorShell({
   className,
   ariaLabel,
@@ -99,6 +105,8 @@ export function EditorShell({
   const contentRef = useRef<HTMLDivElement>(null);
   const pendingFocus = useRef<string | true | null>(null);
   const pendingValidationFocus = useRef(false);
+  // Bumped on every invalid save so the focus effect re-runs even when the parent state is unchanged.
+  const [saveAttempt, setSaveAttempt] = useState(0);
   const activeSectionId = section ?? internalSection;
   const activeSection = sections.find((candidate) => candidate.id === activeSectionId) ?? sections[0];
   const activeIndex = useMemo(() => Math.max(0, sections.findIndex((candidate) => candidate.id === activeSection?.id)), [activeSection?.id, sections]);
@@ -126,7 +134,7 @@ export function EditorShell({
       pendingValidationFocus.current = false;
       pendingFocus.current = null;
       const revealedField = fieldById(contentRef.current, firstInvalidField.focusId ?? firstInvalidField.id);
-      if (revealedField !== undefined && !revealedField.matches("[disabled]")) revealedField.focus();
+      if (revealedField !== undefined && !revealedField.matches("[disabled]")) revealAndFocus(revealedField);
       return;
     }
     const fieldId = pendingFocus.current;
@@ -137,8 +145,8 @@ export function EditorShell({
       return;
     }
     const field = fieldById(contentRef.current, fieldId);
-    if (field !== undefined && !field.matches("[disabled]")) field.focus();
-  }, [activeSection?.id, invalidFields, onSectionChange, section]);
+    if (field !== undefined && !field.matches("[disabled]")) revealAndFocus(field);
+  }, [activeSection?.id, invalidFields, onSectionChange, section, saveAttempt]);
 
   const selectSection = (id: string): void => {
     onSectionChange?.(id);
@@ -153,7 +161,7 @@ export function EditorShell({
       return;
     }
     const target = fieldById(contentRef.current, focusId);
-    if (target !== undefined && !target.matches("[disabled]")) target.focus();
+    if (target !== undefined && !target.matches("[disabled]")) revealAndFocus(target);
   };
 
   const focusFirstInvalid = (): void => {
@@ -176,6 +184,7 @@ export function EditorShell({
     if (onInvalidSave !== undefined) {
       pendingValidationFocus.current = true;
       onInvalidSave();
+      setSaveAttempt((count) => count + 1);
       return;
     }
     focusFirstInvalid();
