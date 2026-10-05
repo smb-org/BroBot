@@ -27,6 +27,7 @@ const routeFor = (): NonNullable<BotModule["routes"]> => {
 
 const testModule = (id: string): BotModule => ({
   id,
+  navigationCategory: "chat",
   settingsSchema: z.object({}),
   defaultSettings: {},
   routes: routeFor(),

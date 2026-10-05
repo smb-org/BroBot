@@ -221,6 +221,7 @@ const resolveOverlayValues = async (
 
 export const sunModule: BotModule<typeof settingsSchema> = {
   id: "sun",
+  navigationCategory: "data",
   panelIcon: sunPanelIcon,
   templateVariableGroup: {
     label: { de: sunModuleCatalog.de.variableGroup, en: sunModuleCatalog.en.variableGroup },

@@ -58,7 +58,7 @@ Tabelle nicht unbegrenzt wachsen lassen.
 ## 4. Vierzehn Tage, rohe `user_id`, Name beim Lesen
 
 `actor_user_id` wird im Ereignisprotokoll roh gespeichert, wenn eine Person die
-Verarbeitung ausgelöst hat; bei Zeitgebern oder EventSub-Nachrichten ohne
+Verarbeitung ausgelöst hat; bei Timern oder EventSub-Nachrichten ohne
 Absender ist der Wert `NULL`. Beim Anzeigen löst die Ereignisroute vorhandene
 IDs über Twitch Helix in Login und Anzeigenamen auf, genau wie die
 Mitgliederliste. Namen werden nicht zusätzlich gespeichert. Fällt die

@@ -116,6 +116,7 @@ const resolveOverlayValues: NonNullable<BotModule<typeof settingsSchema>["resolv
 
 export const apiSourceModule: BotModule<typeof settingsSchema> = {
   id: "api_source",
+  navigationCategory: "data",
   panelIcon: apiSourceIcon,
   mandatory: true,
   mandatoryReason: {

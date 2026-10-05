@@ -36,15 +36,16 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
 
 interface FetchOptions {
   commands?: () => TextCommand[];
+  templateVariables?: readonly unknown[];
   onMutation?: (method: string, path: string, body: unknown) => Response | Promise<Response>;
 }
 
-const panelFetch = ({ commands = () => [makeCommand()], onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
+const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
   vi.fn<typeof fetch>((input, init) => {
     const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-    if (url.pathname.endsWith("/template-variables") && method === "GET") return Promise.resolve(jsonResponse({ variables: [
+    if (url.pathname.endsWith("/template-variables") && method === "GET") return Promise.resolve(jsonResponse({ variables: templateVariables ?? [
       { name: "welcome", moduleId: "text_library", isTextBlock: true },
       ...TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES.map((variable) => ({ ...variable, moduleId: "text_commands", isTextBlock: false })),
     ] }));
@@ -72,6 +73,13 @@ const selectCommand = async (name = "hallo"): Promise<HTMLElement> => {
 const editor = (): HTMLElement => {
   const node = document.querySelector(".ui-editor-shell");
   if (!(node instanceof HTMLElement)) throw new Error("Command editor is missing");
+  return node;
+};
+
+const templateEditorFor = (field: "text" | "usageText" | "timeoutFallbackText"): HTMLElement => {
+  const control = editor().querySelector(`[name="${field}"]`);
+  const node = control?.closest(".command-template-editor");
+  if (!(node instanceof HTMLElement)) throw new Error(`The ${field} template editor is missing`);
   return node;
 };
 
@@ -129,7 +137,7 @@ describe("Text command editor", () => {
   it("offers the shared system variable catalog in the response picker", async () => {
     renderPanel(panelFetch({ commands: () => [] }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    const trigger = screen.getByRole("button", { name: "Variable einfügen" });
+    const trigger = within(templateEditorFor("text")).getByRole("button", { name: "Variable einfügen" });
     expect(trigger.querySelector("svg")).toHaveClass("tabler-icon-braces");
     fireEvent.click(trigger);
     const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
@@ -146,7 +154,7 @@ describe("Text command editor", () => {
       expect(liveLookup).toHaveAttribute("title", "Fragt Twitch live ab, wenn der Befehl ausgeführt wird");
     }
     fireEvent.click(within(picker).getByRole("option", { name: /\{uptime\}/u, hidden: true }));
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("{uptime}");
+    expect(within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" })).toHaveValue("{uptime}");
   });
 
   it("inserts a selected text-library block into a command response", async () => {
@@ -155,13 +163,52 @@ describe("Text command editor", () => {
     await selectCommand();
 
     await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/template-variables")));
-    const picker = document.querySelector(".command-library-picker");
+    const picker = templateEditorFor("text").querySelector(".command-library-picker");
     if (!(picker instanceof HTMLElement)) throw new Error("Text-library picker is missing");
     fireEvent.click(within(picker).getByRole("combobox", { name: "Text aus Bibliothek" }));
-    fireEvent.click(await screen.findByText("{welcome}"));
-    fireEvent.click(screen.getByRole("button", { name: "Text einsetzen" }));
+    const welcomeOptions = await screen.findAllByText("{welcome}");
+    const welcomeOption = welcomeOptions[0];
+    if (welcomeOption === undefined) throw new Error("Text-library option is missing");
+    fireEvent.click(welcomeOption);
+    fireEvent.click(within(picker).getByRole("button", { name: "Text einsetzen" }));
 
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Hallo {user} aus {channel} {welcome}");
+    expect(within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" })).toHaveValue("Hallo {user} aus {channel} {welcome}");
+  });
+
+  it("keeps the usage reply editor collapsed by default for text commands", async () => {
+    const command = makeCommand({ usageText: "Try !hallo 10" });
+    renderPanel(panelFetch({ commands: () => [command] }));
+    await selectCommand();
+
+    const labels = textCommandsTexts("de");
+    const section = editor().querySelector("details.command-usage-advanced");
+    expect(section).toBeInstanceOf(HTMLDetailsElement);
+    expect((section as HTMLDetailsElement).open).toBe(false);
+    expect(section).not.toHaveAttribute("open");
+
+    fireEvent.click(within(editor()).getByText(labels.usageAdvanced, { selector: "summary" }));
+    expect(screen.getByRole("textbox", { name: labels.templateFieldLabels.usageText })).toHaveValue("Try !hallo 10");
+    expect(screen.getByText(labels.usageTextHint)).toBeInTheDocument();
+  });
+
+  it("persists edits and explicit clearing of the usage reply", async () => {
+    const command = makeCommand({ usageText: "Try !hallo 10" });
+    const onMutation = vi.fn<(method: string, path: string, body: unknown) => Response>(() => jsonResponse({ warnings: [] }));
+    renderPanel(panelFetch({ commands: () => [command], onMutation }));
+    await selectCommand();
+
+    const labels = textCommandsTexts("de");
+    fireEvent.click(within(editor()).getByText(labels.usageAdvanced, { selector: "summary" }));
+    const usageReply = screen.getByRole("textbox", { name: labels.templateFieldLabels.usageText });
+    fireEvent.change(usageReply, { target: { value: "Try !hallo <name>" } });
+    fireEvent.click(screen.getByRole("button", { name: labels.save }));
+    await waitFor(() => expect(onMutation).toHaveBeenCalledTimes(1));
+    expect(onMutation.mock.calls[0]?.[2]).toMatchObject({ usageText: "Try !hallo <name>" });
+
+    fireEvent.change(screen.getByRole("textbox", { name: labels.templateFieldLabels.usageText }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: labels.save }));
+    await waitFor(() => expect(onMutation).toHaveBeenCalledTimes(2));
+    expect(onMutation.mock.calls[1]?.[2]).toMatchObject({ usageText: "" });
   });
 
   it("keeps the variable action in a left-aligned switch card and the command body scrollable", async () => {
@@ -221,7 +268,7 @@ describe("Text command editor", () => {
     try {
       renderPanel(panelFetch({ commands: () => [] }));
       fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-      fireEvent.click(screen.getByRole("button", { name: "Variable einfügen" }));
+      fireEvent.click(within(templateEditorFor("text")).getByRole("button", { name: "Variable einfügen" }));
       const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
       expect(picker.parentElement).toHaveClass("ui-variable-picker--sheet");
       expect(picker.parentElement?.querySelector(".ui-variable-picker__mobile-header")).toBeInTheDocument();
@@ -237,7 +284,8 @@ describe("Text command editor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
     fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
     fireEvent.click(await screen.findByRole("option", { name: /Shoutout/u }));
-    expect(screen.getByRole("textbox", { name: "Nutzungshinweis" })).toBeInTheDocument();
+    fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
+    expect(screen.getByRole("textbox", { name: "Antwort bei fehlenden oder ungültigen Argumenten" })).toBeInTheDocument();
     expect(screen.getByText("Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
     const tierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
@@ -258,7 +306,7 @@ describe("Text command editor", () => {
     const fetcher = panelFetch({ commands: () => [] });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.click(screen.getByRole("button", { name: "Variable einfügen" }));
+    fireEvent.click(within(templateEditorFor("text")).getByRole("button", { name: "Variable einfügen" }));
     const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
     expect(within(picker).getByRole("option", { name: /\{user\}/u, hidden: true })).toBeInTheDocument();
     expect(within(picker).getByRole("option", { name: /\{channel\}/u, hidden: true })).toBeInTheDocument();
@@ -314,6 +362,7 @@ describe("Text command editor", () => {
         name: "hallo",
         kind: "text",
         text: "Hallo {user} aus {channel}",
+        usageText: "",
         minimumTier: "everyone",
         cooldownSeconds: 5,
         aliases: ["hey"],
@@ -347,6 +396,7 @@ describe("Text command editor", () => {
       name: "neu",
       text: "Hallo",
       kind: "text",
+      usageText: "",
       minimumTier: "everyone",
       cooldownSeconds: 5,
       aliases: [],
@@ -704,6 +754,7 @@ describe("Text command editor", () => {
       name: "hallo",
       kind: "text",
       text: "Hallo {user} aus {channel}",
+      usageText: "",
       minimumTier: "moderator",
       cooldownSeconds: 5,
       aliases: ["hey"],
