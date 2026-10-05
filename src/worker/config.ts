@@ -102,6 +102,13 @@ export const getMissingBindings = (env: Env): string[] => [
   }),
 ];
 
+// Migrations are additive and backward compatible, so code that is still
+// serving right after a newer migration was applied tolerates that schema.
+const migrationNumber = (name: string | null | undefined): number => {
+  const match = /^(\d+)_/.exec(name ?? "");
+  return match ? Number(match[1]) : Number.NaN;
+};
+
 const getMissingSchema = async (env: Env): Promise<string[]> => {
   try {
     const schema = await env.DB.prepare(`
@@ -115,8 +122,8 @@ const getMissingSchema = async (env: Env): Promise<string[]> => {
     }>();
 
     if (
-      schema?.latest_migration === LATEST_SCHEMA_MIGRATION &&
-      schema.latest_table_count > 0
+      migrationNumber(schema?.latest_migration) >= migrationNumber(LATEST_SCHEMA_MIGRATION) &&
+      schema && schema.latest_table_count > 0
     ) return [];
   } catch {
     // A missing migration table or unreachable D1 counts as a schema error.

@@ -267,8 +267,9 @@ wird zurückgerollt, bereits erfolgreich angewandte bleiben bestehen —, sodass
 das Schema zwischen zwei Ständen landen kann, ohne dass jemand hingesehen
 hat. Eine vergessene Migration fängt stattdessen der Healthcheck ab:
 `/healthz` lässt den CI-Job nach dem Production-Code-Deploy fehlschlagen, wenn
-die jüngste Migration nicht als letzte verzeichnet ist oder eine
-Sentinel-Tabelle fehlt; es prüft nicht das gesamte Schema und rollt den
+die jüngste verzeichnete Migration älter als die erwartete ist (eine neuere
+wird akzeptiert, weil Migrationen rückwärtskompatibel sind und der alte Code
+direkt nach einer Migration noch ausliefert) oder eine Sentinel-Tabelle fehlt; es prüft nicht das gesamte Schema und rollt den
 Deploy nicht zurück.
 
 Migration vor dem Deploy, nie danach: Der neue Code erwartet das neue Schema.

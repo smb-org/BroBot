@@ -161,4 +161,44 @@ describe("Health check binding validation", () => {
 
     expect(health.missingBindings).toEqual(["DB_SCHEMA"]);
   });
+
+  describe("schema migration order", () => {
+    const missing = async (latestMigration: string | null, latestTableCount = 1) =>
+      (await getHealthStatus(environment(Buffer.alloc(32, 4).toString("base64url"), {
+        DB: {
+          prepare: () => ({
+            bind: () => ({
+              first: () => Promise.resolve({
+                latest_migration: latestMigration,
+                latest_table_count: latestTableCount,
+              }),
+            }),
+          }),
+        },
+      }))).missingBindings;
+
+    it("accepts the expected migration", async () => {
+      expect(await missing(LATEST_SCHEMA_MIGRATION)).toEqual([]);
+    });
+
+    it("accepts a newer migration", async () => {
+      expect(await missing("9999_future.sql")).toEqual([]);
+    });
+
+    it("rejects an older migration", async () => {
+      expect(await missing("0001_old.sql")).toEqual(["DB_SCHEMA"]);
+    });
+
+    it("rejects a missing migration", async () => {
+      expect(await missing(null)).toEqual(["DB_SCHEMA"]);
+    });
+
+    it("rejects an unparsable migration name", async () => {
+      expect(await missing("latest.sql")).toEqual(["DB_SCHEMA"]);
+    });
+
+    it("rejects a missing sentinel table", async () => {
+      expect(await missing("9999_future.sql", 0)).toEqual(["DB_SCHEMA"]);
+    });
+  });
 });
