@@ -40,7 +40,6 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
     }
     try {
       await ensureBelaboxPoll({
-        ...(context.getAlarmDeadline === undefined ? {} : { getAlarmDeadline: context.getAlarmDeadline }),
         schedule: (key, deadline) => context.scheduleAlarm(BELABOX_POLL_ALARM_KEY, key, deadline),
       });
     } catch {

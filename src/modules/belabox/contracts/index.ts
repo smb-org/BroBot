@@ -8,6 +8,7 @@ export const BELABOX_POLL_ALARM_KEY = "poll";
 export const BELABOX_ENSURE_POLL_HANDLER = "ensure";
 export const BELABOX_PROBE_INTERVAL_MS = 60_000;
 export const BELABOX_ON_DEMAND_CACHE_MS = 10_000;
+export const BELABOX_SECRET_UNAVAILABLE_STATUS_CODE = "not_configured";
 
 export const belaboxSettingsSchema = z.object({
   mode: z.enum(["interval", "on_demand"]).default("interval"),
@@ -36,6 +37,10 @@ export type BelaboxFetchFailureReason =
   | "malformed"
   | "budget_exhausted";
 
+export type BelaboxStatusErrorCode =
+  | BelaboxFetchFailureReason
+  | typeof BELABOX_SECRET_UNAVAILABLE_STATUS_CODE;
+
 export interface BelaboxStats {
   connected: boolean;
   /** Assumption pending the owner's live check: relay `bitrate` is kbps. */
@@ -57,7 +62,7 @@ export interface BelaboxStatusResponse {
   configured: boolean;
   updatedAt: string | null;
   sample: BelaboxSample | null;
-  errorCode: BelaboxFetchFailureReason | null;
+  errorCode: BelaboxStatusErrorCode | null;
   polling: boolean;
   pollingDesired: boolean;
   streamId: string | null;

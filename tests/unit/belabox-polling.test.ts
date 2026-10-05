@@ -184,7 +184,10 @@ describe("BELABOX polling", () => {
     resolveStaleOffline("offline");
     await staleOffline;
     expect(cleared).toEqual([]);
-    expect(scheduled).toEqual([{ handler: "poll", key: "poll", deadline: Date.now() }]);
+    expect(scheduled).toEqual([
+      { handler: "poll", key: "poll", deadline: Date.now() },
+      { handler: "poll", key: "poll", deadline: Date.now() },
+    ]);
     expect(streamState).not.toHaveBeenCalled();
     expect(await getBelaboxStatus(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({
       polling: true,
@@ -327,7 +330,10 @@ describe("BELABOX polling", () => {
     response.resolve(jsonResponse(relayPayload(true)));
     await running;
 
-    expect(scheduled).toEqual([{ key: "poll", deadline: Date.now() }]);
+    expect(scheduled).toEqual([
+      { key: "poll", deadline: Date.now() },
+      { key: "poll", deadline: Date.now() },
+    ]);
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
       polling: false,
       streamId: null,
@@ -627,7 +633,7 @@ describe("BELABOX polling", () => {
     expect(await getBelaboxStatus(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({ polling: true });
   });
 
-  it("keeps the polling alarm after a transient secret read failure", async () => {
+  it("stops with a fixed status code after an unreadable secret", async () => {
     await insertModule(database);
     const { context, scheduled, cleared } = alarmContext(database, {
       secrets: {
@@ -639,9 +645,37 @@ describe("BELABOX polling", () => {
 
     await expect(handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher)).resolves.toBeUndefined();
 
-    expect(scheduled).toEqual([{ key: "poll", deadline: Date.now() + 60_000 }]);
+    expect(scheduled).toEqual([]);
     expect(cleared).toEqual([]);
     expect(fetcher).not.toHaveBeenCalled();
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      polling: false,
+      errorCode: "not_configured",
+    });
+  });
+
+  it("checks disabled offline stop conditions before reading the secret", async () => {
+    await insertModule(database, BELABOX_DEFAULT_SETTINGS, false);
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, ?, ?, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, STREAM_ID, STREAM_ID).run();
+    const readWithVersion = vi.fn(() => Promise.reject(new Error(SECRET_SENTINEL)));
+    const { context, scheduled } = alarmContext(database, {
+      streamState: "offline",
+      secrets: { ...secretAccess(), readWithVersion },
+    });
+
+    await expect(handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, vi.fn())).resolves.toBeUndefined();
+
+    expect(readWithVersion).not.toHaveBeenCalled();
+    expect(scheduled).toEqual([]);
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      polling: false,
+      streamId: null,
+      belaboxStreamId: null,
+    });
   });
 
   it("prunes old live points when provider polling fails", async () => {

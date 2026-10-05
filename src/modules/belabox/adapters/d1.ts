@@ -1,8 +1,10 @@
 import type { ModuleMutationAuthorization } from "../../contract";
 import {
   BELABOX_MODULE_ID,
+  BELABOX_SECRET_UNAVAILABLE_STATUS_CODE,
   BELABOX_STATS_URL_SECRET,
   type BelaboxFetchFailureReason,
+  type BelaboxStatusErrorCode,
   type BelaboxSample,
 } from "../contracts";
 
@@ -20,7 +22,7 @@ export interface BelaboxFetchPhase {
 
 export interface BelaboxStatus {
   sample: BelaboxSample | null;
-  errorCode: BelaboxFetchFailureReason | null;
+  errorCode: BelaboxStatusErrorCode | null;
   polling: boolean;
   streamId: string | null;
   belaboxStreamId: string | null;
@@ -90,9 +92,10 @@ const parseRecent = (value: string): readonly BelaboxRecentPoint[] => {
   }
 };
 
-const isFailureReason = (value: string | null): value is BelaboxFetchFailureReason =>
+const isStatusErrorCode = (value: string | null): value is BelaboxStatusErrorCode =>
   value !== null && [
     "timeout", "network", "http_4xx", "http_5xx", "redirect_rejected", "too_large", "malformed", "budget_exhausted",
+    BELABOX_SECRET_UNAVAILABLE_STATUS_CODE,
   ].includes(value);
 
 export const getBelaboxStatus = async (db: D1Database, channelId: string): Promise<BelaboxStatus | null> => {
@@ -104,7 +107,7 @@ export const getBelaboxStatus = async (db: D1Database, channelId: string): Promi
   if (row === null) return null;
   return {
     sample: parseSample(row.sample_json),
-    errorCode: isFailureReason(row.error_code) ? row.error_code : null,
+    errorCode: isStatusErrorCode(row.error_code) ? row.error_code : null,
     polling: row.polling === 1,
     streamId: row.stream_id,
     belaboxStreamId: row.belabox_stream_id,
@@ -131,6 +134,7 @@ export const setBelaboxPollingState = async (
   channelId: string,
   polling: boolean,
   resetStream = false,
+  errorCode?: BelaboxStatusErrorCode,
 ): Promise<void> => {
   if (polling) {
     await db.prepare(
@@ -142,6 +146,20 @@ export const setBelaboxPollingState = async (
          revision = belabox_status.revision + 1
        WHERE belabox_status.polling != 1`,
     ).bind(channelId, encodedPhase(EMPTY_FETCH_PHASE)).run();
+    return;
+  }
+
+  if (errorCode !== undefined) {
+    await db.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, error_code, polling, fetch_phase_json, recent_json, revision)
+       VALUES (?, ?, 0, ?, '[]', 1)
+       ON CONFLICT (channel_id) DO UPDATE SET
+         polling = 0,
+         error_code = ?,
+         revision = belabox_status.revision + 1
+       WHERE belabox_status.polling != 0 OR belabox_status.error_code IS NOT ?`,
+    ).bind(channelId, errorCode, encodedPhase(EMPTY_FETCH_PHASE), errorCode, errorCode).run();
     return;
   }
 

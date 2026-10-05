@@ -8,6 +8,7 @@ import {
   BELABOX_ON_DEMAND_CACHE_MS,
   BELABOX_POLL_ALARM_KEY,
   BELABOX_PROBE_INTERVAL_MS,
+  BELABOX_SECRET_UNAVAILABLE_STATUS_CODE,
   BELABOX_STATS_URL_SECRET,
   belaboxSettingsSchema,
   type BelaboxFetchResult,
@@ -34,7 +35,6 @@ interface StoredModuleSettings {
 }
 
 interface BelaboxPollScheduleContext {
-  getAlarmDeadline?: (key: string) => Promise<number | null>;
   schedule: (key: string, deadline: number) => Promise<void>;
 }
 
@@ -118,11 +118,7 @@ const retryDelay = (settings: BelaboxSettings | null): number =>
 
 /** Moves the poll alarm to now without making a stop decision from a stale caller context. */
 export const ensureBelaboxPoll = async (context: BelaboxPollScheduleContext): Promise<void> => {
-  const now = Date.now();
-  const deadline = await context.getAlarmDeadline?.(BELABOX_POLL_ALARM_KEY) ?? null;
-  if (deadline === null || deadline > now) {
-    await context.schedule(BELABOX_POLL_ALARM_KEY, now);
-  }
+  await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
 };
 
 const usableSecret = async (secrets: ModuleSecretAccess): Promise<{
@@ -138,23 +134,46 @@ const usableSecret = async (secrets: ModuleSecretAccess): Promise<{
 
 interface AlarmPrerequisites extends PollingPrerequisites {
   secret: Awaited<ReturnType<typeof usableSecret>>;
+  secretUnavailable: boolean;
 }
 
 const alarmPrerequisites = async (context: ModuleAlarmContext): Promise<AlarmPrerequisites> => {
-  const [moduleState, streamState, secret] = await Promise.all([
+  const [moduleState, streamState] = await Promise.all([
     belaboxSettingsForChannel(context.DB, context.channelId),
     context.streamState(),
-    usableSecret(context.secrets),
   ]);
   const settings = moduleState?.enabled === true && moduleState.settings.mode === "interval"
     ? moduleState.settings
     : null;
+  if (settings === null || streamState !== "online") {
+    return { settings, streamState, secretStored: false, secret: null, secretUnavailable: false };
+  }
+  let secret: Awaited<ReturnType<typeof usableSecret>>;
+  try {
+    secret = await usableSecret(context.secrets);
+  } catch {
+    secret = null;
+  }
   return {
     settings,
     streamState,
     secretStored: secret !== null,
     secret,
+    secretUnavailable: secret === null,
   };
+};
+
+const stopPolling = async (
+  context: ModuleAlarmContext,
+  prerequisites: AlarmPrerequisites,
+): Promise<void> => {
+  await setBelaboxPollingState(
+    context.DB,
+    context.channelId,
+    false,
+    prerequisites.streamState === "offline",
+    prerequisites.secretUnavailable ? BELABOX_SECRET_UNAVAILABLE_STATUS_CODE : undefined,
+  );
 };
 
 const reschedulePollAfterFailure = async (
@@ -172,6 +191,7 @@ const reschedulePollAfterFailure = async (
 type StoredPollOutcome =
   | { kind: "stored"; classified: boolean }
   | { kind: "not_desired" }
+  | { kind: "secret_unavailable" }
   | { kind: "stream_changed" }
   | { kind: "secret_changed" }
   | { kind: "conflict" };
@@ -188,6 +208,7 @@ const storePollResult = async (
       getBelaboxStatus(context.DB, context.channelId),
       context.streamStartedAt(),
     ]);
+    if (prerequisites.secretUnavailable) return { kind: "secret_unavailable" };
     if (live.streamId !== originStreamId) return { kind: "stream_changed" };
     if (!isDesired(prerequisites) || prerequisites.settings === null || prerequisites.secret === null) {
       return { kind: "not_desired" };
@@ -244,7 +265,7 @@ export const handleBelaboxPollAlarm = async (
     const prerequisites = await alarmPrerequisites(context);
     delay = retryDelay(prerequisites.settings);
     if (!isDesired(prerequisites) || prerequisites.settings === null || prerequisites.secret === null) {
-      await setBelaboxPollingState(context.DB, context.channelId, false, prerequisites.streamState === "offline");
+      await stopPolling(context, prerequisites);
       return;
     }
     await setBelaboxPollingState(context.DB, context.channelId, true);
@@ -260,10 +281,20 @@ export const handleBelaboxPollAlarm = async (
 
     const latest = await alarmPrerequisites(context);
     if (!isDesired(latest) || latest.settings === null || latest.secret === null) {
-      await setBelaboxPollingState(context.DB, context.channelId, false, latest.streamState === "offline");
+      await stopPolling(context, latest);
       return;
     }
     delay = retryDelay(latest.settings);
+    if (stored.kind === "secret_unavailable") {
+      await setBelaboxPollingState(
+        context.DB,
+        context.channelId,
+        false,
+        false,
+        BELABOX_SECRET_UNAVAILABLE_STATUS_CODE,
+      );
+      return;
+    }
     if (stored.kind === "not_desired") {
       await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
       return;
