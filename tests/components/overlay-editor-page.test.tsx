@@ -398,6 +398,77 @@ describe("Overlay composition editor", () => {
     expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("680");
   });
 
+  it("clamps keyboard nudges and numeric X/Y edits to whole canvas coordinates", async () => {
+    const cornerElement = {
+      id: "element-corner", kind: "variable", label: "Corner", variableName: "score",
+      text: "Corner: {value}", config: {}, x: 0, y: 0, scalePercent: 100, z: 1, inComposition: true,
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: { ...initialOverlay, elements: [cornerElement] } }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const canvas = previewFrameWindow().document.getElementById("root");
+    if (canvas === null) throw new Error("Overlay preview canvas is missing.");
+    stubMeasuredElementSize(previewFrameWindow(), "element-corner", () => ({ width: 300, height: 40 }));
+
+    fireEvent.keyDown(canvas, { key: "ArrowLeft" });
+    fireEvent.keyDown(canvas, { key: "ArrowUp" });
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("0");
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("0");
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "X (px)" }), { target: { value: "30.4" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Y (px)" }), { target: { value: "900.6" } });
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("30");
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("680");
+  });
+
+  it("scales the unscaled default size for unmeasured elements when the user changes scale", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const textBlock = {
+      ...initialOverlay.elements[0],
+      id: "element-hidden-text",
+      kind: "text_library.block",
+      label: "Hidden text block",
+      variableName: null,
+      text: "",
+      config: { blockName: "" },
+      x: 1850,
+      y: 1040,
+      scalePercent: 25,
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [
+        { id: "text_library", enabled: true, mandatory: false, settings: "{}" },
+      ] }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: { ...initialOverlay, width: 1920, height: 1080, elements: [textBlock] } }));
+      if (url.pathname === "/api/channels/kanal-a/modules/text_library/blocks") return Promise.resolve(jsonResponse({ blocks: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Scale (%)" }), { target: { value: "50" } });
+
+    // 360 x 96 at 50% is 180 x 48 (not 720 x 192 from scaling the 100% size by 50/25).
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1740");
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("1032");
+  });
+
   it("keeps saved X when long temporary text is replaced by short loaded content", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     const longBlockName = "this_is_a_very_long_block_name";

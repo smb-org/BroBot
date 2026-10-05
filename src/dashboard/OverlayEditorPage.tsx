@@ -603,11 +603,16 @@ function OverlayEditorWorkspace({
     return { width: bounds.width, height: bounds.height };
   };
 
-  const renderedElementSize = (elementId: string): OverlayEditorSize => {
+  // The fallback is the unscaled (100%) size; measured sizes already include the element's scale.
+  const unscaledFallbackSize = (elementId: string): OverlayEditorSize => {
     const draftElement = draft.elements.find(({ id }) => id === elementId);
-    const fallback = draftElement === undefined
+    return draftElement === undefined
       ? UNMEASURED_ELEMENT_FALLBACK_SIZE
       : moduleElementOption(draftElement.kind)?.defaultSize ?? UNMEASURED_ELEMENT_FALLBACK_SIZE;
+  };
+
+  const renderedElementSize = (elementId: string): OverlayEditorSize => {
+    const fallback = unscaledFallbackSize(elementId);
     return overlayEditorMeasuredSize(measuredRenderedElementSize(elementId) ?? { width: 0, height: 0 }, fallback);
   };
 
@@ -616,11 +621,13 @@ function OverlayEditorWorkspace({
 
   // User scale input may move the element: keep the scaled box inside the canvas.
   const scaleElement = (element: PanelOverlayElement, scalePercent: number): void => {
-    const size = renderedElementSize(element.id);
-    const factor = scalePercent / element.scalePercent;
+    const measured = measuredRenderedElementSize(element.id);
+    const fallback = unscaledFallbackSize(element.id);
+    const factor = measured === null ? scalePercent / 100 : scalePercent / element.scalePercent;
+    const base = measured ?? fallback;
     updateElement(element.id, {
       scalePercent,
-      ...clampOverlayEditorPosition({ x: element.x, y: element.y }, canvasSize, { width: size.width * factor, height: size.height * factor }, elementHorizontalAnchor(element)),
+      ...clampOverlayEditorPosition({ x: element.x, y: element.y }, canvasSize, { width: base.width * factor, height: base.height * factor }, elementHorizontalAnchor(element)),
     });
   };
 
@@ -864,7 +871,8 @@ function OverlayEditorWorkspace({
             ? { x: selectedElement.x, y: selectedElement.y + distance }
             : null;
     if (requestedPosition === null) return false;
-    if (requestedPosition.x !== selectedElement.x || requestedPosition.y !== selectedElement.y) updateElement(selectedElement.id, requestedPosition);
+    const next = clampDraggedPosition(selectedElement, requestedPosition.x, requestedPosition.y);
+    if (next.x !== selectedElement.x || next.y !== selectedElement.y) updateElement(selectedElement.id, next);
     return true;
   };
 
@@ -1086,9 +1094,9 @@ function OverlayEditorWorkspace({
             onChange={(text) => { updateElement(selectedElement.id, { text }); }} /> : null}
           <div className="overlay-editor__numeric-fields">
             <NumberField id="overlay-editor-x" label={labels.editorX} value={selectedElement.x} disabled={!canEdit}
-              onChange={(x) => { if (typeof x === "number") updateElement(selectedElement.id, { x }); }} />
+              onChange={(x) => { if (typeof x === "number") updateElement(selectedElement.id, clampDraggedPosition(selectedElement, x, selectedElement.y)); }} />
             <NumberField id="overlay-editor-y" label={labels.editorY} value={selectedElement.y} disabled={!canEdit}
-              onChange={(y) => { if (typeof y === "number") updateElement(selectedElement.id, { y }); }} />
+              onChange={(y) => { if (typeof y === "number") updateElement(selectedElement.id, clampDraggedPosition(selectedElement, selectedElement.x, y)); }} />
             <NumberField id="overlay-editor-scale" label={labels.editorScale} min={25} max={400} value={selectedElement.scalePercent} disabled={!canEdit}
               onChange={(scalePercent) => { if (typeof scalePercent === "number") scaleElement(selectedElement, Math.max(25, Math.min(400, Math.round(scalePercent)))); }} />
             <NumberField id="overlay-editor-z" label={labels.editorZ} value={selectedElement.z} disabled={!canEdit}
