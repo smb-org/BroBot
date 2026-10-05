@@ -237,6 +237,7 @@ export interface PanelIssuedOverlayAccess {
   label: string;
   expiresAt: string | null;
   replacesTokenId?: string;
+  closingPending?: boolean;
 }
 
 export const issueOverlayAccess = (channelId: string, overlayId: string, label: string): Promise<PanelIssuedOverlayAccess> =>

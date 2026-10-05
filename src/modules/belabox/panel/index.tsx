@@ -20,6 +20,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const [url, setUrl] = useState("");
   const [testResult, setTestResult] = useState<BelaboxTestResult | null>(null);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -78,7 +79,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const remove = async (): Promise<void> => {
     if (!canManage || busy || status?.configured !== true) return;
     setBusy(true);
-    setError("");
+    setRemoveError(null);
     setNotice("");
     try {
       await removeBelaboxStatsUrl(channelId);
@@ -87,7 +88,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       await refresh();
       setNotice(labels.removed);
     } catch (failure: unknown) {
-      setError(errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.removeFailed);
+      setRemoveError(errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.removeFailed);
     } finally {
       setBusy(false);
     }
@@ -131,9 +132,9 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       </div>
     </InspectorSection>
     <InspectorActions destructive={<Button danger="subtle" disabled={!canManage || busy || status?.configured !== true}
-      onClick={() => { setRemoveConfirmOpen(true); }}>{labels.remove}</Button>} />
+      onClick={() => { setRemoveError(null); setRemoveConfirmOpen(true); }}>{labels.remove}</Button>} />
     <ConfirmDialog opened={removeConfirmOpen} title={labels.removeTitle} description={labels.removeConsequence}
-      confirmLabel={labels.confirmRemove} cancelLabel={labels.cancel} onCancel={() => { setRemoveConfirmOpen(false); }}
-      onConfirm={() => { void remove(); }} pending={busy} danger />
+      confirmLabel={labels.confirmRemove} cancelLabel={labels.cancel} onCancel={() => { setRemoveConfirmOpen(false); setRemoveError(null); }}
+      onConfirm={() => { void remove(); }} pending={busy} danger {...(removeError === null ? {} : { error: removeError })} />
   </section>;
 }

@@ -4,6 +4,7 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { authRouter } from "../../src/worker/auth/routes";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { decryptJson, hashOverlayToken, parseKeyRing } from "../../src/worker/auth/crypto";
+import { getOverlayAccessMetadata, replaceOverlayAccess as replaceOverlayAccessRecord } from "../../src/worker/auth/overlay-access-repository";
 import { overlayAccessRouter } from "../../src/worker/panel/overlay-access-routes";
 import { overlayRouter } from "../../src/worker/panel/overlay-routes";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
@@ -358,8 +359,13 @@ describe("overlay access routes", () => {
     expect(completedAt - serverNow).toBeLessThan(100);
   });
 
-  it("keeps the old access active when replacing it", async () => {
+  it("revokes the old access and audits the replacement in one batch", async () => {
     const oldAccess = await issueAccess(environment, "OBS main");
+    const close = vi.fn().mockResolvedValue(true);
+    environment.CHANNEL = {
+      idFromName: vi.fn(() => "channel-object"),
+      get: vi.fn(() => ({ revokeToken: close })),
+    } as unknown as Env["CHANNEL"];
     const replacement = await post(overlayAccessRouter, accessPath(oldAccess.tokenId, "replace"), environment);
     const newAccess = await replacement.json<{
       tokenId: string;
@@ -370,13 +376,50 @@ describe("overlay access routes", () => {
     }>();
 
     expect(replacement.status).toBe(201);
+    expect(close).toHaveBeenCalledWith(oldAccess.tokenId);
     expect(newAccess.tokenId).not.toBe(oldAccess.tokenId);
     expect(newAccess.label).toBe("OBS main 2");
     expect(newAccess.expiresAt).toBeNull();
     expect(newAccess.replacesTokenId).toBe(oldAccess.tokenId);
+    const revokedOldAccess = await database.prepare("SELECT revoked_at, revocation_reason FROM overlay_tokens WHERE token_id = ?")
+      .bind(oldAccess.tokenId).first<{ revoked_at: string | null; revocation_reason: string | null }>();
+    expect(revokedOldAccess?.revoked_at).toEqual(expect.any(String));
+    expect(revokedOldAccess?.revocation_reason).toBe("replaced");
+    expect(await database.prepare("SELECT token_id FROM overlay_tokens WHERE token_id = ?")
+      .bind(newAccess.tokenId).first()).toEqual({ token_id: newAccess.tokenId });
+    const replacementAudit = await database.prepare(
+      "SELECT channel_id, actor_user_id, action, before_json, after_json FROM audit_log WHERE action = 'overlay.access.replaced'",
+    ).first<{ channel_id: string; actor_user_id: string; action: string; before_json: string; after_json: string }>();
+    expect(replacementAudit).toMatchObject({ channel_id: "channel-a", actor_user_id: "user-1", action: "overlay.access.replaced" });
+    expect(JSON.parse(replacementAudit?.before_json ?? "null")).toMatchObject({ tokenId: oldAccess.tokenId });
+    expect(JSON.parse(replacementAudit?.after_json ?? "null")).toMatchObject({ tokenId: newAccess.tokenId });
+    expect(tokenFromUrl(newAccess.overlayUrl)).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+  });
+
+  it("guards replacement in the mutation when the manager role has changed", async () => {
+    const oldAccess = await issueAccess(environment, "OBS main");
+    const before = await getOverlayAccessMetadata(database as unknown as D1Database, "channel-a", "overlay-a", oldAccess.tokenId);
+    if (before === null) throw new Error("Issued access metadata is missing.");
+    await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'channel-a'").run();
+
+    const replaced = await replaceOverlayAccessRecord(database as unknown as D1Database, before, {
+      tokenId: "replacement-operator-attempt",
+      channelId: "channel-a",
+      overlayId: "overlay-a",
+      tokenHash: "replacement-hash",
+      secretEnvelope: "replacement-envelope",
+      label: "Unauthorized replacement",
+      expiresAt: null,
+      createdAt: new Date().toISOString(),
+    }, { userId: "user-1", sessionId: "session-1" });
+
+    expect(replaced).toBe(false);
     expect(await database.prepare("SELECT revoked_at FROM overlay_tokens WHERE token_id = ?")
       .bind(oldAccess.tokenId).first()).toEqual({ revoked_at: null });
-    expect(tokenFromUrl(newAccess.overlayUrl)).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(await database.prepare("SELECT token_id FROM overlay_tokens WHERE token_id = 'replacement-operator-attempt'").first())
+      .toBeNull();
+    expect(await database.prepare("SELECT action FROM audit_log WHERE action = 'overlay.access.replaced'").all())
+      .toMatchObject({ results: [] });
   });
 
   it("replaces an expired access with a requested fresh expiry and a distinct label within 40 characters", async () => {
@@ -389,7 +432,7 @@ describe("overlay access routes", () => {
     });
     const newAccess = await replacement.json<{ label: string; expiresAt: string | null }>();
 
-    expect(replacement.status).toBe(201);
+    expect([201, 202]).toContain(replacement.status);
     expect(newAccess.label).toBe(`${"X".repeat(38)} 2`);
     expect(newAccess.label).not.toBe("X".repeat(40));
     expect(newAccess.label).toHaveLength(40);

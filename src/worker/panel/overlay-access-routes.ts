@@ -10,6 +10,7 @@ import {
   listOverlayAccessesForOverlay,
   removeRevokedOverlayAccess,
   revealOverlayAccess,
+  replaceOverlayAccess,
   revokeOverlayAccess,
   tokenEncryptionKeyRing,
 } from "../auth/overlay-access-service";
@@ -170,9 +171,25 @@ overlayAccessRouter.post(`${accessPath}/:tokenId/replace`, async (context) => {
     return context.json({ error: "overlay_access_not_found" }, 404);
   }
   if (existing.revokedAt !== null) return context.json({ error: "overlay_access_revoked" }, 409);
-  const result = await issue(context, replacementLabel(existing.label), parsed.data.expiresAt, now);
+  const result = await replaceOverlayAccess(context.env.DB, {
+    channelId,
+    overlayId,
+    label: replacementLabel(existing.label),
+    expiresAt: parsed.data.expiresAt,
+    actor: context.get("actor"),
+    pepper: context.env.OVERLAY_TOKEN_PEPPER,
+    keyRing: tokenEncryptionKeyRing(context.env),
+    publicOrigin: context.env.PUBLIC_ORIGIN,
+    createdAt: now,
+    existing,
+  });
   if (result.outcome === "rejected") return issueFailure(context, now);
-  return context.json({ ...result.access, replacesTokenId: existing.tokenId }, 201);
+  const closed = await closeRealtimeTokenBeforeResponse(context.env.CHANNEL, channelId, existing.tokenId);
+  return context.json({
+    ...result.access,
+    replacesTokenId: existing.tokenId,
+    closingPending: !closed,
+  }, closed ? 201 : 202);
 });
 
 overlayAccessRouter.post(`${accessPath}/:tokenId/revoke`, async (context) => {

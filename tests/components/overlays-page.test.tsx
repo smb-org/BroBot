@@ -225,6 +225,19 @@ describe("Overlays page", () => {
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/reveal"))).toBe(false);
   });
 
+  it("shows operators why new overlay creation is disabled on the initial view", () => {
+    vi.stubGlobal("fetch", routeFetcher({ emptyOverlays: true }));
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
+
+    const create = screen.getByRole("button", { name: "Neues Overlay" });
+    expect(create).toBeDisabled();
+    const descriptionId = create.getAttribute("aria-describedby");
+    expect(descriptionId).not.toBeNull();
+    const reason = descriptionId === null ? null : document.getElementById(descriptionId);
+    expect(reason).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.");
+    expect(reason).toHaveAttribute("role", "note");
+  });
+
   it("shows operators the disabled remove action and its reason for revoked access", async () => {
     vi.stubGlobal("fetch", routeFetcher({ accessRevokedAt: "2026-09-24T12:00:00.000Z" }));
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
@@ -416,6 +429,12 @@ describe("Overlays page", () => {
 
     const originalAccess = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(originalAccess instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    fireEvent.click(within(originalAccess).getByRole("button", { name: "Link kopieren: OBS Main PC" }));
+    await vi.waitFor(() => { expect(writeText).toHaveBeenCalledWith(secret); });
+    await waitFor(() => expect(within(originalAccess).getByRole("button", { name: "Kopiert: OBS Main PC" })).toBeInTheDocument());
+    expect(originalAccess.querySelector(".overlay-access-list__expanded")).toBeNull();
+    expect(within(originalAccess).queryByText(secret)).not.toBeInTheDocument();
+
     await selectAccessAction(originalAccess, "OBS Main PC", "Link anzeigen");
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/reveal"))).toBe(true); });
     expect(await screen.findByText(secret)).toBeInTheDocument();
@@ -427,6 +446,9 @@ describe("Overlays page", () => {
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/replace"))).toBe(true); });
     expect(await screen.findByText(maskedSecret)).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/replace"))).toBe(true);
+    const revokedSection = inspector.querySelector(".overlay-access-revoked");
+    expect(revokedSection).not.toBeNull();
+    expect(within(revokedSection as HTMLElement).getByText("OBS Main PC", { selector: "strong" })).toBeInTheDocument();
 
     const replacementRow = Array.from(inspector.querySelectorAll<HTMLElement>(".overlay-access-list__item"))
       .find((row) => !row.classList.contains("overlay-access-list__item--revoked") && row.querySelector("strong")?.textContent === "OBS Main PC");

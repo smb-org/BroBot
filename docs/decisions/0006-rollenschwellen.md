@@ -151,5 +151,7 @@ und Kanalmitgliedschaft in derselben D1-Batch wie die Mutation; ein
 Audit-Eintrag `overlay.access.removed` bewahrt den Stand vor der Löschung.
 
 Die nächtliche Wartung löscht widerrufene Overlay-Zugänge frühestens 30 Tage
-nach dem Widerruf. Die Audit-Einträge zu Ausstellung, Widerruf und manueller
-Entfernung bleiben erhalten.
+nach dem Widerruf. Sie schreibt pro gelöschtem Zugang in derselben D1-Batch
+einen kanalbezogenen `overlay.access.removed`-Eintrag mit dem Stand vor der
+Löschung und dem Akteurtyp `system`. So bleiben auch diese Audit-Einträge
+neben den Einträgen zu Ausstellung, Widerruf und manueller Entfernung erhalten.

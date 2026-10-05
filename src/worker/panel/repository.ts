@@ -98,7 +98,7 @@ interface ChannelStateRow {
 
 interface AuditLogRow {
   audit_id: string;
-  actor_user_id: string;
+  actor_user_id: string | null;
   actor_kind: AuditActorKind;
   created_at: string;
   module_id: string | null;

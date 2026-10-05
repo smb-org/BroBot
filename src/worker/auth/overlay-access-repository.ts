@@ -7,6 +7,9 @@ import { actorGuard, bindActorGuard, type ActorContext } from "../db/guards";
 import { prepareAudit } from "../db/audit";
 
 export const OVERLAY_ACCESS_MAXIMUM_COUNT = 10;
+export const overlayAccessActivePredicate = `revoked_at IS NULL AND
+  (expires_at IS NULL OR
+    (julianday(expires_at) IS NOT NULL AND julianday(expires_at) > julianday(?)))`;
 
 export interface NewOverlayAccessRecord {
   tokenId: string;
@@ -231,6 +234,105 @@ export const createOverlayAccess = async (
   return (result[0]?.meta.changes ?? 0) > 0;
 };
 
+/** Issues a new credential and cuts off the old one in one guarded D1 batch. */
+export const replaceOverlayAccess = async (
+  db: D1Database,
+  before: OverlayAccessMetadata,
+  replacement: NewOverlayAccessRecord,
+  actor: ActorContext,
+): Promise<boolean> => {
+  const insert = db.prepare(
+    `INSERT INTO overlay_tokens
+      (token_id, channel_id, token_hash, expires_at, created_at, created_by_user_id,
+       revoked_at, revocation_reason, last_used_at, overlay_id, label, secret_envelope)
+     SELECT ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?
+      WHERE EXISTS (
+        SELECT 1 FROM overlays
+         WHERE channel_id = ? AND overlay_id = ?
+      )
+        AND EXISTS (
+          SELECT 1 FROM overlay_tokens
+           WHERE token_id = ? AND channel_id = ? AND overlay_id = ?
+             AND created_at = ? AND (expires_at = ? OR (expires_at IS NULL AND ? IS NULL))
+             AND revoked_at IS NULL
+        )
+        AND (
+          (SELECT COUNT(*) FROM overlay_tokens
+            WHERE channel_id = ? AND overlay_id = ? AND revoked_at IS NULL
+              AND (expires_at IS NULL OR
+                (julianday(expires_at) IS NOT NULL AND julianday(expires_at) > julianday(?)))) < ?
+          OR EXISTS (
+            SELECT 1 FROM overlay_tokens
+             WHERE token_id = ? AND channel_id = ? AND overlay_id = ?
+               AND created_at = ? AND (expires_at = ? OR (expires_at IS NULL AND ? IS NULL))
+               AND ${overlayAccessActivePredicate}
+          )
+        )
+        ${actorGuard(MANAGING_ROLES)}`,
+  ).bind(
+    replacement.tokenId,
+    replacement.channelId,
+    replacement.tokenHash,
+    replacement.expiresAt,
+    replacement.createdAt,
+    actor.userId,
+    replacement.overlayId,
+    replacement.label,
+    replacement.secretEnvelope,
+    replacement.channelId,
+    replacement.overlayId,
+    before.tokenId,
+    before.channelId,
+    before.overlayId,
+    before.createdAt,
+    before.expiresAt,
+    before.expiresAt,
+    replacement.channelId,
+    replacement.overlayId,
+    replacement.createdAt,
+    OVERLAY_ACCESS_MAXIMUM_COUNT,
+    before.tokenId,
+    before.channelId,
+    before.overlayId,
+    before.createdAt,
+    before.expiresAt,
+    before.expiresAt,
+    replacement.createdAt,
+    ...bindActorGuard(actor, replacement.channelId, replacement.createdAt),
+  );
+  const revoke = db.prepare(
+    `UPDATE overlay_tokens
+        SET revoked_at = ?, revocation_reason = 'replaced'
+      WHERE token_id = ? AND channel_id = ? AND overlay_id = ? AND revoked_at IS NULL
+        AND created_at = ? AND (expires_at = ? OR (expires_at IS NULL AND ? IS NULL))
+        AND EXISTS (
+          SELECT 1 FROM overlay_tokens
+           WHERE token_id = ? AND channel_id = ? AND overlay_id = ?
+             AND created_at = ? AND revoked_at IS NULL
+        )
+        ${actorGuard(MANAGING_ROLES)}`,
+  ).bind(
+    replacement.createdAt,
+    before.tokenId,
+    before.channelId,
+    before.overlayId,
+    before.createdAt,
+    before.expiresAt,
+    before.expiresAt,
+    replacement.tokenId,
+    replacement.channelId,
+    replacement.overlayId,
+    replacement.createdAt,
+    ...bindActorGuard(actor, replacement.channelId, replacement.createdAt),
+  );
+  const audit = prepareAudit(db, actor.userId, replacement.createdAt, replacement.channelId, null,
+    "overlay.access.replaced",
+    accessAuditSnapshot(before),
+    accessAuditSnapshot({ ...replacement, revokedAt: null, revocationReason: null }));
+  const result = await db.batch([insert, revoke, audit]);
+  return (result[0]?.meta.changes ?? 0) > 0 && (result[1]?.meta.changes ?? 0) > 0;
+};
+
 export const authorizeOverlayAccessManager = async (
   db: D1Database,
   actor: ActorContext,
@@ -340,12 +442,31 @@ export const removeRevokedOverlayAccess = async (
   return current.revokedAt === null ? "not_revoked" : "not_found";
 };
 
-/** Removes revoked overlay accesses after 30 days, retaining their audit rows. */
+/** Removes revoked overlay accesses after 30 days, retaining channel-scoped audit snapshots. */
 export const purgeRevokedOverlayAccesses = async (db: D1Database, now: string): Promise<void> => {
-  await db.prepare(
+  const audit = db.prepare(
+    `INSERT INTO audit_log
+      (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
+     SELECT lower(hex(randomblob(16))), NULL, ?, channel_id, NULL, 'overlay.access.removed',
+       json_object(
+         'tokenId', token_id,
+         'overlayId', overlay_id,
+         'label', label,
+         'expiresAt', expires_at,
+         'createdAt', created_at,
+         'revokedAt', revoked_at,
+         'revocationReason', revocation_reason
+       ), 'null', 'system'
+      FROM overlay_tokens
+      WHERE overlay_id IS NOT NULL AND revoked_at IS NOT NULL
+        AND julianday(revoked_at) IS NOT NULL
+        AND julianday(revoked_at) <= julianday(?, '-30 days')`,
+  ).bind(now, now);
+  const remove = db.prepare(
     `DELETE FROM overlay_tokens
       WHERE overlay_id IS NOT NULL AND revoked_at IS NOT NULL
         AND julianday(revoked_at) IS NOT NULL
         AND julianday(revoked_at) <= julianday(?, '-30 days')`,
-  ).bind(now).run();
+  ).bind(now);
+  await db.batch([audit, remove]);
 };

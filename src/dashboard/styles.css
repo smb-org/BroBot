@@ -692,6 +692,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-form-actions,
 .channel-variable-use-overlay__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
 .overlay-access-list__actions { flex: none; align-items: center; gap: var(--s1); }
+.overlay-access-list__copy { width: 144px; min-width: 144px; }
 .overlay-access-list__actions-wrap { display: grid; justify-items: end; gap: var(--s1); }
 .overlay-access-list__expanded { display: grid; gap: var(--s2); min-width: 0; padding: var(--s2) var(--s3); border-radius: var(--r-control); background: var(--surface-well); color: var(--text-3); font-size: 12px; }
 .overlay-access-list__expanded code { min-width: 0; overflow-wrap: anywhere; font: var(--mantine-font-size-sm)/1.5 var(--mantine-font-family-monospace); }
@@ -889,6 +890,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .module-detail-heading__copy h1 { margin: 0; }
 .module-detail-heading__copy p { margin: 4px 0 0; color: var(--text-2); font-size: 13px; }
 .module-detail-heading__actions { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: 12px; }
+.overlays-page__create-action { display: grid; justify-items: end; gap: var(--s1); }
+.overlays-page__create-reason { max-width: 18rem; margin: 0; color: var(--text-3); font-size: 12px; line-height: 1.4; text-align: right; }
 .header-action { display: grid; justify-items: end; gap: 2px; min-width: 0; }
 .header-action .form-error { margin-top: 4px; }
 

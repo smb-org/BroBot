@@ -239,6 +239,7 @@ const panelPlatformChannel: PanelPlatformChannelOverview = {
 
 const panelPlatformAuditEntry: PanelPlatformAuditEntry = {
   ...panelAuditEntry,
+  actorUserId: panelAuditEntry.actorUserId ?? "user-1",
   actorKind: "platform_admin",
   channelId: "kanal-a",
 };

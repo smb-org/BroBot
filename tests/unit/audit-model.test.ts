@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { AUDIT_ACTIONS } from "../../src/contracts/values";
 import type { PanelAuditEntry } from "../../src/panel-contract";
 import { textFingerprintIfTruncated, truncateTo200Chars } from "../../src/text";
-import { auditFieldLabel } from "../../src/dashboard/locale";
+import { auditFieldLabel, dashboardTexts } from "../../src/dashboard/locale";
 import {
   auditActorLabel,
   auditAreaForAction,
@@ -462,6 +462,11 @@ describe("auditActorLabel", () => {
     expect(auditActorLabel({ actorUserId: "user-1", actorLogin: "alice", actorDisplayName: "Alice" })).toBe("Alice");
     expect(auditActorLabel({ actorUserId: "user-1", actorLogin: "alice", actorDisplayName: null })).toBe("@alice");
     expect(auditActorLabel({ actorUserId: "user-1", actorLogin: null, actorDisplayName: null })).toBe("user-1");
+  });
+
+  it("labels automated maintenance without a user id", () => {
+    expect(auditActorLabel({ actorUserId: null, actorLogin: null, actorDisplayName: null, actorKind: "system" }))
+      .toBe(dashboardTexts().audit.systemActor);
   });
 });
 

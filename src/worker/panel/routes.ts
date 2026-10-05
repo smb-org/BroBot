@@ -600,12 +600,15 @@ panelRouter.get(
       const subjectId = auditSubjectUserId(entry.action, entry.before, entry.after);
       return subjectId === null ? [] : [subjectId];
     });
-    const userIds = [...new Set([...audit.entries.map((entry) => entry.actorUserId), ...subjectIds])];
+    const userIds = [...new Set([
+      ...audit.entries.flatMap((entry) => entry.actorUserId === null ? [] : [entry.actorUserId]),
+      ...subjectIds,
+    ])];
     const users = await fetchTwitchUsersById(fetch, context.env, userIds);
     return context.json({
       ...audit,
       entries: audit.entries.map((entry) => {
-        const actor = users.get(entry.actorUserId);
+        const actor = entry.actorUserId === null ? undefined : users.get(entry.actorUserId);
         const subjectId = auditSubjectUserId(entry.action, entry.before, entry.after);
         const subject = subjectId === null ? undefined : users.get(subjectId);
         return {

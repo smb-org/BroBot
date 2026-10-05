@@ -740,6 +740,7 @@ export interface DashboardTexts {
     title: string;
     entries: string;
     who: string;
+    systemActor: string;
     load: string;
     empty: string;
     changeData: string;
@@ -1055,7 +1056,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       twitchMessage: "Twitch-Meldung", httpStatus: "HTTP-Status", missingBotPermissions: "Fehlende Bot-Berechtigungen", missingScopes: "Fehlende Scopes",
     },
     audit: {
-      title: "Audit-Log", entries: "Einträge", who: "Wer",
+      title: "Audit-Log", entries: "Einträge", who: "Wer", systemActor: "Automatisches System",
       load: "Audit-Log wird geladen …", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
       before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loadingOlderEntries: "Ältere Einträge werden geladen …",
       yes: "Ja", no: "Nein", newValue: "neu", removedValue: "entfernt",
@@ -1115,6 +1116,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "overlay.access.issued": ({ actor, object }) => `${actor} stellte ${object} aus`,
         "overlay.access.revealed": ({ actor, object }) => `${actor} zeigte ${object} an`,
         "overlay.access.revoked": ({ actor, object }) => `${actor} widerrief ${object}`,
+        "overlay.access.replaced": ({ actor, object }) => `${actor} ersetzte ${object}`,
         "overlay.access.removed": ({ actor, object }) => `${actor} entfernte ${object}`,
         "overlay.created": ({ actor, object }) => `${actor} erstellte das Overlay ${object}`,
         "overlay.updated": ({ actor, object }) => `${actor} änderte das Overlay ${object}`,
@@ -1341,7 +1343,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       twitchMessage: "Twitch message", httpStatus: "HTTP status", missingBotPermissions: "Missing bot permissions", missingScopes: "Missing scopes",
     },
     audit: {
-      title: "Audit log", entries: "entries", who: "Who",
+      title: "Audit log", entries: "entries", who: "Who", systemActor: "Automated system",
       load: "Loading audit log …", empty: "No audit entries saved yet.", changeData: "Change data",
       before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
       yes: "Yes", no: "No", newValue: "new", removedValue: "removed",
@@ -1401,6 +1403,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "overlay.access.issued": ({ actor, object }) => `${actor} issued ${object}`,
         "overlay.access.revealed": ({ actor, object }) => `${actor} revealed ${object}`,
         "overlay.access.revoked": ({ actor, object }) => `${actor} revoked ${object}`,
+        "overlay.access.replaced": ({ actor, object }) => `${actor} replaced ${object}`,
         "overlay.access.removed": ({ actor, object }) => `${actor} removed ${object}`,
         "overlay.created": ({ actor, object }) => `${actor} created overlay ${object}`,
         "overlay.updated": ({ actor, object }) => `${actor} updated overlay ${object}`,
@@ -2412,6 +2415,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "overlay.access.issued": "Overlay-Zugang ausgestellt",
     "overlay.access.revealed": "Overlay-Zugang angezeigt",
     "overlay.access.revoked": "Overlay-Zugang widerrufen",
+    "overlay.access.replaced": "Overlay-Zugang ersetzt",
     "overlay.access.removed": "Overlay-Zugang entfernt",
     "overlay.created": "Overlay erstellt",
     "overlay.updated": "Overlay geändert",
@@ -2473,6 +2477,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "overlay.access.issued": "Overlay access issued",
     "overlay.access.revealed": "Overlay access revealed",
     "overlay.access.revoked": "Overlay access revoked",
+    "overlay.access.replaced": "Overlay access replaced",
     "overlay.access.removed": "Overlay access removed",
     "overlay.created": "Overlay created",
     "overlay.updated": "Overlay updated",
@@ -2519,7 +2524,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "channel.mute.enabled": "den Kanal", "channel.mute.disabled": "den Kanal", "channel.pause.enabled": "den Kanal", "channel.pause.disabled": "den Kanal",
     "votekick.cancelled": "den Votekick", "votekick.timeout_lift_attempted": "den Votekick",
     "overlay.token.issued": "den Overlay-Token", "overlay.token.revoked": "den Overlay-Token",
-    "overlay.access.issued": "den Overlay-Zugang", "overlay.access.revealed": "den Overlay-Zugang", "overlay.access.revoked": "den Overlay-Zugang", "overlay.access.removed": "den Overlay-Zugang",
+    "overlay.access.issued": "den Overlay-Zugang", "overlay.access.revealed": "den Overlay-Zugang", "overlay.access.revoked": "den Overlay-Zugang", "overlay.access.replaced": "den Overlay-Zugang", "overlay.access.removed": "den Overlay-Zugang",
     "overlay.created": "Overlay", "overlay.updated": "Overlay", "overlay.deleted": "Overlay", "overlay.legacy.imported": "Overlay-Link",
   },
   en: {
@@ -2537,7 +2542,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "channel.mute.enabled": "the channel", "channel.mute.disabled": "the channel", "channel.pause.enabled": "the channel", "channel.pause.disabled": "the channel",
     "votekick.cancelled": "the votekick", "votekick.timeout_lift_attempted": "the votekick",
     "overlay.token.issued": "the overlay token", "overlay.token.revoked": "the overlay token",
-    "overlay.access.issued": "the overlay access", "overlay.access.revealed": "the overlay access", "overlay.access.revoked": "the overlay access", "overlay.access.removed": "the overlay access",
+    "overlay.access.issued": "the overlay access", "overlay.access.revealed": "the overlay access", "overlay.access.revoked": "the overlay access", "overlay.access.replaced": "the overlay access", "overlay.access.removed": "the overlay access",
     "overlay.created": "overlay", "overlay.updated": "overlay", "overlay.deleted": "overlay", "overlay.legacy.imported": "legacy overlay link",
   },
 };

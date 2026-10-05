@@ -230,6 +230,7 @@ function OverlaySetupAssistant({
 }
 
 export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEditor }: OverlaysPageProperties): ReactElement {
+  const createManagementReasonId = useId();
   const language = dashboardLanguage();
   const labels = overlaysTexts(language);
   const [overlays, setOverlays] = useState<readonly PanelOverlaySummary[]>([]);
@@ -489,19 +490,14 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     }
   };
 
-  const revealAccessUrl = async (access: PanelOverlayAccess): Promise<string | null> => {
+  const getAccessUrl = async (access: PanelOverlayAccess): Promise<string | null> => {
     if (selectedOverlay === null || !canManage || access.revokedAt !== null || !access.recoverable) return null;
     if (secret?.overlayId === selectedOverlay.id && secret.tokenId === access.tokenId) return secret.overlayUrl;
     const overlayId = selectedOverlay.id;
-    invalidateSecret();
     const version = secretVersion.current;
     const requestedChannelId = channelId;
     const result = await revealOverlayAccess(channelId, overlayId, access.tokenId);
-    if (secretContextIsCurrent(version, overlayId, requestedChannelId)) {
-      saveIssuedSecret({ tokenId: access.tokenId, overlayUrl: result.overlayUrl, label: access.label, expiresAt: access.expiresAt }, overlayId, false);
-      return result.overlayUrl;
-    }
-    return null;
+    return secretContextIsCurrent(version, overlayId, requestedChannelId) ? result.overlayUrl : null;
   };
 
   const reveal = async (access: PanelOverlayAccess): Promise<void> => {
@@ -511,8 +507,13 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     setPending(true);
     setError(null);
     try {
-      const overlayUrl = await revealAccessUrl(access);
-      if (overlayUrl !== null && accessContextIsCurrent(overlayId, requestedChannelId)) setRevealedAccessId(access.tokenId);
+      const overlayUrl = await getAccessUrl(access);
+      if (overlayUrl !== null && accessContextIsCurrent(overlayId, requestedChannelId)) {
+        if (secret?.overlayId !== overlayId || secret.tokenId !== access.tokenId) {
+          saveIssuedSecret({ tokenId: access.tokenId, overlayUrl, label: access.label, expiresAt: access.expiresAt }, overlayId, false);
+        }
+        setRevealedAccessId(access.tokenId);
+      }
     } catch (caught) {
       if (accessContextIsCurrent(overlayId, requestedChannelId)) {
         setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
@@ -530,7 +531,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setSetupCopiedUrl(false);
       setError(null);
       const elementId = selectedOutputElementId(selectedOverlay.elements, setupOutput);
-      const url = revealAccessUrl(setupAccess).then((overlayUrl) => {
+      const url = getAccessUrl(setupAccess).then((overlayUrl) => {
         if (overlayUrl === null) throw new Error("The overlay link could not be revealed.");
         return elementOutputUrl(overlayUrl, elementId);
       });
@@ -572,6 +573,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setReplaceTarget(null);
       await refreshSelected();
       await load();
+      setNotice(replacement.closingPending ? labels.revokedPending : null);
     } catch (caught) {
       if (secretContextIsCurrent(version, overlayId, requestedChannelId)) {
         setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
@@ -626,7 +628,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     setError(null);
     try {
       setPending(true);
-      const url = revealAccessUrl(access);
+      const url = getAccessUrl(access);
       await copyPromiseToClipboard(url.then((value) => {
         if (value === null) throw new Error("The overlay link could not be revealed.");
         return value;
@@ -869,8 +871,12 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
 
   return <>
     <PageHeader kind="overlays" title={labels.title} subtitle={labels.count(overlays.length, maximum)} actions={
-      <Button icon="add" iconOnly ariaLabel={labels.create} disabled={!canManage || pending || overlays.length >= maximum}
-        onClick={beginCreate} />
+      <div className="overlays-page__create-action">
+        <Button icon="add" iconOnly ariaLabel={labels.create}
+          {...(manageReason === undefined ? {} : { describedBy: createManagementReasonId })}
+          disabled={!canManage || pending || overlays.length >= maximum} onClick={beginCreate} />
+        {manageReason === undefined ? null : <p id={createManagementReasonId} className="overlays-page__create-reason" role="note">{manageReason}</p>}
+      </div>
     } />
     <div className="overlays-feedback-slot" {...(feedbackMessage === null ? {} : {
       role: feedbackIsError ? "alert" : "status",

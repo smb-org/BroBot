@@ -332,6 +332,9 @@ export const auditDayGroups = (entries: readonly PanelAuditEntry[], formatDay: (
   return Array.from(days, ([key, dayEntries]) => ({ key, label: formatDay(dayEntries[0]?.createdAt ?? key), entries: dayEntries }));
 };
 
-/** Renders the "who"/actor cell and the inspector's "who" field alike -- the display name/login the table already shows, never the raw id (#181 item 2; the id is available as a tooltip via `actorUserId`). */
-export const auditActorLabel = (entry: Pick<PanelAuditEntry, "actorUserId" | "actorLogin" | "actorDisplayName">): string =>
-  entry.actorDisplayName ?? (entry.actorLogin === null ? entry.actorUserId : `@${entry.actorLogin}`);
+/** Renders the "who"/actor cell and inspector field from the identity, or names automated maintenance explicitly. */
+export const auditActorLabel = (
+  entry: Pick<PanelAuditEntry, "actorUserId" | "actorLogin" | "actorDisplayName"> & Partial<Pick<PanelAuditEntry, "actorKind">>,
+): string => entry.actorKind === "system" || entry.actorUserId === null
+  ? dashboardTexts().audit.systemActor
+  : entry.actorDisplayName ?? (entry.actorLogin === null ? entry.actorUserId : `@${entry.actorLogin}`);
