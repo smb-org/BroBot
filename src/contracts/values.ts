@@ -235,6 +235,8 @@ export const EVENT_CODES = [
   "ads.snooze",
   "ads.commercial.failed",
   "host.clip.failed",
+  "belabox.fetch_failing",
+  "belabox.fetch_recovered",
   "template.lookup_unavailable",
   "text_commands.cooldown",
   "text_commands.user_cooldown",

@@ -300,7 +300,7 @@ export const selectModulesForEvent = (
     }
     const mandatory = module.mandatory === true;
     if (!activation.enabled && !mandatory) continue;
-    if (paused && !mandatory) continue;
+    if (paused && !mandatory && !(module.pauseSafeEventSubTypes ?? []).includes(subscriptionType)) continue;
     if (!(module.eventSubTypes ?? []).includes(subscriptionType)) continue;
     matches.push({ module, settings: activation.settings });
     matchedModules.add(module.id);

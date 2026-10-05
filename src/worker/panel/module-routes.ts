@@ -535,6 +535,14 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
       current: current === null ? null : { settings: currentSettings, revision: current.revision },
     }, 409);
   }
+  if (module.settingsChangedAlarm !== undefined) {
+    await context.get("runModuleAlarm")(
+      channelId,
+      module.id,
+      module.settingsChangedAlarm.handlerKey,
+      module.settingsChangedAlarm.alarmKey,
+    );
+  }
   return context.json({ settings: settings.data, revision: expectedRevision + 1, warnings });
 });
 

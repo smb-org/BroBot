@@ -46,6 +46,7 @@ const createBelaboxRouteHarness = async (testDatabase: TestD1Database) => {
   await insertMember(testDatabase, CHANNEL_ID, MANAGER_ID, "manager");
   const db = testDatabase as unknown as D1Database;
   const secrets = createModuleSecretAccess({ DB: db, TOKEN_ENCRYPTION_KEYS }, CHANNEL_ID, "belabox");
+  const runModuleAlarm = vi.fn(() => Promise.resolve());
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", "manager");
@@ -53,6 +54,7 @@ const createBelaboxRouteHarness = async (testDatabase: TestD1Database) => {
     context.set("authorizeManagementMutation", authorizeModuleManagementMutation);
     context.set("secrets", () => secrets);
     context.set("externalFetchBudget", sharedBudget());
+    context.set("runModuleAlarm", runModuleAlarm);
     context.set("prepareModuleAudit", (entry, changedAt) => prepareModuleAudit(db, MANAGER_ID, changedAt, entry));
     await next();
   });
@@ -68,7 +70,7 @@ const createBelaboxRouteHarness = async (testDatabase: TestD1Database) => {
       }),
     },
   ), { DB: db }));
-  return { app, db, secrets, send };
+  return { app, db, secrets, runModuleAlarm, send };
 };
 
 const renderConsoleValue = (value: unknown, seen = new Set<object>()): string => {
@@ -101,13 +103,28 @@ const expectConsoleCallsRedacted = (calls: readonly unknown[][]): void => {
 };
 
 describe("BELABOX stats URL", () => {
-  it("registers as optional, disabled data module", () => {
+  it("registers interval polling defaults and a settings editor", async () => {
     expect(belaboxModule).toMatchObject({
       id: "belabox",
       navigationCategory: "data",
       mandatory: false,
       defaultEnabled: false,
+      defaultSettings: { mode: "interval", intervalSeconds: 15 },
+      eventSubTypes: ["stream.online", "stream.offline"],
+      settingsChangedAlarm: { handlerKey: "poll", alarmKey: "poll" },
     });
+    expect(belaboxModule.settingsSchema.parse({})).toEqual({ mode: "interval", intervalSeconds: 15 });
+    expect(belaboxModule.settingsSchema.safeParse({ mode: "on_demand", intervalSeconds: 60 }).success).toBe(true);
+    expect(belaboxModule.settingsSchema.safeParse({ mode: "interval", intervalSeconds: 10 }).success).toBe(false);
+    expect(belaboxModule.settingsEditor).toBeTypeOf("function");
+    expect(belaboxModule.alarms?.map(({ key }) => key)).toEqual(["poll"]);
+    const editor = await belaboxModule.settingsEditor?.();
+    expect(editor?.default.spec.sections).toMatchObject([{ fields: [
+      { kind: "segment", key: "mode", options: [{ value: "interval" }, { value: "on_demand" }] },
+      { kind: "segment", key: "intervalSeconds", options: [
+        { value: 5 }, { value: 15 }, { value: 30 }, { value: 60 },
+      ] },
+    ] }]);
   });
 
   it("accepts the explicit HTTP port and HTTPS default port with one key segment", () => {
@@ -321,6 +338,38 @@ describe("BELABOX secret and route redaction", () => {
 
     await assertDatabaseRedacted();
     expectConsoleCallsRedacted(consoleSpies.flatMap((spy) => spy.mock.calls));
+  });
+
+  it("reconciles polling after the stats URL changes", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { runModuleAlarm, send } = await createBelaboxRouteHarness(testDatabase);
+
+    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "poll", "poll");
+
+    expect((await send("/stats-url", "DELETE")).status).toBe(200);
+    expect(runModuleAlarm).toHaveBeenCalledTimes(2);
+    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "poll", "poll");
+  });
+
+  it("fetches status on demand and then reuses the ten-second cache", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { send } = await createBelaboxRouteHarness(testDatabase);
+    await testDatabase.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
+    ).bind(CHANNEL_ID, JSON.stringify({ mode: "on_demand", intervalSeconds: 15 })).run();
+    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(relayPayload(SENTINEL_KEY)));
+    vi.stubGlobal("fetch", fetcher);
+
+    const first = await send("/status", "GET");
+    const second = await send("/status", "GET");
+
+    expect(await first.json()).toMatchObject({ sample: { connected: true, bitrateKbps: 2_400 }, polling: false });
+    expect(await second.json()).toMatchObject({ sample: { connected: true, bitrateKbps: 2_400 }, polling: false });
+    expect(fetcher).toHaveBeenCalledOnce();
   });
 
   it("rechecks management membership after the POST /test body finishes before reading the stored secret", async () => {

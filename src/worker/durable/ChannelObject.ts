@@ -54,6 +54,7 @@ import { resolveModuleEventTimes } from "../module-event-times";
 import { renderScheduledTemplate } from "../scheduled-template-renderer";
 import { secureRandomInteger } from "../template-resolver";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
+import { writeModuleDiagnostics } from "../event-log";
 import {
   claimModuleAlarmSend,
   finishModuleAlarmSend,
@@ -1233,6 +1234,7 @@ export class ChannelObject extends DurableObject<Env> {
     return {
       DB: this.env.DB,
       channelId,
+      externalFetchBudget,
       ballots: this.ballotAccess(moduleId),
       secrets: createModuleSecretAccess(this.env, channelId, moduleId),
       channelLanguage: async () => {
@@ -1338,6 +1340,8 @@ export class ChannelObject extends DurableObject<Env> {
         const state = await readChannelStreamState(this.env.DB, channelId);
         return state === null ? { streamId: null, startedAt: null } : { streamId: state.streamId, startedAt: state.startedAt };
       },
+      writeDiagnostics: (triggerId, diagnostics, now) =>
+        writeModuleDiagnostics(this.env.DB, channelId, moduleId, triggerId, null, diagnostics, now),
     };
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../../src/modules/contract";
+import { belaboxModule } from "../../src/modules/belabox";
 import { channelEventsModule } from "../../src/modules/channel_events";
 import { dispatchEventSubNotification, needsActiveChatterTracking, selectModulesForEvent } from "../../src/worker/dispatch";
 import {
@@ -54,6 +55,8 @@ const environment = (database: TestD1Database, publish = vi.fn()) => {
     getChatActivityCount: vi.fn().mockResolvedValue(0),
     getTwitchRateLimitRetryAfter: vi.fn().mockResolvedValue(null),
     setTwitchRateLimitRetryAfter: vi.fn().mockResolvedValue(undefined),
+    scheduleModuleAlarm: vi.fn().mockResolvedValue(undefined),
+    clearModuleAlarm: vi.fn().mockResolvedValue(undefined),
   };
   return {
     DB: database as unknown as D1Database,
@@ -173,6 +176,43 @@ describe("module selection", () => {
       true,
     );
     expect(matches.map(({ module }) => module.id)).toEqual(["mandatory"]);
+  });
+
+  it("delivers only declared pause-safe lifecycle events to optional modules while paused", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await activate(database, "kanal-a", "belabox");
+      await database.prepare(
+        "UPDATE channel_modules SET settings = ? WHERE channel_id = 'kanal-a' AND module_id = 'belabox'",
+      ).bind(JSON.stringify({ mode: "interval", intervalSeconds: 15 })).run();
+      const unrelated = fakeModule("unrelated", vi.fn(() => ({ actions: [], diagnostics: [] })), ["stream.online"]);
+      await activate(database, "kanal-a", unrelated.id);
+      await database.prepare(
+        "INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('kanal-a', 1, ?)",
+      ).bind(NOW).run();
+      const environmentValue = environment(database);
+
+      await dispatchEventSubNotification(environmentValue, {
+        channelId: "kanal-a",
+        subscriptionType: "stream.online",
+        triggerId: "paused-online",
+        payload: { id: "stream-paused", started_at: NOW },
+        receivedAt: NOW,
+      }, sent(), [belaboxModule, unrelated]);
+
+      await expect(database.prepare(
+        "SELECT polling, stream_id FROM belabox_status WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ polling: 1, stream_id: "stream-paused" });
+      expect(unrelated.handleEvent).not.toHaveBeenCalled();
+      expect(environmentValue.CHANNEL.get(environmentValue.CHANNEL.idFromName("kanal-a")).scheduleModuleAlarm)
+        .toHaveBeenCalledWith("belabox", "poll", "poll", expect.any(Number), expect.any(Number));
+      await expect(database.prepare(
+        "SELECT paused FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ paused: 1 });
+    } finally {
+      database.close();
+    }
   });
 
   it("skips modules not responsible for this event type", () => {
