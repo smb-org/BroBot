@@ -299,6 +299,31 @@ describe("Module panel loader", () => {
     }
   });
 
+  it("reveals untouched custom validation errors when another field already blocks saving", async () => {
+    const initialSettings = { ...editorFixtureSettings, labels: "Yes|" };
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: initialSettings, revision: 1, variables: [] })
+        : Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    const handle = await screen.findByRole("textbox", { name: "Konto" });
+    const labels = screen.getByRole("textbox", { name: "Abstimmungslabels" });
+    fireEvent.change(handle, { target: { value: "" } });
+    expect(handle).toHaveAttribute("aria-invalid", "true");
+    expect(labels).not.toHaveAttribute("aria-invalid", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+
+    const status = screen.getByRole("status");
+    await within(status).findByRole("button", { name: "Abstimmungslabels: Gib zwei gültige Labels ein." });
+    expect(within(status).getAllByRole("button")).toHaveLength(2);
+    expect(labels).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("tab", { name: "Allgemein, Fehler" })).toBeInTheDocument();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+  });
+
   it("focuses an enabled switch when a disabled child still blocks saving", async () => {
     const fetcher = vi.fn<typeof fetch>((input) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;

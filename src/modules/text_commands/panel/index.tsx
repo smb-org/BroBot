@@ -123,7 +123,7 @@ const commandDraftIsValid = (draft: CommandDraft, channelVariables: readonly Tex
   return validCommandName(name) && draft.aliases.every(validCommandName) && !draft.aliases.includes(name) && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES &&
     typeof draft.cooldownSeconds === "number" && Number.isInteger(draft.cooldownSeconds) && draft.cooldownSeconds >= 0 && draft.cooldownSeconds <= 86400 &&
     typeof draft.userCooldownSeconds === "number" && Number.isInteger(draft.userCooldownSeconds) && draft.userCooldownSeconds >= 0 && draft.userCooldownSeconds <= 86400 &&
-    validVariable && validTimeout && !responseRequired && draft.text.length <= 500 && draft.usageText.length <= 500;
+    validVariable && validTimeout && !responseRequired && draft.text.length <= 500 && (draft.kind === "list" || draft.usageText.length <= 500);
 };
 
 const tierDescription = (tier: TextCommandMinimumTier, labels: ReturnType<typeof textCommandsTexts>): string => {
@@ -353,7 +353,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     ? "error" as const
     : undefined;
   const settingsIssue = nameError !== undefined || aliasesError !== undefined || responseFieldError !== undefined ||
-    timeoutReasonError !== undefined || timeoutFallbackError !== undefined || draft.usageText.length > 500 ||
+    timeoutReasonError !== undefined || timeoutFallbackError !== undefined || (draft.kind !== "list" && draft.usageText.length > 500) ||
     (attemptedSave && (timeoutRangeInvalid || variableActionInvalid))
     ? "error" as const
     : announcementWarning !== undefined || localWarnings.length > 0 || serverWarnings.length > 0
@@ -365,9 +365,24 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     invalidFields.push({ id: "command-name", label: labels.name, message: nameError, sectionId: "settings" });
   }
   if ((attemptedSave || fieldError?.field === "aliases" || aliasesInvalid) && aliasesError !== undefined) {
-    invalidFields.push({ id: "command-aliases", label: labels.aliases, message: aliasesError, sectionId: "settings" });
+    const invalidAliasToFocus = fieldError?.field === "aliases"
+      ? fieldError.invalidAlias ?? (sameNameAlias ? normalizedName : invalidAlias ?? draft.aliases[0])
+      : sameNameAlias ? normalizedName : invalidAlias ?? draft.aliases[0];
+    invalidFields.push({
+      id: "command-aliases",
+      ...(invalidAliasToFocus === undefined ? {} : { focusId: `command-aliases-remove-${encodeURIComponent(invalidAliasToFocus)}` }),
+      label: labels.aliases,
+      message: aliasesError,
+      sectionId: "settings",
+    });
   } else if (attemptedSave && draft.aliases.length > TEXT_COMMAND_MAX_ALIASES) {
-    invalidFields.push({ id: "command-aliases", label: labels.aliases, message: labels.tagInputMessages.atLimitHint, sectionId: "settings" });
+    invalidFields.push({
+      id: "command-aliases",
+      ...(draft.aliases[0] === undefined ? {} : { focusId: `command-aliases-remove-${encodeURIComponent(draft.aliases[0])}` }),
+      label: labels.aliases,
+      message: labels.tagInputMessages.atLimitHint,
+      sectionId: "settings",
+    });
   }
   if (attemptedSave && timeoutRangeInvalid) {
     invalidFields.push({ id: "command-timeout-minimum", label: labels.timeoutDuration, message: labels.timeoutRangeInvalid, sectionId: "settings" });
@@ -381,7 +396,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   if (attemptedSave && timeoutFallbackError !== undefined) {
     invalidFields.push({ id: "command-timeoutFallbackText", label: labels.timeoutFallbackTextOptional, message: timeoutFallbackError, sectionId: "settings" });
   }
-  if (attemptedSave && draft.usageText.length > 500) {
+  if (attemptedSave && draft.kind !== "list" && draft.usageText.length > 500) {
     invalidFields.push({ id: "command-usageText", label: labels.templateFieldLabels.usageText, message: labels.fieldTooLong, sectionId: "settings" });
   }
   if (attemptedSave && variableActionNameInvalid) {
@@ -598,7 +613,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         timeoutAction: kind === "timeout"
           ? current.timeoutAction ?? { minSeconds: 120, maxSeconds: 120, fallbackText: "", reason: "" }
           : null,
-        usageText: kind === "shoutout"
+        usageText: kind === "list" ? "" : kind === "shoutout"
           ? current.usageText || defaults?.usageText || TEXT_COMMAND_DEFAULT_USAGE_TEXT
           : current.kind === "shoutout" ? "" : current.usageText,
         ...(isCreate && kind === "shoutout" ? { minimumTier: "moderator" as const } : {}),

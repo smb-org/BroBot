@@ -139,7 +139,7 @@ export function TagInput({ id: suppliedId, label, hint, error, warning, invalidV
         renderPill={({ value: tag, onRemove }) => tag === undefined ? null : (
           <Pill className="ui-tag-input__pill" size="sm" withRemoveButton={false} key={tag} aria-invalid={invalidValues.includes(tag)} data-invalid={invalidValues.includes(tag) || undefined}>
             <span className="ui-tag-input__pill-label">{prefixed(tag)}</span>
-            <button className="ui-tag-input__remove" type="button" aria-label={removeLabel(prefixed(tag))} disabled={disabled} onClick={onRemove}>
+            <button className="ui-tag-input__remove" id={`${id}-remove-${encodeURIComponent(tag)}`} type="button" aria-label={removeLabel(prefixed(tag))} disabled={disabled} onClick={onRemove}>
               <Icon name="close" size={16} />
             </button>
           </Pill>

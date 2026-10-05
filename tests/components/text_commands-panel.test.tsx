@@ -367,6 +367,22 @@ describe("Text command editor", () => {
     expect(onMutation.mock.calls[1]?.[2]).toMatchObject({ usageText: "" });
   });
 
+  it("clears an invalid usage reply when changing to a command list", async () => {
+    const onMutation = vi.fn<(method: string, path: string, body: unknown) => Response>(() => jsonResponse({ warnings: [] }));
+    renderPanel(panelFetch({ commands: () => [makeCommand({ usageText: "x".repeat(501) })], onMutation }));
+    await selectCommand();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Befehlsliste/u }));
+    expect(screen.queryByRole("textbox", { name: textCommandsTexts("de").templateFieldLabels.usageText })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+
+    await waitFor(() => expect(onMutation).toHaveBeenCalledTimes(1));
+    expect(onMutation.mock.calls[0]?.[2]).toMatchObject({ kind: "list", text: "" });
+    expect(onMutation.mock.calls[0]?.[2]).not.toHaveProperty("usageText");
+    expect(screen.queryByRole("button", { name: /Antwort bei fehlenden oder ungültigen Argumenten/u })).not.toBeInTheDocument();
+  });
+
   it("keeps the variable action in a left-aligned switch card and the command body scrollable", async () => {
     renderPanel(panelFetch());
     await selectCommand();
@@ -775,6 +791,23 @@ describe("Text command editor", () => {
     await waitFor(() => expect(save).toBeEnabled());
     expect(await screen.findByText(/!hey ist schon ein Alias von !anderer\./u)).toBeInTheDocument();
     expect(document.querySelector(".ui-tag-input__pill[aria-invalid='true']")).not.toBeNull();
+  });
+
+  it("focuses the conflicting alias chip's remove button when aliases are at capacity", async () => {
+    const aliases = Array.from({ length: 10 }, (_unused, index) => `alias${String(index + 1)}`);
+    renderPanel(panelFetch({ commands: () => [makeCommand({ aliases })] }));
+    await selectCommand();
+
+    const name = screen.getByRole("textbox", { name: "Name" });
+    fireEvent.change(name, { target: { value: "alias5" } });
+    const save = screen.getByRole("button", { name: "Änderungen speichern" });
+    expect(screen.getByRole("combobox", { name: "Aliase" })).toBeDisabled();
+    fireEvent.click(save);
+
+    const aliasError = screen.getByRole("button", { name: "Aliase: Das ist schon der Name." });
+    fireEvent.click(aliasError);
+    expect(screen.getByRole("button", { name: "Alias !alias5 entfernen" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Alias !alias5 entfernen" })).toBeEnabled();
   });
 
   it("shows the amber announcement warning only when moderator status is false", async () => {

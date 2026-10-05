@@ -173,12 +173,11 @@ export function EditorShell({
   };
 
   const handleInvalidSave = (): void => {
-    if (invalidFields.length === 0 && onInvalidSave !== undefined) {
+    if (onInvalidSave !== undefined) {
       pendingValidationFocus.current = true;
       onInvalidSave();
       return;
     }
-    onInvalidSave?.();
     focusFirstInvalid();
   };
 

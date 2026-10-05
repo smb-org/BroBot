@@ -581,6 +581,39 @@ describe("EditorShell and declaration renderer", () => {
     expect(attemptOrder).toEqual(["validate", "save"]);
   });
 
+  it("reveals every validator when saving with a known blocking field", async () => {
+    function Harness() {
+      const [attempted, setAttempted] = useState(false);
+      return <EditorShell
+        {...baseProps}
+        dirty
+        invalid
+        invalidMessage="Correct the marked fields."
+        onInvalidSave={() => { setAttempted(true); }}
+        onSave={vi.fn()}
+        sections={[
+          { id: "settings", label: "Settings", content: <Field id="known-name" label="Name" value="" error="Required" onChange={() => {}} /> },
+          { id: "advanced", label: "Advanced", content: <Field id="delayed-cooldown" label="Cooldown" value="" {...(attempted ? { error: "Enter a duration" } : {})} onChange={() => {}} /> },
+        ]}
+        invalidFields={[
+          { id: "known-name", label: "Name", message: "Required", sectionId: "settings" },
+          ...(attempted ? [{ id: "delayed-cooldown", label: "Cooldown", message: "Enter a duration", sectionId: "advanced" }] : []),
+        ]}
+      />;
+    }
+    renderUi(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const status = screen.getByRole("status");
+    await within(status).findByRole("button", { name: "Cooldown: Enter a duration" });
+    expect(within(status).getAllByRole("button")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "Advanced, error" })).toBeInTheDocument();
+    fireEvent.click(within(status).getByRole("button", { name: "Cooldown: Enter a duration" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Cooldown" })).toHaveFocus());
+    expect(screen.getByRole("textbox", { name: "Cooldown" })).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("keeps the persistent save bar visible across clean, dirty, warning, saved, error, pending, and conflict states", () => {
     const { rerender } = renderUi(<EditorShell {...baseProps} />);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();

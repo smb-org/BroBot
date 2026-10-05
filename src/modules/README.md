@@ -324,7 +324,7 @@ gerendert. Dauer, Grund und Ersatztext liegen auf der vorhandenen Befehlstabelle
 und werden gemeinsam mit der Kanalvariablenaktion und dem Audit-Eintrag
 gespeichert. Migration `0031_text_command_timeout_kind.sql` wandelt vorhandene
 Antwortbefehle mit Timeoutaktion in `timeout` um und bewahrt ihre übrigen Felder.
-Migration `0032_text_command_silent_timeout.sql` erlaubt leere Erfolgstexte für
+Migration `0033_text_command_silent_timeout.sql` erlaubt leere Erfolgstexte für
 `timeout`-Befehle, während Antworttext für andere Arten weiter erforderlich bleibt.
 
 `src/modules/votekick/` nutzt den gemeinsamen Ballot-Speicher und die

@@ -421,6 +421,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
     invalid={invalid}
     invalidMessage={copy.invalidMessage}
     invalidFields={invalidFields}
+    onInvalidSave={() => { setValidationAttempted(true); }}
     warnings={warnings}
     warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${copy.savedLabel} ${items.join(" ")}` : items.join(" ")}
     {...(conflict ? { conflict: { message: copy.conflictMessage, reloadLabel: copy.reloadLabel, onReload } } : {})}

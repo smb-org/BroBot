@@ -156,7 +156,7 @@ describe("text command options migration", () => {
     const database = new DatabaseSync(":memory:");
     try {
       for (const migration of readdirSync(migrationsDirectory)
-        .filter((name) => name.endsWith(".sql") && name < "0032_text_command_silent_timeout.sql")
+        .filter((name) => name.endsWith(".sql") && name < "0033_text_command_silent_timeout.sql")
         .sort()) {
         database.exec(readFileSync(resolve(migrationsDirectory, migration), "utf8"));
       }
@@ -170,7 +170,7 @@ describe("text command options migration", () => {
           timeout_fallback_text, timeout_reason, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run("channel-a", "existing-timeout", "Existing response", "timeout", 7, 30, 90, "Existing fallback", "Existing reason", "now", "now");
-      database.exec(readFileSync(resolve(migrationsDirectory, "0032_text_command_silent_timeout.sql"), "utf8"));
+      database.exec(readFileSync(resolve(migrationsDirectory, "0033_text_command_silent_timeout.sql"), "utf8"));
       expect(database.prepare(
         "SELECT kind, revision, timeout_reason FROM text_commands WHERE command_name = 'existing-timeout'",
       ).get()).toEqual({ kind: "timeout", revision: 7, timeout_reason: "Existing reason" });
