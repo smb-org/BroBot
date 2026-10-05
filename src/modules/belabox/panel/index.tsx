@@ -83,12 +83,20 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     setNotice("");
     try {
       await removeBelaboxStatsUrl(channelId);
-      setRemoveConfirmOpen(false);
-      setTestResult(null);
-      await refresh();
-      setNotice(labels.removed);
     } catch (failure: unknown) {
       setRemoveError(errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.removeFailed);
+      setBusy(false);
+      return;
+    }
+    // The delete succeeded: reflect it locally, independent of the refresh below.
+    setStatus({ configured: false, updatedAt: null, sample: null });
+    setRemoveConfirmOpen(false);
+    setTestResult(null);
+    try {
+      await refresh();
+      setNotice(labels.removed);
+    } catch {
+      setError(labels.refreshFailed);
     } finally {
       setBusy(false);
     }

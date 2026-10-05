@@ -18,6 +18,7 @@ export interface BelaboxPanelTexts {
   saveFailed: string;
   removed: string;
   removeFailed: string;
+  refreshFailed: string;
   remove: string;
   removeTitle: string;
   removeConsequence: string;
@@ -63,6 +64,7 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     saveFailed: "Die Statistik-URL konnte nicht gespeichert werden.",
     removed: "Die Statistik-URL wurde entfernt.",
     removeFailed: "Die Statistik-URL konnte nicht entfernt werden.",
+    refreshFailed: "Der Status konnte nicht aktualisiert werden.",
     remove: "Statistik-URL entfernen",
     removeTitle: "Statistik-URL entfernen?",
     removeConsequence: "Die gespeicherte Verbindung liefert danach keine Statistiken mehr.",
@@ -106,6 +108,7 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     saveFailed: "The stats URL could not be saved.",
     removed: "The stats URL was removed.",
     removeFailed: "The stats URL could not be removed.",
+    refreshFailed: "The status could not be refreshed.",
     remove: "Remove stats URL",
     removeTitle: "Remove stats URL?",
     removeConsequence: "The saved connection will stop providing statistics.",
