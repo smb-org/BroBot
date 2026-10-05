@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import { canManage } from "../../contracts/values";
-import type { ModuleRouteEnvironment } from "../contract";
+import type { AuthorizeModuleMutation, ModuleMutationActor, ModuleRouteEnvironment } from "../contract";
 import { BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET, type BelaboxTestResult } from "./contracts";
 import { getLatestBelaboxSample, prepareBelaboxSampleClear, prepareBelaboxSampleWrite } from "./adapters/d1";
 import { fetchRelaySample } from "./adapters/stats-client";
@@ -16,6 +16,18 @@ const channelIdOf = (context: { req: { param: (name: string) => string | undefin
 
 const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "belabox_management_denied" }, 403);
+
+const hasManagementAuthorization = async (
+  db: D1Database,
+  channelId: string,
+  actor: ModuleMutationActor,
+  authorizeManagementMutation: AuthorizeModuleMutation,
+): Promise<boolean> => {
+  const authorization = authorizeManagementMutation(channelId, actor, new Date().toISOString());
+  const row = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
+    .bind(...authorization.values).first<{ authorized: number }>();
+  return row !== null;
+};
 
 export const belaboxRoutes = new Hono<ModuleRouteEnvironment>();
 
@@ -96,14 +108,27 @@ belaboxRoutes.post("/test", async (context) => {
   if (!parsed.success) return context.json({ error: "belabox_test_invalid" }, 400);
 
   const channelId = channelIdOf(context);
+  const actor = context.get("actor");
+  const authorizeManagementMutation = context.get("authorizeManagementMutation");
+  if (!await hasManagementAuthorization(context.env.DB, channelId, actor, authorizeManagementMutation)) {
+    return managementDenied(context);
+  }
+
   const usesStoredUrl = parsed.data.url === undefined;
-  const input = usesStoredUrl ? await context.get("secrets")(channelId).read(BELABOX_STATS_URL_SECRET) : parsed.data.url;
-  if (input === null || input === undefined) {
+  const storedSecret = usesStoredUrl
+    ? await context.get("secrets")(channelId).readWithRevision(BELABOX_STATS_URL_SECRET)
+    : null;
+  const input = usesStoredUrl ? storedSecret?.value : parsed.data.url;
+  if (input === undefined) {
     return context.json({ ok: false, reason: "not_configured" } satisfies BelaboxTestResult);
   }
   const validation = validateBelaboxStatsUrl(input);
   if (!validation.ok) {
     return context.json({ ok: false, reason: validation.reason } satisfies BelaboxTestResult);
+  }
+
+  if (!await hasManagementAuthorization(context.env.DB, channelId, actor, authorizeManagementMutation)) {
+    return managementDenied(context);
   }
 
   const result = await fetchRelaySample(
@@ -115,9 +140,11 @@ belaboxRoutes.post("/test", async (context) => {
 
   if (usesStoredUrl) {
     const now = new Date().toISOString();
-    const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
+    const authorization = authorizeManagementMutation(channelId, actor, now);
     try {
-      await prepareBelaboxSampleWrite(context.env.DB, channelId, result.sample, authorization).run();
+      if (storedSecret !== null) {
+        await prepareBelaboxSampleWrite(context.env.DB, channelId, result.sample, storedSecret.revision, authorization).run();
+      }
     } catch {
       // The test result remains useful when the optional latest-sample write fails.
     }

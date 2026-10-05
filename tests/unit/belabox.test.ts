@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { format } from "node:util";
 
 import type { ModuleExternalFetchBudget, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { belaboxModule } from "../../src/modules/belabox";
-import { BELABOX_STATS_TIMEOUT_MS, type BelaboxFetchFailureReason } from "../../src/modules/belabox/contracts";
+import { BELABOX_STATS_TIMEOUT_MS, BELABOX_STATS_URL_SECRET, type BelaboxFetchFailureReason } from "../../src/modules/belabox/contracts";
 import { fetchRelaySample } from "../../src/modules/belabox/adapters/stats-client";
 import { belaboxRoutes } from "../../src/modules/belabox/routes";
 import { parseRelayStats } from "../../src/modules/belabox/domain/stats";
@@ -38,6 +39,66 @@ const relayPayload = (publisherKey: string) => ({
   },
   consumers: [],
 });
+
+const createBelaboxRouteHarness = async (testDatabase: TestD1Database) => {
+  await insertChannel(testDatabase, CHANNEL_ID);
+  await insertLoginIdentityAndSession(testDatabase, MANAGER_ID);
+  await insertMember(testDatabase, CHANNEL_ID, MANAGER_ID, "manager");
+  const db = testDatabase as unknown as D1Database;
+  const secrets = createModuleSecretAccess({ DB: db, TOKEN_ENCRYPTION_KEYS }, CHANNEL_ID, "belabox");
+  const app = new Hono<ModuleRouteEnvironment>();
+  app.use("*", async (context, next) => {
+    context.set("channelRole", "manager");
+    context.set("actor", { userId: MANAGER_ID, sessionId: `session-${MANAGER_ID}` });
+    context.set("authorizeManagementMutation", authorizeModuleManagementMutation);
+    context.set("secrets", () => secrets);
+    context.set("externalFetchBudget", sharedBudget());
+    context.set("prepareModuleAudit", (entry, changedAt) => prepareModuleAudit(db, MANAGER_ID, changedAt, entry));
+    await next();
+  });
+  app.route(`/channels/:channelId/modules/belabox`, belaboxRoutes);
+
+  const send = (path: string, method: string, body?: unknown): Promise<Response> => Promise.resolve(app.fetch(new Request(
+    `https://brobot.example/channels/${CHANNEL_ID}/modules/belabox${path}`,
+    {
+      method,
+      ...(body === undefined ? {} : {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    },
+  ), { DB: db }));
+  return { app, db, secrets, send };
+};
+
+const renderConsoleValue = (value: unknown, seen = new Set<object>()): string => {
+  if (typeof value === "string") return value;
+  if (typeof value !== "object" || value === null) return String(value);
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+
+  const rendered: string[] = [];
+  if (value instanceof Error) {
+    rendered.push(value.name, value.message, value.stack ?? "");
+  }
+  if (value instanceof Map) {
+    for (const [key, entry] of value) rendered.push(renderConsoleValue(key, seen), renderConsoleValue(entry, seen));
+  } else if (value instanceof Set) {
+    for (const entry of value) rendered.push(renderConsoleValue(entry, seen));
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor !== undefined && "value" in descriptor) {
+      rendered.push(String(key), renderConsoleValue(descriptor.value, seen));
+    }
+  }
+  return rendered.join(" ");
+};
+
+const expectConsoleCallsRedacted = (calls: readonly unknown[][]): void => {
+  const rendered = calls.map((args) => `${format(...args)} ${args.map((value) => renderConsoleValue(value)).join(" ")}`).join("\n");
+  expect(rendered).not.toContain(SENTINEL_KEY);
+};
 
 describe("BELABOX stats URL", () => {
   it("registers as optional, disabled data module", () => {
@@ -170,7 +231,6 @@ describe("BELABOX relay stats parsing and fetch", () => {
 
 describe("BELABOX secret and route redaction", () => {
   let database: TestD1Database | null = null;
-  let app: Hono<ModuleRouteEnvironment>;
   let consoleSpies: Array<{ mock: { calls: unknown[][] }; getMockName: () => string }>;
 
   afterEach(() => {
@@ -182,35 +242,17 @@ describe("BELABOX secret and route redaction", () => {
   it("keeps a sentinel URL out of logs, route results, audits, events, and module rows for every fetch outcome", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
-    await insertChannel(testDatabase, CHANNEL_ID);
-    await insertLoginIdentityAndSession(testDatabase, MANAGER_ID);
-    await insertMember(testDatabase, CHANNEL_ID, MANAGER_ID, "manager");
-    const db = testDatabase as unknown as D1Database;
-    app = new Hono<ModuleRouteEnvironment>();
-    app.use("*", async (context, next) => {
-      context.set("channelRole", "manager");
-      context.set("actor", { userId: MANAGER_ID, sessionId: `session-${MANAGER_ID}` });
-      context.set("authorizeManagementMutation", authorizeModuleManagementMutation);
-      context.set("secrets", (channelId) => createModuleSecretAccess({ DB: db, TOKEN_ENCRYPTION_KEYS }, channelId, "belabox"));
-      context.set("externalFetchBudget", sharedBudget());
-      context.set("prepareModuleAudit", (entry, changedAt) => prepareModuleAudit(db, MANAGER_ID, changedAt, entry));
-      await next();
-    });
-    app.route(`/channels/:channelId/modules/belabox`, belaboxRoutes);
+    const harness = await createBelaboxRouteHarness(testDatabase);
+    const { send } = harness;
 
     const consoleRecord = console as unknown as Record<string, (...args: unknown[]) => void>;
     const spyNames = Object.getOwnPropertyNames(consoleRecord).filter((name) => typeof consoleRecord[name] === "function");
     consoleSpies = spyNames.map((name) => vi.spyOn(consoleRecord, name));
-    const send = async (path: string, method: string, body?: unknown): Promise<Response> => app.fetch(new Request(
-      `https://brobot.example/channels/${CHANNEL_ID}/modules/belabox${path}`,
-      {
-        method,
-        ...(body === undefined ? {} : {
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }),
-      },
-    ), { DB: db });
+    console.error(new TypeError(`Network failed for ${STATS_URL}`, {
+      cause: new Error("Wrapped fetch error", { cause: SENTINEL_KEY }),
+    }));
+    expect(() => { expectConsoleCallsRedacted(consoleSpies.flatMap((spy) => spy.mock.calls)); }).toThrow();
+    for (const spy of consoleSpies) spy.mock.calls.splice(0);
     const assertDatabaseRedacted = async (): Promise<void> => {
       const tableNames = (await testDatabase.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all<{ name: string }>())
         .results.map(({ name }) => name);
@@ -278,6 +320,86 @@ describe("BELABOX secret and route redaction", () => {
     ]);
 
     await assertDatabaseRedacted();
-    for (const spy of consoleSpies) expect(JSON.stringify(spy.mock.calls), spy.getMockName()).not.toContain(SENTINEL_KEY);
+    expectConsoleCallsRedacted(consoleSpies.flatMap((spy) => spy.mock.calls));
+  });
+
+  it("rechecks management membership after the POST /test body finishes before reading the stored secret", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { app, db, secrets } = await createBelaboxRouteHarness(testDatabase);
+    await secrets.prepareWrite(BELABOX_STATS_URL_SECRET, STATS_URL, {
+      userId: MANAGER_ID,
+      sessionId: `session-${MANAGER_ID}`,
+    }, new Date().toISOString()).then((statement) => statement.run());
+    const secretRead = vi.spyOn(secrets, "readWithRevision");
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let notifyBodyRead!: () => void;
+    const bodyRead = new Promise<void>((resolve) => { notifyBodyRead = resolve; });
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        bodyController = controller;
+        notifyBodyRead();
+      },
+    });
+    const request = new Request(
+      `https://brobot.example/channels/${CHANNEL_ID}/modules/belabox/test`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        duplex: "half",
+      } as RequestInit,
+    );
+    const responsePending = app.fetch(request, { DB: db });
+    await bodyRead;
+    await testDatabase.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
+      .bind(CHANNEL_ID, MANAGER_ID).run();
+    bodyController?.enqueue(new TextEncoder().encode("{}"));
+    bodyController?.close();
+
+    const response = await responsePending;
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "belabox_management_denied" });
+    expect(secretRead).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(["remove", "replace"] as const)("does not write a stale sample when the stored URL is changed during a test (%s)", async (change) => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { send, secrets } = await createBelaboxRouteHarness(testDatabase);
+    await secrets.prepareWrite(BELABOX_STATS_URL_SECRET, STATS_URL, {
+      userId: MANAGER_ID,
+      sessionId: `session-${MANAGER_ID}`,
+    }, new Date().toISOString()).then((statement) => statement.run());
+
+    let finishFetch!: (response: Response) => void;
+    let signalFetch!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => { signalFetch = resolve; });
+    const responseFromFetch = new Promise<Response>((resolve) => { finishFetch = resolve; });
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => {
+      signalFetch();
+      return responseFromFetch;
+    }));
+    const testPending = send("/test", "POST", {});
+    await fetchStarted;
+
+    const changed = change === "remove"
+      ? await send("/stats-url", "DELETE")
+      : await send("/stats-url", "PUT", { url: "http://relay.belabox.net:8080/replacement-publisher-key" });
+    expect(changed.status).toBe(200);
+    finishFetch(jsonResponse(relayPayload(SENTINEL_KEY)));
+    const tested = await testPending;
+    expect(tested.status).toBe(200);
+    expect(await tested.json()).toMatchObject({ ok: true, connected: true });
+
+    const status = await send("/status", "GET");
+    expect(await status.json()).toMatchObject({
+      configured: change === "replace",
+      sample: null,
+    });
   });
 });

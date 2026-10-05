@@ -8,7 +8,7 @@ interface ModuleSecretEnvironment extends TokenEncryptionEnvironment {
 
 interface ModuleSecretRow {
   ciphertext: string;
-  updated_at: string;
+  revision: number;
 }
 
 interface ModuleSecretPayload {
@@ -41,17 +41,18 @@ export const createModuleSecretAccess = (
     return row === null ? { configured: false, updatedAt: null } : { configured: true, updatedAt: row.updated_at };
   };
 
-  const read: ModuleSecretAccess["read"] = async (name) => {
+  const readWithRevision: ModuleSecretAccess["readWithRevision"] = async (name) => {
     const row = await environment.DB.prepare(
-      `SELECT ciphertext, updated_at FROM module_secrets
+      `SELECT ciphertext, revision FROM module_secrets
         WHERE channel_id = ? AND module_id = ? AND name = ?`,
     ).bind(channelId, moduleId, name).first<ModuleSecretRow>();
     if (row === null) return null;
     const payload: unknown = await decryptJson(row.ciphertext, encryptionKeys());
     if (!isModuleSecretPayload(payload) || payload.channelId !== channelId ||
         payload.moduleId !== moduleId || payload.name !== name) return null;
-    return payload.value;
+    return { value: payload.value, revision: row.revision };
   };
+  const read: ModuleSecretAccess["read"] = async (name) => (await readWithRevision(name))?.value ?? null;
 
   const prepareWrite: ModuleSecretAccess["prepareWrite"] = async (name, value, actor, now) => {
     const keys = encryptionKeys();
@@ -83,7 +84,7 @@ export const createModuleSecretAccess = (
     ).bind(channelId, moduleId, name, ...authorization.values);
   };
 
-  return { status, read, prepareWrite, prepareDelete };
+  return { status, read, readWithRevision, prepareWrite, prepareDelete };
 };
 
 /** Creates a runtime read-only view for module template providers. */

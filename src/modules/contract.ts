@@ -528,6 +528,8 @@ export type AuthorizeModuleMutation = (
 export interface ModuleSecretAccess {
   status: (name: string) => Promise<{ configured: boolean; updatedAt: string | null }>;
   read: (name: string) => Promise<string | null>;
+  /** Reads a secret together with the revision that must still be current for dependent writes. */
+  readWithRevision: (name: string) => Promise<{ value: string; revision: number } | null>;
   /** The returned statement carries the management-role guard and belongs in the same batch as its audit statement. */
   prepareWrite: (name: string, value: string, actor: ModuleMutationActor, now: string) => Promise<D1PreparedStatement>;
   /** The returned statement carries the management-role guard and belongs in the same batch as its audit statement. */
