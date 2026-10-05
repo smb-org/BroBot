@@ -37,6 +37,7 @@ import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event
 import { notifyModuleScheduleInputsChanged } from "../module-schedules";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { moduleBallots } from "../module-ballots";
+import { createModuleSecretAccess, createModuleSecretReadAccess } from "../module-secrets";
 import { liftModerationBan } from "../moderation";
 
 interface ModuleRouteEnvironment {
@@ -45,7 +46,7 @@ interface ModuleRouteEnvironment {
     ModuleRouteVariables,
     "writeModuleDiagnostics" | "broadcasterHasScope" | "broadcasterScopesForChannel"
     | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
-    | "listChannelVariables" | "findChannelVariable"
+    | "listChannelVariables" | "findChannelVariable" | "secrets"
     | "externalFetchBudget"
     | "ballots"
     | "runModuleAlarm"
@@ -151,6 +152,16 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     const moduleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
     if (!MODULES.some((module) => module.id === moduleId)) throw new Error("Ballot access requires a registered module route.");
     return moduleBallots(context.env.CHANNEL, channelId, moduleId);
+  });
+  context.set("secrets", (channelId) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Module secret access must use the authorized route channel.");
+    const marker = "/modules/";
+    const suffix = new URL(context.req.url).pathname.split(marker, 2)[1];
+    const moduleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
+    if (!MODULES.some((module) => module.id === moduleId && module.routes !== undefined)) {
+      throw new Error("Module secret access requires a registered module route.");
+    }
+    return createModuleSecretAccess(context.env, channelId, moduleId);
   });
   context.set("runModuleAlarm", async (channelId, moduleId, handlerKey, alarmKey) => {
     if (channelId !== context.req.param("channelId")) throw new Error("Module alarm access must use the authorized route channel.");
@@ -419,6 +430,7 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
   // value-provider discovery only.
   const render = createTemplateRenderer(event, parsed.data.templateContext, [], {
     DB: context.env.DB,
+    moduleSecrets: (moduleId) => createModuleSecretReadAccess(context.env, channelId, moduleId),
     externalFetchBudget: context.get("externalFetchBudget"),
     publicOrigin: context.env.PUBLIC_ORIGIN,
     channelInfo: () => Promise.resolve(channelInfo),

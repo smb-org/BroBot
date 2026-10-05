@@ -280,6 +280,8 @@ export const AUDIT_ACTIONS = [
   "member.removed",
   "module.enabled",
   "module.disabled",
+  "module.secret.replaced",
+  "module.secret.removed",
   "chat_voting.started",
   "chat_voting.closed",
   "text_commands.command.created",

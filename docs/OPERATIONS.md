@@ -135,9 +135,10 @@ Cookies beziehungsweise EventSub-Abonnements mehr existieren.
 Bei `TOKEN_ENCRYPTION_KEYS` verschlüsselt `active` neue Twitch-Tokens sowie
 neue Overlay-Zugangs-Secrets. Ein `retired`-Eintrag bleibt erhalten, bis die
 Prüfung auf verbleibende Ciphertexte mit seiner `keyId` keinen Treffer mehr
-liefert. Die Prüfung muss drei Tokenbestände umfassen: `bot_identity` sowie
+liefert. Die Prüfung muss vier Bestände umfassen: `bot_identity` sowie
 `twitch_login_identity`, jeweils für Access- und Refresh-Ciphertext, und
-`overlay_tokens.secret_envelope` für die erneut anzeigbaren Overlay-Zugänge.
+`overlay_tokens.secret_envelope` für die erneut anzeigbaren Overlay-Zugänge
+sowie `module_secrets.key_id` für die Modul-Secrets.
 Erst wenn diese Bestandsprüfung null Treffer ergibt, darf der alte Eintrag aus
 dem Ring entfernt werden. Ein fehlgeschlagener Refresh kann einen alten
 Ciphertext länger als die normale Übergangszeit erhalten; sieben Tage sind

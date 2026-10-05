@@ -33,6 +33,7 @@ import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { chatOutputSuppressionReason } from "./chat-output-gate";
 import { createModuleExternalFetchBudget } from "./external-fetch-budget";
 import { moduleBallots } from "./module-ballots";
+import { createModuleSecretReadAccess } from "./module-secrets";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -918,6 +919,7 @@ export const dispatchEventSubNotification = async (
       const templateContext = module.templateContext ?? "event";
       const render = createTemplateRenderer(moduleEvent, templateContext, moduleVariables, {
         DB: environment.DB,
+        moduleSecrets: (providerModuleId) => createModuleSecretReadAccess(environment, event.channelId, providerModuleId),
         externalFetchBudget,
         ...(environment.PUBLIC_ORIGIN === undefined ? {} : { publicOrigin: environment.PUBLIC_ORIGIN }),
         channelInfo,

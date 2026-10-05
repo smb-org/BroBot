@@ -126,6 +126,15 @@ Host-Einstellungen wie Kanalzeitzone und Standort. Eigene Moduleinstellungen
 gehören auf die Seite des Moduls (`panel` oder `settingsEditor`). Module
 bekommen Host-Werte bei Bedarf über den schreibgeschützten Contract.
 
+Host-verwaltete Modul-Secrets liegen außerhalb der Einstellungen und des
+Audit-Payloads. Routen beziehen sie über `ModuleRouteVariables.secrets(channelId)`,
+Alarme über `ModuleAlarmContext.secrets`; Vorlagenprovider erhalten in
+`ModuleTemplateValueContext.secrets` nur `status` und `read`. Der Host bindet
+den Zugriff an Kanal und Modul. Schreib- und Löschstatements tragen die
+verwaltende Rollenprüfung und werden im selben D1-Batch wie ihr Audit ausgeführt;
+Audit-Snapshots enthalten dafür nur `replaced` oder `removed`, nie den Wert.
+Overlay-`initialState` erhält keinen Secret-Zugriff.
+
 Die Sonnendatenquelle liegt eigenständig unter `src/modules/sun/`. Sie nutzt
 Open-Meteo-Geocoding über den Host für die Standortsuche. Der Host speichert
 Name, Koordinaten und Standortzeitzone in `channels` und stellt sie Sun über

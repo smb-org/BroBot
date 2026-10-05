@@ -524,6 +524,19 @@ export type AuthorizeModuleMutation = (
   now: string,
 ) => ModuleMutationAuthorization;
 
+/** Host-owned secret access scoped to one channel and module. */
+export interface ModuleSecretAccess {
+  status: (name: string) => Promise<{ configured: boolean; updatedAt: string | null }>;
+  read: (name: string) => Promise<string | null>;
+  /** The returned statement carries the management-role guard and belongs in the same batch as its audit statement. */
+  prepareWrite: (name: string, value: string, actor: ModuleMutationActor, now: string) => Promise<D1PreparedStatement>;
+  /** The returned statement carries the management-role guard and belongs in the same batch as its audit statement. */
+  prepareDelete: (name: string, actor: ModuleMutationActor, now: string) => D1PreparedStatement;
+}
+
+/** Read-only view for resolving module template values. */
+export type ModuleSecretReadAccess = Pick<ModuleSecretAccess, "status" | "read">;
+
 export interface ActiveChatterActivity {
   firstSeenAt: string;
   lastSeenAt: string;
@@ -596,6 +609,8 @@ export interface ModuleExecutionContext {
 export interface ModuleAlarmContext {
   DB: D1Database;
   channelId: string;
+  /** Secret access bound to this alarm's channel and module. */
+  secrets: ModuleSecretAccess;
   /** Ephemeral ballot access bound to this alarm's channel and module. */
   ballots: ModuleBallotAccess;
   /** Channel locale and unbiased randomness for preparing the same module actions as event handlers. */
@@ -812,6 +827,8 @@ export interface ModuleChannelLocation {
 export interface ModuleTemplateValueContext {
   DB: D1Database;
   channelId: string;
+  /** Read-only secret access bound to the provider's channel and module. */
+  secrets: ModuleSecretReadAccess;
   templateContext: TemplateContext;
   knownTemplateVariableNames: ReadonlySet<string>;
   chatStatus: readonly ModuleChatStatus[] | null;
@@ -1064,6 +1081,8 @@ export interface ModuleRouteVariables {
   actor: { userId: string; sessionId: string };
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;
+  /** Returns secret access bound to the authorized route channel and mounted module. */
+  secrets: (channelId: string) => ModuleSecretAccess;
   externalFetchBudget: ModuleExternalFetchBudget;
   /** Returns ballot access bound to the authorized route channel and mounted module. */
   ballots: (channelId: string) => ModuleBallotAccess;

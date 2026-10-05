@@ -44,6 +44,7 @@ import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
+import { createModuleSecretAccess } from "../module-secrets";
 import { sendChatMessage } from "../chat";
 import { sendModerationBan } from "../moderation";
 import { readChannelStreamState } from "../db/stream-state";
@@ -1233,6 +1234,7 @@ export class ChannelObject extends DurableObject<Env> {
       DB: this.env.DB,
       channelId,
       ballots: this.ballotAccess(moduleId),
+      secrets: createModuleSecretAccess(this.env, channelId, moduleId),
       channelLanguage: async () => {
         const row = await this.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
           .bind(channelId).first<{ language: string }>();

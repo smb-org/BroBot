@@ -7,6 +7,7 @@ import { readChannelVariables } from "./db/channel-variables";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
+import { createModuleSecretReadAccess } from "./module-secrets";
 import type { TemplateVariable } from "../template";
 
 const channelLanguage = async (db: D1Database, channelId: string): Promise<ModuleLanguage> => {
@@ -136,6 +137,7 @@ export const renderScheduledTemplate = async (
   };
   const render = createTemplateRenderer(event, "event", [], {
     DB: environment.DB,
+    moduleSecrets: (moduleId) => createModuleSecretReadAccess(environment, channelId, moduleId),
     ...(externalFetchBudget === undefined ? {} : { externalFetchBudget }),
     publicOrigin: environment.PUBLIC_ORIGIN,
     channelInfo,

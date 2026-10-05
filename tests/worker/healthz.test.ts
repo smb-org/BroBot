@@ -63,6 +63,10 @@ const sunSetForHostLocation = async (DB: D1Database, channelId: string, now: num
   const context: ModuleTemplateValueContext = {
     DB,
     channelId,
+    secrets: {
+      status: () => Promise.resolve({ configured: false, updatedAt: null }),
+      read: () => Promise.resolve(null),
+    },
     templateContext: "chat_command",
     knownTemplateVariableNames: new Set(["sun.set"]),
     chatStatus: null,
