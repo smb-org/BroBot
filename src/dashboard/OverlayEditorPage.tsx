@@ -10,7 +10,7 @@ import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
 import type { JsonObject, ModuleOverlayElementDefinition } from "../modules/contract";
 import { ModuleOverlayElementEditor } from "./ModuleOverlayElementEditor";
 import variableViewCss from "../overlay/variable.css?inline";
-import { clampOverlayEditorPosition, overlayEditorMeasuredSize, overlayEditorPositionLimits, UNMEASURED_ELEMENT_FALLBACK_SIZE } from "./overlay-editor-model";
+import { clampOverlayEditorPosition, overlayEditorMeasuredSize, overlayEditorPositionLimits, UNMEASURED_ELEMENT_FALLBACK_SIZE, type OverlayEditorSize } from "./overlay-editor-model";
 import {
   parseOverlayStyleBlock,
   replaceOverlayStyleBlock,
@@ -434,6 +434,7 @@ function OverlayEditorWorkspace({
   const previewViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const drag = useRef<PointerDrag | null>(null);
+  const pendingMeasuredSizes = useRef(new Map<string, OverlayEditorSize>());
   const previewEventHandlers = useRef<PreviewEventHandlers>({
     pointerDown: () => undefined,
     pointerMove: () => undefined,
@@ -609,17 +610,22 @@ function OverlayEditorWorkspace({
   // An element hidden with `inComposition: false` is not in the DOM, so its size cannot be
   // measured; fall back to a sensible minimum instead of {0, 0} so clamping still keeps it
   // on-canvas once it is shown (a {0, 0} size would let X/Y range across the whole canvas).
-  const renderedElementSize = (elementId: string): { width: number; height: number } => {
+  const measuredRenderedElementSize = (elementId: string): OverlayEditorSize | null => {
+    const root = previewFrameRootRef.current;
+    if (root === null) return null;
+    const element = findRenderedElement(root, elementId);
+    if (element === undefined) return null;
+    const bounds = element.getBoundingClientRect();
+    if (!Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 0 || bounds.height <= 0) return null;
+    return { width: bounds.width, height: bounds.height };
+  };
+
+  const renderedElementSize = (elementId: string): OverlayEditorSize => {
     const draftElement = draft.elements.find(({ id }) => id === elementId);
     const fallback = draftElement === undefined
       ? UNMEASURED_ELEMENT_FALLBACK_SIZE
       : moduleElementOption(draftElement.kind)?.defaultSize ?? UNMEASURED_ELEMENT_FALLBACK_SIZE;
-    const root = previewFrameRootRef.current;
-    if (root === null) return fallback;
-    const element = findRenderedElement(root, elementId);
-    if (element === undefined) return fallback;
-    const bounds = element.getBoundingClientRect();
-    return overlayEditorMeasuredSize({ width: bounds.width, height: bounds.height }, fallback);
+    return overlayEditorMeasuredSize(measuredRenderedElementSize(elementId) ?? { width: 0, height: 0 }, fallback);
   };
 
   const clampPosition = (element: PanelOverlayElement, x: number, y: number): { x: number; y: number } =>
@@ -642,13 +648,14 @@ function OverlayEditorWorkspace({
       if (elementId === undefined) return;
       const currentDraft = draftRef.current;
       const draftElement = currentDraft.elements.find(({ id }) => id === elementId);
-      const fallback = draftElement === undefined
-        ? UNMEASURED_ELEMENT_FALLBACK_SIZE
-        : moduleElementOption(draftElement.kind)?.defaultSize ?? UNMEASURED_ELEMENT_FALLBACK_SIZE;
-      const bounds = element.getBoundingClientRect();
-      const size = overlayEditorMeasuredSize({ width: bounds.width, height: bounds.height }, fallback);
+      const size = measuredRenderedElementSize(elementId);
+      if (size === null) return;
       if (elementId === selectedElementId) setSelectedElementSize(size);
-      if (draftElement === undefined || !draftElement.inComposition || drag.current !== null) return;
+      if (draftElement === undefined || !draftElement.inComposition) return;
+      if (drag.current !== null) {
+        pendingMeasuredSizes.current.set(elementId, size);
+        return;
+      }
       const clamped = clampOverlayEditorPosition(
         { x: draftElement.x, y: draftElement.y },
         { width: currentDraft.width, height: currentDraft.height },
@@ -787,10 +794,16 @@ function OverlayEditorWorkspace({
     if (root === null) return;
     const element = findRenderedElement(root, selectedElement.id);
     if (element === undefined) return;
+    const measuredSize = measuredRenderedElementSize(selectedElement.id);
+    if (measuredSize === null) return;
+    if (drag.current !== null) {
+      pendingMeasuredSizes.current.set(selectedElement.id, measuredSize);
+      return;
+    }
     const clamped = clampOverlayEditorPosition(
       { x: selectedElement.x, y: selectedElement.y },
       { width: draft.width, height: draft.height },
-      renderedElementSize(selectedElement.id),
+      measuredSize,
       selectedElementAnchor,
     );
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Keep the selected element inside the canvas before paint after its measured size changes.
@@ -812,10 +825,16 @@ function OverlayEditorWorkspace({
       if (!element.inComposition) continue;
       const rendered = findRenderedElement(root, element.id);
       if (rendered === undefined) continue;
+      const measuredSize = measuredRenderedElementSize(element.id);
+      if (measuredSize === null) continue;
+      if (drag.current !== null) {
+        pendingMeasuredSizes.current.set(element.id, measuredSize);
+        continue;
+      }
       const clamped = clampOverlayEditorPosition(
         { x: element.x, y: element.y },
         { width: draft.width, height: draft.height },
-        renderedElementSize(element.id),
+        measuredSize,
         elementHorizontalAnchor(element),
       );
       // eslint-disable-next-line react-hooks/set-state-in-effect -- CSS or canvas changes can grow any composition element beyond its current bounds.
@@ -1034,7 +1053,22 @@ function OverlayEditorWorkspace({
   };
 
   const stopDrag = (event: PointerEvent): void => {
-    if (drag.current?.pointerId === event.pointerId) drag.current = null;
+    if (drag.current?.pointerId !== event.pointerId) return;
+    drag.current = null;
+    const currentDraft = draftRef.current;
+    const pendingMeasurements = [...pendingMeasuredSizes.current];
+    pendingMeasuredSizes.current.clear();
+    for (const [elementId, size] of pendingMeasurements) {
+      const element = currentDraft.elements.find(({ id }) => id === elementId);
+      if (element === undefined || !element.inComposition) continue;
+      const clamped = clampOverlayEditorPosition(
+        { x: element.x, y: element.y },
+        { width: currentDraft.width, height: currentDraft.height },
+        size,
+        elementHorizontalAnchor(element),
+      );
+      if (clamped.x !== element.x || clamped.y !== element.y) updateElement(elementId, clamped);
+    }
   };
 
   useEffect(() => {

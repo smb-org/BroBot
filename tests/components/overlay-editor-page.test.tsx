@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
@@ -36,7 +36,7 @@ const requestUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, window.location.origin);
 
-interface WindowWithElementConstructor { Element: typeof Element }
+interface WindowWithElementConstructor { Element: typeof Element; document: Document }
 
 const previewFrameWindow = (): WindowWithElementConstructor => {
   const frame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
@@ -55,6 +55,31 @@ const stubMeasuredElementSize = (frameWindow: WindowWithElementConstructor, elem
     const { width, height } = this.dataset.element === elementId ? sizeAt(this) : { width: 0, height: 0 };
     return { x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON: () => ({}) };
   });
+};
+
+const installResizeObserverMock = (): ((element: Element) => void) => {
+  const observers: { callback: ResizeObserverCallback; targets: Set<Element>; active: boolean; instance: ResizeObserver }[] = [];
+  class TestResizeObserver implements ResizeObserver {
+    private readonly observation: typeof observers[number];
+
+    constructor(callback: ResizeObserverCallback) {
+      this.observation = { callback, targets: new Set(), active: true, instance: this };
+      observers.push(this.observation);
+    }
+
+    observe(target: Element): void { this.observation.targets.add(target); }
+    unobserve(target: Element): void { this.observation.targets.delete(target); }
+    disconnect(): void { this.observation.active = false; }
+    takeRecords(): ResizeObserverEntry[] { return []; }
+  }
+  vi.stubGlobal("ResizeObserver", TestResizeObserver);
+  return (target) => {
+    for (const observer of observers) {
+      if (observer.active && observer.targets.has(target)) {
+        observer.callback([{ target } as ResizeObserverEntry], observer.instance);
+      }
+    }
+  };
 };
 
 describe("Overlay composition editor", () => {
@@ -436,6 +461,105 @@ describe("Overlay composition editor", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Layout" }));
 
     expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("780");
+  });
+
+  it("keeps a saved bottom-right text block position through its lazy measurement", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const textBlock = {
+      ...initialOverlay.elements[0],
+      id: "element-lazy-bottom-right",
+      kind: "text_library.block",
+      label: "Bottom-right text block",
+      variableName: null,
+      text: "",
+      config: { blockName: "" },
+      x: 1850,
+      y: 1040,
+      scalePercent: 25,
+    };
+    const savedOverlay = { ...initialOverlay, width: 1920, height: 1080, elements: [textBlock] };
+    const notifyResize = installResizeObserverMock();
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [
+        { id: "text_library", enabled: true, mandatory: false, settings: "{}" },
+      ] }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: savedOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules/text_library/blocks") return Promise.resolve(jsonResponse({ blocks: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const previewWindow = previewFrameWindow();
+    let measuredSize = { width: 0, height: 0 };
+    stubMeasuredElementSize(previewWindow, textBlock.id, () => measuredSize);
+    const rendered = previewWindow.document.querySelector<HTMLElement>(`[data-element="${textBlock.id}"]`);
+    if (rendered === null) throw new Error("Lazy text block preview is missing.");
+    expect(rendered.style.transform).toContain("scale(0.25)");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1850");
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("1040");
+
+    // The lazy preview has now produced its first real bounds; its post-scale box still fits.
+    measuredSize = { width: 50, height: 20 };
+    act(() => notifyResize(rendered));
+
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1850");
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("1040");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("applies a measured growth clamp when a stationary drag is released", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const draggedElement = {
+      ...initialOverlay.elements[0],
+      id: "element-drag-growth",
+      label: "Growing block",
+      x: 1500,
+      y: 100,
+    };
+    const overlayWithDraggedElement = { ...initialOverlay, width: 1920, height: 1080, elements: [draggedElement] };
+    const notifyResize = installResizeObserverMock();
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: overlayWithDraggedElement }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const previewWindow = previewFrameWindow();
+    let measuredSize = { width: 0, height: 0 };
+    stubMeasuredElementSize(previewWindow, draggedElement.id, () => measuredSize);
+    const rendered = previewWindow.document.querySelector<HTMLElement>(`[data-element="${draggedElement.id}"]`);
+    const canvas = previewWindow.document.getElementById("root");
+    if (rendered === null || canvas === null) throw new Error("Drag preview is missing.");
+    vi.spyOn(rendered, "getBoundingClientRect").mockImplementation(() => ({
+      x: 1500, y: 100, left: 1500, top: 100,
+      right: 1500 + measuredSize.width, bottom: 100 + measuredSize.height,
+      width: measuredSize.width, height: measuredSize.height, toJSON: () => ({}),
+    }));
+
+    measuredSize = { width: 100, height: 30 };
+    act(() => notifyResize(rendered));
+    fireEvent.pointerDown(rendered, { pointerId: 22, button: 0, clientX: 1501, clientY: 101 });
+    measuredSize = { width: 1345, height: 30 };
+    act(() => notifyResize(rendered));
+
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1500");
+    fireEvent.pointerUp(canvas, { pointerId: 22, clientX: 1501, clientY: 101 });
+
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("575");
   });
 
   it("reclamps an unselected element near the edge when an overlay-default style grows it", async () => {
