@@ -178,7 +178,9 @@ const overlaysPath = (channelId: string, overlayId?: string): string =>
 
 const overlayAccessesPath = (channelId: string, overlayId: string, tokenId?: string, action?: "reveal" | "replace" | "revoke"): string => {
   const base = `${overlaysPath(channelId, overlayId)}/accesses`;
-  return tokenId === undefined || action === undefined ? base : `${base}/${encodeURIComponent(tokenId)}/${action}`;
+  if (tokenId === undefined) return base;
+  const accessPath = `${base}/${encodeURIComponent(tokenId)}`;
+  return action === undefined ? accessPath : `${accessPath}/${action}`;
 };
 
 export const fetchOverlays = (channelId: string): Promise<{ overlays: readonly PanelOverlaySummary[]; maximum: number; elementMaximum: number }> =>
@@ -252,6 +254,9 @@ export const revokeOverlayAccess = async (channelId: string, overlayId: string, 
   );
   return { closingPending: result?.closingPending ?? false };
 };
+
+export const removeOverlayAccess = (channelId: string, overlayId: string, tokenId: string): Promise<void> =>
+  requestMutation(overlayAccessesPath(channelId, overlayId, tokenId), "DELETE");
 
 const memberPath = (channelId: string, userId?: string): string =>
   `${channelPath(channelId, "members")}${userId === undefined ? "" : `/${encodeURIComponent(userId)}`}`;

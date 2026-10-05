@@ -325,6 +325,7 @@ export const AUDIT_ACTIONS = [
   "overlay.access.issued",
   "overlay.access.revealed",
   "overlay.access.revoked",
+  "overlay.access.removed",
   "overlay.created",
   "overlay.updated",
   "overlay.deleted",

@@ -646,6 +646,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 }
 .table__answer { min-width: 0; color: var(--text-2); white-space: normal; overflow-wrap: anywhere; }
 .table__answer--placeholder { color: var(--text-3); font-style: italic; }
+.overlays-feedback-slot { box-sizing: border-box; height: 3rem; display: flex; align-items: center; overflow: hidden; }
+.overlays-feedback-slot > p { display: -webkit-box; width: 100%; margin: 0; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .channel-variables-limit-note { margin: -8px 0 0; }
 .channel-variables-table-wrap { width: 100%; }
 .channel-variables-table { min-width: 600px; table-layout: auto; }
@@ -690,6 +692,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-form-actions,
 .channel-variable-use-overlay__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
 .overlay-access-list__actions { flex: none; align-items: center; gap: var(--s1); }
+.overlay-access-list__actions-wrap { display: grid; justify-items: end; gap: var(--s1); }
 .overlay-access-list__expanded { display: grid; gap: var(--s2); min-width: 0; padding: var(--s2) var(--s3); border-radius: var(--r-control); background: var(--surface-well); color: var(--text-3); font-size: 12px; }
 .overlay-access-list__expanded code { min-width: 0; overflow-wrap: anywhere; font: var(--mantine-font-size-sm)/1.5 var(--mantine-font-family-monospace); }
 .overlay-access-list__reason { margin: 0; color: var(--text-3); font-size: 11px; }
@@ -1132,6 +1135,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-save-bar__buttons { display: flex; flex: none; gap: 8px; }
 .ui-save-bar__actions--destructive > :first-child { margin-right: auto; }
 .ui-save-bar__footer { flex: none; }
+.ui-confirm-dialog__error-slot { height: 44px; margin-top: var(--s3); overflow-y: auto; }
+.ui-confirm-dialog__error-slot > .form-error { margin: 0; }
 .ui-confirm-dialog__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .ui-confirm-dialog__actions > .mantine-Button-root { flex: 0 0 auto; white-space: nowrap; }
 .ui-editor-shell--readonly { display: block; max-height: none; }

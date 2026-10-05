@@ -431,6 +431,16 @@ describe("auditSubjectText", () => {
     expect(auditSubjectText(baseEntry({ action: "overlay.token.issued" }), "de")).toBeNull();
     expect(auditSubjectText(baseEntry({ action: "clip.created" }), "de")).toBeNull();
   });
+
+  it("names a removed overlay access from its retained audit snapshot", () => {
+    const entry = baseEntry({
+      action: "overlay.access.removed",
+      before: JSON.stringify({ label: "OBS capture PC" }),
+      after: "null",
+    });
+    expect(auditSubjectText(entry, "de")).toBe("OBS capture PC");
+    expect(auditRowLabel(entry, "en")).toBe("Overlay access removed: OBS capture PC");
+  });
 });
 
 describe("auditRowLabel", () => {

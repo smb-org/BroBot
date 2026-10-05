@@ -141,3 +141,15 @@ Mitgliedschaftsprüfung; Änderungen an der Variablendefinition verwenden die
 verwaltende Prüfung. Rollen ohne Definitionsrecht sehen die Definitionen und
 deaktivierte Verwaltungsaktionen mit einem sichtbaren Grund, können den Wert
 aber weiterhin ändern.
+
+## 11. Widerrufene Overlay-Zugänge entfernen (#330)
+
+Das Entfernen eines bereits widerrufenen Overlay-Zugangs ist eine verwaltende
+Handlung und steht Broadcaster und Managern offen. Bediener sehen „Entfernen“
+deaktiviert mit dem Grund nach Abschnitt 7. Die Löschung prüft Rolle, Sitzung
+und Kanalmitgliedschaft in derselben D1-Batch wie die Mutation; ein
+Audit-Eintrag `overlay.access.removed` bewahrt den Stand vor der Löschung.
+
+Die nächtliche Wartung löscht widerrufene Overlay-Zugänge frühestens 30 Tage
+nach dem Widerruf. Die Audit-Einträge zu Ausstellung, Widerruf und manueller
+Entfernung bleiben erhalten.

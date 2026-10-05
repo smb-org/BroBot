@@ -271,6 +271,7 @@ export const recordOverlayAccessReveal = async (
 };
 
 export type RevokeOverlayAccessResult = "revoked" | "already_revoked" | "not_found" | "forbidden";
+export type RemoveOverlayAccessResult = "removed" | "not_found" | "not_revoked" | "forbidden";
 
 export const revokeOverlayAccess = async (
   db: D1Database,
@@ -304,4 +305,47 @@ export const revokeOverlayAccess = async (
   const current = await getOverlayAccessMetadata(db, channelId, overlayId, tokenId);
   if (current === null) return "not_found";
   return current.revokedAt === null ? "not_found" : "already_revoked";
+};
+
+export const removeRevokedOverlayAccess = async (
+  db: D1Database,
+  channelId: string,
+  overlayId: string,
+  tokenId: string,
+  actor: ActorContext,
+  removedAt: string,
+): Promise<RemoveOverlayAccessResult> => {
+  const before = await getOverlayAccessMetadata(db, channelId, overlayId, tokenId);
+  if (before === null) {
+    return await authorizeOverlayAccessManager(db, actor, channelId, removedAt) ? "not_found" : "forbidden";
+  }
+  if (before.revokedAt === null) {
+    return await authorizeOverlayAccessManager(db, actor, channelId, removedAt) ? "not_revoked" : "forbidden";
+  }
+
+  const mutation = db.prepare(
+    `DELETE FROM overlay_tokens
+      WHERE token_id = ? AND channel_id = ? AND overlay_id = ?
+        AND created_at = ? AND revoked_at = ?
+        ${actorGuard(MANAGING_ROLES)}`,
+  ).bind(tokenId, channelId, overlayId, before.createdAt, before.revokedAt,
+    ...bindActorGuard(actor, channelId, removedAt));
+  const audit = prepareAudit(db, actor.userId, removedAt, channelId, null,
+    "overlay.access.removed", accessAuditSnapshot(before), null);
+  const result = await db.batch([mutation, audit]);
+  if ((result[0]?.meta.changes ?? 0) > 0) return "removed";
+  if (!await authorizeOverlayAccessManager(db, actor, channelId, removedAt)) return "forbidden";
+  const current = await getOverlayAccessMetadata(db, channelId, overlayId, tokenId);
+  if (current === null) return "not_found";
+  return current.revokedAt === null ? "not_revoked" : "not_found";
+};
+
+/** Removes revoked overlay accesses after 30 days, retaining their audit rows. */
+export const purgeRevokedOverlayAccesses = async (db: D1Database, now: string): Promise<void> => {
+  await db.prepare(
+    `DELETE FROM overlay_tokens
+      WHERE overlay_id IS NOT NULL AND revoked_at IS NOT NULL
+        AND julianday(revoked_at) IS NOT NULL
+        AND julianday(revoked_at) <= julianday(?, '-30 days')`,
+  ).bind(now).run();
 };

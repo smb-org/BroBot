@@ -7,10 +7,12 @@ import {
   createOverlayAccess,
   getOverlayAccessForReplacement as getStoredOverlayAccessForReplacement,
   getOverlayAccessForReveal,
+  removeRevokedOverlayAccess as removeStoredRevokedOverlayAccess,
   recordOverlayAccessReveal,
   revokeOverlayAccess as revokeStoredOverlayAccess,
   type OverlayAccessListEntry,
   type OverlayAccessMetadata,
+  type RemoveOverlayAccessResult,
   type RevokeOverlayAccessResult,
 } from "./overlay-access-repository";
 import { listOverlayAccesses } from "./overlay-access-repository";
@@ -193,6 +195,16 @@ export const revokeOverlayAccess = (
   revokedAt: string,
 ): Promise<RevokeOverlayAccessResult> =>
   revokeStoredOverlayAccess(db, channelId, overlayId, tokenId, actor, revokedAt);
+
+export const removeRevokedOverlayAccess = (
+  db: D1Database,
+  channelId: string,
+  overlayId: string,
+  tokenId: string,
+  actor: ActorContext,
+  removedAt: string,
+): Promise<RemoveOverlayAccessResult> =>
+  removeStoredRevokedOverlayAccess(db, channelId, overlayId, tokenId, actor, removedAt);
 
 export const getOverlayAccessForReplacement = (
   db: D1Database,

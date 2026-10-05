@@ -8,6 +8,7 @@ import {
   getOverlayAccessForReplacement,
   issueOverlayAccess,
   listOverlayAccessesForOverlay,
+  removeRevokedOverlayAccess,
   revealOverlayAccess,
   revokeOverlayAccess,
   tokenEncryptionKeyRing,
@@ -187,5 +188,22 @@ overlayAccessRouter.post(`${accessPath}/:tokenId/revoke`, async (context) => {
   if (result === "not_found") return context.json({ error: "overlay_access_not_found" }, 404);
   const closed = await closeRealtimeTokenBeforeResponse(context.env.CHANNEL, channelId, tokenId);
   if (!closed) return context.json({ closingPending: true }, 202);
+  return context.body(null, 204);
+});
+
+overlayAccessRouter.delete(`${accessPath}/:tokenId`, async (context) => {
+  if (!canManage(context.get("channelRole"))) return denied(context);
+  const now = nowIso();
+  const result = await removeRevokedOverlayAccess(
+    context.env.DB,
+    context.req.param("channelId"),
+    context.req.param("overlayId"),
+    context.req.param("tokenId"),
+    context.get("actor"),
+    now,
+  );
+  if (result === "forbidden") return denied(context);
+  if (result === "not_found") return context.json({ error: "overlay_access_not_found" }, 404);
+  if (result === "not_revoked") return context.json({ error: "overlay_access_not_revoked" }, 409);
   return context.body(null, 204);
 });

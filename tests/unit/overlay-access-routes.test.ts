@@ -89,6 +89,7 @@ const sessionHeaders = async (environment: TestEnvironment): Promise<Headers> =>
 const accessesPath = "https://brobot.example/api/channels/channel-a/overlays/overlay-a/accesses";
 const accessPath = (tokenId: string, action: "reveal" | "replace" | "revoke"): string =>
   `${accessesPath}/${tokenId}/${action}`;
+const removeAccessPath = (tokenId: string): string => `${accessesPath}/${tokenId}`;
 
 const post = async (
   router: typeof overlayAccessRouter,
@@ -100,6 +101,12 @@ const post = async (
   headers: await sessionHeaders(environment),
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 }), environment);
+
+const remove = async (tokenId: string, environment: TestEnvironment): Promise<Response> =>
+  overlayAccessRouter.fetch(new Request(removeAccessPath(tokenId), {
+    method: "DELETE",
+    headers: await sessionHeaders(environment),
+  }), environment);
 
 const issueAccess = async (environment: TestEnvironment, label = "OBS") => {
   const response = await post(overlayAccessRouter, accessesPath, environment, { label });
@@ -401,8 +408,9 @@ describe("overlay access routes", () => {
       post(overlayAccessRouter, accessPath(access.tokenId, "reveal"), environment),
       post(overlayAccessRouter, accessPath(access.tokenId, "replace"), environment),
       post(overlayAccessRouter, accessPath(access.tokenId, "revoke"), environment),
+      remove(access.tokenId, environment),
     ]);
-    expect([list.status, ...responses.map((response) => response.status)]).toEqual([200, 403, 403, 403, 403]);
+    expect([list.status, ...responses.map((response) => response.status)]).toEqual([200, 403, 403, 403, 403, 403]);
     const listed = await list.json<{ accesses: Record<string, unknown>[] }>();
     expect(listed.accesses).toHaveLength(1);
     expect(listed.accesses[0]).toMatchObject({ tokenId: access.tokenId, label: access.label });
@@ -427,6 +435,47 @@ describe("overlay access routes", () => {
       .bind(access.tokenId).first<{ revoked_at: string | null; revocation_reason: string | null }>();
     expect(row?.revoked_at).toBeTruthy();
     expect(row?.revocation_reason).toBe("manual");
+  });
+
+  it("removes only revoked accesses and retains the issue, revoke, and removal audit entries", async () => {
+    const access = await issueAccess(environment, "OBS old PC");
+    expect((await remove(access.tokenId, environment)).status).toBe(409);
+    const revoked = await post(overlayAccessRouter, accessPath(access.tokenId, "revoke"), environment);
+    expect([204, 202]).toContain(revoked.status);
+
+    const removed = await remove(access.tokenId, environment);
+    expect(removed.status).toBe(204);
+    expect(await database.prepare("SELECT token_id FROM overlay_tokens WHERE token_id = ?")
+      .bind(access.tokenId).first()).toBeNull();
+
+    const entries = await database.prepare(
+      `SELECT action, before_json, after_json FROM audit_log
+        WHERE channel_id = 'channel-a' AND action LIKE 'overlay.access.%'
+        ORDER BY rowid`,
+    ).all<{ action: string; before_json: string; after_json: string }>();
+    expect(entries.results.map((entry) => entry.action)).toEqual([
+      "overlay.access.issued", "overlay.access.revoked", "overlay.access.removed",
+    ]);
+    const removal = entries.results.find((entry) => entry.action === "overlay.access.removed");
+    if (removal === undefined) throw new Error("Removal audit entry is missing.");
+    const removalSnapshot = JSON.parse(removal.before_json) as Record<string, unknown>;
+    expect(removalSnapshot).toMatchObject({
+      tokenId: access.tokenId,
+      label: "OBS old PC",
+      revocationReason: "manual",
+    });
+    expect(typeof removalSnapshot.revokedAt).toBe("string");
+    expect(removal.after_json).toBe("null");
+  });
+
+  it("lets an expired access be revoked and then removed", async () => {
+    const access = await issueAccess(environment, "OBS expired PC");
+    await database.prepare("UPDATE overlay_tokens SET expires_at = '2020-01-01T00:00:00.000Z' WHERE token_id = ?")
+      .bind(access.tokenId).run();
+
+    const revoked = await post(overlayAccessRouter, accessPath(access.tokenId, "revoke"), environment);
+    expect([204, 202]).toContain(revoked.status);
+    expect((await remove(access.tokenId, environment)).status).toBe(204);
   });
 
   it("revokes overlay accesses and closes their sockets when the overlay is deleted", async () => {

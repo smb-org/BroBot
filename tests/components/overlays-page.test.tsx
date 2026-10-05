@@ -97,6 +97,7 @@ describe("Overlays page", () => {
     secondOverlay?: boolean;
     accessLastUsedAt?: string | null;
     accessExpiresAt?: string | null;
+    accessRevokedAt?: string | null;
     accessRecoverable?: boolean;
     removeElementOnReplace?: boolean;
     legacyClosingPending?: boolean;
@@ -106,6 +107,7 @@ describe("Overlays page", () => {
       ...access,
       ...(options.accessLastUsedAt === undefined ? {} : { lastUsedAt: options.accessLastUsedAt }),
       ...(options.accessExpiresAt === undefined ? {} : { expiresAt: options.accessExpiresAt }),
+      ...(options.accessRevokedAt === undefined ? {} : { revokedAt: options.accessRevokedAt }),
       ...(options.accessRecoverable === undefined ? {} : { recoverable: options.accessRecoverable }),
     }];
     let legacyTokens = [...(options.legacyTokens ?? [])];
@@ -171,6 +173,11 @@ describe("Overlays page", () => {
         accesses = accesses.map((item) => item.tokenId === tokenId ? { ...item, revokedAt: "2026-09-24T12:00:00.000Z" } : item);
         return new Response(null, { status: 204 });
       }
+      if (/\/accesses\/[^/]+$/u.test(url.pathname) && method === "DELETE") {
+        const tokenId = url.pathname.split("/").at(-1);
+        accesses = accesses.filter((item) => item.tokenId !== tokenId);
+        return new Response(null, { status: 204 });
+      }
       if (url.pathname.endsWith("/overlay-a") && method === "DELETE") {
         return options.conflictDelete
           ? jsonResponse({ error: "overlay_changed_concurrently", currentRevision: 5 }, 409)
@@ -216,6 +223,24 @@ describe("Overlays page", () => {
     expect(screen.getByRole("button", { name: "Importieren" })).toBeDisabled();
     expect(document.querySelector("a[href*='token=']")).toBeNull();
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/reveal"))).toBe(false);
+  });
+
+  it("shows operators the disabled remove action and its reason for revoked access", async () => {
+    vi.stubGlobal("fetch", routeFetcher({ accessRevokedAt: "2026-09-24T12:00:00.000Z" }));
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+
+    const inspector = await screen.findByRole("region", { name: "Zugänge" });
+    const revokedSection = within(inspector).getByText("1 widerrufene Zugänge").closest("details");
+    if (!(revokedSection instanceof HTMLDetailsElement)) throw new Error("Revoked access section is missing.");
+    fireEvent.click(within(revokedSection).getByText("1 widerrufene Zugänge"));
+    const row = within(revokedSection).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(row instanceof HTMLElement)) throw new Error("Revoked access row is missing.");
+
+    expect(within(row).getByText("Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.", { selector: "[role=note]" })).toBeInTheDocument();
+    const menu = await openAccessMenu(row);
+    expect(within(menu).getAllByRole("menuitem", { hidden: true })).toHaveLength(1);
+    expect(within(menu).getByRole("menuitem", { name: "Entfernen", hidden: true })).toBeDisabled();
   });
 
   it("parses a legacy link locally and sends only its token, variable, and text", async () => {
@@ -344,6 +369,27 @@ describe("Overlays page", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: confirm }));
     expect(await screen.findByRole("status")).toHaveTextContent(language === "de-DE" ? "Zugang widerrufen." : "Access revoked.");
     expect(fetcher.mock.calls.some(([input, init]) => requestPath(input).endsWith("/access-a/revoke") && init?.method === "POST")).toBe(true);
+
+    const revokedCount = language === "de-DE" ? "1 widerrufene Zugänge" : "1 revoked accesses";
+    const revokedSection = within(inspector).getByText(revokedCount).closest("details");
+    if (!(revokedSection instanceof HTMLDetailsElement)) throw new Error("Revoked access section is missing.");
+    fireEvent.click(within(revokedSection).getByText(revokedCount));
+    const revokedRow = within(revokedSection).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(revokedRow instanceof HTMLElement)) throw new Error("Revoked access row is missing.");
+    const revokedMenu = await openActionMenu(revokedRow, trigger);
+    const menuItems = within(revokedMenu).getAllByRole("menuitem", { hidden: true });
+    expect(menuItems).toHaveLength(1);
+    const removeItem = menuItems[0];
+    if (removeItem === undefined) throw new Error("Remove action is missing from the revoked access menu.");
+    expect(removeItem).toHaveTextContent(language === "de-DE" ? "Entfernen" : "Remove");
+    fireEvent.click(removeItem);
+
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input, init]) => requestPath(input).endsWith("/access-a") && init?.method === "DELETE")).toBe(true);
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(language === "de-DE" ? "Zugang entfernt." : "Access removed.");
+    expect(screen.queryByRole("dialog", { name: /Entfernen|Remove/u })).not.toBeInTheDocument();
+    expect(within(revokedSection).queryByText("OBS Main PC", { selector: "strong" })).not.toBeInTheDocument();
   });
 
   it("issues and copies a link, re-shows and replaces access, and confirms revocation", async () => {

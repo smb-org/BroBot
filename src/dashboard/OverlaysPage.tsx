@@ -13,6 +13,7 @@ import {
   fetchOverlayTokens,
   importLegacyOverlay,
   issueOverlayAccess,
+  removeOverlayAccess,
   PanelApiError,
   replaceOverlayAccess,
   revokeOverlayAccess,
@@ -598,6 +599,25 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     }
   };
 
+  const removeRevokedAccess = async (access: PanelOverlayAccess): Promise<void> => {
+    if (selectedOverlay === null || access.revokedAt === null || !canManage || pending) return;
+    const overlayId = selectedOverlay.id;
+    setPending(true);
+    setError(null);
+    try {
+      await removeOverlayAccess(channelId, overlayId, access.tokenId);
+      setNotice(labels.removed);
+      if (setupAccessId === access.tokenId) setSetupAccessId(null);
+      invalidateSecret();
+      await refreshSelected();
+      await load();
+    } catch (caught) {
+      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
+    } finally {
+      setPending(false);
+    }
+  };
+
   const copyAccess = async (access: PanelOverlayAccess): Promise<void> => {
     if (selectedOverlay === null || !canManage || pending || access.revokedAt !== null || !isAccessActive(access) || !access.recoverable) return;
     const overlayId = selectedOverlay.id;
@@ -680,9 +700,11 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const legacyRevokeIdentity = legacyRevokeTarget === null
     ? labels.legacyTokenName
     : `${labels.legacyTokenName} (${legacyRevokeTarget.id.slice(0, 8)})`;
+  const confirmationOpen = confirmDelete || replaceTarget !== null || revokeTarget !== null || legacyRevokeTarget !== null;
+  const feedbackMessage = confirmationOpen ? null : error ?? legacyError ?? notice;
+  const feedbackIsError = !confirmationOpen && (error !== null || legacyError !== null);
   const list = <section className="overlays-page config-section" aria-label={labels.list}>
     {loading ? <p className="loading-line">{labels.loading}</p> : null}
-    {error === null ? null : <p className="form-error" role="alert">{error}</p>}
     {!loading && overlays.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
     {!loading && overlays.length > 0 ? <div className={`table-wrap overlays-table-wrap${selectedId !== null || creating ? " overlays-table-wrap--inspector-open" : ""}`}>
       <table className="table overlays-table">
@@ -723,8 +745,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       {legacyNextOffset === null ? null : <Button variant="subtle" disabled={pending}
         onClick={() => { void loadLegacyTokens(legacyNextOffset, true); }}>{labels.loadMore}</Button>}
     </section> : null}
-    {legacyError === null ? null : <p className="form-error" role="alert">{legacyError}</p>}
-    {notice === null ? null : <p className="muted" role="status">{notice}</p>}
   </section>;
 
   const inspector = creating ? <SubInspector ariaLabel={labels.createTitle} title={labels.createTitle} closeLabel={labels.close} onClose={closeInspector}>
@@ -742,7 +762,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         <NumberField id="overlay-width" label={labels.width} value={draftWidth} min={64} max={3840} step={1} increaseLabel={`${labels.width} +1`} decreaseLabel={`${labels.width} −1`} disabled={pending} onChange={setDraftWidth} />
         <NumberField id="overlay-height" label={labels.height} value={draftHeight} min={64} max={2160} step={1} increaseLabel={`${labels.height} +1`} decreaseLabel={`${labels.height} −1`} disabled={pending} onChange={setDraftHeight} />
       </div> : null}
-      {error === null ? null : <p className="form-error" role="alert">{error}</p>}
       {manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}
       <InspectorActions><Button variant="primary" disabled={!canManage || pending || draftName.trim().length === 0} onClick={() => { void create(); }}>{labels.createSubmit}</Button>
         <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.cancel}</Button></InspectorActions>
@@ -829,11 +848,20 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         {revokedAccesses.length === 0 ? null : <details className="overlay-access-revoked">
           <summary>{labels.revokedCount(revokedAccesses.length)}</summary>
           <ul className="overlay-access-list">{revokedAccesses.map((access) => <li key={access.tokenId} className="overlay-access-list__item overlay-access-list__item--revoked">
-            <strong>{access.label}</strong>
-            <span className="muted">{labels.statusLabel}: {labels.revokedStatus}</span>
+            <div className="overlay-access-list__summary">
+              <strong>{access.label}</strong>
+              <span className="muted">{labels.statusLabel}: {labels.revokedStatus}</span>
+            </div>
+            <div className="overlay-access-list__actions-wrap">
+              <div className="overlay-access-list__actions">
+                <ActionMenu label={labels.accessActions(access.label)} items={[
+                  { label: labels.remove, disabled: !canManage || pending, danger: true, onSelect: () => { void removeRevokedAccess(access); } },
+                ]} />
+              </div>
+              {manageReason === undefined ? null : <p className="overlay-access-list__reason" role="note">{manageReason}</p>}
+            </div>
           </li>)}</ul>
         </details>}
-        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
       </InspectorSection>
       <InspectorActions destructive={<Button danger="subtle" disabled={!canManage || pending} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>} />
     </div>}
@@ -844,6 +872,13 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       <Button icon="add" iconOnly ariaLabel={labels.create} disabled={!canManage || pending || overlays.length >= maximum}
         onClick={beginCreate} />
     } />
+    <div className="overlays-feedback-slot" {...(feedbackMessage === null ? {} : {
+      role: feedbackIsError ? "alert" : "status",
+      "aria-live": feedbackIsError ? "assertive" : "polite",
+      "aria-atomic": "true",
+    })}>
+      <p className={feedbackIsError ? "form-error" : "muted"}>{feedbackMessage ?? "\u00a0"}</p>
+    </div>
     <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
     <ConfirmDialog opened={confirmDelete} title={labels.deleteTitle(selected?.name ?? "")} description={labels.deleteDescription(selected?.name ?? "")}
       confirmLabel={labels.deleteConfirm(selected?.name ?? "")} cancelLabel={labels.cancel} onCancel={() => { setConfirmDelete(false); }}

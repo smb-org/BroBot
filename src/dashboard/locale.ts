@@ -327,7 +327,7 @@ export interface OverlaysTexts {
   editorUnsavedTitle: string; editorUnsavedDescription: string; editorContinue: string;
   editorDiscardAndLeave: string; editorSaveAndLeave: string;
   copyError: string; copyLink: string; copyLinkUnrecoverableReason: string; linkExpiredReason: string;
-  accessActions: (name: string) => string; showLink: string; hideLink: string; replace: string; revoke: string; revoked: string; revokedPending: string;
+  accessActions: (name: string) => string; showLink: string; hideLink: string; replace: string; revoke: string; remove: string; removed: string; revoked: string; revokedPending: string;
   replaceTitle: (name: string) => string; replaceConsequence: string; replaceConfirm: (name: string) => string;
   revokeTitle: (name: string) => string; revokeConsequence: string; revokeConfirm: (name: string) => string;
   revokedCount: (count: number) => string; newLinkTitle: string;
@@ -408,7 +408,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     issue: "Zugang ausstellen", issueLabel: "Name des Zugangs", issueHint: "Zum Beispiel OBS Hauptrechner.",
     copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.", copyLink: "Link kopieren",
     copyLinkUnrecoverableReason: "Link nicht wiederherstellbar – für einen neuen ersetzen.", linkExpiredReason: "Link abgelaufen – ersetzen oder widerrufen.",
-    accessActions: (name) => `Aktionen für ${name}`, showLink: "Link anzeigen", hideLink: "Link verbergen", replace: "Ersetzen", revoke: "Widerrufen",
+    accessActions: (name) => `Aktionen für ${name}`, showLink: "Link anzeigen", hideLink: "Link verbergen", replace: "Ersetzen", revoke: "Widerrufen", remove: "Entfernen",
     replaceTitle: (name) => `Zugang „${name}“ ersetzen?`, replaceConsequence: "Der bisherige Link wird ungültig und verbundene Quellen verlieren den Zugriff.",
     replaceConfirm: (name) => `Zugang ersetzen: ${name}`, revokeTitle: (name) => `Zugang „${name}“ widerrufen?`,
     revokeConsequence: "Quellen mit diesem Zugang verlieren sofort den Zugriff.", revokeConfirm: (name) => `Zugang widerrufen: ${name}`,
@@ -435,7 +435,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     setupHtml: "HTML", setupJs: "JS", setupFields: "Fields", setupViewSnippet: "Inhalt ansehen",
     setupCopySnippet: (name) => `${name} kopieren`, setupSnippetCopied: (name) => `${name} kopiert`,
     setupAccessInactive: "Dieser Zugang ist abgelaufen oder widerrufen und kann nicht kopiert werden.",
-    revoked: "Zugang widerrufen.", revokedPending: "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", active: "Aktiv",
+    revoked: "Zugang widerrufen.", revokedPending: "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", removed: "Zugang entfernt.", active: "Aktiv",
     expired: "Abgelaufen", revokedStatus: "Widerrufen", noAccesses: "Für dieses Overlay gibt es noch keine Zugänge.", delete: "Overlay löschen",
     deleteTitle: (name) => `Overlay „${name}“ löschen?`, deleteDescription: () => `Das Overlay mit seinen Elementen wird gelöscht und alle Zugänge werden widerrufen.`,
     deleteConfirm: (name) => `Overlay löschen: ${name}`, close: "Schließen", conflict: "Das Overlay wurde zwischenzeitlich geändert. Lade es neu und versuche es erneut.",
@@ -512,7 +512,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     issue: "Issue access", issueLabel: "Access name", issueHint: "For example, OBS main PC.",
     copied: "Copied", copyError: "The link could not be copied.", copyLink: "Copy link",
     copyLinkUnrecoverableReason: "Link cannot be recovered — replace it to issue a new one.", linkExpiredReason: "Link expired — replace or revoke it.",
-    accessActions: (name) => `Actions for ${name}`, showLink: "Show link", hideLink: "Hide link", replace: "Replace", revoke: "Revoke",
+    accessActions: (name) => `Actions for ${name}`, showLink: "Show link", hideLink: "Hide link", replace: "Replace", revoke: "Revoke", remove: "Remove",
     replaceTitle: (name) => `Replace access “${name}”?`, replaceConsequence: "The current link will stop working and connected sources will lose access.",
     replaceConfirm: (name) => `Replace access: ${name}`, revokeTitle: (name) => `Revoke access “${name}”?`,
     revokeConsequence: "Sources using this access will lose access immediately.", revokeConfirm: (name) => `Revoke access: ${name}`,
@@ -539,7 +539,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     setupHtml: "HTML", setupJs: "JS", setupFields: "Fields", setupViewSnippet: "View contents",
     setupCopySnippet: (name) => `Copy ${name}`, setupSnippetCopied: (name) => `${name} copied`,
     setupAccessInactive: "This access has expired or been revoked and cannot be copied.",
-    revoked: "Access revoked.", revokedPending: "Access revoked. Connected sources are still closing.", active: "Active",
+    revoked: "Access revoked.", revokedPending: "Access revoked. Connected sources are still closing.", removed: "Access removed.", active: "Active",
     expired: "Expired", revokedStatus: "Revoked", noAccesses: "This overlay has no accesses yet.", delete: "Delete overlay",
     deleteTitle: (name) => `Delete overlay “${name}”?`, deleteDescription: () => `The overlay and its elements will be deleted, and all accesses will be revoked.`,
     deleteConfirm: (name) => `Delete overlay: ${name}`, close: "Close", conflict: "This overlay changed while you were viewing it. Reload it and try again.",
@@ -1115,6 +1115,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "overlay.access.issued": ({ actor, object }) => `${actor} stellte ${object} aus`,
         "overlay.access.revealed": ({ actor, object }) => `${actor} zeigte ${object} an`,
         "overlay.access.revoked": ({ actor, object }) => `${actor} widerrief ${object}`,
+        "overlay.access.removed": ({ actor, object }) => `${actor} entfernte ${object}`,
         "overlay.created": ({ actor, object }) => `${actor} erstellte das Overlay ${object}`,
         "overlay.updated": ({ actor, object }) => `${actor} änderte das Overlay ${object}`,
         "overlay.deleted": ({ actor, object }) => `${actor} löschte das Overlay ${object}`,
@@ -1400,6 +1401,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "overlay.access.issued": ({ actor, object }) => `${actor} issued ${object}`,
         "overlay.access.revealed": ({ actor, object }) => `${actor} revealed ${object}`,
         "overlay.access.revoked": ({ actor, object }) => `${actor} revoked ${object}`,
+        "overlay.access.removed": ({ actor, object }) => `${actor} removed ${object}`,
         "overlay.created": ({ actor, object }) => `${actor} created overlay ${object}`,
         "overlay.updated": ({ actor, object }) => `${actor} updated overlay ${object}`,
         "overlay.deleted": ({ actor, object }) => `${actor} deleted overlay ${object}`,
@@ -2410,6 +2412,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "overlay.access.issued": "Overlay-Zugang ausgestellt",
     "overlay.access.revealed": "Overlay-Zugang angezeigt",
     "overlay.access.revoked": "Overlay-Zugang widerrufen",
+    "overlay.access.removed": "Overlay-Zugang entfernt",
     "overlay.created": "Overlay erstellt",
     "overlay.updated": "Overlay geändert",
     "overlay.deleted": "Overlay gelöscht",
@@ -2470,6 +2473,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "overlay.access.issued": "Overlay access issued",
     "overlay.access.revealed": "Overlay access revealed",
     "overlay.access.revoked": "Overlay access revoked",
+    "overlay.access.removed": "Overlay access removed",
     "overlay.created": "Overlay created",
     "overlay.updated": "Overlay updated",
     "overlay.deleted": "Overlay deleted",
@@ -2515,7 +2519,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "channel.mute.enabled": "den Kanal", "channel.mute.disabled": "den Kanal", "channel.pause.enabled": "den Kanal", "channel.pause.disabled": "den Kanal",
     "votekick.cancelled": "den Votekick", "votekick.timeout_lift_attempted": "den Votekick",
     "overlay.token.issued": "den Overlay-Token", "overlay.token.revoked": "den Overlay-Token",
-    "overlay.access.issued": "den Overlay-Zugang", "overlay.access.revealed": "den Overlay-Zugang", "overlay.access.revoked": "den Overlay-Zugang",
+    "overlay.access.issued": "den Overlay-Zugang", "overlay.access.revealed": "den Overlay-Zugang", "overlay.access.revoked": "den Overlay-Zugang", "overlay.access.removed": "den Overlay-Zugang",
     "overlay.created": "Overlay", "overlay.updated": "Overlay", "overlay.deleted": "Overlay", "overlay.legacy.imported": "Overlay-Link",
   },
   en: {
@@ -2533,7 +2537,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "channel.mute.enabled": "the channel", "channel.mute.disabled": "the channel", "channel.pause.enabled": "the channel", "channel.pause.disabled": "the channel",
     "votekick.cancelled": "the votekick", "votekick.timeout_lift_attempted": "the votekick",
     "overlay.token.issued": "the overlay token", "overlay.token.revoked": "the overlay token",
-    "overlay.access.issued": "the overlay access", "overlay.access.revealed": "the overlay access", "overlay.access.revoked": "the overlay access",
+    "overlay.access.issued": "the overlay access", "overlay.access.revealed": "the overlay access", "overlay.access.revoked": "the overlay access", "overlay.access.removed": "the overlay access",
     "overlay.created": "overlay", "overlay.updated": "overlay", "overlay.deleted": "overlay", "overlay.legacy.imported": "legacy overlay link",
   },
 };

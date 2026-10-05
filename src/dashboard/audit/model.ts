@@ -185,8 +185,8 @@ export const auditSubjectText = (entry: PanelAuditEntry, language: DashboardLang
     const login = record !== null && typeof record.login === "string" && record.login.length > 0 ? record.login : null;
     return login === null ? null : `@${login}`;
   }
-  const name = record !== null && typeof record.name === "string" && record.name.length > 0 ? record.name : null;
-  return name;
+  const subject = record === null ? null : entry.action.startsWith("overlay.access.") ? record.label : record.name;
+  return typeof subject === "string" && subject.length > 0 ? subject : null;
 };
 
 /** The action's label with its subject appended, e.g. "Modul aktiviert: Werbung". */
