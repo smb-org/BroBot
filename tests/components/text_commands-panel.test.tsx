@@ -251,7 +251,7 @@ describe("Text command editor", () => {
   });
 
   it("measures the response length after a slash conversion", async () => {
-    let created: { text?: string } | undefined;
+    let created: { text?: string; kind?: string } | undefined;
     renderPanel(panelFetch({
       commands: () => [],
       onMutation: (_method, _path, body) => {
@@ -260,13 +260,35 @@ describe("Text command editor", () => {
       },
     }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "ann" } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
     expect(created).toBeUndefined();
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "ann" } });
+    expect(screen.getByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
+
     fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: `/announce ${"a".repeat(495)}` } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(created?.text).toBe("a".repeat(495)));
+  });
+
+  it("measures the response length after a timeout slash conversion", async () => {
+    let created: { text?: string; kind?: string } | undefined;
+    renderPanel(panelFetch({
+      commands: () => [],
+      onMutation: (_method, _path, body) => {
+        created = body as { text?: string; kind?: string };
+        return jsonResponse({ warnings: [] });
+      },
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "tmo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(created).toBeUndefined();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: `/timeout {user} 120\n${"a".repeat(495)}` } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    await waitFor(() => expect(created).toMatchObject({ kind: "timeout", text: "a".repeat(495) }));
   });
 
   it("ignores an overlong usage reply that a shoutout conversion replaces", async () => {

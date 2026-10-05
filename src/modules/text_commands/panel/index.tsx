@@ -262,8 +262,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT,
     })
     : draft;
-  const materializesTimeout = slashInput.status === "valid" && slashInput.command === "timeout" && draft.kind !== "timeout";
-  const validationDraft = materializesTimeout ? draft : convertedDraft;
+  const validationDraft = convertedDraft;
   const validationTemplateFields = Object.fromEntries(Object.entries(templateFieldsForKind(
     validationDraft.kind,
     channelVariables,
