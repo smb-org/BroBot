@@ -667,7 +667,7 @@ describe("BELABOX polling", () => {
     expect(await getBelaboxStatus(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({ polling: true });
   });
 
-  it("uses the last polled sample as the history baseline across a connection test", async () => {
+  it("records three polls against the history baseline across an interleaved connection test", async () => {
     await insertModule(database);
     const { context } = alarmContext(database);
     vi.setSystemTime("2026-10-05T12:00:00.000Z");
@@ -678,22 +678,30 @@ describe("BELABOX polling", () => {
       undefined,
       () => Promise.resolve(jsonResponse(relayPayload(true, 500, 10))),
     );
-    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
-      sample: { droppedPackets: 10, bitrateKbps: 500 },
-      historySample: { droppedPackets: 10, bitrateKbps: 500 },
-    });
-
-    vi.setSystemTime("2026-10-05T12:00:15.000Z");
+    vi.setSystemTime("2026-10-05T12:00:25.000Z");
     await prepareBelaboxSampleWrite(
       context.DB,
       CHANNEL_ID,
-      normalizedSample("2026-10-05T12:00:15.000Z", 2_000, 14),
+      normalizedSample("2026-10-05T12:00:25.000Z", 2_000, 14),
       "ciphertext-version",
       { sql: "", values: [] },
     ).run();
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
-      sample: { droppedPackets: 14, bitrateKbps: 2_000 },
+      sample: { at: "2026-10-05T12:00:25.000Z", droppedPackets: 14, bitrateKbps: 2_000 },
       historySample: { droppedPackets: 10, bitrateKbps: 500 },
+    });
+
+    vi.setSystemTime("2026-10-05T12:00:15.000Z");
+    await handleBelaboxPollAlarm(
+      context,
+      BELABOX_POLL_ALARM_KEY,
+      Date.now(),
+      undefined,
+      () => Promise.resolve(jsonResponse(relayPayload(true, 500, 14))),
+    );
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      sample: { at: "2026-10-05T12:00:25.000Z", droppedPackets: 14, bitrateKbps: 2_000 },
+      historySample: { at: "2026-10-05T12:00:15.000Z", droppedPackets: 14, bitrateKbps: 500 },
     });
 
     vi.setSystemTime("2026-10-05T12:00:30.000Z");
@@ -706,15 +714,53 @@ describe("BELABOX polling", () => {
     );
 
     await expect(database.prepare(
-      `SELECT dropped_delta FROM belabox_minutes WHERE channel_id = ? AND stream_id = ?`,
-    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ dropped_delta: 18 });
+      `SELECT samples, dropped_delta FROM belabox_minutes WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ samples: 3, dropped_delta: 18 });
     await expect(database.prepare(
-      `SELECT low_seconds FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
-    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ low_seconds: 30 });
+      `SELECT samples, low_seconds, dropped_total FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ samples: 3, low_seconds: 30, dropped_total: 18 });
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
       sample: { droppedPackets: 18, bitrateKbps: 500 },
       historySample: { droppedPackets: 18, bitrateKbps: 500 },
     });
+  });
+
+  it("preserves the last dropped counter across a missing publisher", async () => {
+    await insertModule(database);
+    const { context } = alarmContext(database);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 10)))
+      .mockResolvedValueOnce(jsonResponse({ publishers: {} }))
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 12)));
+
+    const times = [
+      "2026-10-05T12:00:00.000Z",
+      "2026-10-05T12:01:00.000Z",
+      "2026-10-05T12:02:00.000Z",
+    ];
+    for (const [index, at] of times.entries()) {
+      vi.setSystemTime(new Date(at));
+      await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
+      if (index === 1) {
+        expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+          sample: { connected: false, droppedPackets: 0 },
+          historySample: { connected: false, droppedPackets: 10 },
+        });
+      }
+    }
+
+    await expect(database.prepare(
+      `SELECT minute_at, dropped_delta FROM belabox_minutes WHERE channel_id = ? AND stream_id = ? ORDER BY minute_at`,
+    ).bind(CHANNEL_ID, STREAM_ID).all<Record<string, unknown>>()).resolves.toMatchObject({
+      results: [
+        { minute_at: "2026-10-05T12:00:00.000Z", dropped_delta: 10 },
+        { minute_at: "2026-10-05T12:01:00.000Z", dropped_delta: 0 },
+        { minute_at: "2026-10-05T12:02:00.000Z", dropped_delta: 2 },
+      ],
+    });
+    await expect(database.prepare(
+      `SELECT dropped_total FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ dropped_total: 12 });
   });
 
   it("keeps polling when a stored-URL test writes a sample during the fetch", async () => {

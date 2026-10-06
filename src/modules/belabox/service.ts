@@ -252,6 +252,11 @@ const storePollResult = async (
         disconnectCount: previousSample?.connected === true && !result.sample.connected ? 1 : 0,
       }
       : undefined;
+    const historySample = result.ok
+      ? result.sample.connected || previousSample === null
+        ? result.sample
+        : { ...result.sample, droppedPackets: previousSample.droppedPackets }
+      : null;
     const written = await writeBelaboxFetch(context.DB, {
       channelId: context.channelId,
       sample: result.ok ? result.sample : null,
@@ -263,7 +268,7 @@ const storePollResult = async (
       recent: nextRecent,
       expectedSecretVersion: secretVersion,
       expectedStatusRevision: currentStatus?.revision ?? null,
-      ...(history === undefined ? {} : { history }),
+      ...(history === undefined ? {} : { history, historySample }),
     });
     if (written !== null) {
       await writePhaseDiagnostic(

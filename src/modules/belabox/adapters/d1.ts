@@ -281,7 +281,7 @@ const encodedPhase = (phase: BelaboxFetchPhase): string => JSON.stringify({
 
 export const belaboxHistoryStatusGuard = `WHERE EXISTS (
     SELECT 1 FROM belabox_status
-     WHERE channel_id = ? AND revision = ? AND sampled_at = ? AND sample_json = ?
+     WHERE channel_id = ? AND revision = ? AND history_sample_json = ?
        AND stream_id = ? AND belabox_stream_id = ?
   )`;
 
@@ -358,6 +358,7 @@ export const writeBelaboxFetch = async (
     recent: readonly BelaboxRecentPoint[];
     expectedSecretVersion: string;
     expectedStatusRevision: number | null;
+    historySample?: BelaboxSample | null;
     history?: {
       streamId: string;
       startedAt: string;
@@ -370,6 +371,9 @@ export const writeBelaboxFetch = async (
   },
 ): Promise<number | null> => {
   const sampleJson = input.sample === null ? null : JSON.stringify(input.sample);
+  const historySampleJson = input.history === undefined
+    ? null
+    : JSON.stringify(input.historySample ?? input.sample);
   const statusWrite = db.prepare(
     `INSERT INTO belabox_status
       (channel_id, sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
@@ -416,7 +420,7 @@ export const writeBelaboxFetch = async (
     input.belaboxStreamId,
     encodedPhase(input.fetchPhase),
     encodedRecent(input.recent),
-    input.history === undefined ? null : sampleJson,
+    historySampleJson,
     input.channelId,
     BELABOX_MODULE_ID,
     BELABOX_STATS_URL_SECRET,
@@ -427,7 +431,7 @@ export const writeBelaboxFetch = async (
     Number(input.history !== undefined),
     input.expectedStatusRevision ?? -1,
   );
-  if (input.history === undefined || input.sample === null || sampleJson === null) {
+  if (input.history === undefined || input.sample === null || sampleJson === null || historySampleJson === null) {
     const row = await statusWrite.first<{ revision: number }>();
     return row?.revision ?? null;
   }
@@ -463,8 +467,7 @@ export const writeBelaboxFetch = async (
     history.droppedDelta,
     input.channelId,
     nextRevision,
-    sample.at,
-    sampleJson,
+    historySampleJson,
     history.streamId,
     history.streamId,
   );
@@ -494,8 +497,7 @@ export const writeBelaboxFetch = async (
     history.droppedDelta,
     input.channelId,
     nextRevision,
-    sample.at,
-    sampleJson,
+    historySampleJson,
     history.streamId,
     history.streamId,
   );

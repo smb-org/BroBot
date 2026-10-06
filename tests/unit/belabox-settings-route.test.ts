@@ -123,4 +123,54 @@ describe("BELABOX settings route", () => {
       "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
     ).bind(CHANNEL_ID).first()).resolves.toEqual({ enabled: 0 });
   });
+
+  it("finalizes the open stream when BELABOX is disabled while online", async () => {
+    const streamId = "belabox-disabled-online-stream";
+    const startedAt = "2026-10-07T09:00:00.000Z";
+    const sample = {
+      at: "2026-10-07T09:10:00.000Z",
+      connected: true,
+      bitrateKbps: 3_200,
+      rttMs: 41,
+      latencyMs: 115,
+      network: 2,
+      droppedPackets: 10,
+    };
+    await database.prepare(
+      `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+       VALUES (?, ?, ?, 1, 3_200)`,
+    ).bind(CHANNEL_ID, streamId, startedAt).run();
+    await database.prepare(
+      `INSERT INTO belabox_minutes
+        (channel_id, minute_at, stream_id, samples, connected_samples, bitrate_min, bitrate_max,
+         bitrate_sum, rtt_max, rtt_sum, dropped_delta)
+       VALUES (?, '2026-10-07T09:10:00.000Z', ?, 1, 1, 3_200, 3_200, 3_200, 41, 41, 0)`,
+    ).bind(CHANNEL_ID, streamId).run();
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, sampled_at, sample_json, history_sample_json, polling, stream_id,
+         belabox_stream_id, fetch_phase_json, recent_json, revision)
+       VALUES (?, ?, ?, ?, 1, ?, ?, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, sample.at, JSON.stringify(sample), JSON.stringify(sample), streamId, streamId).run();
+
+    const runModuleAlarm = vi.fn(() => Promise.resolve());
+    const environment = {
+      DB: database as unknown as D1Database,
+      SESSION_COOKIE_KEYS,
+      TOKEN_ENCRYPTION_KEYS,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ runModuleAlarm }),
+      },
+    } as unknown as Env;
+    const response = await panelRouter.fetch(await requestFor({ enabled: false }, ""), environment);
+
+    expect(response.status).toBe(200);
+    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "ensure", "poll");
+    const summary = await database.prepare(
+      "SELECT ended_at, bitrate_p10 FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
+    ).bind(CHANNEL_ID, streamId).first<{ ended_at: string | null; bitrate_p10: number | null }>();
+    expect(summary?.ended_at).not.toBeNull();
+    expect(summary?.bitrate_p10).toBe(3_200);
+  });
 });
