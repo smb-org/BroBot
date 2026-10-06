@@ -607,6 +607,22 @@ test("the new-events notice stays visible while reading older events", async ({ 
   expect(noticeBox?.y).toBeLessThan(120);
 });
 
+test("a keyboard-focused immediate-action control scrolls fully into view at 390px", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installChannelMocks(page, {}, { modules: ["ads", "clips", "raid"].map((id) => ({ id, enabled: true, settings: "{}" })) });
+  await page.goto(`/channels/${channelId}/overview`);
+  const strip = page.locator(".stream-manager-actions");
+  await expect(strip.locator(":scope > .stream-manager-action")).toHaveCount(3);
+  const button = page.getByRole("button", { name: "Create clip" });
+  await expect(button).toBeVisible();
+  for (let i = 0; i < 80 && !(await button.evaluate((element) => element === document.activeElement)); i++) await page.keyboard.press("Tab");
+  await expect(button).toBeFocused();
+  await expect.poll(async () => {
+    const [b, s] = await Promise.all([button.boundingBox(), strip.boundingBox()]);
+    return b !== null && s !== null && b.x >= s.x - 0.5 && b.x + b.width <= s.x + s.width + 0.5;
+  }).toBe(true);
+});
+
 test("immediate-action cards keep their reserved strip height after a shoutout failure", async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -623,7 +639,7 @@ test("immediate-action cards keep their reserved strip height after a shoutout f
     expect(cardsBefore.map((box) => box[3])).toEqual([192, 192, 192]);
     expect(cardsBefore.map((box) => box[2])).toEqual([300, 300, 300]);
     await expect(strip).toHaveAttribute("tabindex", "0");
-    expect(await strip.evaluate((element) => getComputedStyle(element).scrollSnapType)).toContain("x mandatory");
+    expect(await strip.evaluate((element) => getComputedStyle(element).scrollSnapType)).toMatch(/^x( proximity)?$/);
     if (width === 390) {
       expect(await strip.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
       await strip.focus();
