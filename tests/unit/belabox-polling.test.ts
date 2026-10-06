@@ -15,7 +15,7 @@ import {
   BELABOX_STATS_URL_SECRET,
   type BelaboxSettings,
 } from "../../src/modules/belabox/contracts";
-import { getBelaboxStatus, prepareBelaboxSampleWrite } from "../../src/modules/belabox/adapters/d1";
+import { getBelaboxStatus, listBelaboxStreams, prepareBelaboxSampleWrite } from "../../src/modules/belabox/adapters/d1";
 import { currentBelaboxSample, ensureBelaboxPoll, handleBelaboxPollAlarm } from "../../src/modules/belabox/service";
 import { writeModuleDiagnostics } from "../../src/worker/event-log";
 import { insertChannel, jsonResponse } from "./fixtures";
@@ -51,14 +51,14 @@ const deferred = <Value>() => {
   return { promise, resolve, reject };
 };
 
-const normalizedSample = (at: string, bitrateKbps: number) => ({
+const normalizedSample = (at: string, bitrateKbps: number, droppedPackets = 7) => ({
   at,
   connected: true,
   bitrateKbps,
   rttMs: 41,
   latencyMs: 115,
   network: 2,
-  droppedPackets: 7,
+  droppedPackets,
 });
 
 const secretAccess = (configured = true): ModuleSecretAccess => ({
@@ -152,6 +152,7 @@ describe("BELABOX polling", () => {
     const context = {
       DB: database as unknown as D1Database,
       streamStateTransitionAccepted: true,
+      streamSession: { streamId: "ending-stream", startedAt: "2026-10-05T10:00:00.000Z" },
       streamState,
       getAlarmDeadline: () => Promise.resolve(currentDeadline),
       scheduleAlarm: (handler: string, key: string, deadline: number) => {
@@ -175,6 +176,11 @@ describe("BELABOX polling", () => {
     await handleEvent(event("stream.online", { id: STREAM_ID }), context);
     expect(scheduled).toEqual([{ handler: "poll", key: "poll", deadline: Date.now() }]);
     await database.prepare(
+      `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+       VALUES (?, 'ending-stream', '2026-10-05T10:00:00.000Z', 1, 3000),
+              (?, 'newer-stream', '2026-10-05T11:00:00.000Z', 1, 3300)`,
+    ).bind(CHANNEL_ID, CHANNEL_ID).run();
+    await database.prepare(
       `INSERT INTO belabox_status
         (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision)
        VALUES (?, 1, 'newer-stream', 'newer-stream', '{}', '[["2026-10-05T12:00:00.000Z",3200,41,true]]', 1)`,
@@ -194,6 +200,77 @@ describe("BELABOX polling", () => {
       streamId: "newer-stream",
       belaboxStreamId: "newer-stream",
       recent: [{ at: "2026-10-05T12:00:00.000Z", bitrateKbps: 3_200 }],
+    });
+    const finalizedStreams = await database.prepare(
+      `SELECT stream_id, ended_at FROM belabox_streams WHERE channel_id = ? ORDER BY stream_id`,
+    ).bind(CHANNEL_ID).all<{ stream_id: string; ended_at: string | null }>();
+    expect(finalizedStreams.results[0]?.stream_id).toBe("ending-stream");
+    expect(typeof finalizedStreams.results[0]?.ended_at).toBe("string");
+    expect(finalizedStreams.results[1]).toEqual({ stream_id: "newer-stream", ended_at: null });
+  });
+
+  it("finalizes the captured summary after its URL classification is cleared", async () => {
+    const startedAt = "2026-10-05T10:00:00.000Z";
+    await database.prepare(
+      `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+       VALUES (?, 'ended-stream', ?, 1, 3200)`,
+    ).bind(CHANNEL_ID, startedAt).run();
+    await database.prepare(
+      `INSERT INTO belabox_minutes
+        (channel_id, minute_at, stream_id, samples, connected_samples, bitrate_min, bitrate_max,
+         bitrate_sum, rtt_max, rtt_sum, dropped_delta)
+       VALUES (?, '2026-10-05T10:01:00.000Z', 'ended-stream', 1, 1, 3200, 3200, 3200, 41, 41, 0)`,
+    ).bind(CHANNEL_ID).run();
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision)
+       VALUES (?, 0, NULL, NULL, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID).run();
+
+    const handleEvent = belaboxModule.handleEvent;
+    if (handleEvent === undefined) throw new Error("BELABOX event handler missing.");
+    await handleEvent({
+      channelId: CHANNEL_ID,
+      subscriptionType: "stream.offline",
+      triggerId: "ended-after-url-removal",
+      payload: {},
+      settings: BELABOX_DEFAULT_SETTINGS,
+      receivedAt: "2026-10-05T12:01:00.000Z",
+      eventSubTimestamp: "2026-10-05T12:01:00.000Z",
+      actor: null,
+      chatStatus: null,
+    }, {
+      DB: database as unknown as D1Database,
+      streamStateTransitionAccepted: true,
+      streamSession: { streamId: "ended-stream", startedAt },
+      scheduleAlarm: () => Promise.resolve(),
+    } as unknown as ModuleExecutionContext);
+
+    await expect(database.prepare(
+      `SELECT ended_at, bitrate_p10 FROM belabox_streams WHERE channel_id = ? AND stream_id = 'ended-stream'`,
+    ).bind(CHANNEL_ID).first<Record<string, unknown>>()).resolves.toEqual({
+      ended_at: "2026-10-05T12:01:00.000Z",
+      bitrate_p10: 3_200,
+    });
+  });
+
+  it("finalizes every open summary when the offline poll alarm is the fallback", async () => {
+    await database.prepare(
+      `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+       VALUES (?, 'open-a', '2026-10-05T09:00:00.000Z', 1, 1000),
+              (?, 'open-b', '2026-10-05T10:00:00.000Z', 1, 2000)`,
+    ).bind(CHANNEL_ID, CHANNEL_ID).run();
+    const { context } = alarmContext(database, { streamState: "offline", streamId: null });
+
+    await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now());
+
+    await expect(database.prepare(
+      `SELECT stream_id, ended_at FROM belabox_streams WHERE channel_id = ? ORDER BY stream_id`,
+    ).bind(CHANNEL_ID).all<{ stream_id: string; ended_at: string | null }>()).resolves.toMatchObject({
+      results: [
+        { stream_id: "open-a", ended_at: "2026-10-05T12:00:00.000Z" },
+        { stream_id: "open-b", ended_at: "2026-10-05T12:00:00.000Z" },
+      ],
     });
   });
 
@@ -337,6 +414,7 @@ describe("BELABOX polling", () => {
     }, {
       DB: database as unknown as D1Database,
       streamStateTransitionAccepted: true,
+      streamSession: { streamId: STREAM_ID, startedAt: "2026-10-05T12:00:00.000Z" },
       scheduleAlarm: () => Promise.resolve(),
     } as unknown as ModuleExecutionContext);
     await expect(database.prepare(
@@ -378,14 +456,34 @@ describe("BELABOX polling", () => {
     });
   });
 
+  it("lists only the latest twenty BELABOX stream summaries", async () => {
+    for (let index = 0; index < 25; index += 1) {
+      const startedAt = new Date(Date.parse("2026-10-01T00:00:00.000Z") + index * 60_000).toISOString();
+      await database.prepare(
+        `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+         VALUES (?, ?, ?, 1, ?)`,
+      ).bind(CHANNEL_ID, `history-stream-${String(index).padStart(2, "0")}`, startedAt, index + 1).run();
+    }
+
+    const streams = await listBelaboxStreams(database as unknown as D1Database, CHANNEL_ID);
+
+    expect(streams).toHaveLength(20);
+    expect(streams[0]?.streamId).toBe("history-stream-24");
+    expect(streams.at(-1)?.streamId).toBe("history-stream-05");
+  });
+
   it("retains minute data for thirty days and keeps stream summaries", async () => {
+    const secondChannel = `${CHANNEL_ID}-second`;
+    await insertChannel(database, secondChannel);
     await database.prepare(
       `INSERT INTO belabox_minutes
         (channel_id, minute_at, stream_id, samples, connected_samples, bitrate_min, bitrate_max,
          bitrate_sum, rtt_max, rtt_sum, dropped_delta)
        VALUES (?, '2026-09-04T11:59:00.000Z', 'old-stream', 1, 1, 1000, 1000, 1000, 20, 20, 0),
-              (?, '2026-09-05T12:00:00.000Z', 'recent-stream', 1, 1, 2000, 2000, 2000, 30, 30, 0)`,
-    ).bind(CHANNEL_ID, CHANNEL_ID).run();
+              (?, '2026-09-05T12:00:00.000Z', 'recent-stream', 1, 1, 2000, 2000, 2000, 30, 30, 0),
+              (?, '2026-09-04T11:59:00.000Z', 'old-stream-b', 1, 1, 1100, 1100, 1100, 21, 21, 0),
+              (?, '2026-09-05T12:00:00.000Z', 'recent-stream-b', 1, 1, 2100, 2100, 2100, 31, 31, 0)`,
+    ).bind(CHANNEL_ID, CHANNEL_ID, secondChannel, secondChannel).run();
     await database.prepare(
       `INSERT INTO belabox_streams
         (channel_id, stream_id, started_at, samples, bitrate_avg, low_seconds, disconnected_seconds,
@@ -395,9 +493,12 @@ describe("BELABOX polling", () => {
 
     await belaboxModule.scheduledMaintenance?.(database as unknown as D1Database, "2026-10-05T12:00:00.000Z");
 
-    await expect(database.prepare("SELECT minute_at FROM belabox_minutes WHERE channel_id = ? ORDER BY minute_at")
-      .bind(CHANNEL_ID).all<{ minute_at: string }>()).resolves.toMatchObject({
-      results: [{ minute_at: "2026-09-05T12:00:00.000Z" }],
+    await expect(database.prepare("SELECT channel_id, minute_at FROM belabox_minutes WHERE channel_id IN (?, ?) ORDER BY channel_id")
+      .bind(CHANNEL_ID, secondChannel).all<{ channel_id: string; minute_at: string }>()).resolves.toMatchObject({
+      results: [
+        { channel_id: CHANNEL_ID, minute_at: "2026-09-05T12:00:00.000Z" },
+        { channel_id: secondChannel, minute_at: "2026-09-05T12:00:00.000Z" },
+      ],
     });
     await expect(database.prepare("SELECT stream_id FROM belabox_streams WHERE channel_id = ?")
       .bind(CHANNEL_ID).all<{ stream_id: string }>()).resolves.toMatchObject({
@@ -564,6 +665,56 @@ describe("BELABOX polling", () => {
     }, Date.now(), () => Promise.resolve(jsonResponse(relayPayload(true))));
 
     expect(await getBelaboxStatus(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({ polling: true });
+  });
+
+  it("uses the last polled sample as the history baseline across a connection test", async () => {
+    await insertModule(database);
+    const { context } = alarmContext(database);
+    vi.setSystemTime("2026-10-05T12:00:00.000Z");
+    await handleBelaboxPollAlarm(
+      context,
+      BELABOX_POLL_ALARM_KEY,
+      Date.now(),
+      undefined,
+      () => Promise.resolve(jsonResponse(relayPayload(true, 500, 10))),
+    );
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      sample: { droppedPackets: 10, bitrateKbps: 500 },
+      historySample: { droppedPackets: 10, bitrateKbps: 500 },
+    });
+
+    vi.setSystemTime("2026-10-05T12:00:15.000Z");
+    await prepareBelaboxSampleWrite(
+      context.DB,
+      CHANNEL_ID,
+      normalizedSample("2026-10-05T12:00:15.000Z", 2_000, 14),
+      "ciphertext-version",
+      { sql: "", values: [] },
+    ).run();
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      sample: { droppedPackets: 14, bitrateKbps: 2_000 },
+      historySample: { droppedPackets: 10, bitrateKbps: 500 },
+    });
+
+    vi.setSystemTime("2026-10-05T12:00:30.000Z");
+    await handleBelaboxPollAlarm(
+      context,
+      BELABOX_POLL_ALARM_KEY,
+      Date.now(),
+      undefined,
+      () => Promise.resolve(jsonResponse(relayPayload(true, 500, 18))),
+    );
+
+    await expect(database.prepare(
+      `SELECT dropped_delta FROM belabox_minutes WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ dropped_delta: 18 });
+    await expect(database.prepare(
+      `SELECT low_seconds FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ low_seconds: 30 });
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      sample: { droppedPackets: 18, bitrateKbps: 500 },
+      historySample: { droppedPackets: 18, bitrateKbps: 500 },
+    });
   });
 
   it("keeps polling when a stored-URL test writes a sample during the fetch", async () => {

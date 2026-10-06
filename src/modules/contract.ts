@@ -573,6 +573,8 @@ export interface ModuleExecutionContext {
   isRecentBotMessage?: (senderId: string | null, text: string) => Promise<boolean>;
   /** True only when this EventSub notification committed a real stream-state transition. */
   streamStateTransitionAccepted?: boolean;
+  /** Stream identity captured before an accepted offline transition changed channel state. */
+  streamSession?: { streamId: string | null; startedAt: string | null };
   streamState: () => Promise<ModuleStreamState>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
@@ -1339,6 +1341,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
   /** Lazily loaded editor declaration for this module's settings. */
   settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<z.output<SettingsSchema>> }>;
+  /** Places the settings editor before a potentially long module panel. */
+  settingsEditorPlacement?: "before-panel" | "after-panel";
   /** Reconciles one module-owned alarm immediately after settings are saved. */
   settingsChangedAlarm?: { handlerKey: string; alarmKey: string };
   /** Lazily loaded immediate-action card, shown only while this module is enabled. */

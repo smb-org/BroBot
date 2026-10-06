@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactElement } from "react";
 
 import type { BelaboxHistoryPoint, BelaboxStreamSummary } from "../contracts";
+import { BELABOX_STREAM_HISTORY_LIMIT } from "../contracts";
 import { BELABOX_LOW_BITRATE_KBPS, BELABOX_RECOVER_BITRATE_KBPS } from "../domain/history";
 import type { BelaboxPanelTexts } from "./locale";
 
@@ -143,8 +144,10 @@ export const BelaboxHistorySection = ({
       </div>
       <h4 style={{ margin: "var(--s5) 0 var(--s2)", fontSize: 13 }}>{labels.streams}</h4>
       {streams.length === 0 ? <p className="muted" role="status" style={{ minHeight: 44, margin: 0, display: "flex", alignItems: "center" }}>{labels.noStreams}</p> :
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {streams.map((stream) => {
+        <div aria-label={labels.streams} data-testid="belabox-stream-history-list"
+          style={{ maxHeight: 320, overflowY: "auto", scrollbarGutter: "stable" }}>
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {streams.slice(0, BELABOX_STREAM_HISTORY_LIMIT).map((stream) => {
             const active = stream.streamId === selectedStreamId;
             return <li key={stream.streamId} style={{ borderBottom: "1px solid var(--line)" }}>
               <button type="button" aria-pressed={active} onClick={() => {
@@ -165,7 +168,8 @@ export const BelaboxHistorySection = ({
               </button>
             </li>;
           })}
-        </ul>}
+          </ul>
+        </div>}
     </>}
   </section>;
 };

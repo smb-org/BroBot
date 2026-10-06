@@ -85,6 +85,16 @@ vi.mock("../../src/modules/registry", () => ({
       templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },
       settingsEditor: editorFixture.loader,
     },
+    {
+      id: "editor-before-fixture",
+      navigationCategory: "chat",
+      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
+      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
+      templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },
+      panel: activeLoader,
+      settingsEditor: editorFixture.loader,
+      settingsEditorPlacement: "before-panel",
+    },
     { id: "channel_events", mandatory: true, settingsSchema: {}, defaultSettings: {} },
   ],
 }));
@@ -138,6 +148,27 @@ describe("Module panel loader", () => {
 
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
     expect(activeLoader).toHaveBeenCalledTimes(1);
+  });
+
+  it("places a long module panel after its settings editor", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({
+      settings: editorFixtureSettings,
+      revision: 1,
+      variables: [],
+    }))));
+    renderWithMantine(<ModulePage
+      channelId="kanal-a"
+      moduleId="editor-before-fixture"
+      ownRole="manager"
+      modules={[{ id: "editor-before-fixture", enabled: true, settings: "{}" }]}
+      activeModules={[{ moduleId: "editor-before-fixture", settings: "{}" }]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+
+    const settings = await screen.findByRole("region", { name: "Fixture-Einstellungen" });
+    const panel = await screen.findByText("Panel geladen");
+    expect(settings.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
   it("shows an explained state for an active module without a panel", () => {

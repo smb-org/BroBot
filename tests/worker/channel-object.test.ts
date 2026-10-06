@@ -1492,6 +1492,7 @@ describe("ChannelObject realtime path", () => {
         channel_id TEXT PRIMARY KEY, sampled_at TEXT, sample_json TEXT, error_code TEXT,
         polling INTEGER NOT NULL DEFAULT 0, stream_id TEXT, belabox_stream_id TEXT,
         fetch_phase_json TEXT NOT NULL DEFAULT '{}', recent_json TEXT NOT NULL DEFAULT '[]',
+        history_sample_json TEXT,
         revision INTEGER NOT NULL DEFAULT 1
       )`,
     ).run();

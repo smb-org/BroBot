@@ -2,6 +2,7 @@ import type { ModuleMutationAuthorization } from "../../contract";
 import {
   BELABOX_MODULE_ID,
   BELABOX_SECRET_UNAVAILABLE_STATUS_CODE,
+  BELABOX_STREAM_HISTORY_LIMIT,
   BELABOX_STATS_URL_SECRET,
   type BelaboxFetchFailureReason,
   type BelaboxStatusErrorCode,
@@ -29,6 +30,7 @@ export interface BelaboxFetchPhase {
 
 export interface BelaboxStatus {
   sample: BelaboxSample | null;
+  historySample: BelaboxSample | null;
   errorCode: BelaboxStatusErrorCode | null;
   polling: boolean;
   streamId: string | null;
@@ -41,6 +43,7 @@ export interface BelaboxStatus {
 interface BelaboxStatusRow {
   sampled_at: string | null;
   sample_json: string | null;
+  history_sample_json: string | null;
   error_code: string | null;
   polling: number;
   stream_id: string | null;
@@ -107,13 +110,14 @@ const isStatusErrorCode = (value: string | null): value is BelaboxStatusErrorCod
 
 export const getBelaboxStatus = async (db: D1Database, channelId: string): Promise<BelaboxStatus | null> => {
   const row = await db.prepare(
-    `SELECT sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
+    `SELECT sampled_at, sample_json, history_sample_json, error_code, polling, stream_id, belabox_stream_id,
             fetch_phase_json, recent_json, revision
        FROM belabox_status WHERE channel_id = ?`,
   ).bind(channelId).first<BelaboxStatusRow>();
   if (row === null) return null;
   return {
     sample: parseSample(row.sample_json),
+    historySample: parseSample(row.history_sample_json),
     errorCode: isStatusErrorCode(row.error_code) ? row.error_code : null,
     polling: row.polling === 1,
     streamId: row.stream_id,
@@ -169,8 +173,9 @@ export const listBelaboxStreams = async (db: D1Database, channelId: string): Pro
             low_seconds, disconnected_seconds, disconnect_count, dropped_total
        FROM belabox_streams
       WHERE channel_id = ?
-      ORDER BY started_at DESC`,
-  ).bind(channelId).all<{
+      ORDER BY started_at DESC
+      LIMIT ?`,
+  ).bind(channelId, BELABOX_STREAM_HISTORY_LIMIT).all<{
     stream_id: string;
     started_at: string;
     ended_at: string | null;
@@ -199,43 +204,70 @@ export const listBelaboxStreams = async (db: D1Database, channelId: string): Pro
 export const finalizeBelaboxStream = async (
   db: D1Database,
   channelId: string,
+  streamId: string,
+  startedAt: string,
   endedAt: string,
   lowBitrateKbps = BELABOX_LOW_BITRATE_KBPS,
 ): Promise<boolean> => {
-  const status = await getBelaboxStatus(db, channelId);
-  if (status?.streamId === null || status?.streamId === undefined ||
-      status.belaboxStreamId !== status.streamId) return false;
-  const streamId = status.streamId;
-  const minutes = await db.prepare(
-    `SELECT samples, bitrate_sum FROM belabox_minutes
-      WHERE channel_id = ? AND stream_id = ?
-      ORDER BY minute_at ASC`,
-  ).bind(channelId, streamId).all<{ samples: number; bitrate_sum: number }>();
+  const summary = await db.prepare(
+    `SELECT stream_id, started_at FROM belabox_streams
+      WHERE channel_id = ? AND stream_id = ? AND started_at = ? AND ended_at IS NULL`,
+  ).bind(channelId, streamId, startedAt).first<{ stream_id: string; started_at: string }>();
+  if (summary === null) return false;
+  const [status, minutes] = await Promise.all([
+    getBelaboxStatus(db, channelId),
+    db.prepare(
+      `SELECT samples, bitrate_sum FROM belabox_minutes
+        WHERE channel_id = ? AND stream_id = ?
+        ORDER BY minute_at ASC`,
+    ).bind(channelId, summary.stream_id).all<{ samples: number; bitrate_sum: number }>(),
+  ]);
   const p10 = bitrateP10(minutes.results.flatMap((row) =>
     Number.isFinite(row.samples) && row.samples > 0 && Number.isFinite(row.bitrate_sum)
       ? [row.bitrate_sum / row.samples]
       : []));
   const ending = Date.parse(endedAt);
   const normalizedEndedAt = Number.isFinite(ending) ? new Date(ending).toISOString() : new Date().toISOString();
-  const tailSeconds = status.sample === null
+  const sample = status?.streamId === summary.stream_id ? status.historySample : null;
+  const tailSeconds = sample === null
     ? 0
-    : elapsedSampleSeconds(status.sample, { ...status.sample, at: normalizedEndedAt });
-  const lowTail = status.sample?.connected === true && status.sample.bitrateKbps < lowBitrateKbps ? tailSeconds : 0;
-  const disconnectedTail = status.sample?.connected === false ? tailSeconds : 0;
+    : elapsedSampleSeconds(sample, { ...sample, at: normalizedEndedAt });
+  const lowTail = sample?.connected === true && sample.bitrateKbps < lowBitrateKbps ? tailSeconds : 0;
+  const disconnectedTail = sample?.connected === false ? tailSeconds : 0;
   const result = await db.prepare(
     `UPDATE belabox_streams
         SET ended_at = ?,
             bitrate_p10 = ?,
             low_seconds = low_seconds + ?,
             disconnected_seconds = disconnected_seconds + ?
-      WHERE channel_id = ? AND stream_id = ? AND ended_at IS NULL`,
-  ).bind(normalizedEndedAt, p10, lowTail, disconnectedTail, channelId, streamId).run();
+      WHERE channel_id = ? AND stream_id = ? AND started_at = ? AND ended_at IS NULL`,
+  ).bind(normalizedEndedAt, p10, lowTail, disconnectedTail, channelId, summary.stream_id, summary.started_at).run();
   return result.meta.changes > 0;
+};
+
+export const finalizeOpenBelaboxStreams = async (
+  db: D1Database,
+  channelId: string,
+  endedAt: string,
+): Promise<void> => {
+  const openStreams = await db.prepare(
+    `SELECT stream_id, started_at FROM belabox_streams
+      WHERE channel_id = ? AND ended_at IS NULL`,
+  ).bind(channelId).all<{ stream_id: string; started_at: string }>();
+  for (const stream of openStreams.results) {
+    await finalizeBelaboxStream(db, channelId, stream.stream_id, stream.started_at, endedAt);
+  }
 };
 
 export const purgeExpiredBelaboxMinutes = async (db: D1Database, now: string): Promise<void> => {
   const cutoff = new Date(Date.parse(now) - 30 * 24 * 60 * 60_000).toISOString();
-  await db.prepare("DELETE FROM belabox_minutes WHERE minute_at < ?").bind(cutoff).run();
+  const channels = await db.prepare("SELECT channel_id FROM channels").all<{ channel_id: string }>();
+  const batchSize = 50;
+  for (let offset = 0; offset < channels.results.length; offset += batchSize) {
+    const deletes = channels.results.slice(offset, offset + batchSize).map(({ channel_id }) =>
+      db.prepare("DELETE FROM belabox_minutes WHERE channel_id = ? AND minute_at < ?").bind(channel_id, cutoff));
+    await db.batch(deletes);
+  }
 };
 
 const encodedRecent = (recent: readonly BelaboxRecentPoint[]): string => JSON.stringify(
@@ -296,6 +328,7 @@ export const setBelaboxPollingState = async (
          belabox_stream_id = NULL,
          fetch_phase_json = ?,
          recent_json = '[]',
+         history_sample_json = NULL,
          revision = revision + 1
        WHERE channel_id = ? AND (
          polling != 0 OR stream_id IS NOT NULL OR belabox_stream_id IS NOT NULL OR
@@ -340,8 +373,8 @@ export const writeBelaboxFetch = async (
   const statusWrite = db.prepare(
     `INSERT INTO belabox_status
       (channel_id, sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
-       fetch_phase_json, recent_json, revision)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
+       fetch_phase_json, recent_json, history_sample_json, revision)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
      WHERE EXISTS (
        SELECT 1 FROM module_secrets
         WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?
@@ -365,6 +398,11 @@ export const writeBelaboxFetch = async (
        belabox_stream_id = excluded.belabox_stream_id,
        fetch_phase_json = excluded.fetch_phase_json,
        recent_json = excluded.recent_json,
+       history_sample_json = CASE
+         WHEN ? = 1 THEN excluded.history_sample_json
+         WHEN excluded.stream_id IS NOT belabox_status.stream_id THEN NULL
+         ELSE belabox_status.history_sample_json
+       END,
        revision = belabox_status.revision + 1
      WHERE belabox_status.revision = ?
      RETURNING revision`,
@@ -378,6 +416,7 @@ export const writeBelaboxFetch = async (
     input.belaboxStreamId,
     encodedPhase(input.fetchPhase),
     encodedRecent(input.recent),
+    input.history === undefined ? null : sampleJson,
     input.channelId,
     BELABOX_MODULE_ID,
     BELABOX_STATS_URL_SECRET,
@@ -385,6 +424,7 @@ export const writeBelaboxFetch = async (
     input.expectedStatusRevision,
     input.channelId,
     input.expectedStatusRevision,
+    Number(input.history !== undefined),
     input.expectedStatusRevision ?? -1,
   );
   if (input.history === undefined || input.sample === null || sampleJson === null) {

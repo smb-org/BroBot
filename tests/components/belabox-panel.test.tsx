@@ -171,4 +171,25 @@ describe("BELABOX panel", () => {
       expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "stream", "stream-42");
     });
   });
+
+  it("caps the stream history at twenty rows inside a bounded scroll region", async () => {
+    mocks.loadBelaboxStreams.mockResolvedValue(Array.from({ length: 25 }, (_, index) => ({
+      streamId: `stream-${String(index)}`,
+      startedAt: new Date(Date.parse("2026-10-01T00:00:00.000Z") + index * 60_000).toISOString(),
+      endedAt: null,
+      samples: 1,
+      bitrateAvg: 2_400,
+      bitrateP10: 2_100,
+      lowSeconds: 0,
+      disconnectedSeconds: 0,
+      disconnectCount: 0,
+      droppedTotal: 0,
+    })));
+
+    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
+
+    const list = await screen.findByTestId("belabox-stream-history-list");
+    await waitFor(() => { expect(within(list).getAllByRole("button")).toHaveLength(20); });
+    expect(list).toHaveStyle({ maxHeight: "320px", overflowY: "auto" });
+  });
 });

@@ -33,6 +33,7 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   }],
   routes: belaboxRoutes,
   scheduledMaintenance: purgeExpiredBelaboxMinutes,
+  settingsEditorPlacement: "before-panel",
   panel: () => import("./panel/index"),
   settingsEditor: () => import("./panel/settings-editor"),
   handleEvent: async (event, context) => {
@@ -41,10 +42,19 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
       return { actions: [], diagnostics: [] };
     }
     if (event.subscriptionType === "stream.offline") {
-      try {
-        await finalizeBelaboxStream(context.DB, event.channelId, event.eventSubTimestamp ?? event.receivedAt);
-      } catch {
-        // The offline alarm retries finalization before clearing the stream binding.
+      const session = context.streamSession;
+      if (session !== undefined && session.streamId !== null && session.startedAt !== null) {
+        try {
+          await finalizeBelaboxStream(
+            context.DB,
+            event.channelId,
+            session.streamId,
+            session.startedAt,
+            event.eventSubTimestamp ?? event.receivedAt,
+          );
+        } catch {
+          // The offline alarm retries finalization from open summary rows.
+        }
       }
     }
     try {

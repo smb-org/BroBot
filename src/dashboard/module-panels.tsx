@@ -477,8 +477,9 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true, c
     <section className="module-stack" aria-label={dashboardTexts().module.views}>
       <Suspense fallback={<p className="muted">{dashboardTexts().module.loadingViews}</p>}>
         {registeredViews.map(({ id, Panel, module }) => <div className="module-view" key={id}>
+          {module.settingsEditorPlacement === "before-panel" ? <ModuleSettingsEditor module={module} channelId={channelId} canManageContent={canManage} language={dashboardLanguage()} /> : null}
           {Panel === null ? null : <Panel channelId={channelId} language={dashboardLanguage()} canManage={canManage} canOperate={canOperate} botIsModerator={botIsModerator} textBlockConditions={MODULES.flatMap((candidate) => candidate.textBlockConditions ?? [])} {...(initialSelection === undefined ? {} : { initialSelection })} />}
-          <ModuleSettingsEditor module={module} channelId={channelId} canManageContent={canManage} language={dashboardLanguage()} />
+          {module.settingsEditorPlacement === "before-panel" ? null : <ModuleSettingsEditor module={module} channelId={channelId} canManageContent={canManage} language={dashboardLanguage()} />}
         </div>)}
       </Suspense>
     </section>

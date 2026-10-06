@@ -8,6 +8,7 @@ export const BELABOX_POLL_ALARM_KEY = "poll";
 export const BELABOX_ENSURE_POLL_HANDLER = "ensure";
 export const BELABOX_PROBE_INTERVAL_MS = 60_000;
 export const BELABOX_ON_DEMAND_CACHE_MS = 10_000;
+export const BELABOX_STREAM_HISTORY_LIMIT = 20;
 export const BELABOX_SECRET_UNAVAILABLE_STATUS_CODE = "not_configured";
 
 export const belaboxSettingsSchema = z.object({

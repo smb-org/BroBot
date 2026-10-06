@@ -15,7 +15,7 @@ import {
   type BelaboxSettings,
 } from "./contracts";
 import {
-  finalizeBelaboxStream,
+  finalizeOpenBelaboxStreams,
   getBelaboxStatus,
   setBelaboxPollingState,
   writeBelaboxFetch,
@@ -176,7 +176,7 @@ const stopPolling = async (
   prerequisites: AlarmPrerequisites,
 ): Promise<void> => {
   if (prerequisites.streamState === "offline") {
-    await finalizeBelaboxStream(context.DB, context.channelId, new Date().toISOString());
+    await finalizeOpenBelaboxStreams(context.DB, context.channelId, new Date().toISOString());
   }
   await setBelaboxPollingState(
     context.DB,
@@ -236,7 +236,7 @@ const storePollResult = async (
     const now = Date.now();
     const recent = sameStream ? pruneRecent(currentStatus.recent, now) : [];
     const nextRecent = result.ok && classified ? appendRecent(recent, result.sample, now) : recent;
-    const previousSample = alreadyClassified ? currentStatus.sample : null;
+    const previousSample = alreadyClassified ? currentStatus.historySample : null;
     const minuteAt = result.ok && classified ? minuteAtForSample(result.sample.at) : null;
     const elapsedSeconds = result.ok ? elapsedSampleSeconds(previousSample, result.sample) : 0;
     const history = result.ok && classified && minuteAt !== null
