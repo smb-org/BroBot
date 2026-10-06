@@ -59,6 +59,7 @@ describe("Twitch OAuth", () => {
     expect(botUrl.searchParams.get("scope")?.split(" ")).toContain("user:read:moderated_channels");
     expect(botUrl.searchParams.get("force_verify")).toBe("true");
     expect(botUrl.searchParams.get("scope")?.split(" ")).toEqual(expect.arrayContaining([
+      "moderator:read:blocked_terms",
       "moderator:manage:blocked_terms",
       "moderator:manage:chat_settings",
       "moderator:manage:unban_requests",

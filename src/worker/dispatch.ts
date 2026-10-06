@@ -15,6 +15,7 @@ import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-lo
 import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
+import { readChannelBlockedTerms } from "./twitch/blocked-terms";
 import {
   isOlderOnlineEventThanHelixOfflineObservation,
   readChannelStreamState,
@@ -742,6 +743,7 @@ export const dispatchEventSubNotification = async (
   let channelLocationPromise: ReturnType<typeof readChannelLocation> | undefined;
   let followerTotalPromise: Promise<number | null> | undefined;
   let chattersTotalPromise: Promise<number | null> | undefined;
+  let blockedTermsPromise: Promise<readonly string[] | null> | undefined;
   const followedAtPromises = new Map<string, Promise<ModuleFollowedAt>>();
   const userCreatedAtPromises = new Map<string, Promise<string | null>>();
   const streamState = (): Promise<ModuleStreamState> => {
@@ -755,6 +757,10 @@ export const dispatchEventSubNotification = async (
   const botUserId = (): Promise<string | null> => {
     botUserIdPromise ??= getCachedBotUserId(environment.DB);
     return botUserIdPromise;
+  };
+  const channelBlockedTerms = (): Promise<readonly string[] | null> => {
+    blockedTermsPromise ??= readChannelBlockedTerms(environment, event.channelId, fetcher);
+    return blockedTermsPromise;
   };
   const isRecentBotMessage = async (senderId: string | null, text: string): Promise<boolean> => {
     if (environment.CHANNEL === undefined) return false;
@@ -944,6 +950,7 @@ export const dispatchEventSubNotification = async (
             DB: environment.DB,
             authorizeMutation: authorizeModuleMutation,
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
+            readChannelBlockedTerms: channelBlockedTerms,
             botUserId,
             lookupUserByLogin: async (login) => {
               const user = await fetchTwitchUserByLogin(fetcher, environment as unknown as Env, login, "app");

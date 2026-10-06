@@ -378,6 +378,8 @@ const expectedModuleSettings = {
     yesNoLabels: "",
     scaleLabels: "",
     optionLabels: "",
+    zeroOneLabels: "",
+    oneTwoLabels: "",
     autoCloseSeconds: 0,
     announceResult: true,
     resultText: "{vote.result}",

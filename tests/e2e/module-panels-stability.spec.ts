@@ -266,11 +266,69 @@ test("chat voting header status keeps its box when a live end time appears", asy
   await page.getByRole("button", { name: "Start" }).click();
   await expect(detail).toContainText("ends");
   await expect(actions.locator("button")).toBeVisible();
+  await page.evaluate(() => { window.scrollTo(0, 0); });
   expect(await box(status)).toEqual(statusBefore);
   expect(await box(page.locator(".chat-voting-panel .section-heading"))).toEqual(headingBefore);
   expect(await box(resultArea)).toEqual(resultAreaBefore);
   expect(await box(hintSlot)).toEqual(hintSlotBefore);
   expect(await box(actions)).toEqual(actionsBefore);
+});
+
+test("free-text voting results and approval keep the panel layout fixed", async ({ page }) => {
+  const terms = Array.from({ length: 200 }, (_, index) => ({
+    term: `term-${String(index).padStart(3, "0")}`,
+    count: index % 10 + 1,
+    approved: false,
+  }));
+  let approvedTerm: string | null = null;
+  const vote = {
+    id: "text-vote-a", channelId: "channel-a", preset: "free_text", optionCount: 0, labels: [],
+    textMode: "first_word", termFilterReady: true,
+    status: "open", openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:01:00.000Z",
+    requestedDurationSeconds: 60, closedAt: null, closeReason: "timer", counts: [], voterCount: null,
+    textResults: null, moreTerms: null,
+  };
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    const currentTerms = terms.map((entry) => ({ ...entry, approved: entry.term === approvedTerm }));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: [], revision: approvedTerm === null ? 1 : 2, terms: currentTerms,
+      moreTerms: 3, termFilterReady: true, hasOpenBallot: true, defaultDurationSeconds: 60,
+    }) });
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/approve-term", async (route) => {
+    const requestBody = await route.request().postDataJSON() as { pollId: string; term: string };
+    expect(requestBody.pollId).toBe(vote.id);
+    approvedTerm = requestBody.term;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ terms, moreTerms: 3, revision: 2 }) });
+  });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+
+  const boxesAtWidth = async (): Promise<Record<string, { x: number; y: number; width: number; height: number }>> => ({
+    panel: await box(page.locator(".chat-voting-panel")),
+    result: await box(page.locator(".chat-voting-result-area")),
+    configuration: await box(page.locator(".chat-voting-configuration")),
+    modeSlot: await box(page.getByTestId("chat-voting-text-mode-slot")),
+    hint: await box(page.getByTestId("chat-voting-hint-slot")),
+    actions: await box(page.locator(".chat-voting-actions")),
+  });
+
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await gotoPanel(page, "chat_voting");
+  const rows = page.locator(".chat-voting-results__term-row");
+  await expect(rows).toHaveCount(200);
+  const scrollable = await page.locator(".chat-voting-result-area").evaluate((element) => element.scrollHeight > element.clientHeight);
+  expect(scrollable).toBe(true);
+  const desktopBefore = await boxesAtWidth();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileBefore = await boxesAtWidth();
+  await page.locator(".chat-voting-results__term-row button").first().click();
+  await expect(page.locator(".chat-voting-results__term-row button")).toHaveCount(199);
+
+  await page.setViewportSize({ width: 1280, height: 844 });
+  expect(await boxesAtWidth()).toEqual(desktopBefore);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await boxesAtWidth()).toEqual(mobileBefore);
 });
 
 test("text command slash help and variable action keep editor boxes stable", async ({ page }) => {

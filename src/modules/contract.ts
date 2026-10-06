@@ -334,9 +334,8 @@ export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "
 /** Parses the deliberately narrow chat syntax shared by ballot-using modules. */
 export const ballotChoiceFromMessage = (text: string, optionCount: number): number | null => {
   if (!Number.isInteger(optionCount) || optionCount < 1 || optionCount > 9) return null;
-  const normalized = text.trim();
-  if (!/^[1-9]$/u.test(normalized)) return null;
-  const choice = Number(normalized);
+  if (!/^[1-9]$/u.test(text)) return null;
+  const choice = Number(text);
   return choice <= optionCount ? choice : null;
 };
 
@@ -562,6 +561,8 @@ export interface ModuleExecutionContext {
   authorizeMutation: AuthorizeModuleMutation;
   /** Ephemeral ballot access bound to the event channel and executing module. */
   ballots: ModuleBallotAccess;
+  /** Lazily reads the current channel's public blocked terms with the bot moderator token. */
+  readChannelBlockedTerms?: () => Promise<readonly string[] | null>;
   /** Lazily resolves the connected bot identity so modules can ignore its own chat messages. */
   botUserId?: () => Promise<string | null>;
   /** Looks up one public Twitch user by login; throws when Helix lookup fails. */
@@ -746,8 +747,25 @@ export type ModuleFollowedAt = (string & {}) | null | "unavailable";
 export interface BallotSnapshot {
   counts: readonly number[];
   revision: number;
+  /** Generic bounded free-text tally for modules that open a term ballot. */
+  terms?: readonly BallotTermCount[];
+  /** Incoming distinct terms ignored after the term cap was reached. */
+  more?: number;
+  /** False when the host could not load the blocked-term list for this ballot. */
+  termFilterReady?: boolean;
   /** Present once the host has finalized the ballot. */
   outcome?: Exclude<BallotFinalizeOutcome, "open">;
+}
+
+export interface BallotTermCount {
+  term: string;
+  count: number;
+  approved: boolean;
+}
+
+export interface BallotTermFilter {
+  /** Null means the host could not load the channel's blocked-term list. */
+  blockedTerms: readonly string[] | null;
 }
 
 export type BallotOpenResult =
@@ -755,7 +773,7 @@ export type BallotOpenResult =
   | { status: "busy"; moduleId: string };
 
 export type BallotCastResult = BallotSnapshot & {
-  status: "counted" | "changed" | "unchanged" | "not_open";
+  status: "counted" | "changed" | "unchanged" | "not_open" | "blocked" | "overflow";
 };
 
 export type BallotFinalizeOutcome = "open" | "passed" | "expired" | "not_open";
@@ -773,8 +791,14 @@ export type BallotFinalizeResult = Omit<BallotSnapshot, "outcome"> & { outcome: 
 
 /** Ballot access already bound by the host to one channel and one module. */
 export interface ModuleBallotAccess {
-  open: (ballotId: string, optionCount: number, expiresAt: number, rule?: BallotFinalizeRule) => Promise<BallotOpenResult>;
+  open: (ballotId: string, optionCount: number, expiresAt: number, rule?: BallotFinalizeRule, termFilter?: BallotTermFilter) => Promise<BallotOpenResult>;
   cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
+  /** Casts a normalized text term while storing only the ballot-local voter hash. */
+  castTerm?: (ballotId: string, userId: string, term: string, matchText?: string) => Promise<BallotCastResult>;
+  /** Refreshes a term ballot's blocked-term filter and removes matching aggregate terms. */
+  setBlockedTerms?: (ballotId: string, blockedTerms: readonly string[]) => Promise<BallotSnapshot | null>;
+  /** Remembers an approved term for this ballot only. */
+  approveTerm?: (ballotId: string, term: string) => Promise<{ status: "approved" | "blocked" | "not_open" | "unavailable"; snapshot: BallotSnapshot | null }>;
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
   /** Reads whether any module currently owns the channel's exclusive ballot. */
   hasOpenBallot?: () => Promise<boolean>;
@@ -1102,6 +1126,8 @@ export interface ModuleRouteVariables {
   externalFetchBudget: ModuleExternalFetchBudget;
   /** Returns ballot access bound to the authorized route channel and mounted module. */
   ballots: (channelId: string) => ModuleBallotAccess;
+  /** Reads blocked terms only for the authorized route channel. */
+  readChannelBlockedTerms?: (channelId: string) => Promise<readonly string[] | null>;
   /** Runs a registered module alarm immediately for a route that must reconcile module-owned state. */
   runModuleAlarm: (channelId: string, moduleId: string, handlerKey: string, alarmKey: string) => Promise<void>;
   prepareModuleAudit: PrepareModuleAudit;

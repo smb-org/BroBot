@@ -10,6 +10,9 @@ export const moduleBallots = (
     return {
       open: () => Promise.reject(new Error("Ballot storage is unavailable.")),
       cast: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
+      castTerm: () => Promise.resolve({ status: "not_open", counts: [], revision: 0 }),
+      setBlockedTerms: () => Promise.resolve(null),
+      approveTerm: () => Promise.resolve({ status: "not_open", snapshot: null }),
       read: () => Promise.resolve(null),
       close: () => Promise.resolve(null),
       finalize: () => Promise.resolve({ outcome: "not_open", counts: [], revision: 0 }),
@@ -18,8 +21,11 @@ export const moduleBallots = (
   }
   const object = namespace.get(namespace.idFromName(channelId));
   return {
-    open: (ballotId, optionCount, expiresAt, rule) => object.openBallot(moduleId, ballotId, optionCount, expiresAt, rule),
+    open: (ballotId, optionCount, expiresAt, rule, termFilter) => object.openBallot(moduleId, ballotId, optionCount, expiresAt, rule, termFilter),
     cast: (ballotId, userId, choice) => object.castBallot(moduleId, ballotId, userId, choice),
+    castTerm: (ballotId, userId, term, matchText) => object.castBallotTerm(moduleId, ballotId, userId, term, matchText),
+    setBlockedTerms: (ballotId, terms) => object.setBlockedTerms(moduleId, ballotId, terms),
+    approveTerm: (ballotId, term) => object.approveTerm(moduleId, ballotId, term),
     read: (ballotId) => object.readBallot(moduleId, ballotId),
     hasOpenBallot: () => object.hasOpenBallot(),
     close: (ballotId) => object.closeBallot(moduleId, ballotId),

@@ -15,6 +15,7 @@ export const BOT_SCOPES = [
   "moderator:read:shoutouts",
   "moderator:manage:chat_messages",
   "user:read:moderated_channels",
+  "moderator:read:blocked_terms",
   "moderator:manage:blocked_terms",
   "moderator:manage:chat_settings",
   "moderator:manage:unban_requests",

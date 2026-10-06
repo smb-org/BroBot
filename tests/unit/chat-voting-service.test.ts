@@ -26,10 +26,20 @@ const openVote: ChatVote = {
   voterCount: null,
 };
 
+const openTextVote: ChatVote = {
+  ...openVote,
+  preset: "free_text",
+  optionCount: 0,
+  labels: [],
+  textMode: "first_word",
+  termFilterReady: true,
+};
+
 const repositoryWith = (overrides: Partial<ChatVotingRepository> = {}): ChatVotingRepository => ({
   open: vi.fn(() => Promise.resolve(null)),
   latest: vi.fn(() => Promise.resolve(null)),
   byId: vi.fn(() => Promise.resolve(null)),
+  approveTerm: vi.fn(() => Promise.resolve({ authorized: true, changed: true })),
   insertOpen: vi.fn(() => Promise.resolve(true)),
   requestManualClose: vi.fn(() => Promise.resolve(true)),
   finish: vi.fn(() => Promise.resolve(true)),
@@ -84,7 +94,7 @@ describe("chat voting event service", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("does not read or mutate a ballot for non-choice chat", async () => {
+  it("does not mutate a ballot for non-choice chat when no vote is running", async () => {
     const open = vi.fn(() => Promise.resolve(null));
     const repository = repositoryWith({ open });
     const botUserId = vi.fn(() => Promise.resolve("fictional-bot"));
@@ -93,9 +103,9 @@ describe("chat voting event service", () => {
     const result = await processChatVotingMessage(eventWithText("hello 1"), repository, context);
 
     expect(result.actions).toEqual([]);
-    expect(open).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledOnce();
     expect(context.ballots.cast).not.toHaveBeenCalled();
-    expect(botUserId).not.toHaveBeenCalled();
+    expect(botUserId).toHaveBeenCalledOnce();
   });
 
   it("publishes the latest ballot counts and revision for a valid digit choice", async () => {
@@ -111,6 +121,65 @@ describe("chat voting event service", () => {
       elementKind: "chat_voting.tally",
       payload: { pollId: "fictional-poll", openedAt: openVote.openedAt, counts: [0, 1], revision: 1 },
     }]);
+  });
+
+  it("normalizes a free-text vote and publishes the bounded term tally", async () => {
+    const repository = repositoryWith({ open: vi.fn(() => Promise.resolve(openTextVote)) });
+    const castTerm = vi.fn(() => Promise.resolve({
+      status: "changed" as const,
+      counts: [],
+      terms: [{ term: "kappa", count: 2, approved: false }],
+      more: 1,
+      termFilterReady: true,
+      revision: 4,
+    }));
+    const context = executionContext({ ballots: { ...executionContext().ballots, castTerm } });
+
+    const result = await processChatVotingMessage(eventWithText("ＫＡＰＰＡ, PogChamp!"), repository, context);
+
+    expect(castTerm).toHaveBeenCalledWith("fictional-poll", "fictional-voter-1", "kappa", "kappa pogchamp");
+    expect(result.actions).toEqual([{
+      kind: "overlay",
+      type: "tally",
+      elementKind: "chat_voting.tally",
+      payload: {
+        pollId: "fictional-poll",
+        openedAt: openTextVote.openedAt,
+        preset: "free_text",
+        optionCount: 0,
+        textMode: "first_word",
+        labels: [],
+        counts: [],
+        terms: [{ term: "kappa", count: 2, approved: false }],
+        more: 1,
+        termFilterReady: true,
+        revision: 4,
+      },
+    }]);
+  });
+
+  it("starts the free-text chat command with the refreshed blocked-term filter", async () => {
+    const open = vi.fn(() => Promise.resolve({ status: "opened" as const }));
+    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryWith({ insertOpen });
+    const readChannelBlockedTerms = vi.fn(() => Promise.resolve(["ＰＯＧＣＨＡＭＰ!", "bad-term", "shoot*"]));
+    const context = executionContext({
+      ballots: { ...executionContext().ballots, open },
+      readChannelBlockedTerms,
+    });
+
+    await processChatVotingMessage(eventWithText("!vote text message", ["moderator"]), repository, context);
+
+    expect(readChannelBlockedTerms).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledWith(expect.any(String), 0, expect.any(Number), undefined, {
+      blockedTerms: ["pogchamp", "badterm", "shoot*"],
+    });
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({
+      preset: "free_text",
+      optionCount: 0,
+      textMode: "whole_message",
+      termFilterReady: true,
+    }), undefined);
   });
 
   it("opens the shared ballot before writing the row and schedules the hard-limit alarm", async () => {
@@ -141,7 +210,7 @@ describe("chat voting event service", () => {
     }, ballots, scheduleClose);
 
     expect(result.status).toBe("started");
-    expect(ballots.open).toHaveBeenCalledWith(expect.any(String), 2, effectiveOpenedAt + 24 * 60 * 60 * 1_000 - 60_000);
+    expect(ballots.open).toHaveBeenCalledWith(expect.any(String), 2, effectiveOpenedAt + 24 * 60 * 60 * 1_000 - 60_000, undefined, undefined);
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining<Partial<ChatVoteDraft>>({
       channelId: "fictional-channel",
       preset: "yes_no",
@@ -187,6 +256,55 @@ describe("chat voting event service", () => {
       closeReason: "timer",
     }), undefined);
     expect(result).toMatchObject({ status: "started", vote: { requestedDurationSeconds: 90 } });
+  });
+
+  it("opens a text ballot fail-closed when the blocked-term list could not be loaded", async () => {
+    const ballots = executionContext().ballots;
+    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryWith({ insertOpen });
+
+    await startChatVote(repository, {
+      channelId: "fictional-channel",
+      preset: "free_text",
+      optionCount: 0,
+      textMode: "first_word",
+      blockedTerms: null,
+      settings: DEFAULT_CHAT_VOTING_SETTINGS,
+      language: "en",
+    }, ballots, vi.fn(() => Promise.resolve()));
+
+    expect(ballots.open).toHaveBeenCalledWith(expect.any(String), 0, expect.any(Number), undefined, { blockedTerms: null });
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ preset: "free_text", termFilterReady: false }), undefined);
+  });
+
+  it("finishes a free-text vote with constraint-valid empty results when scheduling fails", async () => {
+    const close = vi.fn(() => Promise.resolve({ counts: [], terms: [], more: 0, termFilterReady: true, revision: 0 }));
+    const acknowledgeClosed = vi.fn(() => Promise.resolve());
+    const ballots = { ...executionContext().ballots, open: vi.fn(() => Promise.resolve({ status: "opened" as const })), close, acknowledgeClosed };
+    const finish = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryWith({ insertOpen: vi.fn(() => Promise.resolve(true)), finish });
+
+    await expect(startChatVote(repository, {
+      channelId: "fictional-channel",
+      preset: "free_text",
+      optionCount: 0,
+      textMode: "whole_message",
+      blockedTerms: [],
+      settings: DEFAULT_CHAT_VOTING_SETTINGS,
+      language: "en",
+    }, ballots, vi.fn(() => Promise.reject(new Error("alarm unavailable"))))).rejects.toThrow("alarm unavailable");
+
+    expect(finish).toHaveBeenCalledWith(
+      "fictional-channel",
+      expect.any(String),
+      "limit",
+      expect.any(String),
+      [],
+      [],
+      0,
+      true,
+    );
+    expect(acknowledgeClosed).toHaveBeenCalledOnce();
   });
 
   it("does not cast a choice after closesAt even if the host ballot remains open", async () => {

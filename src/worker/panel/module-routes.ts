@@ -22,6 +22,7 @@ import { broadcasterHasScope, broadcasterScopesForChannel } from "../broadcaster
 import { getAppAccessToken } from "../app-token";
 import { writeModuleDiagnostics } from "../event-log";
 import { helixRequest } from "../twitch/helix";
+import { readChannelBlockedTerms } from "../twitch/blocked-terms";
 import { effectiveTemplateVariables, templateWarnings, type TemplateVariable } from "../../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { listChannelVariables } from "../db/channel-variables";
@@ -49,6 +50,7 @@ interface ModuleRouteEnvironment {
     | "listChannelVariables" | "findChannelVariable" | "secrets"
     | "externalFetchBudget"
     | "ballots"
+    | "readChannelBlockedTerms"
     | "runModuleAlarm"
     | "listTextBlockConditions"
     | "listEventTimeSources" | "resolveEventTimes"
@@ -210,6 +212,12 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   context.set("scheduleBackgroundWork", (work) => { scheduleBackgroundWork(context, work); });
   context.set("getAppAccessToken", getAppAccessToken);
   context.set("helixRequest", helixRequest);
+  context.set("readChannelBlockedTerms", async (channelId) => {
+    if (channelId !== context.req.param("channelId")) {
+      throw new Error("Blocked-term access must use the authorized route channel.");
+    }
+    return await readChannelBlockedTerms(context.env, channelId);
+  });
   context.set("liftModerationBan", async (channelId, userId, expected) => {
     if (channelId !== context.req.param("channelId")) {
       return { outcome: "rejected", reason: "invalid_request", detail: { target: userId } };

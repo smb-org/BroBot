@@ -1,8 +1,8 @@
-import { ballotChoiceFromMessage, type ModuleEvent, type ModuleExecutionContext, type ModuleMutationAuthorization, type ModuleResult } from "../contract";
+import type { BallotTermCount, ModuleEvent, ModuleExecutionContext, ModuleMutationAuthorization, ModuleResult } from "../contract";
 import type { ModuleLanguage, ModuleAlarmContext } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
-import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVotingSettings } from "./contracts";
-import { formatVoteResult, labelsForVote, parseVoteCommand, voteCloseDeadline } from "./domain";
+import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
+import { formatFreeTextVoteResult, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, parseVoteCommand, voteChoiceFromMessage, voteCloseDeadline } from "./domain";
 import type { ChatVotingRepository } from "./repository";
 import { chatVotingChatText } from "./contracts/chat-defaults";
 import { createChatVotingRepository } from "./repository";
@@ -11,6 +11,8 @@ export interface StartChatVoteInput {
   channelId: string;
   preset: ChatVotePreset;
   optionCount: number;
+  textMode?: ChatVotingTextMode;
+  blockedTerms?: readonly string[] | null;
   settings: ChatVotingSettings;
   language: ModuleLanguage;
   openedAt?: number;
@@ -27,7 +29,14 @@ export const startChatVote = async (
   ballots: ModuleExecutionContext["ballots"],
   scheduleClose: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
 ): Promise<VoteStartResult> => {
-  if (!Number.isInteger(input.optionCount) || input.optionCount < 2 || input.optionCount > 9 ||
+  const expectedOptionCount = input.preset === "free_text" ? 0
+    : input.preset === "yes_no" || input.preset === "digit_01" || input.preset === "digit_12" ? 2
+      : input.preset === "scale_5" ? 5 : null;
+  if (input.preset === "options_n" && (!Number.isInteger(input.optionCount) || input.optionCount < 2 || input.optionCount > 9) ||
+      expectedOptionCount !== null && input.optionCount !== expectedOptionCount) {
+    throw new RangeError("The selected voting preset has an invalid option count.");
+  }
+  if (!Number.isInteger(input.optionCount) || input.optionCount < 0 || input.optionCount > 9 ||
       input.preset === "yes_no" && input.optionCount !== 2 ||
       input.preset === "scale_5" && input.optionCount !== 5) {
     throw new RangeError("The selected voting preset has an invalid option count.");
@@ -45,16 +54,25 @@ export const startChatVote = async (
     preset: input.preset,
     optionCount: input.optionCount,
     labels: labelsForVote(input.settings, input.preset, input.optionCount, input.language),
+    textMode: input.preset === "free_text" ? input.textMode ?? "first_word" : null,
+    termFilterReady: input.preset === "free_text" ? input.blockedTerms != null : null,
     openedAt: new Date(openedAt).toISOString(),
     closesAt: new Date(deadline.closesAt).toISOString(),
     requestedDurationSeconds: input.settings.autoCloseSeconds === 0 ? null : input.settings.autoCloseSeconds,
     closeReason: deadline.reason,
     status: "open",
+    textResults: null,
+    moreTerms: null,
   };
+  const blockedTerms = input.blockedTerms === null || input.blockedTerms === undefined
+    ? null
+    : [...new Set(input.blockedTerms.map(normalizeBlockedVoteTerm).filter((term) => term.length > 0))];
   const opened = await ballots.open(
     vote.id,
     vote.optionCount,
     openedAt + CHAT_VOTING_BALLOT_RETENTION_MS,
+    undefined,
+    input.preset === "free_text" ? { blockedTerms } : undefined,
   );
   if (opened.status === "busy") return { status: "busy" };
 
@@ -70,12 +88,18 @@ export const startChatVote = async (
   } catch (error: unknown) {
     const closedSnapshot = await ballots.close(vote.id).catch(() => null);
     if (inserted) {
+      const textResults = vote.preset === "free_text" ? closedSnapshot?.terms ?? [] : null;
       const finished = await repository.finish(
         input.channelId,
         vote.id,
         vote.closeReason,
         new Date().toISOString(),
         Array.from({ length: vote.optionCount }, () => 0),
+        textResults,
+        closedSnapshot?.more ?? 0,
+        vote.preset === "free_text"
+          ? closedSnapshot?.termFilterReady ?? vote.termFilterReady ?? false
+          : null,
       ).catch(() => false);
       if (finished) await ballots.acknowledgeClosed?.(vote.id).catch(() => null);
     } else if (closedSnapshot !== null) {
@@ -131,12 +155,15 @@ export const processChatVotingMessage = async (
     return { actions: [], diagnostics: [] };
   }
   const command = parseVoteCommand(text);
-  const isChoice = /^[1-9]$/u.test(text.trim());
-  if (command === null && !isChoice) return { actions: [], diagnostics: [] };
 
   const userId = chatterId(event);
   const botUserId = await context.botUserId?.() ?? null;
   if (userId === null || botUserId !== null && userId === botUserId) return { actions: [], diagnostics: [] };
+
+  if (command === null && /^!vote(?:\s|$)/iu.test(text.trim())) {
+    if (!canControlVotes(event)) return { actions: [], diagnostics: [] };
+    return { actions: [directChat(chatVotingChatText(await context.channelLanguage(), "help"))], diagnostics: [] };
+  }
 
   if (command !== null) {
     if (!canControlVotes(event)) return { actions: [], diagnostics: [] };
@@ -153,10 +180,17 @@ export const processChatVotingMessage = async (
     }
 
     try {
+      let blockedTerms: readonly string[] | null = null;
+      if (command.preset === "free_text") {
+        try { blockedTerms = await context.readChannelBlockedTerms?.() ?? null; }
+        catch { blockedTerms = null; }
+      }
       const result = await startChatVote(repository, {
         channelId: event.channelId,
         preset: command.preset,
         optionCount: command.optionCount,
+        ...(command.textMode === undefined ? {} : { textMode: command.textMode }),
+        ...(command.preset === "free_text" ? { blockedTerms } : {}),
         settings: event.settings,
         language,
       }, context.ballots, closeAlarmScheduler(context));
@@ -165,7 +199,7 @@ export const processChatVotingMessage = async (
       }
       return {
         actions: [
-          directChat(chatVotingChatText(language, "started", result.vote.optionCount)),
+          directChat(chatVotingChatText(language, "started", result.vote.optionCount, result.vote.preset, result.vote.textMode)),
           { kind: "overlay", type: "opened", elementKind: CHAT_VOTING_ELEMENT_KIND, payload: { pollId: result.vote.id } },
         ],
         diagnostics: [],
@@ -179,7 +213,38 @@ export const processChatVotingMessage = async (
   if (vote === null) return { actions: [], diagnostics: [] };
   const closesAt = Date.parse(vote.closesAt);
   if (!Number.isFinite(closesAt) || Date.now() >= closesAt) return { actions: [], diagnostics: [] };
-  const choice = ballotChoiceFromMessage(text, vote.optionCount);
+  if (vote.preset === "free_text") {
+    const matchText = normalizeFreeTextVoteForMatching(text);
+    const term = normalizeFreeTextVote(text, vote.textMode ?? "first_word");
+    if (term === null || context.ballots.castTerm === undefined) return { actions: [], diagnostics: [] };
+    const result = await context.ballots.castTerm(vote.id, userId, term, matchText);
+    if (result.status !== "counted" && result.status !== "changed" && result.status !== "overflow") {
+      return { actions: [], diagnostics: [] };
+    }
+    return {
+      actions: [{
+        kind: "overlay",
+        type: "tally",
+        elementKind: CHAT_VOTING_ELEMENT_KIND,
+        payload: {
+          pollId: vote.id,
+          openedAt: vote.openedAt,
+          preset: vote.preset,
+          optionCount: vote.optionCount,
+          textMode: vote.textMode,
+          labels: [...vote.labels],
+          counts: [...result.counts],
+          terms: (result.terms ?? []).map((entry) => ({ ...entry })),
+          more: result.more ?? 0,
+          termFilterReady: result.termFilterReady ?? false,
+          revision: result.revision,
+        },
+      }],
+      diagnostics: [],
+    };
+  }
+
+  const choice = voteChoiceFromMessage(text, vote.preset, vote.optionCount);
   if (choice === null) return { actions: [], diagnostics: [] };
   const result = await context.ballots.cast(vote.id, userId, choice);
   if (result.status !== "counted" && result.status !== "changed") return { actions: [], diagnostics: [] };
@@ -197,6 +262,9 @@ export const processChatVotingMessage = async (
 interface StoredClosedSnapshot {
   counts: number[];
   revision: number;
+  terms?: BallotTermCount[];
+  more?: number;
+  termFilterReady?: boolean;
 }
 
 const isStoredSnapshot = (value: unknown): value is StoredClosedSnapshot =>
@@ -204,11 +272,26 @@ const isStoredSnapshot = (value: unknown): value is StoredClosedSnapshot =>
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
     const counts: unknown = Reflect.get(value, "counts");
     const revision: unknown = Reflect.get(value, "revision");
+    const terms: unknown = Reflect.get(value, "terms");
+    const more: unknown = Reflect.get(value, "more");
+    const termFilterReady: unknown = Reflect.get(value, "termFilterReady");
     return Array.isArray(counts) && counts.every((count) => Number.isSafeInteger(count) && count >= 0) &&
-      Number.isSafeInteger(revision) && (revision as number) >= 0;
+      Number.isSafeInteger(revision) && (revision as number) >= 0 &&
+      (terms === undefined || Array.isArray(terms) && terms.every((entry: unknown) => isStoredTerm(entry))) &&
+      (more === undefined || Number.isSafeInteger(more) && (more as number) >= 0) &&
+      (termFilterReady === undefined || typeof termFilterReady === "boolean");
   })();
 
 const voteSnapshotStorageKey = (pollId: string): string => `closed:${pollId}`;
+
+const isStoredTerm = (entry: unknown): boolean => {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+  const term: unknown = Reflect.get(entry, "term");
+  const count: unknown = Reflect.get(entry, "count");
+  const approved: unknown = Reflect.get(entry, "approved");
+  return typeof term === "string" && Array.from(term).length <= 25 &&
+    Number.isSafeInteger(count) && (count as number) > 0 && typeof approved === "boolean";
+};
 
 const alarmSettings = async (context: ModuleAlarmContext): Promise<ChatVotingSettings> => {
   const row = await context.DB.prepare(
@@ -241,24 +324,46 @@ export const closeChatVoteFromAlarm = async (
     if (snapshot === null) {
       const observed = await context.ballots.read(pollId);
       if (observed !== null) {
-        snapshot = { counts: [...observed.counts], revision: observed.revision };
+        snapshot = {
+          counts: [...observed.counts],
+          revision: observed.revision,
+          ...(observed.terms === undefined ? {} : { terms: observed.terms.map((entry) => ({ ...entry })) }),
+          ...(observed.more === undefined ? {} : { more: observed.more }),
+          ...(observed.termFilterReady === undefined ? {} : { termFilterReady: observed.termFilterReady }),
+        };
         // Keep a durable copy before handing ownership to close(), so a retry
         // can never turn a failed persistence step into a zero-count result.
         await context.storage.put(storageKey, snapshot);
       }
     }
     const closed = await context.ballots.close(pollId);
-    if (closed !== null) snapshot = { counts: [...closed.counts], revision: closed.revision };
-    snapshot ??= { counts: [...(vote.counts ?? Array.from({ length: vote.optionCount }, () => 0))], revision: 0 };
+    if (closed !== null) snapshot = {
+      counts: [...closed.counts],
+      revision: closed.revision,
+      ...(closed.terms === undefined ? {} : { terms: closed.terms.map((entry) => ({ ...entry })) }),
+      ...(closed.more === undefined ? {} : { more: closed.more }),
+      ...(closed.termFilterReady === undefined ? {} : { termFilterReady: closed.termFilterReady }),
+    };
+    snapshot ??= vote.preset === "free_text"
+      ? { counts: [], revision: 0, terms: [], more: 0 }
+      : { counts: [...(vote.counts ?? Array.from({ length: vote.optionCount }, () => 0))], revision: 0 };
     await context.storage.put(storageKey, snapshot);
   }
-  snapshot ??= {
-    counts: [...(vote.counts ?? Array.from({ length: vote.optionCount }, () => 0))],
-    revision: 0,
-  };
+  snapshot ??= vote.preset === "free_text"
+    ? { counts: [...(vote.counts ?? [])], revision: 0, terms: [...(vote.textResults ?? [])], more: vote.moreTerms ?? 0 }
+    : { counts: [...(vote.counts ?? Array.from({ length: vote.optionCount }, () => 0))], revision: 0 };
 
   if (vote.status === "open") {
-    await repository.finish(context.channelId, pollId, vote.closeReason, new Date().toISOString(), snapshot.counts);
+    await repository.finish(
+      context.channelId,
+      pollId,
+      vote.closeReason,
+      new Date().toISOString(),
+      snapshot.counts,
+      snapshot.terms ?? null,
+      snapshot.more ?? 0,
+      snapshot.termFilterReady ?? vote.termFilterReady ?? false,
+    );
   }
   const closedVote = await repository.byId(context.channelId, pollId);
   if (closedVote === null || closedVote.status !== "closed") throw new Error("The chat vote could not be closed.");
@@ -269,13 +374,22 @@ export const closeChatVoteFromAlarm = async (
     status: "closed",
     counts: [...(closedVote.counts ?? snapshot.counts)],
     revision: snapshot.revision,
+    ...(closedVote.textResults == null ? {} : { terms: closedVote.textResults.map((entry) => ({ ...entry })) }),
+    ...(closedVote.moreTerms === null ? {} : { more: closedVote.moreTerms }),
+    termFilterReady: closedVote.termFilterReady ?? snapshot.termFilterReady ?? false,
     closedAt: closedVote.closedAt ?? new Date().toISOString(),
     closeReason: closedVote.closeReason,
   });
 
   const settings = await alarmSettings(context);
   if (settings.announceResult) {
-    const result = formatVoteResult(closedVote.labels, closedVote.counts ?? snapshot.counts);
+    const result = closedVote.preset === "free_text"
+      ? formatFreeTextVoteResult(
+        closedVote.textResults ?? snapshot.terms ?? [],
+        closedVote.moreTerms ?? snapshot.more ?? 0,
+        await context.channelLanguage() === "de" ? "weitere" : "more",
+      )
+      : formatVoteResult(closedVote.labels, closedVote.counts ?? snapshot.counts);
     const rendered = await context.renderTemplate(
       settings.resultText,
       Date.parse(closedVote.closedAt ?? new Date().toISOString()),

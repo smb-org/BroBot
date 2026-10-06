@@ -9,14 +9,24 @@ const english = chatVotingOverlayLabels("en");
 export const chatVotingOverlayElement = {
   kind: CHAT_VOTING_TALLY_ELEMENT_KIND,
   configVersion: 1,
-  defaultSize: { width: 640, height: 240 },
-  defaultConfig: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 },
+  defaultSize: { width: 480, height: 240 },
+  defaultConfig: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15, width: 480 },
   previewState: (_config: JsonObject, language: ModuleLanguage, now: number): JsonObject => ({
     pollId: "overlay-editor-preview",
     openedAt: new Date(now).toISOString(),
     status: "open",
+    preset: "free_text",
+    optionCount: 0,
+    textMode: "first_word",
     labels: chatVotingOverlayLabels(language).previewOptions,
-    counts: [12, 7, 3],
+    counts: [],
+    terms: [
+      { term: "preview", count: 12, approved: true },
+      { term: "?", count: 7, approved: false },
+      { term: "sample", count: 3, approved: true },
+    ],
+    more: 1,
+    termFilterReady: true,
     revision: 1,
   }),
   editorLabel: { de: german.editorLabel, en: english.editorLabel },
@@ -27,14 +37,16 @@ export const chatVotingOverlayElement = {
   parseConfig: (raw: unknown) => {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
     const config = raw as Record<string, unknown>;
-    if (Object.keys(config).some((key) => !["layout", "showPercent", "hideAfterCloseSeconds"].includes(key))) return null;
+    if (Object.keys(config).some((key) => !["layout", "showPercent", "hideAfterCloseSeconds", "width"].includes(key))) return null;
     const layout = config.layout ?? "bars";
     const showPercent = config.showPercent ?? true;
     const hideAfterCloseSeconds = config.hideAfterCloseSeconds ?? 15;
+    const width = config.width ?? 480;
+    if (typeof width !== "number" || !Number.isSafeInteger(width) || width < 200 || width > 1920) return null;
     if ((layout !== "strip" && layout !== "bars") || typeof showPercent !== "boolean" ||
         typeof hideAfterCloseSeconds !== "number" || !Number.isSafeInteger(hideAfterCloseSeconds) ||
         hideAfterCloseSeconds < 0 || hideAfterCloseSeconds > 120) return null;
-    return { layout, showPercent, hideAfterCloseSeconds };
+    return { layout, showPercent, hideAfterCloseSeconds, width };
   },
   load: () => import("./tally"),
   editor: () => import("./editor"),

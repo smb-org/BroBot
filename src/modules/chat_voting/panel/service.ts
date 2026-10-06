@@ -1,10 +1,12 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { ChatVote, ChatVoteCloseReason, ChatVotePreset } from "../contracts";
+import type { ChatVote, ChatVoteCloseReason, ChatVotePreset, ChatVoteTerm, ChatVotingTextMode } from "../contracts";
 
 export interface ChatVotingPanelState {
   vote: ChatVote | null;
   counts: readonly number[] | null;
   revision: number;
+  terms: readonly ChatVoteTerm[] | null;
+  moreTerms: number | null;
   hasOpenBallot: boolean;
   defaultDurationSeconds: number;
 }
@@ -37,6 +39,7 @@ export const startChatVoting = async (
   preset: ChatVotePreset,
   optionCount?: number,
   durationSeconds?: number,
+  textMode?: ChatVotingTextMode,
 ): Promise<ChatVote> => {
   const token = await csrfHeader();
   return (await readJson<{ vote: ChatVote }>(await fetch(route(channelId, "/start"), {
@@ -46,8 +49,18 @@ export const startChatVoting = async (
       preset,
       ...(optionCount === undefined ? {} : { optionCount }),
       ...(durationSeconds === undefined ? {} : { durationSeconds }),
+      ...(textMode === undefined ? {} : { textMode }),
     }),
-  }))).vote;
+}))).vote;
+};
+
+export const approveChatVotingTerm = async (channelId: string, pollId: string, term: string): Promise<void> => {
+  const token = await csrfHeader();
+  await readJson<{ terms: readonly ChatVoteTerm[]; moreTerms: number; revision: number }>(await fetch(route(channelId, "/approve-term"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: JSON.stringify({ pollId, term }),
+  }));
 };
 
 export const closeChatVoting = async (channelId: string): Promise<void> => {
