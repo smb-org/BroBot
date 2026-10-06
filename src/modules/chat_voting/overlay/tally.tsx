@@ -68,6 +68,9 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
     count,
     percent: total === 0 ? 0 : Math.round(count * 100 / total),
   }));
+  // Fixed width: the canvas wrapper is content-sized, so a percentage would follow the term length.
+  const width = typeof config.width === "number" && Number.isFinite(config.width)
+    ? Math.max(200, Math.min(1920, config.width)) : 480;
   const layout = config.layout === "strip" ? "strip" : "bars";
   const visibleTextTerms = current.termFilterReady === true
     ? current.terms ?? []
@@ -112,7 +115,7 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
   return <section
     className={`brobot-module-text chat-voting-tally chat-voting-tally--${layout}`}
     aria-label={current.status === "closed" ? labels.closed : labels.title}
-    style={{ display: "grid", gap: "0.6em", width: "100%", minWidth: 0, boxSizing: "border-box" }}
+    style={{ display: "grid", gap: "0.6em", width: `${String(width)}px`, minWidth: 0, boxSizing: "border-box" }}
   >
     {current.status === "closed" ? <strong>{labels.closed}</strong> : null}
     <div className="chat-voting-tally__options" style={{

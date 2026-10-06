@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 
-import Tally from "../../src/modules/chat_voting/overlay/tally";
+import { OverlayCanvas } from "../../src/overlay/canvas";
 import "../../src/overlay/variable.css";
 
 const count = Number(new URLSearchParams(window.location.search).get("terms") ?? "0");
@@ -11,13 +11,18 @@ const terms = Array.from({ length: Math.max(0, Math.min(5, count)) }, (_, index)
 }));
 
 document.body.style.margin = "0";
-document.documentElement.style.width = "320px";
-document.body.style.width = "320px";
-document.body.style.overflow = "hidden";
 
-createRoot(document.getElementById("root") as HTMLElement).render(
-  <main style={{ width: "320px", minWidth: 0, boxSizing: "border-box" }}>
-    <Tally config={{ layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 }} state={{
+const overlay = {
+  id: "overlay-fixture",
+  revision: 1,
+  width: 1920,
+  height: 1080,
+  css: "",
+  elements: [{
+    id: "tally-a", kind: "chat_voting.tally", label: "Tally", variableName: null, text: "",
+    x: 0, y: 0, scalePercent: 100, z: 0, inComposition: true, moduleEnabled: true,
+    config: { layout: new URLSearchParams(window.location.search).get("layout") ?? "bars", showPercent: true, hideAfterCloseSeconds: 15, width: 480 },
+    state: {
       pollId: "layout-poll",
       status: "open",
       preset: "free_text",
@@ -27,6 +32,10 @@ createRoot(document.getElementById("root") as HTMLElement).render(
       terms,
       termFilterReady: true,
       revision: 1,
-    }} language="en" now={Date.now()} />
-  </main>,
+    },
+  }],
+};
+
+createRoot(document.getElementById("root") as HTMLElement).render(
+  <OverlayCanvas overlay={overlay} language="en" variables={{}} elementId={null} />,
 );

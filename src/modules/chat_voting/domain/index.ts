@@ -111,7 +111,8 @@ export const normalizeFreeTextVote = (text: string, mode: ChatVotingTextMode): s
   const normalized = normalizeVoteText(text);
   if (normalized.length === 0) return null;
   const value = mode === "first_word" ? normalized.split(" ")[0] ?? "" : normalized;
-  const bounded = firstCharacters(value, 25);
+  // Trim after truncation: cutting at 25 can leave a trailing space that approval keys never have.
+  const bounded = firstCharacters(value, 25).trim();
   return bounded.length === 0 ? null : bounded;
 };
 

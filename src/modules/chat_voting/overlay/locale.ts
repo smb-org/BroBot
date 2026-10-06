@@ -15,6 +15,7 @@ const catalog = {
     showPercent: "Prozent anzeigen",
     hideAfterCloseSeconds: "Ergebnis ausblenden nach",
     seconds: "Sekunden",
+    width: "Breite (px)",
   },
   en: {
     title: "Voting",
@@ -30,6 +31,7 @@ const catalog = {
     showPercent: "Show percentages",
     hideAfterCloseSeconds: "Hide results after",
     seconds: "seconds",
+    width: "Width (px)",
   },
 } as const;
 

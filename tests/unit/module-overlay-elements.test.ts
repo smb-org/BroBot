@@ -61,11 +61,13 @@ describe("module overlay element declarations", () => {
     expect(tally).toMatchObject({
       kind: "chat_voting.tally",
       configVersion: 1,
-      defaultSize: { width: 640, height: 240 },
-      defaultConfig: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 },
+      defaultSize: { width: 480, height: 240 },
+      defaultConfig: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15, width: 480 },
     });
     expect(tally?.parseConfig({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0 }))
-      .toEqual({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0 });
+      .toEqual({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0, width: 480 });
+    expect(tally?.parseConfig({ width: 199 })).toBeNull();
+    expect(tally?.parseConfig({ width: 1921 })).toBeNull();
     expect(tally?.parseConfig({ hideAfterCloseSeconds: 121 })).toBeNull();
     expect(tally?.parseConfig({ html: "unsafe" })).toBeNull();
     expect(tally?.mergeRealtimeState).toBeTypeOf("function");

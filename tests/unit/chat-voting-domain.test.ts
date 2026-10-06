@@ -78,6 +78,9 @@ describe("chat voting command and result domain", () => {
     expect(normalizeFreeTextVote("😀Kappa", "first_word")).toBe("😀kappa");
     expect(normalizeFreeTextVote("!!!   ???", "whole_message")).toBeNull();
     expect(normalizeFreeTextVote("abcdefghijklmnopqrstuvwxyz", "whole_message")).toBe("abcdefghijklmnopqrstuvwxy");
+    const cut = normalizeFreeTextVote("this is a regular normal sentence", "whole_message");
+    expect(cut).toBe("this is a regular normal");
+    expect(normalizeBlockedVoteTerm(cut ?? "")).toBe(cut);
     expect(normalizeBlockedVoteTerm("ＰＯＧＣＨＡＭＰ!")).toBe("pogchamp");
   });
 
