@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, DangerSection, Field, InspectorFieldRow, InspectorSection } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Field, InspectorActions, InspectorFieldRow, InspectorSection, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
-import type { BelaboxStatusResponse, BelaboxTestResult } from "../contracts";
+import type { BelaboxStatusResponse } from "../contracts";
 import { belaboxReasonText, belaboxPanelTexts } from "./locale";
 import { loadBelaboxStatus, removeBelaboxStatsUrl, replaceBelaboxStatsUrl, retryBelaboxPolling, testBelaboxConnection } from "./service";
 
@@ -18,11 +18,10 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const labels = belaboxPanelTexts(language);
   const [status, setStatus] = useState<BelaboxStatusResponse | null>(null);
   const [url, setUrl] = useState("");
-  const [testResult, setTestResult] = useState<BelaboxTestResult | null>(null);
-  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const pollingInactive = status?.pollingDesired === true && !status.polling;
 
   const refresh = useCallback(async (): Promise<void> => {
     setStatus(await loadBelaboxStatus(channelId));
@@ -31,29 +30,27 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   useEffect(() => {
     let active = true;
     loadBelaboxStatus(channelId).then((next) => {
-      if (active) {
-        setStatus(next);
-        setError("");
-      }
+      if (active) setStatus(next);
     }).catch(() => {
-      if (active) setError(labels.testFailed);
+      if (active) notify({ tone: "error", message: labels.testFailed });
     });
     return () => { active = false; };
   }, [channelId, labels.testFailed]);
 
+  useEffect(() => {
+    if (pollingInactive) notify({ tone: "error", message: labels.pollingInactive });
+  }, [labels.pollingInactive, pollingInactive]);
+
   const save = async (): Promise<void> => {
     if (!canManage || busy || url.length === 0) return;
     setBusy(true);
-    setError("");
-    setNotice("");
     try {
       await replaceBelaboxStatsUrl(channelId, url);
       setUrl("");
-      setTestResult(null);
       await refresh();
-      setNotice(labels.saved);
+      notify({ tone: "success", message: labels.saved });
     } catch (failure: unknown) {
-      setError(errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.saveFailed);
+      notify({ tone: "error", message: errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.saveFailed });
     } finally {
       setBusy(false);
     }
@@ -62,14 +59,26 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const test = async (): Promise<void> => {
     if (!canManage || busy) return;
     setBusy(true);
-    setError("");
-    setNotice("");
     try {
       const next = await testBelaboxConnection(channelId, url.length === 0 ? undefined : url);
-      setTestResult(next);
-      if (next.ok && url.length === 0) await refresh();
+      if (!next.ok) {
+        notify({ tone: "error", message: belaboxReasonText(labels, next.reason) });
+        return;
+      }
+      if (url.length === 0) {
+        try {
+          await refresh();
+        } catch {
+          notify({ tone: "error", message: labels.refreshFailed });
+          return;
+        }
+      }
+      notify({
+        tone: next.connected ? "success" : "info",
+        message: `${next.connected ? labels.connected : labels.disconnected} · ${labels.bitrate}: ${String(next.bitrateKbps)} kbps`,
+      });
     } catch (failure: unknown) {
-      setError(errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.testFailed);
+      notify({ tone: "error", message: errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.testFailed });
     } finally {
       setBusy(false);
     }
@@ -78,13 +87,11 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const retryPolling = async (): Promise<void> => {
     if (!canManage || busy) return;
     setBusy(true);
-    setError("");
-    setNotice("");
     try {
       await retryBelaboxPolling(channelId);
       await refresh();
     } catch (failure: unknown) {
-      setError(errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.retryPollingFailed);
+      notify({ tone: "error", message: errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.retryPollingFailed });
     } finally {
       setBusy(false);
     }
@@ -92,48 +99,51 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
 
   const remove = async (): Promise<void> => {
     if (!canManage || busy || status?.configured !== true) return;
-    if (!confirmRemove) {
-      setConfirmRemove(true);
-      return;
-    }
     setBusy(true);
-    setError("");
-    setNotice("");
+    setRemoveError(null);
     try {
       await removeBelaboxStatsUrl(channelId);
-      setConfirmRemove(false);
-      setTestResult(null);
-      await refresh();
-      setNotice(labels.removed);
     } catch (failure: unknown) {
-      setError(errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.removeFailed);
+      setRemoveError(errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.removeFailed);
+      setBusy(false);
+      return;
+    }
+    // The delete succeeded: reflect it locally, independent of the refresh below.
+    setStatus({
+      configured: false,
+      updatedAt: null,
+      sample: null,
+      errorCode: null,
+      polling: false,
+      pollingDesired: false,
+      streamId: null,
+      belaboxStreamId: null,
+    });
+    setRemoveConfirmOpen(false);
+    try {
+      await refresh();
+      notify({ tone: "success", message: labels.removed });
+    } catch {
+      notify({ tone: "error", message: labels.refreshFailed });
     } finally {
       setBusy(false);
     }
   };
 
-  const testError = testResult !== null && !testResult.ok ? belaboxReasonText(labels, testResult.reason) : "";
-  const testSummary = testResult?.ok === true
-    ? `${testResult.connected ? labels.connected : labels.disconnected} · ${labels.bitrate}: ${String(testResult.bitrateKbps)} kbps`
-    : "";
   const sampleSummary = status?.sample === null || status?.sample === undefined
     ? null
     : `${status.sample.connected ? labels.connected : labels.disconnected} · ${labels.bitrate}: ${String(status.sample.bitrateKbps)} kbps`;
 
   return <section className="module-stack" aria-label={labels.title}>
-    {error.length === 0 ? null : <p className="form-error" role="alert">{error}</p>}
-    {notice.length === 0 ? null : <p className="muted" role="status">{notice}</p>}
     {!canManage ? <p className="lock-reason">{labels.readOnly}</p> : null}
     <InspectorSection title={labels.connection}>
       <p className="muted">{status?.configured ? labels.configured : labels.notConfigured}</p>
-      {status?.pollingDesired === true && !status.polling ? <>
-        <p className="form-error" role="status">{labels.pollingInactive}</p>
-        {canManage ? <div className="form-actions">
-          <Button disabled={busy} onClick={() => { void retryPolling(); }}>{labels.retryPolling}</Button>
-        </div> : null}
-      </> : null}
+      <div className="belabox-polling-retry-slot">
+        {pollingInactive && canManage ? <Button disabled={busy} onClick={() => { void retryPolling(); }}>{labels.retryPolling}</Button> : null}
+      </div>
       {status?.updatedAt === null || status?.updatedAt === undefined ? null : <p className="muted">{labels.updatedAt}: {statusTimestamp(status.updatedAt, language === "de" ? "de-DE" : "en-US")}</p>}
       {sampleSummary === null ? null : <p className="muted">{labels.latestSample}: {sampleSummary}</p>}
+      <Button disabled={!canManage || busy} onClick={() => { void test(); }}>{labels.testConnection}</Button>
     </InspectorSection>
     <InspectorSection title={labels.replace}>
       <InspectorFieldRow label={labels.statsUrl}>
@@ -144,7 +154,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
           autoComplete="off"
           spellCheck={false}
           value={url}
-          onChange={(value) => { setUrl(value); setTestResult(null); }}
+          onChange={setUrl}
           disabled={!canManage || busy}
         />
       </InspectorFieldRow>
@@ -152,16 +162,10 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
         <Button variant="primary" disabled={!canManage || busy || url.length === 0} onClick={() => { void save(); }}>{labels.save}</Button>
       </div>
     </InspectorSection>
-    <DangerSection title={labels.danger}>
-      <div className="form-actions">
-        <Button disabled={!canManage || busy} onClick={() => { void test(); }}>{labels.testConnection}</Button>
-        <Button danger="subtle" disabled={!canManage || busy || status?.configured !== true} onClick={() => { void remove(); }}>
-          {confirmRemove ? labels.confirmRemove : labels.remove}
-        </Button>
-        {confirmRemove ? <Button disabled={busy} onClick={() => setConfirmRemove(false)}>{labels.cancel}</Button> : null}
-      </div>
-      {testError.length > 0 ? <p className="form-error" role="alert">{testError}</p> : null}
-      {testSummary.length > 0 ? <p className="muted" role="status">{testSummary}</p> : null}
-    </DangerSection>
+    <InspectorActions destructive={<Button danger="subtle" disabled={!canManage || busy || status?.configured !== true}
+      onClick={() => { setRemoveError(null); setRemoveConfirmOpen(true); }}>{labels.remove}</Button>} />
+    <ConfirmDialog opened={removeConfirmOpen} title={labels.removeTitle} description={labels.removeConsequence}
+      confirmLabel={labels.confirmRemove} cancelLabel={labels.cancel} onCancel={() => { setRemoveConfirmOpen(false); setRemoveError(null); }}
+      onConfirm={() => { void remove(); }} pending={busy} danger {...(removeError === null ? {} : { error: removeError })} />
   </section>;
 }

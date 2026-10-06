@@ -31,9 +31,9 @@ import {
   type PanelOverlayDraft,
   type PanelOverlayElement,
 } from "./api";
-import { apiErrorText, dashboardCommonTexts, dashboardLanguage, overlaysTexts } from "./locale";
+import { apiErrorText, dashboardLanguage, overlaysTexts } from "./locale";
 import { useRealtimeVariableUpdates } from "./realtime";
-import { Button, CodeField, ColorField, ConfirmDialog, DangerSection, Field, Icon, NumberField, PageHeader, SaveBar, Select, Switch, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
+import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, NumberField, PageHeader, SaveBar, Select, Switch, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
 interface OverlayEditorPageProperties {
@@ -303,7 +303,8 @@ const conflictRevision = (error: PanelApiError): number | null => {
 };
 
 export function OverlayEditorPage({ channelId, overlayId, canManage, language, initialVariable, initialOverlayName, onBack, onOverlayCreated }: OverlayEditorPageProperties): ReactElement {
-  const labels = overlaysTexts(dashboardLanguage());
+  const dashboardLocale = dashboardLanguage();
+  const labels = useMemo(() => overlaysTexts(dashboardLocale), [dashboardLocale]);
   const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
   const [moduleStates, setModuleStates] = useState<readonly PanelModuleState[]>([]);
   const [session, setSession] = useState<OverlayEditorSession | null>(null);
@@ -343,9 +344,11 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
       })
       .catch((caught: unknown) => {
         if (disposed) return;
-        setLoadError(caught instanceof PanelApiError
+        const message = caught instanceof PanelApiError
           ? apiErrorText(caught.code, labels.editorLoadError)
-          : labels.editorLoadError);
+          : labels.editorLoadError;
+        setLoadError(message);
+        notify({ tone: "error", message });
       });
     return () => { disposed = true; };
   }, [channelId, initialOverlayName, labels.editorLoadError, loadGeneration, overlayId]);
@@ -356,12 +359,15 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
     setLoadGeneration((current) => current + 1);
   }, []);
 
-  if (loadError !== null) return <section className="overlay-editor overlay-editor--message">
+  if (loadError !== null || session === null) return <section className="overlay-editor overlay-editor--message">
     <Button variant="subtle" onClick={onBack}>{labels.editorBack}</Button>
-    <p className="form-error" role="alert">{loadError}</p>
-    <Button variant="neutral" onClick={reload}>{labels.editorConflictReload}</Button>
+    <LoadState status={loadError === null ? "loading" : "error"} minHeight="360px"
+      loading={<p className="loading-line">{labels.editorLoading}</p>}
+      empty={<span />}
+      error={<Button variant="neutral" onClick={reload}>{labels.editorConflictReload}</Button>}>
+      {null}
+    </LoadState>
   </section>;
-  if (session === null) return <section className="overlay-editor overlay-editor--message"><p className="loading-line">{labels.editorLoading}</p></section>;
 
   return <OverlayEditorWorkspace
     key={`${overlayId}-${String(loadGeneration)}`}
@@ -400,7 +406,8 @@ function OverlayEditorWorkspace({
   onReload,
   onOverlayCreated,
 }: OverlayEditorWorkspaceProperties): ReactElement {
-  const labels = overlaysTexts(dashboardLanguage());
+  const dashboardLocale = dashboardLanguage();
+  const labels = useMemo(() => overlaysTexts(dashboardLocale), [dashboardLocale]);
   const moduleIsEnabled = (moduleId: string): boolean => {
     const module = moduleStates.find((candidate) => candidate.id === moduleId);
     return module?.mandatory === true || module?.enabled === true;
@@ -423,7 +430,6 @@ function OverlayEditorWorkspace({
     const parsed = parseOverlayStyleBlock(overlay.css);
     return parsed.kind === "valid" ? parsed.styles : emptyOverlayStyles();
   });
-  const [cssCopyState, setCssCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [previewFrameRoot, setPreviewFrameRoot] = useState<HTMLDivElement | null>(null);
   const previewFrameRootRef = useRef<HTMLDivElement | null>(null);
@@ -438,6 +444,16 @@ function OverlayEditorWorkspace({
   });
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline.draft);
+  const initialNoticeMessage = initialNotice === null
+    ? null
+    : initialNotice.kind === "element-limit"
+      ? labels.editorElementLimit
+      : labels.editorMissingPrefill(initialNotice.name);
+
+  useEffect(() => {
+    if (initialNoticeMessage !== null) notify({ tone: "error", message: initialNoticeMessage });
+  }, [initialNoticeMessage]);
+
   const canEdit = canManage && !saving;
   const selectedElement = draft.elements.find((element) => element.id === selectedElementId) ?? null;
   const updateSelectedPreviewState = useCallback((state: JsonObject | null): void => {
@@ -645,7 +661,6 @@ function OverlayEditorWorkspace({
     setDraft((current) => ({ ...current, css }));
     setSaved(false);
     setError(undefined);
-    setCssCopyState("idle");
   };
 
   const updateStyleProperty = <Key extends keyof OverlayStyle>(property: Key, value: OverlayStyle[Key] | undefined): void => {
@@ -672,7 +687,6 @@ function OverlayEditorWorkspace({
     setDraft((current) => ({ ...current, css }));
     setSaved(false);
     setError(undefined);
-    setCssCopyState("idle");
   };
 
   const rewriteStylesFromEditor = (): void => {
@@ -694,9 +708,9 @@ function OverlayEditorWorkspace({
   const copyCss = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(draft.css);
-      setCssCopyState("copied");
+      notify({ tone: "success", message: labels.editorStyleCopied });
     } catch {
-      setCssCopyState("error");
+      notify({ tone: "error", message: labels.editorStyleCopyError });
     }
   };
 
@@ -1063,7 +1077,6 @@ function OverlayEditorWorkspace({
             aria-label={labels.editorCssTab} onClick={() => { setEditorTab("css"); }}><Icon name="tabCode" size={16} /><span>{labels.editorCssTabShort}</span></button>
         </div>
         <div role="tabpanel" id="overlay-editor-panel-properties" aria-labelledby="overlay-editor-tab-properties" hidden={editorTab !== "properties"}>
-        {initialNotice === null ? null : <p className="form-error" role="alert">{initialNotice.kind === "element-limit" ? labels.editorElementLimit : labels.editorMissingPrefill(initialNotice.name)}</p>}
         {selectedElement === null ? <p className="muted">{labels.editorNoSelection}</p> : <div className="overlay-editor__property-fields">
           {selectedElement.kind === "variable"
             ? selectedElement.variableName === null
@@ -1108,11 +1121,9 @@ function OverlayEditorWorkspace({
           </div>
           <Switch layout="inline" label={labels.editorInComposition} checked={selectedElement.inComposition} disabled={!canEdit}
             onChange={(inComposition) => { updateElement(selectedElement.id, { inComposition }); }} />
-          <DangerSection title={dashboardCommonTexts().dangerZone}>
-            <Button danger="subtle" disabled={!canEdit}
+          <Button variant="subtle" disabled={!canEdit}
               {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
               onClick={removeElement}>{labels.editorRemove}</Button>
-          </DangerSection>
         </div>}
         {!canManage ? <p className="muted" id="overlay-editor-readonly-reason" role="note">{labels.editorReadOnly}</p> : null}
         </div>
@@ -1242,8 +1253,6 @@ function OverlayEditorWorkspace({
             <p className="form-hint">{labels.editorStyleCodeHint}</p>
             <Button variant="neutral" onClick={() => { void copyCss(); }}>{labels.editorStyleCopy}</Button>
           </div>
-          {cssCopyState === "copied" ? <p className="form-hint" role="status">{labels.editorStyleCopied}</p> : null}
-          {cssCopyState === "error" ? <p className="form-error" role="alert">{labels.editorStyleCopyError}</p> : null}
           {!canManage ? <p className="muted" id="overlay-editor-css-readonly-reason" role="note">{labels.editorCssReadOnlyReason}</p> : null}
           <DisabledFieldReasonContext.Provider value={!canManage ? { id: "overlay-editor-css-disabled-reason", reason: labels.editorCssReadOnlyReason } : null}>
             <CodeField id="overlay-editor-css-code" className="overlay-editor__css-code" label={labels.editorCssTab} value={draft.css} maxLength={16000}

@@ -244,14 +244,13 @@ const MemberInspector = ({
         issueLabels={{ error: common.error, warning: common.warning }}
         onClose={onClose}
         closeLabel={common.close}
-        dangerTitle={common.dangerZone}
-        dangerContent={<span title={locked ?? undefined}><Button danger="subtle" icon="memberRemove" disabled={locked !== null} onClick={() => { setRemoveConfirmOpen(true); }}>{texts.remove}</Button></span>}
+        destructive={<span title={locked ?? undefined}><Button danger="subtle" icon="memberRemove" disabled={locked !== null} onClick={() => { setRemoveConfirmOpen(true); }}>{texts.remove}</Button></span>}
       />
       <ConfirmDialog
         opened={removeConfirmOpen}
         title={texts.removeConfirmTitle(name)}
         description={member.userId === ownUserId ? texts.removeSelf : texts.removeOther(name)}
-        confirmLabel={texts.remove}
+        confirmLabel={texts.removeAccessFor(name)}
         cancelLabel={common.cancel}
         danger
         onCancel={() => { setRemoveConfirmOpen(false); }}

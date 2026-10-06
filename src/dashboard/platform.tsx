@@ -23,7 +23,7 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { Badge, Button, ConfirmDialog, DangerSection, EditorShell, Field, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, PageHeader, Select, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
+import { Badge, Button, ConfirmDialog, EditorShell, Field, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, PageHeader, Select, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
 import { MemberGrantEditor } from "./member-grant-editor";
 import { StateRow, type StateTone } from "./module-panels";
 
@@ -233,12 +233,12 @@ const ChannelInspector = ({
                 options={roleSelectOptions()} />
             </InspectorFieldRow>}
           </InspectorSection>
-          <DangerSection title={common.dangerZone}>
+          <InspectorActions destructive={
             <Button danger="subtle" disabled={selectedMember.role === "broadcaster" || busyUserId === selectedMember.userId}
               {...(selectedMember.role === "broadcaster" ? { title: texts.removeBroadcasterHint } : {})}
               {...(selectedMember.role === "broadcaster" ? { describedBy: `platform-remove-broadcaster-reason-${selectedMember.userId}` } : {})}
               onClick={() => { setPendingRemoval(selectedMember); }}>{texts.remove}</Button>
-          </DangerSection>
+          } />
         </>}
       <section className="config-section platform-inspector-section" aria-label={texts.addMember}>
         <div className="section-heading"><h3>{texts.addMember}</h3></div>
@@ -270,7 +270,7 @@ const ChannelInspector = ({
         opened={pendingRemoval !== null}
         title={texts.removeConfirmTitle(pendingRemoval === null ? "" : memberName(pendingRemoval))}
         description={texts.removeQuestion(pendingRemoval === null ? "" : memberName(pendingRemoval))}
-        confirmLabel={texts.confirmRemove}
+        confirmLabel={texts.confirmRemove(pendingRemoval === null ? "" : memberName(pendingRemoval))}
         cancelLabel={common.cancel}
         danger
         onCancel={() => { setPendingRemoval(null); }}

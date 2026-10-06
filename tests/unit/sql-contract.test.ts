@@ -20,6 +20,7 @@ import {
 } from "../../src/worker/auth/overlay-token-repository";
 import {
   overlayAccessColumns,
+  overlayAccessActivePredicate,
   overlayAccessMetadataColumns,
 } from "../../src/worker/auth/overlay-access-repository";
 import { overlayElementIdCollisionGuard, referencedVariablesGuard } from "../../src/worker/db/overlays";
@@ -76,6 +77,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["overlayTokenSelectColumns", overlayTokenSelectColumns],
   ["overlayTokenReturningColumns", overlayTokenReturningColumns],
   ["overlayAccessColumns", overlayAccessColumns],
+  ["overlayAccessActivePredicate", overlayAccessActivePredicate],
   ["overlayAccessMetadataColumns", overlayAccessMetadataColumns],
   ["guardParts.sql", platformSessionGuard(actor, now).sql],
   ["lastBroadcasterRoleChangeGuard", lastBroadcasterRoleChangeGuard],

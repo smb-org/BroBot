@@ -5,7 +5,7 @@ import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
 import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Badge, Button, ChatPreview, ConfirmDialog, DangerSection, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, SubInspector, TextArea, useDraftGuard } from "../../../dashboard/ui";
+import { Badge, Button, ChatPreview, ConfirmDialog, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, SubInspector, TextArea, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
 import { systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { textLibraryTexts } from "./locale";
@@ -598,12 +598,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                 {(data.usages[draft.name] ?? []).length === 0 ? <p className="muted">{labels.noUsages}</p> : <ul className="text-library__usages">{(data.usages[draft.name] ?? []).map((usage, index) => <li key={`${usage.kind}-${usage.label}-${String(index)}`}><span>{labels.usageKind[usage.kind]}</span><span>{usage.label}</span></li>)}</ul>}
               </InspectorSection>
 
-              {canManage && !isCreate ? <DangerSection title={labels.delete}>
-                <p className="muted">{labels.deleteHint}</p>
-                <Button danger="subtle" disabled={pending} onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>
-              </DangerSection> : null}
-
-              <InspectorActions>
+              <InspectorActions destructive={isCreate ? undefined : <Button danger="subtle" disabled={!canManage || pending} onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>}>
                 {canManage ? <Button variant="primary" disabled={pending || !valid} onClick={() => { void saveDraft(); }}>{isCreate ? labels.create : labels.save}</Button> : null}
                 {canManage ? <Button variant="subtle" disabled={pending} onClick={closeEditor}>{labels.discard}</Button> : null}
               </InspectorActions>
@@ -646,7 +641,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
           </>}
         </div>
       </details>
-      <ConfirmDialog opened={confirmingDelete} title={labels.delete} description={labels.deleteConfirm(selectedName ?? "")} confirmLabel={labels.delete} cancelLabel={labels.close} onCancel={() => { setConfirmingDelete(false); }} onConfirm={() => { void removeBlock(); }} pending={pending} danger />
+      <ConfirmDialog opened={confirmingDelete} title={labels.deleteTitle(selectedName ?? "")} description={labels.deleteConsequence(selectedName ?? "")} confirmLabel={labels.deleteConfirm(selectedName ?? "")} cancelLabel={labels.close} onCancel={() => { setConfirmingDelete(false); }} onConfirm={() => { void removeBlock(); }} pending={pending} danger />
       <ConfirmDialog
         opened={draftGuard.confirmOpen}
         title={labels.draftGuardTitle}

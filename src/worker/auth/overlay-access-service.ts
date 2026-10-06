@@ -7,10 +7,14 @@ import {
   createOverlayAccess,
   getOverlayAccessForReplacement as getStoredOverlayAccessForReplacement,
   getOverlayAccessForReveal,
+  removeRevokedOverlayAccess as removeStoredRevokedOverlayAccess,
   recordOverlayAccessReveal,
+  replaceOverlayAccess as replaceStoredOverlayAccess,
+  type NewOverlayAccessRecord,
   revokeOverlayAccess as revokeStoredOverlayAccess,
   type OverlayAccessListEntry,
   type OverlayAccessMetadata,
+  type RemoveOverlayAccessResult,
   type RevokeOverlayAccessResult,
 } from "./overlay-access-repository";
 import { listOverlayAccesses } from "./overlay-access-repository";
@@ -118,6 +122,43 @@ export const issueOverlayAccess = async (
   };
 };
 
+export const replaceOverlayAccess = async (
+  db: D1Database,
+  input: IssueOverlayAccessInput & { existing: OverlayAccessMetadata },
+): Promise<IssueOverlayAccessResult> => {
+  const expiresAt = normalizedExpiry(input.expiresAt, input.createdAt);
+  if (input.expiresAt !== null && expiresAt === null) return { outcome: "rejected" };
+
+  const token = createSecret();
+  const tokenId = crypto.randomUUID();
+  const replacement: NewOverlayAccessRecord = {
+    tokenId,
+    channelId: input.channelId,
+    overlayId: input.overlayId,
+    tokenHash: await hashOverlayToken(token, input.pepper),
+    secretEnvelope: await encryptJson({
+      v: 1,
+      tokenId,
+      channelId: input.channelId,
+      token,
+    }, parseKeyRing(input.keyRing)),
+    label: input.label,
+    expiresAt,
+    createdAt: input.createdAt,
+  };
+  const replaced = await replaceStoredOverlayAccess(db, input.existing, replacement, input.actor);
+  if (!replaced) return { outcome: "rejected" };
+  return {
+    outcome: "issued",
+    access: {
+      tokenId,
+      overlayUrl: overlayUrlFor(input.publicOrigin, token),
+      label: input.label,
+      expiresAt,
+    },
+  };
+};
+
 interface StoredAccessEnvelope {
   v: number;
   tokenId: string;
@@ -193,6 +234,16 @@ export const revokeOverlayAccess = (
   revokedAt: string,
 ): Promise<RevokeOverlayAccessResult> =>
   revokeStoredOverlayAccess(db, channelId, overlayId, tokenId, actor, revokedAt);
+
+export const removeRevokedOverlayAccess = (
+  db: D1Database,
+  channelId: string,
+  overlayId: string,
+  tokenId: string,
+  actor: ActorContext,
+  removedAt: string,
+): Promise<RemoveOverlayAccessResult> =>
+  removeStoredRevokedOverlayAccess(db, channelId, overlayId, tokenId, actor, removedAt);
 
 export const getOverlayAccessForReplacement = (
   db: D1Database,

@@ -25,8 +25,9 @@ export interface TextLibraryTexts {
   saveAndSwitch: string;
   close: string;
   delete: string;
+  deleteTitle: (name: string) => string;
+  deleteConsequence: (name: string) => string;
   deleteConfirm: (name: string) => string;
-  deleteHint: string;
   name: string;
   nameHint: string;
   nameInvalid: string;
@@ -133,8 +134,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     saveAndSwitch: "Speichern und wechseln",
     close: "Schließen",
     delete: "Textbaustein löschen",
-    deleteConfirm: (name) => `Textbaustein „${name}“ dauerhaft löschen?`,
-    deleteHint: "Der Textbaustein wird dauerhaft entfernt.",
+    deleteTitle: (name) => `Textbaustein „${name}“ löschen?`,
+    deleteConsequence: (name) => `Der Textbaustein „${name}“ und alle Verweise darauf werden entfernt.`,
+    deleteConfirm: (name) => `Textbaustein löschen: ${name}`,
     name: "Name",
     nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; wird als {name} eingesetzt.",
     nameInvalid: "Nur a–z, 0–9 und Unterstriche; höchstens 32 Zeichen.",
@@ -270,8 +272,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     saveAndSwitch: "Save and switch",
     close: "Close",
     delete: "Delete text block",
-    deleteConfirm: (name) => `Delete text block “${name}” permanently?`,
-    deleteHint: "This permanently removes the text block.",
+    deleteTitle: (name) => `Delete text block “${name}”?`,
+    deleteConsequence: (name) => `Text block “${name}” and all references to it will be removed.`,
+    deleteConfirm: (name) => `Delete text block: ${name}`,
     name: "Name",
     nameHint: "Lowercase letters, numbers, and underscores; insert it as {name}.",
     nameInvalid: "Use only a–z, 0–9, and underscores; up to 32 characters.",

@@ -16,7 +16,7 @@ import {
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage } from "./locale";
 import { useRealtimeVariableUpdates } from "./realtime";
-import { Button, ConfirmDialog, DangerSection, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, NumberField, PageHeader, Select, SubInspector, Switch } from "./ui";
+import { Button, ConfirmDialog, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, NumberField, PageHeader, Select, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 
 interface ChannelVariablesPageProperties {
@@ -460,12 +460,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             </div>
           </div> : null}
         </InspectorSection>}
-        {selected !== null ? <DangerSection title={labels.dangerSection}>
-          <p className="muted">{labels.deleteHint}</p>
-          <Button danger="subtle" disabled={!canManageContent || pending || selectedUsages.some((usage) => usage.kind === "action")} {...(!canManageContent ? { title: labels.managementLocked } : selectedUsages.some((usage) => usage.kind === "action") ? { title: labels.inUseReason(usageNames.join(", ")) } : {})} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>
-        </DangerSection> : null}
         {!canManageContent ? <p className="muted" role="note">{labels.managementLocked}</p> : null}
-        <InspectorActions>
+        <InspectorActions destructive={selected === null ? undefined : <Button danger="subtle" disabled={!canManageContent || pending || selectedUsages.some((usage) => usage.kind === "action")} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>}>
           <Button variant="primary" disabled={!canManageContent || pending || nameInvalid || draftSetValue === ""} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { void save(); }}>{labels.save}</Button>
           <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.discard}</Button>
         </InspectorActions>

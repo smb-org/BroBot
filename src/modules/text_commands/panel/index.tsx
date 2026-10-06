@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
-import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
+import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
   Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
   GamePicker, InspectorFieldRow, InspectorSection, TimeoutDurationRangeFields,
@@ -939,7 +939,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     </>}
   </dl>;
 
-  const deleteButton = command === null ? undefined : <Button icon="remove" danger="subtle" onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>;
+  const deleteButton = command === null ? undefined : <Button icon="remove" danger="subtle" disabled={!canManageContent} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>;
   return <>
     <EditorShell
       className="command-editor-shell"
@@ -967,7 +967,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       savedLabel={labels.saved}
       pendingLabel={labels.pending}
       issueLabels={{ error: labels.issueError, warning: labels.issueWarning }}
-      {...(isCreate || deleteButton === undefined ? {} : { dangerTitle: dashboardCommonTexts().dangerZone, dangerContent: deleteButton })}
+      {...(isCreate || deleteButton === undefined ? {} : { destructive: deleteButton })}
       onClose={onClose}
       closeLabel={labels.close}
     />

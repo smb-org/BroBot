@@ -267,7 +267,7 @@ export interface PanelSystemResponse {
 
 export interface PanelAuditEntry {
   auditId: string;
-  actorUserId: string;
+  actorUserId: string | null;
   actorLogin: string | null;
   actorDisplayName: string | null;
   actorKind: AuditActorKind;

@@ -213,7 +213,7 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
         inspector={selectedAudit === null ? null : (
           <SubInspector ariaLabel={texts.audit.changeData} title={auditRowLabel(selectedAudit, dashboardLanguage())} identifier={selectedAudit.auditId} closeLabel={dashboardCommonTexts().close} onClose={closeAudit}>
             <InspectorSection title={texts.audit.who}>
-              <dl className="properties"><div><dt>{texts.audit.who}</dt><dd title={selectedAudit.actorUserId}>{auditActorLabel(selectedAudit)}</dd></div></dl>
+              <dl className="properties"><div><dt>{texts.audit.who}</dt><dd title={selectedAudit.actorUserId ?? undefined}>{auditActorLabel(selectedAudit)}</dd></div></dl>
             </InspectorSection>
             {selectedDiffRows.length === 0 ? null : <InspectorSection title={texts.audit.changesHeading}>
               <AuditDiffList rows={selectedDiffRows} moduleCatalog={moduleCatalog} texts={texts} />

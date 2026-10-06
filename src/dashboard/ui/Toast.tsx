@@ -8,7 +8,7 @@ import { dismissToast, subscribeToToasts, toastsSnapshot } from "./toast-store";
 /** The dashboard shell mounts this host once; modules call `notify` through the UI seam. */
 export function ToastHost() {
   const toasts = useSyncExternalStore(subscribeToToasts, toastsSnapshot, toastsSnapshot);
-  const closeLabel = dashboardCommonTexts().close;
+  const closeLabel = dashboardCommonTexts().dismissNotification;
 
   return (
     <Portal>

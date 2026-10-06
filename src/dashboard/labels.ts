@@ -113,7 +113,7 @@ export interface PlatformTexts {
   removeConfirmTitle: (name: string) => string;
   removeBroadcasterHint: string;
   removeQuestion: (name: string) => string;
-  confirmRemove: string;
+  confirmRemove: (name: string) => string;
   audit: string;
   loadAudit: string;
   auditEmpty: string;
@@ -183,10 +183,10 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     addMemberConfirmButton: "Endgültig hinzufügen",
     change: "Ändern",
     remove: "Entfernen",
-    removeConfirmTitle: (name) => `Zugriff für ${name} entfernen?`,
+    removeConfirmTitle: (name) => `Zugriff für „${name}“ entfernen?`,
     removeBroadcasterHint: "Die Broadcaster-Rolle kann der Betreiber nicht entfernen.",
-    removeQuestion: (name) => `Zugriff für ${name} wirklich entfernen?`,
-    confirmRemove: "Endgültig entfernen",
+    removeQuestion: (name) => `${name} verliert den Zugriff auf diesen Kanal.`,
+    confirmRemove: (name) => `Mitgliedszugriff entfernen: ${name}`,
     audit: "Betreiber-Audit",
     loadAudit: "Audit wird geladen …",
     auditEmpty: "Noch keine Betreiberhandlungen protokolliert.",
@@ -260,10 +260,10 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     addMemberConfirmButton: "Add permanently",
     change: "Change",
     remove: "Remove",
-    removeConfirmTitle: (name) => `Remove access for ${name}?`,
+    removeConfirmTitle: (name) => `Remove access for “${name}”?`,
     removeBroadcasterHint: "The operator cannot remove the broadcaster role.",
-    removeQuestion: (name) => `Remove access for ${name}?`,
-    confirmRemove: "Remove permanently",
+    removeQuestion: (name) => `${name} will lose access to this channel.`,
+    confirmRemove: (name) => `Remove member access: ${name}`,
     audit: "Operator audit",
     loadAudit: "Loading audit …",
     auditEmpty: "No operator actions have been logged yet.",
@@ -368,8 +368,8 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
     grantPermanently: "Zugriff endgültig freigeben", membersWithAccess: "Freigegebene Mitglieder",
     load: "Mitglieder werden geladen …", loadMore: "Weitere Mitglieder laden", loadingMore: "Weitere Mitglieder werden geladen …",
     sessionInvalid: "Deine Sitzung ist nicht mehr gültig.", changeFailed: "Die Mitgliederänderung ist fehlgeschlagen.",
-    removeSelf: "Deinen eigenen Zugang zu diesem Kanal wirklich entziehen? Du sperrst dich damit selbst aus und kommst nur über eine andere berechtigte Person zurück.",
-    removeOther: (name) => `Zugriff für ${name} wirklich entziehen? Die Person verliert den Zugang zu diesem Kanal und allen kanalbezogenen Panel-Daten und -Funktionen.`,
+    removeSelf: "Du verlierst deinen Zugang und kannst nur über eine andere berechtigte Person zurückkehren.",
+    removeOther: (name) => `${name} verliert den Zugang zu diesem Kanal und seinen kanalbezogenen Panel-Daten und -Funktionen.`,
     unsavedRoleTitle: "Ungespeicherte Rollenänderung",
     unsavedRoleDescription: "Die neue Rolle ist noch nicht gespeichert.",
     continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln",
@@ -385,8 +385,8 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
     grantPermanently: "Grant access permanently", membersWithAccess: "Members with access",
     load: "Loading members …", loadMore: "Load more members", loadingMore: "Loading more members …",
     sessionInvalid: "Your session is no longer valid.", changeFailed: "The member change failed.",
-    removeSelf: "Remove your own access to this channel? This locks you out and you can return only through another authorized person.",
-    removeOther: (name) => `Remove access for ${name}? This person will lose access to this channel and all channel-specific panel data and features.`,
+    removeSelf: "You will lose access to this channel and can return only through another authorized person.",
+    removeOther: (name) => `${name} will lose access to this channel and its channel-specific panel data and features.`,
     unsavedRoleTitle: "Unsaved role change",
     unsavedRoleDescription: "The new role has not been saved yet.",
     continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch",

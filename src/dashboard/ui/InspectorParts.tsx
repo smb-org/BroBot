@@ -40,10 +40,10 @@ function InfoButton({ label, help }: { label: string; help: string }) {
   </span>;
 }
 
-export function InspectorSection({ title, children, danger = false, help }: { title: ReactNode; children: ReactNode; danger?: boolean; help?: string }) {
+export function InspectorSection({ title, children, help }: { title: ReactNode; children: ReactNode; help?: string }) {
   const headingId = useId();
   return (
-    <section className={`inspector-content-section${danger ? " inspector-content-section--danger" : ""}`} aria-labelledby={headingId}>
+    <section className="inspector-content-section" aria-labelledby={headingId}>
       <h3 id={headingId} className="inspector-content-section__heading"><span>{title}</span>{help === undefined ? null : <InfoButton label={typeof title === "string" ? title : help} help={help} />}</h3>
       <div className="inspector-content-section__body">{children}</div>
     </section>
@@ -62,10 +62,10 @@ export function InspectorFieldRow({ label, help, children, className }: { label:
   );
 }
 
-export function InspectorActions({ children }: { children: ReactNode }) {
-  return <div className="inspector-actions">{children}</div>;
-}
-
-export function DangerSection({ title, children }: { title: ReactNode; children: ReactNode }) {
-  return <InspectorSection title={title} danger>{children}</InspectorSection>;
+export function InspectorActions({ children, destructive }: { children?: ReactNode; destructive?: ReactNode }) {
+  const destructiveOnly = destructive !== undefined && (children === null || children === undefined || children === false);
+  return <div className={`inspector-actions${destructiveOnly ? " inspector-actions--destructive-only" : ""}`}>
+    <div className="inspector-actions__primary">{children}</div>
+    {destructive === undefined ? null : <div className="inspector-actions__destructive">{destructive}</div>}
+  </div>;
 }

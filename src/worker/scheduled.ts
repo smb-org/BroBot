@@ -9,6 +9,7 @@ import { purgeOldTextCommandUserCooldowns } from "./db/text-command-user-cooldow
 import { maintainEventSubSubscriptions } from "./eventsub-subscriptions";
 import { eventSubMessageCutoff } from "./eventsub";
 import { maintainStreamStates } from "./stream-state-lookup";
+import { purgeRevokedOverlayAccesses } from "./auth/overlay-access-repository";
 import { MODULES } from "../modules/registry";
 
 export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
@@ -34,7 +35,9 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   ];
   // The count trim is a full-table scan (see EVENT_LOG_LIMIT's comment) --
   // cheap once a day, not something every hourly tick should pay for.
-  if (new Date(now).getUTCHours() === EVENT_LOG_DAILY_TRIM_HOUR) tasks.push(trimEventLogToLimit(env.DB));
+  if (new Date(now).getUTCHours() === EVENT_LOG_DAILY_TRIM_HOUR) {
+    tasks.push(trimEventLogToLimit(env.DB), purgeRevokedOverlayAccesses(env.DB, now));
+  }
   const work = Promise.all(tasks).then(() => undefined);
   executionContext.waitUntil(work);
   await work;

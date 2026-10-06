@@ -13,6 +13,7 @@ import {
   fetchOverlayTokens,
   importLegacyOverlay,
   issueOverlayAccess,
+  removeOverlayAccess,
   PanelApiError,
   replaceOverlayAccess,
   revokeOverlayAccess,
@@ -24,8 +25,8 @@ import {
   type PanelOverlaySummary,
   type PanelOverlayToken,
 } from "./api";
-import { apiErrorText, dashboardCommonTexts, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
-import { Button, ConfirmDialog, DangerSection, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, NumberField, PageHeader, Select, SubInspector } from "./ui";
+import { apiErrorText, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
+import { ActionMenu, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, notify, NumberField, PageHeader, Select, SubInspector } from "./ui";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -36,6 +37,16 @@ interface OverlaysPageProperties {
 
 const blankOverlayName = "";
 const maskOverlaySecret = (overlayUrl: string): string => overlayUrl.replace(/([#&]token=)[^&]*/u, "$1••••••");
+const copyPromiseToClipboard = async (text: Promise<string>): Promise<void> => {
+  const clipboard = Reflect.get(navigator, "clipboard") as Clipboard | undefined;
+  if (clipboard === undefined) throw new Error("Clipboard access is unavailable.");
+  if (typeof ClipboardItem !== "undefined" && typeof clipboard.write === "function") {
+    await clipboard.write([new ClipboardItem({ "text/plain": text })]);
+    return;
+  }
+  if (typeof clipboard.writeText !== "function") throw new Error("Clipboard access is unavailable.");
+  await clipboard.writeText(await text);
+};
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 type SetupTarget = "obs" | "streamelements" | "soundalerts";
 type SetupSnippetKind = "html" | "js" | "fields";
@@ -74,6 +85,7 @@ const parseLegacyOverlayLink = (value: string): { token: string; variableName: s
 
 interface ScopedOverlaySecret extends PanelIssuedOverlayAccess {
   overlayId: string;
+  newlyIssued: boolean;
 }
 
 interface OverlaySetupAssistantProperties {
@@ -218,6 +230,7 @@ function OverlaySetupAssistant({
 }
 
 export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEditor }: OverlaysPageProperties): ReactElement {
+  const createManagementReasonId = useId();
   const language = dashboardLanguage();
   const labels = overlaysTexts(language);
   const [overlays, setOverlays] = useState<readonly PanelOverlaySummary[]>([]);
@@ -225,7 +238,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(initialSelection ?? null);
   const selectedIdRef = useRef<string | null>(initialSelection ?? null);
   const [selectedOverlayData, setSelectedOverlayData] = useState<{
@@ -240,14 +252,15 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const [draftHeight, setDraftHeight] = useState<number | "">(1080);
   const [accessName, setAccessName] = useState("");
   const [secret, setSecret] = useState<ScopedOverlaySecret | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [showSecret, setShowSecret] = useState(false);
+  const [copiedAccessId, setCopiedAccessId] = useState<string | null>(null);
+  const [revealedAccessId, setRevealedAccessId] = useState<string | null>(null);
   const [setupAccessId, setSetupAccessId] = useState<string | null>(null);
   const [setupTarget, setSetupTarget] = useState<SetupTarget>("obs");
   const [setupOutput, setSetupOutput] = useState("whole");
   const [setupCopiedUrl, setSetupCopiedUrl] = useState(false);
   const [setupCopiedSnippet, setSetupCopiedSnippet] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<PanelOverlayAccess | null>(null);
+  const [replaceTarget, setReplaceTarget] = useState<PanelOverlayAccess | null>(null);
   const [legacyTokens, setLegacyTokens] = useState<readonly PanelOverlayToken[]>([]);
   const [legacyNextOffset, setLegacyNextOffset] = useState<number | null>(null);
   const [legacyError, setLegacyError] = useState<string | null>(null);
@@ -266,12 +279,16 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const invalidateSecret = useCallback((): void => {
     secretVersion.current++;
     setSecret(null);
-    setCopied(false);
-    setShowSecret(false);
+    setCopiedAccessId(null);
+    setRevealedAccessId(null);
   }, []);
   const changeSelection = useCallback((nextId: string | null): void => {
     invalidateSecret();
     setSetupAccessId(null);
+    setRevokeTarget(null);
+    setReplaceTarget(null);
+    setRevealedAccessId(null);
+    setCopiedAccessId(null);
     setSetupTarget("obs");
     setSetupOutput("whole");
     setSetupCopiedUrl(false);
@@ -303,6 +320,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const selected = useMemo(() => overlays.find((overlay) => overlay.id === selectedId) ?? null, [overlays, selectedId]);
   const selectedOverlay = selectedOverlayData?.id === selectedId ? selectedOverlayData.overlay : null;
   const accesses = selectedOverlayData?.id === selectedId ? selectedOverlayData.accesses : [];
+  const revokedAccesses = accesses.filter((access) => access.revokedAt !== null);
   const setupAccess = accesses.find((access) => access.tokenId === setupAccessId) ?? null;
 
   const load = useCallback(async (isActive: () => boolean = () => true): Promise<void> => {
@@ -318,7 +336,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       }
     } catch (caught) {
       if (!isActive() || version !== requestVersion.current) return;
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
     } finally {
       if (isActive() && version === requestVersion.current) setLoading(false);
     }
@@ -334,7 +352,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setLegacyError(null);
     } catch (caught) {
       if (!pageActiveRef.current || legacyRequestVersion.current !== version || channelIdRef.current !== channelId) return;
-      setLegacyError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
     }
   }, [channelId, labels.loadError]);
 
@@ -368,7 +386,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setError(null);
     }).catch((caught: unknown) => {
       if (!active) return;
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
     });
     return () => { active = false; };
   }, [canManage, channelId, labels.loadError, selectedId]);
@@ -406,7 +424,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       changeSelection(created.overlay.id);
       await load();
     } catch (caught) {
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError });
     } finally {
       setPending(false);
     }
@@ -429,7 +447,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       changeSelection(null);
       setSelectedOverlayData(null);
       await load();
-      setNotice(result?.closingPending ? labels.revokedPending : null);
+      if (result?.closingPending) notify({ tone: "info", message: labels.revokedPending });
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.code === "overlay_changed_concurrently") {
         setError(labels.conflict);
@@ -442,10 +460,10 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     }
   };
 
-  const saveIssuedSecret = (issued: PanelIssuedOverlayAccess, overlayId: string): void => {
-    setSecret({ ...issued, overlayId });
-    setCopied(false);
-    setShowSecret(false);
+  const saveIssuedSecret = (issued: PanelIssuedOverlayAccess, overlayId: string, newlyIssued: boolean): void => {
+    setSecret({ ...issued, overlayId, newlyIssued });
+    setCopiedAccessId(null);
+    setRevealedAccessId(null);
   };
 
   const issue = async (): Promise<void> => {
@@ -458,32 +476,27 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     setError(null);
     try {
       const issued = await issueOverlayAccess(channelId, overlayId, accessName.trim());
-      if (secretContextIsCurrent(version, overlayId, requestedChannelId)) saveIssuedSecret(issued, overlayId);
+      if (secretContextIsCurrent(version, overlayId, requestedChannelId)) saveIssuedSecret(issued, overlayId, true);
       setAccessName("");
       await refreshSelected();
       await load();
     } catch (caught) {
       if (secretContextIsCurrent(version, overlayId, requestedChannelId)) {
-        setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
+        notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError });
       }
     } finally {
       setPending(false);
     }
   };
 
-  const revealAccessUrl = async (access: PanelOverlayAccess): Promise<string | null> => {
+  const getAccessUrl = async (access: PanelOverlayAccess): Promise<string | null> => {
     if (selectedOverlay === null || !canManage || access.revokedAt !== null || !access.recoverable) return null;
     if (secret?.overlayId === selectedOverlay.id && secret.tokenId === access.tokenId) return secret.overlayUrl;
     const overlayId = selectedOverlay.id;
-    invalidateSecret();
     const version = secretVersion.current;
     const requestedChannelId = channelId;
     const result = await revealOverlayAccess(channelId, overlayId, access.tokenId);
-    if (secretContextIsCurrent(version, overlayId, requestedChannelId)) {
-      saveIssuedSecret({ tokenId: access.tokenId, overlayUrl: result.overlayUrl, label: access.label, expiresAt: access.expiresAt }, overlayId);
-      return result.overlayUrl;
-    }
-    return null;
+    return secretContextIsCurrent(version, overlayId, requestedChannelId) ? result.overlayUrl : null;
   };
 
   const reveal = async (access: PanelOverlayAccess): Promise<void> => {
@@ -493,10 +506,16 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     setPending(true);
     setError(null);
     try {
-      await revealAccessUrl(access);
+      const overlayUrl = await getAccessUrl(access);
+      if (overlayUrl !== null && accessContextIsCurrent(overlayId, requestedChannelId)) {
+        if (secret?.overlayId !== overlayId || secret.tokenId !== access.tokenId) {
+          saveIssuedSecret({ tokenId: access.tokenId, overlayUrl, label: access.label, expiresAt: access.expiresAt }, overlayId, false);
+        }
+        setRevealedAccessId(access.tokenId);
+      }
     } catch (caught) {
       if (accessContextIsCurrent(overlayId, requestedChannelId)) {
-        setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
+        notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError });
       }
     } finally {
       setPending(false);
@@ -508,24 +527,19 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     const overlayId = selectedOverlay.id;
     const requestedChannelId = channelId;
     try {
-      const overlayUrl = secret?.overlayId === overlayId && secret.tokenId === setupAccess.tokenId
-        ? secret.overlayUrl
-        : null;
       setSetupCopiedUrl(false);
       setError(null);
-      if (overlayUrl === null) {
-        setPending(true);
-        await revealAccessUrl(setupAccess);
-        return;
-      }
       const elementId = selectedOutputElementId(selectedOverlay.elements, setupOutput);
-      const copyPromise = navigator.clipboard.writeText(elementOutputUrl(overlayUrl, elementId));
+      const url = getAccessUrl(setupAccess).then((overlayUrl) => {
+        if (overlayUrl === null) throw new Error("The overlay link could not be revealed.");
+        return elementOutputUrl(overlayUrl, elementId);
+      });
       setPending(true);
-      await copyPromise;
+      await copyPromiseToClipboard(url);
       if (accessContextIsCurrent(overlayId, requestedChannelId)) setSetupCopiedUrl(true);
     } catch (caught) {
       if (accessContextIsCurrent(overlayId, requestedChannelId)) {
-        setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.copyError);
+        notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.copyError });
       }
     } finally {
       setPending(false);
@@ -538,12 +552,13 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setSetupCopiedSnippet(`${target}:${kind}`);
       setError(null);
     } catch {
-      setError(labels.copyError);
+      notify({ tone: "error", message: labels.copyError });
     }
   };
 
-  const replace = async (access: PanelOverlayAccess): Promise<void> => {
-    if (selectedOverlay === null || !canManage || pending || access.revokedAt !== null) return;
+  const replace = async (): Promise<void> => {
+    const access = replaceTarget;
+    if (selectedOverlay === null || access === null || !canManage || pending || access.revokedAt !== null) return;
     const overlayId = selectedOverlay.id;
     invalidateSecret();
     const version = secretVersion.current;
@@ -552,9 +567,12 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     setError(null);
     try {
       const replacement = await replaceOverlayAccess(channelId, overlayId, access.tokenId);
-      if (secretContextIsCurrent(version, overlayId, requestedChannelId)) saveIssuedSecret(replacement, overlayId);
+      if (secretContextIsCurrent(version, overlayId, requestedChannelId)) saveIssuedSecret(replacement, overlayId, true);
+      if (setupAccessId === access.tokenId) setSetupAccessId(replacement.tokenId);
+      setReplaceTarget(null);
       await refreshSelected();
       await load();
+      if (replacement.closingPending) notify({ tone: "info", message: labels.revokedPending });
     } catch (caught) {
       if (secretContextIsCurrent(version, overlayId, requestedChannelId)) {
         setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
@@ -571,7 +589,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     try {
       const result = await revokeOverlayAccess(channelId, selectedOverlay.id, revokeTarget.tokenId);
       setRevokeTarget(null);
-      setNotice(result.closingPending ? labels.revokedPending : labels.revoked);
+      notify(result.closingPending
+        ? { tone: "info", message: labels.revokedPending }
+        : { tone: "success", message: labels.revoked });
       invalidateSecret();
       await refreshSelected();
       await load();
@@ -582,14 +602,45 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     }
   };
 
-  const copySecret = async (): Promise<void> => {
-    if (secret === null || !canManage || secret.overlayId !== selectedIdRef.current) return;
+  const removeRevokedAccess = async (access: PanelOverlayAccess): Promise<void> => {
+    if (selectedOverlay === null || access.revokedAt === null || !canManage || pending) return;
+    const overlayId = selectedOverlay.id;
+    setPending(true);
+    setError(null);
     try {
-      await navigator.clipboard.writeText(secret.overlayUrl);
-      if (permissionRef.current && secret.overlayId === selectedIdRef.current) setCopied(true);
-      setError(null);
-    } catch {
-      setError(labels.copyError);
+      await removeOverlayAccess(channelId, overlayId, access.tokenId);
+      notify({ tone: "success", message: labels.removed });
+      if (setupAccessId === access.tokenId) setSetupAccessId(null);
+      invalidateSecret();
+      await refreshSelected();
+      await load();
+    } catch (caught) {
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError });
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const copyAccess = async (access: PanelOverlayAccess): Promise<void> => {
+    if (selectedOverlay === null || !canManage || pending || access.revokedAt !== null || !isAccessActive(access) || !access.recoverable) return;
+    const overlayId = selectedOverlay.id;
+    const requestedChannelId = channelId;
+    setCopiedAccessId(null);
+    setError(null);
+    try {
+      setPending(true);
+      const url = getAccessUrl(access);
+      await copyPromiseToClipboard(url.then((value) => {
+        if (value === null) throw new Error("The overlay link could not be revealed.");
+        return value;
+      }));
+      if (accessContextIsCurrent(overlayId, requestedChannelId)) setCopiedAccessId(access.tokenId);
+    } catch (caught) {
+      if (accessContextIsCurrent(overlayId, requestedChannelId)) {
+        notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.copyError });
+      }
+    } finally {
+      setPending(false);
     }
   };
 
@@ -600,7 +651,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     try {
       const result = await revokeOverlayToken(channelId, legacyRevokeTarget.id, labels.legacyRevocationReason);
       setLegacyRevokeTarget(null);
-      setNotice(result.closingPending ? labels.revokedPending : labels.revoked);
+      notify(result.closingPending
+        ? { tone: "info", message: labels.revokedPending }
+        : { tone: "success", message: labels.revoked });
       await loadLegacyTokens();
     } catch (caught) {
       setLegacyError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
@@ -624,7 +677,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setLegacyImportLink("");
       changeSelection(result.overlay.id);
       await Promise.all([load(), loadLegacyTokens()]);
-      setNotice(result.closingPending ? labels.legacyImportClosingPending : labels.legacyImportSuccess(result.overlay.name));
+      notify(result.closingPending
+        ? { tone: "info", message: labels.legacyImportClosingPending }
+        : { tone: "success", message: labels.legacyImportSuccess(result.overlay.name) });
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.code === "overlay_token_not_found") {
         setLegacyImportError(labels.legacyImportTokenNotFound);
@@ -642,11 +697,10 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     (access.expiresAt === null || Date.parse(access.expiresAt) > now);
   const manageReason = canManage ? undefined : labels.managementLocked;
   const setupCopyUrlReason = setupAccess === null ? null
-    : !canManage ? labels.setupCopyUnavailable
+    : !canManage ? null
       : !setupAccess.recoverable ? labels.accessUnrecoverable
         : !isAccessActive(setupAccess) ? labels.setupAccessInactive : null;
-  const setupCanCopyUrl = setupAccess !== null && setupCopyUrlReason === null;
-  const setupUrlRevealed = setupAccess !== null && secret?.overlayId === selectedId && secret.tokenId === setupAccess.tokenId;
+  const setupCanCopyUrl = setupAccess !== null && canManage && setupCopyUrlReason === null;
   const setupBaseUrl = setupAccess !== null && secret?.overlayId === selectedId && secret.tokenId === setupAccess.tokenId
     ? maskOverlaySecret(secret.overlayUrl)
     : `${window.location.origin}/overlay#token=••••••`;
@@ -655,14 +709,13 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     : `${labels.legacyTokenName} (${legacyRevokeTarget.id.slice(0, 8)})`;
   const list = <section className="overlays-page config-section" aria-label={labels.list}>
     {loading ? <p className="loading-line">{labels.loading}</p> : null}
-    {error === null ? null : <p className="form-error" role="alert">{error}</p>}
     {!loading && overlays.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
     {!loading && overlays.length > 0 ? <div className={`table-wrap overlays-table-wrap${selectedId !== null || creating ? " overlays-table-wrap--inspector-open" : ""}`}>
       <table className="table overlays-table">
         <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.elements}</th><th scope="col">{labels.accesses}</th><th scope="col">{labels.lastUsedAt}</th></tr></thead>
         <tbody>{overlays.map((overlay) => <tr key={overlay.id} tabIndex={0} aria-selected={overlay.id === selectedId}
-          onClick={() => { setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); setNotice(null); }}
-          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); setNotice(null); } }}>
+          onClick={() => { setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); }}
+          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); } }}>
           <th scope="row">{overlay.name}</th>
           <td>{overlay.elementCount}</td>
           <td>{overlay.accessCount}</td>
@@ -673,30 +726,29 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     {legacyTokens.length > 0 ? <section className="overlay-legacy-links" aria-label={labels.legacyTitle}>
       <div className="overlay-legacy-links__heading">
         <h2>{labels.legacyTitle}</h2>
-        {canManage ? <Button variant="neutral" disabled={pending} onClick={() => {
+        <Button variant="neutral" disabled={!canManage || pending} onClick={() => {
           setLegacyImportLink("");
           setLegacyImportError(null);
           setLegacyImportOpen(true);
-        }}>{labels.legacyImport}</Button> : null}
+        }}>{labels.legacyImport}</Button>
       </div>
       <p className="muted">{labels.legacyDescription}</p>
-      <DangerSection title={dashboardCommonTexts().dangerZone}><ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item">
-        <div><strong>{labels.legacyTokenName}</strong>
-          <span className="muted">{labels.legacyTokenId}: {token.id.slice(0, 8)}</span>
+      {manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}
+      <ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item overlay-access-list__item--legacy">
+        <div className="overlay-access-list__summary">
+          <strong>{labels.legacyTokenName}</strong>
+          <span className="mono muted">{labels.legacyTokenId}: {token.id.slice(0, 8)}</span>
           <span className="muted">{labels.legacyCreatedAt}: {formatTimestamp(token.createdAt)}</span>
           <span className="muted">{token.createdBy ?? labels.legacyCreatedByUnknown}</span>
           <span className="muted">{token.lastUsedAt === null ? labels.never : `${labels.lastUsedAt}: ${formatTimestamp(token.lastUsedAt)}`}</span>
         </div>
-        <Button danger="subtle" disabled={!canManage || pending} {...(manageReason === undefined ? {} : { title: manageReason })}
-          onClick={() => { setLegacyRevokeTarget(token); }}>{labels.revoke}</Button>
+        <div className="overlay-access-list__actions"><ActionMenu label={labels.accessActions(`${labels.legacyTokenName} ${token.id.slice(0, 8)}`)} items={[
+          { label: `${labels.revoke} …`, disabled: !canManage || pending, danger: true, onSelect: () => { setLegacyRevokeTarget(token); } },
+        ]} /></div>
       </li>)}</ul>
       {legacyNextOffset === null ? null : <Button variant="subtle" disabled={pending}
         onClick={() => { void loadLegacyTokens(legacyNextOffset, true); }}>{labels.loadMore}</Button>}
-      </DangerSection>
     </section> : null}
-    {legacyError === null ? null : <p className="form-error" role="alert">{legacyError}</p>}
-    {manageReason === undefined ? null : <p className="muted" role="note">{labels.readOnly}</p>}
-    {notice === null ? null : <p className="muted" role="status">{notice}</p>}
   </section>;
 
   const inspector = creating ? <SubInspector ariaLabel={labels.createTitle} title={labels.createTitle} closeLabel={labels.close} onClose={closeInspector}>
@@ -714,7 +766,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         <NumberField id="overlay-width" label={labels.width} value={draftWidth} min={64} max={3840} step={1} increaseLabel={`${labels.width} +1`} decreaseLabel={`${labels.width} −1`} disabled={pending} onChange={setDraftWidth} />
         <NumberField id="overlay-height" label={labels.height} value={draftHeight} min={64} max={2160} step={1} increaseLabel={`${labels.height} +1`} decreaseLabel={`${labels.height} −1`} disabled={pending} onChange={setDraftHeight} />
       </div> : null}
-      {error === null ? null : <p className="form-error" role="alert">{error}</p>}
       {manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}
       <InspectorActions><Button variant="primary" disabled={!canManage || pending || draftName.trim().length === 0} onClick={() => { void create(); }}>{labels.createSubmit}</Button>
         <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.cancel}</Button></InspectorActions>
@@ -723,87 +774,121 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     identifier={selected?.id} closeLabel={labels.close} onClose={closeInspector}>
     {selectedOverlay === null ? <p className="loading-line">{labels.loading}</p> : <div className="overlay-inspector">
       <InspectorSection title={labels.details}>
-        <dl className="properties"><div><dt>{labels.width} × {labels.height}</dt><dd>{selectedOverlay.width} × {selectedOverlay.height}</dd></div>
-          <div><dt>{labels.elements}</dt><dd>{selectedOverlay.elements.length}</dd></div></dl>
-        {onOpenEditor === undefined ? null : <Button variant="primary" onClick={() => { onOpenEditor(selectedOverlay.id); }}>{labels.editComposition}</Button>}
-      </InspectorSection>
-      <InspectorSection title={labels.elements}>
-        {selectedOverlay.elements.length === 0 ? <p className="muted">{labels.elementCount(0)}</p> : <ul className="overlay-elements-list">{selectedOverlay.elements.map((element) => <li key={element.id}>
-          {element.label || element.id}{element.variableName === null ? <span className="muted"> · {element.missingVariableName === undefined || element.missingVariableName === null ? "—" : labels.missingVariable(element.missingVariableName)}</span> : null}
-        </li>)}</ul>}
+        <dl className="properties">
+          <div><dt>{labels.size}</dt><dd>{selectedOverlay.width} × {selectedOverlay.height}</dd></div>
+          <div><dt>{labels.elements}</dt><dd>{labels.elementsSummary(selectedOverlay.elements.length, selectedOverlay.elements.slice(0, 3).map((element) => element.label || element.id).join(", ") + (selectedOverlay.elements.length > 3 ? ", …" : ""))}</dd></div>
+          <div><dt>{labels.lastUsedAt}</dt><dd>{selected?.lastUsedAt === null || selected?.lastUsedAt === undefined ? labels.lastUsedNever : formatTimestamp(selected.lastUsedAt)}</dd></div>
+        </dl>
+        {onOpenEditor === undefined ? null : <Button variant="primary" disabled={!canManage}
+          onClick={() => { onOpenEditor(selectedOverlay.id); }}>{labels.editComposition}</Button>}
       </InspectorSection>
       <InspectorSection title={labels.accesses}>
-        <InspectorFieldRow label={labels.issueLabel} help={labels.issueHint}>
+        {manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}
+        <div className="overlay-access-create">
           <Field id="overlay-access-name" label={labels.issueLabel} value={accessName} maxLength={40} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManage || pending} onChange={setAccessName} />
-        </InspectorFieldRow>
-          <Button variant="primary" disabled={!canManage || pending || accessName.trim().length === 0}
-            {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void issue(); }}>{labels.issue}</Button>
-          {accesses.length === 0 ? <p className="muted">{labels.noAccesses}</p> : <ul className="overlay-access-list">{accesses.map((access) => {
+          <Button size="compact" variant="primary" disabled={!canManage || pending || accessName.trim().length === 0}
+            onClick={() => { void issue(); }}>{labels.issue}</Button>
+        </div>
+        {accesses.filter((access) => access.revokedAt === null).length === 0 ? <p className="muted">{labels.noAccesses}</p> : <ul className="overlay-access-list">{accesses.filter((access) => access.revokedAt === null).map((access) => {
             const active = isAccessActive(access);
             const status = access.revokedAt !== null ? labels.revokedStatus : active ? labels.active : labels.expired;
-            const statusTone = access.revokedAt !== null ? "revoked" : active ? "active" : "expired";
+            const rowSecret = canManage && secret?.overlayId === selectedOverlay.id && secret.tokenId === access.tokenId ? secret : null;
             return (
               <li key={access.tokenId} className="overlay-access-list__item">
-                <div><strong>{access.label}</strong>
-                  <span className="muted">{labels.lastUsedAt}: {access.lastUsedAt === null ? labels.lastUsedNever : formatTimestamp(access.lastUsedAt)}</span>
-                  <span className="overlay-access-list__status" data-status={statusTone}>{labels.statusLabel}: {status}</span>
-                </div>
+                <div className="overlay-access-list__row">
+                  <div className="overlay-access-list__summary">
+                    <strong>{access.label}</strong>
+                    <Led status={active ? "green" : "off"} word={status} />
+                    <span className="overlay-access-list__last-used mono">{labels.lastUsedAt}: {access.lastUsedAt === null ? labels.lastUsedNever : formatTimestamp(access.lastUsedAt)}</span>
+                  </div>
                 <div className="overlay-access-list__actions">
-                  <Button variant="neutral" ariaPressed={setupAccessId === access.tokenId} disabled={pending}
-                    onClick={() => {
-                      if (secret?.overlayId !== selectedId || secret.tokenId !== access.tokenId) invalidateSecret();
+                  <Button size="compact" variant="neutral" icon="copy" className="overlay-access-list__copy" ariaLabel={`${copiedAccessId === access.tokenId ? labels.copied : labels.copyLink}: ${access.label}`}
+                    disabled={!canManage || pending || !active || !access.recoverable} onClick={() => { void copyAccess(access); }}>
+                    {copiedAccessId === access.tokenId ? labels.copied : labels.copyLink}
+                  </Button>
+                  <ActionMenu label={labels.accessActions(access.label)} items={[
+                    { label: labels.setup, disabled: pending, onSelect: () => {
+                      if (setupAccessId === access.tokenId) {
+                        setSetupAccessId(null);
+                        return;
+                      }
+                      if (secret?.overlayId !== selectedOverlay.id || secret.tokenId !== access.tokenId) invalidateSecret();
+                      setRevealedAccessId(null);
                       setSetupAccessId(access.tokenId);
                       setSetupTarget("obs");
                       setSetupOutput("whole");
                       setSetupCopiedUrl(false);
                       setSetupCopiedSnippet(null);
-                    }}>{labels.setup}</Button>
-                  <Button variant="neutral" disabled={!canManage || pending || !active || !access.recoverable} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void reveal(access); }}>{labels.reveal}</Button>
-                  <Button variant="neutral" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void replace(access); }}>{labels.replace}</Button>
-                  {!access.recoverable ? <span className="muted">{labels.accessUnrecoverable}</span> : null}
+                    } },
+                    { label: revealedAccessId === access.tokenId ? labels.hideLink : labels.showLink,
+                      disabled: !canManage || pending || !active || !access.recoverable,
+                      onSelect: () => {
+                        if (revealedAccessId === access.tokenId) setRevealedAccessId(null);
+                        else if (rowSecret !== null) setRevealedAccessId(access.tokenId);
+                        else void reveal(access).then(() => { setRevealedAccessId(access.tokenId); });
+                      } },
+                    { label: `${labels.replace} …`, disabled: !canManage || pending || access.revokedAt !== null,
+                      onSelect: () => { setReplaceTarget(access); } },
+                    { divider: true },
+                    { label: `${labels.revoke} …`, disabled: !canManage || pending || access.revokedAt !== null,
+                      danger: true, onSelect: () => { setRevokeTarget(access); } },
+                  ]} />
                 </div>
-              </li>
-            );
+                </div>
+                {rowSecret !== null ? <div className="overlay-access-list__expanded">
+                  {rowSecret.newlyIssued ? <strong>{labels.newLinkTitle}</strong> : null}
+                  <code>{revealedAccessId === access.tokenId ? rowSecret.overlayUrl : maskOverlaySecret(rowSecret.overlayUrl)}</code>
+                </div> : !access.recoverable ? <p className="overlay-access-list__reason">{labels.copyLinkUnrecoverableReason}</p>
+                  : !active ? <p className="overlay-access-list__reason">{labels.linkExpiredReason}</p> : null}
+                {setupAccess?.tokenId !== access.tokenId ? null : <OverlaySetupAssistant labels={labels} overlay={selectedOverlay} access={setupAccess}
+                  target={setupTarget} onTargetChange={(target) => { setSetupTarget(target); setSetupCopiedSnippet(null); }}
+                  output={setupOutput} onOutputChange={(output) => { setSetupOutput(output); setSetupCopiedUrl(false); }}
+                  visibleUrl={setupBaseUrl} canCopyUrl={setupCanCopyUrl} copyUrlReason={setupCopyUrlReason} copiedUrl={setupCopiedUrl}
+                  urlActionLabel={labels.setupCopyRevealedUrl} pending={pending}
+                  onCopyUrl={() => { void copySetupUrl(); }} copiedSnippet={setupCopiedSnippet}
+                  onCopySnippet={(target, kind, content) => { void copySetupSnippet(target, kind, content); }} />}
+              </li>);
           })}</ul>}
-          {setupAccess === null ? null : <OverlaySetupAssistant labels={labels} overlay={selectedOverlay} access={setupAccess}
-            target={setupTarget} onTargetChange={(target) => { setSetupTarget(target); setSetupCopiedSnippet(null); }}
-            output={setupOutput} onOutputChange={(output) => { setSetupOutput(output); setSetupCopiedUrl(false); }}
-            visibleUrl={setupBaseUrl} canCopyUrl={setupCanCopyUrl} copyUrlReason={setupCopyUrlReason} copiedUrl={setupCopiedUrl}
-            urlActionLabel={setupUrlRevealed ? labels.setupCopyRevealedUrl : labels.setupRevealUrl} pending={pending}
-            onCopyUrl={() => { void copySetupUrl(); }} copiedSnippet={setupCopiedSnippet}
-            onCopySnippet={(target, kind, content) => { void copySetupSnippet(target, kind, content); }} />}
-          {secret === null || secret.overlayId !== selectedId || !canManage ? null : <div className="overlay-access-secret" aria-label={labels.issue}>
-            <p className="overlay-access-secret__masked"><code>{maskOverlaySecret(secret.overlayUrl)}</code></p>
-            <Button variant="neutral" disabled={pending} onClick={() => { setShowSecret((current) => !current); }}>
-              {showSecret ? labels.hideLink : labels.showLink}
-            </Button>
-            {showSecret ? <Field id="overlay-access-full-link" label={labels.fullLink} value={secret.overlayUrl} onChange={() => {}} readOnly mono /> : null}
-            <Button variant="neutral" disabled={pending} onClick={() => { void copySecret(); }}>{copied ? labels.copied : labels.copy}</Button>
-          </div>}
-          {manageReason === undefined ? null : <p className="muted" role="note">{labels.readOnly}</p>}
-      <DangerSection title={dashboardCommonTexts().dangerZone}>
-        {accesses.filter((access) => access.revokedAt === null).length === 0 ? null : <ul className="overlay-access-list overlay-access-list--danger">{accesses.filter((access) => access.revokedAt === null).map((access) => <li key={access.tokenId} className="overlay-access-list__item">
-          <span>{access.label}</span>
-          <Button danger="subtle" ariaLabel={`${labels.revoke}: ${access.label}`} disabled={!canManage || pending || !isAccessActive(access)} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { setRevokeTarget(access); }}>{labels.revoke}</Button>
-        </li>)}</ul>}
-        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-        <Button danger="subtle" disabled={!canManage || pending} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>
-      </DangerSection>
+        {revokedAccesses.length === 0 ? null : <details className="overlay-access-revoked">
+          <summary>{labels.revokedCount(revokedAccesses.length)}</summary>
+          <ul className="overlay-access-list">{revokedAccesses.map((access) => <li key={access.tokenId} className="overlay-access-list__item overlay-access-list__item--revoked">
+            <div className="overlay-access-list__summary">
+              <strong>{access.label}</strong>
+              <span className="muted">{labels.statusLabel}: {labels.revokedStatus}</span>
+            </div>
+            <div className="overlay-access-list__actions-wrap">
+              <div className="overlay-access-list__actions">
+                <ActionMenu label={labels.accessActions(access.label)} items={[
+                  { label: labels.remove, disabled: !canManage || pending, danger: true, onSelect: () => { void removeRevokedAccess(access); } },
+                ]} />
+              </div>
+              {manageReason === undefined ? null : <p className="overlay-access-list__reason" role="note">{manageReason}</p>}
+            </div>
+          </li>)}</ul>
+        </details>}
       </InspectorSection>
+      <InspectorActions destructive={<Button danger="subtle" disabled={!canManage || pending} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>} />
     </div>}
   </SubInspector>;
 
   return <>
-    <PageHeader kind="overlays" title={labels.title} subtitle={labels.count(overlays.length, maximum)} actions={<span title={manageReason}>
-      <Button icon="add" iconOnly ariaLabel={labels.create} disabled={!canManage || pending || overlays.length >= maximum}
-        {...(manageReason === undefined ? {} : { title: manageReason })} onClick={beginCreate} />
-    </span>} />
+    <PageHeader kind="overlays" title={labels.title} subtitle={labels.count(overlays.length, maximum)} actions={
+      <div className="overlays-page__create-action">
+        <Button icon="add" iconOnly ariaLabel={labels.create}
+          {...(manageReason === undefined ? {} : { describedBy: createManagementReasonId })}
+          disabled={!canManage || pending || overlays.length >= maximum} onClick={beginCreate} />
+        {manageReason === undefined ? null : <p id={createManagementReasonId} className="overlays-page__create-reason" role="note">{manageReason}</p>}
+      </div>
+    } />
     <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
     <ConfirmDialog opened={confirmDelete} title={labels.deleteTitle(selected?.name ?? "")} description={labels.deleteDescription(selected?.name ?? "")}
       confirmLabel={labels.deleteConfirm(selected?.name ?? "")} cancelLabel={labels.cancel} onCancel={() => { setConfirmDelete(false); }}
       onConfirm={() => { void removeOverlay(); }} pending={pending} danger {...(error === null ? {} : { error })} />
-    <ConfirmDialog opened={revokeTarget !== null} title={`${labels.revoke}: ${revokeTarget?.label ?? ""}`}
-      description={revokeTarget?.label ?? ""} confirmLabel={`${labels.revoke}: ${revokeTarget?.label ?? ""}`} cancelLabel={labels.cancel}
+    <ConfirmDialog opened={replaceTarget !== null} title={labels.replaceTitle(replaceTarget?.label ?? "")}
+      description={labels.replaceConsequence} confirmLabel={labels.replaceConfirm(replaceTarget?.label ?? "")} cancelLabel={labels.cancel}
+      onCancel={() => { setReplaceTarget(null); }} onConfirm={() => { void replace(); }} pending={pending} danger {...(error === null ? {} : { error })} />
+    <ConfirmDialog opened={revokeTarget !== null} title={labels.revokeTitle(revokeTarget?.label ?? "")}
+      description={labels.revokeConsequence} confirmLabel={labels.revokeConfirm(revokeTarget?.label ?? "")} cancelLabel={labels.cancel}
       onCancel={() => { setRevokeTarget(null); }} onConfirm={() => { void revoke(); }} pending={pending} danger {...(error === null ? {} : { error })} />
     <ConfirmDialog opened={legacyRevokeTarget !== null}
       title={labels.legacyRevokeTitle(legacyRevokeIdentity)}

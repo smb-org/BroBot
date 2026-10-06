@@ -8,7 +8,9 @@ import {
   getOverlayAccessForReplacement,
   issueOverlayAccess,
   listOverlayAccessesForOverlay,
+  removeRevokedOverlayAccess,
   revealOverlayAccess,
+  replaceOverlayAccess,
   revokeOverlayAccess,
   tokenEncryptionKeyRing,
 } from "../auth/overlay-access-service";
@@ -169,9 +171,25 @@ overlayAccessRouter.post(`${accessPath}/:tokenId/replace`, async (context) => {
     return context.json({ error: "overlay_access_not_found" }, 404);
   }
   if (existing.revokedAt !== null) return context.json({ error: "overlay_access_revoked" }, 409);
-  const result = await issue(context, replacementLabel(existing.label), parsed.data.expiresAt, now);
+  const result = await replaceOverlayAccess(context.env.DB, {
+    channelId,
+    overlayId,
+    label: replacementLabel(existing.label),
+    expiresAt: parsed.data.expiresAt,
+    actor: context.get("actor"),
+    pepper: context.env.OVERLAY_TOKEN_PEPPER,
+    keyRing: tokenEncryptionKeyRing(context.env),
+    publicOrigin: context.env.PUBLIC_ORIGIN,
+    createdAt: now,
+    existing,
+  });
   if (result.outcome === "rejected") return issueFailure(context, now);
-  return context.json({ ...result.access, replacesTokenId: existing.tokenId }, 201);
+  const closed = await closeRealtimeTokenBeforeResponse(context.env.CHANNEL, channelId, existing.tokenId);
+  return context.json({
+    ...result.access,
+    replacesTokenId: existing.tokenId,
+    closingPending: !closed,
+  }, closed ? 201 : 202);
 });
 
 overlayAccessRouter.post(`${accessPath}/:tokenId/revoke`, async (context) => {
@@ -187,5 +205,22 @@ overlayAccessRouter.post(`${accessPath}/:tokenId/revoke`, async (context) => {
   if (result === "not_found") return context.json({ error: "overlay_access_not_found" }, 404);
   const closed = await closeRealtimeTokenBeforeResponse(context.env.CHANNEL, channelId, tokenId);
   if (!closed) return context.json({ closingPending: true }, 202);
+  return context.body(null, 204);
+});
+
+overlayAccessRouter.delete(`${accessPath}/:tokenId`, async (context) => {
+  if (!canManage(context.get("channelRole"))) return denied(context);
+  const now = nowIso();
+  const result = await removeRevokedOverlayAccess(
+    context.env.DB,
+    context.req.param("channelId"),
+    context.req.param("overlayId"),
+    context.req.param("tokenId"),
+    context.get("actor"),
+    now,
+  );
+  if (result === "forbidden") return denied(context);
+  if (result === "not_found") return context.json({ error: "overlay_access_not_found" }, 404);
+  if (result === "not_revoked") return context.json({ error: "overlay_access_not_revoked" }, 409);
   return context.body(null, 204);
 });

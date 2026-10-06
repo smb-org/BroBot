@@ -5,7 +5,6 @@ import { dashboardCommonTexts } from "../locale";
 import { FormDensity } from "./FormDensity";
 import { Icon, type IconName } from "./Icon";
 import { InspectorHeading } from "./Inspector";
-import { DangerSection } from "./InspectorParts";
 import { SaveBar, type SaveBarProps } from "./SaveBar";
 
 export interface EditorSection {
@@ -56,8 +55,7 @@ export interface EditorShellProps {
   onClose?: () => void;
   closeLabel?: string;
   footer?: ReactNode;
-  dangerContent?: ReactNode;
-  dangerTitle?: string;
+  destructive?: ReactNode;
 }
 
 const fieldById = (root: HTMLElement | null, id: string): HTMLElement | undefined =>
@@ -206,8 +204,7 @@ export function EditorShell({
   onClose,
   closeLabel,
   footer,
-  dangerContent,
-  dangerTitle,
+  destructive,
 }: EditorShellProps) {
   const [internalSection, setInternalSection] = useState(sections[0]?.id ?? "");
   const contentRef = useRef<HTMLDivElement>(null);
@@ -413,7 +410,6 @@ export function EditorShell({
                 {activeSection.content}
               </div>
             )}
-            {dangerContent === undefined ? null : <DangerSection title={dangerTitle ?? ""}>{dangerContent}</DangerSection>}
           </div>
         </form>
         <SaveBar
@@ -429,6 +425,7 @@ export function EditorShell({
           {...(warningStatusLabel === undefined ? {} : { warningStatusLabel })}
           {...(conflict === undefined ? {} : { conflict })}
           {...(footer === undefined ? {} : { footer })}
+          {...(destructive === undefined ? {} : { destructive })}
           onSave={handleSaveAttempt}
           onInvalidSave={handleInvalidSave}
           onDiscard={onDiscard}

@@ -4,6 +4,7 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { authRouter } from "../../src/worker/auth/routes";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { decryptJson, hashOverlayToken, parseKeyRing } from "../../src/worker/auth/crypto";
+import { getOverlayAccessMetadata, replaceOverlayAccess as replaceOverlayAccessRecord } from "../../src/worker/auth/overlay-access-repository";
 import { overlayAccessRouter } from "../../src/worker/panel/overlay-access-routes";
 import { overlayRouter } from "../../src/worker/panel/overlay-routes";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
@@ -89,6 +90,7 @@ const sessionHeaders = async (environment: TestEnvironment): Promise<Headers> =>
 const accessesPath = "https://brobot.example/api/channels/channel-a/overlays/overlay-a/accesses";
 const accessPath = (tokenId: string, action: "reveal" | "replace" | "revoke"): string =>
   `${accessesPath}/${tokenId}/${action}`;
+const removeAccessPath = (tokenId: string): string => `${accessesPath}/${tokenId}`;
 
 const post = async (
   router: typeof overlayAccessRouter,
@@ -100,6 +102,12 @@ const post = async (
   headers: await sessionHeaders(environment),
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 }), environment);
+
+const remove = async (tokenId: string, environment: TestEnvironment): Promise<Response> =>
+  overlayAccessRouter.fetch(new Request(removeAccessPath(tokenId), {
+    method: "DELETE",
+    headers: await sessionHeaders(environment),
+  }), environment);
 
 const issueAccess = async (environment: TestEnvironment, label = "OBS") => {
   const response = await post(overlayAccessRouter, accessesPath, environment, { label });
@@ -351,8 +359,13 @@ describe("overlay access routes", () => {
     expect(completedAt - serverNow).toBeLessThan(100);
   });
 
-  it("keeps the old access active when replacing it", async () => {
+  it("revokes the old access and audits the replacement in one batch", async () => {
     const oldAccess = await issueAccess(environment, "OBS main");
+    const close = vi.fn().mockResolvedValue(true);
+    environment.CHANNEL = {
+      idFromName: vi.fn(() => "channel-object"),
+      get: vi.fn(() => ({ revokeToken: close })),
+    } as unknown as Env["CHANNEL"];
     const replacement = await post(overlayAccessRouter, accessPath(oldAccess.tokenId, "replace"), environment);
     const newAccess = await replacement.json<{
       tokenId: string;
@@ -363,13 +376,50 @@ describe("overlay access routes", () => {
     }>();
 
     expect(replacement.status).toBe(201);
+    expect(close).toHaveBeenCalledWith(oldAccess.tokenId);
     expect(newAccess.tokenId).not.toBe(oldAccess.tokenId);
     expect(newAccess.label).toBe("OBS main 2");
     expect(newAccess.expiresAt).toBeNull();
     expect(newAccess.replacesTokenId).toBe(oldAccess.tokenId);
+    const revokedOldAccess = await database.prepare("SELECT revoked_at, revocation_reason FROM overlay_tokens WHERE token_id = ?")
+      .bind(oldAccess.tokenId).first<{ revoked_at: string | null; revocation_reason: string | null }>();
+    expect(revokedOldAccess?.revoked_at).toEqual(expect.any(String));
+    expect(revokedOldAccess?.revocation_reason).toBe("replaced");
+    expect(await database.prepare("SELECT token_id FROM overlay_tokens WHERE token_id = ?")
+      .bind(newAccess.tokenId).first()).toEqual({ token_id: newAccess.tokenId });
+    const replacementAudit = await database.prepare(
+      "SELECT channel_id, actor_user_id, action, before_json, after_json FROM audit_log WHERE action = 'overlay.access.replaced'",
+    ).first<{ channel_id: string; actor_user_id: string; action: string; before_json: string; after_json: string }>();
+    expect(replacementAudit).toMatchObject({ channel_id: "channel-a", actor_user_id: "user-1", action: "overlay.access.replaced" });
+    expect(JSON.parse(replacementAudit?.before_json ?? "null")).toMatchObject({ tokenId: oldAccess.tokenId });
+    expect(JSON.parse(replacementAudit?.after_json ?? "null")).toMatchObject({ tokenId: newAccess.tokenId });
+    expect(tokenFromUrl(newAccess.overlayUrl)).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+  });
+
+  it("guards replacement in the mutation when the manager role has changed", async () => {
+    const oldAccess = await issueAccess(environment, "OBS main");
+    const before = await getOverlayAccessMetadata(database as unknown as D1Database, "channel-a", "overlay-a", oldAccess.tokenId);
+    if (before === null) throw new Error("Issued access metadata is missing.");
+    await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'channel-a'").run();
+
+    const replaced = await replaceOverlayAccessRecord(database as unknown as D1Database, before, {
+      tokenId: "replacement-operator-attempt",
+      channelId: "channel-a",
+      overlayId: "overlay-a",
+      tokenHash: "replacement-hash",
+      secretEnvelope: "replacement-envelope",
+      label: "Unauthorized replacement",
+      expiresAt: null,
+      createdAt: new Date().toISOString(),
+    }, { userId: "user-1", sessionId: "session-1" });
+
+    expect(replaced).toBe(false);
     expect(await database.prepare("SELECT revoked_at FROM overlay_tokens WHERE token_id = ?")
       .bind(oldAccess.tokenId).first()).toEqual({ revoked_at: null });
-    expect(tokenFromUrl(newAccess.overlayUrl)).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(await database.prepare("SELECT token_id FROM overlay_tokens WHERE token_id = 'replacement-operator-attempt'").first())
+      .toBeNull();
+    expect(await database.prepare("SELECT action FROM audit_log WHERE action = 'overlay.access.replaced'").all())
+      .toMatchObject({ results: [] });
   });
 
   it("replaces an expired access with a requested fresh expiry and a distinct label within 40 characters", async () => {
@@ -382,7 +432,7 @@ describe("overlay access routes", () => {
     });
     const newAccess = await replacement.json<{ label: string; expiresAt: string | null }>();
 
-    expect(replacement.status).toBe(201);
+    expect([201, 202]).toContain(replacement.status);
     expect(newAccess.label).toBe(`${"X".repeat(38)} 2`);
     expect(newAccess.label).not.toBe("X".repeat(40));
     expect(newAccess.label).toHaveLength(40);
@@ -401,8 +451,9 @@ describe("overlay access routes", () => {
       post(overlayAccessRouter, accessPath(access.tokenId, "reveal"), environment),
       post(overlayAccessRouter, accessPath(access.tokenId, "replace"), environment),
       post(overlayAccessRouter, accessPath(access.tokenId, "revoke"), environment),
+      remove(access.tokenId, environment),
     ]);
-    expect([list.status, ...responses.map((response) => response.status)]).toEqual([200, 403, 403, 403, 403]);
+    expect([list.status, ...responses.map((response) => response.status)]).toEqual([200, 403, 403, 403, 403, 403]);
     const listed = await list.json<{ accesses: Record<string, unknown>[] }>();
     expect(listed.accesses).toHaveLength(1);
     expect(listed.accesses[0]).toMatchObject({ tokenId: access.tokenId, label: access.label });
@@ -427,6 +478,47 @@ describe("overlay access routes", () => {
       .bind(access.tokenId).first<{ revoked_at: string | null; revocation_reason: string | null }>();
     expect(row?.revoked_at).toBeTruthy();
     expect(row?.revocation_reason).toBe("manual");
+  });
+
+  it("removes only revoked accesses and retains the issue, revoke, and removal audit entries", async () => {
+    const access = await issueAccess(environment, "OBS old PC");
+    expect((await remove(access.tokenId, environment)).status).toBe(409);
+    const revoked = await post(overlayAccessRouter, accessPath(access.tokenId, "revoke"), environment);
+    expect([204, 202]).toContain(revoked.status);
+
+    const removed = await remove(access.tokenId, environment);
+    expect(removed.status).toBe(204);
+    expect(await database.prepare("SELECT token_id FROM overlay_tokens WHERE token_id = ?")
+      .bind(access.tokenId).first()).toBeNull();
+
+    const entries = await database.prepare(
+      `SELECT action, before_json, after_json FROM audit_log
+        WHERE channel_id = 'channel-a' AND action LIKE 'overlay.access.%'
+        ORDER BY rowid`,
+    ).all<{ action: string; before_json: string; after_json: string }>();
+    expect(entries.results.map((entry) => entry.action)).toEqual([
+      "overlay.access.issued", "overlay.access.revoked", "overlay.access.removed",
+    ]);
+    const removal = entries.results.find((entry) => entry.action === "overlay.access.removed");
+    if (removal === undefined) throw new Error("Removal audit entry is missing.");
+    const removalSnapshot = JSON.parse(removal.before_json) as Record<string, unknown>;
+    expect(removalSnapshot).toMatchObject({
+      tokenId: access.tokenId,
+      label: "OBS old PC",
+      revocationReason: "manual",
+    });
+    expect(typeof removalSnapshot.revokedAt).toBe("string");
+    expect(removal.after_json).toBe("null");
+  });
+
+  it("lets an expired access be revoked and then removed", async () => {
+    const access = await issueAccess(environment, "OBS expired PC");
+    await database.prepare("UPDATE overlay_tokens SET expires_at = '2020-01-01T00:00:00.000Z' WHERE token_id = ?")
+      .bind(access.tokenId).run();
+
+    const revoked = await post(overlayAccessRouter, accessPath(access.tokenId, "revoke"), environment);
+    expect([204, 202]).toContain(revoked.status);
+    expect((await remove(access.tokenId, environment)).status).toBe(204);
   });
 
   it("revokes overlay accesses and closes their sockets when the overlay is deleted", async () => {

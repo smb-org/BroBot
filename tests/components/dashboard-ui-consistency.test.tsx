@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AuditSentence, Badge, DangerSection, FilterBar, InspectorActions, InspectorFieldRow, InspectorSection, PageHeader } from "../../src/dashboard/ui";
+import { AuditSentence, Badge, FilterBar, InspectorActions, InspectorFieldRow, InspectorSection, PageHeader } from "../../src/dashboard/ui";
 
 afterEach(cleanup);
 
@@ -36,14 +36,18 @@ describe("shared dashboard consistency components", () => {
         <InspectorFieldRow label="Name" help="Use a short name."><input aria-label="Name" /></InspectorFieldRow>
       </InspectorSection>
       <InspectorActions><button type="button">Save</button><button type="button">Discard</button></InspectorActions>
-      <DangerSection title="Danger zone"><button type="button">Delete</button></DangerSection>
+      <InspectorActions destructive={<button type="button">Delete</button>}><button type="button">Save</button></InspectorActions>
     </>);
 
     expect(screen.getByRole("heading", { name: "General" })).toHaveClass("inspector-content-section__heading");
     expect(screen.getByRole("button", { name: "Name: Use a short name." })).toHaveAttribute("title", "Use a short name.");
     expect(container.querySelector(".inspector-field-row__control")).toContainElement(screen.getByRole("textbox", { name: "Name" }));
-    expect(container.querySelector(".inspector-actions")).toContainElement(screen.getByRole("button", { name: "Save" }));
-    expect(container.querySelector(".inspector-content-section--danger")).toContainElement(screen.getByRole("button", { name: "Delete" }));
+    const saveButtons = screen.getAllByRole("button", { name: "Save" });
+    const firstSaveButton = saveButtons.at(0);
+    if (firstSaveButton === undefined) throw new Error("The primary inspector Save button is missing.");
+    expect(container.querySelector(".inspector-actions")).toContainElement(firstSaveButton);
+    expect(container.querySelector(".inspector-content-section--danger")).toBeNull();
+    expect(container.querySelector(".inspector-actions__destructive")).toContainElement(screen.getByRole("button", { name: "Delete" }));
   });
 
   it("opens inspector help on keyboard focus and activation, and dismisses it with Escape", () => {

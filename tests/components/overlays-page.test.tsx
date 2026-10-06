@@ -1,15 +1,20 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { URL as NodeURL } from "node:url";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 
 import streamElementsFields from "../../docs/embedding/streamelements/fields.json?raw";
 import streamElementsHtml from "../../docs/embedding/streamelements/widget.html?raw";
 import streamElementsJs from "../../docs/embedding/streamelements/widget.js?raw";
 import { OverlaysPage } from "../../src/dashboard/OverlaysPage";
-import { UiProvider } from "../../src/dashboard/ui";
+import { UiProvider as BaseUiProvider } from "../../src/dashboard/ui";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { jsonResponse } from "../unit/fixtures";
+
+const UiProvider = ({ children }: { children: ReactNode }) => <BaseUiProvider><ToastHost />{children}</BaseUiProvider>;
 
 const overlay = {
   id: "overlay-a", channelId: "channel-a", name: "Gameplay", width: 1920, height: 1080, css: "", revision: 4,
@@ -42,6 +47,32 @@ const requestPath = (input: RequestInfo | URL): string => {
 };
 const requestBody = (init: RequestInit | undefined): string => typeof init?.body === "string" ? init.body : "";
 const dashboardStyles = readFileSync(new NodeURL("../../src/dashboard/styles.css", import.meta.url), "utf8");
+const openActionMenu = async (row: HTMLElement, triggerLabel: string): Promise<HTMLElement> => {
+  const trigger = within(row).getByRole("button", { name: triggerLabel });
+  fireEvent.click(trigger);
+  const menuId = trigger.getAttribute("aria-controls");
+  const locateMenu = (): HTMLElement | null => (menuId === null ? null : document.getElementById(menuId)) ?? Array.from(document.querySelectorAll<HTMLElement>("[data-menu-dropdown]"))
+    .find((candidate) => candidate.getAttribute("aria-labelledby") === trigger.id) ?? null;
+  await waitFor(() => {
+    if (locateMenu() === null) throw new Error(`Action menu is missing (controls=${menuId ?? "none"}; trigger=${trigger.id}; dropdowns=${String(document.querySelectorAll("[data-menu-dropdown]").length)}).`);
+  });
+  const menu = locateMenu();
+  if (menu === null) throw new Error("Action menu is missing.");
+  return menu;
+};
+const findToast = async (message: string): Promise<HTMLElement> => {
+  const text = await screen.findByText(message);
+  const toast = text.closest<HTMLElement>(".ui-toast");
+  if (toast === null) throw new Error(`Toast was not found for: ${message}`);
+  return toast;
+};
+const openAccessMenu = async (row: HTMLElement, accessName = "OBS Main PC"): Promise<HTMLElement> => {
+  return await openActionMenu(row, `Aktionen für ${accessName}`);
+};
+const selectAccessAction = async (row: HTMLElement, accessName: string, action: string, triggerLabel = `Aktionen für ${accessName}`): Promise<void> => {
+  const menu = await openActionMenu(row, triggerLabel);
+  fireEvent.click(within(menu).getByRole("menuitem", { name: action, hidden: true }));
+};
 
 const validateWithWidget = (overlayUrl: string, brobotAddress: string): { src: string; errorDisplay: string } => {
   const widgetRuntime: { loadWidget?: (event: unknown) => void } = {};
@@ -67,6 +98,7 @@ const setBrowserLanguage = (language: string): void => {
 describe("Overlays page", () => {
   afterEach(() => {
     cleanup();
+    for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.unstubAllGlobals();
     setBrowserLanguage("de-DE");
   });
@@ -76,6 +108,8 @@ describe("Overlays page", () => {
     emptyOverlays?: boolean;
     secondOverlay?: boolean;
     accessLastUsedAt?: string | null;
+    accessExpiresAt?: string | null;
+    accessRevokedAt?: string | null;
     accessRecoverable?: boolean;
     removeElementOnReplace?: boolean;
     legacyClosingPending?: boolean;
@@ -84,6 +118,8 @@ describe("Overlays page", () => {
     let accesses: AccessFixture[] = [{
       ...access,
       ...(options.accessLastUsedAt === undefined ? {} : { lastUsedAt: options.accessLastUsedAt }),
+      ...(options.accessExpiresAt === undefined ? {} : { expiresAt: options.accessExpiresAt }),
+      ...(options.accessRevokedAt === undefined ? {} : { revokedAt: options.accessRevokedAt }),
       ...(options.accessRecoverable === undefined ? {} : { recoverable: options.accessRecoverable }),
     }];
     let legacyTokens = [...(options.legacyTokens ?? [])];
@@ -139,10 +175,19 @@ describe("Overlays page", () => {
       if (url.pathname.endsWith("/access-a/reveal") && method === "POST") return jsonResponse({ overlayUrl: secret });
       if (url.pathname.endsWith("/access-a/replace") && method === "POST") {
         if (options.removeElementOnReplace) currentOverlay = { ...overlay, revision: 5, elements: [] };
+        accesses = [...accesses.map((item) => item.tokenId === "access-a" ? { ...item, revokedAt: "2026-09-24T12:00:00.000Z" } : item), {
+          ...access, tokenId: "access-replaced", label: "OBS Main PC", recoverable: true,
+        }];
         return jsonResponse({ tokenId: "access-replaced", overlayUrl: secret, label: "OBS Main PC 2", expiresAt: null }, 201);
       }
-      if (url.pathname.endsWith("/access-a/revoke") && method === "POST") {
-        accesses = accesses.map((item) => item.tokenId === "access-a" ? { ...item, revokedAt: "2026-09-24T12:00:00.000Z" } : item);
+      if (/\/accesses\/[^/]+\/revoke$/u.test(url.pathname) && method === "POST") {
+        const tokenId = url.pathname.split("/").at(-2);
+        accesses = accesses.map((item) => item.tokenId === tokenId ? { ...item, revokedAt: "2026-09-24T12:00:00.000Z" } : item);
+        return new Response(null, { status: 204 });
+      }
+      if (/\/accesses\/[^/]+$/u.test(url.pathname) && method === "DELETE") {
+        const tokenId = url.pathname.split("/").at(-1);
+        accesses = accesses.filter((item) => item.tokenId !== tokenId);
         return new Response(null, { status: 204 });
       }
       if (url.pathname.endsWith("/overlay-a") && method === "DELETE") {
@@ -157,10 +202,12 @@ describe("Overlays page", () => {
 
   it("lists overlay counts and usage, and keeps operator management actions disabled without exposing links", async () => {
     const fetcher = routeFetcher({ legacyTokens: [{ id: "legacy-token", name: null, createdAt: "2026-09-24T10:00:00.000Z", createdBy: null, lastUsedAt: null, expiresAt: null }] });
+    const onOpenEditor = vi.fn();
     vi.stubGlobal("fetch", fetcher);
-    render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} onOpenEditor={onOpenEditor} /></UiProvider>);
 
     const table = await screen.findByRole("table");
+    expect(document.querySelector(".overlays-feedback-slot")).not.toBeInTheDocument();
     expect(table.closest(".overlays-table-wrap")).not.toHaveClass("overlays-table-wrap--inspector-open");
     expect(within(table).getByText("Gameplay")).toBeInTheDocument();
     expect(within(table).getAllByText("1", { selector: "td" })).toHaveLength(2);
@@ -171,21 +218,55 @@ describe("Overlays page", () => {
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
     expect(within(inspector).getByText("OBS Main PC", { selector: "strong" })).toBeInTheDocument();
     expect(within(inspector).getByRole("button", { name: "Zugang ausstellen" })).toBeDisabled();
-    expect(within(inspector).getByRole("button", { name: "Link erneut anzeigen" })).toBeDisabled();
-    expect(within(inspector).getByRole("button", { name: "Ersetzen" })).toBeDisabled();
-    expect(within(inspector).getByRole("button", { name: "Widerrufen: OBS Main PC" })).toBeDisabled();
     const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    expect(within(accessRow).getByRole("button", { name: "Link kopieren: OBS Main PC" })).toBeDisabled();
+    const menu = await openAccessMenu(accessRow);
+    expect(within(menu).getByRole("menuitem", { name: "Einrichten", hidden: true })).toBeEnabled();
+    expect(within(menu).getByRole("menuitem", { name: "Link anzeigen", hidden: true })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: "Ersetzen …", hidden: true })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: "Widerrufen …", hidden: true })).toBeDisabled();
     expect(within(accessRow).getByText(/^Zuletzt benutzt:/u)).toHaveTextContent("Zuletzt benutzt: 24.09.2026");
-    expect(within(accessRow).getByText("Status: Aktiv")).toHaveClass("overlay-access-list__status");
+    expect(within(accessRow).getByText("Aktiv").parentElement).toHaveClass("led");
     const fullInspector = document.querySelector(".list-detail__inspector");
     if (!(fullInspector instanceof HTMLElement)) throw new Error("Overlay inspector is missing.");
     expect(within(fullInspector).getByRole("button", { name: "Overlay löschen" })).toBeDisabled();
-    expect(within(inspector).getByText(/Bediener können Overlays/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Importieren" })).not.toBeInTheDocument();
+    expect(within(fullInspector).getByRole("button", { name: "Komposition bearbeiten" })).toBeDisabled();
+    expect(within(fullInspector).getAllByText("Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Importieren" })).toBeDisabled();
     expect(document.querySelector("a[href*='token=']")).toBeNull();
-    expect(within(inspector).getByRole("button", { name: "Ersetzen" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/reveal"))).toBe(false);
+  });
+
+  it("shows operators why new overlay creation is disabled on the initial view", () => {
+    vi.stubGlobal("fetch", routeFetcher({ emptyOverlays: true }));
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
+
+    const create = screen.getByRole("button", { name: "Neues Overlay" });
+    expect(create).toBeDisabled();
+    const descriptionId = create.getAttribute("aria-describedby");
+    expect(descriptionId).not.toBeNull();
+    const reason = descriptionId === null ? null : document.getElementById(descriptionId);
+    expect(reason).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.");
+    expect(reason).toHaveAttribute("role", "note");
+  });
+
+  it("shows operators the disabled remove action and its reason for revoked access", async () => {
+    vi.stubGlobal("fetch", routeFetcher({ accessRevokedAt: "2026-09-24T12:00:00.000Z" }));
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+
+    const inspector = await screen.findByRole("region", { name: "Zugänge" });
+    const revokedSection = within(inspector).getByText("1 widerrufene Zugänge").closest("details");
+    if (!(revokedSection instanceof HTMLDetailsElement)) throw new Error("Revoked access section is missing.");
+    fireEvent.click(within(revokedSection).getByText("1 widerrufene Zugänge"));
+    const row = within(revokedSection).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(row instanceof HTMLElement)) throw new Error("Revoked access row is missing.");
+
+    expect(within(row).getByText("Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.", { selector: "[role=note]" })).toBeInTheDocument();
+    const menu = await openAccessMenu(row);
+    expect(within(menu).getAllByRole("menuitem", { hidden: true })).toHaveLength(1);
+    expect(within(menu).getByRole("menuitem", { name: "Entfernen", hidden: true })).toBeDisabled();
   });
 
   it("parses a legacy link locally and sends only its token, variable, and text", async () => {
@@ -205,7 +286,7 @@ describe("Overlays page", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Alter Overlay-Link" }), { target: { value: legacyLink } });
     fireEvent.click(screen.getByRole("button", { name: "Link importieren" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Overlay „score“ wurde importiert.");
+    expect(await findToast("Overlay „score“ wurde importiert.")).toHaveAttribute("role", "status");
     const importCall = fetcher.mock.calls.find(([input]) => requestPath(input).endsWith("/overlays/import-legacy"));
     expect(importCall).toBeDefined();
     const [request, init] = importCall ?? [];
@@ -218,9 +299,9 @@ describe("Overlays page", () => {
   });
 
   it.each([
-    { language: "de-DE", lastUsed: "Zuletzt benutzt: nie", status: "Status: Aktiv" },
-    { language: "en-US", lastUsed: "Last used: never", status: "Status: Active" },
-  ])("labels access metadata and uses secondary buttons in $language", async ({ language, lastUsed, status }) => {
+    { language: "de-DE", lastUsed: "Zuletzt benutzt: nie", status: "Aktiv" },
+    { language: "en-US", lastUsed: "Last used: never", status: "Active" },
+  ])("labels access metadata and uses a compact row menu in $language", async ({ language, lastUsed, status }) => {
     setBrowserLanguage(language);
     vi.stubGlobal("fetch", routeFetcher({ accessLastUsedAt: null }));
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
@@ -230,11 +311,12 @@ describe("Overlays page", () => {
     const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
     expect(within(accessRow).getByText(lastUsed)).toBeInTheDocument();
-    expect(within(accessRow).getByText(status)).toHaveClass("overlay-access-list__status");
+    expect(within(accessRow).getByText(status).parentElement).toHaveClass("led");
 
     const actions = within(accessRow).getAllByRole("button");
-    expect(actions).toHaveLength(3);
-    for (const action of actions) expect(action).toHaveAttribute("data-variant", "default");
+    expect(actions).toHaveLength(2);
+    expect(within(accessRow).getByRole("button", { name: language === "en-US" ? "Copy link: OBS Main PC" : "Link kopieren: OBS Main PC" })).toBeEnabled();
+    expect(within(accessRow).getByRole("button", { name: language === "en-US" ? "Actions for OBS Main PC" : "Aktionen für OBS Main PC" })).toHaveAttribute("aria-haspopup", "menu");
   });
 
   it("opens the selected overlay composition editor", async () => {
@@ -253,17 +335,17 @@ describe("Overlays page", () => {
   it.each([
     {
       language: "de-DE",
-      reveal: "Link erneut anzeigen",
-      replace: "Ersetzen",
-      hint: "Dieser alte Zugang kann nicht erneut angezeigt werden. Stelle einen neuen Zugang aus.",
+      show: "Link anzeigen",
+      replace: "Ersetzen …",
+      hint: "Link nicht wiederherstellbar – für einen neuen ersetzen.",
     },
     {
       language: "en-US",
-      reveal: "Show link again",
-      replace: "Replace",
-      hint: "This legacy access cannot be shown again. Issue a new access.",
+      show: "Show link",
+      replace: "Replace …",
+      hint: "Link cannot be recovered — replace it to issue a new one.",
     },
-  ])("disables reveal for an imported access and explains how to issue a new one in $language", async ({ language, reveal, replace, hint }) => {
+  ])("disables link reveal for an imported access and explains how to issue a new one in $language", async ({ language, show, replace, hint }) => {
     setBrowserLanguage(language);
     vi.stubGlobal("fetch", routeFetcher({ accessRecoverable: false }));
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
@@ -272,9 +354,68 @@ describe("Overlays page", () => {
     const inspector = await screen.findByRole("region", { name: language === "en-US" ? "Accesses" : "Zugänge" });
     const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
-    expect(within(accessRow).getByRole("button", { name: reveal })).toBeDisabled();
-    expect(within(accessRow).getByRole("button", { name: replace })).toBeEnabled();
+    const menu = await openActionMenu(accessRow, language === "en-US" ? "Actions for OBS Main PC" : "Aktionen für OBS Main PC");
+    expect(within(menu).getByRole("menuitem", { name: show, hidden: true })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: replace, hidden: true })).toBeEnabled();
     expect(within(accessRow).getByText(hint)).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      language: "de-DE", status: "Abgelaufen", copy: "Link kopieren: OBS Main PC", trigger: "Aktionen für OBS Main PC",
+      show: "Link anzeigen", replace: "Ersetzen …", revoke: "Widerrufen …", title: "Zugang „OBS Main PC“ widerrufen?",
+      consequence: "Quellen mit diesem Zugang verlieren sofort den Zugriff.", confirm: "Zugang widerrufen: OBS Main PC",
+    },
+    {
+      language: "en-US", status: "Expired", copy: "Copy link: OBS Main PC", trigger: "Actions for OBS Main PC",
+      show: "Show link", replace: "Replace …", revoke: "Revoke …", title: "Revoke access “OBS Main PC”?",
+      consequence: "Sources using this access will lose access immediately.", confirm: "Revoke access: OBS Main PC",
+    },
+  ])("allows an expired access to be revoked with localized confirmation in $language", async ({ language, status, copy, trigger, show, replace, revoke, title, consequence, confirm }) => {
+    setBrowserLanguage(language);
+    const fetcher = routeFetcher({ accessExpiresAt: "2026-09-24T11:00:00.000Z" });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+
+    const inspector = await screen.findByRole("region", { name: language === "de-DE" ? "Zugänge" : "Accesses" });
+    const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(accessRow instanceof HTMLElement)) throw new Error("Expired access list row is missing.");
+    expect(within(accessRow).getByText(status)).toBeInTheDocument();
+    expect(within(accessRow).getByRole("button", { name: copy })).toBeDisabled();
+    const menu = await openActionMenu(accessRow, trigger);
+    expect(within(menu).getByRole("menuitem", { name: show, hidden: true })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: replace, hidden: true })).toBeEnabled();
+    expect(within(menu).getByRole("menuitem", { name: revoke, hidden: true })).toBeEnabled();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: revoke, hidden: true }));
+
+    const dialog = await screen.findByRole("dialog", { name: title });
+    expect(within(dialog).getByRole("heading")).toHaveTextContent(title);
+    expect(dialog).toHaveTextContent(consequence);
+    fireEvent.click(within(dialog).getByRole("button", { name: confirm }));
+    expect(await findToast(language === "de-DE" ? "Zugang widerrufen." : "Access revoked.")).toHaveAttribute("role", "status");
+    expect(fetcher.mock.calls.some(([input, init]) => requestPath(input).endsWith("/access-a/revoke") && init?.method === "POST")).toBe(true);
+
+    const revokedCount = language === "de-DE" ? "1 widerrufene Zugänge" : "1 revoked accesses";
+    const revokedSection = within(inspector).getByText(revokedCount).closest("details");
+    if (!(revokedSection instanceof HTMLDetailsElement)) throw new Error("Revoked access section is missing.");
+    fireEvent.click(within(revokedSection).getByText(revokedCount));
+    const revokedRow = within(revokedSection).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(revokedRow instanceof HTMLElement)) throw new Error("Revoked access row is missing.");
+    const revokedMenu = await openActionMenu(revokedRow, trigger);
+    const menuItems = within(revokedMenu).getAllByRole("menuitem", { hidden: true });
+    expect(menuItems).toHaveLength(1);
+    const removeItem = menuItems[0];
+    if (removeItem === undefined) throw new Error("Remove action is missing from the revoked access menu.");
+    expect(removeItem).toHaveTextContent(language === "de-DE" ? "Entfernen" : "Remove");
+    fireEvent.click(removeItem);
+
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input, init]) => requestPath(input).endsWith("/access-a") && init?.method === "DELETE")).toBe(true);
+    });
+    expect(await findToast(language === "de-DE" ? "Zugang entfernt." : "Access removed.")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("dialog", { name: /Entfernen|Remove/u })).not.toBeInTheDocument();
+    expect(within(revokedSection).queryByText("OBS Main PC", { selector: "strong" })).not.toBeInTheDocument();
   });
 
   it("issues and copies a link, re-shows and replaces access, and confirms revocation", async () => {
@@ -294,27 +435,47 @@ describe("Overlays page", () => {
     expect(screen.queryByDisplayValue(secret)).not.toBeInTheDocument();
     expect([...document.querySelectorAll("input, textarea")].some((element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
       ? element.value.includes("f".repeat(43)) : false)).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Link kopieren" }));
-    expect(writeText).toHaveBeenCalledWith(secret);
+    const issuedRow = within(inspector).getByText("OBS Backup PC", { selector: "strong" }).closest("li");
+    if (!(issuedRow instanceof HTMLElement)) throw new Error("Issued access list row is missing.");
+    fireEvent.click(within(issuedRow).getByRole("button", { name: "Link kopieren: OBS Backup PC" }));
+    await vi.waitFor(() => { expect(writeText).toHaveBeenCalledWith(secret); });
 
     const originalAccess = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(originalAccess instanceof HTMLElement)) throw new Error("Access list row is missing.");
-    fireEvent.click(within(originalAccess).getByRole("button", { name: "Link erneut anzeigen" }));
+    fireEvent.click(within(originalAccess).getByRole("button", { name: "Link kopieren: OBS Main PC" }));
+    await vi.waitFor(() => { expect(writeText).toHaveBeenCalledWith(secret); });
+    await waitFor(() => expect(within(originalAccess).getByRole("button", { name: "Kopiert: OBS Main PC" })).toBeInTheDocument());
+    expect(originalAccess.querySelector(".overlay-access-list__expanded")).toBeNull();
+    expect(within(originalAccess).queryByText(secret)).not.toBeInTheDocument();
+
+    await selectAccessAction(originalAccess, "OBS Main PC", "Link anzeigen");
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/reveal"))).toBe(true); });
-    expect(await screen.findByText(maskedSecret)).toBeInTheDocument();
-    fireEvent.click(within(originalAccess).getByRole("button", { name: "Ersetzen" }));
+    expect(await screen.findByText(secret)).toBeInTheDocument();
+    await selectAccessAction(originalAccess, "OBS Main PC", "Ersetzen …");
+    const replaceDialog = await screen.findByRole("dialog");
+    expect(within(replaceDialog).getByRole("heading")).toHaveTextContent("Zugang „OBS Main PC“ ersetzen?");
+    expect(replaceDialog).toHaveTextContent("Der bisherige Link wird ungültig und verbundene Quellen verlieren den Zugriff.");
+    fireEvent.click(within(replaceDialog).getByRole("button", { name: "Zugang ersetzen: OBS Main PC" }));
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/replace"))).toBe(true); });
     expect(await screen.findByText(maskedSecret)).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/replace"))).toBe(true);
+    const revokedSection = inspector.querySelector(".overlay-access-revoked");
+    expect(revokedSection).not.toBeNull();
+    expect(within(revokedSection as HTMLElement).getByText("OBS Main PC", { selector: "strong" })).toBeInTheDocument();
 
-    fireEvent.click(within(inspector).getByRole("button", { name: "Widerrufen: OBS Main PC" }));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Widerrufen: OBS Main PC" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Zugang widerrufen.");
-    expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/revoke"))).toBe(true);
+    const replacementRow = Array.from(inspector.querySelectorAll<HTMLElement>(".overlay-access-list__item"))
+      .find((row) => !row.classList.contains("overlay-access-list__item--revoked") && row.querySelector("strong")?.textContent === "OBS Main PC");
+    if (!(replacementRow instanceof HTMLElement)) throw new Error("Replacement access list row is missing.");
+    await selectAccessAction(replacementRow, "OBS Main PC", "Widerrufen …");
+    const dialog = await screen.findByRole("dialog", { name: "Zugang „OBS Main PC“ widerrufen?" });
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Zugang „OBS Main PC“ widerrufen?");
+    expect(dialog).toHaveTextContent("Quellen mit diesem Zugang verlieren sofort den Zugriff.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Zugang widerrufen: OBS Main PC" }));
+    expect(await findToast("Zugang widerrufen.")).toHaveAttribute("role", "status");
+    expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-replaced/revoke"))).toBe(true);
   });
 
-  it("lets a manager reveal the current overlay link in a selectable field when clipboard access is denied", async () => {
+  it("lets a manager reveal the current overlay link in its row when clipboard access is denied", async () => {
     const fetcher = routeFetcher({ secondOverlay: true });
     vi.stubGlobal("fetch", fetcher);
     const writeText = vi.fn().mockRejectedValue(new DOMException("Permission denied", "NotAllowedError"));
@@ -328,17 +489,16 @@ describe("Overlays page", () => {
     fireEvent.click(within(inspector).getByRole("button", { name: "Zugang ausstellen" }));
     await screen.findByText(maskedSecret);
 
-    fireEvent.click(within(inspector).getByRole("button", { name: "Link kopieren" }));
+    const issuedRow = within(inspector).getByText("OBS Backup PC", { selector: "strong" }).closest("li");
+    if (!(issuedRow instanceof HTMLElement)) throw new Error("Issued access list row is missing.");
+    fireEvent.click(within(issuedRow).getByRole("button", { name: "Link kopieren: OBS Backup PC" }));
     expect(await screen.findAllByText("Der Link konnte nicht kopiert werden.")).not.toHaveLength(0);
-    fireEvent.click(within(inspector).getByRole("button", { name: "Link anzeigen" }));
-    const linkField = within(inspector).getByRole("textbox", { name: "Vollständiger Link" });
-    expect(linkField).toHaveValue(secret);
-    expect(linkField).toHaveAttribute("readonly");
+    await selectAccessAction(issuedRow, "OBS Backup PC", "Link anzeigen");
+    expect(within(issuedRow).getByText(secret)).toBeInTheDocument();
 
     fireEvent.click(within(table).getByText("Second scene"));
     await screen.findByRole("heading", { name: "Second scene" });
-    expect(screen.queryByRole("textbox", { name: "Vollständiger Link" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Link verbergen" })).not.toBeInTheDocument();
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
   });
 
   it("surfaces a delete revision conflict and reloads the current overlay", async () => {
@@ -350,7 +510,9 @@ describe("Overlays page", () => {
     if (!(inspector instanceof HTMLElement)) throw new Error("Overlay inspector is missing.");
     fireEvent.click(await within(inspector).findByRole("button", { name: "Overlay löschen" }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Gameplay endgültig löschen" }));
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Overlay „Gameplay“ löschen?");
+    expect(dialog).toHaveTextContent("Das Overlay mit seinen Elementen wird gelöscht und alle Zugänge werden widerrufen.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Overlay löschen: Gameplay" }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Das Overlay wurde zwischenzeitlich geändert.");
     const deleteCall = fetcher.mock.calls.find(([input, init]) => requestPath(input).endsWith("/overlays/overlay-a") && init?.method === "DELETE");
@@ -363,7 +525,9 @@ describe("Overlays page", () => {
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
     fireEvent.click(await screen.findByText("Gameplay"));
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
-    fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
+    const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    await selectAccessAction(accessRow, "OBS Main PC", "Einrichten");
     const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
     const tabs = within(assistant).getAllByRole("tab");
     for (const tab of tabs) {
@@ -378,7 +542,6 @@ describe("Overlays page", () => {
     expect(dashboardStyles).toMatch(/\.overlay-setup__tab\s*\{[^}]*min-height:\s*44px/u);
     expect(dashboardStyles).toMatch(/\.overlay-setup__panel\[hidden\]\s*\{[^}]*display:\s*none/u);
     expect(dashboardStyles).toMatch(/\.overlay-elements-list\s*\{[^}]*list-style:\s*none/u);
-    expect(document.querySelector(".overlay-elements-list")).toHaveClass("overlay-elements-list");
     expect(assistant).toHaveTextContent("Breite und Höhe: 1920 × 1080 px");
     expect(assistant).toHaveTextContent("Quelle hinzufügen");
     expect(assistant).toHaveTextContent("Browser auswählen");
@@ -395,7 +558,9 @@ describe("Overlays page", () => {
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
     fireEvent.click(await screen.findByText("Gameplay"));
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
-    fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
+    const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    await selectAccessAction(accessRow, "OBS Main PC", "Einrichten");
     const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
 
     const obsTab = within(assistant).getByRole("tab", { name: "OBS" });
@@ -432,7 +597,9 @@ describe("Overlays page", () => {
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
     fireEvent.click(await screen.findByText("Gameplay"));
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
-    fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
+    const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    await selectAccessAction(accessRow, "OBS Main PC", "Einrichten");
     const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
     const output = within(assistant).getByRole("combobox", { name: "Ausgabe" });
     fireEvent.click(output);
@@ -440,11 +607,9 @@ describe("Overlays page", () => {
     expect(assistant).toHaveTextContent("Breite ≈ Elementbreite × Skalierung; Höhe nach Inhalt.");
     expect(assistant).toHaveTextContent("#token=••••••&element=element-a");
 
-    fireEvent.click(within(assistant).getByRole("button", { name: "Link zum Kopieren anzeigen" }));
-    await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/reveal"))).toBe(true); });
-    expect(writeText).not.toHaveBeenCalled();
     fireEvent.click(within(assistant).getByRole("button", { name: "Overlay-Link kopieren" }));
     await vi.waitFor(() => { expect(writeText).toHaveBeenLastCalledWith(`${secret}&element=element-a`); });
+    expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/reveal"))).toBe(true);
     expect(await within(assistant).findByRole("button", { name: "Overlay-Link kopiert" })).toBeInTheDocument();
     const copiedElementUrl = writeText.mock.calls[0]?.[0];
     if (typeof copiedElementUrl !== "string") throw new Error("The selected element URL was not copied.");
@@ -470,7 +635,9 @@ describe("Overlays page", () => {
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
     fireEvent.click(await screen.findByText("Gameplay"));
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
-    fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
+    const setupRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(setupRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    await selectAccessAction(setupRow, "OBS Main PC", "Einrichten");
     const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
     const output = within(assistant).getByRole("combobox", { name: "Ausgabe" });
     fireEvent.click(output);
@@ -478,14 +645,16 @@ describe("Overlays page", () => {
 
     const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
-    fireEvent.click(within(accessRow).getByRole("button", { name: "Ersetzen" }));
+    await selectAccessAction(accessRow, "OBS Main PC", "Ersetzen …");
+    const replaceDialog = await screen.findByRole("dialog");
+    fireEvent.click(within(replaceDialog).getByRole("button", { name: "Zugang ersetzen: OBS Main PC" }));
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/replace"))).toBe(true); });
-    await vi.waitFor(() => { expect(output).toHaveValue("Ganzes Overlay"); });
-    expect(assistant).toHaveTextContent("Breite und Höhe: 1920 × 1080 px");
+    const refreshedAssistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
+    const refreshedOutput = within(refreshedAssistant).getByRole("combobox", { name: "Ausgabe" });
+    await vi.waitFor(() => { expect(refreshedOutput).toHaveValue("Ganzes Overlay"); });
+    expect(refreshedAssistant).toHaveTextContent("Breite und Höhe: 1920 × 1080 px");
 
-    fireEvent.click(within(assistant).getByRole("button", { name: "Link zum Kopieren anzeigen" }));
-    await vi.waitFor(() => { expect(fetcher.mock.calls.filter(([input]) => requestPath(input).endsWith("/access-a/reveal")).length).toBeGreaterThan(0); });
-    fireEvent.click(within(assistant).getByRole("button", { name: "Overlay-Link kopieren" }));
+    fireEvent.click(within(refreshedAssistant).getByRole("button", { name: "Overlay-Link kopieren" }));
     await vi.waitFor(() => { expect(writeText).toHaveBeenCalledWith(secret); });
     const copiedUrl = writeText.mock.calls[0]?.[0];
     if (typeof copiedUrl !== "string") throw new Error("The whole overlay URL was not copied after the selection became stale.");
@@ -508,24 +677,27 @@ describe("Overlays page", () => {
     expect(validation.errorDisplay).toBe("block");
   });
 
-  it("keeps setup instructions and snippet copying available to operators but explains disabled access copying", async () => {
+  it("shows operators disabled access actions with one reason", async () => {
     const fetcher = routeFetcher();
     vi.stubGlobal("fetch", fetcher);
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
     fireEvent.click(await screen.findByText("Gameplay"));
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
-    fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
+    const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    const fullInspector = document.querySelector(".list-detail__inspector");
+    if (!(fullInspector instanceof HTMLElement)) throw new Error("Overlay inspector is missing.");
+    expect(within(fullInspector).getAllByText("Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.")).toHaveLength(1);
+    expect(within(accessRow).getByRole("button", { name: "Link kopieren: OBS Main PC" })).toBeDisabled();
+    const menu = await openAccessMenu(accessRow);
+    expect(within(menu).getByRole("menuitem", { name: "Einrichten", hidden: true })).toBeEnabled();
+    for (const action of ["Link anzeigen", "Ersetzen …", "Widerrufen …"]) {
+      expect(within(menu).getByRole("menuitem", { name: action, hidden: true })).toBeDisabled();
+    }
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Einrichten", hidden: true }));
     const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
-    const copyUrl = within(assistant).getByRole("button", { name: "Link zum Kopieren anzeigen" });
-    expect(copyUrl).toBeDisabled();
-    expect(assistant).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Overlay-Zugänge kopieren.");
-    expect(within(assistant).getByRole("tab", { name: "OBS" })).toBeEnabled();
-    fireEvent.click(within(assistant).getByRole("tab", { name: "StreamElements" }));
-    fireEvent.click(within(assistant).getByRole("button", { name: "HTML kopieren" }));
-    expect(writeText).toHaveBeenCalledWith(streamElementsHtml);
-    fireEvent.click(copyUrl);
+    expect(within(assistant).getByText(/overlay#token=••••••/u)).toBeInTheDocument();
+    expect(within(assistant).getByRole("button", { name: "Overlay-Link kopieren" })).toBeDisabled();
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/reveal"))).toBe(false);
   });
 
@@ -546,7 +718,9 @@ describe("Overlays page", () => {
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
     fireEvent.click(await screen.findByText("Gameplay"));
     const inspector = await screen.findByRole("region", { name: language === "de-DE" ? "Zugänge" : "Accesses" });
-    fireEvent.click(within(inspector).getByRole("button", { name: language === "de-DE" ? "Einrichten" : "Set up" }));
+    const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
+    if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    await selectAccessAction(accessRow, "OBS Main PC", language === "de-DE" ? "Einrichten" : "Set up", language === "de-DE" ? "Aktionen für OBS Main PC" : "Actions for OBS Main PC");
     const assistant = within(inspector).getByRole("region", { name: assistantLabel });
     expect(within(assistant).getByRole("tablist", { name: target })).toBeInTheDocument();
     const obsTab = within(assistant).getByRole("tab", { name: "OBS" });
@@ -568,19 +742,22 @@ describe("Overlays page", () => {
     const legacy = await screen.findByRole("region", { name: "Alte Links (Konfiguration im Link)" });
     expect(within(legacy).getByText("Unbenannter Alt-Link")).toBeInTheDocument();
     expect(legacy).toHaveTextContent("Link-ID: legacy-a");
-    fireEvent.click(within(legacy).getByRole("button", { name: "Widerrufen" }));
+    const legacyRow = within(legacy).getByRole("listitem");
+    const menu = await openActionMenu(legacyRow, "Aktionen für Unbenannter Alt-Link legacy-a");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Widerrufen …", hidden: true }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("legacy-a");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Unbenannter Alt-Link (legacy-a) widerrufen" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Zugang widerrufen.");
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Alten Link „Unbenannter Alt-Link (legacy-a)“ widerrufen?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Alten Link widerrufen: Unbenannter Alt-Link (legacy-a)" }));
+    expect(await findToast("Zugang widerrufen.")).toHaveAttribute("role", "status");
     const revoke = fetcher.mock.calls.find(([input, init]) => requestPath(input).endsWith("/legacy-access-a/revoke") && init?.method === "POST");
     expect(revoke?.[1]?.body).toContain("Über Alte Links im Dashboard widerrufen");
     expect(screen.queryByRole("region", { name: "Alte Links (Konfiguration im Link)" })).not.toBeInTheDocument();
   });
 
   it.each([
-    ["de-DE", "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", "Unbenannter Alt-Link (bbbbbbbb) widerrufen"],
-    ["en-US", "Access revoked. Connected sources are still closing.", "Revoke Unnamed legacy link (bbbbbbbb)"],
+    ["de-DE", "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", "Alten Link widerrufen: Unbenannter Alt-Link (bbbbbbbb)"],
+    ["en-US", "Access revoked. Connected sources are still closing.", "Revoke legacy link: Unnamed legacy link (bbbbbbbb)"],
   ])("shows the pending closure message and token identity after legacy revocation in %s", async (language, pendingMessage, confirmLabel) => {
     setBrowserLanguage(language);
     const fetcher = routeFetcher({ emptyOverlays: true, legacyClosingPending: true, legacyTokens: [
@@ -594,14 +771,16 @@ describe("Overlays page", () => {
     const targetRow = within(legacy).getAllByRole("listitem").find((row) => row.textContent.includes("bbbbbbbb"));
     if (!(targetRow instanceof HTMLElement)) throw new Error("Target legacy link row is missing.");
     expect(legacy).toHaveTextContent(`${language === "de-DE" ? "Link-ID" : "Link ID"}: aaaaaaaa`);
-    fireEvent.click(within(targetRow).getByRole("button", { name: language === "de-DE" ? "Widerrufen" : "Revoke" }));
+    const legacyMenuLabel = language === "de-DE" ? "Aktionen für Unbenannter Alt-Link bbbbbbbb" : "Actions for Unnamed legacy link bbbbbbbb";
+    const menu = await openActionMenu(targetRow, legacyMenuLabel);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: language === "de-DE" ? "Widerrufen …" : "Revoke …", hidden: true }));
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("bbbbbbbb");
     expect(dialog).not.toHaveTextContent("aaaaaaaa");
     fireEvent.click(within(dialog).getByRole("button", { name: confirmLabel }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(pendingMessage);
+    expect(await findToast(pendingMessage)).toHaveAttribute("role", "status");
     expect(fetcher.mock.calls.some(([input, init]) => requestPath(input).endsWith("/bbbbbbbb-second/revoke") && init?.method === "POST")).toBe(true);
     expect(fetcher.mock.calls.some(([input, init]) => requestPath(input).endsWith("/aaaaaaaa-first/revoke") && init?.method === "POST")).toBe(false);
   });
@@ -614,13 +793,14 @@ describe("Overlays page", () => {
     fireEvent.change(within(inspector).getByLabelText("Name des Zugangs"), { target: { value: "OBS Backup PC" } });
     fireEvent.click(within(inspector).getByRole("button", { name: "Zugang ausstellen" }));
     expect(await screen.findByText(maskedSecret)).toBeInTheDocument();
-    fireEvent.click(within(inspector).getByRole("button", { name: "Link anzeigen" }));
-    expect(within(inspector).getByRole("textbox", { name: "Vollständiger Link" })).toHaveValue(secret);
+    const issuedRow = within(inspector).getByText("OBS Backup PC", { selector: "strong" }).closest("li");
+    if (!(issuedRow instanceof HTMLElement)) throw new Error("Issued access list row is missing.");
+    await selectAccessAction(issuedRow, "OBS Backup PC", "Link anzeigen");
+    expect(within(issuedRow).getByText(secret)).toBeInTheDocument();
 
     page.rerender(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
     expect(screen.queryByText(maskedSecret)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Link kopieren" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "Vollständiger Link" })).not.toBeInTheDocument();
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
   });
 
   it("does not show a delayed reveal after the manager selects another overlay", async () => {
@@ -641,13 +821,13 @@ describe("Overlays page", () => {
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
     const row = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(row instanceof HTMLElement)) throw new Error("Access row is missing.");
-    fireEvent.click(within(row).getByRole("button", { name: "Link erneut anzeigen" }));
+    await selectAccessAction(row, "OBS Main PC", "Link anzeigen");
     await vi.waitFor(() => { expect(resolveReveal).toBeTypeOf("function"); });
     fireEvent.click(within(table).getByText("Second scene"));
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/overlays/overlay-b/accesses"))).toBe(true); });
     act(() => { resolveReveal?.(jsonResponse({ overlayUrl: secret })); });
 
     expect(screen.queryByText(maskedSecret)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Link kopieren" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Link kopieren: OBS Main PC" })).not.toBeInTheDocument();
   });
 });

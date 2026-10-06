@@ -20,7 +20,9 @@ export { AuditSentence } from "./AuditSentence";
 export type { AuditSentenceProps } from "./AuditSentence";
 export { Badge } from "./Badge";
 export type { BadgeTone } from "./Badge";
-export { InspectorSection, InspectorFieldRow, InspectorActions, DangerSection } from "./InspectorParts";
+export { InspectorSection, InspectorFieldRow, InspectorActions } from "./InspectorParts";
+export { ActionMenu } from "./ActionMenu";
+export type { ActionMenuItem } from "./ActionMenu";
 export { ChatOutputTargetControl } from "./ChatOutputTargetControl";
 export type { ChatOutputTargetControlProps } from "./ChatOutputTargetControl";
 

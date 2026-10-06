@@ -22,6 +22,7 @@ export const catalogString = (catalog: object, key: string): string | undefined 
 export interface DashboardCommonTexts {
   cancel: string;
   close: string;
+  dismissNotification: string;
   invalidFieldCount: (count: number) => string;
   invalidFieldsTitle: string;
   showInvalidFields: string;
@@ -36,7 +37,6 @@ export interface DashboardCommonTexts {
   /** `EditorShell.issueLabels` -- appended to a tab's accessible name. */
   error: string;
   warning: string;
-  dangerZone: string;
   /** `Switch.hint` on an immediate-action switch (2, "Sofort gegen gespeichert"). */
   immediate: string;
   roles: Record<ChannelRole, string>;
@@ -48,6 +48,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   de: {
     cancel: "Abbrechen",
     close: "Schließen",
+    dismissNotification: "Benachrichtigung schließen",
     invalidFieldCount: (count) => `${String(count)} ${count === 1 ? "Feld" : "Felder"} fehlerhaft`,
     invalidFieldsTitle: "Fehlerhafte Felder",
     showInvalidFields: "Fehlerhafte Felder anzeigen",
@@ -58,7 +59,6 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     saving: "Wird gespeichert …",
     error: "Fehler",
     warning: "Hinweis",
-    dangerZone: "Gefahrenzone",
     immediate: "wirkt sofort",
     roles: {
       broadcaster: "Broadcaster",
@@ -74,6 +74,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   en: {
     cancel: "Cancel",
     close: "Close",
+    dismissNotification: "Dismiss notification",
     invalidFieldCount: (count) => `${String(count)} invalid ${count === 1 ? "field" : "fields"}`,
     invalidFieldsTitle: "Invalid fields",
     showInvalidFields: "Show invalid fields",
@@ -84,7 +85,6 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     saving: "Saving …",
     error: "Error",
     warning: "Notice",
-    dangerZone: "Danger zone",
     immediate: "takes effect immediately",
     roles: {
       broadcaster: "Broadcaster",
@@ -191,8 +191,6 @@ export interface ChannelVariablesTexts {
   value: string;
   generalSection: string;
   valueSection: string;
-  dangerSection: string;
-  deleteHint: string;
   valueHint: string;
   editValue: string;
   applyValue: string;
@@ -245,7 +243,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     saveError: "Die Kanalvariable konnte nicht gespeichert werden.", deleteError: "Die Kanalvariable konnte nicht gelöscht werden.",
     name: "Name", nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; höchstens 32 Zeichen.", nameInvalid: "Nur Kleinbuchstaben, Zahlen und Unterstrich.",
     description: "Beschreibung", descriptionHint: "Erscheint in der Variablenauswahl. Höchstens 80 Zeichen.", noDescription: "Keine Beschreibung",
-    value: "Wert", generalSection: "Allgemein", valueSection: "Aktueller Wert", dangerSection: "Gefahrenzone", deleteHint: "Löscht die Variable und ihre Verwendungen.",
+    value: "Wert", generalSection: "Allgemein", valueSection: "Aktueller Wert",
     valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.", editValue: "Wert bearbeiten", applyValue: "Übernehmen", cancelValueEdit: "Abbrechen",
     minimumValueReached: "Der Mindestwert ist erreicht.", maximumValueReached: "Der Höchstwert ist erreicht.",
     resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird zurückgesetzt, wenn der nächste Stream startet.",
@@ -254,11 +252,11 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     usageKindLabel: (kind) => kind === "action" ? "Aktion" : kind === "display" ? "Anzeige" : "Vorlage",
     usageModuleLabel: (moduleId) => moduleId === "text_commands" ? "Textbefehle" : moduleId === "overlays" ? "Overlays" : moduleId.replace(/[_-]+/gu, " "),
     usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? `!${itemName.replace(/^!/u, "")}` : itemName} · ${kind === "action" ? "zählt eine Aktion" : kind === "display" ? "Overlay-Anzeige" : "Vorlage"}`,
-    increase: "+1", decrease: "−1", delete: "Variable löschen", deleteTitle: (name) => `Variable ${name} löschen?`,
+    increase: "+1", decrease: "−1", delete: "Variable löschen", deleteTitle: (name) => `Variable „${name}“ löschen?`,
     deleteDescription: (name, usages, overlayCount = 0) => overlayCount > 0
-      ? `„${name}“ wird dauerhaft gelöscht. Wird in ${String(overlayCount)} Overlay-Element${overlayCount === 1 ? "" : "en"} angezeigt; diese zeigen danach nichts.${usages.length === 0 ? "" : ` Weitere Verwendungen: ${usages}`}`
-      : usages.length === 0 ? `„${name}“ wird dauerhaft gelöscht.` : `„${name}“ wird dauerhaft gelöscht. Verwendungen: ${usages}`,
-    deleteConfirm: (name) => `${name} endgültig löschen`, deleteCancel: "Abbrechen",
+      ? `Die Variable „${name}“ wird entfernt; ${String(overlayCount)} Overlay-Element${overlayCount === 1 ? "" : "e"} zeigen sie danach nicht mehr${usages.length === 0 ? "." : `; weitere Verwendungen: ${usages}.`}`
+      : usages.length === 0 ? `Die Variable „${name}“ und alle zugehörigen Verwendungen werden entfernt.` : `Die Variable „${name}“ und ihre Verwendungen (${usages}) werden entfernt.`,
+    deleteConfirm: (name) => `Variable löschen: ${name}`, deleteCancel: "Abbrechen",
     inUseReason: (usages) => `Wird von ${usages} verwendet. Entferne zuerst die Befehlsaktion.`,
     managementLocked: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen, beschreiben oder löschen.",
     limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
@@ -276,7 +274,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     saveError: "The channel variable could not be saved.", deleteError: "The channel variable could not be deleted.",
     name: "Name", nameHint: "Lowercase letters, numbers, and underscores; up to 32 characters.", nameInvalid: "Use lowercase letters, numbers, and underscores only.",
     description: "Description", descriptionHint: "Shown in the variable picker. Up to 80 characters.", noDescription: "No description",
-    value: "Value", generalSection: "General", valueSection: "Current value", dangerSection: "Danger zone", deleteHint: "Removes the variable and its references.",
+    value: "Value", generalSection: "General", valueSection: "Current value",
     valueHint: "Integer from −999,999,999 to 999,999,999.", editValue: "Edit value", applyValue: "Apply", cancelValueEdit: "Cancel",
     minimumValueReached: "The minimum value has been reached.", maximumValueReached: "The maximum value has been reached.",
     resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets when the next stream starts.",
@@ -285,11 +283,11 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     usageKindLabel: (kind) => kind === "action" ? "action" : kind === "display" ? "display" : "template",
     usageModuleLabel: (moduleId) => moduleId === "text_commands" ? "Text commands" : moduleId === "overlays" ? "Overlays" : moduleId.replace(/[_-]+/gu, " "),
     usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? `!${itemName.replace(/^!/u, "")}` : itemName} · ${kind === "action" ? "changes a variable" : kind === "display" ? "overlay display" : "template"}`,
-    increase: "+1", decrease: "−1", delete: "Delete variable", deleteTitle: (name) => `Delete variable ${name}?`,
+    increase: "+1", decrease: "−1", delete: "Delete variable", deleteTitle: (name) => `Delete variable “${name}”?`,
     deleteDescription: (name, usages, overlayCount = 0) => overlayCount > 0
-      ? `“${name}” will be deleted permanently. It appears in ${String(overlayCount)} overlay element${overlayCount === 1 ? "" : "s"}; ${overlayCount === 1 ? "it" : "they"} will show nothing afterward.${usages.length === 0 ? "" : ` Other uses: ${usages}`}`
-      : usages.length === 0 ? `“${name}” will be deleted permanently.` : `“${name}” will be deleted permanently. Used in: ${usages}`,
-    deleteConfirm: (name) => `Delete ${name} permanently`, deleteCancel: "Cancel",
+      ? `Variable “${name}” will be removed; ${String(overlayCount)} overlay element${overlayCount === 1 ? "" : "s"} will stop showing it${usages.length === 0 ? "." : `, along with these other uses: ${usages}.`}`
+      : usages.length === 0 ? `Variable “${name}” and all its references will be removed.` : `Variable “${name}” and its references (${usages}) will be removed.`,
+    deleteConfirm: (name) => `Delete variable: ${name}`, deleteCancel: "Cancel",
     inUseReason: (usages) => `Used by ${usages}. Remove the command action first.`,
     managementLocked: "Only broadcasters and managers may create, rename, describe, or delete variables.",
     limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
@@ -308,9 +306,9 @@ export const channelVariablesTexts = (language: DashboardLanguage = dashboardLan
 export interface OverlaysTexts {
   title: string; list: string; details: string; count: (count: number, maximum: number) => string; empty: string; loading: string;
   loadError: string; actionError: string; managementLocked: string; create: string; createTitle: string;
-  name: string; width: string; height: string; standardSize: string; compactSize: string; customSize: string;
+  name: string; size: string; width: string; height: string; standardSize: string; compactSize: string; customSize: string;
   createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; lastUsedNever: string; never: string; statusLabel: string;
-  openAccesses: string; issue: string; issueLabel: string; issueHint: string; copy: string; copied: string;
+  openAccesses: string; issue: string; issueLabel: string; issueHint: string; copied: string;
   editComposition: string; editorBack: string; editorLoading: string; editorLoadError: string;
   editorElements: string; editorPreview: string; editorPreviewCanvas: string; editorProperties: string;
   editorPropertiesTab: string; editorStyleTab: string; editorCssTab: string;
@@ -343,11 +341,15 @@ export interface OverlaysTexts {
   editorConflictKeep: string; editorConflictReload: string; editorConflictOverwrite: string;
   editorUnsavedTitle: string; editorUnsavedDescription: string; editorContinue: string;
   editorDiscardAndLeave: string; editorSaveAndLeave: string;
-  copyError: string; showLink: string; hideLink: string; fullLink: string; reveal: string; replace: string; revoke: string; revoked: string; revokedPending: string;
+  copyError: string; copyLink: string; copyLinkUnrecoverableReason: string; linkExpiredReason: string;
+  accessActions: (name: string) => string; showLink: string; hideLink: string; replace: string; revoke: string; remove: string; removed: string; revoked: string; revokedPending: string;
+  replaceTitle: (name: string) => string; replaceConsequence: string; replaceConfirm: (name: string) => string;
+  revokeTitle: (name: string) => string; revokeConsequence: string; revokeConfirm: (name: string) => string;
+  revokedCount: (count: number) => string; newLinkTitle: string;
   accessUnrecoverable: string;
   setup: string; setupAssistant: string; setupAccessSelected: (name: string) => string; setupTarget: string;
   setupObs: string; setupStreamElements: string; setupSoundAlerts: string; setupOutput: string;
-  setupWholeOverlay: string; setupSingleElement: string; setupOverlayUrl: string; setupRevealUrl: string; setupCopyRevealedUrl: string; setupCopiedUrl: string;
+  setupWholeOverlay: string; setupSingleElement: string; setupOverlayUrl: string; setupCopyRevealedUrl: string; setupCopiedUrl: string;
   setupDimensions: (width: number, height: number) => string; setupElementDimensions: string;
   setupObsAddSource: string; setupObsBrowser: string; setupObsPasteUrl: string; setupObsSetSize: string; setupObsClearCss: string;
   setupObsCssNote: string; setupStreamElementsPath: string; setupStreamElementsPaste: string;
@@ -355,10 +357,11 @@ export interface OverlaysTexts {
   setupSoundAlertsPath: string; setupSoundAlertsImportFields: string; setupSoundAlertsFallback: string; setupSoundAlertsUnverified: string;
   setupHtml: string; setupJs: string; setupFields: string; setupViewSnippet: string;
   setupCopySnippet: (name: string) => string; setupSnippetCopied: (name: string) => string;
-  setupCopyUnavailable: string; setupAccessInactive: string;
+  setupAccessInactive: string;
   active: string; expired: string; revokedStatus: string; noAccesses: string; delete: string; deleteTitle: (name: string) => string;
   deleteDescription: (name: string) => string; deleteConfirm: (name: string) => string; close: string;
-  conflict: string; guide: string; issueReason: string; readOnly: string; elementCount: (count: number) => string;
+  conflict: string; guide: string; issueReason: string; elementCount: (count: number) => string;
+  elementsSummary: (count: number, names: string) => string;
   missingVariable: (name: string) => string;
   legacyTitle: string; legacyDescription: string; legacyTokenName: string; legacyCreatedByUnknown: string;
   legacyCreatedAt: string; legacyTokenId: string; legacyRevokeTitle: (name: string) => string; legacyRevokeDescription: (name: string) => string;
@@ -375,7 +378,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     details: "Übersicht",
     empty: "Noch keine Overlays angelegt.", loading: "Overlays werden geladen …", loadError: "Overlays konnten nicht geladen werden.",
     actionError: "Die Änderung konnte nicht durchgeführt werden.", managementLocked: "Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.",
-    create: "Neues Overlay", createTitle: "Neues Overlay anlegen", name: "Name", width: "Breite", height: "Höhe",
+    create: "Neues Overlay", createTitle: "Neues Overlay anlegen", name: "Name", size: "Größe", width: "Breite", height: "Höhe",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Eigene Fläche", createSubmit: "Overlay anlegen", cancel: "Abbrechen",
     elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", lastUsedNever: "nie", never: "Nie", statusLabel: "Status", openAccesses: "Zugänge verwalten", editComposition: "Komposition bearbeiten",
     editorBack: "Zurück zu Overlays", editorLoading: "Overlay wird geladen …", editorLoadError: "Das Overlay konnte nicht geladen werden.",
@@ -417,13 +420,19 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorConflictKeep: "Weiter bearbeiten", editorConflictReload: "Neu laden", editorConflictOverwrite: "Überschreiben",
     editorUnsavedTitle: "Ungespeicherte Änderungen", editorUnsavedDescription: "Beim Verlassen gehen deine ungespeicherten Änderungen verloren.",
     editorContinue: "Weiter bearbeiten", editorDiscardAndLeave: "Verwerfen und verlassen", editorSaveAndLeave: "Speichern und verlassen",
-    issue: "Zugang ausstellen", issueLabel: "Name des Zugangs", issueHint: "Zum Beispiel OBS Hauptrechner.", copy: "Link kopieren",
-    copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.", showLink: "Link anzeigen", hideLink: "Link verbergen", fullLink: "Vollständiger Link", reveal: "Link erneut anzeigen", replace: "Ersetzen", revoke: "Widerrufen",
+    issue: "Zugang ausstellen", issueLabel: "Name des Zugangs", issueHint: "Zum Beispiel OBS Hauptrechner.",
+    copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.", copyLink: "Link kopieren",
+    copyLinkUnrecoverableReason: "Link nicht wiederherstellbar – für einen neuen ersetzen.", linkExpiredReason: "Link abgelaufen – ersetzen oder widerrufen.",
+    accessActions: (name) => `Aktionen für ${name}`, showLink: "Link anzeigen", hideLink: "Link verbergen", replace: "Ersetzen", revoke: "Widerrufen", remove: "Entfernen",
+    replaceTitle: (name) => `Zugang „${name}“ ersetzen?`, replaceConsequence: "Der bisherige Link wird ungültig und verbundene Quellen verlieren den Zugriff.",
+    replaceConfirm: (name) => `Zugang ersetzen: ${name}`, revokeTitle: (name) => `Zugang „${name}“ widerrufen?`,
+    revokeConsequence: "Quellen mit diesem Zugang verlieren sofort den Zugriff.", revokeConfirm: (name) => `Zugang widerrufen: ${name}`,
+    revokedCount: (count) => `${String(count)} widerrufene Zugänge`, newLinkTitle: "Neuer Link – nur jetzt vollständig",
     accessUnrecoverable: "Dieser alte Zugang kann nicht erneut angezeigt werden. Stelle einen neuen Zugang aus.",
     setup: "Einrichten", setupAssistant: "Einrichtungsassistent", setupAccessSelected: (name) => `Zugang: ${name}`, setupTarget: "Zielsystem",
     setupObs: "OBS", setupStreamElements: "StreamElements", setupSoundAlerts: "Sound Alerts", setupOutput: "Ausgabe",
     setupWholeOverlay: "Ganzes Overlay", setupSingleElement: "Einzelnes Element", setupOverlayUrl: "Maskierter Overlay-Link (Anzeige)",
-    setupRevealUrl: "Link zum Kopieren anzeigen", setupCopyRevealedUrl: "Overlay-Link kopieren", setupCopiedUrl: "Overlay-Link kopiert",
+    setupCopyRevealedUrl: "Overlay-Link kopieren", setupCopiedUrl: "Overlay-Link kopiert",
     setupDimensions: (width, height) => `Breite und Höhe: ${String(width)} × ${String(height)} px`,
     setupElementDimensions: "Breite ≈ Elementbreite × Skalierung; Höhe nach Inhalt.",
     setupObsAddSource: "Quelle hinzufügen", setupObsBrowser: "Browser auswählen", setupObsPasteUrl: "Die Anzeige ist maskiert; der kopierte Link enthält den Zugangstoken. Den Link kopieren und als URL einfügen.",
@@ -440,21 +449,21 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     setupSoundAlertsUnverified: "Dieser Klickpfad wurde noch nicht am echten Sound-Alerts-Produkt geprüft.",
     setupHtml: "HTML", setupJs: "JS", setupFields: "Fields", setupViewSnippet: "Inhalt ansehen",
     setupCopySnippet: (name) => `${name} kopieren`, setupSnippetCopied: (name) => `${name} kopiert`,
-    setupCopyUnavailable: "Nur Broadcaster und Verwalter dürfen Overlay-Zugänge kopieren.",
     setupAccessInactive: "Dieser Zugang ist abgelaufen oder widerrufen und kann nicht kopiert werden.",
-    revoked: "Zugang widerrufen.", revokedPending: "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", active: "Aktiv",
+    revoked: "Zugang widerrufen.", revokedPending: "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", removed: "Zugang entfernt.", active: "Aktiv",
     expired: "Abgelaufen", revokedStatus: "Widerrufen", noAccesses: "Für dieses Overlay gibt es noch keine Zugänge.", delete: "Overlay löschen",
-    deleteTitle: (name) => `Overlay ${name} löschen?`, deleteDescription: (name) => `„${name}“ und seine Elemente werden gelöscht; alle zugehörigen Zugänge werden widerrufen.`,
-    deleteConfirm: (name) => `${name} endgültig löschen`, close: "Schließen", conflict: "Das Overlay wurde zwischenzeitlich geändert. Lade es neu und versuche es erneut.",
-    guide: "In OBS einrichten", issueReason: "Widerruf über das Dashboard", readOnly: "Bediener können Overlays und deren Verwendung ansehen, aber keine Zugänge verwalten.",
+    deleteTitle: (name) => `Overlay „${name}“ löschen?`, deleteDescription: () => `Das Overlay mit seinen Elementen wird gelöscht und alle Zugänge werden widerrufen.`,
+    deleteConfirm: (name) => `Overlay löschen: ${name}`, close: "Schließen", conflict: "Das Overlay wurde zwischenzeitlich geändert. Lade es neu und versuche es erneut.",
+    guide: "In OBS einrichten", issueReason: "Widerruf über das Dashboard",
     elementCount: (count) => `${String(count)} Elemente`,
+    elementsSummary: (count, names) => count === 0 ? "Noch keine – in der Komposition hinzufügen" : `${String(count)} · ${names}`,
     missingVariable: (name) => `Variable ${name} fehlt`,
     legacyTitle: "Alte Links (Konfiguration im Link)",
     legacyDescription: "Diese ungebundenen Links verwenden noch die alte Konfiguration im Fragment. Hier kannst du sie widerrufen.",
     legacyTokenName: "Unbenannter Alt-Link", legacyCreatedByUnknown: "Ersteller unbekannt", legacyCreatedAt: "Erstellt", legacyTokenId: "Link-ID",
-    legacyRevokeTitle: (name) => `Alten Link ${name} widerrufen?`,
-    legacyRevokeDescription: (name) => `Der alte Link ${name} wird sofort ungültig. Verbundene Quellen werden geschlossen.`,
-    legacyRevokeConfirm: (name) => `${name} widerrufen`, legacyRevocationReason: "Über Alte Links im Dashboard widerrufen", loadMore: "Weitere laden",
+    legacyRevokeTitle: (name) => `Alten Link „${name}“ widerrufen?`,
+    legacyRevokeDescription: () => `Der alte Link wird ungültig und verbundene Quellen werden geschlossen.`,
+    legacyRevokeConfirm: (name) => `Alten Link widerrufen: ${name}`, legacyRevocationReason: "Über Alte Links im Dashboard widerrufen", loadMore: "Weitere laden",
     legacyImport: "Importieren", legacyImportTitle: "Alten Link importieren",
     legacyImportDescription: "Füge einen alten Overlay-Link ein. Nur Token, Variable und Anzeigetext werden an den Server gesendet.",
     legacyImportLinkLabel: "Alter Overlay-Link",
@@ -473,7 +482,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     details: "Overview",
     empty: "No overlays yet.", loading: "Loading overlays …", loadError: "Overlays could not be loaded.",
     actionError: "The change could not be completed.", managementLocked: "Only broadcasters and managers may change overlays or accesses.",
-    create: "New overlay", createTitle: "Create an overlay", name: "Name", width: "Width", height: "Height",
+    create: "New overlay", createTitle: "Create an overlay", name: "Name", size: "Size", width: "Width", height: "Height",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Custom size", createSubmit: "Create overlay", cancel: "Cancel",
     elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", lastUsedNever: "never", never: "Never", statusLabel: "Status", openAccesses: "Manage accesses", editComposition: "Edit composition",
     editorBack: "Back to overlays", editorLoading: "Loading overlay …", editorLoadError: "The overlay could not be loaded.",
@@ -515,13 +524,19 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorConflictKeep: "Keep editing", editorConflictReload: "Reload", editorConflictOverwrite: "Overwrite",
     editorUnsavedTitle: "Unsaved changes", editorUnsavedDescription: "Your unsaved changes will be lost if you leave.",
     editorContinue: "Keep editing", editorDiscardAndLeave: "Discard and leave", editorSaveAndLeave: "Save and leave",
-    issue: "Issue access", issueLabel: "Access name", issueHint: "For example, OBS main PC.", copy: "Copy link",
-    copied: "Copied", copyError: "The link could not be copied.", showLink: "Show link", hideLink: "Hide link", fullLink: "Full link", reveal: "Show link again", replace: "Replace", revoke: "Revoke",
+    issue: "Issue access", issueLabel: "Access name", issueHint: "For example, OBS main PC.",
+    copied: "Copied", copyError: "The link could not be copied.", copyLink: "Copy link",
+    copyLinkUnrecoverableReason: "Link cannot be recovered — replace it to issue a new one.", linkExpiredReason: "Link expired — replace or revoke it.",
+    accessActions: (name) => `Actions for ${name}`, showLink: "Show link", hideLink: "Hide link", replace: "Replace", revoke: "Revoke", remove: "Remove",
+    replaceTitle: (name) => `Replace access “${name}”?`, replaceConsequence: "The current link will stop working and connected sources will lose access.",
+    replaceConfirm: (name) => `Replace access: ${name}`, revokeTitle: (name) => `Revoke access “${name}”?`,
+    revokeConsequence: "Sources using this access will lose access immediately.", revokeConfirm: (name) => `Revoke access: ${name}`,
+    revokedCount: (count) => `${String(count)} revoked accesses`, newLinkTitle: "New link — shown in full only now",
     accessUnrecoverable: "This legacy access cannot be shown again. Issue a new access.",
     setup: "Set up", setupAssistant: "Setup assistant", setupAccessSelected: (name) => `Access: ${name}`, setupTarget: "Target platform",
     setupObs: "OBS", setupStreamElements: "StreamElements", setupSoundAlerts: "Sound Alerts", setupOutput: "Output",
     setupWholeOverlay: "Whole overlay", setupSingleElement: "Single element", setupOverlayUrl: "Masked overlay link (display)",
-    setupRevealUrl: "Reveal link for copying", setupCopyRevealedUrl: "Copy overlay link", setupCopiedUrl: "Overlay link copied",
+    setupCopyRevealedUrl: "Copy overlay link", setupCopiedUrl: "Overlay link copied",
     setupDimensions: (width, height) => `Width and height: ${String(width)} × ${String(height)} px`,
     setupElementDimensions: "Width ≈ element width × scale; height follows content.",
     setupObsAddSource: "Add a source", setupObsBrowser: "Choose Browser", setupObsPasteUrl: "The displayed URL is masked; the copied link includes the access token. Copy that link and paste it as the URL.",
@@ -538,21 +553,21 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     setupSoundAlertsUnverified: "This click path has not yet been checked in the real Sound Alerts product.",
     setupHtml: "HTML", setupJs: "JS", setupFields: "Fields", setupViewSnippet: "View contents",
     setupCopySnippet: (name) => `Copy ${name}`, setupSnippetCopied: (name) => `${name} copied`,
-    setupCopyUnavailable: "Only broadcasters and managers may copy overlay access links.",
     setupAccessInactive: "This access has expired or been revoked and cannot be copied.",
-    revoked: "Access revoked.", revokedPending: "Access revoked. Connected sources are still closing.", active: "Active",
+    revoked: "Access revoked.", revokedPending: "Access revoked. Connected sources are still closing.", removed: "Access removed.", active: "Active",
     expired: "Expired", revokedStatus: "Revoked", noAccesses: "This overlay has no accesses yet.", delete: "Delete overlay",
-    deleteTitle: (name) => `Delete overlay ${name}?`, deleteDescription: (name) => `“${name}” and its elements will be deleted; all of its accesses will be revoked.`,
-    deleteConfirm: (name) => `Delete ${name} permanently`, close: "Close", conflict: "This overlay changed while you were viewing it. Reload it and try again.",
-    guide: "Set up in OBS", issueReason: "Revoked from the dashboard", readOnly: "Operators can view overlays and their usage, but cannot manage accesses.",
+    deleteTitle: (name) => `Delete overlay “${name}”?`, deleteDescription: () => `The overlay and its elements will be deleted, and all accesses will be revoked.`,
+    deleteConfirm: (name) => `Delete overlay: ${name}`, close: "Close", conflict: "This overlay changed while you were viewing it. Reload it and try again.",
+    guide: "Set up in OBS", issueReason: "Revoked from the dashboard",
     elementCount: (count) => `${String(count)} elements`,
+    elementsSummary: (count, names) => count === 0 ? "None yet — add elements in the composition" : `${String(count)} · ${names}`,
     missingVariable: (name) => `Variable ${name} is missing`,
     legacyTitle: "Legacy links (configuration in the link)",
     legacyDescription: "These unbound links still use the old fragment configuration. You can revoke them here.",
     legacyTokenName: "Unnamed legacy link", legacyCreatedByUnknown: "Creator unknown", legacyCreatedAt: "Created", legacyTokenId: "Link ID",
-    legacyRevokeTitle: (name) => `Revoke legacy link ${name}?`,
-    legacyRevokeDescription: (name) => `The legacy link ${name} will stop working immediately. Connected sources will be closed.`,
-    legacyRevokeConfirm: (name) => `Revoke ${name}`, legacyRevocationReason: "Revoked from Legacy links in the dashboard", loadMore: "Load more",
+    legacyRevokeTitle: (name) => `Revoke legacy link “${name}”?`,
+    legacyRevokeDescription: () => `The legacy link will stop working and connected sources will close.`,
+    legacyRevokeConfirm: (name) => `Revoke legacy link: ${name}`, legacyRevocationReason: "Revoked from Legacy links in the dashboard", loadMore: "Load more",
     legacyImport: "Import", legacyImportTitle: "Import a legacy link",
     legacyImportDescription: "Paste an old overlay link. Only its token, variable, and display text are sent to the server.",
     legacyImportLinkLabel: "Legacy overlay link",
@@ -740,6 +755,7 @@ export interface DashboardTexts {
     title: string;
     entries: string;
     who: string;
+    systemActor: string;
     load: string;
     empty: string;
     changeData: string;
@@ -1055,7 +1071,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       twitchMessage: "Twitch-Meldung", httpStatus: "HTTP-Status", missingBotPermissions: "Fehlende Bot-Berechtigungen", missingScopes: "Fehlende Scopes",
     },
     audit: {
-      title: "Audit-Log", entries: "Einträge", who: "Wer",
+      title: "Audit-Log", entries: "Einträge", who: "Wer", systemActor: "Automatisches System",
       load: "Audit-Log wird geladen …", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
       before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loadingOlderEntries: "Ältere Einträge werden geladen …",
       yes: "Ja", no: "Nein", newValue: "neu", removedValue: "entfernt",
@@ -1115,6 +1131,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "overlay.access.issued": ({ actor, object }) => `${actor} stellte ${object} aus`,
         "overlay.access.revealed": ({ actor, object }) => `${actor} zeigte ${object} an`,
         "overlay.access.revoked": ({ actor, object }) => `${actor} widerrief ${object}`,
+        "overlay.access.replaced": ({ actor, object }) => `${actor} ersetzte ${object}`,
+        "overlay.access.removed": ({ actor, object }) => `${actor} entfernte ${object}`,
         "overlay.created": ({ actor, object }) => `${actor} erstellte das Overlay ${object}`,
         "overlay.updated": ({ actor, object }) => `${actor} änderte das Overlay ${object}`,
         "overlay.deleted": ({ actor, object }) => `${actor} löschte das Overlay ${object}`,
@@ -1340,7 +1358,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       twitchMessage: "Twitch message", httpStatus: "HTTP status", missingBotPermissions: "Missing bot permissions", missingScopes: "Missing scopes",
     },
     audit: {
-      title: "Audit log", entries: "entries", who: "Who",
+      title: "Audit log", entries: "entries", who: "Who", systemActor: "Automated system",
       load: "Loading audit log …", empty: "No audit entries saved yet.", changeData: "Change data",
       before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
       yes: "Yes", no: "No", newValue: "new", removedValue: "removed",
@@ -1400,6 +1418,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "overlay.access.issued": ({ actor, object }) => `${actor} issued ${object}`,
         "overlay.access.revealed": ({ actor, object }) => `${actor} revealed ${object}`,
         "overlay.access.revoked": ({ actor, object }) => `${actor} revoked ${object}`,
+        "overlay.access.replaced": ({ actor, object }) => `${actor} replaced ${object}`,
+        "overlay.access.removed": ({ actor, object }) => `${actor} removed ${object}`,
         "overlay.created": ({ actor, object }) => `${actor} created overlay ${object}`,
         "overlay.updated": ({ actor, object }) => `${actor} updated overlay ${object}`,
         "overlay.deleted": ({ actor, object }) => `${actor} deleted overlay ${object}`,
@@ -2416,6 +2436,8 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "overlay.access.issued": "Overlay-Zugang ausgestellt",
     "overlay.access.revealed": "Overlay-Zugang angezeigt",
     "overlay.access.revoked": "Overlay-Zugang widerrufen",
+    "overlay.access.replaced": "Overlay-Zugang ersetzt",
+    "overlay.access.removed": "Overlay-Zugang entfernt",
     "overlay.created": "Overlay erstellt",
     "overlay.updated": "Overlay geändert",
     "overlay.deleted": "Overlay gelöscht",
@@ -2476,6 +2498,8 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "overlay.access.issued": "Overlay access issued",
     "overlay.access.revealed": "Overlay access revealed",
     "overlay.access.revoked": "Overlay access revoked",
+    "overlay.access.replaced": "Overlay access replaced",
+    "overlay.access.removed": "Overlay access removed",
     "overlay.created": "Overlay created",
     "overlay.updated": "Overlay updated",
     "overlay.deleted": "Overlay deleted",
@@ -2521,7 +2545,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "channel.mute.enabled": "den Kanal", "channel.mute.disabled": "den Kanal", "channel.pause.enabled": "den Kanal", "channel.pause.disabled": "den Kanal",
     "votekick.cancelled": "den Votekick", "votekick.timeout_lift_attempted": "den Votekick",
     "overlay.token.issued": "den Overlay-Token", "overlay.token.revoked": "den Overlay-Token",
-    "overlay.access.issued": "den Overlay-Zugang", "overlay.access.revealed": "den Overlay-Zugang", "overlay.access.revoked": "den Overlay-Zugang",
+    "overlay.access.issued": "den Overlay-Zugang", "overlay.access.revealed": "den Overlay-Zugang", "overlay.access.revoked": "den Overlay-Zugang", "overlay.access.replaced": "den Overlay-Zugang", "overlay.access.removed": "den Overlay-Zugang",
     "overlay.created": "Overlay", "overlay.updated": "Overlay", "overlay.deleted": "Overlay", "overlay.legacy.imported": "Overlay-Link",
   },
   en: {
@@ -2539,7 +2563,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "channel.mute.enabled": "the channel", "channel.mute.disabled": "the channel", "channel.pause.enabled": "the channel", "channel.pause.disabled": "the channel",
     "votekick.cancelled": "the votekick", "votekick.timeout_lift_attempted": "the votekick",
     "overlay.token.issued": "the overlay token", "overlay.token.revoked": "the overlay token",
-    "overlay.access.issued": "the overlay access", "overlay.access.revealed": "the overlay access", "overlay.access.revoked": "the overlay access",
+    "overlay.access.issued": "the overlay access", "overlay.access.revealed": "the overlay access", "overlay.access.revoked": "the overlay access", "overlay.access.replaced": "the overlay access", "overlay.access.removed": "the overlay access",
     "overlay.created": "overlay", "overlay.updated": "overlay", "overlay.deleted": "overlay", "overlay.legacy.imported": "legacy overlay link",
   },
 };

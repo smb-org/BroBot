@@ -25,11 +25,13 @@ interface ButtonBaseProps {
   ariaPressed?: boolean;
   ariaHasPopup?: "menu";
   ariaExpanded?: boolean;
+  ariaControls?: string;
   onClick?: () => void;
   type?: "button" | "submit";
   /** Initial focus inside a `ConfirmDialog`: Mantine honors the focus target. */
   autoFocus?: boolean;
   title?: string;
+  id?: string;
   size?: ButtonSize;
   ref?: Ref<HTMLButtonElement>;
   className?: string;
@@ -91,6 +93,7 @@ export function Button(props: ButtonProps) {
       type = "button",
     autoFocus = false,
     title,
+    id,
     size = "md",
     ref,
     className,
@@ -98,6 +101,7 @@ export function Button(props: ButtonProps) {
     ariaPressed,
     ariaHasPopup,
     ariaExpanded,
+    ariaControls,
   } = props;
   const iconOnly = props.iconOnly === true;
   const icon = props.icon;
@@ -131,11 +135,13 @@ export function Button(props: ButtonProps) {
       aria-disabled={ariaDisabled || undefined}
       onClick={onClick}
       type={type}
+      id={id}
       aria-label={props.ariaLabel}
       aria-describedby={describedBy}
     aria-pressed={ariaPressed}
     aria-haspopup={ariaHasPopup}
     aria-expanded={ariaExpanded}
+    aria-controls={ariaControls}
       title={title}
       data-autofocus={autoFocus ? true : undefined}
       className={buttonClassName}

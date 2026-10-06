@@ -19,7 +19,7 @@ export const PLATFORM_ASSIGNABLE_ROLES = ["manager", "operator"] as const satisf
 export const canManage = (role: ChannelRole): boolean =>
   (MANAGING_ROLES as readonly ChannelRole[]).includes(role);
 
-export const AUDIT_ACTOR_KINDS = ["member", "platform_admin"] as const;
+export const AUDIT_ACTOR_KINDS = ["member", "platform_admin", "system"] as const;
 export type AuditActorKind = (typeof AUDIT_ACTOR_KINDS)[number];
 
 export const EVENT_TONES = ["info", "warning", "error"] as const;
@@ -70,7 +70,7 @@ export const OVERLAY_ELEMENT_KINDS = ["variable"] as const;
 export type OverlayElementKind = (typeof OVERLAY_ELEMENT_KINDS)[number] | `${string}.${string}`;
 
 /** Closed reasons persisted when an overlay access is revoked. */
-export const OVERLAY_ACCESS_REVOCATION_REASONS = ["manual", "overlay_deleted"] as const;
+export const OVERLAY_ACCESS_REVOCATION_REASONS = ["manual", "overlay_deleted", "replaced"] as const;
 export type OverlayAccessRevocationReason = (typeof OVERLAY_ACCESS_REVOCATION_REASONS)[number];
 
 /** Stable reasons for a rejected manual or automatic shoutout. */
@@ -327,6 +327,8 @@ export const AUDIT_ACTIONS = [
   "overlay.access.issued",
   "overlay.access.revealed",
   "overlay.access.revoked",
+  "overlay.access.replaced",
+  "overlay.access.removed",
   "overlay.created",
   "overlay.updated",
   "overlay.deleted",
