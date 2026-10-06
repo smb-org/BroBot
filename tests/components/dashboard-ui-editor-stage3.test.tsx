@@ -288,7 +288,7 @@ describe("template field", () => {
     expect(input).not.toHaveAttribute("maxlength");
     rerender(<UiProvider><form onSubmit={onSubmit}><TextArea label="Reply" hint="What the bot writes." value="12345678901" maxLength={10} onChange={() => {}} messages={textAreaMessages} /></form></UiProvider>);
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByText("× 11 von 10 Zeichen")).toBeInTheDocument();
+    expect(document.querySelector(".ui-textarea .mantine-InputWrapper-error")).toHaveTextContent("× 11 von 10 Zeichen");
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Reply" }), { key: "Enter", ctrlKey: true });
     expect(onSubmit).toHaveBeenCalledOnce();
   });
@@ -539,9 +539,11 @@ describe("EditorShell and declaration renderer", () => {
     const settingsTab = screen.getByRole("tab", { name: /^Settings/u });
     expect(settingsTab.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByRole("tab", { name: "Advanced, error" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Correct the marked fields.");
-    expect(screen.getByRole("button", { name: "Name: Required" })).toBeInTheDocument();
-    const cooldownLink = screen.getByRole("button", { name: "Cooldown: Enter a duration" });
+    expect(screen.getByRole("status")).toHaveTextContent(/2 (invalid fields|Felder fehlerhaft)/u);
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const invalidPopover = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
+    expect(within(invalidPopover).getByRole("button", { name: "Name: Required" })).toBeInTheDocument();
+    const cooldownLink = within(invalidPopover).getByRole("button", { name: "Cooldown: Enter a duration" });
     fireEvent.click(cooldownLink);
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Cooldown" })).toHaveFocus());
 
@@ -577,7 +579,8 @@ describe("EditorShell and declaration renderer", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus());
     expect(screen.getByRole("tab", { name: "Advanced, error" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("button", { name: "Name: Required" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    expect(within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getByRole("button", { name: "Name: Required" })).toBeInTheDocument();
     expect(attemptOrder).toEqual(["validate", "save"]);
   });
 
@@ -606,10 +609,12 @@ describe("EditorShell and declaration renderer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const status = screen.getByRole("status");
-    await within(status).findByRole("button", { name: "Cooldown: Enter a duration" });
-    expect(within(status).getAllByRole("button")).toHaveLength(2);
+    fireEvent.click(within(status).getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const invalidPopover = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
+    await within(invalidPopover).findByRole("button", { name: "Cooldown: Enter a duration" });
+    expect(within(invalidPopover).getAllByRole("button")).toHaveLength(2);
     expect(screen.getByRole("tab", { name: "Advanced, error" })).toBeInTheDocument();
-    fireEvent.click(within(status).getByRole("button", { name: "Cooldown: Enter a duration" }));
+    fireEvent.click(within(invalidPopover).getByRole("button", { name: "Cooldown: Enter a duration" }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Cooldown" })).toHaveFocus());
     expect(screen.getByRole("textbox", { name: "Cooldown" })).toHaveAttribute("aria-invalid", "true");
   });
@@ -636,20 +641,46 @@ describe("EditorShell and declaration renderer", () => {
     expect(screen.getByRole("tab", { name: /^Settings/u })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("opens collapsed sections when an error link focuses a field inside them", () => {
-    renderUi(<EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
-      sections={[{ id: "settings", label: "Settings", content: <details><summary>Advanced</summary><Field id="usage-text" label="Usage" value="" error="Too long" onChange={() => {}} /></details> }]}
-      invalidFields={[{ id: "usage-text", label: "Usage", message: "Too long", sectionId: "settings" }]} />);
+  it("keeps collapsed sections marked until every hidden error is cleared", async () => {
+    const detailsSection = [{ id: "settings", label: "Settings", content: <details>
+      <summary>Advanced</summary>
+      <Field id="usage-text" label="Usage" value="" error="Too long" onChange={() => {}} />
+      <Field id="usage-limit" label="Limit" value="" error="Enter a smaller value" onChange={() => {}} />
+    </details> }];
+    const firstError = { id: "usage-text", label: "Usage", message: "Too long", sectionId: "settings" };
+    const secondError = { id: "usage-limit", label: "Limit", message: "Enter a smaller value", sectionId: "settings" };
+    const { rerender } = renderUi(<EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
+      sections={detailsSection}
+      invalidFields={[firstError, secondError]} />);
     const details = document.querySelector("details") as HTMLDetailsElement;
     expect(details.open).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Usage: Too long" }));
-    expect(details.open).toBe(true);
-    expect(screen.getByRole("textbox", { name: "Usage" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const invalidPopover = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
+    fireEvent.click(within(invalidPopover).getByRole("button", { name: "Usage: Too long" }));
+    expect(details.open).toBe(false);
+    expect(details).toHaveAttribute("data-editor-error", "true");
+    expect(screen.getByText("Advanced")).toHaveFocus();
+    fireEvent.click(within(invalidPopover).getByRole("button", { name: "Limit: Enter a smaller value" }));
+    expect(details).toHaveAttribute("data-editor-error", "true");
+
+    rerender(<UiProvider><EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
+      sections={detailsSection}
+      invalidFields={[firstError, secondError]} /></UiProvider>);
+    expect(details).toHaveAttribute("data-editor-error", "true");
+
+    rerender(<UiProvider><EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields."
+      sections={detailsSection}
+      invalidFields={[firstError]} /></UiProvider>);
+    expect(details).toHaveAttribute("data-editor-error", "true");
+
+    rerender(<UiProvider><EditorShell {...baseProps} dirty sections={detailsSection} invalidFields={[]} /></UiProvider>);
+    expect(details).not.toHaveAttribute("data-editor-error");
   });
 
   it("keeps the persistent save bar visible across clean, dirty, warning, saved, error, pending, and conflict states", () => {
     const { rerender } = renderUi(<EditorShell {...baseProps} />);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("");
 
     rerender(<UiProvider><EditorShell {...baseProps} dirty warnings={["Unknown variable {viewer}."]} /></UiProvider>);
@@ -665,6 +696,7 @@ describe("EditorShell and declaration renderer", () => {
 
     rerender(<UiProvider><EditorShell {...baseProps} saved /></UiProvider>);
     expect(screen.getByRole("status")).toHaveTextContent("Saved.");
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
     rerender(<UiProvider><EditorShell {...baseProps} dirty /></UiProvider>);
     expect(screen.getByRole("status")).not.toHaveTextContent("Saved.");
 
@@ -679,9 +711,10 @@ describe("EditorShell and declaration renderer", () => {
     const onReload = vi.fn();
     rerender(<UiProvider><EditorShell {...baseProps} dirty conflict={{ message: "Changed elsewhere.", reloadLabel: "Load server version", onReload }} /></UiProvider>);
     expect(screen.getByRole("status")).toHaveTextContent("× Changed elsewhere.");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load server version" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Discard" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load server version" }).closest(".ui-save-bar__actions")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Load server version" }));
     expect(onReload).toHaveBeenCalledOnce();
   });

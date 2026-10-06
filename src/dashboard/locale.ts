@@ -22,6 +22,10 @@ export const catalogString = (catalog: object, key: string): string | undefined 
 export interface DashboardCommonTexts {
   cancel: string;
   close: string;
+  invalidFieldCount: (count: number) => string;
+  invalidFieldsTitle: string;
+  showInvalidFields: string;
+  hideInvalidFields: string;
   save: string;
   /** `EditorShell.discardLabel` -- reverts an editor draft to its last saved value. */
   discard: string;
@@ -44,6 +48,10 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   de: {
     cancel: "Abbrechen",
     close: "Schließen",
+    invalidFieldCount: (count) => `${String(count)} ${count === 1 ? "Feld" : "Felder"} fehlerhaft`,
+    invalidFieldsTitle: "Fehlerhafte Felder",
+    showInvalidFields: "Fehlerhafte Felder anzeigen",
+    hideInvalidFields: "Fehlerhafte Felder verbergen",
     save: "Speichern",
     discard: "Verwerfen",
     saved: "Gespeichert.",
@@ -66,6 +74,10 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   en: {
     cancel: "Cancel",
     close: "Close",
+    invalidFieldCount: (count) => `${String(count)} invalid ${count === 1 ? "field" : "fields"}`,
+    invalidFieldsTitle: "Invalid fields",
+    showInvalidFields: "Show invalid fields",
+    hideInvalidFields: "Hide invalid fields",
     save: "Save",
     discard: "Discard",
     saved: "Saved.",
