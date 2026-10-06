@@ -113,6 +113,8 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
         middlewares={{ flip: true, shift: true }}
         shadow="xs"
         closeOnEscape={false}
+        // No exit fade: a fading popover keeps clickable links that unmount mid-click.
+        transitionProps={{ exitDuration: 0 }}
         returnFocus={!linkActivated}
         hideDetached={false}
         onEnterTransitionEnd={focusFirstErrorLink}

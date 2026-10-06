@@ -290,10 +290,12 @@ describe("Module panel loader", () => {
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent(`${String(expectedErrors.length)} Felder fehlerhaft`);
     fireEvent.click(within(status).getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
-    const invalidPopover = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
-    expect(within(invalidPopover).getAllByRole("button")).toHaveLength(expectedErrors.length);
+    expect(within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getAllByRole("button")).toHaveLength(expectedErrors.length);
     expect(screen.getByRole("tab", { name: "Allgemein, Fehler" })).toBeInTheDocument();
     for (const [label, message] of expectedErrors) {
+      // Activating a link closes the popover at once, so each link needs it reopened.
+      if (screen.queryByRole("dialog", { name: "Fehlerhafte Felder" }) === null) fireEvent.click(within(status).getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+      const invalidPopover = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
       const control = screen.getByRole(label === "Menge" || label === "Schwelle" ? "spinbutton" : "textbox", { name: label });
       expect(control).toHaveAttribute("aria-invalid", "true");
       fireEvent.click(within(invalidPopover).getByRole("button", { name: `${label}: ${message}` }));
