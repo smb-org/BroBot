@@ -23,6 +23,12 @@ const ALL_ACTIONS_ENABLED = [
 const requestUrl = (input: RequestInfo | URL): URL =>
   input instanceof Request ? new URL(input.url) : new URL(String(input), window.location.origin);
 
+const expectActionResult = async (message: string, tone: "success" | "error"): Promise<void> => {
+  const resultSlot = await screen.findByTestId("immediate-action-result-slot");
+  expect(resultSlot).toHaveTextContent(message);
+  expect(toastsSnapshot()).toContainEqual(expect.objectContaining({ tone, message }));
+};
+
 class FeedWebSocket {
   static instances: FeedWebSocket[] = [];
   private readonly listeners = new Map<string, Set<(event: Event) => void>>();
@@ -54,11 +60,11 @@ class FeedWebSocket {
 describe("Stream Manager immediate actions", () => {
   afterEach(() => {
     cleanup();
-    toastsSnapshot().forEach(({ id }) => { dismissToast(id); });
+    for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.unstubAllGlobals();
   });
 
-  it("runs a commercial and reports success at the button, not a toast", async () => {
+  it("runs a commercial and reports success in the reserved result line and a toast", async () => {
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
@@ -72,7 +78,7 @@ describe("Stream Manager immediate actions", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
 
-    expect(await screen.findByText("Werbung gestartet (60s)")).toBeInTheDocument();
+    await expectActionResult("Werbung gestartet (60s)", "success");
     expect(fetcher.mock.calls.some(([input, init]) =>
       requestUrl(input).pathname === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST")).toBe(true);
   });
@@ -97,12 +103,12 @@ describe("Stream Manager immediate actions", () => {
     const adCard = adButton.closest(".stream-manager-action");
     const adLength = within(adCard as HTMLElement).getByRole("radiogroup");
     expect(adCard).toContainElement(adLength);
-    expect(adCard?.lastElementChild).toBe(adButton);
+    expect(adButton.nextElementSibling).toHaveAttribute("data-testid", "immediate-action-result-slot");
 
     const shoutoutCard = shoutoutButton.closest(".stream-manager-action");
     const shoutoutLogin = screen.getByLabelText("Twitch-Name");
     expect(shoutoutCard).toContainElement(shoutoutLogin);
-    expect(shoutoutCard?.lastElementChild).toBe(shoutoutButton);
+    expect(shoutoutButton.nextElementSibling).toHaveAttribute("data-testid", "immediate-action-result-slot");
     expect(shoutoutButton).toBeDisabled();
     // Exactly one helper line under the field: the reason, not the hint beside it.
     expect(screen.getByText("Bitte gib einen Twitch-Namen ein.")).toBeInTheDocument();
@@ -142,7 +148,7 @@ describe("Stream Manager immediate actions", () => {
     fireEvent.click(within(group).getByRole("radio", { name: "180s" }));
     fireEvent.click(await screen.findByRole("button", { name: "Werbung jetzt (180s)" }));
 
-    expect(await screen.findByText("Werbung gestartet (180s)")).toBeInTheDocument();
+    await expectActionResult("Werbung gestartet (180s)", "success");
   });
 
   it("strips a leading @ from the shoutout login and sends the bare name", async () => {
@@ -162,7 +168,7 @@ describe("Stream Manager immediate actions", () => {
     expect(screen.getByLabelText("Twitch-Name")).toHaveValue("streamerin");
     fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
 
-    expect(await screen.findByText("Shoutout an streamerin gesendet")).toBeInTheDocument();
+    await expectActionResult("Shoutout an streamerin gesendet", "success");
   });
 
   it("lays out the three actions as equal cards in one grid, each with a header icon and title", async () => {
@@ -250,7 +256,7 @@ describe("Stream Manager immediate actions", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
 
-    expect(await screen.findByText("Die Werbeeinblendung konnte nicht gestartet werden.")).toBeInTheDocument();
+    await expectActionResult("Die Werbeeinblendung konnte nicht gestartet werden.", "error");
     expect(screen.queryByText("Clip erstellt")).not.toBeInTheDocument();
   });
 
@@ -270,7 +276,7 @@ describe("Stream Manager immediate actions", () => {
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
     fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
 
-    expect(await screen.findByText("Shoutout an streamerin gesendet")).toBeInTheDocument();
+    await expectActionResult("Shoutout an streamerin gesendet", "success");
   });
 
   it("shows the catalogue reason in a toast when a manual shoutout fails", async () => {
@@ -287,9 +293,7 @@ describe("Stream Manager immediate actions", () => {
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
     fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
 
-    const failure = await screen.findByText("Twitch-Abklingzeit aktiv");
-    expect(failure.closest(".ui-toast--error")).toBeInTheDocument();
-    expect(failure.closest(".stream-manager-action")).not.toBeInTheDocument();
+    await expectActionResult("Twitch-Abklingzeit aktiv", "error");
   });
 
   it.each([
@@ -310,9 +314,7 @@ describe("Stream Manager immediate actions", () => {
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
     fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
 
-    const failure = await screen.findByText(message);
-    expect(failure.closest(".ui-toast--error")).toBeInTheDocument();
-    expect(failure.closest(".stream-manager-action")).not.toBeInTheDocument();
+    await expectActionResult(message, "error");
   });
 
   it("creates a clip and offers a link to it", async () => {
@@ -329,7 +331,7 @@ describe("Stream Manager immediate actions", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clip erstellen" }));
 
-    expect(await screen.findByText("Clip erstellt")).toBeInTheDocument();
+    await expectActionResult("Clip erstellt", "success");
     const openClip = screen.getByRole("link", { name: "Clip öffnen (öffnet neuen Tab)" });
     expect(openClip).toHaveAccessibleName("Clip öffnen (öffnet neuen Tab)");
     expect(openClip).toHaveAttribute("href", "https://clips.twitch.tv/clip-1/edit");
@@ -354,7 +356,7 @@ describe("Stream Manager immediate actions", () => {
     fireEvent.click(button);
 
     resolvePatch?.(jsonResponse({ clipId: "clip-1", editUrl: null }));
-    await screen.findByText("Clip erstellt");
+    await expectActionResult("Clip erstellt", "success");
 
     expect(fetcher.mock.calls.filter(([input, init]) =>
       requestUrl(input).pathname === "/api/channels/kanal-a/clips" && init?.method === "POST")).toHaveLength(1);

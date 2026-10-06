@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, ConfirmDialog, Field, InspectorActions, InspectorFieldRow, InspectorSection, notify } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Field, InspectorActions, InspectorFieldRow, InspectorSection, LoadState, notify, Skeleton } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { BelaboxStatusResponse } from "../contracts";
 import { belaboxReasonText, belaboxPanelTexts } from "./locale";
@@ -21,6 +21,8 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [testOutcome, setTestOutcome] = useState<string | null>(null);
   const pollingInactive = status?.pollingDesired === true && !status.polling;
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -30,9 +32,15 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   useEffect(() => {
     let active = true;
     loadBelaboxStatus(channelId).then((next) => {
-      if (active) setStatus(next);
+      if (active) {
+        setStatus(next);
+        setLoadFailed(false);
+      }
     }).catch(() => {
-      if (active) notify({ tone: "error", message: labels.testFailed });
+      if (active) {
+        setLoadFailed(true);
+        notify({ tone: "error", message: labels.testFailed });
+      }
     });
     return () => { active = false; };
   }, [channelId, labels.testFailed]);
@@ -62,7 +70,9 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     try {
       const next = await testBelaboxConnection(channelId, url.length === 0 ? undefined : url);
       if (!next.ok) {
-        notify({ tone: "error", message: belaboxReasonText(labels, next.reason) });
+        const reason = belaboxReasonText(labels, next.reason);
+        setTestOutcome(reason);
+        notify({ tone: "error", message: reason });
         return;
       }
       if (url.length === 0) {
@@ -77,8 +87,11 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
         tone: next.connected ? "success" : "info",
         message: `${next.connected ? labels.connected : labels.disconnected} · ${labels.bitrate}: ${String(next.bitrateKbps)} kbps`,
       });
+      setTestOutcome(`${next.connected ? labels.connected : labels.disconnected} · ${labels.bitrate}: ${String(next.bitrateKbps)} kbps`);
     } catch (failure: unknown) {
-      notify({ tone: "error", message: errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.testFailed });
+      const message = errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.testFailed;
+      setTestOutcome(message);
+      notify({ tone: "error", message });
     } finally {
       setBusy(false);
     }
@@ -133,18 +146,35 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const sampleSummary = status?.sample === null || status?.sample === undefined
     ? null
     : `${status.sample.connected ? labels.connected : labels.disconnected} · ${labels.bitrate}: ${String(status.sample.bitrateKbps)} kbps`;
+  const connectionStatus = status === null ? loadFailed ? "error" : "loading" : "success";
 
   return <section className="module-stack" aria-label={labels.title}>
-    {!canManage ? <p className="lock-reason">{labels.readOnly}</p> : null}
     <InspectorSection title={labels.connection}>
-      <p className="muted">{status?.configured ? labels.configured : labels.notConfigured}</p>
-      <div className="belabox-polling-retry-slot">
-        {pollingInactive && canManage ? <Button disabled={busy} onClick={() => { void retryPolling(); }}>{labels.retryPolling}</Button> : null}
-      </div>
-      {status?.updatedAt === null || status?.updatedAt === undefined ? null : <p className="muted">{labels.updatedAt}: {statusTimestamp(status.updatedAt, language === "de" ? "de-DE" : "en-US")}</p>}
-      {sampleSummary === null ? null : <p className="muted">{labels.latestSample}: {sampleSummary}</p>}
-      <Button disabled={!canManage || busy} onClick={() => { void test(); }}>{labels.testConnection}</Button>
+      <LoadState status={connectionStatus} minHeight="calc(var(--s10) * 8)"
+        loading={<Skeleton rows={5} height={34} />}
+        empty={<p className="muted">{labels.notConfigured}</p>}
+        error={<p className="muted">{labels.refreshFailed}</p>}>
+        <p className="muted">{status?.configured ? labels.configured : labels.notConfigured}</p>
+        <div className="belabox-polling-retry-slot">
+          {pollingInactive && canManage ? <Button disabled={busy} onClick={() => { void retryPolling(); }}>{labels.retryPolling}</Button> : null}
+        </div>
+        <p className="muted" data-testid="belabox-updated-at-slot" title={status?.updatedAt == null ? undefined : `${labels.updatedAt}: ${statusTimestamp(status.updatedAt, language === "de" ? "de-DE" : "en-US")}`}
+          style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflowWrap: "anywhere" }}>
+          {status?.updatedAt == null ? "" : `${labels.updatedAt}: ${statusTimestamp(status.updatedAt, language === "de" ? "de-DE" : "en-US")}`}
+        </p>
+        <p className="muted" data-testid="belabox-sample-slot" title={sampleSummary === null ? undefined : `${labels.latestSample}: ${sampleSummary}`}
+          style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflowWrap: "anywhere" }}>
+          {sampleSummary === null ? "" : `${labels.latestSample}: ${sampleSummary}`}
+        </p>
+        <Button disabled={!canManage || busy || status === null} onClick={() => { void test(); }}>{labels.testConnection}</Button>
+        <p className="muted" data-testid="belabox-test-result-slot" role="status" aria-live="polite" title={testOutcome ?? undefined}
+          style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflowWrap: "anywhere" }}>{testOutcome ?? ""}</p>
+      </LoadState>
     </InspectorSection>
+    <p className="lock-reason" title={canManage ? undefined : labels.readOnly}
+      style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }} aria-live="polite">
+      {canManage ? "" : labels.readOnly}
+    </p>
     <InspectorSection title={labels.replace}>
       <InspectorFieldRow label={labels.statsUrl}>
         <Field

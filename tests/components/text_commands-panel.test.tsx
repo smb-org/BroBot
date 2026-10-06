@@ -106,7 +106,7 @@ describe("Text command editor", () => {
     expect(screen.getByText(renderCommandText("Hallo {user} aus {channel}", { user: "zuschauerin", channel: "beispielkanal" }))).toBeInTheDocument();
     expect(within(editor()).getByRole("switch", { name: "Kanalvariable ändern" })).toBeInTheDocument();
     expect(screen.getAllByText(textCommandsTexts("de").variableSelectHint)).toHaveLength(1);
-    expect(within(editor()).getByRole("switch", { name: "Kanalvariable ändern" }).closest(".ui-switch-card")?.querySelector(".ui-switch-card__children")).toBeNull();
+    expect(within(editor()).getByRole("switch", { name: "Kanalvariable ändern" }).closest(".ui-switch-card")?.querySelector("[data-testid='command-variable-action-slot']")).toHaveAttribute("aria-hidden", "true");
 
     fireEvent.click(advancedTab);
     const copy = textCommandsTexts("de");
@@ -165,6 +165,13 @@ describe("Text command editor", () => {
     expect(screen.getByText("Dieser Slash-Befehl bleibt Antworttext.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
     await waitFor(() => expect(created).toMatchObject({ kind: "text", text: "/permit everyone" }));
+  });
+
+  it("keeps a reserved slash-help slot beside the response editor", async () => {
+    renderPanel(panelFetch({ commands: () => [] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+
+    expect(templateEditorFor("text").querySelector(".command-slash-help")).not.toBeNull();
   });
 
   it("replaces a slash suggestion while preserving the response body", async () => {

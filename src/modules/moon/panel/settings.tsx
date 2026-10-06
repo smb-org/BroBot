@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactElement } from "react";
 
 import type { ModulePanelProperties } from "../../contract";
 import { MOON_ERROR_TEXT_MAX_LENGTH, type MoonSettings } from "../contracts";
-import { Button, Field, InspectorFieldRow } from "../../../dashboard/ui";
+import { Button, Field, InspectorFieldRow, notify } from "../../../dashboard/ui";
 import { moonSettingsTexts } from "./locale";
 import { fetchMoonSettings, saveMoonSettings } from "./service";
 
@@ -11,17 +11,14 @@ export default function MoonSettingsPanel({ channelId, language, canManage }: Mo
   const canEdit = canManage ?? false;
   const [settings, setSettings] = useState<MoonSettings | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     let active = true;
     fetchMoonSettings(channelId).then((moonSettings) => {
       if (!active) return;
       setSettings(moonSettings);
-      setError("");
     }).catch(() => {
-      if (active) setError(labels.loadFailed);
+      if (active) notify({ tone: "error", message: labels.loadFailed });
     });
     return () => { active = false; };
   }, [channelId, labels.loadFailed]);
@@ -29,16 +26,13 @@ export default function MoonSettingsPanel({ channelId, language, canManage }: Mo
   const save = async (): Promise<void> => {
     if (settings === null || !canEdit) return;
     setBusy(true);
-    setError("");
-    setNotice("");
     try {
       const next = await saveMoonSettings(channelId, { revision: settings.revision, errorTexts: settings.errorTexts });
       setSettings(next);
-      setNotice(labels.saved);
+      notify({ tone: "success", message: labels.saved });
     } catch (saveFailure: unknown) {
-      setError(saveFailure instanceof Error && "code" in saveFailure && saveFailure.code === "moon_settings_conflict"
-        ? labels.settingsConflict
-        : labels.saveFailed);
+      notify({ tone: "error", message: saveFailure instanceof Error && "code" in saveFailure && saveFailure.code === "moon_settings_conflict"
+        ? labels.settingsConflict : labels.saveFailed });
     } finally {
       setBusy(false);
     }
@@ -46,9 +40,6 @@ export default function MoonSettingsPanel({ channelId, language, canManage }: Mo
 
   return (
     <div className="module-stack moon-settings" aria-label={labels.errorTexts}>
-      {error.length === 0 ? null : <p className="form-error" role="alert">{error}</p>}
-      {notice.length === 0 ? null : <p className="muted" role="status">{notice}</p>}
-      {!canEdit ? <p className="lock-reason" id="moon-settings-read-only">{labels.readOnlyReason}</p> : null}
       <InspectorFieldRow label={labels.errorTexts} help={labels.errorTextsHint}>
         <div className="moon-settings__fields">
           <Field
@@ -71,6 +62,11 @@ export default function MoonSettingsPanel({ channelId, language, canManage }: Mo
           />
         </div>
       </InspectorFieldRow>
+      <p className="lock-reason" id="moon-settings-read-only" data-testid="moon-settings-permission-slot"
+        title={canEdit ? undefined : labels.readOnlyReason}
+        style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }} aria-live="polite">
+        {!canEdit ? labels.readOnlyReason : ""}
+      </p>
       <div className="moon-settings__footer">
         <Button
           variant="primary"

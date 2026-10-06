@@ -16,27 +16,28 @@ const ShoutoutAction = ({ channelId, availabilityReason }: ModuleImmediateAction
   const labels = raidActionTexts(language);
   const [login, setLogin] = useState("");
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [succeeded, setSucceeded] = useState(false);
+  const [resultMessage, setResultMessage] = useState("");
 
   const run = async (): Promise<void> => {
     const trimmed = login.trim();
     if (pending || availabilityReason !== null || trimmed.length === 0) return;
     setPending(true);
-    setMessage(null);
-    setSucceeded(false);
+    setResultMessage("");
     try {
       await sendManualShoutout(channelId, trimmed);
-      setMessage(labels.sent(trimmed));
-      setSucceeded(true);
+      const message = labels.sent(trimmed);
+      setResultMessage(message);
+      notify({ tone: "success", message });
     } catch (error: unknown) {
       const details = error instanceof PanelApiError && typeof error.details === "object" && error.details !== null && !Array.isArray(error.details)
         ? error.details as Record<string, unknown>
         : null;
       const reason = details?.reason;
-      notify({ tone: "error", message: isShoutoutFailureReason(reason)
+      const message = isShoutoutFailureReason(reason)
         ? labels.failureReasons[reason]
-        : error instanceof PanelApiError ? apiErrorText(error.code, labels.failed, language) : labels.failed });
+        : error instanceof PanelApiError ? apiErrorText(error.code, labels.failed, language) : labels.failed;
+      setResultMessage(message);
+      notify({ tone: "error", message });
     } finally {
       setPending(false);
     }
@@ -65,8 +66,11 @@ const ShoutoutAction = ({ channelId, availabilityReason }: ModuleImmediateAction
       <Button className="stream-manager-action__button" icon="shoutout" variant="primary" disabled={pending || isEmpty || availabilityReason !== null} {...(availabilityReason !== null ? { describedBy: availabilityReasonId } : isEmpty ? { describedBy: helperId } : {})} onClick={() => { void run(); }}>
         {labels.send}
       </Button>
-      {availabilityReason === null ? null : <p className="lock-reason" id={availabilityReasonId}>{availabilityReason}</p>}
-      {message === null ? null : <p className={succeeded ? "form-success" : "form-error"} role={succeeded ? "status" : "alert"}>{message}</p>}
+      <p className="lock-reason" id={availabilityReasonId} data-testid="immediate-action-result-slot"
+        style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite"
+        title={availabilityReason ?? resultMessage}>
+        {availabilityReason ?? resultMessage}
+      </p>
     </div>
   );
 };
