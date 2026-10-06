@@ -739,7 +739,8 @@ describe("Overlays page", () => {
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
 
-    const legacy = await screen.findByRole("region", { name: "Alte Links (Konfiguration im Link)" });
+    const legacy = await screen.findByRole("region", { name: "Alte Links" });
+    fireEvent.click(await within(legacy).findByText("Alte Links (1)"));
     expect(within(legacy).getByText("Unbenannter Alt-Link")).toBeInTheDocument();
     expect(legacy).toHaveTextContent("Link-ID: legacy-a");
     const legacyRow = within(legacy).getByRole("listitem");
@@ -767,7 +768,8 @@ describe("Overlays page", () => {
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
 
-    const legacy = await screen.findByRole("region", { name: language === "de-DE" ? "Alte Links (Konfiguration im Link)" : "Legacy links (configuration in the link)" });
+    const legacy = await screen.findByRole("region", { name: language === "de-DE" ? "Alte Links" : "Legacy links" });
+    fireEvent.click(await within(legacy).findByText(language === "de-DE" ? "Alte Links (2)" : "Legacy links (2)"));
     const targetRow = within(legacy).getAllByRole("listitem").find((row) => row.textContent.includes("bbbbbbbb"));
     if (!(targetRow instanceof HTMLElement)) throw new Error("Target legacy link row is missing.");
     expect(legacy).toHaveTextContent(`${language === "de-DE" ? "Link-ID" : "Link ID"}: aaaaaaaa`);

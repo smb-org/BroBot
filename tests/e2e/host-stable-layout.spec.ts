@@ -44,7 +44,7 @@ interface RequestGate {
   started: () => void;
 }
 
-type ChannelGates = Partial<Record<"settings" | "members" | "audit" | "events" | "overlays" | "legacyTokens" | "variables", RequestGate>>;
+type ChannelGates = Partial<Record<"settings" | "members" | "audit" | "events" | "overlays" | "legacyTokens" | "variables" | "modules", RequestGate>>;
 
 interface ChannelMockData {
   settings?: Record<string, unknown>;
@@ -119,6 +119,9 @@ const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: C
       return;
     }
     if (pathname === `/api/channels/${channelId}/modules` && route.request().method() === "GET") {
+      const gate = gates.modules;
+      gate?.started();
+      if (gate !== undefined) await gate.wait;
       await route.fulfill({ status: data.moduleStatus ?? 200, contentType: "application/json", body: JSON.stringify(data.moduleStatus === undefined ? { modules: data.modules ?? [] } : { error: "module_load_failed" }) });
       return;
     }
@@ -239,6 +242,12 @@ const platformChannel = {
   memberCounts: { broadcaster: 1, manager: 1, operator: 100 },
   broadcasterConnected: true,
 };
+const fullPlatformChannels = [platformChannel, ...Array.from({ length: 29 }, (_, index) => ({
+  ...platformChannel,
+  channelId: `stable-platform-channel-${String(index + 2)}`,
+  login: `stable-platform-channel-${String(index + 2)}`,
+  displayName: `Stable Platform Channel ${String(index + 2)}`,
+}))];
 const fullPlatformAuditPage = {
   entries: Array.from({ length: 50 }, (_, index) => ({
     auditId: `platform-audit-${String(index + 1)}`,
@@ -262,7 +271,7 @@ const fullPlatformMembers = {
   viewerUserId: "viewer",
 };
 
-const installPlatformMocks = async (page: Page, gates: Partial<Record<"audit" | "members", RequestGate>>): Promise<void> => {
+const installPlatformMocks = async (page: Page, gates: Partial<Record<"audit" | "members" | "overview", RequestGate>>, channels: readonly Record<string, unknown>[] = [platformChannel]): Promise<void> => {
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
@@ -270,7 +279,10 @@ const installPlatformMocks = async (page: Page, gates: Partial<Record<"audit" | 
       return;
     }
     if (pathname === "/api/platform") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [platformChannel] }) });
+      const gate = gates.overview;
+      gate?.started();
+      if (gate !== undefined) await gate.wait;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels }) });
       return;
     }
     if (pathname === "/api/platform/audit") {
@@ -380,6 +392,35 @@ test("platform audit and member controls stay above their growing lists", async 
   await expect(page.locator(".platform-members-table tbody tr")).toHaveCount(100);
   expect(await measureBox(page, '.platform-inspector-section[aria-label="Add member"]')).toEqual(grantBefore);
   expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".platform-members-table"))[1]);
+});
+
+test("platform audit controls stay above populated channel and audit lists at desktop and mobile widths", async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    let releaseOverview!: () => void;
+    let markOverviewStarted!: () => void;
+    const overviewGate = new Promise<void>((resolve) => { releaseOverview = resolve; });
+    const overviewStarted = new Promise<void>((resolve) => { markOverviewStarted = resolve; });
+    await installPlatformMocks(page, { overview: { wait: overviewGate, started: markOverviewStarted } }, fullPlatformChannels);
+
+    await page.goto("/platform");
+    await overviewStarted;
+    const auditControl = page.locator(".platform-audit__pagination-slot");
+    const auditList = page.locator(".platform-audit__pagination-slot + .ui-load-state");
+    const controlBefore = await measureDocumentBox(page, ".platform-audit__pagination-slot");
+
+    releaseOverview();
+    await expect(page.locator(".platform-channel-table tbody tr")).toHaveCount(30);
+    await expect(auditControl.getByRole("button", { name: "Load more" })).toBeVisible();
+    await expect(auditList).toHaveAttribute("data-status", "success");
+    await expect(auditList.locator(".table tbody tr")).toHaveCount(50);
+    expect(await measureDocumentBox(page, ".platform-audit__pagination-slot")).toEqual(controlBefore);
+    const auditAfter = await measureDocumentBox(page, ".platform-audit__pagination-slot + .ui-load-state");
+    expect(controlBefore[1] + controlBefore[3]).toBeLessThanOrEqual(auditAfter[1]);
+    const channelsAfter = await measureDocumentBox(page, ".platform-channel-table");
+    expect(auditAfter[1] + auditAfter[3]).toBeLessThanOrEqual(channelsAfter[1]);
+    await page.unrouteAll();
+  }
 });
 
 test("a full member page keeps pagination above the growing list at desktop and 390px", async ({ page }) => {
@@ -582,6 +623,33 @@ test("immediate-action cards keep their reserved strip height after a shoutout f
   }
 });
 
+test("immediate-action strip reserves every registry card until module data arrives at desktop and mobile widths", async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    let releaseModules!: () => void;
+    let markModulesStarted!: () => void;
+    const modulesGate = new Promise<void>((resolve) => { releaseModules = resolve; });
+    const modulesStarted = new Promise<void>((resolve) => { markModulesStarted = resolve; });
+    await installChannelMocks(page, { modules: { wait: modulesGate, started: markModulesStarted } }, {
+      modules: ["ads", "clips", "raid"].map((id) => ({ id, enabled: true, settings: "{}" })),
+    });
+
+    await page.goto(`/channels/${channelId}/overview`);
+    await modulesStarted;
+    const strip = page.locator(".stream-manager-actions");
+    await expect(strip.locator(":scope > .stream-manager-action--loading")).toHaveCount(3);
+    const before = await measureDocumentBox(page, ".stream-manager-actions");
+    expect(before[3]).toBe(width === 390 ? 608 : 192);
+
+    releaseModules();
+    await expect(page.getByRole("textbox", { name: "Twitch login" })).toBeVisible();
+    await expect(strip.locator(":scope > .stream-manager-action--loading")).toHaveCount(0);
+    await expect(strip.locator(":scope > .stream-manager-action")).toHaveCount(3);
+    expect(await measureDocumentBox(page, ".stream-manager-actions")).toEqual(before);
+    await page.unrouteAll();
+  }
+});
+
 test("module toggle and workspace failures use toasts without inserting error rows", async ({ page }) => {
   await installChannelMocks(page, {}, { modules: [{ id: "ads", enabled: false, settings: "{}" }], moduleToggleStatus: 500 });
   await page.goto(`/channels/${channelId}/modules`);
@@ -656,38 +724,47 @@ test("the overlay style lock strip keeps its height as locked content is cleared
   }
 });
 
-test("overlay controls stay above their growing lists as data loads", async ({ page }) => {
-  let releaseOverlays!: () => void;
-  let markOverlaysStarted!: () => void;
-  let releaseLegacyTokens!: () => void;
-  let markLegacyTokensStarted!: () => void;
-  const overlaysGate = new Promise<void>((resolve) => { releaseOverlays = resolve; });
-  const overlaysStarted = new Promise<void>((resolve) => { markOverlaysStarted = resolve; });
-  const legacyTokensGate = new Promise<void>((resolve) => { releaseLegacyTokens = resolve; });
-  const legacyTokensStarted = new Promise<void>((resolve) => { markLegacyTokensStarted = resolve; });
-  await installChannelMocks(page, {
-    overlays: { wait: overlaysGate, started: markOverlaysStarted },
-    legacyTokens: { wait: legacyTokensGate, started: markLegacyTokensStarted },
-  }, { overlays: fullOverlays, legacyTokens: fullLegacyTokens });
+test("the collapsed legacy overlay list stays below primary content while loading and expanding at desktop and mobile widths", async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    let releaseOverlays!: () => void;
+    let markOverlaysStarted!: () => void;
+    let releaseLegacyTokens!: () => void;
+    let markLegacyTokensStarted!: () => void;
+    const overlaysGate = new Promise<void>((resolve) => { releaseOverlays = resolve; });
+    const overlaysStarted = new Promise<void>((resolve) => { markOverlaysStarted = resolve; });
+    const legacyTokensGate = new Promise<void>((resolve) => { releaseLegacyTokens = resolve; });
+    const legacyTokensStarted = new Promise<void>((resolve) => { markLegacyTokensStarted = resolve; });
+    await installChannelMocks(page, {
+      overlays: { wait: overlaysGate, started: markOverlaysStarted },
+      legacyTokens: { wait: legacyTokensGate, started: markLegacyTokensStarted },
+    }, { overlays: fullOverlays, legacyTokens: fullLegacyTokens });
 
-  await page.goto(`/channels/${channelId}/overlays`);
-  await Promise.all([overlaysStarted, legacyTokensStarted]);
-  const overlayList = page.locator(".overlays-page > .ui-load-state");
-  const legacyList = page.locator(".overlay-legacy-links .ui-load-state");
-  const beforeCreateAction = await measureBox(page, ".overlays-page__create-action");
-  const beforeLegacyHeading = await measureBox(page, ".overlay-legacy-links__heading");
-  const beforeLegacyPagination = await measureBox(page, ".overlay-legacy-links__pagination-slot");
-  releaseOverlays();
-  releaseLegacyTokens();
-  await expect(overlayList).toHaveAttribute("data-status", "success");
-  await expect(legacyList).toHaveAttribute("data-status", "success");
-  await expect(page.locator(".overlays-table tbody tr")).toHaveCount(20);
-  await expect(page.locator(".overlay-access-list__item--legacy")).toHaveCount(50);
-  expect(await measureBox(page, ".overlays-page__create-action")).toEqual(beforeCreateAction);
-  expect(await measureBox(page, ".overlay-legacy-links__heading")).toEqual(beforeLegacyHeading);
-  expect(await measureBox(page, ".overlay-legacy-links__pagination-slot")).toEqual(beforeLegacyPagination);
-  const legacyListBox = await measureBox(page, ".overlay-legacy-links .ui-load-state");
-  expect(beforeLegacyPagination[1] + beforeLegacyPagination[3]).toBeLessThanOrEqual(legacyListBox[1]);
+    await page.goto(`/channels/${channelId}/overlays`);
+    await Promise.all([overlaysStarted, legacyTokensStarted]);
+    const overlayList = page.locator(".overlays-page > .ui-load-state");
+    const details = page.locator(".overlay-legacy-links");
+    await expect.poll(() => details.evaluate((element) => element.hasAttribute("open"))).toBe(false);
+    releaseOverlays();
+    await expect(overlayList).toHaveAttribute("data-status", "success");
+    await expect(page.locator(".overlays-table tbody tr")).toHaveCount(20);
+    const primaryListBefore = await measureDocumentBox(page, ".overlays-table");
+    const createActionBefore = await measureDocumentBox(page, ".overlays-page__create-action");
+
+    releaseLegacyTokens();
+    await expect(details.locator("summary")).toContainText("Legacy links (50)");
+    await expect(details.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
+    expect(await measureDocumentBox(page, ".overlays-table")).toEqual(primaryListBefore);
+    expect(await measureDocumentBox(page, ".overlays-page__create-action")).toEqual(createActionBefore);
+    expect(primaryListBefore[1] + primaryListBefore[3]).toBeLessThanOrEqual((await measureDocumentBox(page, ".overlay-legacy-links"))[1]);
+
+    await details.locator("summary").click();
+    await expect(details.locator(".overlay-access-list__item--legacy").first()).toBeVisible();
+    await expect(details.locator(".overlay-access-list__item--legacy")).toHaveCount(50);
+    expect(await measureDocumentBox(page, ".overlays-table")).toEqual(primaryListBefore);
+    expect(await measureDocumentBox(page, ".overlays-page__create-action")).toEqual(createActionBefore);
+    await page.unrouteAll();
+  }
 });
 
 test("a location-search error toast can be dismissed above its dialog backdrop", async ({ page }) => {

@@ -583,6 +583,7 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
       <PageHeader kind="platform" title={texts.title} subtitle={texts.subtitle(formatNumber(overview.data?.length ?? 0))} actions={
         <Button ref={channelReleaseButton} variant="primary" icon="add" onClick={openChannelRelease}>{texts.releaseChannel}</Button>
       } />
+      <PlatformAudit auditState={audit} channels={overview.data ?? []} onLoadMore={() => { void loadMoreAudit(); }} loadingMore={auditLoadingMore} />
       <section className="config-section" aria-label={texts.channelOverview}>
         <ListDetail
           list={
@@ -618,7 +619,6 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
           onCloseInspector={closeFloating}
         />
       </section>
-      <PlatformAudit auditState={audit} channels={overview.data ?? []} onLoadMore={() => { void loadMoreAudit(); }} loadingMore={auditLoadingMore} />
       <ChannelRelease opened={channelReleaseOpen} onReloadOverview={loadOverview} onAuthenticationRequired={onAuthenticationRequired} onClose={closeChannelRelease} />
     </section>
   );

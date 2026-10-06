@@ -14,6 +14,7 @@ import { LoadState, notify, Popover, Skeleton } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
 const lazyActions = new Map<string, LazyExoticComponent<ComponentType<ModuleImmediateActionProperties>>>();
+const immediateActionModules = MODULES.filter((module) => module.immediateActions !== undefined);
 
 const getLazyImmediateAction = (moduleId: string): LazyExoticComponent<ComponentType<ModuleImmediateActionProperties>> | null => {
   const module = MODULES.find((entry) => entry.id === moduleId);
@@ -30,7 +31,7 @@ const getLazyImmediateAction = (moduleId: string): LazyExoticComponent<Component
  * itself (inline, next to its own button), never a global toast, and each
  * guards its own in-flight request the same way `Switch`'s `pending` does.
  */
-export const ImmediateActions = ({ channelId, streamState, modules = [] }: { channelId: string; streamState?: ChannelStreamState | null | undefined; modules?: readonly Pick<PanelModuleState, "id" | "enabled">[] }): ReactElement => {
+export const ImmediateActions = ({ channelId, streamState, modules = [], modulesLoaded = true }: { channelId: string; streamState?: ChannelStreamState | null | undefined; modules?: readonly Pick<PanelModuleState, "id" | "enabled">[]; modulesLoaded?: boolean }): ReactElement => {
   const texts = dashboardTexts();
   const modulesById = new Map(modules.map((state) => [state.id, state]));
   const moduleCards = MODULES.flatMap((module) => {
@@ -48,10 +49,12 @@ export const ImmediateActions = ({ channelId, streamState, modules = [] }: { cha
     <section className="content-section" aria-label={texts.streamManager.immediateActions}>
       <div className="section-heading"><h2>{texts.streamManager.immediateActions}</h2></div>
       <div className="stream-manager-actions">
-        {moduleCards.map(({ id, ActionCard, availabilityReason }) => (
+        {modulesLoaded ? moduleCards.map(({ id, ActionCard, availabilityReason }) => (
           <Suspense key={id} fallback={<div className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>}>
             <ActionCard channelId={channelId} streamState={streamState ?? null} availabilityReason={availabilityReason} />
           </Suspense>
+        )) : immediateActionModules.map((module) => (
+          <div key={module.id} className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>
         ))}
       </div>
     </section>

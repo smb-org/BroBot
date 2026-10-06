@@ -975,6 +975,7 @@ interface ChannelOverviewPageProperties {
   onNavigate: (route: DashboardRoute) => void;
   /** Stream Manager: every module, switchable without a page change. */
   modules: PanelModuleState[];
+  modulesLoaded: boolean;
   onModulesChanged: () => Promise<void>;
   onLocationChanged: (channelId: string, location: NonNullable<PanelChannelOverview["location"]> | null) => void;
 }
@@ -1001,7 +1002,7 @@ const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; chi
   );
 };
 
-const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, onModulesChanged, onLocationChanged }: ChannelOverviewPageProperties): ReactElement => {
+const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, modulesLoaded, onModulesChanged, onLocationChanged }: ChannelOverviewPageProperties): ReactElement => {
   const settingsTexts = channelSettingsTexts(dashboardLanguage());
   const [channelSettings, setChannelSettings] = useState<PanelChannelSettings | null>(null);
   const [timeZoneDraft, setTimeZoneDraft] = useState("");
@@ -1094,7 +1095,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
           disabled={settingsBusy || channelSettings === null}
         />
       </section>
-      <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} modules={modules} />
+      <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} modules={modules} modulesLoaded={modulesLoaded} />
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
       <section className="content-section" aria-label={dashboardTexts().navigation.module}>
         <div className="section-heading"><h2>{dashboardTexts().navigation.module}</h2><span className="muted number">{formatNumber(overview.activeModules.length)}</span></div>
@@ -2084,7 +2085,7 @@ export const DashboardApp = (): ReactElement => {
           loading={<Skeleton rows={12} height={58} />}
           empty={<Skeleton rows={12} height={58} />}
           error={<Skeleton rows={12} height={58} />}
-        >{overviewMatchesRoute && overview.data !== null ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} onModulesChanged={reloadModules} onLocationChanged={(channelId, location) => {
+        >{overviewMatchesRoute && overview.data !== null ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} modulesLoaded={selectedChannel.modules !== undefined || overview.data.modules !== undefined || modules.data !== null} onModulesChanged={reloadModules} onLocationChanged={(channelId, location) => {
           setChannels((current) => current.data === null ? current : {
             ...current,
             data: current.data.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),
