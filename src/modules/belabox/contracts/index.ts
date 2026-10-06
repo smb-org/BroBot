@@ -9,6 +9,9 @@ export const BELABOX_ENSURE_POLL_HANDLER = "ensure";
 export const BELABOX_PROBE_INTERVAL_MS = 60_000;
 export const BELABOX_ON_DEMAND_CACHE_MS = 10_000;
 export const BELABOX_SECRET_UNAVAILABLE_STATUS_CODE = "not_configured";
+export const BELABOX_DEFAULT_LOW_BITRATE_KBPS = 1_000;
+
+export type BelaboxPhase = "healthy" | "low" | "disconnected" | "inactive";
 
 export const belaboxSettingsSchema = z.object({
   mode: z.enum(["interval", "on_demand"]).default("interval"),
@@ -56,6 +59,12 @@ export interface BelaboxStats {
 
 export interface BelaboxSample extends BelaboxStats {
   at: string;
+  /** Sum of observed counter deltas in the current stream. */
+  droppedTotal?: number;
+  /** Overlay/template phase; #323 may refine it with the configured alert thresholds. */
+  phase?: BelaboxPhase;
+  /** Start of the current low/disconnected episode. */
+  alertStartedAt?: string | null;
 }
 
 export interface BelaboxStatusResponse {

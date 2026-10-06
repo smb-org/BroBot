@@ -4,6 +4,7 @@ import {
   BELABOX_SECRET_UNAVAILABLE_STATUS_CODE,
   BELABOX_STATS_URL_SECRET,
   type BelaboxFetchFailureReason,
+  type BelaboxPhase,
   type BelaboxStatusErrorCode,
   type BelaboxSample,
 } from "../contracts";
@@ -48,6 +49,9 @@ const EMPTY_FETCH_PHASE: BelaboxFetchPhase = { consecutiveFailures: 0, failing: 
 const finiteNonnegative = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0;
 
+const isBelaboxPhase = (value: unknown): value is BelaboxPhase =>
+  value === "healthy" || value === "low" || value === "disconnected" || value === "inactive";
+
 const parseSample = (value: string | null): BelaboxSample | null => {
   if (value === null) return null;
   try {
@@ -58,6 +62,11 @@ const parseSample = (value: string | null): BelaboxSample | null => {
         !finiteNonnegative(sample.bitrateKbps) || !finiteNonnegative(sample.rttMs) ||
         !finiteNonnegative(sample.latencyMs) || !finiteNonnegative(sample.network) ||
         !finiteNonnegative(sample.droppedPackets)) return null;
+    if (sample.droppedTotal !== undefined && !finiteNonnegative(sample.droppedTotal) ||
+        sample.phase !== undefined && !isBelaboxPhase(sample.phase) ||
+        sample.alertStartedAt !== undefined && sample.alertStartedAt !== null && typeof sample.alertStartedAt !== "string") {
+      return null;
+    }
     return sample as unknown as BelaboxSample;
   } catch {
     return null;
@@ -166,6 +175,8 @@ export const setBelaboxPollingState = async (
   if (resetStream) {
     await db.prepare(
       `UPDATE belabox_status SET
+         sampled_at = NULL,
+         sample_json = NULL,
          polling = 0,
          error_code = NULL,
          stream_id = NULL,
@@ -175,7 +186,7 @@ export const setBelaboxPollingState = async (
          revision = revision + 1
        WHERE channel_id = ? AND (
          polling != 0 OR stream_id IS NOT NULL OR belabox_stream_id IS NOT NULL OR
-         fetch_phase_json != ? OR recent_json != '[]'
+         sampled_at IS NOT NULL OR sample_json IS NOT NULL OR fetch_phase_json != ? OR recent_json != '[]'
        )`,
     ).bind(encodedPhase(EMPTY_FETCH_PHASE), channelId, encodedPhase(EMPTY_FETCH_PHASE)).run();
     return;

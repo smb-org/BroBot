@@ -95,6 +95,7 @@ const alarmContext = (
   const scheduled: Array<{ key: string; deadline: number }> = [];
   const cleared: string[] = [];
   const diagnostics: Array<{ code: string; detail?: Readonly<Record<string, unknown>> }> = [];
+  const overlayMessages: Array<{ type: string; elementKind: string; payload: Readonly<Record<string, unknown>> }> = [];
   let currentDeadline: number | null = null;
   const context = {
     DB: database as unknown as D1Database,
@@ -117,8 +118,12 @@ const alarmContext = (
         now,
       );
     },
+    publishModuleOverlayMessage: (type: string, elementKind: string, payload: Readonly<Record<string, unknown>>) => {
+      overlayMessages.push({ type, elementKind, payload });
+      return Promise.resolve();
+    },
   } as unknown as ModuleAlarmContext;
-  return { context, scheduled, cleared, diagnostics };
+  return { context, scheduled, cleared, diagnostics, overlayMessages };
 };
 
 describe("BELABOX polling", () => {
@@ -271,6 +276,43 @@ describe("BELABOX polling", () => {
       belaboxStreamId: STREAM_ID,
       recent: [{ bitrateKbps: 3_200, connected: true }],
     });
+  });
+
+  it("accumulates dropped deltas, tracks the unhealthy episode, and publishes changed samples", async () => {
+    await insertModule(database, { mode: "interval", intervalSeconds: 15 });
+    const { context, overlayMessages } = alarmContext(database);
+    const payload = (connected: boolean, bitrate: number, dropped: number) => ({ publishers: {
+      [SECRET_SENTINEL]: { connected, bitrate, rtt: connected ? 41 : 0, latency: 115, network: 2, dropped_pkts: dropped },
+    } });
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(payload(false, 0, 0)))
+      .mockResolvedValueOnce(jsonResponse(payload(true, 900, 7)))
+      .mockResolvedValueOnce(jsonResponse(payload(true, 800, 9)))
+      .mockResolvedValueOnce(jsonResponse(payload(true, 800, 9)))
+      .mockResolvedValueOnce(jsonResponse(payload(false, 0, 0)));
+
+    await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
+    vi.setSystemTime(Date.now() + 60_000);
+    await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
+    const lowStartedAt = new Date().toISOString();
+    vi.setSystemTime(Date.now() + 15_000);
+    await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
+    vi.setSystemTime(Date.now() + 15_000);
+    await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
+    vi.setSystemTime(Date.now() + 15_000);
+    await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
+
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      sample: { phase: "disconnected", alertStartedAt: lowStartedAt, droppedTotal: 9 },
+    });
+    expect(overlayMessages.map(({ type, elementKind, payload: message }) => ({ type, elementKind, phase: message.phase })))
+      .toEqual([
+        { type: "sample", elementKind: "belabox.status", phase: "inactive" },
+        { type: "sample", elementKind: "belabox.status", phase: "low" },
+        { type: "sample", elementKind: "belabox.status", phase: "low" },
+        { type: "sample", elementKind: "belabox.status", phase: "low" },
+        { type: "sample", elementKind: "belabox.status", phase: "disconnected" },
+      ]);
   });
 
   it("uses max(now, deadline) plus the active interval for the next deadline", async () => {
@@ -699,6 +741,38 @@ describe("BELABOX polling", () => {
       polling: false,
       streamId: null,
       belaboxStreamId: null,
+    });
+  });
+
+  it("clears the prior stream sample and enrichment on an offline reset", async () => {
+    await insertModule(database);
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, sampled_at, sample_json, polling, stream_id, belabox_stream_id,
+         fetch_phase_json, recent_json, revision)
+       VALUES (?, ?, ?, 1, ?, ?, '{}', '[]', 1)`,
+    ).bind(
+      CHANNEL_ID,
+      "2026-10-05T11:59:50.000Z",
+      JSON.stringify({
+        ...normalizedSample("2026-10-05T11:59:50.000Z", 900),
+        droppedTotal: 42,
+        phase: "low",
+        alertStartedAt: "2026-10-05T11:58:00.000Z",
+      }),
+      STREAM_ID,
+      STREAM_ID,
+    ).run();
+    const { context } = alarmContext(database, { streamState: "offline" });
+
+    await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now());
+
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      polling: false,
+      streamId: null,
+      belaboxStreamId: null,
+      sample: null,
+      recent: [],
     });
   });
 

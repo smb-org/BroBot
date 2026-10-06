@@ -291,6 +291,8 @@ export interface ModuleOverlayElementDefinition {
   initialStateNeedsContext?: boolean;
   /** Module realtime message types that require the host to reload this element's state. */
   reloadStateOnModuleMessages?: readonly string[];
+  /** Module realtime message types merged directly into this element's current state. */
+  mergeRealtimeStateOnModuleMessages?: readonly string[];
   /** Merges partial realtime state into the current state without replacing module lifecycle data. */
   mergeRealtimeState?: (
     current: Readonly<Record<string, unknown>> | null,
