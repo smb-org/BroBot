@@ -399,6 +399,37 @@ Moderator-Berechtigungen hast“ und „Tritt dem Chat deines Kanals als
 Bot-Nutzer bei“, ist man im Panel-Login gelandet und bei Twitch mit dem
 falschen Konto angemeldet.
 
+Der Bot fordert **alle** Bot-Scopes in einem Zug an (`BOT_SCOPES` in
+`src/worker/auth/oauth.ts`). Dass auch der übrige Moderator-Satz (Lese- und
+Verwaltungsvarianten) schon jetzt dabei ist, ist Absicht: So braucht der Bot-
+Account später keine weitere Zustimmungsrunde, wenn ein Modul eine dieser
+Fähigkeiten erstmals nutzt.
+
+| Scope | Zweck |
+|---|---|
+| `user:bot` | als Bot-Nutzer im Chat auftreten |
+| `user:read:chat` | Chatnachrichten über EventSub lesen |
+| `user:write:chat` | Chatnachrichten senden |
+| `user:read:moderated_channels` | Kanäle auflisten, in denen der Bot Moderator ist |
+| `clips:edit` | Clips erstellen |
+| `moderator:manage:shoutouts` / `moderator:read:shoutouts` | Shoutouts senden / lesen |
+| `moderator:manage:announcements` | Ankündigungen senden |
+| `moderator:read:chatters` | Liste der Chatter lesen |
+| `moderator:read:followers` | Follower lesen |
+| `moderator:manage:chat_messages` / `moderator:read:chat_messages` | Nachrichten löschen / gelöschte Nachrichten lesen |
+| `moderator:manage:blocked_terms` / `moderator:read:blocked_terms` | gesperrte Begriffe ändern / lesen |
+| `moderator:manage:chat_settings` / `moderator:read:chat_settings` | Chat-Einstellungen ändern / lesen |
+| `moderator:manage:unban_requests` / `moderator:read:unban_requests` | Entsperranträge bearbeiten / lesen |
+| `moderator:manage:banned_users` / `moderator:read:banned_users` | bannen, timeouten, entbannen / Bannliste lesen |
+| `moderator:manage:warnings` / `moderator:read:warnings` | Verwarnungen aussprechen / lesen |
+| `moderator:read:moderators` | Moderatorenliste lesen |
+| `moderator:read:vips` | VIP-Liste lesen |
+| `moderator:manage:automod` | zurückgehaltene Nachrichten freigeben oder ablehnen |
+| `moderator:manage:automod_settings` / `moderator:read:automod_settings` | AutoMod-Einstellungen ändern / lesen |
+| `moderator:read:suspicious_users` | Twitchs Bann-Umgehungs-Erkennung lesen |
+| `moderator:manage:shield_mode` / `moderator:read:shield_mode` | Shield Mode schalten / Status lesen |
+| `moderator:manage:guest_star` / `moderator:read:guest_star` | Guest-Star-Sitzungen steuern / lesen |
+
 Die routinemäßige Erneuerung läuft automatisch über den Refresh-Token im
 stündlichen Lauf. Manuell ist die Autorisierung nur nötig, wenn Scopes
 hinzukommen oder das Refresh-Token ungültig wurde — einmal je Scope-Änderung,
