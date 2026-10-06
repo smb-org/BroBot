@@ -486,3 +486,26 @@ test("text command slash help and variable action keep editor boxes stable", asy
   expect(await box(actionSlot)).toEqual(actionBefore);
   expect(await box(editor)).toEqual(editorBeforeAction);
 });
+
+test("an overnight chat voting result keeps its closing time fully visible at 390px", async ({ page }) => {
+  const defaults = {
+    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
+    scale_5: ["1", "2", "3", "4", "5"], options_n: ["1", "2"], free_text: [],
+  };
+  const vote = {
+    id: "night-vote", channelId: "channel-a", preset: "yes_no", optionCount: 2, labels: ["Yes", "No"],
+    status: "closed", openedAt: new Date(2030, 9, 6, 23, 50).toISOString(), closesAt: new Date(2030, 9, 7, 0, 10).toISOString(),
+    requestedDurationSeconds: 1200, closedAt: new Date(2030, 9, 7, 0, 10).toISOString(), closeReason: "timer", counts: [3, 1], voterCount: 4,
+  };
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote, counts: [3, 1], revision: 2, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60, defaultLabels: defaults,
+  });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "chat_voting");
+
+  const meta = page.locator(".chat-voting-result__meta");
+  await expect(meta).toContainText("(+1)");
+  const clipped = await meta.evaluate((element) => element.scrollWidth > element.clientWidth);
+  expect(clipped).toBe(false);
+});

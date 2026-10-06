@@ -1,36 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
-import type { DashboardLanguage } from "../../../dashboard/locale";
 import { Button, Field, Led, LoadState, notify, NumberField, SegmentedControl, Select, Skeleton } from "../../../dashboard/ui";
 import type { SelectOption } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import { CHAT_VOTING_MAX_TEXT_TERMS, CHAT_VOTING_PRESETS } from "../contracts";
 import type { ChatVotePreset, ChatVotingTextMode } from "../contracts";
 import { CHAT_VOTING_LABEL_MAX_LENGTH, isValidVoteLabel, rankVoteTerms, voteLabelLength } from "../domain";
+import { compactDateRange, dateText, timeText } from "./date-range";
 import { chatVotingPanelTexts } from "./locale-panel";
 import type { ChatVotingPanelState } from "./service";
 import { approveChatVotingTerm, closeChatVoting, loadChatVotingState, startChatVoting } from "./service";
-
-const dateText = (value: string | null, language: DashboardLanguage): string => {
-  if (value === null || !Number.isFinite(Date.parse(value))) return "—";
-  return new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-US", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
-};
-
-const timeText = (value: string, language: DashboardLanguage): string =>
-  Number.isFinite(Date.parse(value))
-    ? new Intl.DateTimeFormat(language, { timeStyle: "short" }).format(new Date(value))
-    : "—";
-
-const compactDateRange = (from: string, to: string, language: DashboardLanguage): [string, string] => {
-  const start = new Date(from);
-  const end = new Date(to);
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return ["—", "—"];
-  const locale = language === "de" ? "de-DE" : "en-US";
-  const dateFormatter = new Intl.DateTimeFormat(locale, { dateStyle: "short" });
-  return dateFormatter.format(start) === dateFormatter.format(end)
-    ? [timeText(from, language), timeText(to, language)]
-    : [dateText(from, language), dateText(to, language)];
-};
 
 type DurationPreset = "open" | "one" | "two" | "five" | "custom";
 
@@ -278,7 +257,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   const displayedDefaults = state.defaultLabels[displayedPreset];
   const resultCount = vote === null ? 0 : closed ? vote.voterCount ?? (vote.preset === "free_text" ? textTotal : total)
     : vote.preset === "free_text" ? textTotal : total;
-  const resultRange = closed ? compactDateRange(vote.openedAt, vote.closedAt ?? vote.closesAt, language) : null;
+  const resultRange = closed ? compactDateRange(vote.openedAt, vote.closedAt ?? vote.closesAt, language, labels.nextDay) : null;
   const resultFrom = vote === null ? "" : resultRange?.[0] ?? dateText(vote.openedAt, language);
   const resultTo = closed ? resultRange?.[1] ?? dateText(vote.closedAt ?? vote.closesAt, language) : null;
   const resultMetadata = vote === null ? null : labels.resultMeta(resultCount, resultFrom, resultTo, vote.preset === "free_text" ? moreTerms : undefined);

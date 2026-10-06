@@ -55,6 +55,7 @@ export interface ChatVotingPanelTexts {
   roleDisabledReason: string;
   invalidDuration: string;
   invalidOptionCount: string;
+  nextDay: string;
   resultMeta: (count: number, from: string, to: string | null, moreTerms?: number) => string;
   resultBar: (label: string, count: number, percent: number) => string;
   emptySlot: string;
@@ -138,6 +139,7 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     roleDisabledReason: "Deine Kanalrolle darf Abstimmungen nur ansehen.",
     invalidDuration: "Gib eine Dauer von 1 bis 14.400 Sekunden ein.",
     invalidOptionCount: "Gib eine Zahl von 2 bis 9 ein.",
+    nextDay: "(+1)",
     resultMeta: (count, from, to, moreTerms) => `${String(count)} Stimmen · ${to === null ? `seit ${from}` : `${from}–${to}`}${moreTerms ? ` · ${String(moreTerms)} weitere` : ""}`,
     resultBar: (label, count, percent) => `${label}: ${String(count)} Stimmen, ${String(percent)} Prozent`,
     emptySlot: "—",
@@ -219,6 +221,7 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     roleDisabledReason: "Your channel role can only view votes.",
     invalidDuration: "Enter a duration from 1 to 14,400 seconds.",
     invalidOptionCount: "Enter a number from 2 to 9.",
+    nextDay: "(+1)",
     resultMeta: (count, from, to, moreTerms) => `${String(count)} votes · ${to === null ? `since ${from}` : `${from}–${to}`}${moreTerms ? ` · ${String(moreTerms)} more` : ""}`,
     resultBar: (label, count, percent) => `${label}: ${String(count)} votes, ${String(percent)} percent`,
     emptySlot: "—",
