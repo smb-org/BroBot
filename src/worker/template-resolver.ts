@@ -70,6 +70,7 @@ const recordFrom = (value: unknown): Readonly<Record<string, unknown>> | null =>
 const unavailableModuleSecrets: ModuleSecretReadAccess = {
   status: () => Promise.resolve({ configured: false, updatedAt: null }),
   read: () => Promise.resolve(null),
+  readWithVersion: () => Promise.resolve(null),
 };
 
 const payloadString = (event: ModuleEvent, key: string): string | null => valueFrom(event.payload[key]);

@@ -144,9 +144,9 @@ export const setBelaboxPollingState = async (
   polling: boolean,
   resetStream = false,
   errorCode?: BelaboxStatusErrorCode,
-): Promise<void> => {
+): Promise<boolean> => {
   if (polling) {
-    await db.prepare(
+    const result = await db.prepare(
       `INSERT INTO belabox_status
         (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision)
        VALUES (?, 1, NULL, NULL, ?, '[]', 1)
@@ -155,11 +155,11 @@ export const setBelaboxPollingState = async (
          revision = belabox_status.revision + 1
        WHERE belabox_status.polling != 1`,
     ).bind(channelId, encodedPhase(EMPTY_FETCH_PHASE)).run();
-    return;
+    return result.meta.changes > 0;
   }
 
   if (errorCode !== undefined) {
-    await db.prepare(
+    const result = await db.prepare(
       `INSERT INTO belabox_status
         (channel_id, error_code, polling, fetch_phase_json, recent_json, revision)
        VALUES (?, ?, 0, ?, '[]', 1)
@@ -169,11 +169,11 @@ export const setBelaboxPollingState = async (
          revision = belabox_status.revision + 1
        WHERE belabox_status.polling != 0 OR belabox_status.error_code IS NOT ?`,
     ).bind(channelId, errorCode, encodedPhase(EMPTY_FETCH_PHASE), errorCode, errorCode).run();
-    return;
+    return result.meta.changes > 0;
   }
 
   if (resetStream) {
-    await db.prepare(
+    const result = await db.prepare(
       `UPDATE belabox_status SET
          sampled_at = NULL,
          sample_json = NULL,
@@ -189,14 +189,15 @@ export const setBelaboxPollingState = async (
          sampled_at IS NOT NULL OR sample_json IS NOT NULL OR fetch_phase_json != ? OR recent_json != '[]'
        )`,
     ).bind(encodedPhase(EMPTY_FETCH_PHASE), channelId, encodedPhase(EMPTY_FETCH_PHASE)).run();
-    return;
+    return result.meta.changes > 0;
   }
 
-  await db.prepare(
+  const result = await db.prepare(
     `UPDATE belabox_status
         SET polling = 0, revision = revision + 1
       WHERE channel_id = ? AND polling != 0`,
   ).bind(channelId).run();
+  return result.meta.changes > 0;
 };
 
 export const writeBelaboxFetch = async (
@@ -213,7 +214,7 @@ export const writeBelaboxFetch = async (
     expectedSecretVersion: string;
     expectedStatusRevision: number | null;
   },
-): Promise<number | null> => {
+): Promise<{ revision: number; sample: BelaboxSample | null } | null> => {
   const row = await db.prepare(
     `INSERT INTO belabox_status
       (channel_id, sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
@@ -244,7 +245,7 @@ export const writeBelaboxFetch = async (
        recent_json = excluded.recent_json,
        revision = belabox_status.revision + 1
      WHERE belabox_status.revision = ?
-     RETURNING revision`,
+     RETURNING revision, sample_json`,
   ).bind(
     input.channelId,
     input.sample?.at ?? null,
@@ -263,8 +264,8 @@ export const writeBelaboxFetch = async (
     input.channelId,
     input.expectedStatusRevision,
     input.expectedStatusRevision ?? -1,
-  ).first<{ revision: number }>();
-  return row?.revision ?? null;
+  ).first<{ revision: number; sample_json: string | null }>();
+  return row === null ? null : { revision: row.revision, sample: parseSample(row.sample_json) };
 };
 
 /*

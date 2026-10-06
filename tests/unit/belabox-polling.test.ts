@@ -478,7 +478,7 @@ describe("BELABOX polling", () => {
 
   it("keeps polling when a stored-URL test writes a sample during the fetch", async () => {
     await insertModule(database);
-    const { context, scheduled, cleared } = alarmContext(database);
+    const { context, scheduled, cleared, overlayMessages } = alarmContext(database);
     const started = deferred<undefined>();
     const response = deferred<Response>();
     const fetcher = vi.fn<typeof fetch>(() => {
@@ -501,6 +501,7 @@ describe("BELABOX polling", () => {
 
     expect(scheduled).toHaveLength(1);
     expect(cleared).toEqual([]);
+    expect(overlayMessages).toEqual([]);
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
       polling: true,
       sample: { at: testedAt, bitrateKbps: 7_777 },
@@ -763,7 +764,7 @@ describe("BELABOX polling", () => {
       STREAM_ID,
       STREAM_ID,
     ).run();
-    const { context } = alarmContext(database, { streamState: "offline" });
+    const { context, overlayMessages } = alarmContext(database, { streamState: "offline" });
 
     await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now());
 
@@ -774,6 +775,11 @@ describe("BELABOX polling", () => {
       sample: null,
       recent: [],
     });
+    expect(overlayMessages).toEqual([{
+      type: "state_changed",
+      elementKind: "belabox.status",
+      payload: { reason: "stream.state.changed" },
+    }]);
   });
 
   it("prunes old live points when provider polling fails", async () => {

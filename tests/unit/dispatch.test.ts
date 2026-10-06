@@ -1368,6 +1368,51 @@ describe("dispatch and execution", () => {
     }
   });
 
+  it("reloads declared module overlays when the stream transitions online and offline", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+         VALUES ('kanal-a', 'belabox', 1, '{"mode":"interval","intervalSeconds":15}')`,
+      ).run();
+      await database.prepare(
+        `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+         VALUES ('overlay-bela', 'kanal-a', 'BELABOX', ?, ?)`,
+      ).bind(NOW, NOW).run();
+      await database.prepare(
+        `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind)
+         VALUES ('element-bela', 'kanal-a', 'overlay-bela', 'belabox.status')`,
+      ).run();
+      const publish = vi.fn();
+      const env = environment(database, publish);
+
+      await dispatchEventSubNotification(env, {
+        channelId: "kanal-a", subscriptionType: "stream.online", triggerId: "stream-online",
+        payload: { id: "stream-321", started_at: "2026-09-19T11:55:00.000Z" },
+        receivedAt: NOW, eventSubTimestamp: NOW,
+      }, sent(), []);
+      await dispatchEventSubNotification(env, {
+        channelId: "kanal-a", subscriptionType: "stream.offline", triggerId: "stream-offline",
+        payload: {}, receivedAt: "2026-09-19T12:01:00.000Z", eventSubTimestamp: "2026-09-19T12:01:00.000Z",
+      }, sent(), []);
+
+      expect(publish).toHaveBeenCalledTimes(2);
+      for (const [messages] of publish.mock.calls) {
+        expect(messages).toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: "stream.state.changed" }),
+          expect.objectContaining({
+            type: "modul.belabox.state_changed",
+            payload: { reason: "stream.state.changed" },
+            overlayIds: ["overlay-bela"],
+          }),
+        ]));
+      }
+    } finally {
+      database.close();
+    }
+  });
+
   it("resets variables again for a new stream after offline", async () => {
     const database = new TestD1Database();
     try {

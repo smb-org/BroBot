@@ -543,8 +543,8 @@ export interface ModuleSecretAccess {
   prepareDelete: (name: string, actor: ModuleMutationActor, now: string) => D1PreparedStatement;
 }
 
-/** Read-only view for resolving module template values. */
-export type ModuleSecretReadAccess = Pick<ModuleSecretAccess, "status" | "read">;
+/** Read-only view for resolving module template values, including version-guarded dependent writes. */
+export type ModuleSecretReadAccess = Pick<ModuleSecretAccess, "status" | "read" | "readWithVersion">;
 
 export interface ActiveChatterActivity {
   firstSeenAt: string;

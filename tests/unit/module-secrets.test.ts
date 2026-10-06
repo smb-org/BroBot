@@ -229,8 +229,9 @@ describe("host module secrets", () => {
       MODULE_ID,
     );
 
-    expect(Object.keys(readOnly).sort()).toEqual(["read", "status"]);
+    expect(Object.keys(readOnly).sort()).toEqual(["read", "readWithVersion", "status"]);
     expect(await readOnly.status(SECRET_NAME)).toEqual({ configured: false, updatedAt: null });
+    await expect(readOnly.readWithVersion(SECRET_NAME)).resolves.toBeNull();
   });
 
   it("rejects a write without the management role inside the D1 batch", async () => {

@@ -124,7 +124,7 @@ export const ensureBelaboxPoll = async (context: BelaboxPollScheduleContext): Pr
   await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
 };
 
-const usableSecret = async (secrets: ModuleSecretAccess): Promise<{
+const usableSecret = async (secrets: Pick<ModuleSecretAccess, "readWithVersion">): Promise<{
   url: URL;
   publisherKey: string;
   version: string;
@@ -171,13 +171,22 @@ const stopPolling = async (
   context: ModuleAlarmContext,
   prerequisites: AlarmPrerequisites,
 ): Promise<void> => {
-  await setBelaboxPollingState(
+  const changed = await setBelaboxPollingState(
     context.DB,
     context.channelId,
     false,
     prerequisites.streamState === "offline",
     prerequisites.secretUnavailable ? BELABOX_SECRET_UNAVAILABLE_STATUS_CODE : undefined,
   );
+  if (changed && prerequisites.streamState === "offline") {
+    try {
+      await context.publishModuleOverlayMessage("state_changed", "belabox.status", {
+        reason: "stream.state.changed",
+      });
+    } catch {
+      // Overlay reloads are hints; the status row remains authoritative.
+    }
+  }
 };
 
 const reschedulePollAfterFailure = async (
@@ -252,15 +261,17 @@ const storePollResult = async (
         previousPhase,
         phase,
       );
+      const storedAttempt = storedSample !== null && written.sample !== null &&
+        JSON.stringify(written.sample) === JSON.stringify(storedSample) ? written.sample : null;
       const previousRealtime = currentStatus?.sample;
-      const realtimeSample = storedSample !== null && (
+      const realtimeSample = storedAttempt !== null && (
         previousRealtime === null || previousRealtime === undefined ||
-        previousRealtime.at !== storedSample.at ||
-        previousRealtime.connected !== storedSample.connected ||
-        previousRealtime.bitrateKbps !== storedSample.bitrateKbps ||
-        previousRealtime.rttMs !== storedSample.rttMs ||
-        previousRealtime.phase !== storedSample.phase
-      ) ? storedSample : null;
+        previousRealtime.at !== storedAttempt.at ||
+        previousRealtime.connected !== storedAttempt.connected ||
+        previousRealtime.bitrateKbps !== storedAttempt.bitrateKbps ||
+        previousRealtime.rttMs !== storedAttempt.rttMs ||
+        previousRealtime.phase !== storedAttempt.phase
+      ) ? storedAttempt : null;
       return { kind: "stored", classified, realtimeSample };
     }
   }
@@ -360,24 +371,12 @@ export type CurrentBelaboxSampleResult = BelaboxFetchResult | { ok: false; reaso
 type CurrentBelaboxSampleContext = {
   DB: D1Database;
   channelId: string;
-  secrets: ModuleSecretReadAccess | ModuleSecretAccess;
+  secrets: ModuleSecretReadAccess;
   externalFetchBudget: ModuleExternalFetchBudget;
   writeDiagnostics?: NonNullable<ModuleAlarmContext["writeDiagnostics"]>;
 };
 
-const canWriteCurrentSample = (
-  context: CurrentBelaboxSampleContext,
-): context is CurrentBelaboxSampleContext & { secrets: ModuleSecretAccess } =>
-  "readWithVersion" in context.secrets && typeof context.secrets.readWithVersion === "function";
-
-const readOnlySecret = async (secrets: ModuleSecretReadAccess): Promise<{ url: URL; publisherKey: string } | null> => {
-  const stored = await secrets.read(BELABOX_STATS_URL_SECRET);
-  if (stored === null) return null;
-  const validated = validateBelaboxStatsUrl(stored);
-  return validated.ok ? validated : null;
-};
-
-/** Returns a fresh on-demand sample, reusing only successful samples younger than ten seconds. */
+/** Returns and persists a fresh on-demand sample, reusing successful samples younger than ten seconds. */
 export const currentBelaboxSample = async (
   context: CurrentBelaboxSampleContext,
   now = Date.now(),
@@ -385,20 +384,12 @@ export const currentBelaboxSample = async (
 ): Promise<CurrentBelaboxSampleResult> => {
   const status = await getBelaboxStatus(context.DB, context.channelId);
   const sampledAt = status?.sample === null || status?.sample === undefined ? Number.NaN : Date.parse(status.sample.at);
-  const age = now - sampledAt;
+  const age = Math.max(0, now - sampledAt);
   if (status?.sample !== null && status?.sample !== undefined && status.errorCode === null &&
       Number.isFinite(age) && age >= 0 && age < BELABOX_ON_DEMAND_CACHE_MS) {
     return { ok: true, sample: status.sample };
   }
 
-  if (!canWriteCurrentSample(context)) {
-    const secret = await readOnlySecret(context.secrets);
-    if (secret === null) return { ok: false, reason: "not_configured" };
-    const result = await fetchRelaySample(secret.url, secret.publisherKey, context.externalFetchBudget, fetcher);
-    return result.ok
-      ? { ok: true, sample: enrichBelaboxSample(result.sample, status?.sample ?? null, true, true) }
-      : result;
-  }
   const secret = await usableSecret(context.secrets);
   if (secret === null) return { ok: false, reason: "not_configured" };
   const result = await fetchRelaySample(secret.url, secret.publisherKey, context.externalFetchBudget, fetcher);
@@ -411,7 +402,7 @@ export const currentBelaboxSample = async (
     const storedSample = result.ok
       ? enrichBelaboxSample(result.sample, currentStatus?.sample ?? null, true, true)
       : null;
-    const revision = await writeBelaboxFetch(context.DB, {
+    const written = await writeBelaboxFetch(context.DB, {
       channelId: context.channelId,
       sample: storedSample,
       errorCode: result.ok ? null : result.reason,
@@ -423,7 +414,7 @@ export const currentBelaboxSample = async (
       expectedSecretVersion: secret.version,
       expectedStatusRevision: currentStatus?.revision ?? null,
     });
-    if (revision !== null) {
+    if (written !== null) {
       await writePhaseDiagnostic(
         context.writeDiagnostics,
         "belabox:on_demand",
@@ -431,7 +422,7 @@ export const currentBelaboxSample = async (
         previousPhase,
         phase,
       );
-      return storedSample === null ? result : { ok: true, sample: storedSample };
+      return storedSample === null ? result : { ok: true, sample: written.sample ?? storedSample };
     }
     const currentSecret = await context.secrets.readWithVersion(BELABOX_STATS_URL_SECRET);
     if (currentSecret?.version !== secret.version) return result;

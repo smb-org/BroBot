@@ -78,7 +78,7 @@ const freshSample = (
 ): sample is BelaboxSample => {
   if (sample === null || errorCode !== null) return false;
   const sampledAt = Date.parse(sample.at);
-  const age = now - sampledAt;
+  const age = Math.max(0, now - sampledAt);
   return Number.isFinite(age) && age >= 0 && age <= maximumAgeMilliseconds;
 };
 
@@ -106,10 +106,11 @@ const resolveValues = async (
       secrets: context.secrets,
       externalFetchBudget: context.externalFetchBudget ?? { claim: () => true },
     }, context.now);
-    if (!current.ok || !freshSample(current.sample, null, context.now, 30_000)) {
+    const freshAt = Date.now();
+    if (!current.ok || !freshSample(current.sample, null, freshAt, 30_000)) {
       throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
     }
-    return formatTemplateValues(current.sample, names, language, context.now, true);
+    return formatTemplateValues(current.sample, names, language, freshAt, true);
   } catch {
     throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
   }
@@ -130,17 +131,23 @@ const resolveOverlayValues: NonNullable<BotModule<typeof belaboxSettingsSchema>[
     return Object.fromEntries(known.map((name) => [name, { available: false }]));
   }
   const refreshMilliseconds = Math.max(moduleState.settings.intervalSeconds * 1_000, 30_000);
+  const maximumAgeMilliseconds = moduleState.settings.mode === "on_demand"
+    ? 30_000
+    : moduleState.settings.intervalSeconds * 3_000;
   const persistedSample = status?.sample ?? null;
   const availablePersistedSample = persistedSample !== null && freshSample(
     persistedSample,
     status?.errorCode ?? null,
     context.now,
-    moduleState.settings.mode === "on_demand" ? 30_000 : moduleState.settings.intervalSeconds * 3_000,
+    maximumAgeMilliseconds,
   );
   const sampledAt = availablePersistedSample ? Date.parse(persistedSample.at) : context.now;
-  const nextChangeAt = new Date(sampledAt + refreshMilliseconds).toISOString();
-  // On-demand values are fetched through the read-only template path. Their fresh
-  // sample is intentionally not persisted, so retry at the next render boundary.
+  const refreshAt = sampledAt + refreshMilliseconds;
+  const refreshDeadline = refreshAt > context.now ? refreshAt : context.now + refreshMilliseconds;
+  const unavailabilityAt = sampledAt + maximumAgeMilliseconds + 1;
+  const nextChangeAt = new Date(availablePersistedSample
+    ? Math.min(refreshDeadline, unavailabilityAt)
+    : context.now + refreshMilliseconds).toISOString();
   return Object.fromEntries(known.map((name) => [name, { available: availablePersistedSample, nextChangeAt }]));
 };
 

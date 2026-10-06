@@ -63,6 +63,11 @@ describe("BELABOX template variables and overlay metadata", () => {
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
     ).bind(CHANNEL_ID, JSON.stringify({ mode, intervalSeconds })).run();
+    await database.prepare(
+      `INSERT INTO module_secrets
+        (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
+       VALUES (?, 'belabox', 'stats_url', 'ciphertext-version', 'test', 1, ?, 'tester')`,
+    ).bind(CHANNEL_ID, "2026-10-06T00:00:00.000Z").run();
   };
 
   const insertStatus = async (
@@ -84,6 +89,7 @@ describe("BELABOX template variables and overlay metadata", () => {
     secrets: {
       status: () => Promise.resolve({ configured: true, updatedAt: "2026-10-06T00:00:00.000Z" }),
       read: () => Promise.resolve(STATS_URL),
+      readWithVersion: () => Promise.resolve({ value: STATS_URL, version: "ciphertext-version" }),
     },
     templateContext: "event",
     knownTemplateVariableNames: new Set(),
@@ -172,6 +178,41 @@ describe("BELABOX template variables and overlay metadata", () => {
       .resolves.toEqual({ "belabox.bitrate": "4,520 kbps", "belabox.status": "healthy" });
   });
 
+  it("checks an on-demand sample against real time after a delayed fetch", async () => {
+    await insertModule("on_demand", 60);
+    vi.useRealTimers();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => {
+      await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 20));
+      return jsonResponse(relayPayload());
+    }));
+
+    await expect(belaboxModule.resolveTemplateValues?.(["belabox.bitrate", "belabox.status"], templateContext("en")))
+      .resolves.toEqual({ "belabox.bitrate": "4,520 kbps", "belabox.status": "healthy" });
+    expect(await database.prepare("SELECT sample_json FROM belabox_status WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).not.toBeNull();
+  });
+
+  it("persists enriched on-demand samples so dropped totals and alert duration accumulate", async () => {
+    await insertModule("on_demand", 60);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(relayPayload({ bitrate: 900, dropped_pkts: 10 })))
+      .mockResolvedValueOnce(jsonResponse(relayPayload({ bitrate: 900, dropped_pkts: 15 })));
+    vi.stubGlobal("fetch", fetcher);
+
+    await expect(belaboxModule.resolveTemplateValues?.(["belabox.dropped", "belabox.down_for"], templateContext("en")))
+      .resolves.toEqual({ "belabox.dropped": "0", "belabox.down_for": "0 seconds" });
+    vi.setSystemTime(Date.now() + 60_000);
+    await expect(belaboxModule.resolveTemplateValues?.(["belabox.dropped", "belabox.down_for"], templateContext("en")))
+      .resolves.toEqual({ "belabox.dropped": "5", "belabox.down_for": "1 minute" });
+
+    const status = await database.prepare("SELECT sample_json FROM belabox_status WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ sample_json: string }>();
+    expect(status === null ? null : JSON.parse(status.sample_json) as unknown).toMatchObject({
+      droppedTotal: 5,
+      alertStartedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+  });
+
   it("sanitizes on-demand secret and fetch failures", async () => {
     await insertModule("on_demand", 15);
     const readFailureContext = templateContext();
@@ -186,8 +227,8 @@ describe("BELABOX template variables and overlay metadata", () => {
       .catch((error: unknown) => error);
     expect(String(fetchFailure)).toContain("BELABOX_SAMPLE_UNAVAILABLE");
     expect(String(fetchFailure)).not.toContain(SECRET_KEY);
-    expect(await database.prepare("SELECT sample_json FROM belabox_status WHERE channel_id = ?")
-      .bind(CHANNEL_ID).first()).toBeNull();
+    expect(await database.prepare("SELECT sample_json, error_code FROM belabox_status WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ sample_json: null, error_code: "network" });
   });
 
   it("returns inactive for an unclassified probe before the first connection", async () => {
@@ -235,7 +276,7 @@ describe("BELABOX template variables and overlay metadata", () => {
     });
   });
 
-  it("schedules on-demand text refreshes without persisting a fetched sample", async () => {
+  it("schedules on-demand text refreshes while there is no saved sample", async () => {
     await insertModule("on_demand", 60);
 
     await expect(belaboxModule.resolveOverlayTemplateValues?.(["belabox.status"], {
@@ -257,7 +298,7 @@ describe("BELABOX template variables and overlay metadata", () => {
     expect(element).toMatchObject({
       kind: "belabox.status",
       configVersion: 1,
-      defaultSize: { width: 320, height: 64 },
+      defaultSize: { width: 320, height: 40 },
       defaultConfig: { layout: "compact", unit: "kbps", hideWhenHealthy: false },
       mergeRealtimeStateOnModuleMessages: ["modul.belabox.sample"],
       reloadStateOnHostEvents: ["stream.state.changed"],
@@ -296,6 +337,47 @@ describe("BELABOX template variables and overlay metadata", () => {
     })).toMatchObject({
       intervalSeconds: 15,
       sample: { at: "2026-10-06T12:00:29.000Z", phase: "disconnected" },
+    });
+  });
+
+  it("does not regress the element state when an older sample message arrives", () => {
+    const current = {
+      intervalSeconds: 15,
+      sample: { at: "2026-10-06T12:00:29.000Z", connected: true, bitrateKbps: 4_520, rttMs: 38, phase: "healthy" },
+    };
+    expect(mergeModuleOverlayElementState("belabox.status", current, {
+      at: "2026-10-06T12:00:20.000Z",
+      connected: false,
+      bitrateKbps: 0,
+      rttMs: 0,
+      phase: "disconnected",
+    })).toEqual(current);
+  });
+
+  it("keeps overlay refresh times in the future and schedules the availability boundary first", async () => {
+    await insertModule("interval", 30);
+    await insertStatus(sample("2026-10-06T12:00:00.000Z"));
+
+    await expect(belaboxModule.resolveOverlayTemplateValues?.(["belabox.status"], {
+      DB: database as unknown as D1Database,
+      channelId: CHANNEL_ID,
+      now: Date.parse("2026-10-06T12:00:45.000Z"),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve(null),
+      language: "en",
+    })).resolves.toEqual({
+      "belabox.status": { available: true, nextChangeAt: "2026-10-06T12:01:15.000Z" },
+    });
+
+    await expect(belaboxModule.resolveOverlayTemplateValues?.(["belabox.status"], {
+      DB: database as unknown as D1Database,
+      channelId: CHANNEL_ID,
+      now: Date.parse("2026-10-06T12:01:29.000Z"),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve(null),
+      language: "en",
+    })).resolves.toEqual({
+      "belabox.status": { available: true, nextChangeAt: "2026-10-06T12:01:30.001Z" },
     });
   });
 

@@ -17,6 +17,7 @@ const Status = ({ config, state, now, language = "en" }: ModuleOverlayElementPro
   const sample = record(state?.sample);
   const intervalSeconds = finiteNonnegative(state?.intervalSeconds) ? state.intervalSeconds : 15;
   const sampledAt = typeof sample?.at === "string" ? Date.parse(sample.at) : Number.NaN;
+  const layout = config.layout === "detail" ? "detail" : "compact";
   const boundaryKey = Number.isFinite(sampledAt) ? `${String(sample?.at)}\u0000${String(intervalSeconds)}` : null;
   useEffect(() => {
     if (boundaryKey === null || !Number.isFinite(sampledAt)) return undefined;
@@ -25,8 +26,8 @@ const Status = ({ config, state, now, language = "en" }: ModuleOverlayElementPro
     const timeout = window.setTimeout(() => setExpiredBoundaryKey(boundaryKey), staleAt - now);
     return () => window.clearTimeout(timeout);
   }, [boundaryKey, intervalSeconds, now, sampledAt]);
-  const age = now - sampledAt;
-  const fresh = Number.isFinite(age) && age >= 0 && age <= intervalSeconds * 3_000 && expiredBoundaryKey !== boundaryKey;
+  const age = Math.max(0, now - sampledAt);
+  const fresh = Number.isFinite(age) && age <= intervalSeconds * 3_000 && expiredBoundaryKey !== boundaryKey;
   const phase = sample?.phase === "low" || sample?.phase === "disconnected" || sample?.phase === "inactive"
     ? sample.phase
     : "healthy";
@@ -43,10 +44,21 @@ const Status = ({ config, state, now, language = "en" }: ModuleOverlayElementPro
   return <span
     className={`brobot-module-text belabox-status belabox-status--${phase}`}
     aria-label={fresh ? phaseText : labels.noData}
-    style={{ display: "grid", width: "320px", minHeight: "64px", alignContent: "center", gap: "0.2em" }}
+    style={{
+      boxSizing: "border-box",
+      display: "grid",
+      width: "320px",
+      height: layout === "detail" ? "64px" : "40px",
+      overflow: "hidden",
+      alignContent: "center",
+      gap: "2px",
+      fontSize: "16px",
+      lineHeight: 1.1,
+      whiteSpace: "nowrap",
+    }}
   >
     <strong>{fresh ? `${phaseText} · ${bitrateText}` : labels.noData}</strong>
-    <span style={{ minHeight: "1.2em", visibility: config.layout === "detail" ? "visible" : "hidden" }}>
+    <span style={{ minHeight: "1.2em", visibility: layout === "detail" ? "visible" : "hidden" }}>
       {fresh ? `RTT ${rttText}` : "\u00a0"}
     </span>
   </span>;

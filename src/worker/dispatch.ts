@@ -10,7 +10,7 @@ import { sendChatAnnouncement } from "./announcement";
 import { fetchTwitchUserByLogin, sendShoutout } from "./shoutout";
 import { isTwitchChannelModerator, sendModerationBan } from "./moderation";
 import { publishRealtimeMessages, publishVariablesChanged } from "./realtime";
-import { prepareModuleOverlayRealtimeMessage } from "./module-overlay-realtime";
+import { prepareModuleOverlayHostEventMessages, prepareModuleOverlayRealtimeMessage } from "./module-overlay-realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
 import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
@@ -1063,7 +1063,18 @@ export const dispatchEventSubNotification = async (
       })),
     },
   }];
-  if (streamStateChanged !== null) realtimeMessages.push(streamStateChanged);
+  if (streamStateChanged !== null) {
+    realtimeMessages.push(streamStateChanged);
+    try {
+      realtimeMessages.push(...await prepareModuleOverlayHostEventMessages(
+        environment.DB,
+        event.channelId,
+        "stream.state.changed",
+      ));
+    } catch (error: unknown) {
+      console.warn("Module overlay stream refresh hint could not be prepared.", error);
+    }
+  }
   if (changedVariables.size > 0) {
     await publishVariablesChanged(
       environment.CHANNEL,

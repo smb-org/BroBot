@@ -26,6 +26,7 @@ vi.mock("../../src/worker/module-secrets", () => ({
   createModuleSecretReadAccess: vi.fn(() => ({
     status: () => Promise.resolve({ configured: true, updatedAt: "2026-10-05T00:00:00.000Z" }),
     read: () => Promise.resolve("http://relay.belabox.net:8080/relay-key"),
+    readWithVersion: () => Promise.resolve({ value: "http://relay.belabox.net:8080/relay-key", version: "belabox-secret-version" }),
   })),
 }));
 
