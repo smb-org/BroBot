@@ -122,3 +122,17 @@ describe("chat voting command and result domain", () => {
     expect(voteCloseDeadline(10_000, 30)).toEqual({ closesAt: 40_000, reason: "timer" });
   });
 });
+
+describe("chat voting normalization performance", () => {
+  it("normalizes pathological long input in linear time", () => {
+    const noise = " .!?*😀\t".repeat(7_200);
+    const inputs = [noise, `${"*".repeat(50_000)}x`, `x${"*".repeat(50_000)} y`, " ".repeat(50_000) + "!"];
+    const started = performance.now();
+    for (const input of inputs) {
+      normalizeFreeTextVote(input, "whole_message");
+      normalizeBlockedVoteTerm(input);
+      parseVoteCommand(input);
+    }
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+});

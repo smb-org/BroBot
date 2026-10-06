@@ -95,12 +95,21 @@ interface BlockedPatternWord {
   wildcardSuffix: boolean;
 }
 
+/** Linear-time replacement for /^\*+/ and /\*+$/ (the trailing form backtracks quadratically). */
+const stripEdgeStars = (text: string): string => {
+  let start = 0;
+  let end = text.length;
+  while (start < end && text[start] === "*") start += 1;
+  while (end > start && text[end - 1] === "*") end -= 1;
+  return text.slice(start, end);
+};
+
 const blockedPattern = (text: string): BlockedPatternWord[] => text.normalize("NFKC").toLowerCase()
   .split(/\s+/u)
   .flatMap((source) => {
     const wildcardPrefix = source.startsWith("*");
     const wildcardSuffix = source.endsWith("*");
-    const value = normalizeVoteText(source.replace(/^\*+/u, "").replace(/\*+$/u, ""));
+    const value = normalizeVoteText(stripEdgeStars(source));
     return value.length === 0 ? [] : [{ value, wildcardPrefix, wildcardSuffix }];
   });
 
