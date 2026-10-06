@@ -85,6 +85,14 @@ describe("module overlay element declarations", () => {
     expect(MODULE_OVERLAY_ELEMENTS.every(({ definition }) => typeof definition.load === "function")).toBe(true);
   });
 
+  it("provides a localized sample state for every registered module overlay element", () => {
+    for (const { definition } of MODULE_OVERLAY_ELEMENTS) {
+      expect(definition.previewState).toBeTypeOf("function");
+      expect(definition.previewState?.(definition.defaultConfig, "en", Date.UTC(2026, 8, 27, 20, 15))).not.toEqual({});
+      expect(definition.previewState?.(definition.defaultConfig, "de", Date.UTC(2026, 8, 27, 20, 15))).not.toEqual({});
+    }
+  });
+
   it("invalidates text block overlays after live, game, or template data changes", async () => {
     expect(textLibraryModule.overlayElements?.[0]?.reloadStateOnHostEvents).toContain("template.data.changed");
     const handleEvent = textLibraryModule.handleEvent;

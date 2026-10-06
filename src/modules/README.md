@@ -475,7 +475,9 @@ Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
 
 `overlayElements` deklariert pro Element einen eindeutigen, mit der Modulkennung
 präfigierten `kind`, eine `configVersion`, `defaultSize`, `parseConfig` und
-`load`. Der Render-Code wird mit `import()` geladen; ein optionaler Editor
+`load`. `previewState` kann einen sprachabhängigen Beispielzustand für die
+Kompositionsvorschau aus Konfiguration, Kanalsprache und aktuellem Zeitpunkt
+erzeugen. Der Render-Code wird mit `import()` geladen; ein optionaler Editor
 verwendet ebenfalls einen Lazy Loader. `initialState` erhält D1-Binding,
 Kanalkennung und validierte Konfiguration und läuft beim Bootstrap nur, wenn
 das Modul im Kanal aktiviert ist. Der Host speichert `kind` und Konfiguration

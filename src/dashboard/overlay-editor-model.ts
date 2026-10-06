@@ -14,11 +14,12 @@ export interface OverlayEditorPositionLimits extends OverlayEditorPosition {
   minX: number;
 }
 
-/**
- * Used to clamp position when an element's real rendered size is not known yet
- * (e.g. it is hidden with `inComposition: false` and about to be shown), so a
- * position picked while the element was invisible cannot leave it off-canvas.
- */
+export const overlayEditorMeasuredSize = (
+  measured: OverlayEditorSize,
+  fallback: OverlayEditorSize,
+): OverlayEditorSize => measured.width === 0 && measured.height === 0 ? fallback : measured;
+
+/** Fallback bounds for pointer-drag clamping before an element has rendered measurable dimensions. */
 export const UNMEASURED_ELEMENT_FALLBACK_SIZE: OverlayEditorSize = { width: 40, height: 40 };
 
 export const overlayEditorPositionLimits = (

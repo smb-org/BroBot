@@ -1,6 +1,7 @@
 import { CHAT_VOTING_TALLY_ELEMENT_KIND } from "./kinds";
 import { chatVotingOverlayLabels } from "./locale";
 import { mergeTallyRealtimeState } from "./tally-state";
+import type { JsonObject, ModuleLanguage } from "../../contract";
 
 const german = chatVotingOverlayLabels("de");
 const english = chatVotingOverlayLabels("en");
@@ -10,6 +11,14 @@ export const chatVotingOverlayElement = {
   configVersion: 1,
   defaultSize: { width: 640, height: 240 },
   defaultConfig: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 },
+  previewState: (_config: JsonObject, language: ModuleLanguage, now: number): JsonObject => ({
+    pollId: "overlay-editor-preview",
+    openedAt: new Date(now).toISOString(),
+    status: "open",
+    labels: chatVotingOverlayLabels(language).previewOptions,
+    counts: [12, 7, 3],
+    revision: 1,
+  }),
   editorLabel: { de: german.editorLabel, en: english.editorLabel },
   editorAddLabel: { de: german.editorAddLabel, en: english.editorAddLabel },
   editorModuleLabel: { de: german.editorModuleLabel, en: english.editorModuleLabel },

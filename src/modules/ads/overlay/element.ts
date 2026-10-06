@@ -1,5 +1,6 @@
 import { ADS_COUNTDOWN_ELEMENT_KIND } from "./kinds";
 import { adsCountdownLabels } from "./countdown-locale";
+import type { JsonObject, ModuleLanguage } from "../../contract";
 
 const editorLabels = { de: adsCountdownLabels("de"), en: adsCountdownLabels("en") };
 
@@ -8,6 +9,14 @@ export const adsCountdownElement = {
   configVersion: 2,
   defaultSize: { width: 300, height: 96 },
   defaultConfig: { showSnoozeInfo: false },
+  previewState: (_config: JsonObject, _language: ModuleLanguage, now: number): JsonObject => ({
+    nextAdAt: new Date(now + 150_000).toISOString(),
+    duration: 180,
+    snoozeCount: 2,
+    snoozeRefreshAt: null,
+    serverNow: new Date(now).toISOString(),
+    isSample: true,
+  }),
   editorLabel: { de: editorLabels.de.editorLabel, en: editorLabels.en.editorLabel },
   editorAddLabel: { de: editorLabels.de.editorAddLabel, en: editorLabels.en.editorAddLabel },
   editorModuleLabel: { de: editorLabels.de.editorModuleLabel, en: editorLabels.en.editorModuleLabel },
