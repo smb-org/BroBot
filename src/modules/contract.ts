@@ -794,7 +794,7 @@ export interface ModuleBallotAccess {
   open: (ballotId: string, optionCount: number, expiresAt: number, rule?: BallotFinalizeRule, termFilter?: BallotTermFilter) => Promise<BallotOpenResult>;
   cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
   /** Casts a normalized text term while storing only the ballot-local voter hash. */
-  castTerm?: (ballotId: string, userId: string, term: string) => Promise<BallotCastResult>;
+  castTerm?: (ballotId: string, userId: string, term: string, matchText?: string) => Promise<BallotCastResult>;
   /** Refreshes a term ballot's blocked-term filter and removes matching aggregate terms. */
   setBlockedTerms?: (ballotId: string, blockedTerms: readonly string[]) => Promise<BallotSnapshot | null>;
   /** Remembers an approved term for this ballot only. */

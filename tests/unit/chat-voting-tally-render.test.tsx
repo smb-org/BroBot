@@ -69,4 +69,52 @@ describe("chat voting overlay tally", () => {
     expect(screen.getByText("1 · 33%")).toBeInTheDocument();
     expect(screen.getByText("2 · 67%")).toBeInTheDocument();
   });
+
+  it("hides free-text percentages when configured", () => {
+    render(<Tally config={{ layout: "bars", showPercent: false, hideAfterCloseSeconds: 15 }} state={{
+      pollId: "text-percent-poll",
+      status: "open",
+      preset: "free_text",
+      counts: [],
+      terms: [{ term: "alpha", count: 2, approved: true }],
+      termFilterReady: true,
+      revision: 1,
+    }} now={Date.now()} language="en" />);
+
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.queryByText(/%/u)).not.toBeInTheDocument();
+  });
+
+  it("gives empty text rows the same bar dimensions and reserves the five-row strip height", () => {
+    const { container } = render(<Tally config={{ layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 }} state={{
+      pollId: "strip-poll",
+      status: "open",
+      preset: "free_text",
+      counts: [],
+      terms: [{ term: "alpha", count: 2, approved: true }],
+      termFilterReady: true,
+      revision: 1,
+    }} now={Date.now()} language="en" />);
+    let options = container.querySelector(".chat-voting-tally__options");
+    const rows = options?.querySelectorAll(".chat-voting-tally__option");
+    expect(rows).toHaveLength(5);
+    expect((rows?.[0] as HTMLElement | undefined)?.style.minHeight).toBe("2.3em");
+    expect((rows?.[1] as HTMLElement | undefined)?.style.minHeight).toBe("2.3em");
+    expect(rows?.[0]?.querySelector(".chat-voting-tally__track")).not.toBeNull();
+    expect(rows?.[1]?.querySelector(".chat-voting-tally__track")).not.toBeNull();
+
+    cleanup();
+    const strip = render(<Tally config={{ layout: "strip", showPercent: true, hideAfterCloseSeconds: 15 }} state={{
+      pollId: "strip-poll",
+      status: "open",
+      preset: "free_text",
+      counts: [],
+      terms: [{ term: "alpha", count: 2, approved: true }],
+      termFilterReady: true,
+      revision: 1,
+    }} now={Date.now()} language="en" />);
+    options = strip.container.querySelector(".chat-voting-tally__options");
+    expect((options as HTMLElement | null)?.style.height).toBe("14.1em");
+    expect(options?.querySelectorAll(".chat-voting-tally__option")).toHaveLength(5);
+  });
 });

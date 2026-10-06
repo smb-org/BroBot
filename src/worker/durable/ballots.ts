@@ -7,6 +7,7 @@ import type {
   BallotTermCount,
   BallotTermFilter,
 } from "../../modules/contract";
+import { isBlockedFreeTextVote } from "../../modules/chat_voting/domain";
 
 export const BALLOT_MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 export const BALLOT_FINALIZATION_RETENTION_MS = 24 * 60 * 60 * 1_000;
@@ -39,6 +40,7 @@ interface StoredBallot {
   key: Uint8Array;
   optionCount: number;
   termCounts?: BallotTermCount[];
+  approvedTerms?: string[];
   blockedTerms?: string[] | null;
   more?: number;
   passRule?: BallotFinalizeRule;
@@ -81,6 +83,14 @@ const snapshotOf = (ballot: StoredBallot): BallotSnapshot => ({
     termFilterReady: Array.isArray(ballot.blockedTerms),
   } : {}),
 });
+
+const approvedTermsOf = (ballot: StoredBallot): Set<string> => {
+  const approvedTerms = new Set(ballot.approvedTerms ?? []);
+  for (const entry of ballot.termCounts ?? []) {
+    if (entry.approved) approvedTerms.add(entry.term);
+  }
+  return approvedTerms;
+};
 
 const finalizationOf = (ballot: StoredBallot): StoredBallotFinalization | null => {
   const value: unknown = ballot.finalization;
@@ -148,6 +158,9 @@ const isStoredBallot = (value: unknown): value is StoredBallot => {
     (ballot.frozen === undefined || typeof ballot.frozen === "boolean") &&
     (ballot.finalization === undefined || finalizationOf(ballot as StoredBallot) !== null) &&
     (ballot.termCounts === undefined || isValidTermCounts(ballot.termCounts)) &&
+    (ballot.approvedTerms === undefined || Array.isArray(ballot.approvedTerms) &&
+      ballot.approvedTerms.every((term) => typeof term === "string" && validTextTerm(term)) &&
+      new Set(ballot.approvedTerms).size === ballot.approvedTerms.length) &&
     (ballot.more === undefined || Number.isSafeInteger(ballot.more) && ballot.more >= 0) &&
     (ballot.blockedTerms === undefined || ballot.blockedTerms === null || isValidBlockedTerms(ballot.blockedTerms)) &&
     Number.isFinite(ballot.openedAt) && Number.isFinite(ballot.expiresAt);
@@ -418,10 +431,13 @@ export const castStoredBallotTerm = async (
   ballotId: string,
   userId: string,
   term: string,
+  matchText = term,
 ): Promise<BallotCastResult> => {
   validId(moduleId, "Module id");
   validId(ballotId, "Ballot id");
-  if (!validTextTerm(term)) return { status: "not_open", counts: [], revision: 0 };
+  if (!validTextTerm(term) || typeof matchText !== "string" || Array.from(matchText).length > 500) {
+    return { status: "not_open", counts: [], revision: 0 };
+  }
   const stored = await storage.get(ballotKey(moduleId, ballotId));
   if (!isStoredBallot(stored) || stored.moduleId !== moduleId || stored.ballotId !== ballotId ||
       stored.optionCount !== 0 || finalizationOf(stored) !== null || stored.frozen === true ||
@@ -440,17 +456,26 @@ export const castStoredBallotTerm = async (
     }
 
     const previous = await transaction.get<string | number>(voteKey);
-    if (previous === term && !ballot.blockedTerms?.includes(term)) {
+    const blocked = isBlockedFreeTextVote(term, ballot.blockedTerms ?? []) ||
+      isBlockedFreeTextVote(matchText, ballot.blockedTerms ?? []);
+    if (previous === term && !blocked && (ballot.termCounts ?? []).some((entry) => entry.term === term)) {
       return { status: "unchanged", ...snapshotOf(ballot) };
     }
-    const blocked = ballot.blockedTerms?.includes(term) === true;
     if (blocked) {
-      if (previous === term) await transaction.delete(voteKey);
       return { status: "blocked", ...snapshotOf(ballot) };
     }
-    const terms = (ballot.termCounts ?? []).map((entry) => ({ ...entry }));
-    const existingIndex = terms.findIndex((entry) => entry.term === term);
-    if (existingIndex < 0 && terms.length >= BALLOT_MAX_TEXT_TERMS) {
+    const terms = new Map((ballot.termCounts ?? []).map((entry) => [entry.term, { ...entry }]));
+    const approvedTerms = approvedTermsOf(ballot);
+    if (typeof previous === "string") {
+      const previousEntry = terms.get(previous);
+      if (previousEntry !== undefined) {
+        if (previousEntry.count > 1) terms.set(previous, { ...previousEntry, count: previousEntry.count - 1 });
+        else terms.delete(previous);
+      }
+    }
+
+    const existing = terms.get(term);
+    if (existing === undefined && terms.size >= BALLOT_MAX_TEXT_TERMS) {
       const updated: StoredBallot = {
         ...ballot,
         more: Math.min(Number.MAX_SAFE_INTEGER, (ballot.more ?? 0) + 1),
@@ -460,25 +485,17 @@ export const castStoredBallotTerm = async (
       return { status: "overflow", ...snapshotOf(updated) };
     }
 
-    if (typeof previous === "string") {
-      const previousIndex = terms.findIndex((entry) => entry.term === previous);
-      if (previousIndex >= 0) {
-        const previousEntry = terms[previousIndex];
-        if (previousEntry !== undefined && previousEntry.count > 1) {
-          terms[previousIndex] = { ...previousEntry, count: previousEntry.count - 1 };
-        } else {
-          terms.splice(previousIndex, 1);
-        }
-      }
-    }
-
-    if (existingIndex >= 0) {
-      const existing = terms[existingIndex];
-      if (existing !== undefined) terms[existingIndex] = { ...existing, count: existing.count + 1 };
+    if (existing !== undefined) {
+      terms.set(term, { ...existing, count: existing.count + 1 });
     } else {
-      terms.push({ term, count: 1, approved: false });
+      terms.set(term, { term, count: 1, approved: approvedTerms.has(term) });
     }
-    const updated: StoredBallot = { ...ballot, termCounts: terms, revision: ballot.revision + 1 };
+    const updated: StoredBallot = {
+      ...ballot,
+      termCounts: [...terms.values()],
+      approvedTerms: [...approvedTerms],
+      revision: ballot.revision + 1,
+    };
     await transaction.put(voteKey, term);
     await transaction.put(ballotKey(moduleId, ballotId), updated);
     return { status: previous === undefined ? "counted" : "changed", ...snapshotOf(updated) };
@@ -501,18 +518,20 @@ export const setStoredBallotBlockedTerms = async (
         ballot.optionCount !== 0 || finalizationOf(ballot) !== null || ballot.frozen === true || ballot.expiresAt <= Date.now()) return null;
     const active = await transaction.get<ActiveBallot>(ACTIVE_BALLOT_KEY);
     if (active?.moduleId !== moduleId || active.ballotId !== ballotId) return null;
-    const blocked = new Set(boundedTerms);
-    const filteredTerms = (ballot.termCounts ?? []).filter(({ term }) => !blocked.has(term));
+    const filteredTerms = (ballot.termCounts ?? []).filter(({ term }) => !isBlockedFreeTextVote(term, boundedTerms));
+    const approvedTerms = approvedTermsOf(ballot);
+    const approvalsChanged = approvedTerms.size !== (ballot.approvedTerms?.length ?? 0);
     const filterChanged = JSON.stringify(ballot.blockedTerms ?? null) !== JSON.stringify(boundedTerms);
     const tallyChanged = filteredTerms.length !== (ballot.termCounts ?? []).length;
     const updated: StoredBallot = {
       ...ballot,
       blockedTerms: boundedTerms,
       termCounts: filteredTerms,
+      approvedTerms: [...approvedTerms],
       revision: ballot.revision + (filterChanged || tallyChanged ? 1 : 0),
     };
-    if (filterChanged || tallyChanged) await transaction.put(ballotKey(moduleId, ballotId), updated);
-    return snapshotOf(filterChanged || tallyChanged ? updated : ballot);
+    if (filterChanged || tallyChanged || approvalsChanged) await transaction.put(ballotKey(moduleId, ballotId), updated);
+    return snapshotOf(filterChanged || tallyChanged || approvalsChanged ? updated : ballot);
   });
 };
 
@@ -536,12 +555,22 @@ export const approveStoredBallotTerm = async (
     if (ballot.blockedTerms === null || ballot.blockedTerms === undefined) {
       return { status: "unavailable", snapshot: snapshotOf(ballot) };
     }
-    if (ballot.blockedTerms.includes(term)) return { status: "blocked", snapshot: snapshotOf(ballot) };
-    const terms = (ballot.termCounts ?? []).map((entry) => entry.term === term ? { ...entry, approved: true } : { ...entry });
-    if (!terms.some((entry) => entry.term === term)) return { status: "not_open", snapshot: snapshotOf(ballot) };
-    const wasApproved = (ballot.termCounts ?? []).find((entry) => entry.term === term)?.approved === true;
-    const updated: StoredBallot = wasApproved ? ballot : { ...ballot, termCounts: terms, revision: ballot.revision + 1 };
-    if (!wasApproved) await transaction.put(ballotKey(moduleId, ballotId), updated);
+    if (isBlockedFreeTextVote(term, ballot.blockedTerms)) return { status: "blocked", snapshot: snapshotOf(ballot) };
+    const terms = new Map((ballot.termCounts ?? []).map((entry) => [entry.term, { ...entry }]));
+    const entry = terms.get(term);
+    if (entry === undefined) return { status: "not_open", snapshot: snapshotOf(ballot) };
+    terms.set(term, { ...entry, approved: true });
+    const approvedTerms = approvedTermsOf(ballot);
+    approvedTerms.add(term);
+    const tallyChanged = !entry.approved;
+    const approvalsChanged = approvedTerms.size !== (ballot.approvedTerms?.length ?? 0);
+    const updated: StoredBallot = !tallyChanged && !approvalsChanged ? ballot : {
+      ...ballot,
+      approvedTerms: [...approvedTerms],
+      termCounts: [...terms.values()],
+      revision: ballot.revision + Number(tallyChanged),
+    };
+    if (updated !== ballot) await transaction.put(ballotKey(moduleId, ballotId), updated);
     return { status: "approved", snapshot: snapshotOf(updated) };
   });
 };

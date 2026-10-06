@@ -89,6 +89,14 @@ const normalizeVoteText = (text: string): string => text.normalize("NFKC").toLow
   .replace(/\s+/gu, " ")
   .trim();
 
+const blockedPattern = (text: string): { value: string; wildcardPrefix: boolean; wildcardSuffix: boolean } => {
+  const source = text.normalize("NFKC").toLowerCase();
+  const wildcardPrefix = source.startsWith("*");
+  const wildcardSuffix = source.endsWith("*");
+  const value = normalizeVoteText(source.replace(/^\*+/u, "").replace(/\*+$/u, ""));
+  return { value, wildcardPrefix, wildcardSuffix };
+};
+
 const firstCharacters = (text: string, maximum: number): string => Array.from(text).slice(0, maximum).join("");
 
 /** Normalizes one free-text ballot message to a bounded, lowercased term. */
@@ -100,8 +108,38 @@ export const normalizeFreeTextVote = (text: string, mode: ChatVotingTextMode): s
   return bounded.length === 0 ? null : bounded;
 };
 
-/** Normalizes Twitch blocked terms with the same comparison rules as a vote. */
-export const normalizeBlockedVoteTerm = (text: string): string => normalizeVoteText(text);
+/** Normalizes message text before the stored term is truncated for tallying. */
+export const normalizeFreeTextVoteForMatching = (text: string): string => normalizeVoteText(text);
+
+/** Normalizes a blocked pattern while keeping Twitch's edge wildcards intact. */
+export const normalizeBlockedVoteTerm = (text: string): string => {
+  const pattern = blockedPattern(text);
+  return `${pattern.wildcardPrefix ? "*" : ""}${pattern.value}${pattern.wildcardSuffix ? "*" : ""}`;
+};
+
+/** Matches blocked words and phrases within the normalized chat message. */
+export const isBlockedFreeTextVote = (vote: string, blockedTerms: readonly string[]): boolean => {
+  const words = normalizeVoteText(vote).split(" ").filter((word) => word.length > 0);
+  return blockedTerms.some((blockedTerm) => {
+    const pattern = blockedPattern(blockedTerm);
+    const patternWords = pattern.value.split(" ").filter((word) => word.length > 0);
+    if (patternWords.length === 0 || patternWords.length > words.length) return false;
+    for (let start = 0; start <= words.length - patternWords.length; start += 1) {
+      const matches = patternWords.every((word, offset) => {
+        const candidate = words[start + offset];
+        if (candidate === undefined) return false;
+        const wildcardPrefix = offset === 0 && pattern.wildcardPrefix;
+        const wildcardSuffix = offset === patternWords.length - 1 && pattern.wildcardSuffix;
+        if (wildcardPrefix && wildcardSuffix) return candidate.includes(word);
+        if (wildcardPrefix) return candidate.endsWith(word);
+        if (wildcardSuffix) return candidate.startsWith(word);
+        return candidate === word;
+      });
+      if (matches) return true;
+    }
+    return false;
+  });
+};
 
 export const rankVoteTerms = (terms: readonly ChatVoteTerm[], limit = 5): ChatVoteTerm[] =>
   [...terms].sort((left, right) => right.count - left.count || (left.term < right.term ? -1 : left.term > right.term ? 1 : 0))

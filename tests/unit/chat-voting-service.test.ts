@@ -136,7 +136,7 @@ describe("chat voting event service", () => {
 
     const result = await processChatVotingMessage(eventWithText("ＫＡＰＰＡ, PogChamp!"), repository, context);
 
-    expect(castTerm).toHaveBeenCalledWith("fictional-poll", "fictional-voter-1", "kappa");
+    expect(castTerm).toHaveBeenCalledWith("fictional-poll", "fictional-voter-1", "kappa", "kappa pogchamp");
     expect(result.actions).toEqual([{
       kind: "overlay",
       type: "tally",
@@ -161,7 +161,7 @@ describe("chat voting event service", () => {
     const open = vi.fn(() => Promise.resolve({ status: "opened" as const }));
     const insertOpen = vi.fn(() => Promise.resolve(true));
     const repository = repositoryWith({ insertOpen });
-    const readChannelBlockedTerms = vi.fn(() => Promise.resolve(["ＰＯＧＣＨＡＭＰ!", "bad-term"]));
+    const readChannelBlockedTerms = vi.fn(() => Promise.resolve(["ＰＯＧＣＨＡＭＰ!", "bad-term", "shoot*"]));
     const context = executionContext({
       ballots: { ...executionContext().ballots, open },
       readChannelBlockedTerms,
@@ -171,7 +171,7 @@ describe("chat voting event service", () => {
 
     expect(readChannelBlockedTerms).toHaveBeenCalledOnce();
     expect(open).toHaveBeenCalledWith(expect.any(String), 0, expect.any(Number), undefined, {
-      blockedTerms: ["pogchamp", "badterm"],
+      blockedTerms: ["pogchamp", "badterm", "shoot*"],
     });
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({
       preset: "free_text",
@@ -274,6 +274,36 @@ describe("chat voting event service", () => {
 
     expect(ballots.open).toHaveBeenCalledWith(expect.any(String), 0, expect.any(Number), undefined, { blockedTerms: null });
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ preset: "free_text", termFilterReady: false }), undefined);
+  });
+
+  it("finishes a free-text vote with constraint-valid empty results when scheduling fails", async () => {
+    const close = vi.fn(() => Promise.resolve({ counts: [], terms: [], more: 0, termFilterReady: true, revision: 0 }));
+    const acknowledgeClosed = vi.fn(() => Promise.resolve());
+    const ballots = { ...executionContext().ballots, open: vi.fn(() => Promise.resolve({ status: "opened" as const })), close, acknowledgeClosed };
+    const finish = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryWith({ insertOpen: vi.fn(() => Promise.resolve(true)), finish });
+
+    await expect(startChatVote(repository, {
+      channelId: "fictional-channel",
+      preset: "free_text",
+      optionCount: 0,
+      textMode: "whole_message",
+      blockedTerms: [],
+      settings: DEFAULT_CHAT_VOTING_SETTINGS,
+      language: "en",
+    }, ballots, vi.fn(() => Promise.reject(new Error("alarm unavailable"))))).rejects.toThrow("alarm unavailable");
+
+    expect(finish).toHaveBeenCalledWith(
+      "fictional-channel",
+      expect.any(String),
+      "limit",
+      expect.any(String),
+      [],
+      [],
+      0,
+      true,
+    );
+    expect(acknowledgeClosed).toHaveBeenCalledOnce();
   });
 
   it("does not cast a choice after closesAt even if the host ballot remains open", async () => {

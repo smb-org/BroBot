@@ -54,12 +54,12 @@ export const startChatVoting = async (
 }))).vote;
 };
 
-export const approveChatVotingTerm = async (channelId: string, term: string): Promise<void> => {
+export const approveChatVotingTerm = async (channelId: string, pollId: string, term: string): Promise<void> => {
   const token = await csrfHeader();
   await readJson<{ terms: readonly ChatVoteTerm[]; moreTerms: number; revision: number }>(await fetch(route(channelId, "/approve-term"), {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
-    body: JSON.stringify({ term }),
+    body: JSON.stringify({ pollId, term }),
   }));
 };
 

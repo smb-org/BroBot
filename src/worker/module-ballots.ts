@@ -23,7 +23,7 @@ export const moduleBallots = (
   return {
     open: (ballotId, optionCount, expiresAt, rule, termFilter) => object.openBallot(moduleId, ballotId, optionCount, expiresAt, rule, termFilter),
     cast: (ballotId, userId, choice) => object.castBallot(moduleId, ballotId, userId, choice),
-    castTerm: (ballotId, userId, term) => object.castBallotTerm(moduleId, ballotId, userId, term),
+    castTerm: (ballotId, userId, term, matchText) => object.castBallotTerm(moduleId, ballotId, userId, term, matchText),
     setBlockedTerms: (ballotId, terms) => object.setBlockedTerms(moduleId, ballotId, terms),
     approveTerm: (ballotId, term) => object.approveTerm(moduleId, ballotId, term),
     read: (ballotId) => object.readBallot(moduleId, ballotId),

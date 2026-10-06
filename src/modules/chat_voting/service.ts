@@ -2,7 +2,7 @@ import type { BallotTermCount, ModuleEvent, ModuleExecutionContext, ModuleMutati
 import type { ModuleLanguage, ModuleAlarmContext } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
 import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
-import { formatFreeTextVoteResult, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, parseVoteCommand, voteChoiceFromMessage, voteCloseDeadline } from "./domain";
+import { formatFreeTextVoteResult, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, parseVoteCommand, voteChoiceFromMessage, voteCloseDeadline } from "./domain";
 import type { ChatVotingRepository } from "./repository";
 import { chatVotingChatText } from "./contracts/chat-defaults";
 import { createChatVotingRepository } from "./repository";
@@ -88,12 +88,18 @@ export const startChatVote = async (
   } catch (error: unknown) {
     const closedSnapshot = await ballots.close(vote.id).catch(() => null);
     if (inserted) {
+      const textResults = vote.preset === "free_text" ? closedSnapshot?.terms ?? [] : null;
       const finished = await repository.finish(
         input.channelId,
         vote.id,
         vote.closeReason,
         new Date().toISOString(),
         Array.from({ length: vote.optionCount }, () => 0),
+        textResults,
+        closedSnapshot?.more ?? 0,
+        vote.preset === "free_text"
+          ? closedSnapshot?.termFilterReady ?? vote.termFilterReady ?? false
+          : null,
       ).catch(() => false);
       if (finished) await ballots.acknowledgeClosed?.(vote.id).catch(() => null);
     } else if (closedSnapshot !== null) {
@@ -208,9 +214,10 @@ export const processChatVotingMessage = async (
   const closesAt = Date.parse(vote.closesAt);
   if (!Number.isFinite(closesAt) || Date.now() >= closesAt) return { actions: [], diagnostics: [] };
   if (vote.preset === "free_text") {
+    const matchText = normalizeFreeTextVoteForMatching(text);
     const term = normalizeFreeTextVote(text, vote.textMode ?? "first_word");
     if (term === null || context.ballots.castTerm === undefined) return { actions: [], diagnostics: [] };
-    const result = await context.ballots.castTerm(vote.id, userId, term);
+    const result = await context.ballots.castTerm(vote.id, userId, term, matchText);
     if (result.status !== "counted" && result.status !== "changed" && result.status !== "overflow") {
       return { actions: [], diagnostics: [] };
     }

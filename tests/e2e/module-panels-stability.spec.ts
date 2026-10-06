@@ -296,7 +296,9 @@ test("free-text voting results and approval keep the panel layout fixed", async 
     }) });
   });
   await page.route("**/api/channels/channel-a/modules/chat_voting/approve-term", async (route) => {
-    approvedTerm = (await route.request().postDataJSON() as { term: string }).term;
+    const requestBody = await route.request().postDataJSON() as { pollId: string; term: string };
+    expect(requestBody.pollId).toBe(vote.id);
+    approvedTerm = requestBody.term;
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ terms, moreTerms: 3, revision: 2 }) });
   });
   await routeJson(page, "/api/csrf", { token: "csrf" });

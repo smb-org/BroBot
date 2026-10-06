@@ -117,10 +117,10 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
     }
   };
 
-  const approveTerm = async (term: string): Promise<void> => {
+  const approveTerm = async (pollId: string, term: string): Promise<void> => {
     setBusy(true);
     try {
-      await approveChatVotingTerm(channelId, term);
+      await approveChatVotingTerm(channelId, pollId, term);
       notify({ tone: "success", message: labels.approvalSaved });
       await refresh();
     } catch (error: unknown) {
@@ -211,7 +211,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
                 <span>
                   {approved
                     ? <span className="muted">{labels.approved}</span>
-                    : <Button disabled={busy || !canOperate || !running} onClick={() => { void approveTerm(term); }}>{labels.approveTerm(term)}</Button>}
+                    : <Button disabled={busy || !canOperate || !running} onClick={() => { void approveTerm(vote.id, term); }}>{labels.approveTerm(term)}</Button>}
                 </span>
               </div>;
             })}

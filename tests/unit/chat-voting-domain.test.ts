@@ -4,6 +4,7 @@ import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/cont
 import {
   formatFreeTextVoteResult,
   formatVoteResult,
+  isBlockedFreeTextVote,
   isValidVoteLabelSetting,
   labelsForVote,
   normalizeBlockedVoteTerm,
@@ -78,6 +79,18 @@ describe("chat voting command and result domain", () => {
     expect(normalizeFreeTextVote("!!!   ???", "whole_message")).toBeNull();
     expect(normalizeFreeTextVote("abcdefghijklmnopqrstuvwxyz", "whole_message")).toBe("abcdefghijklmnopqrstuvwxy");
     expect(normalizeBlockedVoteTerm("ＰＯＧＣＨＡＭＰ!")).toBe("pogchamp");
+  });
+
+  it("matches blocked phrases and edge wildcards before punctuation normalization", () => {
+    expect(normalizeBlockedVoteTerm("Bad Phrase")).toBe("bad phrase");
+    expect(normalizeBlockedVoteTerm("shoot*")).toBe("shoot*");
+    expect(normalizeBlockedVoteTerm("*hound")).toBe("*hound");
+    expect(isBlockedFreeTextVote("this is a BAD, phrase here", ["bad phrase"])).toBe(true);
+    expect(isBlockedFreeTextVote("shooting", ["shoot*"])).toBe(true);
+    expect(isBlockedFreeTextVote("bloodhound", ["*hound"])).toBe(true);
+    expect(isBlockedFreeTextVote("middlepiece", ["*middle*"])).toBe(true);
+    expect(isBlockedFreeTextVote("badger", ["bad"])).toBe(false);
+    expect(isBlockedFreeTextVote("phrase bad", ["bad phrase"])).toBe(false);
   });
 
   it("ranks free-text terms by count then name and caps the tally at five", () => {
