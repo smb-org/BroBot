@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { ChatVotingPanel } from "../../src/modules/chat_voting/panel";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -249,6 +250,64 @@ describe("chat voting live panel", () => {
     expect(screen.getByText("4")).toBeInTheDocument();
     expect(screen.getByText("67%")).toBeInTheDocument();
     expect(screen.getByText("33%")).toBeInTheDocument();
+  });
+
+  it("keeps one reserved hint slot above the voting action", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
+      vote: null, counts: null, revision: 0, hasOpenBallot: false, defaultDurationSeconds: 120,
+    }))));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    expect(await screen.findByRole("button", { name: "Start" })).toBeInTheDocument();
+    expect(screen.getByTestId("chat-voting-hint-slot")).toBeInTheDocument();
+  });
+
+  it("sends initial load failures to a persistent error toast", async () => {
+    const previousIds = new Set(toastsSnapshot().map((toast) => toast.id));
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.reject(new Error("network unavailable"))));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    await waitFor(() => expect(toastsSnapshot().some((toast) => !previousIds.has(toast.id) && toast.message === "The vote could not be loaded.")).toBe(true));
+    const errorToasts = toastsSnapshot().filter((toast) => !previousIds.has(toast.id));
+    expect(errorToasts).toHaveLength(1);
+    expect(errorToasts[0]).toMatchObject({ tone: "error", message: "The vote could not be loaded." });
+    expect(screen.queryByText("The vote could not be loaded.")).not.toBeInTheDocument();
+    for (const toast of errorToasts) dismissToast(toast.id);
+  });
+
+  it("sends failed start and stop actions to error toasts instead of the hint slot", async () => {
+    const previousIds = new Set(toastsSnapshot().map((toast) => toast.id));
+    let currentState = {
+      vote: null as typeof openVote | null,
+      counts: null as number[] | null,
+      revision: 0,
+      hasOpenBallot: false,
+      defaultDurationSeconds: 120,
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request
+        ? new URL(input.url).pathname
+        : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path.endsWith("/close")) return Promise.resolve(jsonResponse({ error: "close_failed" }, 500));
+      if (path.endsWith("/start")) return Promise.resolve(jsonResponse({ error: "start_failed" }, 500));
+      return Promise.resolve(jsonResponse(currentState));
+    }));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    await screen.findByRole("button", { name: "Start" });
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(toastsSnapshot().some((toast) => !previousIds.has(toast.id) && toast.message === "The vote could not be started.")).toBe(true));
+    expect(screen.getByTestId("chat-voting-hint-slot")).not.toHaveTextContent("The vote could not be started.");
+    const startError = toastsSnapshot().find((toast) => !previousIds.has(toast.id) && toast.message === "The vote could not be started.");
+    if (startError !== undefined) dismissToast(startError.id);
+    currentState = { vote: openVote, counts: [4, 2], revision: 6, hasOpenBallot: true, defaultDurationSeconds: 0 };
+    fireEvent(document, new Event("visibilitychange"));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(toastsSnapshot().some((toast) => !previousIds.has(toast.id) && toast.message === "The vote could not be closed.")).toBe(true));
+    expect(screen.getByTestId("chat-voting-hint-slot")).not.toHaveTextContent("The vote could not be closed.");
+    for (const toast of toastsSnapshot().filter((item) => !previousIds.has(item.id))) dismissToast(toast.id);
   });
 
   it.each([

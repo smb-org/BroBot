@@ -2,6 +2,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import VotekickPanel from "../../src/modules/votekick/panel";
 import type { Votekick } from "../../src/modules/votekick/contracts";
 import { jsonResponse } from "../unit/fixtures";
@@ -62,5 +63,37 @@ describe("Votekick panel", () => {
     }))));
     render(<UiProvider><VotekickPanel channelId="channel-a" language="en" canOperate={false} /></UiProvider>);
     expect(await screen.findByRole("button", { name: "Cancel" })).toBeDisabled();
+  });
+
+  it("keeps the running-votekick and history boxes reserved while the countdown runs", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
+      running,
+      votekicks: [running],
+      now: "2026-10-04T11:00:00.000Z",
+    }))));
+    render(<UiProvider><VotekickPanel channelId="channel-a" language="en" /></UiProvider>);
+
+    expect(await screen.findByTestId("votekick-running-slot")).toBeInTheDocument();
+    expect(screen.getByTestId("votekick-history-list")).toBeInTheDocument();
+  });
+
+  it("shows only one persistent load toast during repeated failed refreshes", async () => {
+    vi.useFakeTimers();
+    const previousToastIds = new Set(toastsSnapshot().map((toast) => toast.id));
+    const fetcher = vi.fn<typeof fetch>(() => Promise.reject(new Error("network unavailable")));
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><VotekickPanel channelId="channel-a" language="en" /></UiProvider>);
+
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => {
+      vi.advanceTimersByTime(6_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    const newToasts = toastsSnapshot().filter((toast) => !previousToastIds.has(toast.id));
+    expect(newToasts.filter((toast) => toast.message === "Votekicks could not be loaded.")).toHaveLength(1);
+    for (const toast of newToasts) dismissToast(toast.id);
   });
 });

@@ -91,4 +91,13 @@ describe("BELABOX panel", () => {
       expect(mocks.retryBelaboxPolling).toHaveBeenCalledWith("kanal-a");
     });
   });
+
+  it("reserves the test result and live status rows before values are available", async () => {
+    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
+
+    expect(await screen.findByText("Stats URL stored")).toBeInTheDocument();
+    expect(screen.getByTestId("belabox-updated-at-slot")).toBeInTheDocument();
+    expect(screen.getByTestId("belabox-sample-slot")).toBeInTheDocument();
+    expect(screen.getByTestId("belabox-test-result-slot")).toBeInTheDocument();
+  });
 });

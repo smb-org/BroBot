@@ -1,7 +1,7 @@
 import { useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, Icon, SegmentedControl } from "../../../dashboard/ui";
+import { Button, Icon, SegmentedControl, notify } from "../../../dashboard/ui";
 import type { ModuleImmediateActionProperties } from "../contract";
 import { adsPanelTexts } from "./locale";
 import { startCommercialNow } from "./service";
@@ -12,24 +12,25 @@ const AdNowAction = ({ channelId, availabilityReason }: ModuleImmediateActionPro
   const labels = adsPanelTexts(typeof navigator === "undefined" || !navigator.language.toLowerCase().startsWith("en") ? "de" : "en");
   const [length, setLength] = useState<string | null>("60");
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [succeeded, setSucceeded] = useState(false);
+  const [resultMessage, setResultMessage] = useState("");
   const availabilityReasonId = "stream-manager-ads-availability-reason";
   const unavailable = availabilityReason !== null;
 
   const run = async (): Promise<void> => {
     if (pending || length === null || availabilityReason !== null) return;
     setPending(true);
-    setMessage(null);
-    setSucceeded(false);
+    setResultMessage("");
     try {
       const result = await startCommercialNow(channelId, Number(length));
-      setMessage(labels.immediateStarted(String(result.length ?? length)));
-      setSucceeded(true);
+      const message = labels.immediateStarted(String(result.length ?? length));
+      setResultMessage(message);
+      notify({ tone: "success", message });
     } catch (error: unknown) {
-      setMessage(error instanceof PanelApiError && error.code === "commercial_stream_offline"
+      const message = error instanceof PanelApiError && error.code === "commercial_stream_offline"
         ? labels.immediateOffline
-        : labels.immediateFailed);
+        : labels.immediateFailed;
+      setResultMessage(message);
+      notify({ tone: "error", message });
     } finally {
       setPending(false);
     }
@@ -52,8 +53,11 @@ const AdNowAction = ({ channelId, availabilityReason }: ModuleImmediateActionPro
       <Button className="stream-manager-action__button" icon="ad" variant="primary" disabled={pending || length === null || unavailable} {...(unavailable ? { describedBy: availabilityReasonId } : {})} onClick={() => { void run(); }}>
         {labels.immediateRun(length ?? "")}
       </Button>
-      {availabilityReason === null ? null : <p className="lock-reason" id={availabilityReasonId}>{availabilityReason}</p>}
-      {message === null ? null : <p className={succeeded ? "form-success" : "form-error"} role={succeeded ? "status" : "alert"}>{message}</p>}
+      <p className="lock-reason" id={availabilityReasonId} data-testid="immediate-action-result-slot"
+        style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite"
+        title={availabilityReason ?? resultMessage}>
+        {availabilityReason ?? resultMessage}
+      </p>
     </div>
   );
 };

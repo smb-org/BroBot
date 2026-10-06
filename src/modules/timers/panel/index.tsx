@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { formatTimestamp } from "../../../dashboard/locale";
-import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, InspectorSection, NumberField, Select, Switch } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { Timer, TimerMutationInput, TimerTrigger } from "../contracts";
 import { timersTexts } from "./locale";
@@ -124,10 +124,8 @@ export default function TimersPanel({ channelId, language, canManage = true, can
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const reload = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    setError(null);
     try { setData(await loadTimersPanel(channelId)); }
-    catch { setError(labels.loadError); }
+    catch { notify({ tone: "error", message: labels.loadError }); }
     finally { setLoading(false); }
   }, [channelId, labels.loadError]);
 
@@ -135,7 +133,7 @@ export default function TimersPanel({ channelId, language, canManage = true, can
     let active = true;
     void loadTimersPanel(channelId)
       .then((value) => { if (active) setData(value); })
-      .catch(() => { if (active) setError(labels.loadError); })
+      .catch(() => { if (active) notify({ tone: "error", message: labels.loadError }); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [channelId, labels.loadError]);
@@ -193,7 +191,7 @@ export default function TimersPanel({ channelId, language, canManage = true, can
     try {
       await setTimerEnabled(channelId, timer, enabled);
       await reload();
-    } catch { setError(labels.saveError); }
+    } catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setBusyTimerId(null); }
   };
 
@@ -216,15 +214,19 @@ export default function TimersPanel({ channelId, language, canManage = true, can
     { value: "time_of_day", label: labels.timeOfDay },
     { value: "before_event", label: labels.beforeEvent },
   ];
+  const listStatus = loading ? "loading" : data === null ? "error" : data.timers.length === 0 ? "empty" : "success";
 
   return (
     <section aria-label={labels.title}>
       <InspectorSection title={labels.title}>
         {canManage ? <Button variant="primary" onClick={openCreate}>{labels.add}</Button> : <p className="lock-reason">{labels.roleLocked}</p>}
-        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-        {loading ? <p className="muted">…</p> : null}
-        {!loading && data?.timers.length === 0 ? <p className="muted">{labels.empty}</p> : null}
-        <div className="state-list">
+        <div data-testid="timers-list-slot" style={{ height: "calc(var(--s10) * 18)", overflow: "hidden" }}>
+        <LoadState status={listStatus} minHeight="calc(var(--s10) * 18)"
+          loading={<Skeleton rows={7} height={34} />}
+          empty={<p className="muted">{labels.empty}</p>}
+          error={<div style={{ minHeight: "calc(var(--s10) * 18)" }} />}
+        >
+        <div className="state-list" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>
           {(data?.timers ?? []).map((timer) => (
             <article key={timer.id} className="timer-row">
               <div className="timer-row__copy">
@@ -250,15 +252,22 @@ export default function TimersPanel({ channelId, language, canManage = true, can
             </article>
           ))}
         </div>
+        </LoadState>
+        </div>
       </InspectorSection>
 
-      <Dialog
+      <FormDialog
         opened={draft !== null}
         title={editing === null ? labels.create : labels.edit}
-        onClose={() => { if (!pending) { setDraft(null); setEditing(null); setError(null); } }}
+        confirmLabel={labels.save}
+        cancelLabel={labels.cancel}
+        onConfirm={() => { void save(); }}
+        onCancel={() => { if (!pending) { setDraft(null); setEditing(null); setError(null); } }}
         pending={pending}
+        confirmDisabled={blockOptions.length === 0}
+        {...(error === null ? {} : { error })}
       >
-        {draft === null ? null : <form className="module-stack" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+        {draft === null ? null : <div className="module-stack">
           <Field label={labels.name} value={draft.name} onChange={(name) => patchDraft({ name })} maxLength={60} countLabel={(count, max) => `${String(count)}/${String(max)}`} required />
           <Select
             label={labels.block}
@@ -322,14 +331,11 @@ export default function TimersPanel({ channelId, language, canManage = true, can
             <NumberField label={labels.before} value={draft.minutes} onChange={(minutes) => patchDraft({ minutes })} min={1} max={1_440} unit="min" required />
           </> : null}
 
-          {error === null ? null : <p className="form-error" role="alert">{error}</p>}
           <div className="inspector-actions">
-            <Button type="submit" variant="primary" disabled={pending || blockOptions.length === 0}>{labels.save}</Button>
             <Button type="button" variant="neutral" onClick={() => { void preview(draft.blockName); }} disabled={draft.blockName.length === 0 || previewBusy}>{labels.preview}</Button>
-            <Button type="button" variant="subtle" onClick={() => { setDraft(null); setEditing(null); }}>{labels.cancel}</Button>
           </div>
-        </form>}
-      </Dialog>
+        </div>}
+      </FormDialog>
 
       <Dialog opened={previewText !== null} title={labels.previewTitle} onClose={() => setPreviewText(null)} pending={previewBusy}>
         {previewText === null ? null : <ChatPreview label={labels.preview} speaker={labels.previewBot} text={previewText} countLabel={labels.characterCount(previewText.length)} />}
