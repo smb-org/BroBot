@@ -117,6 +117,36 @@ test("Escape closes the open error summary before the inspector", async ({ page 
   await expect(page.locator(".list-detail__inspector")).toHaveCount(0);
 });
 
+test("activating an error link keeps focus on the target field", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tests/e2e/host-popovers-fixture.html");
+
+  const editor = page.locator(".host-popovers-fixture__editor");
+  const errorPopover = page.getByRole("dialog", { name: "Fehlerhafte Felder" });
+  await editor.locator(".ui-save-bar__invalid-trigger").click();
+  await errorPopover.getByRole("button", { name: /^Gamma:/u }).click();
+  await expect(errorPopover).toBeHidden();
+  await expect(page.getByRole("textbox", { name: "Gamma" })).toBeFocused();
+});
+
+test("Escape with the error summary open keeps the inspector; closed, it closes it", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tests/e2e/host-popovers-fixture.html");
+
+  const editor = page.locator(".host-popovers-fixture__editor");
+  const errorTrigger = editor.locator(".ui-save-bar__invalid-trigger");
+  const errorPopover = page.getByRole("dialog", { name: "Fehlerhafte Felder" });
+  await errorTrigger.click();
+  await expect(errorPopover).toBeVisible();
+  await errorTrigger.focus();
+  await page.keyboard.press("Escape");
+  await expect(errorPopover).toBeHidden();
+  await expect(editor).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".list-detail__inspector")).toHaveCount(0);
+});
+
 test("conflict recovery label stays fully visible in the mobile SaveBar slot", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tests/e2e/host-popovers-fixture.html?conflict");

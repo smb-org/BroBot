@@ -1,5 +1,5 @@
 import { Popover as MantinePopover } from "@mantine/core";
-import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
 
 import { dashboardCommonTexts } from "../locale";
 import { FormDensity } from "./FormDensity";
@@ -79,18 +79,25 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
     dropdownRef.current?.querySelector<HTMLElement>("button")?.focus();
   };
 
-  const closeFromTriggerEscape = (event: KeyboardEvent<HTMLButtonElement>): void => {
-    if (!opened || event.key !== "Escape") return;
-    event.preventDefault();
-    event.stopPropagation();
-    setOpened(false);
+  // Dismissal (Escape, outside click) returns focus to the trigger; activating an error link must not.
+  const [linkActivated, setLinkActivated] = useState(false);
+  const setOpenedState = (next: boolean): void => {
+    if (next) setLinkActivated(false);
+    setOpened(next);
   };
 
-  const keepOpenEscapeInsidePopover = (event: KeyboardEvent<HTMLDivElement>): void => {
-    // Mantine closes the opened dropdown in its capture handler; keep that
-    // Escape from reaching the inspector's native keydown listener.
-    if (opened && event.key === "Escape") event.stopPropagation();
-  };
+  useEffect(() => {
+    if (!opened) return undefined;
+    // Capture on window so the inspector's native Escape listener never sees this key press.
+    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpened(false);
+    };
+    window.addEventListener("keydown", closeOnEscape, true);
+    return () => { window.removeEventListener("keydown", closeOnEscape, true); };
+  }, [opened]);
 
   return (
     <>
@@ -98,15 +105,15 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
       <MantinePopover
         id={popoverId}
         opened={opened}
-        onChange={setOpened}
+        onChange={setOpenedState}
         withinPortal={false}
         floatingStrategy="fixed"
         position="top-start"
         width={280}
         middlewares={{ flip: true, shift: true }}
         shadow="xs"
-        closeOnEscape={opened}
-        returnFocus
+        closeOnEscape={false}
+        returnFocus={!linkActivated}
         hideDetached={false}
         onEnterTransitionEnd={focusFirstErrorLink}
       >
@@ -116,21 +123,20 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
             type="button"
             aria-label={opened ? common.hideInvalidFields : common.showInvalidFields}
             onKeyDown={(event) => {
-              closeFromTriggerEscape(event);
               if (event.key === "Enter" || event.key === " ") openedFromKeyboard.current = !opened;
             }}
-            onClick={() => { setOpened((current) => !current); }}
+            onClick={() => { setOpenedState(!opened); }}
           >
             <Icon name="cause" size={16} />
           </button>
         </MantinePopover.Target>
         <MantinePopover.Dropdown ref={dropdownRef} className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`}>
-          <div onKeyDownCapture={keepOpenEscapeInsidePopover}>
+          <div>
             <h2 id={`${popoverId}-title`} className="sr-only">{common.invalidFieldsTitle}</h2>
             <ul className="ui-save-bar__invalid-fields">
               {fields.map((field) => (
                 <li key={`${field.sectionId}:${field.id}`}>
-                  <button type="button" aria-label={`${field.label}: ${field.message}`} onClick={() => { onFocusField(field); setOpened(false); }}>
+                  <button type="button" aria-label={`${field.label}: ${field.message}`} onClick={() => { setLinkActivated(true); onFocusField(field); setOpened(false); }}>
                     <span>{field.label}</span>
                     <span>{field.message}</span>
                   </button>
