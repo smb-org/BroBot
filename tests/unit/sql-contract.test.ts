@@ -29,6 +29,7 @@ import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { chatVoteSelectColumns } from "../../src/modules/chat_voting/repository";
+import { belaboxStreamSessionGuard } from "../../src/modules/belabox/adapters/d1";
 import { MANAGING_ROLES } from "../../src/contracts/values";
 import { ANY_MEMBER_ROLES } from "../../src/worker/db/guards";
 
@@ -67,6 +68,12 @@ const sourceFiles = (directory: string): string[] => readdirSync(directory, { wi
 // Only `placeholders` is built at runtime and has no production literal.
 const sqlGetFixtures = new Map<string, string>([
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
+  ["sessionGuard.sql", belaboxStreamSessionGuard("channel-id", {
+    state: "online",
+    changedAt: now,
+    startedAt: now,
+    streamId: "stream-id",
+  }).sql],
   ["minimumValue", "-999999999"],
   ["maximumValue", "999999999"],
   ["MINIMUM_VALUE_SQL", "-999999999"],

@@ -17,11 +17,16 @@ import {
   type BelaboxSettings,
 } from "./contracts";
 import {
+  belaboxStatusMatchesSession,
+  belaboxStreamSessionKey,
+  getBelaboxStreamSession,
   getBelaboxStatus,
+  sameBelaboxStreamSession,
   setBelaboxPollingState,
   writeBelaboxFetch,
   type BelaboxFetchPhase,
   type BelaboxRecentPoint,
+  type BelaboxStreamSession,
 } from "./adapters/d1";
 import { fetchRelaySample } from "./adapters/stats-client";
 import { validateBelaboxStatsUrl } from "./domain/stats-url";
@@ -214,32 +219,38 @@ const storePollResult = async (
   result: BelaboxFetchResult,
   secretVersion: string,
   originStreamId: string | null,
+  originSession: BelaboxStreamSession | null,
 ): Promise<StoredPollOutcome> => {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const [prerequisites, currentStatus, live] = await Promise.all([
+    const [prerequisites, currentStatus, live, currentSession] = await Promise.all([
       alarmPrerequisites(context),
       getBelaboxStatus(context.DB, context.channelId),
       context.streamStartedAt(),
+      getBelaboxStreamSession(context.DB, context.channelId),
     ]);
     if (prerequisites.secretUnavailable) return { kind: "secret_unavailable" };
-    if (live.streamId !== originStreamId) return { kind: "stream_changed" };
+    if (live.streamId !== originStreamId || !sameBelaboxStreamSession(originSession, currentSession)) {
+      return { kind: "stream_changed" };
+    }
     if (!isDesired(prerequisites) || prerequisites.settings === null || prerequisites.secret === null) {
       return { kind: "not_desired" };
     }
     if (prerequisites.secret.version !== secretVersion) return { kind: "secret_changed" };
 
     const streamId = live.streamId;
-    const sameStream = currentStatus?.streamId === streamId;
-    const previousPhase = sameStream ? currentStatus.fetchPhase
+    const sameStream = originSession === null
+      ? currentStatus?.streamId === streamId && currentStatus.streamSessionKey === null
+      : belaboxStatusMatchesSession(currentStatus, originSession);
+    const previousPhase = sameStream ? currentStatus?.fetchPhase ?? { consecutiveFailures: 0, failing: false }
       : { consecutiveFailures: 0, failing: false };
     const phase = result.ok ? { consecutiveFailures: 0, failing: false } : failedPhase(previousPhase);
-    const alreadyClassified = sameStream && streamId !== null && currentStatus.belaboxStreamId === streamId;
+    const alreadyClassified = sameStream && streamId !== null && currentStatus?.belaboxStreamId === streamId;
     const classified = alreadyClassified || result.ok && result.sample.connected && streamId !== null;
     const storedSample = result.ok
-      ? enrichBelaboxSample(result.sample, sameStream ? currentStatus.sample : null, sameStream, classified)
+      ? enrichBelaboxSample(result.sample, sameStream ? currentStatus?.sample ?? null : null, sameStream, classified)
       : null;
     const now = Date.now();
-    const recent = sameStream ? pruneRecent(currentStatus.recent, now) : [];
+    const recent = sameStream ? pruneRecent(currentStatus?.recent ?? [], now) : [];
     const nextRecent = storedSample !== null && alreadyClassified ? appendRecent(recent, storedSample, now) : recent;
     const written = await writeBelaboxFetch(context.DB, {
       channelId: context.channelId,
@@ -247,11 +258,13 @@ const storePollResult = async (
       errorCode: result.ok ? null : result.reason,
       polling: true,
       streamId,
+      streamSessionKey: belaboxStreamSessionKey(originSession),
       belaboxStreamId: classified ? streamId : null,
       fetchPhase: phase,
       recent: nextRecent,
       expectedSecretVersion: secretVersion,
       expectedStatusRevision: currentStatus?.revision ?? null,
+      expectedStreamSession: originSession,
     });
     if (written !== null) {
       await writePhaseDiagnostic(
@@ -296,7 +309,10 @@ export const handleBelaboxPollAlarm = async (
       return;
     }
     await setBelaboxPollingState(context.DB, context.channelId, true);
-    const originStreamId = (await context.streamStartedAt()).streamId;
+    const [originStream, originSession] = await Promise.all([
+      context.streamStartedAt(),
+      getBelaboxStreamSession(context.DB, context.channelId),
+    ]);
 
     const result = await fetchRelaySample(
       prerequisites.secret.url,
@@ -304,7 +320,7 @@ export const handleBelaboxPollAlarm = async (
       context.externalFetchBudget ?? { claim: () => true },
       fetcher,
     );
-    const stored = await storePollResult(context, result, prerequisites.secret.version, originStreamId);
+    const stored = await storePollResult(context, result, prerequisites.secret.version, originStream.streamId, originSession);
 
     const latest = await alarmPrerequisites(context);
     if (!isDesired(latest) || latest.settings === null || latest.secret === null) {
@@ -366,7 +382,8 @@ export const ensureBelaboxPollSchedule = async (
   await ensureBelaboxPoll(context);
 };
 
-export type CurrentBelaboxSampleResult = BelaboxFetchResult | { ok: false; reason: "not_configured" };
+export type CurrentBelaboxSampleResult = BelaboxFetchResult |
+  { ok: false; reason: "not_configured" | "stream_changed" };
 
 type CurrentBelaboxSampleContext = {
   DB: D1Database;
@@ -383,36 +400,47 @@ export const currentBelaboxSample = async (
   fetcher: typeof fetch = fetch,
 ): Promise<CurrentBelaboxSampleResult> => {
   const status = await getBelaboxStatus(context.DB, context.channelId);
+  const cachedSession = await getBelaboxStreamSession(context.DB, context.channelId);
   const sampledAt = status?.sample === null || status?.sample === undefined ? Number.NaN : Date.parse(status.sample.at);
   const age = Math.max(0, now - sampledAt);
+  const sampleIsFromCurrentStream = belaboxStatusMatchesSession(status, cachedSession);
   if (status?.sample !== null && status?.sample !== undefined && status.errorCode === null &&
-      Number.isFinite(age) && age >= 0 && age < BELABOX_ON_DEMAND_CACHE_MS) {
+      sampleIsFromCurrentStream && Number.isFinite(age) && age >= 0 && age < BELABOX_ON_DEMAND_CACHE_MS) {
     return { ok: true, sample: status.sample };
   }
 
   const secret = await usableSecret(context.secrets);
   if (secret === null) return { ok: false, reason: "not_configured" };
+  const originSession = await getBelaboxStreamSession(context.DB, context.channelId);
   const result = await fetchRelaySample(secret.url, secret.publisherKey, context.externalFetchBudget, fetcher);
   let currentStatus = status;
   for (;;) {
-    const moduleState = await belaboxSettingsForChannel(context.DB, context.channelId);
+    const [moduleState, currentSession] = await Promise.all([
+      belaboxSettingsForChannel(context.DB, context.channelId),
+      getBelaboxStreamSession(context.DB, context.channelId),
+    ]);
+    if (!sameBelaboxStreamSession(originSession, currentSession)) return { ok: false, reason: "stream_changed" };
     if (moduleState?.enabled !== true || moduleState.settings.mode !== "on_demand") return result;
-    const previousPhase = currentStatus?.fetchPhase ?? { consecutiveFailures: 0, failing: false };
+    const sameStream = belaboxStatusMatchesSession(currentStatus, originSession);
+    const previousPhase = sameStream ? currentStatus?.fetchPhase ?? { consecutiveFailures: 0, failing: false }
+      : { consecutiveFailures: 0, failing: false };
     const phase = result.ok ? { consecutiveFailures: 0, failing: false } : failedPhase(previousPhase);
     const storedSample = result.ok
-      ? enrichBelaboxSample(result.sample, currentStatus?.sample ?? null, true, true)
+      ? enrichBelaboxSample(result.sample, sameStream ? currentStatus?.sample ?? null : null, sameStream, true)
       : null;
     const written = await writeBelaboxFetch(context.DB, {
       channelId: context.channelId,
       sample: storedSample,
       errorCode: result.ok ? null : result.reason,
       polling: currentStatus?.polling ?? false,
-      streamId: currentStatus?.streamId ?? null,
-      belaboxStreamId: currentStatus?.belaboxStreamId ?? null,
+      streamId: originSession?.state === "online" ? originSession.streamId : null,
+      streamSessionKey: belaboxStreamSessionKey(originSession),
+      belaboxStreamId: sameStream ? currentStatus?.belaboxStreamId ?? null : null,
       fetchPhase: phase,
-      recent: currentStatus?.recent ?? [],
+      recent: sameStream ? currentStatus?.recent ?? [] : [],
       expectedSecretVersion: secret.version,
       expectedStatusRevision: currentStatus?.revision ?? null,
+      expectedStreamSession: originSession,
     });
     if (written !== null) {
       await writePhaseDiagnostic(

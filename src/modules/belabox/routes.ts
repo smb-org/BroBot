@@ -10,8 +10,17 @@ import {
   BELABOX_STATS_URL_SECRET,
   type BelaboxTestResult,
 } from "./contracts";
-import { getBelaboxStatus, prepareBelaboxSampleClear, prepareBelaboxSampleWrite } from "./adapters/d1";
+import {
+  belaboxStatusMatchesSession,
+  belaboxStreamSessionKey,
+  getBelaboxStatus,
+  getBelaboxStreamSession,
+  prepareBelaboxSampleClear,
+  prepareBelaboxSampleWrite,
+  sameBelaboxStreamSession,
+} from "./adapters/d1";
 import { fetchRelaySample } from "./adapters/stats-client";
+import { enrichBelaboxSample } from "./domain/presentation";
 import { validateBelaboxStatsUrl } from "./domain/stats-url";
 import { belaboxSettingsForChannel, currentBelaboxSample } from "./service";
 
@@ -218,6 +227,7 @@ belaboxRoutes.post("/test", async (context) => {
     return managementDenied(context);
   }
 
+  const originSession = usesStoredUrl ? await getBelaboxStreamSession(context.env.DB, channelId) : null;
   const result = await fetchRelaySample(
     validation.url,
     validation.publisherKey,
@@ -230,7 +240,19 @@ belaboxRoutes.post("/test", async (context) => {
     const authorization = authorizeManagementMutation(channelId, actor, now);
     try {
       if (storedSecret !== null) {
-        await prepareBelaboxSampleWrite(context.env.DB, channelId, result.sample, storedSecret.version, authorization).run();
+        const currentSession = await getBelaboxStreamSession(context.env.DB, channelId);
+        if (sameBelaboxStreamSession(originSession, currentSession)) {
+          const status = await getBelaboxStatus(context.env.DB, channelId);
+          const sameStream = belaboxStatusMatchesSession(status, originSession);
+          const sample = enrichBelaboxSample(result.sample, sameStream ? status?.sample ?? null : null, sameStream, true);
+          await prepareBelaboxSampleWrite(context.env.DB, channelId, sample, storedSecret.version, authorization, {
+            streamId: originSession?.state === "online" ? originSession.streamId : null,
+            streamSessionKey: belaboxStreamSessionKey(originSession),
+            belaboxStreamId: sameStream ? status?.belaboxStreamId ?? null : null,
+            expectedStatusRevision: status?.revision ?? null,
+            expectedStreamSession: originSession,
+          }).run();
+        }
       }
     } catch {
       // The test result remains useful when the optional latest-sample write fails.

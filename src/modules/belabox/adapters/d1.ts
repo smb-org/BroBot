@@ -26,10 +26,18 @@ export interface BelaboxStatus {
   errorCode: BelaboxStatusErrorCode | null;
   polling: boolean;
   streamId: string | null;
+  streamSessionKey: string | null;
   belaboxStreamId: string | null;
   fetchPhase: BelaboxFetchPhase;
   recent: readonly BelaboxRecentPoint[];
   revision: number;
+}
+
+export interface BelaboxStreamSession {
+  state: "online" | "offline";
+  changedAt: string;
+  startedAt: string | null;
+  streamId: string | null;
 }
 
 interface BelaboxStatusRow {
@@ -38,10 +46,18 @@ interface BelaboxStatusRow {
   error_code: string | null;
   polling: number;
   stream_id: string | null;
+  stream_session_key: string | null;
   belabox_stream_id: string | null;
   fetch_phase_json: string;
   recent_json: string;
   revision: number;
+}
+
+interface BelaboxStreamSessionRow {
+  state: "online" | "offline";
+  changed_at: string;
+  started_at: string | null;
+  stream_id: string | null;
 }
 
 const EMPTY_FETCH_PHASE: BelaboxFetchPhase = { consecutiveFailures: 0, failing: false };
@@ -109,7 +125,7 @@ const isStatusErrorCode = (value: string | null): value is BelaboxStatusErrorCod
 
 export const getBelaboxStatus = async (db: D1Database, channelId: string): Promise<BelaboxStatus | null> => {
   const row = await db.prepare(
-    `SELECT sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
+    `SELECT sampled_at, sample_json, error_code, polling, stream_id, stream_session_key, belabox_stream_id,
             fetch_phase_json, recent_json, revision
        FROM belabox_status WHERE channel_id = ?`,
   ).bind(channelId).first<BelaboxStatusRow>();
@@ -119,6 +135,7 @@ export const getBelaboxStatus = async (db: D1Database, channelId: string): Promi
     errorCode: isStatusErrorCode(row.error_code) ? row.error_code : null,
     polling: row.polling === 1,
     streamId: row.stream_id,
+    streamSessionKey: row.stream_session_key,
     belaboxStreamId: row.belabox_stream_id,
     fetchPhase: parseFetchPhase(row.fetch_phase_json),
     recent: parseRecent(row.recent_json),
@@ -128,6 +145,84 @@ export const getBelaboxStatus = async (db: D1Database, channelId: string): Promi
 
 export const getLatestBelaboxSample = async (db: D1Database, channelId: string): Promise<BelaboxSample | null> =>
   (await getBelaboxStatus(db, channelId))?.sample ?? null;
+
+export const getBelaboxStreamSession = async (
+  db: D1Database,
+  channelId: string,
+): Promise<BelaboxStreamSession | null> => {
+  const row = await db.prepare(
+    `SELECT state, changed_at, started_at, stream_id
+       FROM channel_stream_state
+      WHERE channel_id = ?`,
+  ).bind(channelId).first<BelaboxStreamSessionRow>();
+  return row === null ? null : {
+    state: row.state,
+    changedAt: row.changed_at,
+    startedAt: row.started_at,
+    streamId: row.stream_id,
+  };
+};
+
+export const belaboxStreamSessionKey = (session: BelaboxStreamSession | null): string | null => {
+  if (session === null) return null;
+  if (session.state === "offline") return `offline:${session.changedAt}`;
+  if (session.streamId !== null) return `stream:${session.streamId}`;
+  if (session.startedAt !== null) return `started:${session.startedAt}:${session.changedAt}`;
+  return `online:${session.changedAt}`;
+};
+
+export const sameBelaboxStreamSession = (
+  left: BelaboxStreamSession | null,
+  right: BelaboxStreamSession | null,
+): boolean => belaboxStreamSessionKey(left) === belaboxStreamSessionKey(right);
+
+export const belaboxStatusMatchesSession = (
+  status: BelaboxStatus | null,
+  session: BelaboxStreamSession | null,
+): boolean => {
+  if (status === null) return false;
+  if (session === null) return status.streamId === null && status.streamSessionKey === null;
+  const sessionKey = belaboxStreamSessionKey(session);
+  return status.streamSessionKey === sessionKey || (
+    status.streamSessionKey === null && session.state === "online" && session.streamId !== null &&
+    status.streamId === session.streamId
+  );
+};
+
+export const belaboxStreamSessionGuard = (
+  channelId: string,
+  session: BelaboxStreamSession | null | undefined,
+): { sql: string; values: readonly (string | null)[] } => {
+  if (session === undefined) return { sql: "", values: [] };
+  if (session === null) {
+    return {
+      sql: "AND NOT EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ?)",
+      values: [channelId],
+    };
+  }
+  if (session.state === "offline") {
+    return {
+      sql: "AND EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'offline' AND changed_at = ?)",
+      values: [channelId, session.changedAt],
+    };
+  }
+  if (session.streamId !== null) {
+    return {
+      sql: "AND EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?)",
+      values: [channelId, session.streamId],
+    };
+  }
+  if (session.startedAt !== null) {
+    return {
+      sql: "AND EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id IS NULL AND started_at IS ? AND changed_at = ?)",
+      values: [channelId, session.startedAt, session.changedAt],
+    };
+  }
+  return {
+    sql: "AND EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id IS NULL AND started_at IS NULL AND changed_at = ?)",
+    values: [channelId, session.changedAt],
+  };
+};
 
 const encodedRecent = (recent: readonly BelaboxRecentPoint[]): string => JSON.stringify(
   recent.map(({ at, bitrateKbps, rttMs, connected }) => [at, bitrateKbps, rttMs, connected]),
@@ -180,6 +275,7 @@ export const setBelaboxPollingState = async (
          polling = 0,
          error_code = NULL,
          stream_id = NULL,
+         stream_session_key = NULL,
          belabox_stream_id = NULL,
          fetch_phase_json = ?,
          recent_json = '[]',
@@ -208,18 +304,21 @@ export const writeBelaboxFetch = async (
     errorCode: BelaboxFetchFailureReason | null;
     polling: boolean;
     streamId: string | null;
+    streamSessionKey: string | null;
     belaboxStreamId: string | null;
     fetchPhase: BelaboxFetchPhase;
     recent: readonly BelaboxRecentPoint[];
     expectedSecretVersion: string;
     expectedStatusRevision: number | null;
+    expectedStreamSession?: BelaboxStreamSession | null;
   },
 ): Promise<{ revision: number; sample: BelaboxSample | null } | null> => {
+  const sessionGuard = belaboxStreamSessionGuard(input.channelId, input.expectedStreamSession);
   const row = await db.prepare(
     `INSERT INTO belabox_status
-      (channel_id, sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
+      (channel_id, sampled_at, sample_json, error_code, polling, stream_id, stream_session_key, belabox_stream_id,
        fetch_phase_json, recent_json, revision)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
      WHERE EXISTS (
        SELECT 1 FROM module_secrets
         WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?
@@ -228,6 +327,7 @@ export const writeBelaboxFetch = async (
          SELECT 1 FROM belabox_status
           WHERE channel_id = ? AND revision = ?
        ))
+       ${sessionGuard.sql}
      ON CONFLICT (channel_id) DO UPDATE SET
        sampled_at = CASE
          WHEN excluded.sampled_at IS NOT NULL AND
@@ -240,6 +340,7 @@ export const writeBelaboxFetch = async (
        error_code = excluded.error_code,
        polling = excluded.polling,
        stream_id = excluded.stream_id,
+       stream_session_key = excluded.stream_session_key,
        belabox_stream_id = excluded.belabox_stream_id,
        fetch_phase_json = excluded.fetch_phase_json,
        recent_json = excluded.recent_json,
@@ -253,6 +354,7 @@ export const writeBelaboxFetch = async (
     input.errorCode,
     Number(input.polling),
     input.streamId,
+    input.streamSessionKey,
     input.belaboxStreamId,
     encodedPhase(input.fetchPhase),
     encodedRecent(input.recent),
@@ -263,6 +365,7 @@ export const writeBelaboxFetch = async (
     input.expectedStatusRevision,
     input.channelId,
     input.expectedStatusRevision,
+    ...sessionGuard.values,
     input.expectedStatusRevision ?? -1,
   ).first<{ revision: number; sample_json: string | null }>();
   return row === null ? null : { revision: row.revision, sample: parseSample(row.sample_json) };
@@ -279,26 +382,74 @@ export const prepareBelaboxSampleWrite = (
   sample: BelaboxSample,
   expectedSecretVersion: string,
   authorization: ModuleMutationAuthorization,
-): D1PreparedStatement => db.prepare(
-  `INSERT INTO belabox_status
-    (channel_id, sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
-     fetch_phase_json, recent_json, revision)
-   SELECT ?, ?, ?, NULL, 0, NULL, NULL, ?, '[]', 1 WHERE 1 = 1 ${authorization.sql}
-     AND EXISTS (
-       SELECT 1 FROM module_secrets
-        WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?
-     )
-   ON CONFLICT (channel_id) DO UPDATE SET
-     sampled_at = CASE
-       WHEN belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at
-       THEN excluded.sampled_at ELSE belabox_status.sampled_at END,
-     sample_json = CASE
-       WHEN belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at
-       THEN excluded.sample_json ELSE belabox_status.sample_json END,
-     error_code = NULL,
-     revision = belabox_status.revision + 1`,
-).bind(channelId, sample.at, JSON.stringify(sample), encodedPhase(EMPTY_FETCH_PHASE), ...authorization.values,
-  channelId, BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET, expectedSecretVersion);
+  options: {
+    streamId?: string | null;
+    streamSessionKey?: string | null;
+    belaboxStreamId?: string | null;
+    expectedStatusRevision?: number | null;
+    expectedStreamSession?: BelaboxStreamSession | null;
+  } = {},
+): D1PreparedStatement => {
+  const sessionGuard = belaboxStreamSessionGuard(channelId, options.expectedStreamSession);
+  const hasExpectedRevision = options.expectedStatusRevision !== undefined;
+  const expectedRevision = options.expectedStatusRevision ?? -1;
+  return db.prepare(
+    `INSERT INTO belabox_status
+      (channel_id, sampled_at, sample_json, error_code, polling, stream_id, stream_session_key, belabox_stream_id,
+       fetch_phase_json, recent_json, revision)
+     SELECT ?, ?, ?, NULL, 0, ?, ?, ?, ?, '[]', 1 WHERE 1 = 1 ${authorization.sql}
+       AND EXISTS (
+         SELECT 1 FROM module_secrets
+          WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?
+       )
+       AND (? = 0 OR (? IS NULL AND NOT EXISTS (
+         SELECT 1 FROM belabox_status WHERE channel_id = ?
+       )) OR EXISTS (
+         SELECT 1 FROM belabox_status WHERE channel_id = ? AND revision = ?
+       ))
+       ${sessionGuard.sql}
+     ON CONFLICT (channel_id) DO UPDATE SET
+       sampled_at = CASE
+         WHEN belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at
+         THEN excluded.sampled_at ELSE belabox_status.sampled_at END,
+       sample_json = CASE
+         WHEN belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at
+         THEN excluded.sample_json ELSE belabox_status.sample_json END,
+       stream_id = CASE
+         WHEN belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at
+         THEN excluded.stream_id ELSE belabox_status.stream_id END,
+       stream_session_key = CASE
+         WHEN belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at
+         THEN excluded.stream_session_key ELSE belabox_status.stream_session_key END,
+       belabox_stream_id = CASE
+         WHEN belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at
+         THEN excluded.belabox_stream_id ELSE belabox_status.belabox_stream_id END,
+       error_code = NULL,
+       revision = belabox_status.revision + 1
+     WHERE (? = 0 OR belabox_status.revision = ?)`,
+  ).bind(
+    channelId,
+    sample.at,
+    JSON.stringify(sample),
+    options.streamId ?? null,
+    options.streamSessionKey ?? null,
+    options.belaboxStreamId ?? null,
+    encodedPhase(EMPTY_FETCH_PHASE),
+    ...authorization.values,
+    channelId,
+    BELABOX_MODULE_ID,
+    BELABOX_STATS_URL_SECRET,
+    expectedSecretVersion,
+    Number(hasExpectedRevision),
+    options.expectedStatusRevision ?? null,
+    channelId,
+    channelId,
+    options.expectedStatusRevision ?? null,
+    ...sessionGuard.values,
+    Number(hasExpectedRevision),
+    expectedRevision,
+  );
+};
 
 export const prepareBelaboxSampleClear = (
   db: D1Database,
@@ -309,6 +460,7 @@ export const prepareBelaboxSampleClear = (
       SET sampled_at = NULL,
           sample_json = NULL,
           error_code = NULL,
+          stream_session_key = NULL,
           belabox_stream_id = NULL,
           fetch_phase_json = ?,
           recent_json = '[]',

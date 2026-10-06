@@ -436,6 +436,194 @@ describe("BELABOX secret and route redaction", () => {
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
+  it.each(["interval", "on_demand"] as const)("preserves accumulated enrichment when POST /test stores a sample in %s mode", async (mode) => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { send } = await createBelaboxRouteHarness(testDatabase);
+    await testDatabase.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
+    ).bind(CHANNEL_ID, JSON.stringify({ mode, intervalSeconds: 15 })).run();
+    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+
+    const streamChangedAt = new Date(Date.now() - 90_000).toISOString();
+    await testDatabase.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-test')`,
+    ).bind(CHANNEL_ID, streamChangedAt, streamChangedAt).run();
+
+    const alertStartedAt = new Date(Date.now() - 60_000).toISOString();
+    const previousAt = new Date(Date.now() - 30_000).toISOString();
+    await testDatabase.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, sampled_at, sample_json, polling, stream_id, stream_session_key, belabox_stream_id,
+         fetch_phase_json, recent_json, revision)
+       VALUES (?, ?, ?, 0, 'stream-test', 'stream:stream-test', 'stream-test', '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, previousAt, JSON.stringify({
+      at: previousAt,
+      connected: true,
+      bitrateKbps: 800,
+      rttMs: 45,
+      latencyMs: 125,
+      network: 3,
+      droppedPackets: 4,
+      droppedTotal: 5,
+      phase: "low",
+      alertStartedAt,
+    })).run();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      publishers: {
+        [SENTINEL_KEY]: {
+          connected: true,
+          bitrate: 800,
+          rtt: 45,
+          latency: 125,
+          network: 3,
+          dropped_pkts: 8,
+        },
+      },
+    })));
+
+    const tested = await send("/test", "POST", {});
+    expect(tested.status).toBe(200);
+    await expect(tested.json()).resolves.toEqual({ ok: true, connected: true, bitrateKbps: 800 });
+    const stored = await testDatabase.prepare(
+      "SELECT sample_json FROM belabox_status WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first<{ sample_json: string }>();
+    expect(JSON.parse(stored?.sample_json ?? "null") as unknown).toMatchObject({
+      droppedTotal: 9,
+      phase: "low",
+      alertStartedAt,
+    });
+  });
+
+  it("does not persist a connection test sample when its stream session changes during fetch", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { send } = await createBelaboxRouteHarness(testDatabase);
+    await testDatabase.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
+    ).bind(CHANNEL_ID, JSON.stringify({ mode: "on_demand", intervalSeconds: 15 })).run();
+    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    const streamChangedAt = "2026-10-05T11:59:00.000Z";
+    await testDatabase.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-s1')`,
+    ).bind(CHANNEL_ID, streamChangedAt, streamChangedAt).run();
+    await testDatabase.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, sampled_at, sample_json, polling, stream_id, stream_session_key, belabox_stream_id,
+         fetch_phase_json, recent_json, revision)
+       VALUES (?, ?, ?, 0, 'stream-s1', 'stream:stream-s1', 'stream-s1', '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, streamChangedAt, JSON.stringify({
+      at: streamChangedAt,
+      connected: true,
+      bitrateKbps: 800,
+      rttMs: 45,
+      latencyMs: 125,
+      network: 3,
+      droppedPackets: 4,
+      droppedTotal: 8,
+      phase: "low",
+      alertStartedAt: "2026-10-05T11:00:00.000Z",
+    })).run();
+
+    let finishFetch!: (response: Response) => void;
+    let signalFetch!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => { signalFetch = resolve; });
+    const responseFromFetch = new Promise<Response>((resolve) => { finishFetch = resolve; });
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => {
+      signalFetch();
+      return responseFromFetch;
+    }));
+    const testPending = send("/test", "POST", {});
+    await fetchStarted;
+
+    await testDatabase.prepare(
+      `UPDATE channel_stream_state
+          SET state = 'offline', changed_at = ?, started_at = NULL, stream_id = NULL
+        WHERE channel_id = ?`,
+    ).bind("2026-10-05T12:00:00.000Z", CHANNEL_ID).run();
+    await testDatabase.prepare(
+      `UPDATE belabox_status
+          SET sampled_at = NULL, sample_json = NULL, stream_id = NULL, stream_session_key = NULL,
+              belabox_stream_id = NULL, revision = revision + 1
+        WHERE channel_id = ?`,
+    ).bind(CHANNEL_ID).run();
+    await testDatabase.prepare(
+      `UPDATE channel_stream_state
+          SET state = 'online', changed_at = ?, started_at = ?, stream_id = ?
+        WHERE channel_id = ?`,
+    ).bind("2026-10-05T12:00:05.000Z", "2026-10-05T12:00:05.000Z", "stream-s2", CHANNEL_ID).run();
+
+    finishFetch(jsonResponse(relayPayload(SENTINEL_KEY)));
+    const tested = await testPending;
+    expect(tested.status).toBe(200);
+    await expect(tested.json()).resolves.toMatchObject({ ok: true });
+    await expect(testDatabase.prepare(
+      "SELECT sampled_at, sample_json, stream_id, stream_session_key, revision FROM belabox_status WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({
+      sampled_at: null,
+      sample_json: null,
+      stream_id: null,
+      stream_session_key: null,
+      revision: 2,
+    });
+  });
+
+  it("starts connection-test enrichment fresh when the current session is newer than the stored sample", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { send } = await createBelaboxRouteHarness(testDatabase);
+    await testDatabase.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
+    ).bind(CHANNEL_ID, JSON.stringify({ mode: "on_demand", intervalSeconds: 15 })).run();
+    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    const oldAt = "2026-10-05T11:59:00.000Z";
+    const newStartedAt = "2026-10-05T12:00:05.000Z";
+    await testDatabase.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-s2')`,
+    ).bind(CHANNEL_ID, newStartedAt, newStartedAt).run();
+    await testDatabase.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, sampled_at, sample_json, polling, stream_id, stream_session_key, belabox_stream_id,
+         fetch_phase_json, recent_json, revision)
+       VALUES (?, ?, ?, 0, 'stream-s1', 'stream:stream-s1', 'stream-s1', '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, oldAt, JSON.stringify({
+      at: oldAt,
+      connected: true,
+      bitrateKbps: 400,
+      rttMs: 45,
+      latencyMs: 125,
+      network: 3,
+      droppedPackets: 4,
+      droppedTotal: 8,
+      phase: "low",
+      alertStartedAt: "2026-10-05T11:00:00.000Z",
+    })).run();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      publishers: {
+        [SENTINEL_KEY]: {
+          connected: true,
+          bitrate: 400,
+          rtt: 45,
+          latency: 125,
+          network: 3,
+          dropped_pkts: 8,
+        },
+      },
+    })));
+
+    const tested = await send("/test", "POST", {});
+    expect(tested.status).toBe(200);
+    const stored = await testDatabase.prepare(
+      "SELECT sample_json, stream_id, stream_session_key FROM belabox_status WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first<{ sample_json: string; stream_id: string; stream_session_key: string }>();
+    const sample = JSON.parse(stored?.sample_json ?? "null") as { at: string; droppedTotal: number; alertStartedAt: string };
+    expect(sample).toMatchObject({ droppedTotal: 0, phase: "low", alertStartedAt: sample.at });
+    expect(stored).toMatchObject({ stream_id: "stream-s2", stream_session_key: "stream:stream-s2" });
+  });
+
   it("rechecks management membership after the POST /test body finishes before reading the stored secret", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
