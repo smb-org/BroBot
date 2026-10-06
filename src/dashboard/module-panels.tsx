@@ -9,7 +9,7 @@ import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type Das
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -306,7 +306,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
         } else if (field.kind === "text" || field.kind === "template") {
           if (typeof current !== "string" || (!field.optional && current.trim().length === 0)) {
             errors[field.key] = copy.fields[field.key]?.requiredError ?? copy.invalidMessage;
-          } else if (field.kind === "text" && field.maxLength !== undefined && current.length > field.maxLength) {
+          } else if (field.kind === "text" && field.maxLength !== undefined && textFieldLength(field, current) > field.maxLength) {
             errors[field.key] = copy.invalidMessage;
           } else if (field.kind === "text" && field.validate !== undefined &&
               (includeUntouched || validationAttempted || touchedFields.has(field.key)) && !field.validate(current)) {

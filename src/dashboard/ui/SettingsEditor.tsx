@@ -12,13 +12,14 @@ import { NumberField } from "./NumberField";
 import { SegmentedControl } from "./SegmentedControl";
 import { Switch } from "./Switch";
 import { TemplateText } from "./TemplateText";
+import { textFieldLength } from "./text-length";
 import { TextArea, type TemplateVariableOption, type TextAreaMessages } from "./TextArea";
 import { TimeoutDurationRangeFields, type TimeoutDurationRangeValue } from "./TimeoutDurationRangeFields";
 
 export type SettingsFieldSpec<Settings> =
   | { kind: "number"; key: keyof Settings & string; unit?: string; min: number; max: number; step: number }
   | { kind: "timeoutDurationRange"; key: keyof Settings & string; min: number; max: number }
-  | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number; optional?: boolean; validate?: (value: string) => boolean }
+  | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number; lengthUnit?: "utf16" | "codePoints"; optional?: boolean; validate?: (value: string) => boolean }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; optional?: boolean; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
   | { kind: "chatTarget"; key: keyof Settings & string; includeWhereAsked?: boolean }
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string | number }[] }
@@ -201,7 +202,7 @@ export function SettingsEditor<Settings extends object>({
             {...(copy.placeholder === undefined ? {} : { placeholder: copy.placeholder })}
             required={!field.optional}
             {...(field.prefix === undefined ? {} : { prefix: field.prefix })}
-            {...(maxLength === undefined ? {} : { maxLength, countLabel: copy.countLabel ?? ((count, maximum) => `${String(count)} / ${String(maximum)}`) })}
+            {...(maxLength === undefined ? {} : { countLength: (text: string) => textFieldLength(field, text), maxLength, countLabel: copy.countLabel ?? ((count, maximum) => `${String(count)} / ${String(maximum)}`) })}
           />
         </InspectorFieldRow>
       );
