@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BelaboxStatusResponse } from "../../src/modules/belabox/contracts";
@@ -58,5 +58,34 @@ describe("BELABOX alert surfaces", () => {
 
     await waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(2); });
     expect(await screen.findByTestId("belabox-immediate-status-slot")).toHaveTextContent(/BELABOX encoder disconnected|BELABOX-Encoder getrennt/u);
+  });
+
+  it("refreshes an offline-open module page until a live disconnect notice appears", async () => {
+    const offlineStatus: BelaboxStatusResponse = {
+      ...status,
+      sample: null,
+      polling: false,
+      pollingDesired: false,
+      streamId: null,
+      belaboxStreamId: null,
+      alertNotice: null,
+    };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(offlineStatus))
+      .mockResolvedValue(Response.json(status));
+    vi.stubGlobal("fetch", fetcher);
+    vi.useFakeTimers();
+    renderWithUi(<BelaboxPanel channelId="channel-a" language="en" canManage />);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    const notice = screen.getByTestId("belabox-alert-notice-slot");
+    expect(notice).not.toHaveTextContent("BELABOX encoder disconnected");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(notice).toHaveTextContent("BELABOX encoder disconnected");
   });
 });

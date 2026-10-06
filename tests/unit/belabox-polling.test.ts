@@ -90,6 +90,7 @@ const alarmContext = (
     streamState?: "online" | "offline" | "unknown";
     streamId?: string | null;
     secrets?: ModuleSecretAccess;
+    databaseBinding?: D1Database;
   } = {},
 ) => {
   const scheduled: Array<{ key: string; deadline: number }> = [];
@@ -101,7 +102,7 @@ const alarmContext = (
     return { sent: true, reason: null, retryable: false };
   });
   const context = {
-    DB: database as unknown as D1Database,
+    DB: options.databaseBinding ?? database as unknown as D1Database,
     channelId: CHANNEL_ID,
     secrets: options.secrets ?? secretAccess(),
     streamState: () => Promise.resolve(options.streamState ?? "online"),
@@ -333,6 +334,115 @@ describe("BELABOX polling", () => {
     expect(sendChat).toHaveBeenCalledTimes(2);
     expect(sendChat.mock.calls[1]?.[1]).toBe(firstKey);
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({ alertState: { chatSentInEpisode: true, pendingChat: null } });
+  });
+
+  it("settles recovery after a concurrent Check now write and keeps the chat cooldown", async () => {
+    await insertModule(database, {
+      ...BELABOX_DEFAULT_SETTINGS,
+      mode: "interval",
+      intervalSeconds: 5,
+      holdSeconds: 5,
+      recoverHoldSeconds: 5,
+      chatCooldownSeconds: 300,
+      chatEnabled: true,
+    });
+    const settlementReadStarted = deferred<undefined>();
+    const allowSettlementRead = deferred<undefined>();
+    let interceptSettlementRead = false;
+    let interceptedSettlementRead = false;
+    const databaseBinding = {
+      prepare: (sql: string) => {
+        const statement = database.prepare(sql);
+        const wrapped = {
+          bind: (...values: Parameters<typeof statement.bind>) => {
+            statement.bind(...values);
+            return wrapped;
+          },
+          first: <Value>() => {
+            if (interceptSettlementRead && !interceptedSettlementRead && sql.includes("SELECT sampled_at") && sql.includes("FROM belabox_status")) {
+              interceptedSettlementRead = true;
+              return statement.first<Value>().then(async (value) => {
+                settlementReadStarted.resolve(undefined);
+                await allowSettlementRead.promise;
+                return value;
+              });
+            }
+            return statement.first<Value>();
+          },
+          all: <Value>(...typeHint: readonly Value[]) => statement.all<Value>(...typeHint),
+          run: () => statement.run(),
+        };
+        return wrapped;
+      },
+      batch: database.batch.bind(database),
+    } as unknown as D1Database;
+    const { context, sendChat } = alarmContext(database, { databaseBinding });
+    sendChat.mockImplementation(async (_message, idempotencyKey, _attributions, stillValid) => {
+      if (stillValid !== undefined && !await stillValid()) return { sent: false, reason: "stale_before_send", retryable: false };
+      if (idempotencyKey.endsWith(":recovered")) interceptSettlementRead = true;
+      return { sent: true, reason: null, retryable: false };
+    });
+    const poll = (bitrateKbps: number): Promise<void> => handleBelaboxPollAlarm(
+      context,
+      "poll",
+      Date.now(),
+      undefined,
+      () => Promise.resolve(jsonResponse(relayPayload(true, bitrateKbps))),
+    );
+    const onDemand = {
+      DB: database as unknown as D1Database,
+      channelId: CHANNEL_ID,
+      secrets: secretAccess(),
+      externalFetchBudget: budget(),
+    };
+    const startedAt = Date.now();
+
+    await poll(3_200);
+    vi.setSystemTime(Date.now() + 5_000);
+    await poll(900);
+    vi.setSystemTime(Date.now() + 5_000);
+    await poll(900);
+    expect(sendChat).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(Date.now() + 5_000);
+    await poll(3_200);
+    vi.setSystemTime(Date.now() + 5_000);
+    const recoveryPoll = poll(3_200);
+    await settlementReadStarted.promise;
+    await prepareBelaboxSampleWrite(
+      onDemand.DB,
+      CHANNEL_ID,
+      normalizedSample(new Date(Date.now()).toISOString(), 3_200),
+      "ciphertext-version",
+      { sql: "", values: [] },
+    ).run();
+    allowSettlementRead.resolve(undefined);
+    await recoveryPoll;
+
+    expect(interceptedSettlementRead).toBe(true);
+    expect(sendChat).toHaveBeenCalledTimes(2);
+    expect(sendChat.mock.calls[1]?.[1]).toBe(`belabox:${STREAM_ID}:${new Date(startedAt + 5_000).toISOString()}:recovered`);
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      alertState: {
+        phase: "ok",
+        pendingChat: null,
+        completedEpisodeAt: new Date(startedAt + 5_000).toISOString(),
+        lastChatSentAt: new Date(startedAt + 10_000).toISOString(),
+      },
+    });
+
+    vi.setSystemTime(startedAt + 21_000);
+    await poll(900);
+    vi.setSystemTime(startedAt + 26_000);
+    await poll(900);
+    expect(sendChat).toHaveBeenCalledTimes(2);
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      alertState: { phase: "alarm", pendingChat: { idempotencyKind: "alert" } },
+    });
+
+    vi.setSystemTime(startedAt + 310_000);
+    await poll(900);
+    expect(sendChat).toHaveBeenCalledTimes(3);
   });
 
   it("keeps relay fetch failures out of chat and raises the notice phase on failure three", async () => {

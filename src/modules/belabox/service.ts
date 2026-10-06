@@ -342,11 +342,13 @@ const sendPendingAlert = async (
     return currentStatus.alertState.phase === "ok" && currentStatus.alertState.completedEpisodeAt === output.episodeStartedAt;
   }, message.target);
   if (result.sent || !result.retryable) {
-    const latest = await getBelaboxStatus(context.DB, context.channelId);
-    if (latest?.alertState.pendingChat?.idempotencyKind !== output.idempotencyKind ||
-        latest.alertState.pendingChat.episodeStartedAt !== output.episodeStartedAt) return;
-    const next = settleAlertChat(latest.alertState, { sent: result.sent, retryable: result.retryable }, Date.now());
-    await writeBelaboxAlertState(context.DB, context.channelId, next, latest.revision);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const latest = await getBelaboxStatus(context.DB, context.channelId);
+      if (latest?.alertState.pendingChat?.idempotencyKind !== output.idempotencyKind ||
+          latest.alertState.pendingChat.episodeStartedAt !== output.episodeStartedAt) return;
+      const next = settleAlertChat(latest.alertState, { sent: result.sent, retryable: result.retryable }, Date.now());
+      if (await writeBelaboxAlertState(context.DB, context.channelId, next, latest.revision) !== null) return;
+    }
   }
 };
 

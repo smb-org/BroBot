@@ -8,6 +8,7 @@ import { belaboxReasonText, belaboxPanelTexts } from "./locale";
 import { loadBelaboxStatus, removeBelaboxStatsUrl, replaceBelaboxStatsUrl, retryBelaboxPolling, testBelaboxConnection } from "./service";
 
 const errorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;
+const IDLE_STATUS_REFRESH_MS = 60_000;
 
 const statusTimestamp = (value: string, locale: string): string => {
   const date = new Date(value);
@@ -24,7 +25,9 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const [loadFailed, setLoadFailed] = useState(false);
   const [testOutcome, setTestOutcome] = useState<string | null>(null);
   const pollingInactive = status?.pollingDesired === true && !status.polling;
-  const pollingIntervalSeconds = status?.pollingDesired === true ? status.intervalSeconds : null;
+  const statusRefreshInterval = status === null
+    ? null
+    : status.pollingDesired ? Math.max(5, status.intervalSeconds) * 1_000 : IDLE_STATUS_REFRESH_MS;
 
   const refresh = useCallback(async (): Promise<void> => {
     setStatus(await loadBelaboxStatus(channelId));
@@ -47,12 +50,12 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   }, [channelId, labels.testFailed]);
 
   useEffect(() => {
-    if (pollingIntervalSeconds === null) return;
+    if (statusRefreshInterval === null) return;
     const timer = window.setInterval(() => {
       void refresh().catch(() => undefined);
-    }, Math.max(5, pollingIntervalSeconds) * 1_000);
+    }, statusRefreshInterval);
     return () => window.clearInterval(timer);
-  }, [pollingIntervalSeconds, refresh]);
+  }, [refresh, statusRefreshInterval]);
 
   useEffect(() => {
     if (pollingInactive) notify({ tone: "error", message: labels.pollingInactive });
