@@ -62,6 +62,36 @@ interface ModuleRouteEnvironment {
 }
 
 const nowIso = (): string => new Date().toISOString();
+const runModuleAlarmAfterMutation = async (
+  context: {
+    get: (key: "runModuleAlarm") => ModuleRouteVariables["runModuleAlarm"];
+    env: Env;
+  },
+  channelId: string,
+  moduleId: string,
+  handlerKey: string,
+  alarmKey: string,
+): Promise<void> => {
+  try {
+    await context.get("runModuleAlarm")(channelId, moduleId, handlerKey, alarmKey);
+  } catch {
+    if (moduleId !== "belabox") return;
+    try {
+      await writeModuleDiagnostics(
+        context.env.DB,
+        channelId,
+        moduleId,
+        "belabox:polling_ensure",
+        null,
+        [{ code: "belabox.polling_ensure_failed" }],
+        nowIso(),
+      );
+    } catch {
+      // A committed module mutation remains successful if its diagnostic cannot be stored.
+    }
+  }
+};
+
 const previewSchema = z.object({
   text: z.string().max(500),
   templateContext: z.enum(["event", "chat_command"]),
@@ -535,6 +565,15 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
       current: current === null ? null : { settings: currentSettings, revision: current.revision },
     }, 409);
   }
+  if (module.settingsChangedAlarm !== undefined) {
+    await runModuleAlarmAfterMutation(
+      context,
+      channelId,
+      module.id,
+      module.settingsChangedAlarm.handlerKey,
+      module.settingsChangedAlarm.alarmKey,
+    );
+  }
   return context.json({ settings: settings.data, revision: expectedRevision + 1, warnings });
 });
 
@@ -589,7 +628,15 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       dependentMutations,
     );
   if (!changed) return context.json({ error: "module_changed_concurrently" }, 409);
-  if (enabled && existing?.enabled !== true) {
+  if (module.id === "belabox" && module.settingsChangedAlarm !== undefined) {
+    await runModuleAlarmAfterMutation(
+      context,
+      channelId,
+      module.id,
+      module.settingsChangedAlarm.handlerKey,
+      module.settingsChangedAlarm.alarmKey,
+    );
+  } else if (enabled && existing?.enabled !== true) {
     await notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation");
   }
   const overlayKinds = module.overlayElements?.map(({ kind }) => kind) ?? [];

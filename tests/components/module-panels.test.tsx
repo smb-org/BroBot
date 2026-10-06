@@ -288,13 +288,17 @@ describe("Module panel loader", () => {
       ["Schwelle", "Zahl eingeben."],
     ] as const;
     const status = screen.getByRole("status");
-    expect(status).toHaveTextContent("Ungültige Werte.");
-    expect(within(status).getAllByRole("button")).toHaveLength(expectedErrors.length);
+    expect(status).toHaveTextContent(`${String(expectedErrors.length)} Felder fehlerhaft`);
+    fireEvent.click(within(status).getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    expect(within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getAllByRole("button")).toHaveLength(expectedErrors.length);
     expect(screen.getByRole("tab", { name: "Allgemein, Fehler" })).toBeInTheDocument();
     for (const [label, message] of expectedErrors) {
+      // Activating a link closes the popover at once, so each link needs it reopened.
+      if (screen.queryByRole("dialog", { name: "Fehlerhafte Felder" }) === null) fireEvent.click(within(status).getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+      const invalidPopover = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
       const control = screen.getByRole(label === "Menge" || label === "Schwelle" ? "spinbutton" : "textbox", { name: label });
       expect(control).toHaveAttribute("aria-invalid", "true");
-      fireEvent.click(within(status).getByRole("button", { name: `${label}: ${message}` }));
+      fireEvent.click(within(invalidPopover).getByRole("button", { name: `${label}: ${message}` }));
       expect(control).toHaveFocus();
     }
   });
@@ -317,8 +321,10 @@ describe("Module panel loader", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
 
     const status = screen.getByRole("status");
-    await within(status).findByRole("button", { name: "Abstimmungslabels: Gib zwei gültige Labels ein." });
-    expect(within(status).getAllByRole("button")).toHaveLength(2);
+    fireEvent.click(within(status).getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const invalidPopover = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
+    await within(invalidPopover).findByRole("button", { name: "Abstimmungslabels: Gib zwei gültige Labels ein." });
+    expect(within(invalidPopover).getAllByRole("button")).toHaveLength(2);
     expect(labels).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByRole("tab", { name: "Allgemein, Fehler" })).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
@@ -340,7 +346,8 @@ describe("Module panel loader", () => {
 
     expect(threshold).toBeDisabled();
     expect(screen.getByText(/Zahl eingeben\./u)).toBeVisible();
-    const invalidFieldLink = screen.getByRole("button", { name: "Schwelle: Zahl eingeben." });
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const invalidFieldLink = within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getByRole("button", { name: "Schwelle: Zahl eingeben." });
     fireEvent.click(invalidFieldLink);
 
     expect(switchCard).toHaveFocus();

@@ -3,6 +3,7 @@ import type { ComboboxItem, ComboboxLikeRenderOptionInput } from "@mantine/core"
 import type { ReactNode } from "react";
 
 import { useDisabledFieldReason } from "./DisabledFieldReason";
+import { TruncatedText } from "./TruncatedText";
 import { colors } from "./theme";
 
 export interface SelectOption {
@@ -38,6 +39,8 @@ export interface SelectProps {
   options: SelectOption[];
   placeholder?: string;
   disabled?: boolean;
+  /** Omits reserved hint/error rows for controls inside fixed-height chrome. */
+  compact?: boolean;
   busy?: boolean;
   searchable?: boolean;
   /** Controlled search text; pairs with `onSearchChange` for callers that
@@ -67,6 +70,7 @@ export function Select({
   options,
   placeholder,
   disabled = false,
+  compact = false,
   busy = false,
   searchable = false,
   searchValue,
@@ -81,25 +85,25 @@ export function Select({
   const contextualDescriptionId = describedBy !== undefined && disabledReason !== null && id !== undefined
     ? `${describedBy}-select-${id}`
     : undefined;
-  const description: ReactNode = contextualDescriptionId === undefined || disabledReason === null
-    ? hint
-    : <>
-      {hint === undefined ? null : <span>{hint}</span>}
-      <span className="sr-only">{disabledReason.reason}</span>
-    </>;
+  const description: ReactNode = (
+    <span className="ui-select__description">
+      {hint === undefined ? null : <TruncatedText text={hint} />}
+      {contextualDescriptionId === undefined || disabledReason === null ? null : <span className="sr-only">{disabledReason.reason}</span>}
+    </span>
+  );
   return (
     <MantineSelect
+      className={`ui-select${compact ? " ui-select--compact" : ""}`}
       label={label}
       aria-label={ariaLabel}
-      description={description}
+      description={compact ? undefined : description}
       {...(contextualDescriptionId === undefined ? {} : {
         descriptionProps: {
           id: contextualDescriptionId,
-          ...(hint === undefined ? { className: "sr-only" } : {}),
         },
       })}
-      inputWrapperOrder={["label", "input", "description", "error"]}
-      error={error ? `× ${error}` : undefined}
+      inputWrapperOrder={compact ? ["input"] : ["label", "input", "description", "error"]}
+      error={compact || !error ? undefined : <span><span aria-hidden="true">× </span><TruncatedText text={error} /></span>}
       value={value}
       onChange={onChange}
       data={options}

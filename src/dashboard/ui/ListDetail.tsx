@@ -73,6 +73,9 @@ export function ListDetail({ list, inspector, onCloseInspector }: ListDetailProp
     while (branch.parentElement !== null) {
       for (const sibling of Array.from(branch.parentElement.children)) {
         if (!(sibling instanceof HTMLElement) || sibling === branch || sibling.classList.contains("list-detail__backdrop")) continue;
+        // ToastHost is portaled beside the app shell. Keep that notification
+        // layer available while the rest of the page is isolated as a modal.
+        if (sibling.matches(".ui-toast-host") || sibling.querySelector(".ui-toast-host") !== null) continue;
         states.push({ element: sibling, inert: sibling.inert, ariaHidden: sibling.getAttribute("aria-hidden") });
         sibling.inert = true;
         sibling.setAttribute("aria-hidden", "true");

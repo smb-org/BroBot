@@ -2,6 +2,8 @@ import { AppShell, Burger } from "@mantine/core";
 import { useDisclosure, useSessionStorage } from "@mantine/hooks";
 import type { ReactNode } from "react";
 
+import { ToastHost } from "./Toast";
+
 export interface ShellNavContext {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -41,6 +43,7 @@ export function Shell({ header, navbar, navLabel, openSidebarLabel, closeSidebar
   const onToggleCollapsed = (): void => { setCollapsed((current) => !current); };
 
   return (
+    <>
     <AppShell
       className="dashboard-shell"
       mode="static"
@@ -74,5 +77,7 @@ export function Shell({ header, navbar, navLabel, openSidebarLabel, closeSidebar
       </AppShell.Navbar>
       <AppShell.Main className="dashboard-shell__main">{children}</AppShell.Main>
     </AppShell>
+      <ToastHost />
+    </>
   );
 }

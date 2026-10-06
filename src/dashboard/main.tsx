@@ -587,6 +587,7 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, onNavigate,
       {activeChannel === undefined ? null : (
       <div className="dashboard-header__channel">
         <div className="dashboard-header__channel-select"><UiSelect
+            compact
             value={activeChannel.channelId}
             onChange={(channelId) => { if (channelId !== null) onNavigate({ kind: "channel", channelId, section: "overview" }); }}
             options={channels.map((channel) => ({ value: channel.channelId, label: `${channel.displayName} — ${channel.channelId}` }))}

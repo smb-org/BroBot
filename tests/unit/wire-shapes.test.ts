@@ -416,7 +416,7 @@ const expectedModuleSettings = {
   weather: {},
   currency: {},
   api_source: {},
-  belabox: {},
+  belabox: { mode: "interval", intervalSeconds: 15 },
   ads: {
     automatic: "Automatische Werbepause: {ads.duration} Sekunden. Bin gleich zurück!",
     automaticTarget: "source_only",

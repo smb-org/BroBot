@@ -21,7 +21,7 @@ export type SettingsFieldSpec<Settings> =
   | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number; optional?: boolean; validate?: (value: string) => boolean }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; optional?: boolean; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
   | { kind: "chatTarget"; key: keyof Settings & string; includeWhereAsked?: boolean }
-  | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string }[] }
+  | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string | number }[] }
   | { kind: "choice"; key: keyof Settings & string; options: readonly { value: string; icon?: IconName }[] }
   | { kind: "switchCard"; key: keyof Settings & string; children?: readonly SettingsFieldSpec<Settings>[] };
 
@@ -237,13 +237,16 @@ export function SettingsEditor<Settings extends object>({
     }
     if (field.kind === "segment" || field.kind === "choice") {
       if (field.kind === "segment") {
-        const options = field.options.map((option) => ({ value: option.value, label: copy.options?.[option.value]?.label ?? "" }));
+        const options = field.options.map((option) => ({ value: String(option.value), label: copy.options?.[String(option.value)]?.label ?? "" }));
         return (
           <InspectorFieldRow key={field.key} label={copy.label} help={copy.options?.[String(fieldValue)]?.description ?? copy.hint}>
             <SegmentedControl
               label={copy.label}
               value={String(fieldValue ?? "")}
-              onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+              onChange={(next) => {
+                const selected = field.options.find((option) => String(option.value) === next)?.value ?? next;
+                onChange(field.key, selected as Settings[typeof field.key]);
+              }}
               options={options}
               disabled={disabled}
             />

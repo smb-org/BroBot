@@ -171,6 +171,27 @@ Netzwerkaufrufe je Kanal und Stunde. Ein Vorlagenlauf teilt sein Budget von
 drei externen HTTP-Aufrufen mit allen verschachtelten Blöcken und Bedingungen.
 Das Modul ist über Contract und Registry angeschlossen.
 
+Das BELABOX-Modul ruft normalisierte Relay-Messwerte während eines Live-
+Streams über einen keyed Alarm des Channel Durable Object ab. Nach
+`stream.online` läuft zunächst alle 60 Sekunden eine Erkennungsphase. Erst
+eine Messung mit `connected = true` bindet die aktuelle Twitch-Stream-ID als
+BELABOX-Stream; danach gilt das kanalweise Intervall von 5, 15, 30 oder 60
+Sekunden. Ein Schreibtischstream ohne Encoder bleibt dadurch in der sparsamen
+Erkennungsphase. `stream.offline` löscht die Bindung und den Live-Puffer.
+Pause und Stummschaltung beeinflussen den Datenabruf nicht.
+
+`belabox_status` enthält ausschließlich das letzte normalisierte Sample, einen
+festen Fehlercode, Polling- und Streamzustand sowie höchstens 120 Messpunkte
+der letzten zehn Minuten. Antworten des Relays und die geheime URL werden
+nicht gespeichert. Die Erkennungsmessungen füllen den Live-Puffer nicht.
+Im Modus „bei Bedarf“ existiert kein Alarm; Aufrufer verwenden ein erfolgreiches
+Sample bis zu zehn Sekunden lang und lösen danach höchstens einen neuen Abruf
+innerhalb ihres gemeinsamen externen Fetch-Budgets aus. Abruffehler verlassen
+den Alarmhandler nicht. Erst drei aufeinanderfolgende Fehler und die spätere
+Erholung erzeugen je einen Ereignisprotokolleintrag mit festem Grundcode.
+Künftige Haltezeiten werden gegen die Sample-Zeitstempel berechnet, weil
+Durable-Object-Alarme verzögert eintreffen können.
+
 Migration `0016_text_library.sql` führte Textblöcke und zunächst eine
 Bibliothekszeitzone ein. `0017_text_library_variant_choices.sql` ergänzte den
 Zufallswahlindex je Variante. Migration `0018_template_value_providers.sql`
