@@ -330,10 +330,14 @@ export const writeBelaboxFetch = async (
        ${sessionGuard.sql}
      ON CONFLICT (channel_id) DO UPDATE SET
        sampled_at = CASE
+         WHEN belabox_status.stream_session_key IS NOT excluded.stream_session_key
+         THEN excluded.sampled_at
          WHEN excluded.sampled_at IS NOT NULL AND
               (belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at)
          THEN excluded.sampled_at ELSE belabox_status.sampled_at END,
        sample_json = CASE
+         WHEN belabox_status.stream_session_key IS NOT excluded.stream_session_key
+         THEN excluded.sample_json
          WHEN excluded.sampled_at IS NOT NULL AND
               (belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at)
          THEN excluded.sample_json ELSE belabox_status.sample_json END,

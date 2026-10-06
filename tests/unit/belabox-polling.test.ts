@@ -976,6 +976,70 @@ describe("BELABOX polling", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it.each(["interval", "on_demand"] as const)(
+    "starts sample enrichment fresh when the first fetch for a new stream fails in %s mode",
+    async (mode) => {
+      await insertModule(database, { mode, intervalSeconds: 15 });
+      const previousAt = new Date(Date.now() - 30_000).toISOString();
+      const previousAlertStartedAt = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+      await database.prepare(
+        `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+         VALUES (?, 'online', ?, 'eventsub', ?, 'stream-s2')`,
+      ).bind(CHANNEL_ID, new Date(Date.now() - 1_000).toISOString(), new Date(Date.now() - 1_000).toISOString()).run();
+      await database.prepare(
+        `INSERT INTO belabox_status
+          (channel_id, sampled_at, sample_json, polling, stream_id, stream_session_key, belabox_stream_id,
+           fetch_phase_json, recent_json, revision)
+         VALUES (?, ?, ?, 1, 'stream-s1', 'stream:stream-s1', 'stream-s1', '{}', '[]', 1)`,
+      ).bind(CHANNEL_ID, previousAt, JSON.stringify({
+        ...normalizedSample(previousAt, 800),
+        droppedPackets: 4,
+        droppedTotal: 5,
+        phase: "low",
+        alertStartedAt: previousAlertStartedAt,
+      })).run();
+
+      const options = {
+        DB: database as unknown as D1Database,
+        channelId: CHANNEL_ID,
+        secrets: secretAccess(),
+        externalFetchBudget: budget(),
+      };
+      const { context } = alarmContext(database);
+      const fetcher = vi.fn<typeof fetch>()
+        .mockRejectedValueOnce(new TypeError("relay unavailable"))
+        .mockResolvedValueOnce(jsonResponse(relayPayload(true, 800, 10)));
+      const fetchSample = async (): Promise<void> => {
+        if (mode === "on_demand") {
+          await currentBelaboxSample(options, Date.now(), fetcher);
+        } else {
+          await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
+        }
+      };
+
+      await fetchSample();
+      expect(await getBelaboxStatus(options.DB, CHANNEL_ID)).toMatchObject({
+        errorCode: "network",
+        streamSessionKey: "stream:stream-s2",
+        sample: null,
+      });
+      const afterFailure = await database.prepare(
+        "SELECT sampled_at, sample_json FROM belabox_status WHERE channel_id = ?",
+      ).bind(CHANNEL_ID).first();
+      expect(afterFailure).toEqual({ sampled_at: null, sample_json: null });
+
+      await fetchSample();
+      const status = await getBelaboxStatus(options.DB, CHANNEL_ID);
+      expect(status).toMatchObject({
+        streamSessionKey: "stream:stream-s2",
+        sample: { droppedTotal: 0, phase: "low" },
+      });
+      expect(status?.sample?.alertStartedAt).toBe(status?.sample?.at);
+      expect(status?.sample?.alertStartedAt).not.toBe(previousAlertStartedAt);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it("discards a delayed on-demand sample across offline reset and starts new-stream enrichment fresh", async () => {
     await insertModule(database, { mode: "on_demand", intervalSeconds: 15 });
     const firstAt = "2026-10-05T11:59:00.000Z";
