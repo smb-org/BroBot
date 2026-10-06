@@ -14,7 +14,7 @@ const assertInsideViewport = async (page: Page, element: Locator): Promise<void>
   }).toBe(true);
 };
 
-test("error links and text reveals stay clickable and in the viewport at mobile and inspector widths", async ({ page }) => {
+test("error summaries and clipped field text stay complete at mobile and inspector widths", async ({ page }) => {
   const cases = [
     { viewportWidth: 390, editorWidth: 390 },
     { viewportWidth: 1280, editorWidth: 592 },
@@ -38,9 +38,9 @@ test("error links and text reveals stay clickable and in the viewport at mobile 
     const errorTrigger = status.getByRole("button", { name: "Fehlerhafte Felder anzeigen" });
     const errorPopover = page.getByRole("dialog", { name: "Fehlerhafte Felder" });
     const links = [
-      { name: "Alpha: Enter a valid alpha value.", details: true },
-      { name: "Beta: Choose a value below the allowed maximum.", details: true },
-      { name: "Gamma: This complete error explains how to correct the value without leaving the editor.", details: false },
+      { name: "Alpha: Enter a valid alpha value.", message: "Enter a valid alpha value.", details: true },
+      { name: "Beta: Choose a value below the allowed maximum.", message: "Choose a value below the allowed maximum.", details: true },
+      { name: "Gamma: This complete error explains how to correct the value without leaving the editor.", message: "This complete error explains how to correct the value without leaving the editor.", details: false },
     ];
 
     for (const link of links) {
@@ -49,6 +49,11 @@ test("error links and text reveals stay clickable and in the viewport at mobile 
       expect(await errorPopover.evaluate((element) => element.closest(".list-detail__inspector"))).not.toBeNull();
       const errorLink = errorPopover.getByRole("button", { name: link.name });
       await assertInsideViewport(page, errorLink);
+      await expect(errorPopover).toContainText(link.message);
+      const wrappedMessage = errorLink.locator("span").nth(1);
+      await expect(wrappedMessage).toHaveText(link.message);
+      await expect.poll(async () => wrappedMessage.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("normal");
+      await expect.poll(async () => wrappedMessage.evaluate((element) => getComputedStyle(element).overflowWrap)).toBe("anywhere");
       await errorLink.click();
       if (link.details) {
         await expect(editor.locator("details")).toHaveAttribute("data-editor-error", "true");
@@ -58,42 +63,32 @@ test("error links and text reveals stay clickable and in the viewport at mobile 
     }
 
     const gamma = editor.locator(".ui-field").filter({ has: page.getByRole("textbox", { name: "Gamma" }) });
-    const hintTrigger = gamma.locator(".ui-field__hint .ui-text-reveal__trigger");
-    await hintTrigger.scrollIntoViewIfNeeded();
-    await hintTrigger.click();
-    const hintPopup = page.locator(".ui-text-reveal__popup").filter({ hasText: "the editor clips its scrolling body" });
-    await assertInsideViewport(page, hintPopup);
-    expect(await hintPopup.evaluate((element) => element.closest(".ui-editor-shell__body"))).not.toBeNull();
-    expect(await hintPopup.evaluate((element) => element.closest(".list-detail__inspector"))).not.toBeNull();
-    await expect(hintPopup).toContainText("the editor clips its scrolling body");
-    await hintTrigger.click();
-    await expect(hintPopup).toBeHidden();
-
-    const errorTextTrigger = gamma.locator(".mantine-InputWrapper-error .ui-text-reveal__trigger");
-    await errorTextTrigger.click();
-    const fieldErrorPopup = page.locator(".ui-text-reveal__popup").filter({ hasText: "without leaving the editor" });
-    await assertInsideViewport(page, fieldErrorPopup);
-    expect(await fieldErrorPopup.evaluate((element) => element.closest(".ui-editor-shell__body"))).not.toBeNull();
-    await expect(fieldErrorPopup).toContainText("without leaving the editor");
-    await errorTextTrigger.click();
-    await expect(fieldErrorPopup).toBeHidden();
+    const hint = "This complete hint stays readable when it is longer than the reserved field row and the editor clips its scrolling body. ".repeat(2);
+    const hintText = gamma.locator(".ui-field__hint.ui-truncated-text");
+    const fieldError = gamma.locator(".mantine-InputWrapper-error .ui-truncated-text");
+    await expect(hintText).toHaveAttribute("title", hint);
+    await expect(gamma.locator(".ui-field__description .sr-only")).toHaveText(hint);
+    await expect(fieldError).toHaveAttribute("title", "This complete error explains how to correct the value without leaving the editor.");
+    await expect(gamma.locator(".mantine-InputWrapper-error .sr-only")).toHaveText("This complete error explains how to correct the value without leaving the editor.");
+    const gammaInput = gamma.getByRole("textbox", { name: "Gamma" });
+    const gammaDescribedBy = (await gammaInput.getAttribute("aria-describedby"))?.split(" ") ?? [];
+    expect(gammaDescribedBy).toContain("field-gamma-description");
+    expect(gammaDescribedBy).toContain("field-gamma-error");
 
     await editor.getByRole("button", { name: "Close inspector" }).click();
     await page.getByRole("button", { name: "Open dialog" }).click();
     const dialog = page.getByRole("dialog", { name: "Long message dialog" });
     await expect(dialog).toBeVisible();
-    const dialogErrorTrigger = dialog.locator(".ui-dialog__error-slot .ui-text-reveal__trigger");
-    await dialogErrorTrigger.click();
-    const dialogErrorPopup = page.locator(".ui-text-reveal__popup").filter({ hasText: "the step needed to correct the request" });
-    await assertInsideViewport(page, dialogErrorPopup);
-    expect(await dialogErrorPopup.evaluate((element) => element.closest(".mantine-Modal-content"))).not.toBeNull();
-    await expect(dialogErrorPopup).toContainText("the step needed to correct the request");
-    await dialogErrorTrigger.click();
+    const dialogErrorSlot = dialog.locator(".ui-dialog__error-slot");
+    const dialogError = dialogErrorSlot.locator(".form-error");
+    await expect(dialogError).toHaveAttribute("title", "This complete dialog error stays readable near the right edge and ends with the step needed to correct the request.");
+    expect((await dialogErrorSlot.boundingBox())?.height).toBe(36);
+    await expect(dialogError).toHaveCSS("-webkit-line-clamp", "2");
     await page.getByRole("button", { name: "Cancel" }).click();
   }
 });
 
-test("keyboard reaches error links in the mobile inspector and popup Escape only closes the popup", async ({ page }) => {
+test("Escape closes the open error summary before the inspector", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tests/e2e/host-popovers-fixture.html");
 
@@ -118,19 +113,8 @@ test("keyboard reaches error links in the mobile inspector and popup Escape only
   await expect(editor).toBeVisible();
   await expect(errorTrigger).toBeFocused();
 
-  await errorTrigger.click();
-  await expect(errorPopover).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(errorPopover).toBeHidden();
-  await expect(editor).toBeVisible();
-
-  const hintTrigger = editor.locator(".ui-field__hint .ui-text-reveal__trigger");
-  await hintTrigger.click();
-  const hintPopup = editor.locator(".ui-text-reveal__popup").filter({ hasText: "the editor clips its scrolling body" });
-  await expect(hintPopup).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(hintPopup).toBeHidden();
-  await expect(editor).toBeVisible();
+  await expect(page.locator(".list-detail__inspector")).toHaveCount(0);
 });
 
 test("conflict recovery label stays fully visible in the mobile SaveBar slot", async ({ page }) => {

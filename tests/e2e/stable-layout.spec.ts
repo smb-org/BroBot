@@ -21,7 +21,7 @@ test("field error and warning slots keep their layout boxes stable", async ({ pa
   if (tagErrorBox === null || tagWarningBox === null) throw new Error("TagInput error and warning rows should have layout boxes.");
   expect(tagErrorBox.y + tagErrorBox.height).toBeLessThanOrEqual(tagWarningBox.y);
   const markerY = await tagError.locator("[aria-hidden='true']").first().evaluate((element) => Math.round(element.getBoundingClientRect().y));
-  const copyY = await tagError.locator(".ui-text-reveal__copy").evaluate((element) => Math.round(element.getBoundingClientRect().y));
+  const copyY = await tagError.locator(".ui-truncated-text").evaluate((element) => Math.round(element.getBoundingClientRect().y));
   expect(Math.abs(copyY - markerY)).toBeLessThanOrEqual(1);
   const after = await Promise.all(selectors.map(async (selector) => {
     const box = await page.locator(selector).first().boundingBox();
@@ -97,33 +97,25 @@ test("save action width stays fixed across pending and idle states on desktop an
   expect(idleMobile.discard?.x).toBe(beforeMobile.discard?.x);
 });
 
-test("clipped hints and dialog errors reveal full copy by keyboard without moving reserved rows", async ({ page }) => {
+test("clipped hints and dialog errors keep full copy in fixed reserved rows", async ({ page }) => {
   await page.goto("/tests/e2e/layout-fixture.html");
   const field = page.locator(".ui-field").first();
   const fieldHeight = (await field.boundingBox())?.height;
-  const hint = field.locator(".ui-field__hint");
-  const hintTrigger = hint.locator(".ui-text-reveal__trigger");
-  await hintTrigger.focus();
-  await hintTrigger.press("Enter");
-  const hintPopup = page.getByRole("tooltip");
-  await expect(hintPopup).toHaveText("A short name.");
-  expect(await hintPopup.evaluate((element) => element.closest(".ui-field"))).not.toBeNull();
+  const hint = field.locator(".ui-field__hint.ui-truncated-text");
+  await expect(hint).toHaveAttribute("title", "A short name.");
+  await expect(field.locator(".ui-field__description .sr-only")).toHaveText("A short name.");
   expect((await field.boundingBox())?.height).toBe(fieldHeight);
-  await hintTrigger.press("Enter");
-  await expect(page.getByRole("tooltip")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Open dialog" }).click();
   const dialog = page.getByRole("dialog", { name: "Layout dialog" });
   const dialogHeight = (await dialog.boundingBox())?.height;
-  await dialog.getByRole("button", { name: "Toggle dialog error" }).click();
   const error = dialog.locator(".ui-dialog__error-slot");
-  const errorTrigger = error.locator(".ui-text-reveal__trigger");
-  await errorTrigger.focus();
-  await errorTrigger.press("Space");
-  const errorPopup = page.getByRole("tooltip");
-  await expect(errorPopup).toContainText("the step needed to correct the request");
-  expect(await errorPopup.evaluate((element) => element.closest(".mantine-Modal-content"))).not.toBeNull();
+  expect((await error.boundingBox())?.height).toBe(36);
+  await dialog.getByRole("button", { name: "Toggle dialog error" }).click();
+  const fullError = "A dialog error. This explains the complete reason and the step needed to correct the request.";
+  await expect(error.locator(".form-error")).toHaveAttribute("title", fullError);
+  await expect(error.locator(".form-error")).toContainText(fullError);
+  await expect(error.locator(".form-error")).toHaveCSS("-webkit-line-clamp", "2");
+  expect((await error.boundingBox())?.height).toBe(36);
   expect((await dialog.boundingBox())?.height).toBe(dialogHeight);
-  await errorTrigger.press("Space");
-  await expect(page.getByRole("tooltip")).toHaveCount(0);
 });

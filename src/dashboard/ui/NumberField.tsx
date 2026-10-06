@@ -2,7 +2,7 @@ import { NumberInput, type NumberInputHandlers } from "@mantine/core";
 import { useRef, type KeyboardEvent } from "react";
 
 import { Button } from "./Button";
-import { TextReveal } from "./TextReveal";
+import { TruncatedText } from "./TruncatedText";
 import { colors } from "./theme";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 
@@ -67,8 +67,8 @@ export function NumberField({
       className={`ui-number-field__control${unit === undefined ? "" : " ui-number-field--has-unit"}`}
       label={label}
       aria-label={ariaLabel}
-      description={<span className="ui-number-field__description">{hint === undefined ? null : <TextReveal text={hint} />}{describedHelper(null, disabledReason, `number-${id ?? label}`)}</span>}
-      error={error ? <span><span aria-hidden="true">× </span><TextReveal text={error} /></span> : undefined}
+      description={<span className="ui-number-field__description">{hint === undefined ? null : <TruncatedText text={hint} />}{describedHelper(null, disabledReason, `number-${id ?? label}`)}</span>}
+      error={error ? <span><span aria-hidden="true">× </span><TruncatedText text={error} /></span> : undefined}
       inputWrapperOrder={["label", "input", "description", "error"]}
       value={value}
       onChange={(next) => onChange(next === "" ? "" : Number(next))}

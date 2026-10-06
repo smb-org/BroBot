@@ -4,9 +4,9 @@ import { useEffect, useRef } from "react";
 
 import { Button } from "./Button";
 import { Icon } from "./Icon";
+import { TruncatedText } from "./TruncatedText";
 import { notify } from "./toast-store";
 import { colors } from "./theme";
-import { TextReveal } from "./TextReveal";
 
 export interface SaveBarProps {
   dirty: boolean;
@@ -87,14 +87,12 @@ export function SaveBar({
               : null;
   const invalidAction = persistent && invalid && dirty && !pending && conflict === undefined;
   const saveDisabled = pending || conflict !== undefined || !dirty;
-  const statusTitle = conflict?.message ?? error ?? (invalid && invalidMessage !== undefined ? invalidMessage : typeof statusText === "string" ? statusText : undefined);
-
   return (
     <div className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}`} aria-busy={pending}>
       <div className="ui-save-bar__status" role="status" aria-live="polite">
         {warningStatus !== null && statusText === warningStatus || warningStatus !== null && saved && !dirty ? <Icon name="warning" size={16} /> : null}
-        <div className="ui-save-bar__message" title={typeof statusText === "string" ? statusTitle : undefined} style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
-          {typeof statusText === "string" ? <TextReveal className="ui-save-bar__message-copy" text={statusText} /> : statusText}
+        <div className="ui-save-bar__message" style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
+          {typeof statusText === "string" ? <TruncatedText className="ui-save-bar__message-copy" text={statusText} /> : statusText}
         </div>
         {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}
       </div>

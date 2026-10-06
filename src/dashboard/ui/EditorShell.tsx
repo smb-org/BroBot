@@ -70,7 +70,6 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
   const [opened, setOpened] = useState(false);
   const popoverId = useId();
   const common = dashboardCommonTexts();
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const openedFromKeyboard = useRef(false);
 
@@ -80,12 +79,17 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
     dropdownRef.current?.querySelector<HTMLElement>("button")?.focus();
   };
 
-  const closeFromEscape = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.key !== "Escape") return;
+  const closeFromTriggerEscape = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    if (!opened || event.key !== "Escape") return;
     event.preventDefault();
     event.stopPropagation();
     setOpened(false);
-    triggerRef.current?.focus();
+  };
+
+  const keepOpenEscapeInsidePopover = (event: KeyboardEvent<HTMLDivElement>): void => {
+    // Mantine closes the opened dropdown in its capture handler; keep that
+    // Escape from reaching the inspector's native keydown listener.
+    if (opened && event.key === "Escape") event.stopPropagation();
   };
 
   return (
@@ -101,18 +105,18 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
         width={280}
         middlewares={{ flip: true, shift: true }}
         shadow="xs"
-        closeOnEscape={false}
+        closeOnEscape={opened}
+        returnFocus
         hideDetached={false}
         onEnterTransitionEnd={focusFirstErrorLink}
       >
         <MantinePopover.Target>
           <button
-            ref={triggerRef}
             className="ui-save-bar__invalid-trigger"
             type="button"
             aria-label={opened ? common.hideInvalidFields : common.showInvalidFields}
-            onKeyDownCapture={closeFromEscape}
             onKeyDown={(event) => {
+              closeFromTriggerEscape(event);
               if (event.key === "Enter" || event.key === " ") openedFromKeyboard.current = !opened;
             }}
             onClick={() => { setOpened((current) => !current); }}
@@ -120,18 +124,20 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
             <Icon name="cause" size={16} />
           </button>
         </MantinePopover.Target>
-        <MantinePopover.Dropdown ref={dropdownRef} className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`} onKeyDownCapture={closeFromEscape}>
-          <h2 id={`${popoverId}-title`} className="sr-only">{common.invalidFieldsTitle}</h2>
-          <ul className="ui-save-bar__invalid-fields">
-            {fields.map((field) => (
-              <li key={`${field.sectionId}:${field.id}`}>
-                <button type="button" aria-label={`${field.label}: ${field.message}`} onClick={() => { onFocusField(field); setOpened(false); }}>
-                  <span>{field.label}</span>
-                  <span>{field.message}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+        <MantinePopover.Dropdown ref={dropdownRef} className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`}>
+          <div onKeyDownCapture={keepOpenEscapeInsidePopover}>
+            <h2 id={`${popoverId}-title`} className="sr-only">{common.invalidFieldsTitle}</h2>
+            <ul className="ui-save-bar__invalid-fields">
+              {fields.map((field) => (
+                <li key={`${field.sectionId}:${field.id}`}>
+                  <button type="button" aria-label={`${field.label}: ${field.message}`} onClick={() => { onFocusField(field); setOpened(false); }}>
+                    <span>{field.label}</span>
+                    <span>{field.message}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         </MantinePopover.Dropdown>
       </MantinePopover>
     </>

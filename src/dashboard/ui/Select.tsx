@@ -3,7 +3,7 @@ import type { ComboboxItem, ComboboxLikeRenderOptionInput } from "@mantine/core"
 import type { ReactNode } from "react";
 
 import { useDisabledFieldReason } from "./DisabledFieldReason";
-import { TextReveal } from "./TextReveal";
+import { TruncatedText } from "./TruncatedText";
 import { colors } from "./theme";
 
 export interface SelectOption {
@@ -87,7 +87,7 @@ export function Select({
     : undefined;
   const description: ReactNode = (
     <span className="ui-select__description">
-      {hint === undefined ? null : <TextReveal text={hint} />}
+      {hint === undefined ? null : <TruncatedText text={hint} />}
       {contextualDescriptionId === undefined || disabledReason === null ? null : <span className="sr-only">{disabledReason.reason}</span>}
     </span>
   );
@@ -103,7 +103,7 @@ export function Select({
         },
       })}
       inputWrapperOrder={compact ? ["input"] : ["label", "input", "description", "error"]}
-      error={compact || !error ? undefined : <span><span aria-hidden="true">× </span><TextReveal text={error} /></span>}
+      error={compact || !error ? undefined : <span><span aria-hidden="true">× </span><TruncatedText text={error} /></span>}
       value={value}
       onChange={onChange}
       data={options}

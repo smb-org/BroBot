@@ -2,7 +2,7 @@ import { TextInput } from "@mantine/core";
 import type { KeyboardEvent, ReactNode } from "react";
 
 import { Icon, type IconName } from "./Icon";
-import { TextReveal } from "./TextReveal";
+import { TruncatedText } from "./TruncatedText";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 
 interface FieldBaseProps {
@@ -53,14 +53,14 @@ export function Field({ label, hint, error, value, onChange, placeholder, disabl
   const nearLimit = maxLength !== undefined && count >= maxLength * 0.9;
   const effectiveError = error ?? (overLimit ? countLabel(count, maxLength) : undefined);
   const errorNode = effectiveError === undefined || effectiveError === "" ? undefined : (
-    <span><span aria-hidden="true">× </span>{typeof effectiveError === "string" ? <TextReveal text={effectiveError} /> : effectiveError}</span>
+    <span><span aria-hidden="true">× </span>{typeof effectiveError === "string" ? <TruncatedText text={effectiveError} /> : effectiveError}</span>
   );
   const leading = prefix === undefined ? (icon === undefined ? undefined : <Icon name={icon} size={16} />) : (
     <span className="ui-field__prefix" aria-hidden="true">{prefix}</span>
   );
   const description: ReactNode = (
     <span className="ui-field__description">
-      {hint === undefined ? null : <TextReveal className="ui-field__hint" text={hint} />}
+      {hint === undefined ? null : <TruncatedText className="ui-field__hint" text={hint} />}
       {maxLength === undefined ? null : <span className={`ui-field__count${nearLimit && !overLimit ? " ui-field__count--warning" : ""}${overLimit ? " ui-field__count--error" : ""}`}>{countLabel(count, maxLength)}</span>}
       {describedHelper(null, disabledReason, `field-${id ?? label}`)}
     </span>
