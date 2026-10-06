@@ -5,7 +5,7 @@ import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
 import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Badge, Button, ChatPreview, ConfirmDialog, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, SubInspector, TextArea, useDraftGuard } from "../../../dashboard/ui";
+import { Badge, Button, ChatPreview, ConfirmDialog, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, LoadState, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, Skeleton, SubInspector, TextArea, notify, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
 import { systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { textLibraryTexts } from "./locale";
@@ -128,8 +128,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const [simulatedTier, setSimulatedTier] = useState("everyone");
   const [pending, setPending] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [error, setError] = useState("");
-  const [showCategories, setShowCategories] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [categoryDrafts, setCategoryDrafts] = useState<Record<string, string>>({});
   const [previewNow, setPreviewNow] = useState(() => Date.now());
@@ -142,6 +141,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const refresh = useCallback(async (select?: string): Promise<void> => {
     const next = await loadTextLibrary(channelId);
     setData(next);
+    setLoadFailed(false);
     if (select !== undefined) {
       const selected = next.blocks.find((block) => block.name === select);
       if (selected !== undefined) {
@@ -170,7 +170,8 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     loadTextLibrary(channelId).then((next) => {
       if (!active) return;
       setData(next);
-    }).catch(() => { if (active) setError(labels.loadError); });
+      setLoadFailed(false);
+    }).catch(() => { if (active) { setLoadFailed(true); notify({ tone: "error", message: labels.loadError }); } });
     return () => { active = false; };
   }, [channelId, labels.loadError]);
 
@@ -273,7 +274,6 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     setDraft(initial);
     setBaselineDraft(initial);
     setRevision(null);
-    setError("");
   };
 
   const closeEditorNow = (): void => {
@@ -281,7 +281,6 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     setDraft(null);
     setBaselineDraft(null);
     setRevision(null);
-    setError("");
   };
 
   const selectBlockNow = (block: TextBlock): void => {
@@ -289,13 +288,11 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     setDraft(draftFromBlock(block));
     setBaselineDraft(draftFromBlock(block));
     setRevision(block.revision);
-    setError("");
   };
 
   const saveDraft = async (): Promise<string | null> => {
     if (draft === null || !valid || !canManage) return labels.saveError;
     setPending(true);
-    setError("");
     try {
       const payload = {
         ...draft,
@@ -314,11 +311,15 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
         : code === "text_library_reference_depth_exceeded" ? labels.depth(path)
           : code === "text_library_template_usage_invalid" && contentIssues.length > 0 ? contentIssues.join(" ")
             : code === null ? labels.saveError : labels.errors[code] ?? (caught instanceof PanelApiError && caught.status === 409 ? labels.conflict : labels.saveError);
-      setError(message);
       return message;
     } finally {
       setPending(false);
     }
+  };
+
+  const saveDraftWithToast = async (): Promise<void> => {
+    const failure = await saveDraft();
+    if (failure !== null) notify({ tone: "error", message: failure });
   };
 
   const discardDraft = useCallback((): void => {
@@ -342,7 +343,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
       setConfirmingDelete(false);
       await refresh();
     } catch (caught: unknown) {
-      setError(errorCode(caught) === "text_library_block_conflict" ? labels.conflict : labels.saveError);
+      notify({ tone: "error", message: errorCode(caught) === "text_library_block_conflict" ? labels.conflict : labels.saveError });
     } finally {
       setPending(false);
     }
@@ -361,7 +362,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
       await renameTextCategory(channelId, category.id, name.trim());
       setCategoryDrafts({});
       await refresh();
-    } catch { setError(labels.saveError); } finally { setPending(false); }
+    } catch { notify({ tone: "error", message: labels.saveError }); } finally { setPending(false); }
   };
 
   const addCategory = async (): Promise<void> => {
@@ -373,7 +374,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
       await refresh();
     } catch (caught: unknown) {
       const code = errorCode(caught);
-      setError(code === null ? labels.saveError : labels.errors[code] ?? labels.categoryLimit);
+      notify({ tone: "error", message: code === null ? labels.saveError : labels.errors[code] ?? labels.categoryLimit });
     } finally { setPending(false); }
   };
 
@@ -381,11 +382,17 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     if (!canManage) return;
     setPending(true);
     try { await deleteTextCategory(channelId, category.id); await refresh(); }
-    catch (caught: unknown) { setError(errorCode(caught) === "text_library_category_not_empty" ? labels.categoryDeleteBlocked : labels.saveError); }
+    catch (caught: unknown) { notify({ tone: "error", message: errorCode(caught) === "text_library_category_not_empty" ? labels.categoryDeleteBlocked : labels.saveError }); }
     finally { setPending(false); }
   };
 
-  if (data === null) return <section className="module-stack" aria-label={labels.library}><p className={error ? "form-error" : "loading-line"}>{error || labels.loading}</p></section>;
+  if (data === null) return <section className="module-stack text-library" aria-label={labels.library}>
+    <LoadState status={loadFailed ? "error" : "loading"} minHeight="calc(var(--s10) * 30)"
+      loading={<Skeleton rows={8} height={34} />}
+      empty={<div />}
+      error={<div style={{ minHeight: "calc(var(--s10) * 30)" }} />}
+    >{null}</LoadState>
+  </section>;
   const categories = data.categories.map((category) => ({ value: category.id, label: categoryLabel(category, labels) }));
   const categoryBlockCounts = new Map(data.categories.map((category) => [category.id, data.blocks.filter((block) => block.categoryId === category.id).length]));
   const activeFilters = [
@@ -393,10 +400,14 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     ...(categoryFilter.length === 0 ? [] : [`${labels.categoryFilter}: ${categories.find((category) => category.value === categoryFilter)?.label ?? categoryFilter}`]),
     ...gameFilter.map((game) => `${labels.gameFilter}: ${game.name}`),
   ];
+  const previewWarnings = [
+    previewOverflow === null ? null : labels.previewTooLong(previewOverflow.blockNames),
+    roleConditionUsedOutsideCommand ? labels.roleConditionHint : null,
+    inputVariableUsedOutsideCommand ? labels.inputContextWarning : null,
+  ].filter((message): message is string => message !== null);
 
   return (
-    <section className="module-stack text-library" aria-label={labels.library}>
-      {error.length === 0 ? null : <p className="form-error" role="alert">{error}</p>}
+    <section className="module-stack text-library" aria-label={labels.library} style={{ minHeight: "calc(var(--s10) * 30)" }}>
 
       <ListDetail
         list={<section className="config-section text-library__list-panel" aria-label={labels.library}>
@@ -410,7 +421,8 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
             <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter} messages={{ ...labels.gamePicker, label: labels.gameFilter }} visuallyHiddenLabel />
           </FilterBar>
           <p className="muted">{labels.blockLimit(TEXT_BLOCK_MAXIMUMS.blocksPerChannel)}</p>
-          {visibleBlocks.length === 0 ? <p className="empty-state">{labels.empty}</p> : (
+          <div data-testid="text-library-list-slot" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>
+          {visibleBlocks.length === 0 ? <p className="empty-state" style={{ minHeight: "calc(var(--s10) * 18)" }}>{labels.empty}</p> : (
             <div className="table-wrap">
               <table className="table table--content text-library__table">
                 <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.category}</th><th scope="col">{labels.variants}</th><th scope="col">{labels.uses}</th></tr></thead>
@@ -427,6 +439,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
               </table>
             </div>
           )}
+          </div>
         </section>}
         inspector={draft === null ? null : (
 
@@ -495,7 +508,9 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                             />}
                           </fieldset>
                         </div>
-                        {variant.conditions.game?.game.id.length === 0 ? <p className="form-error">{labels.gamePicker.hint}</p> : null}
+                        <p className="form-error" style={{ minHeight: "var(--s6)", margin: 0 }}>
+                          {variant.conditions.game?.game.id.length === 0 ? labels.gamePicker.hint : ""}
+                        </p>
                         <div className="text-library__weekdays" role="group" aria-label={labels.weekdays}>
                           {labels.weekdaysLabels.map((day, dayIndex) => {
                             const selected = variant.conditions.weekdays?.includes(dayIndex) ?? false;
@@ -553,7 +568,11 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                         ))}
                         {variant.texts.length >= TEXT_BLOCK_MAXIMUMS.textsPerVariant ? null : <Button size="compact" disabled={pending} onClick={() => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: [...entry.texts, ""] })) })}>{labels.addText}</Button>}
                       </div>
-                      {variantOverflow === null ? null : <p className="text-library__warning" role="note">{labels.previewTooLong(variantOverflow.blockNames)}</p>}
+                      <p className="text-library__warning" role={variantOverflow === null ? undefined : "note"} aria-live="polite"
+                        style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }}
+                        title={variantOverflow === null ? undefined : labels.previewTooLong(variantOverflow.blockNames)}>
+                        {variantOverflow === null ? "" : labels.previewTooLong(variantOverflow.blockNames)}
+                      </p>
                     </article>
                   );
                 })}
@@ -585,21 +604,28 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
                   {simulatedContext === "command" ? <Select label={labels.minimumTier} value={simulatedTier} onChange={(value) => value !== null && setSimulatedTier(value)} options={Object.entries(labels.tierLabels).map(([value, label]) => ({ value, label }))} /> : null}
                   <GamePicker searchGames={searchGames} value={simulatedGame} onChange={(games) => setSimulatedGame(games.slice(0, 1))} messages={{ ...labels.gamePicker, label: labels.gameCondition }} />
                 </div>
-                {matchingVariant === null ? <p className="muted">{blockUnavailableForGame ? labels.blockUnavailableForGame : labels.noMatchingVariant}</p> : <>
-                  <p className="muted">{labels.selectedVariant(isDefaultVariant(matchingVariant, draft) ? labels.defaultVariant : labels.variant(draft.variants.findIndex((variant) => variant.id === matchingVariant.id) + 1))}</p>
-                  <div className="text-library__preview-output"><ChatPreview label={labels.preview} text={previewText} speaker="Bot" countLabel={String(previewText.length)} /></div>
-                  {previewOverflow === null ? null : <p className="text-library__warning" role="note">{labels.previewTooLong(previewOverflow.blockNames)}</p>}
-                </>}
-                {roleConditionUsedOutsideCommand ? <p className="text-library__warning" role="note">{labels.roleConditionHint}</p> : null}
-                {inputVariableUsedOutsideCommand ? <p className="text-library__warning" role="note">{labels.inputContextWarning}</p> : null}
+                <div data-testid="text-library-preview-slot" style={{ height: "calc(var(--s10) * 9)", overflow: "hidden" }}>
+                  {matchingVariant === null ? <p className="muted">{blockUnavailableForGame ? labels.blockUnavailableForGame : labels.noMatchingVariant}</p> : <>
+                    <p className="muted" style={{ minHeight: "var(--s6)", margin: 0 }}>{labels.selectedVariant(isDefaultVariant(matchingVariant, draft) ? labels.defaultVariant : labels.variant(draft.variants.findIndex((variant) => variant.id === matchingVariant.id) + 1))}</p>
+                    <div className="text-library__preview-output" style={{ height: "calc(var(--s10) * 8)", overflow: "hidden" }}>
+                      <ChatPreview label={labels.preview} text={previewText} speaker="Bot" countLabel={String(previewText.length)} />
+                    </div>
+                  </>}
+                </div>
+                <p className="text-library__warning" data-testid="text-library-warning-slot" role={previewWarnings.length > 0 ? "note" : undefined} aria-live="polite"
+                  style={{ height: "calc(var(--s10) * 3)", overflowY: "auto", margin: 0 }}>
+                  {previewWarnings.join(" ")}
+                </p>
               </InspectorSection>
 
               <InspectorSection title={labels.uses}>
-                {(data.usages[draft.name] ?? []).length === 0 ? <p className="muted">{labels.noUsages}</p> : <ul className="text-library__usages">{(data.usages[draft.name] ?? []).map((usage, index) => <li key={`${usage.kind}-${usage.label}-${String(index)}`}><span>{labels.usageKind[usage.kind]}</span><span>{usage.label}</span></li>)}</ul>}
+                <div data-testid="text-library-usage-slot" style={{ height: "calc(var(--s10) * 7)", overflowY: "auto" }}>
+                  {(data.usages[draft.name] ?? []).length === 0 ? <p className="muted">{labels.noUsages}</p> : <ul className="text-library__usages">{(data.usages[draft.name] ?? []).map((usage, index) => <li key={`${usage.kind}-${usage.label}-${String(index)}`}><span>{labels.usageKind[usage.kind]}</span><span>{usage.label}</span></li>)}</ul>}
+                </div>
               </InspectorSection>
 
               <InspectorActions destructive={isCreate ? undefined : <Button danger="subtle" disabled={!canManage || pending} onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>}>
-                {canManage ? <Button variant="primary" disabled={pending || !valid} onClick={() => { void saveDraft(); }}>{isCreate ? labels.create : labels.save}</Button> : null}
+                {canManage ? <Button variant="primary" disabled={pending || !valid} onClick={() => { void saveDraftWithToast(); }}>{isCreate ? labels.create : labels.save}</Button> : null}
                 {canManage ? <Button variant="subtle" disabled={pending} onClick={closeEditor}>{labels.discard}</Button> : null}
               </InspectorActions>
               {isCreate && data.blocks.length >= TEXT_BLOCK_MAXIMUMS.blocksPerChannel ? <p className="form-error">{labels.blockLimit(TEXT_BLOCK_MAXIMUMS.blocksPerChannel)}</p> : null}
@@ -609,7 +635,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
         onCloseInspector={closeEditor}
       />
 
-      <details className="text-library__settings" open={showCategories} onToggle={(event) => setShowCategories(event.currentTarget.open)}>
+      <details className="text-library__settings">
         <summary>{labels.categories}</summary>
         <div className="text-library__settings-body">
           {canManage ? <>

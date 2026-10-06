@@ -3,8 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
   Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
-  GamePicker, InspectorFieldRow, InspectorSection, TimeoutDurationRangeFields,
-  registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
+  GamePicker, InspectorFieldRow, InspectorSection, LoadState, Skeleton, TimeoutDurationRangeFields,
+  registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection, notify,
   type EditorInvalidField,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
@@ -212,7 +212,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const [activePending, setActivePending] = useState(false);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | undefined>();
+  const [deleteError, setDeleteError] = useState<string | undefined>();
   const [fieldError, setFieldError] = useState<{ field: "name" | "aliases"; message: string; invalidAlias?: string } | null>(null);
   const [concurrentConflict, setConcurrentConflict] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -418,7 +418,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const setDraftField = <Key extends keyof CommandDraft>(key: Key, value: CommandDraft[Key]): void => {
     if (key === "minimumTier") setMinimumTierExplicit(true);
     setValue((current) => ({ ...current, [key]: value }));
-    setSaved(false); setError(undefined); setConcurrentConflict(false);
+    setSaved(false); setConcurrentConflict(false);
     if (key === "name" || key === "aliases") setFieldError(null);
   };
   const variableActionEditor = draft.kind === "text" || draft.kind === "timeout" ? <Switch
@@ -434,7 +434,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         : null);
     }}
   >
-    {variableAction === null ? null : <div className="command-variable-action">
+    {variableAction === null ? <div className="command-variable-action" data-testid="command-variable-action-slot" style={{ height: "calc(var(--s10) * 8)", overflowY: "auto" }} aria-hidden="true" /> : <div className="command-variable-action" data-testid="command-variable-action-slot" style={{ height: "calc(var(--s10) * 8)", overflowY: "auto" }}>
       <Select
         id="command-variable-name"
         label={labels.variableSelect}
@@ -464,29 +464,31 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
               },
               minimumTier: minimumTierAfterVariableOperation(current.minimumTier, nextOperation, minimumTierExplicit),
             }));
-            setSaved(false); setError(undefined); setConcurrentConflict(false);
+            setSaved(false); setConcurrentConflict(false);
           }}
         />
-        {variableAction.operation === "set_argument" ? null : <NumberField
-          id="command-variable-amount"
-          label={labels.variableAmount}
-          hint={labels.variableOperationHelp[variableAction.operation]}
-          min={variableAction.operation === "add" || variableAction.operation === "subtract" ? 1 : -999999999}
-          max={variableAction.operation === "add" || variableAction.operation === "subtract" ? 1000 : 999999999}
-          step={1}
-          increaseLabel={labels.variableAmount}
-          decreaseLabel={labels.variableAmount}
-          value={variableAction.amount ?? ""}
-          disabled={!canManageContent || pending}
-          {...(attemptedSave && variableActionAmountInvalid ? { error: labels.variableActionInvalid } : {})}
-          onChange={(amount) => setDraftField("variableAction", { ...variableAction, amount: amount === "" ? null : amount })}
-        />}
+        <div aria-hidden={variableAction.operation === "set_argument"} style={{ visibility: variableAction.operation === "set_argument" ? "hidden" : "visible" }}>
+          <NumberField
+            id="command-variable-amount"
+            label={labels.variableAmount}
+            hint={labels.variableOperationHelp[variableAction.operation]}
+            min={variableAction.operation === "add" || variableAction.operation === "subtract" ? 1 : -999999999}
+            max={variableAction.operation === "add" || variableAction.operation === "subtract" ? 1000 : 999999999}
+            step={1}
+            increaseLabel={labels.variableAmount}
+            decreaseLabel={labels.variableAmount}
+            value={variableAction.amount ?? ""}
+            disabled={!canManageContent || pending || variableAction.operation === "set_argument"}
+            {...(attemptedSave && variableActionAmountInvalid ? { error: labels.variableActionInvalid } : {})}
+            onChange={(amount) => setDraftField("variableAction", { ...variableAction, amount: amount === "" ? null : amount })}
+          />
+        </div>
       </FieldPair>
-      {channelVariables.length === 0 ? <p className={variableActionError === undefined ? "muted" : "form-error"} role={variableActionError === undefined ? undefined : "alert"}>
-        {variableActionError === undefined ? labels.variableNone : `× ${variableActionError} `}<a href={`/channels/${encodeURIComponent(channelId)}/variables`}>{labels.createVariable}</a>
-      </p> : null}
-      {variableAction.operation === "set_argument" && draft.minimumTier === "everyone" ? <p className="form-warning" role="note">{labels.variableEveryoneWarning}</p> : null}
-      {draft.kind === "text" && draft.text.trim().length === 0 ? <p className="muted">{labels.variableSilentHint}</p> : null}
+      <p className={channelVariables.length === 0 && variableActionError !== undefined ? "form-error" : "muted"} role={channelVariables.length === 0 && variableActionError !== undefined ? "alert" : undefined} style={{ minHeight: "var(--s6)", margin: 0 }}>
+        {channelVariables.length === 0 ? <>{variableActionError === undefined ? labels.variableNone : `× ${variableActionError} `}<a href={`/channels/${encodeURIComponent(channelId)}/variables`}>{labels.createVariable}</a></> : ""}
+      </p>
+      <p className="form-warning" role="note" style={{ minHeight: "var(--s6)", margin: 0 }}>{variableAction.operation === "set_argument" && draft.minimumTier === "everyone" ? labels.variableEveryoneWarning : ""}</p>
+      <p className="muted" style={{ minHeight: "var(--s6)", margin: 0 }}>{draft.kind === "text" && draft.text.trim().length === 0 ? labels.variableSilentHint : ""}</p>
     </div>}
   </Switch> : null;
   const responseTypeEditor = draft.kind === "shoutout" ? null : <SegmentedControl
@@ -546,7 +548,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         reason: savedDraft.timeoutAction.reason,
       },
     };
-    setPending(true); setError(undefined); setFieldError(null); setConcurrentConflict(false); setSaved(false);
+    setPending(true); setDeleteError(undefined); setFieldError(null); setConcurrentConflict(false); setSaved(false);
     try {
       const returnedWarnings = isCreate
         ? await createTextCommand(channelId, payload)
@@ -582,10 +584,10 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           }
         }
       }
-      setError(labels.saveError);
+      notify({ tone: "error", message: labels.saveError });
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, channelId, channelVariables, command, draft, isCreate, labels, onRefresh, setAttemptedSave, setConcurrentConflict, setError, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
+  }, [accept, canManageContent, channelId, channelVariables, command, draft, isCreate, labels, onRefresh, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
 
   const guard = useDraftGuard(dirty, saveDraft, reset);
   useEffect(() => {
@@ -618,7 +620,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         ...(isCreate && kind === "shoutout" ? { minimumTier: "moderator" as const } : {}),
       };
     });
-    setSaved(false); setError(undefined); setConcurrentConflict(false);
+    setSaved(false); setConcurrentConflict(false);
   };
 
   const handleSave = async (): Promise<void> => {
@@ -633,26 +635,26 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     accept(draftFromCommand(latest));
     draftRevision.current = latest.revision;
     setActive(latest.enabled);
-    setConcurrentConflict(false); setFieldError(null); setError(undefined); setServerWarnings([]);
+    setConcurrentConflict(false); setFieldError(null); setDeleteError(undefined); setServerWarnings([]);
   };
 
   const toggleActive = async (next: boolean): Promise<void> => {
     if (command === null) return;
-    setActivePending(true); setError(undefined);
+    setActivePending(true);
     try {
       await toggleTextCommand(channelId, command.name, command.revision, next);
       setActive(next);
       await onRefresh(command.name);
     } catch {
-      setError(labels.saveError);
+      notify({ tone: "error", message: labels.saveError });
     } finally { setActivePending(false); }
   };
 
   const remove = async (): Promise<void> => {
     if (command === null) return;
-    setDeleting(true); setError(undefined);
+    setDeleting(true); setDeleteError(undefined);
     try { await deleteTextCommand(channelId, command.name, command.revision); setConfirmingDelete(false); await onDeleted(); }
-    catch { setError(labels.deleteError); }
+    catch { setDeleteError(labels.deleteError); }
     finally { setDeleting(false); }
   };
 
@@ -678,7 +680,8 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         {...(field === "text" && responseFieldError !== undefined ? { error: responseFieldError } : {})}
         {...(field === "timeoutFallbackText" && timeoutFallbackError !== undefined ? { error: timeoutFallbackError } : {})}
       />
-      {field === "text" && slashInput.status !== "none" ? <div className="command-slash-help" aria-live="polite">
+      {field === "text" ? <div className="command-slash-help" aria-live="polite" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto" }}>
+        {slashInput.status === "none" ? null : <>
         {slashSuggestions.length > 0 ? <>
           <p className="form-hint">{labels.slashCommandHelp}</p>
           <div className="command-slash-help__options" role="group" aria-label={labels.slashCommandHelp}>
@@ -710,6 +713,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           : slashInput.status === "unsupported"
             ? <p className="form-warning" role="status">{labels.slashUnsupportedWarning}</p>
             : slashEffect === null ? null : <p className="form-hint" role="status">{slashEffect}</p>}
+        </>}
       </div> : null}
       {libraryBlocks.length === 0 ? null : <div className="command-library-picker">
         <Select label={labels.libraryText} value={selectedLibraryBlock || null} placeholder={labels.libraryTextPlaceholder} options={libraryBlocks.map((name) => ({ value: name, label: `{${name}}` }))} disabled={!canManageContent || pending} onChange={(name) => setSelectedLibraryBlock(name ?? "")} />
@@ -767,47 +771,51 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           disabled={!canManageContent || pending}
           onChange={(value) => { if (value !== null) changeKind(value as TextCommandKind); }}
         />
-        {draft.kind === "timeout" && draft.timeoutAction !== null ? <div className="command-timeout-action">
-          <InspectorSection title={labels.timeoutDuration}>
-            <TimeoutDurationRangeFields
-              idPrefix="command-timeout"
-              value={draft.timeoutAction}
-              onChange={(range) => {
-                const timeoutAction = draft.timeoutAction;
-                if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, ...range });
-              }}
-              min={1}
-              max={MODERATION_TIMEOUT_MAX_SECONDS}
-              minimumLabel={labels.timeoutMinSeconds}
-              maximumLabel={labels.timeoutMaxSeconds}
-              hint={labels.timeoutRangeHint}
-              {...(attemptedSave && timeoutRangeInvalid ? { error: labels.timeoutRangeInvalid } : {})}
+        <div data-testid="command-timeout-settings-slot" style={{ height: "calc(var(--s10) * 6)", overflowY: "auto" }}>
+          {draft.kind === "timeout" && draft.timeoutAction !== null ? <div className="command-timeout-action">
+            <InspectorSection title={labels.timeoutDuration}>
+              <TimeoutDurationRangeFields
+                idPrefix="command-timeout"
+                value={draft.timeoutAction}
+                onChange={(range) => {
+                  const timeoutAction = draft.timeoutAction;
+                  if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, ...range });
+                }}
+                min={1}
+                max={MODERATION_TIMEOUT_MAX_SECONDS}
+                minimumLabel={labels.timeoutMinSeconds}
+                maximumLabel={labels.timeoutMaxSeconds}
+                hint={labels.timeoutRangeHint}
+                {...(attemptedSave && timeoutRangeInvalid ? { error: labels.timeoutRangeInvalid } : {})}
+                disabled={!canManageContent || pending}
+              />
+            </InspectorSection>
+            <Field
+              id="command-timeout-reason"
+              label={labels.timeoutReason}
+              hint={labels.timeoutReasonHint}
+              value={draft.timeoutAction.reason}
+              maxLength={500}
+              {...(timeoutReasonError === undefined ? {} : { error: timeoutReasonError })}
+              countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
               disabled={!canManageContent || pending}
+              onChange={(reason) => {
+                const timeoutAction = draft.timeoutAction;
+                if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, reason });
+              }}
             />
-          </InspectorSection>
-          <Field
-            id="command-timeout-reason"
-            label={labels.timeoutReason}
-            hint={labels.timeoutReasonHint}
-            value={draft.timeoutAction.reason}
-            maxLength={500}
-            {...(timeoutReasonError === undefined ? {} : { error: timeoutReasonError })}
-            countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
-            disabled={!canManageContent || pending}
-            onChange={(reason) => {
-              const timeoutAction = draft.timeoutAction;
-              if (timeoutAction !== null) setDraftField("timeoutAction", { ...timeoutAction, reason });
-            }}
-          />
-        </div> : null}
+          </div> : null}
+        </div>
         {draft.kind === "list"
           ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />
           : templateEditor("text", draft.kind === "timeout" ? labels.responseOptional : labels.response)}
-        {draft.kind === "timeout" && draft.timeoutAction !== null ? <div className="command-timeout-action">
-          {templateEditor("timeoutFallbackText", labels.timeoutFallbackTextOptional)}
-          {botIsModerator === false ? <p className="form-warning" role="note">{labels.timeoutBotWarning}</p> : null}
-        </div> : null}
-        {draft.kind !== "list" ? <details className="command-usage-advanced" open={attemptedSave && (validationDraft.usageText.length > 500 || (validationDraft.kind === "timeout" && variableActionInvalid))}>
+        <div data-testid="command-timeout-fallback-slot" style={{ height: "calc(var(--s10) * 6)", overflowY: "auto" }}>
+          {draft.kind === "timeout" && draft.timeoutAction !== null ? <div className="command-timeout-action">
+            {templateEditor("timeoutFallbackText", labels.timeoutFallbackTextOptional)}
+            <p className="form-warning" role="note" style={{ minHeight: "var(--s6)", margin: 0 }}>{botIsModerator === false ? labels.timeoutBotWarning : ""}</p>
+          </div> : null}
+        </div>
+        {draft.kind !== "list" ? <details className="command-usage-advanced">
           <summary>{labels.usageAdvanced}</summary>
           <div className="command-usage-advanced__body">
             {templateEditor("usageText", labels.templateFieldLabels.usageText, labels.usageTextHint)}
@@ -939,7 +947,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     </>}
   </dl>;
 
-  const deleteButton = command === null ? undefined : <Button icon="remove" danger="subtle" disabled={!canManageContent} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>;
+  const deleteButton = command === null ? undefined : <Button icon="remove" danger="subtle" disabled={!canManageContent} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { setDeleteError(undefined); setConfirmingDelete(true); }}>{labels.delete}</Button>;
   return <>
     <EditorShell
       className="command-editor-shell"
@@ -952,7 +960,6 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       dirty={dirty}
       pending={pending}
       saved={saved}
-      {...(error === undefined ? {} : { error })}
       invalid={!valid}
       invalidMessage={labels.invalid}
       invalidFields={invalidFields}
@@ -961,7 +968,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${labels.saved} ${items.join(" ")}` : items.join(" ")}
       {...(concurrentConflict ? { conflict: { message: labels.conflictMessage, reloadLabel: labels.reload, onReload: () => { void reloadServer(); } } } : {})}
       onSave={() => { void handleSave(); }}
-      onDiscard={() => { reset(); setAttemptedSave(false); setSaved(false); setFieldError(null); setError(undefined); setServerWarnings([]); }}
+      onDiscard={() => { reset(); setAttemptedSave(false); setSaved(false); setFieldError(null); setDeleteError(undefined); setServerWarnings([]); }}
       saveLabel={isCreate ? labels.create : labels.save}
       discardLabel={labels.discard}
       savedLabel={labels.saved}
@@ -971,11 +978,10 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       onClose={onClose}
       closeLabel={labels.close}
     />
-    {guard.saveError === undefined ? null : <p className="form-error" role="alert">{guard.saveError}</p>}
     <ConfirmDialog
       opened={guard.confirmOpen}
       title={labels.draftGuardTitle}
-      description={guard.saveError === undefined ? labels.draftGuardDescription : `${labels.draftGuardDescription} ${guard.saveError}`}
+      description={labels.draftGuardDescription}
       cancelLabel={labels.continueEditing}
       confirmLabel={labels.discardAndSwitch}
       onCancel={guard.continueEditing}
@@ -983,6 +989,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       {...(valid ? { alternative: { label: labels.saveAndSwitch, onClick: () => { void guard.saveAndSwitch(); } } } : {})}
       pending={guard.saving}
       danger
+      {...(guard.saveError === undefined ? {} : { error: guard.saveError })}
     />
     <ConfirmDialog
       opened={confirmingDelete}
@@ -994,6 +1001,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       onConfirm={() => { void remove(); }}
       danger
       pending={deleting}
+      {...(deleteError === undefined ? {} : { error: deleteError })}
     />
   </>;
 };
@@ -1019,7 +1027,7 @@ export const TextCommandsPanel = ({
   const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useInspectorSelection<string>();
   const [createOpen, setCreateOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
   const guardRef = useRef<((proceed: () => void, cancel?: () => void) => void) | null>(null);
   const guardSwitch = useCallback((proceed: () => void, cancel?: () => void): void => {
@@ -1035,7 +1043,7 @@ export const TextCommandsPanel = ({
     const data = await loadTextCommandData(channelId);
     setCommands(data.commands);
     setChannelVariables(data.variables);
-    setError(null);
+    setLoadFailed(false);
     if (selectAfter !== undefined && data.commands.some((item) => item.name === selectAfter)) {
       setCreateOpen(false);
       selectName(selectAfter);
@@ -1050,7 +1058,8 @@ export const TextCommandsPanel = ({
       setCommands(data.commands); setChannelVariables(data.variables); setLoading(false);
     }).catch(() => {
       if (!active) return;
-      setError(labels.loadError); setLoading(false);
+      setLoadFailed(true); setLoading(false);
+      notify({ tone: "error", message: labels.loadError });
     });
     return () => { active = false; };
   }, [channelId, labels.loadError]);
@@ -1082,9 +1091,9 @@ export const TextCommandsPanel = ({
     selectName(name);
   });
   const toggle = async (command: TextCommand): Promise<void> => {
-    setToggleBusyName(command.name); setError(null);
+    setToggleBusyName(command.name);
     try { await toggleTextCommand(channelId, command.name, command.revision, !command.enabled); await refresh(); }
-    catch { setError(labels.saveError); }
+    catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setToggleBusyName(null); }
   };
   const handleDeleted = async (): Promise<void> => {
@@ -1093,26 +1102,29 @@ export const TextCommandsPanel = ({
     closeSelection();
   };
 
+  const listStatus = loading ? "loading" : loadFailed ? "error" : commands.length === 0 ? "empty" : "success";
   const list = <section className="command-list config-section" aria-label={labels.list}>
     <div className="section-heading">
       <h2>{labels.list}</h2>
       {canManageContent ? <Button icon="add" iconOnly ariaLabel={labels.add} onClick={openCreate} /> : null}
     </div>
-    {loading ? <p className="loading-line">{labels.load}</p> : null}
-    {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-    {!loading && error === null && commands.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
-    {!loading && error === null && commands.length > 0 ? <div className="table-wrap"><table className="table"><thead><tr>
-      <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>
-    </tr></thead><tbody>{commands.map((command) => <TextCommandRow
-      key={command.name}
-      initial={command}
-      language={language}
-      selected={selectedName === command.name}
-      onSelect={() => { selectCommand(command.name); }}
-      rowRef={rowRef(command.name)}
-      toggleBusy={toggleBusyName === command.name}
-      onToggle={() => toggle(command)}
-    />)}</tbody></table></div> : null}
+    <LoadState status={listStatus} minHeight="calc(var(--s10) * 15)"
+      loading={<Skeleton rows={8} height={34} />}
+      empty={<p className="empty-state">{labels.empty}</p>}
+      error={<p className="form-error" role="alert">{labels.loadError}</p>}>
+      <div className="table-wrap" style={{ maxHeight: "calc(var(--s10) * 15)", overflowY: "auto" }}><table className="table"><thead><tr>
+        <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>
+      </tr></thead><tbody>{commands.map((command) => <TextCommandRow
+        key={command.name}
+        initial={command}
+        language={language}
+        selected={selectedName === command.name}
+        onSelect={() => { selectCommand(command.name); }}
+        rowRef={rowRef(command.name)}
+        toggleBusy={toggleBusyName === command.name}
+        onToggle={() => toggle(command)}
+      />)}</tbody></table></div>
+    </LoadState>
   </section>;
 
   const inspector = selected !== null ? <TextCommandEditor

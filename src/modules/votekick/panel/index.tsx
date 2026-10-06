@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
-import { Badge, Button, ConfirmDialog, InspectorSection } from "../../../dashboard/ui";
+import { Badge, Button, ConfirmDialog, InspectorSection, LoadState, Skeleton, notify } from "../../../dashboard/ui";
 import { dashboardLanguage } from "../../../dashboard/locale";
 import type { ModulePanelProperties } from "../../contract";
 import type { Votekick } from "../contracts";
@@ -21,7 +21,8 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
   const [data, setData] = useState<VotekickPanelData | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [dialogError, setDialogError] = useState<string | undefined>();
+  const loadErrorNotified = useRef(false);
   const [cancelTarget, setCancelTarget] = useState<Votekick | null>(null);
   const [liftTarget, setLiftTarget] = useState<Votekick | null>(null);
   const [now, setNow] = useState(0);
@@ -30,9 +31,12 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
     if (!silent) setLoading(true);
     try {
       setData(await loadVotekickPanel(channelId));
-      setError(null);
+      loadErrorNotified.current = false;
     } catch {
-      setError(labels.loadError);
+      if (!loadErrorNotified.current) {
+        loadErrorNotified.current = true;
+        notify({ tone: "error", message: labels.loadError });
+      }
     } finally {
       if (!silent) setLoading(false);
     }
@@ -40,9 +44,15 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
 
   useEffect(() => {
     let active = true;
+    loadErrorNotified.current = false;
     void loadVotekickPanel(channelId)
-      .then((value) => { if (active) setData(value); })
-      .catch(() => { if (active) setError(labels.loadError); })
+      .then((value) => { if (active) { setData(value); loadErrorNotified.current = false; } })
+      .catch(() => {
+        if (active && !loadErrorNotified.current) {
+          loadErrorNotified.current = true;
+          notify({ tone: "error", message: labels.loadError });
+        }
+      })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [channelId, labels.loadError]);
@@ -58,12 +68,13 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
   const cancel = async (): Promise<void> => {
     if (cancelTarget === null) return;
     setBusy(true);
+    setDialogError(undefined);
     try {
       await cancelVotekick(channelId, cancelTarget.id);
       setCancelTarget(null);
       await reload(true);
     } catch {
-      setError(labels.actionError);
+      setDialogError(labels.actionError);
     } finally {
       setBusy(false);
     }
@@ -72,12 +83,13 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
   const lift = async (): Promise<void> => {
     if (liftTarget === null) return;
     setBusy(true);
+    setDialogError(undefined);
     try {
       await liftVotekickTimeout(channelId, liftTarget.id);
       setLiftTarget(null);
       await reload(true);
     } catch {
-      setError(labels.actionError);
+      setDialogError(labels.actionError);
     } finally {
       setBusy(false);
     }
@@ -87,26 +99,39 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
   const currentTime = now === 0 ? Date.parse(data?.now ?? "") : now;
   const history = data?.votekicks.filter((item) => item.status !== "running") ?? [];
   return <section className="module-stack" aria-label={labels.ariaLabel}>
+    <LoadState status={loading ? "loading" : data === null ? "error" : "success"}
+      minHeight="calc(var(--s10) * 30)"
+      loading={<div className="module-stack" aria-label={labels.ariaLabel}>
+        <Skeleton rows={4} height={34} /><Skeleton rows={8} height={34} />
+      </div>}
+      empty={<div />}
+      error={<div style={{ minHeight: "calc(var(--s10) * 30)" }} />}
+    >
+    {data === null ? null : <>
     <InspectorSection title={labels.running}>
-      {loading ? <p className="muted">…</p> : running === null
+      <div data-testid="votekick-running-slot" style={{ height: "calc(var(--s10) * 7)", overflowY: "auto" }}>
+      {running === null
         ? <p className="muted">{labels.emptyRunning}</p>
         : <article className="timer-row">
             <div className="timer-row__copy">
               <strong>{labels.target} · <code>{running.targetLogin ?? running.targetUserId ?? "—"}</code></strong>
               <span>{labels.votes(running.yesVotes, running.noVotes, running.threshold)}</span>
-              <span>{labels.remaining(remainingVotekickSeconds(running.endsAt, currentTime))}</span>
+              <span style={{ minWidth: "calc(var(--s10) * 7)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                {labels.remaining(remainingVotekickSeconds(running.endsAt, currentTime))}
+              </span>
             </div>
             <div className="timer-row__actions">
-              <Button variant="subtle" danger disabled={!canOperate || busy} onClick={() => setCancelTarget(running)}>{labels.cancel}</Button>
+              <Button variant="subtle" danger disabled={!canOperate || busy} onClick={() => { setDialogError(undefined); setCancelTarget(running); }}>{labels.cancel}</Button>
             </div>
           </article>}
+      </div>
     </InspectorSection>
 
     <InspectorSection title={labels.history}>
-      {loading ? <p className="muted">…</p> : history.length === 0 ? <p className="muted">{labels.emptyHistory}</p> : (
-        <div className="state-list">
-          {history.map((item) => (
-            <article key={item.id} className="timer-row">
+        <div className="state-list" data-testid="votekick-history-list"
+          style={{ height: "calc(var(--s10) * 20)", overflowY: "auto" }}>
+          {history.length === 0 ? <p className="muted">{labels.emptyHistory}</p> : history.map((item) => (
+            <article key={item.id} className="timer-row" style={{ height: "calc(var(--s10) * 5)", overflow: "hidden" }}>
               <div className="timer-row__copy">
                 <strong>{labels.target} · <code>{item.targetLogin ?? item.targetUserId ?? "—"}</code></strong>
                 <span><Badge tone={item.status === "passed" ? "brand" : "neutral"}>{labels.status[item.status]}</Badge> · {formatTime(item.startedAt, resolvedLanguage)}</span>
@@ -117,15 +142,15 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
                   item.endedAt !== null && item.durationSeconds !== null &&
                   Number.isFinite(Date.parse(item.endedAt)) &&
                   Date.parse(item.endedAt) + item.durationSeconds * 1000 > currentTime
-                  ? <Button variant="neutral" disabled={!canOperate || busy} onClick={() => setLiftTarget(item)}>{labels.lift}</Button>
+                  ? <Button variant="neutral" disabled={!canOperate || busy} onClick={() => { setDialogError(undefined); setLiftTarget(item); }}>{labels.lift}</Button>
                   : item.liftedAt === null ? null : <span role="status">{labels.lifted}</span>}
               </div>
             </article>
           ))}
         </div>
-      )}
     </InspectorSection>
-    {error === null ? null : <p className="form-error" role="alert">{error}</p>}
+    </>}
+    </LoadState>
 
     <ConfirmDialog
       opened={cancelTarget !== null}
@@ -134,10 +159,10 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
       confirmLabel={labels.confirmCancel}
       cancelLabel={labels.cancelDialogCancel}
       onConfirm={() => { void cancel(); }}
-      onCancel={() => setCancelTarget(null)}
+      onCancel={() => { setCancelTarget(null); setDialogError(undefined); }}
       pending={busy}
       danger
-      {...(error === null ? {} : { error })}
+      {...(dialogError === undefined ? {} : { error: dialogError })}
     />
     <ConfirmDialog
       opened={liftTarget !== null}
@@ -146,10 +171,10 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
       confirmLabel={labels.confirmLift}
       cancelLabel={labels.liftDialogCancel}
       onConfirm={() => { void lift(); }}
-      onCancel={() => setLiftTarget(null)}
+      onCancel={() => { setLiftTarget(null); setDialogError(undefined); }}
       pending={busy}
       danger
-      {...(error === null ? {} : { error })}
+      {...(dialogError === undefined ? {} : { error: dialogError })}
     />
   </section>;
 }

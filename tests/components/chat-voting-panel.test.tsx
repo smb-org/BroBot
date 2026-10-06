@@ -251,6 +251,16 @@ describe("chat voting live panel", () => {
     expect(screen.getByText("33%")).toBeInTheDocument();
   });
 
+  it("keeps one reserved hint slot above the voting action", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
+      vote: null, counts: null, revision: 0, hasOpenBallot: false, defaultDurationSeconds: 120,
+    }))));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    expect(await screen.findByRole("button", { name: "Start" })).toBeInTheDocument();
+    expect(screen.getByTestId("chat-voting-hint-slot")).toBeInTheDocument();
+  });
+
   it.each([
     ["running", openVote, [4, 2], "Running", "· open", true],
     ["manual close requested for an open vote", closingVote, [4, 2], "Running", "· open", true],

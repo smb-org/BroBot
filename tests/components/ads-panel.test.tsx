@@ -1,8 +1,9 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModulePage } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
+import { toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -107,7 +108,7 @@ describe("Ad settings editor declaration", () => {
     expect(view?.lastElementChild).toBe(editor);
 
     fireEvent.click(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ }));
-    expect(await screen.findByText("Die nächste Werbepause wurde verschoben.")).toBeInTheDocument();
+    await waitFor(() => expect(toastsSnapshot().some((toast) => toast.message === "Die nächste Werbepause wurde verschoben.")).toBe(true));
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true);
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
   });
@@ -124,12 +125,12 @@ describe("Ad settings editor declaration", () => {
     expect(screen.getByText(/channel:manage:ads fehlt/)).toBeInTheDocument();
   });
 
-  it("shows a rejected snooze beside its action without making the settings draft dirty", async () => {
+  it("shows a rejected snooze as an error toast without making the settings draft dirty", async () => {
     const fetcher = adsFetch(undefined, schedule, () => jsonResponse({ error: "ad_snooze_failed" }, 500));
     renderAds(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Die nächste Werbepause konnte nicht verschoben werden.");
+    await waitFor(() => expect(toastsSnapshot().some((toast) => toast.tone === "error" && toast.message === "Die nächste Werbepause konnte nicht verschoben werden.")).toBe(true));
     expect(screen.getByRole("button", { name: "Ansagen speichern" })).toBeDisabled();
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
   });

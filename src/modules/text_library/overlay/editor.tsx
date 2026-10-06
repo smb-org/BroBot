@@ -82,10 +82,15 @@ const TextBlockOverlayEditor = ({ config, onChange, channelId = "", language = "
       options={blocks.map(({ name }) => ({ value: name, label: name }))}
       onChange={(value) => { if (!readOnly && value !== null) onChange({ ...config, blockName: value }); }}
     />
-    {loadState === "loading" ? <p className="form-hint" role="status">{labels.loading}</p> : null}
-    {loadState === "error" ? <p className="form-error" role="status">{labels.unavailable}</p> : null}
-    {loadState === "ready" && blocks.length === 0 ? <p className="form-hint">{labels.empty}</p> : null}
-    {previewText.length > 0 ? <p className="form-hint" aria-live="polite">{sampleText(previewText, labels.sampleValues)}</p> : null}
+    <p className={loadState === "error" ? "form-error" : "form-hint"} data-testid="overlay-editor-status-slot"
+      role="status" aria-live="polite" title={loadState === "error" ? labels.unavailable : loadState === "loading" ? labels.loading : blocks.length === 0 ? labels.empty : ""}
+      style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }}>
+      {loadState === "loading" ? labels.loading : loadState === "error" ? labels.unavailable : blocks.length === 0 ? labels.empty : ""}
+    </p>
+    <p className="form-hint" data-testid="overlay-editor-preview-slot" aria-live="polite" title={sampleText(previewText, labels.sampleValues)}
+      style={{ height: "calc(var(--s10) * 4)", overflow: "hidden", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 3, overflowWrap: "anywhere", margin: 0 }}>
+      {previewText.length === 0 ? "" : sampleText(previewText, labels.sampleValues)}
+    </p>
   </div>;
 };
 

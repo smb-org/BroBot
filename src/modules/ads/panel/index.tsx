@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
-import { Button, Icon } from "../../../dashboard/ui";
+import { Button, Icon, LoadState, Skeleton, notify } from "../../../dashboard/ui";
 import type { AdsScheduleResponse } from "../contracts";
 import { loadAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
@@ -21,11 +21,11 @@ const formatTimestamp = (value: string | null, language: DashboardLanguage): str
 
 export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; language?: DashboardLanguage }): ReactElement => {
   const labels = adsPanelTexts(language);
+  const loadError = labels.loadError;
   const [schedule, setSchedule] = useState<AdsScheduleResponse | null>(null);
   const latestRealtimeRef = useRef<{ schedule: AdsScheduleResponse["schedule"]; asOf: string } | null>(null);
-  const [loadError, setLoadError] = useState(false);
+  const [loadStatus, setLoadStatus] = useState<"loading" | "error" | "success">("loading");
   const [snoozeBusy, setSnoozeBusy] = useState(false);
-  const [snoozeOutcome, setSnoozeOutcome] = useState<"success" | "error" | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -43,10 +43,10 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
         }
         return updates.reduce((newestSoFar, candidate) => pickNewestSchedule(newestSoFar, candidate), loaded);
       });
-      setLoadError(false);
-    }).catch(() => { if (active) setLoadError(true); });
+      setLoadStatus("success");
+    }).catch(() => { if (active) { setLoadStatus("error"); notify({ tone: "error", message: loadError }); } });
     return () => { active = false; };
-  }, [channelId]);
+  }, [channelId, loadError]);
 
   useEffect(() => {
     const handleRealtimeMessage = (event: Event): void => {
@@ -70,39 +70,53 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
     return () => window.removeEventListener("brobot:realtime", handleRealtimeMessage);
   }, [channelId]);
 
-  if (schedule === null) return <p className={loadError ? "form-error" : "loading-line"} role={loadError ? "alert" : undefined}>{loadError ? labels.loadError : labels.loading}</p>;
-
-  const snoozeCount = schedule.schedule.snoozeCount;
-  const snoozeButtonDisabled = snoozeBusy || !schedule.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
-  const snoozeReason = !schedule.snoozeScopeAvailable
+  const snoozeCount = schedule?.schedule.snoozeCount ?? null;
+  const snoozeButtonDisabled = schedule === null || snoozeBusy || !schedule.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
+  const snoozeReason = schedule === null ? ""
+    : !schedule.snoozeScopeAvailable
     ? labels.snoozeScopeMissing
     : snoozeCount === null
       ? labels.snoozeUnknown
-      : snoozeCount <= 0 ? labels.snoozeNone : null;
+      : snoozeCount <= 0 ? labels.snoozeNone : "";
   const snoozeLabel = labels.snoozeButton(
     snoozeCount === null ? "—" : String(snoozeCount),
-    formatTimestamp(schedule.schedule.snoozeRefreshAt, language),
+    formatTimestamp(schedule?.schedule.snoozeRefreshAt ?? null, language),
   );
   const snooze = async (): Promise<void> => {
+    if (schedule === null) return;
     setSnoozeBusy(true);
-    setSnoozeOutcome(null);
     try {
       setSchedule(await snoozeAds(channelId));
-      setSnoozeOutcome("success");
+      notify({ tone: "success", message: labels.snoozeSuccess });
     } catch {
-      setSnoozeOutcome("error");
+      notify({ tone: "error", message: labels.snoozeError });
     } finally {
       setSnoozeBusy(false);
     }
   };
 
   return (
-    <section className="module-stack" aria-label={labels.title}>
+    <section className="module-stack" aria-label={labels.title} style={{ minHeight: "calc(var(--s10) * 24)" }}>
+      <LoadState status={loadStatus} minHeight="calc(var(--s10) * 24)"
+        loading={<div className="module-stack" aria-label={labels.loading}>
+          <Skeleton rows={4} height={34} />
+          <Skeleton rows={3} height={34} />
+          <Skeleton rows={4} height={34} />
+        </div>}
+        empty={<div style={{ minHeight: "calc(var(--s10) * 24)" }} />}
+        error={<div className="module-stack" aria-label={labels.title}>
+          <Skeleton rows={4} height={34} /><Skeleton rows={3} height={34} /><Skeleton rows={4} height={34} />
+        </div>}>
+      {schedule === null ? null : <>
       <section className="config-section" aria-label={labels.scheduleSection}>
         <div className="section-heading"><h2>{labels.scheduleSection}</h2></div>
-        {schedule.asOf === undefined ? null : <p className="muted mono">{labels.asOf(formatTimestamp(schedule.asOf, language))}</p>}
-        {schedule.schedule.nextAdAt === null ? <p className="empty-state">{labels.noAdBreak}</p> : (
-          <div className="table-wrap">
+        <p className="muted mono" title={schedule.asOf === undefined ? undefined : labels.asOf(formatTimestamp(schedule.asOf, language))}
+          style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }}>
+          {schedule.asOf === undefined ? "" : labels.asOf(formatTimestamp(schedule.asOf, language))}
+        </p>
+        <div data-testid="ads-next-schedule-slot" style={{ height: "calc(var(--s10) * 3)", overflowY: "auto" }}>
+          {schedule.schedule.nextAdAt === null ? <p className="empty-state" style={{ height: "calc(var(--s10) * 3)", margin: 0 }}>{labels.noAdBreak}</p> : (
+          <div className="table-wrap" style={{ height: "calc(var(--s10) * 3)", overflowY: "auto" }}>
             <table className="table" aria-label={labels.scheduleSection}>
               <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody><tr>
@@ -111,18 +125,22 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
               </tr></tbody>
             </table>
           </div>
-        )}
+          )}
+        </div>
       </section>
       <section className="config-section" aria-label={labels.snoozeSection}>
         <div className="section-heading"><h2>{labels.snoozeSection}</h2></div>
         <Button variant="secondary" icon="ad" disabled={snoozeButtonDisabled} onClick={() => { void snooze(); }}>{snoozeLabel}</Button>
-        {snoozeReason === null ? null : <p className="lock-reason lock-reason--with-icon"><Icon name="lock" size={16} />{snoozeReason}</p>}
-        {snoozeOutcome === null ? null : <p className={snoozeOutcome === "success" ? "form-success" : "form-error"} role={snoozeOutcome === "error" ? "alert" : "status"}>{snoozeOutcome === "success" ? labels.snoozeSuccess : labels.snoozeError}</p>}
+        <p className="lock-reason lock-reason--with-icon" data-testid="ads-snooze-result-slot"
+          title={snoozeReason || undefined} style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0 }} aria-live="polite">
+          {snoozeReason.length === 0 ? null : <><Icon name="lock" size={16} />{snoozeReason}</>}
+        </p>
       </section>
       <section className="config-section" aria-label={labels.recentSection}>
         <div className="section-heading"><h2>{labels.recentSection}</h2></div>
-        {schedule.recentAdBreaks.length === 0 ? <p className="empty-state">{labels.noRecent}</p> : (
-          <div className="table-wrap">
+        <div data-testid="ads-recent-list-slot" style={{ height: "calc(var(--s10) * 6)", overflowY: "auto" }}>
+          {schedule.recentAdBreaks.length === 0 ? <p className="empty-state" style={{ height: "calc(var(--s10) * 6)", margin: 0 }}>{labels.noRecent}</p> : (
+          <div className="table-wrap" style={{ height: "calc(var(--s10) * 6)", overflowY: "auto" }}>
             <table className="table" aria-label={labels.recentSection}>
               <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody>{schedule.recentAdBreaks.map((breakItem) => <tr key={`${breakItem.timestamp}-${String(breakItem.durationSeconds)}`}>
@@ -131,8 +149,11 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
               </tr>)}</tbody>
             </table>
           </div>
-        )}
+          )}
+        </div>
       </section>
+      </>}
+      </LoadState>
     </section>
   );
 };

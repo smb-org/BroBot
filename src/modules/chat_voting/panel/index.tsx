@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
-import { Button, Led, NumberField, SegmentedControl } from "../../../dashboard/ui";
+import { Button, Led, LoadState, NumberField, SegmentedControl, Skeleton } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { ChatVotePreset } from "../contracts";
 import type { ChatVotingPanelState } from "./service";
@@ -105,7 +105,15 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
     }
   };
 
-  if (state === null) return <p className={loadFailed ? "form-error" : "loading-line"} role={loadFailed ? "alert" : undefined}>{loadFailed ? labels.loadError : labels.loading}</p>;
+  if (state === null) return <section className="module-stack chat-voting-panel" aria-label={labels.title}>
+    <LoadState
+      status={loadFailed ? "error" : "loading"}
+      minHeight="calc(var(--s10) * 20)"
+      loading={<Skeleton rows={8} height={34} />}
+      empty={<p className="empty-state">{labels.noVote}</p>}
+      error={<p className="form-error" role="alert">{labels.loadError}</p>}
+    >{null}</LoadState>
+  </section>;
   const vote = state.vote;
   const running = vote?.status === "open";
   const counts = state.counts ?? vote?.counts ?? [];
@@ -126,20 +134,35 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   const validDuration = typeof durationSeconds === "number" && Number.isSafeInteger(durationSeconds) && durationSeconds >= 0 && durationSeconds <= 14_400;
   const validConfiguration = (draftPreset !== "options_n" || validOptionCount) && validDuration;
   const disabledReason = !canOperate ? labels.roleDisabledReason : activeBallot && !running ? labels.startDisabledReason : null;
+  const actionHint = message ?? (!running && draftPreset === "options_n" && !validOptionCount ? labels.invalidOptionCount
+    : !running && !validDuration ? labels.invalidDuration
+      : disabledReason);
+  const loadStateProps = {
+    minHeight: "calc(var(--s10) * 20)",
+    loading: <Skeleton rows={8} height={34} />,
+    empty: <p className="empty-state">{labels.noVote}</p>,
+    error: <p className="form-error" role="alert">{labels.loadError}</p>,
+  } as const;
 
   return <section className="module-stack chat-voting-panel" aria-label={labels.title}>
+    <LoadState status="success" {...loadStateProps}>
     <section className="config-section" aria-label={labels.title}>
       <div className="section-heading">
         <h2>{labels.title}</h2>
-        <div className="chat-voting-panel__status">
+        <div className="chat-voting-panel__status" data-testid="chat-voting-header-status"
+          style={{ display: "flex", flexWrap: "nowrap", alignItems: "center", width: "calc(var(--s10) * 6)", minWidth: "calc(var(--s10) * 6)", maxWidth: "calc(var(--s10) * 6)", height: "calc(var(--s10) + var(--s2))", overflow: "hidden", whiteSpace: "nowrap" }}>
           <Led
             status={running ? "green" : "off"}
             word={vote === null ? labels.readyStatus : running ? labels.runningStatus : labels.closedStatus}
           />
-          {running ? <span className="muted">· {vote.requestedDurationSeconds === null ? labels.openStatus : labels.ends(timeText(vote.closesAt, language))}</span> : null}
+          <span className="muted" data-testid="chat-voting-header-detail" aria-hidden={!running}
+            title={running ? vote.requestedDurationSeconds === null ? labels.openStatus : labels.ends(timeText(vote.closesAt, language)) : ""}
+            style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {running ? `· ${vote.requestedDurationSeconds === null ? labels.openStatus : labels.ends(timeText(vote.closesAt, language))}` : ""}
+          </span>
         </div>
       </div>
-      <div className="chat-voting-result-area" style={{ height: "calc(var(--s10) * 7)" }}>
+      <div className="chat-voting-result-area" style={{ height: "calc(var(--s10) * 7)", overflowY: "auto" }}>
         {vote === null ? <>
           <p className="empty-state">{labels.noVote}</p>
         </> : <>
@@ -175,8 +198,8 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
             { value: "options_n", label: labels.options },
           ]}
         />
-        <div className="chat-voting-configuration__field-slot" style={{ height: "calc(var(--s10) + var(--s6))" }}>
-          {displayedPreset === "options_n" ? <NumberField
+        <div className="chat-voting-configuration__field-slot" data-testid="chat-voting-option-count-slot" aria-hidden={displayedPreset !== "options_n"} style={{ height: "calc(var(--s10) + var(--s6))", visibility: displayedPreset === "options_n" ? "visible" : "hidden" }}>
+          <NumberField
             id="chat-voting-option-count"
             label={labels.optionCount}
             value={displayedOptionCount}
@@ -185,9 +208,9 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
             step={1}
             increaseLabel={labels.increaseOptionCount}
             decreaseLabel={labels.decreaseOptionCount}
-            disabled={configurationDisabled}
+            disabled={configurationDisabled || displayedPreset !== "options_n"}
             onChange={setDraftOptionCount}
-          /> : null}
+          />
         </div>
         <SegmentedControl
           label={labels.duration}
@@ -205,8 +228,8 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
             { value: "custom", label: labels.customDuration },
           ]}
         />
-        <div className="chat-voting-configuration__field-slot" style={{ height: "calc(var(--s10) + var(--s6))" }}>
-          {displayedDurationPreset === "custom" ? <NumberField
+        <div className="chat-voting-configuration__field-slot" data-testid="chat-voting-custom-duration-slot" aria-hidden={displayedDurationPreset !== "custom"} style={{ height: "calc(var(--s10) + var(--s6))", visibility: displayedDurationPreset === "custom" ? "visible" : "hidden" }}>
+          <NumberField
             id="chat-voting-duration-seconds"
             label={labels.customDurationSeconds}
             value={displayedCustomDurationSeconds}
@@ -216,25 +239,25 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
             unit="s"
             increaseLabel={labels.increaseDuration}
             decreaseLabel={labels.decreaseDuration}
-            disabled={configurationDisabled}
+            disabled={configurationDisabled || displayedDurationPreset !== "custom"}
             onChange={(value) => {
               durationDraftTouched.current = true;
               setDraftCustomDurationSeconds(value);
             }}
-          /> : null}
+          />
         </div>
       </div>
 
-      {disabledReason === null ? null : <p className="lock-reason">{disabledReason}</p>}
-      {!running && draftPreset === "options_n" && !validOptionCount ? <p className="form-error">{labels.invalidOptionCount}</p> : null}
-      {!running && !validDuration ? <p className="form-error">{labels.invalidDuration}</p> : null}
+      <div data-testid="chat-voting-hint-slot" style={{ height: "calc(var(--s10) + var(--s3))", overflow: "hidden" }} aria-live={message === null ? "polite" : "assertive"}>
+        {actionHint === null ? null : <p className={message !== null || !validConfiguration && !running ? "form-error" : "lock-reason"} title={actionHint} style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{actionHint}</p>}
+      </div>
       <div className="chat-voting-actions">
         {running
           ? <Button variant="primary" icon="close" disabled={busy || !canOperate} onClick={() => { void close(); }}>{labels.stop}</Button>
           : <Button variant="primary" disabled={configurationDisabled || !validConfiguration} onClick={() => { void start(); }}>{labels.start}</Button>}
       </div>
-      {message === null ? null : <p className="form-error" role="alert">{message}</p>}
     </section>
+    </LoadState>
   </section>;
 };
 

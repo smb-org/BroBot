@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 
-import { Button, ChatOutputTargetControl, ConfirmDialog, Dialog, Field, GamePicker, InspectorSection, NumberField, Select, Switch, TextArea } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
 import { FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH } from "../contracts";
@@ -80,10 +80,8 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
   const searchGames = useCallback((query: string) => searchFaqGames(channelId, query), [channelId]);
 
   const reload = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    setError(null);
     try { setData(await loadFaqPanel(channelId)); }
-    catch { setError(labels.loadError); }
+    catch { notify({ tone: "error", message: labels.loadError }); }
     finally { setLoading(false); }
   }, [channelId, labels.loadError]);
 
@@ -91,7 +89,7 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
     let active = true;
     void loadFaqPanel(channelId)
       .then((value) => { if (active) setData(value); })
-      .catch(() => { if (active) setError(labels.loadError); })
+      .catch(() => { if (active) notify({ tone: "error", message: labels.loadError }); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [channelId, labels.loadError]);
@@ -130,7 +128,7 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
     if (busyEntryId !== null) return;
     setBusyEntryId(entry.id);
     try { await setFaqEntryEnabled(channelId, entry, enabled); await reload(); }
-    catch { setError(labels.saveError); }
+    catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setBusyEntryId(null); }
   };
 
@@ -138,7 +136,7 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
     if (busyEntryId !== null) return;
     setBusyEntryId(entry.id);
     try { await moveFaqEntry(channelId, entry, direction); await reload(); }
-    catch { setError(labels.saveError); }
+    catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setBusyEntryId(null); }
   };
 
@@ -162,15 +160,18 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
 
   const blockOptions = (data?.blocks ?? []).map((name) => ({ value: name, label: name }));
   const orderedEntries = data?.entries ?? [];
+  const listStatus = loading ? "loading" : data === null ? "error" : orderedEntries.length === 0 ? "empty" : "success";
 
   return (
     <section aria-label={labels.title}>
       <InspectorSection title={labels.title}>
         {canManage ? <Button variant="primary" onClick={openCreate}>{labels.add}</Button> : <p className="lock-reason">{labels.roleLocked}</p>}
-        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-        {loading ? <p className="muted">…</p> : null}
-        {!loading && orderedEntries.length === 0 ? <p className="muted">{labels.noEntries}</p> : null}
-        <div className="state-list">
+        <LoadState status={listStatus} minHeight="calc(var(--s10) * 18)"
+          loading={<Skeleton rows={7} height={34} />}
+          empty={<p className="muted">{labels.noEntries}</p>}
+          error={<div style={{ minHeight: "calc(var(--s10) * 18)" }} />}
+        >
+        <div className="state-list" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>
           {orderedEntries.map((entry, index) => (
             <article key={entry.id} className="timer-row">
               <div className="timer-row__copy">
@@ -196,6 +197,7 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
             </article>
           ))}
         </div>
+        </LoadState>
       </InspectorSection>
 
       <InspectorSection title={labels.testHeading}>
@@ -208,20 +210,32 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
             messages={labels.testGamePickerMessages}
           />
           <Button variant="neutral" disabled={testBusy || loading} onClick={() => { void runTest(); }}>{labels.testButton}</Button>
-          {testError === null ? null : <p className="form-error" role="alert">{testError}</p>}
-          {testResult === null ? null : <p role="status">{matchCopy(testResult, labels)}</p>}
-          {testResult === null || testResult.skippedByGame.length === 0 ? null : (
-            <ul>
-              {testResult.skippedByGame.map((skipped) => (
-                <li key={skipped.entryId}>{labels.testSkippedByGame(skipped.entryName, skipped.games.join(", "))}</li>
-              ))}
-            </ul>
-          )}
+          <div data-testid="faq-test-result-slot" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto" }} aria-live="polite">
+            {testError === null ? null : <p className="form-error" role="alert">{testError}</p>}
+            {testResult === null ? null : <p role="status">{matchCopy(testResult, labels)}</p>}
+            {testResult === null || testResult.skippedByGame.length === 0 ? null : (
+              <ul>
+                {testResult.skippedByGame.map((skipped) => (
+                  <li key={skipped.entryId}>{labels.testSkippedByGame(skipped.entryName, skipped.games.join(", "))}</li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       </InspectorSection>
 
-      <Dialog opened={draft !== null} title={editing === null ? labels.create : labels.edit} onClose={closeDialog} pending={pending}>
-        {draft === null ? null : <form className="module-stack" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      <FormDialog
+        opened={draft !== null}
+        title={editing === null ? labels.create : labels.edit}
+        confirmLabel={labels.save}
+        cancelLabel={labels.cancel}
+        onConfirm={() => { void save(); }}
+        onCancel={closeDialog}
+        pending={pending}
+        confirmDisabled={blockOptions.length === 0}
+        {...(error === null ? {} : { error })}
+      >
+        {draft === null ? null : <div className="module-stack">
           <Field label={labels.name} value={draft.name} onChange={(name) => patchDraft({ name })} maxLength={FAQ_ENTRY_NAME_MAX_LENGTH} countLabel={(count, max) => `${String(count)}/${String(max)}`} required />
           <TextArea
             label={labels.patterns}
@@ -269,13 +283,8 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
             includeWhereAsked
             disabled={pending}
           />
-          {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-          <div className="inspector-actions">
-            <Button type="submit" variant="primary" disabled={pending || blockOptions.length === 0}>{labels.save}</Button>
-            <Button type="button" variant="subtle" onClick={closeDialog}>{labels.cancel}</Button>
-          </div>
-        </form>}
-      </Dialog>
+        </div>}
+      </FormDialog>
 
       <ConfirmDialog
         opened={deleteTarget !== null}

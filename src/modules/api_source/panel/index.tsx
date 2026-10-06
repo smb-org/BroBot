@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, CodeField, Field, InspectorFieldRow, InspectorSection } from "../../../dashboard/ui";
+import { Button, CodeField, ConfirmDialog, Field, FormDialog, InspectorFieldRow, InspectorSection, LoadState, Skeleton, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { ApiSource } from "../contracts";
 import { apiSourcePanelTexts } from "./locale";
@@ -25,68 +25,78 @@ const disallowedConstructName = (error: unknown): string | null => {
 };
 
 export default function ApiSourcePanel({ channelId, language, canManage }: ModulePanelProperties): ReactElement {
-  const locale = language ?? "de";
-  const labels = apiSourcePanelTexts(locale);
+  const labels = apiSourcePanelTexts(language ?? "de");
   const canEdit = canManage ?? false;
   const [sources, setSources] = useState<readonly ApiSource[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [draft, setDraft] = useState<SourceDraft | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [formError, setFormError] = useState<string | undefined>();
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | undefined>();
 
   const refresh = useCallback(async (): Promise<void> => {
     setSources(await loadApiSources(channelId));
+    setLoadFailed(false);
   }, [channelId]);
 
   useEffect(() => {
     let active = true;
     loadApiSources(channelId).then((next) => {
-      if (active) setSources(next);
+      if (active) {
+        setSources(next);
+        setLoadFailed(false);
+      }
     }).catch(() => {
-      if (active) setError(labels.loadFailed);
-    });
+      if (active) {
+        setLoadFailed(true);
+        notify({ tone: "error", message: labels.loadFailed });
+      }
+    }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [channelId, labels.loadFailed]);
+
+  const closeEditor = (): void => {
+    setDraft(null);
+    setEditingName(null);
+    setFormError(undefined);
+    setConfirmDeleteOpen(false);
+    setDeleteError(undefined);
+  };
 
   const startCreate = (): void => {
     setEditingName(null);
     setDraft(emptyDraft());
-    setConfirmDelete(false);
-    setError("");
+    setFormError(undefined);
   };
 
   const startEdit = (source: ApiSource): void => {
     setEditingName(source.name);
     setDraft({ name: source.name, url: source.url, expression: source.expression });
-    setConfirmDelete(false);
-    setError("");
+    setFormError(undefined);
   };
 
   const save = async (): Promise<void> => {
-    if (draft === null || !canEdit) return;
+    if (draft === null || !canEdit || busy) return;
     const normalized = { ...draft, name: draft.name.trim(), url: draft.url.trim(), expression: draft.expression.trim() };
     setBusy(true);
-    setError("");
-    setNotice("");
+    setFormError(undefined);
     try {
-      if (editingName === null) {
-        await createApiSource(channelId, normalized);
-        setNotice(labels.created);
-      } else {
+      if (editingName === null) await createApiSource(channelId, normalized);
+      else {
         const current = sources.find((source) => source.name === editingName);
         if (current === undefined) throw new Error("api_source_not_found");
         await updateApiSource(channelId, editingName, { url: normalized.url, expression: normalized.expression, revision: current.revision });
-        setNotice(labels.saved);
       }
       await refresh();
-      setDraft(null);
-      setEditingName(null);
+      closeEditor();
+      notify({ tone: "success", message: editingName === null ? labels.created : labels.saved });
     } catch (failure: unknown) {
       const code = apiErrorCode(failure);
       const constructName = disallowedConstructName(failure);
-      setError(code === "api_source_construct_not_allowed" && constructName !== null ? labels.constructNotAllowed(constructName)
+      setFormError(code === "api_source_construct_not_allowed" && constructName !== null ? labels.constructNotAllowed(constructName)
         : code === "api_source_invalid" ? labels.invalid
         : code === "api_source_conflict" ? labels.conflict
           : code === "api_source_management_denied" ? labels.denied
@@ -98,59 +108,93 @@ export default function ApiSourcePanel({ channelId, language, canManage }: Modul
 
   const remove = async (): Promise<void> => {
     const source = sources.find((candidate) => candidate.name === editingName);
-    if (source === undefined || !canEdit) return;
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      return;
-    }
+    if (source === undefined || !canEdit || busy) return;
     setBusy(true);
-    setError("");
+    setDeleteError(undefined);
     try {
       await deleteApiSource(channelId, source);
       await refresh();
-      setDraft(null);
-      setEditingName(null);
-      setNotice(labels.deleted);
+      closeEditor();
+      notify({ tone: "success", message: labels.deleted });
     } catch (failure: unknown) {
-      setError(apiErrorCode(failure) === "api_source_management_denied" ? labels.denied : labels.saveFailed);
+      setDeleteError(apiErrorCode(failure) === "api_source_management_denied" ? labels.denied : labels.saveFailed);
     } finally {
       setBusy(false);
-      setConfirmDelete(false);
     }
   };
 
+  const loadStatus = loading ? "loading" : loadFailed ? "error" : sources.length === 0 ? "empty" : "success";
+
   return <section className="module-stack api-source-panel" aria-label={labels.title}>
-    {error.length === 0 ? null : <p className="form-error" role="alert">{error}</p>}
-    {notice.length === 0 ? null : <p className="muted" role="status">{notice}</p>}
-    {!canEdit ? <p className="lock-reason">{labels.readOnlyReason}</p> : null}
     <p className="muted">{labels.explanation}</p>
     <InspectorSection title={labels.sourceList}>
-      {sources.length === 0 ? <p className="muted">{labels.empty}</p> : <ul className="api-source-panel__list">
-        {sources.map((source) => <li key={source.name}>
-          <Button size="compact" variant={editingName === source.name ? "secondary" : "neutral"} onClick={() => startEdit(source)}>
-            <code>{source.name}</code>
-          </Button>
-          <span className="muted">{new URL(source.url).hostname}</span>
-        </li>)}
-      </ul>}
-      {draft === null ? <Button disabled={!canEdit || busy} onClick={startCreate}>{labels.addSource}</Button> : null}
-    </InspectorSection>
-    {draft === null ? null : <InspectorSection title={editingName === null ? labels.createSource : labels.editSource}>
-      <InspectorFieldRow label={labels.name} help={labels.nameHint}>
-        <Field label={labels.name} value={draft.name} onChange={(name) => setDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "").slice(0, 32) })} disabled={busy || !canEdit || editingName !== null} readOnly={editingName !== null} />
-      </InspectorFieldRow>
-      <InspectorFieldRow label={labels.url} help={labels.urlHint}>
-        <Field label={labels.url} value={draft.url} onChange={(url) => setDraft({ ...draft, url })} disabled={busy || !canEdit} mono />
-      </InspectorFieldRow>
-      <InspectorFieldRow label={labels.expression} help={labels.expressionHint}>
-        <CodeField id="api-source-expression" label={labels.expression} value={draft.expression} onChange={(expression) => setDraft({ ...draft, expression })} maxLength={512} disabled={busy || !canEdit} />
-      </InspectorFieldRow>
-      {draft.expression.trim().length === 0 ? <p className="muted">{labels.noExpression}</p> : null}
-      <div className="form-actions">
-        <Button variant="primary" disabled={!canEdit || busy || draft.name.length === 0 || draft.url.length === 0} onClick={() => { void save(); }}>{labels.save}</Button>
-        <Button disabled={busy} onClick={() => { setDraft(null); setEditingName(null); setConfirmDelete(false); }}>{labels.cancel}</Button>
-        {editingName === null ? null : <Button danger="subtle" disabled={!canEdit || busy} onClick={() => { void remove(); }}>{confirmDelete ? labels.confirmDelete : labels.delete}</Button>}
+      <div data-testid="api-source-list-slot" style={{ height: "calc(var(--s10) * 5)", overflow: "hidden" }}>
+      <LoadState
+        status={loadStatus}
+        minHeight="calc(var(--s10) * 5)"
+        loading={<Skeleton rows={4} height={34} />}
+        empty={<p className="muted">{labels.empty}</p>}
+        error={<p className="muted">{labels.loadFailed}</p>}
+      >
+        <ul className="api-source-panel__list" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto" }}>
+          {sources.map((source) => <li key={source.name}>
+            <Button size="compact" variant={editingName === source.name ? "secondary" : "neutral"} onClick={() => startEdit(source)}>
+              <code>{source.name}</code>
+            </Button>
+            <span className="muted">{new URL(source.url).hostname}</span>
+          </li>)}
+        </ul>
+      </LoadState>
       </div>
-    </InspectorSection>}
+      <p className="lock-reason" data-testid="api-source-permission-slot" title={canEdit ? undefined : labels.readOnlyReason}
+        style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }} aria-live="polite">
+        {canEdit ? "" : labels.readOnlyReason}
+      </p>
+      <Button disabled={!canEdit || busy} onClick={startCreate}>{labels.addSource}</Button>
+    </InspectorSection>
+
+    <FormDialog
+      opened={draft !== null}
+      title={editingName === null ? labels.createSource : labels.editSource}
+      confirmLabel={labels.save}
+      cancelLabel={labels.cancel}
+      onConfirm={() => { void save(); }}
+      onCancel={closeEditor}
+      pending={busy}
+      confirmDisabled={!canEdit || draft === null || draft.name.trim().length === 0 || draft.url.trim().length === 0}
+      {...(formError === undefined ? {} : { error: formError })}
+    >
+      {draft === null ? null : <div className="module-stack">
+        <InspectorFieldRow label={labels.name} help={labels.nameHint}>
+          <Field label={labels.name} value={draft.name} onChange={(name) => setDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "").slice(0, 32) })} disabled={busy || !canEdit || editingName !== null} readOnly={editingName !== null} />
+        </InspectorFieldRow>
+        <InspectorFieldRow label={labels.url} help={labels.urlHint}>
+          <Field label={labels.url} value={draft.url} onChange={(url) => setDraft({ ...draft, url })} disabled={busy || !canEdit} mono />
+        </InspectorFieldRow>
+        <InspectorFieldRow label={labels.expression} help={labels.expressionHint}>
+          <CodeField id="api-source-expression" label={labels.expression} value={draft.expression} onChange={(expression) => setDraft({ ...draft, expression })} maxLength={512} disabled={busy || !canEdit} />
+        </InspectorFieldRow>
+        <p className="muted" title={draft.expression.trim().length === 0 ? labels.noExpression : undefined}
+          style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite">
+          {draft.expression.trim().length === 0 ? labels.noExpression : ""}
+        </p>
+        <div className="form-actions">
+          {editingName === null ? null : <Button type="button" danger="subtle" disabled={!canEdit || busy} onClick={() => { setDeleteError(undefined); setConfirmDeleteOpen(true); }}>{labels.delete}</Button>}
+        </div>
+      </div>}
+    </FormDialog>
+
+    <ConfirmDialog
+      opened={confirmDeleteOpen}
+      title={labels.deleteTitle}
+      description={labels.deleteConsequence}
+      confirmLabel={labels.delete}
+      cancelLabel={labels.cancel}
+      danger
+      pending={busy}
+      {...(deleteError === undefined ? {} : { error: deleteError })}
+      onConfirm={() => { void remove(); }}
+      onCancel={() => { setConfirmDeleteOpen(false); setDeleteError(undefined); }}
+    />
   </section>;
 }
