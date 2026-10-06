@@ -440,6 +440,8 @@ const setupActor = async (database: TestD1Database, role: RoleRow): Promise<void
 };
 
 describe("Role-times-action matrix", () => {
+  // Large matrix (every guarded action x every role) that grows with each new guarded action,
+  // so it gets an explicit timeout instead of the 5 s default.
   it("runs every guard-protected write action for every channel role", async () => {
     // Without this floor, the test would pass if the table ran empty.
     expect(actions.length).toBeGreaterThanOrEqual(20);
@@ -455,5 +457,5 @@ describe("Role-times-action matrix", () => {
         }
       }
     }
-  });
+  }, 30_000);
 });
