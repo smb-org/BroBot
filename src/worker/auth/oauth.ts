@@ -25,6 +25,11 @@ export const BOT_SCOPES = [
   "moderator:read:vips",
   "moderator:manage:automod",
   "moderator:read:suspicious_users",
+  "moderator:read:banned_users",
+  "moderator:read:chat_messages",
+  "moderator:read:chat_settings",
+  "moderator:read:unban_requests",
+  "moderator:read:warnings",
 ] as const;
 
 /** Returns the required bot scopes that Twitch did not grant. */
