@@ -715,13 +715,13 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             : slashEffect === null ? null : <p className="form-hint" role="status">{slashEffect}</p>}
         </>}
       </div> : null}
-      {libraryBlocks.length === 0 ? null : <div className="command-library-picker">
-        <Select label={labels.libraryText} value={selectedLibraryBlock || null} placeholder={labels.libraryTextPlaceholder} options={libraryBlocks.map((name) => ({ value: name, label: `{${name}}` }))} disabled={!canManageContent || pending} onChange={(name) => setSelectedLibraryBlock(name ?? "")} />
-        <Button disabled={!canManageContent || pending || selectedLibraryBlock.length === 0} onClick={() => {
+      <div className="command-library-picker" data-testid="command-library-picker-slot" aria-hidden={libraryBlocks.length === 0 || undefined} style={libraryBlocks.length === 0 ? { visibility: "hidden" } : undefined}>
+        <Select label={labels.libraryText} value={selectedLibraryBlock || null} placeholder={labels.libraryTextPlaceholder} options={libraryBlocks.map((name) => ({ value: name, label: `{${name}}` }))} disabled={!canManageContent || pending || libraryBlocks.length === 0} onChange={(name) => setSelectedLibraryBlock(name ?? "")} />
+        <Button disabled={!canManageContent || pending || libraryBlocks.length === 0 || selectedLibraryBlock.length === 0} onClick={() => {
           const insertion = `{${selectedLibraryBlock}}`;
           setTemplateField(field, `${value}${value.length === 0 || /\s$/u.test(value) ? "" : " "}${insertion}`);
         }}>{labels.insertLibraryText}</Button>
-      </div>}
+      </div>
     </div>;
   };
 

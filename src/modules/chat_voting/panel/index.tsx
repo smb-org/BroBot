@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
-import { Button, Led, LoadState, NumberField, SegmentedControl, Skeleton } from "../../../dashboard/ui";
+import { Button, Led, LoadState, notify, NumberField, SegmentedControl, Skeleton } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { ChatVotePreset } from "../contracts";
 import type { ChatVotingPanelState } from "./service";
@@ -30,8 +30,8 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   const labels = chatVotingPanelTexts(language);
   const [state, setState] = useState<ChatVotingPanelState | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const loadErrorNotified = useRef(false);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [draftPreset, setDraftPreset] = useState<ChatVotePreset>("yes_no");
   const [draftOptionCount, setDraftOptionCount] = useState<number | "">(2);
   const [draftDurationPreset, setDraftDurationPreset] = useState<DurationPreset | null>(null);
@@ -52,10 +52,15 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
         configurationInitialized.current = true;
       }
       setLoadFailed(false);
+      loadErrorNotified.current = false;
     } catch {
       setLoadFailed(true);
+      if (!loadErrorNotified.current) {
+        loadErrorNotified.current = true;
+        notify({ tone: "error", message: labels.loadError });
+      }
     }
-  }, [channelId, setDraftCustomDurationSeconds, setDraftDurationPreset]);
+  }, [channelId, labels.loadError, setDraftCustomDurationSeconds, setDraftDurationPreset]);
 
   useEffect(() => { void Promise.resolve().then(() => refresh()); }, [refresh]);
 
@@ -76,7 +81,6 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
     if (durationSeconds === "" || !Number.isSafeInteger(durationSeconds) || durationSeconds < 0 || durationSeconds > 14_400 ||
         draftPreset === "options_n" && !validOptionCount) return;
     setBusy(true);
-    setMessage(null);
     try {
       await startChatVoting(channelId, draftPreset, draftPreset === "options_n" ? draftOptionCount as number : undefined, durationSeconds);
       const defaultDurationSeconds = state?.defaultDurationSeconds ?? 0;
@@ -86,7 +90,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
       durationDraftTouched.current = false;
       await refresh();
     } catch (error: unknown) {
-      setMessage(error instanceof Error && "code" in error && error.code === "chat_voting_busy" ? labels.busy : labels.startError);
+      notify({ tone: "error", message: error instanceof Error && "code" in error && error.code === "chat_voting_busy" ? labels.busy : labels.startError });
     } finally {
       setBusy(false);
     }
@@ -94,12 +98,11 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
 
   const close = async (): Promise<void> => {
     setBusy(true);
-    setMessage(null);
     try {
       await closeChatVoting(channelId);
       await refresh();
     } catch {
-      setMessage(labels.closeError);
+      notify({ tone: "error", message: labels.closeError });
     } finally {
       setBusy(false);
     }
@@ -111,7 +114,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
       minHeight="calc(var(--s10) * 20)"
       loading={<Skeleton rows={8} height={34} />}
       empty={<p className="empty-state">{labels.noVote}</p>}
-      error={<p className="form-error" role="alert">{labels.loadError}</p>}
+      error={<div />}
     >{null}</LoadState>
   </section>;
   const vote = state.vote;
@@ -134,9 +137,9 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   const validDuration = typeof durationSeconds === "number" && Number.isSafeInteger(durationSeconds) && durationSeconds >= 0 && durationSeconds <= 14_400;
   const validConfiguration = (draftPreset !== "options_n" || validOptionCount) && validDuration;
   const disabledReason = !canOperate ? labels.roleDisabledReason : activeBallot && !running ? labels.startDisabledReason : null;
-  const actionHint = message ?? (!running && draftPreset === "options_n" && !validOptionCount ? labels.invalidOptionCount
+  const actionHint = !running && draftPreset === "options_n" && !validOptionCount ? labels.invalidOptionCount
     : !running && !validDuration ? labels.invalidDuration
-      : disabledReason);
+      : disabledReason;
   const loadStateProps = {
     minHeight: "calc(var(--s10) * 20)",
     loading: <Skeleton rows={8} height={34} />,
@@ -248,8 +251,8 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
         </div>
       </div>
 
-      <div data-testid="chat-voting-hint-slot" style={{ height: "calc(var(--s10) + var(--s3))", overflow: "hidden" }} aria-live={message === null ? "polite" : "assertive"}>
-        {actionHint === null ? null : <p className={message !== null || !validConfiguration && !running ? "form-error" : "lock-reason"} title={actionHint} style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{actionHint}</p>}
+      <div data-testid="chat-voting-hint-slot" style={{ height: "calc(var(--s10) + var(--s3))", overflow: "hidden" }} aria-live={!validConfiguration && !running ? "assertive" : "polite"}>
+        {actionHint === null ? null : <p className={!validConfiguration && !running ? "form-error" : "lock-reason"} title={actionHint} style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{actionHint}</p>}
       </div>
       <div className="chat-voting-actions">
         {running

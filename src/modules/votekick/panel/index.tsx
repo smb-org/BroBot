@@ -98,58 +98,59 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
   const running = data?.running ?? null;
   const currentTime = now === 0 ? Date.parse(data?.now ?? "") : now;
   const history = data?.votekicks.filter((item) => item.status !== "running") ?? [];
-  return <section className="module-stack" aria-label={labels.ariaLabel}>
-    <LoadState status={loading ? "loading" : data === null ? "error" : "success"}
-      minHeight="calc(var(--s10) * 30)"
-      loading={<div className="module-stack" aria-label={labels.ariaLabel}>
-        <Skeleton rows={4} height={34} /><Skeleton rows={8} height={34} />
-      </div>}
-      empty={<div />}
-      error={<div style={{ minHeight: "calc(var(--s10) * 30)" }} />}
-    >
-    {data === null ? null : <>
+  const renderSections = (skeleton: boolean): ReactElement => <div className="module-stack" data-testid="votekick-reserved-content">
     <InspectorSection title={labels.running}>
       <div data-testid="votekick-running-slot" style={{ height: "calc(var(--s10) * 7)", overflowY: "auto" }}>
-      {running === null
-        ? <p className="muted">{labels.emptyRunning}</p>
-        : <article className="timer-row">
-            <div className="timer-row__copy">
-              <strong>{labels.target} · <code>{running.targetLogin ?? running.targetUserId ?? "—"}</code></strong>
-              <span>{labels.votes(running.yesVotes, running.noVotes, running.threshold)}</span>
-              <span style={{ minWidth: "calc(var(--s10) * 7)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                {labels.remaining(remainingVotekickSeconds(running.endsAt, currentTime))}
-              </span>
-            </div>
-            <div className="timer-row__actions">
-              <Button variant="subtle" danger disabled={!canOperate || busy} onClick={() => { setDialogError(undefined); setCancelTarget(running); }}>{labels.cancel}</Button>
-            </div>
-          </article>}
+        {skeleton ? <Skeleton rows={2} height={34} /> : running === null
+          ? <p className="muted">{labels.emptyRunning}</p>
+          : <article className="timer-row">
+              <div className="timer-row__copy">
+                <strong>{labels.target} · <code>{running.targetLogin ?? running.targetUserId ?? "—"}</code></strong>
+                <span>{labels.votes(running.yesVotes, running.noVotes, running.threshold)}</span>
+                <span style={{ minWidth: "calc(var(--s10) * 7)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                  {labels.remaining(remainingVotekickSeconds(running.endsAt, currentTime))}
+                </span>
+              </div>
+              <div className="timer-row__actions">
+                <Button variant="subtle" danger disabled={!canOperate || busy} onClick={() => { setDialogError(undefined); setCancelTarget(running); }}>{labels.cancel}</Button>
+              </div>
+            </article>}
       </div>
     </InspectorSection>
 
     <InspectorSection title={labels.history}>
-        <div className="state-list" data-testid="votekick-history-list"
-          style={{ height: "calc(var(--s10) * 20)", overflowY: "auto" }}>
-          {history.length === 0 ? <p className="muted">{labels.emptyHistory}</p> : history.map((item) => (
-            <article key={item.id} className="timer-row" style={{ height: "calc(var(--s10) * 5)", overflow: "hidden" }}>
-              <div className="timer-row__copy">
-                <strong>{labels.target} · <code>{item.targetLogin ?? item.targetUserId ?? "—"}</code></strong>
-                <span><Badge tone={item.status === "passed" ? "brand" : "neutral"}>{labels.status[item.status]}</Badge> · {formatTime(item.startedAt, resolvedLanguage)}</span>
-                <span>{labels.votes(item.yesVotes, item.noVotes, item.threshold)} · {labels.duration(item.durationSeconds)}</span>
-              </div>
-              <div className="timer-row__actions">
-                {item.status === "passed" && item.targetUserId !== null && item.liftedAt === null &&
-                  item.endedAt !== null && item.durationSeconds !== null &&
-                  Number.isFinite(Date.parse(item.endedAt)) &&
-                  Date.parse(item.endedAt) + item.durationSeconds * 1000 > currentTime
-                  ? <Button variant="neutral" disabled={!canOperate || busy} onClick={() => { setDialogError(undefined); setLiftTarget(item); }}>{labels.lift}</Button>
-                  : item.liftedAt === null ? null : <span role="status">{labels.lifted}</span>}
-              </div>
-            </article>
-          ))}
-        </div>
+      <div className="state-list" data-testid="votekick-history-list"
+        style={{ height: "calc(var(--s10) * 20)", overflowY: "auto" }}>
+        {skeleton ? <Skeleton rows={5} height={34} /> : history.length === 0
+          ? <p className="muted">{labels.emptyHistory}</p>
+          : history.map((item) => (
+              <article key={item.id} className="timer-row" style={{ height: "calc(var(--s10) * 5)", overflow: "hidden" }}>
+                <div className="timer-row__copy">
+                  <strong>{labels.target} · <code>{item.targetLogin ?? item.targetUserId ?? "—"}</code></strong>
+                  <span><Badge tone={item.status === "passed" ? "brand" : "neutral"}>{labels.status[item.status]}</Badge> · {formatTime(item.startedAt, resolvedLanguage)}</span>
+                  <span>{labels.votes(item.yesVotes, item.noVotes, item.threshold)} · {labels.duration(item.durationSeconds)}</span>
+                </div>
+                <div className="timer-row__actions">
+                  {item.status === "passed" && item.targetUserId !== null && item.liftedAt === null &&
+                    item.endedAt !== null && item.durationSeconds !== null &&
+                    Number.isFinite(Date.parse(item.endedAt)) &&
+                    Date.parse(item.endedAt) + item.durationSeconds * 1000 > currentTime
+                    ? <Button variant="neutral" disabled={!canOperate || busy} onClick={() => { setDialogError(undefined); setLiftTarget(item); }}>{labels.lift}</Button>
+                    : item.liftedAt === null ? null : <span role="status">{labels.lifted}</span>}
+                </div>
+              </article>
+            ))}
+      </div>
     </InspectorSection>
-    </>}
+  </div>;
+  return <section className="module-stack" aria-label={labels.ariaLabel}>
+    <LoadState status={loading ? "loading" : data === null ? "error" : "success"}
+      minHeight="0"
+      loading={renderSections(true)}
+      empty={renderSections(false)}
+      error={renderSections(true)}
+    >
+      {renderSections(false)}
     </LoadState>
 
     <ConfirmDialog

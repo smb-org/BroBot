@@ -136,7 +136,7 @@ export default function ApiSourcePanel({ channelId, language, canManage }: Modul
         empty={<p className="muted">{labels.empty}</p>}
         error={<p className="muted">{labels.loadFailed}</p>}
       >
-        <ul className="api-source-panel__list" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto" }}>
+        <ul className="api-source-panel__list" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", margin: 0, padding: 0, listStyle: "none" }}>
           {sources.map((source) => <li key={source.name}>
             <Button size="compact" variant={editingName === source.name ? "secondary" : "neutral"} onClick={() => startEdit(source)}>
               <code>{source.name}</code>
@@ -158,6 +158,7 @@ export default function ApiSourcePanel({ channelId, language, canManage }: Modul
       title={editingName === null ? labels.createSource : labels.editSource}
       confirmLabel={labels.save}
       cancelLabel={labels.cancel}
+      {...(canEdit ? {} : { description: labels.readOnlyReason })}
       onConfirm={() => { void save(); }}
       onCancel={closeEditor}
       pending={busy}

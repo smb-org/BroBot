@@ -62,6 +62,156 @@ test("API source editor and expression hint keep their boxes stable", async ({ p
   expect(dialogAfter).toEqual(dialogBefore);
 });
 
+test("API source list keeps its final populated row reachable at desktop and mobile widths", async ({ page }) => {
+  const sources = Array.from({ length: 8 }, (_, index) => ({
+    name: `source_${String(index)}`,
+    url: `https://example.com/${String(index)}`,
+    expression: "$.status",
+    revision: 1,
+    updatedAt: "2030-01-01T12:00:00.000Z",
+  }));
+  await routeJson(page, "/api/channels/channel-a/modules/api_source/sources", { sources });
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await gotoPanel(page, "api_source");
+    const list = page.getByTestId("api-source-list-slot").locator(".api-source-panel__list");
+    await expect(list.locator("li")).toHaveCount(sources.length);
+    const lastRow = await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      const lastButton = element.querySelector("li:last-child button");
+      if (!(lastButton instanceof HTMLElement)) throw new Error("The last source button is missing.");
+      const listBounds = element.getBoundingClientRect();
+      const buttonBounds = lastButton.getBoundingClientRect();
+      return { listBottom: listBounds.bottom, buttonBottom: buttonBounds.bottom, scrollable: element.scrollHeight > element.clientHeight };
+    });
+    expect(lastRow.scrollable).toBe(true);
+    expect(lastRow.buttonBottom).toBeLessThanOrEqual(lastRow.listBottom + 0.5);
+  }
+});
+
+test("text-library picker space is reserved until populated variables arrive", async ({ page }) => {
+  let signalRequest: () => void = () => undefined;
+  const requestStarted = new Promise<void>((resolve) => { signalRequest = resolve; });
+  let releaseResponse: () => void = () => undefined;
+  await routeJson(page, "/api/channels/channel-a/modules/text_commands/commands", { commands: [], variables: [] });
+  await page.route("**/api/channels/channel-a/template-variables", async (route) => {
+    signalRequest();
+    await new Promise<void>((resolve) => { releaseResponse = resolve; });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ variables: [
+      { name: "welcome", moduleId: "text_library", isTextBlock: true },
+    ] }) });
+  });
+
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await gotoPanel(page, "text_commands");
+  await page.getByRole("button", { name: "Add command" }).click();
+  await requestStarted;
+  const response = page.getByRole("textbox", { name: "Response" });
+  await expect(response).toBeVisible();
+  const editor = page.locator(".command-template-editor").first();
+  const pickerSlot = page.getByTestId("command-library-picker-slot").first();
+  const desktopBefore = { editor: await box(editor), slot: await box(pickerSlot) };
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileBefore = { editor: await box(editor), slot: await box(pickerSlot) };
+  releaseResponse();
+  await expect(page.getByRole("combobox", { name: "Text from library" }).first()).toBeVisible();
+
+  await page.setViewportSize({ width: 1280, height: 844 });
+  expect({ editor: await box(editor), slot: await box(pickerSlot) }).toEqual(desktopBefore);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect({ editor: await box(editor), slot: await box(pickerSlot) }).toEqual(mobileBefore);
+});
+
+test("votekick loading sections reserve their populated structure", async ({ page }) => {
+  const running = {
+    id: "running-a", targetUserId: "target-a", targetLogin: "sampleviewer", initiatorUserId: "starter-a",
+    status: "running", threshold: 3, yesVotes: 1, noVotes: 0, ballotRevision: 1, durationSeconds: null,
+    startedAt: "2030-01-01T12:00:00.000Z", endsAt: "2030-01-01T12:01:00.000Z", endedAt: null, liftedAt: null,
+  };
+  const history = Array.from({ length: 8 }, (_, index) => ({
+    ...running,
+    id: `history-${String(index)}`,
+    targetLogin: `viewer_${String(index)}`,
+    status: "expired",
+    startedAt: `2030-01-0${String(index + 1)}T12:00:00.000Z`,
+    endedAt: `2030-01-0${String(index + 1)}T12:01:00.000Z`,
+    durationSeconds: 60,
+  }));
+  let signalRequest: () => void = () => undefined;
+  const requestStarted = new Promise<void>((resolve) => { signalRequest = resolve; });
+  let releaseResponse: () => void = () => undefined;
+  await page.route("**/api/channels/channel-a/modules/votekick/votekicks", async (route) => {
+    signalRequest();
+    await new Promise<void>((resolve) => { releaseResponse = resolve; });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ running, votekicks: [running, ...history], now: "2030-01-01T12:00:30.000Z" }) });
+  });
+
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await gotoPanel(page, "votekick");
+  await requestStarted;
+  const content = page.getByTestId("votekick-reserved-content");
+  const desktopBefore = await box(content);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileBefore = await box(content);
+  releaseResponse();
+  await expect(content).toContainText("viewer_7");
+
+  await page.setViewportSize({ width: 1280, height: 844 });
+  expect(await box(content)).toEqual(desktopBefore);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await box(content)).toEqual(mobileBefore);
+});
+
+test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
+  const variables = { variables: [{ name: "greeting", moduleId: "text_library", isTextBlock: true }] };
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/template-variables", variables);
+
+  let timerCreated = false;
+  await page.route("**/api/channels/channel-a/modules/timers/timers", async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ timers: [] }) });
+    timerCreated = true;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ timer: {
+      id: "timer-created", name: "Hourly", enabled: true, blockName: "greeting", chatTarget: "source_only",
+      trigger: { type: "interval", minutes: 30 }, revision: 1, nextRunAt: null, nextRunStreamId: null,
+      lastRunAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
+    } }) });
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/timers/event-time-sources", { sources: [] });
+  await gotoPanel(page, "timers");
+  await page.getByRole("button", { name: "Create timer" }).click();
+  const timerDialog = page.getByRole("dialog", { name: "Create" });
+  await timerDialog.getByRole("textbox", { name: "Name" }).fill("Hourly");
+  await timerDialog.getByRole("combobox", { name: "Text block" }).click();
+  await page.getByRole("option", { name: "greeting" }).click();
+  await expect(timerDialog.locator("form")).toBeAttached();
+  await timerDialog.getByRole("textbox", { name: "Name" }).press("Enter");
+  await expect.poll(() => timerCreated).toBe(true);
+
+  let faqCreated = false;
+  await page.route("**/api/channels/channel-a/modules/faq/entries", async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [] }) });
+    faqCreated = true;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entry: {
+      id: "faq-created", name: "Greeting", enabled: true, matcher: { type: "keywords", patterns: ["hello"] },
+      answerBlock: "greeting", cooldownSeconds: 30, games: [], chatTarget: "source_only", order: 0, revision: 1,
+      lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
+    } }) });
+  });
+  await gotoPanel(page, "faq");
+  await page.getByRole("button", { name: "Create FAQ entry" }).click();
+  const faqDialog = page.getByRole("dialog", { name: "Create entry" });
+  await faqDialog.getByRole("textbox", { name: "Name" }).fill("Greeting");
+  await faqDialog.getByRole("textbox", { name: "Keywords and phrases" }).fill("hello");
+  await faqDialog.getByRole("combobox", { name: "Answer text block" }).click();
+  await page.getByRole("option", { name: "greeting" }).click();
+  await expect(faqDialog.locator("form")).toBeAttached();
+  await faqDialog.getByRole("textbox", { name: "Name" }).press("Enter");
+  await expect.poll(() => faqCreated).toBe(true);
+});
+
 test("Belabox test results stay inside the reserved result box", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/belabox/status", {
     configured: false, updatedAt: null, sample: null, errorCode: null, polling: false,
