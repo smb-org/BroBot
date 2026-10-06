@@ -50,6 +50,20 @@ test("mobile palette focuses search, names its dialog and selects by keyboard", 
   await expect(page.getByRole("combobox", { name: "Search elements" })).toHaveCount(0);
 });
 
+test("resizing from desktop to mobile with the palette open does not crash", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await routeApi(page);
+  await page.getByRole("button", { name: "Add element" }).click();
+  await expect(page.getByRole("combobox", { name: "Search elements" })).toBeFocused();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("dialog", { name: "Add element" })).toBeVisible();
+  await page.getByRole("combobox", { name: "Search elements" }).press("Enter");
+  await expect(page.locator(".overlay-editor__element-select")).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
 test("desktop palette closes with Escape after Tab and removal moves focus to the plus button", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await routeApi(page);

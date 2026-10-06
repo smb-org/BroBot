@@ -245,7 +245,7 @@ export function GroupedPicker<T = unknown>({
 
     return (
       <div id={surfacePanelId} className={`ui-grouped-picker${surface === "sheet" ? " ui-grouped-picker--sheet" : ""}`}>
-        {isSmallScreen ? (
+        {surface === "sheet" ? (
           <div className="ui-grouped-picker__mobile-header">
             <span className="ui-grouped-picker__handle" aria-hidden="true" />
             <Drawer.Title component="h2">{messages.title}</Drawer.Title>
