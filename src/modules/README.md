@@ -506,11 +506,19 @@ oder Twitch (etwa ein Clip nur bei laufendem Stream).
 
 **Einsatz:** Pro Element `kind` (`<moduleId>.<name>`, eindeutig), `configVersion`,
 `defaultSize`, `defaultConfig`, `parseConfig` und `load`; optional `editor`.
+`editorLabel` und `editorDescription` liefern den zweisprachigen Namen und die
+einzeilige Beschreibung in der Overlay-Element-Palette. Die Gruppe stammt aus
+`navigationCategory` des Moduls; die Elementdeklaration führt keine eigene
+Palette-Kategorie ein. `editorDescription` wird für jede Sprache (`de`, `en`)
+gesetzt, damit aktivierte und ausgeschaltete Module dieselbe vollständige
+Palette-Zeile erhalten.
 
 ```ts
 overlayElements: [{
   kind: "chat_voting.tally", configVersion: 1, defaultSize: { width: 480, height: 240 },
   defaultConfig: {}, parseConfig, load: () => import("./overlay/tally"),
+  editorLabel: { de: "Abstimmungsergebnis", en: "Voting tally" },
+  editorDescription: { de: "Live-Balken der Abstimmung.", en: "Live bars for the current vote." },
   initialState: (db, channelId) => readOpenTally(db, channelId),
   mergeRealtimeState: (current, incoming) => ({ ...current, ...incoming }),
 }],

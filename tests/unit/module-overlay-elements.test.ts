@@ -92,6 +92,8 @@ describe("module overlay element declarations", () => {
       expect(definition.previewState).toBeTypeOf("function");
       expect(definition.previewState?.(definition.defaultConfig, "en", Date.UTC(2026, 8, 27, 20, 15))).not.toEqual({});
       expect(definition.previewState?.(definition.defaultConfig, "de", Date.UTC(2026, 8, 27, 20, 15))).not.toEqual({});
+      expect(definition.editorDescription?.en.trim().length).toBeGreaterThan(0);
+      expect(definition.editorDescription?.de.trim().length).toBeGreaterThan(0);
     }
   });
 

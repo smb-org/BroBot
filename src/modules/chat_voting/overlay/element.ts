@@ -30,7 +30,7 @@ export const chatVotingOverlayElement = {
     revision: 1,
   }),
   editorLabel: { de: german.editorLabel, en: english.editorLabel },
-  editorAddLabel: { de: german.editorAddLabel, en: english.editorAddLabel },
+  editorDescription: { de: german.editorDescription, en: english.editorDescription },
   editorModuleLabel: { de: german.editorModuleLabel, en: english.editorModuleLabel },
   reloadStateOnModuleMessages: ["modul.chat_voting.opened"],
   mergeRealtimeState: mergeTallyRealtimeState,
