@@ -214,7 +214,7 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
 
 test("Belabox test results stay inside the reserved result box", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/belabox/status", {
-    configured: false, updatedAt: null, sample: null, errorCode: null, polling: false,
+    configured: false, updatedAt: null, mode: "on_demand", sample: null, errorCode: null, polling: false,
     pollingDesired: false, streamId: null, belaboxStreamId: null,
   });
   await routeJson(page, "/api/csrf", { token: "csrf" });

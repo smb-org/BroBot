@@ -434,6 +434,58 @@ describe("BELABOX secret and route redaction", () => {
     expect(await first.json()).toMatchObject({ sample: { connected: true, bitrateKbps: 2_400 }, polling: false });
     expect(await second.json()).toMatchObject({ sample: { connected: true, bitrateKbps: 2_400 }, polling: false });
     expect(fetcher).toHaveBeenCalledOnce();
+    const history = await send("/history?range=live", "GET");
+    await expect(history.json()).resolves.toEqual([]);
+    await expect(testDatabase.prepare("SELECT COUNT(*) AS count FROM belabox_minutes WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ count: number }>()).resolves.toEqual({ count: 0 });
+  });
+
+  it("returns only numeric history points and keeps stream reads channel-scoped", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { app } = await createBelaboxRouteHarness(testDatabase);
+    await insertChannel(testDatabase, "other-belabox-channel");
+    const sampledAt = new Date().toISOString();
+    const minuteAt = `${sampledAt.slice(0, 16)}:00.000Z`;
+    for (const channelId of [CHANNEL_ID, "other-belabox-channel"]) {
+      const bitrate = channelId === CHANNEL_ID ? 3_200 : 4_100;
+      await testDatabase.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+         VALUES (?, 'belabox', 1, '{"mode":"interval","intervalSeconds":15}')`,
+      ).bind(channelId).run();
+      await testDatabase.prepare(
+        `INSERT INTO belabox_status
+          (channel_id, sampled_at, sample_json, polling, stream_id, belabox_stream_id,
+           fetch_phase_json, recent_json, revision)
+         VALUES (?, ?, NULL, 1, 'shared-stream', 'shared-stream', ?, ?, 1)`,
+      ).bind(channelId, sampledAt, "{}", JSON.stringify([[sampledAt, bitrate, 41, true]])).run();
+      await testDatabase.prepare(
+        `INSERT INTO belabox_minutes
+          (channel_id, minute_at, stream_id, samples, connected_samples, bitrate_min, bitrate_max,
+           bitrate_sum, rtt_max, rtt_sum, dropped_delta)
+         VALUES (?, ?, 'shared-stream', 1, 1, ?, ?, ?, 41, 41, 3)`,
+      ).bind(channelId, minuteAt, bitrate, bitrate, bitrate).run();
+      await testDatabase.prepare(
+        `INSERT INTO belabox_streams
+          (channel_id, stream_id, started_at, ended_at, samples, bitrate_avg, bitrate_p10,
+           low_seconds, disconnected_seconds, disconnect_count, dropped_total)
+         VALUES (?, 'shared-stream', '2026-10-05T11:00:00.000Z', NULL, 1, ?, NULL, 0, 0, 0, 3)`,
+      ).bind(channelId, bitrate).run();
+    }
+    const sendFor = (channelId: string, path: string): Promise<Response> => Promise.resolve(app.fetch(new Request(
+      `https://brobot.example/channels/${channelId}/modules/belabox${path}`,
+    ), { DB: testDatabase as unknown as D1Database }));
+
+    const live = await sendFor(CHANNEL_ID, "/history?range=live");
+    const livePoints: unknown = await live.json();
+    expect(livePoints).toEqual([[Date.parse(sampledAt), 3_200, 1]]);
+    expect((livePoints as unknown[][]).flat().every((value) => typeof value === "number")).toBe(true);
+    const stream = await sendFor(CHANNEL_ID, "/history?range=stream&streamId=shared-stream");
+    await expect(stream.json()).resolves.toEqual([[Date.parse(minuteAt), 3_200, 1]]);
+    const streams = await sendFor(CHANNEL_ID, "/streams");
+    await expect(streams.json()).resolves.toMatchObject([{ streamId: "shared-stream", samples: 1 }]);
+    const foreign = await sendFor("other-belabox-channel", "/history?range=stream&streamId=shared-stream");
+    await expect(foreign.json()).resolves.toEqual([[Date.parse(minuteAt), 4_100, 1]]);
   });
 
   it("rechecks management membership after the POST /test body finishes before reading the stored secret", async () => {

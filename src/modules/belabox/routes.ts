@@ -10,7 +10,14 @@ import {
   BELABOX_STATS_URL_SECRET,
   type BelaboxTestResult,
 } from "./contracts";
-import { getBelaboxStatus, prepareBelaboxSampleClear, prepareBelaboxSampleWrite } from "./adapters/d1";
+import {
+  getBelaboxLiveHistory,
+  getBelaboxStatus,
+  getBelaboxStreamHistory,
+  listBelaboxStreams,
+  prepareBelaboxSampleClear,
+  prepareBelaboxSampleWrite,
+} from "./adapters/d1";
 import { fetchRelaySample } from "./adapters/stats-client";
 import { validateBelaboxStatsUrl } from "./domain/stats-url";
 import { belaboxSettingsForChannel, currentBelaboxSample } from "./service";
@@ -95,6 +102,7 @@ belaboxRoutes.get("/status", async (context) => {
     secretStatus.configured && streamState?.state === "online";
   return context.json({
     ...secretStatus,
+    mode: moduleState?.settings.mode ?? null,
     sample: status?.sample ?? null,
     errorCode: status?.errorCode ?? null,
     polling: status?.polling ?? false,
@@ -102,6 +110,29 @@ belaboxRoutes.get("/status", async (context) => {
     streamId: status?.streamId ?? null,
     belaboxStreamId: status?.belaboxStreamId ?? null,
   });
+});
+
+belaboxRoutes.get("/history", async (context) => {
+  const channelId = channelIdOf(context);
+  const range = context.req.query("range");
+  if (range !== "live" && range !== "stream") return context.json({ error: "belabox_history_range_invalid" }, 400);
+  const moduleState = await belaboxSettingsForChannel(context.env.DB, channelId);
+  if (moduleState?.enabled !== true || moduleState.settings.mode !== "interval") return context.json([]);
+  if (range === "live") return context.json(await getBelaboxLiveHistory(context.env.DB, channelId));
+
+  const requestedStreamId = context.req.query("streamId");
+  if (requestedStreamId !== undefined && (requestedStreamId.length === 0 || requestedStreamId.length > 128)) {
+    return context.json({ error: "belabox_history_stream_invalid" }, 400);
+  }
+  const status = requestedStreamId === undefined ? await getBelaboxStatus(context.env.DB, channelId) : null;
+  const streamId = requestedStreamId ?? status?.belaboxStreamId;
+  if (streamId === null || streamId === undefined) return context.json([]);
+  return context.json(await getBelaboxStreamHistory(context.env.DB, channelId, streamId));
+});
+
+belaboxRoutes.get("/streams", async (context) => {
+  const channelId = channelIdOf(context);
+  return context.json(await listBelaboxStreams(context.env.DB, channelId));
 });
 
 belaboxRoutes.put("/stats-url", async (context) => {

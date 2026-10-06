@@ -7,6 +7,7 @@ import {
   BELABOX_POLL_ALARM_KEY,
   belaboxSettingsSchema,
 } from "./contracts";
+import { finalizeBelaboxStream, purgeExpiredBelaboxMinutes } from "./adapters/d1";
 import { ensureBelaboxPoll, ensureBelaboxPollSchedule, handleBelaboxPollAlarm } from "./service";
 
 export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
@@ -31,12 +32,20 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
     onScheduleInputsChanged: ensureBelaboxPollSchedule,
   }],
   routes: belaboxRoutes,
+  scheduledMaintenance: purgeExpiredBelaboxMinutes,
   panel: () => import("./panel/index"),
   settingsEditor: () => import("./panel/settings-editor"),
   handleEvent: async (event, context) => {
     if (context.streamStateTransitionAccepted !== true ||
         (event.subscriptionType !== "stream.online" && event.subscriptionType !== "stream.offline")) {
       return { actions: [], diagnostics: [] };
+    }
+    if (event.subscriptionType === "stream.offline") {
+      try {
+        await finalizeBelaboxStream(context.DB, event.channelId, event.eventSubTimestamp ?? event.receivedAt);
+      } catch {
+        // The offline alarm retries finalization before clearing the stream binding.
+      }
     }
     try {
       await ensureBelaboxPoll({

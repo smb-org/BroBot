@@ -61,12 +61,28 @@ export interface BelaboxSample extends BelaboxStats {
 export interface BelaboxStatusResponse {
   configured: boolean;
   updatedAt: string | null;
+  mode: BelaboxSettings["mode"] | null;
   sample: BelaboxSample | null;
   errorCode: BelaboxStatusErrorCode | null;
   polling: boolean;
   pollingDesired: boolean;
   streamId: string | null;
   belaboxStreamId: string | null;
+}
+
+export type BelaboxHistoryPoint = readonly [at: number, bitrateKbps: number, connected: number];
+
+export interface BelaboxStreamSummary {
+  streamId: string;
+  startedAt: string;
+  endedAt: string | null;
+  samples: number;
+  bitrateAvg: number;
+  bitrateP10: number | null;
+  lowSeconds: number;
+  disconnectedSeconds: number;
+  disconnectCount: number;
+  droppedTotal: number;
 }
 
 export type BelaboxFetchResult =

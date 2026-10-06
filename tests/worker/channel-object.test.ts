@@ -1496,6 +1496,22 @@ describe("ChannelObject realtime path", () => {
       )`,
     ).run();
     await database.prepare(
+      `CREATE TABLE IF NOT EXISTS belabox_minutes (
+        channel_id TEXT NOT NULL, minute_at TEXT NOT NULL, stream_id TEXT NOT NULL, samples INTEGER NOT NULL,
+        connected_samples INTEGER NOT NULL, bitrate_min REAL NOT NULL, bitrate_max REAL NOT NULL,
+        bitrate_sum REAL NOT NULL, rtt_max REAL NOT NULL, rtt_sum REAL NOT NULL, dropped_delta REAL NOT NULL,
+        PRIMARY KEY (channel_id, minute_at, stream_id)
+      )`,
+    ).run();
+    await database.prepare(
+      `CREATE TABLE IF NOT EXISTS belabox_streams (
+        channel_id TEXT NOT NULL, stream_id TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT,
+        samples INTEGER NOT NULL, bitrate_avg REAL NOT NULL, bitrate_p10 REAL, low_seconds REAL NOT NULL,
+        disconnected_seconds REAL NOT NULL, disconnect_count INTEGER NOT NULL, dropped_total REAL NOT NULL,
+        PRIMARY KEY (channel_id, stream_id)
+      )`,
+    ).run();
+    await database.prepare(
       `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?)`,
     ).bind(channelId, channelId, channelId, nowIso, nowIso).run();

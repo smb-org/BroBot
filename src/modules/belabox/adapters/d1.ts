@@ -6,7 +6,14 @@ import {
   type BelaboxFetchFailureReason,
   type BelaboxStatusErrorCode,
   type BelaboxSample,
+  type BelaboxHistoryPoint,
+  type BelaboxStreamSummary,
 } from "../contracts";
+import {
+  BELABOX_LOW_BITRATE_KBPS,
+  bitrateP10,
+  elapsedSampleSeconds,
+} from "../domain/history";
 
 export interface BelaboxRecentPoint {
   at: string;
@@ -120,6 +127,117 @@ export const getBelaboxStatus = async (db: D1Database, channelId: string): Promi
 export const getLatestBelaboxSample = async (db: D1Database, channelId: string): Promise<BelaboxSample | null> =>
   (await getBelaboxStatus(db, channelId))?.sample ?? null;
 
+export const getBelaboxLiveHistory = async (db: D1Database, channelId: string, now = Date.now()): Promise<BelaboxHistoryPoint[]> => {
+  const status = await getBelaboxStatus(db, channelId);
+  if (status === null) return [];
+  const cutoff = now - 10 * 60_000;
+  return status.recent.flatMap(({ at, bitrateKbps, connected }) => {
+    const timestamp = Date.parse(at);
+    return Number.isFinite(timestamp) && timestamp >= cutoff
+      ? [[timestamp, bitrateKbps, Number(connected)] as const]
+      : [];
+  });
+};
+
+export const getBelaboxStreamHistory = async (
+  db: D1Database,
+  channelId: string,
+  streamId: string,
+): Promise<BelaboxHistoryPoint[]> => {
+  const result = await db.prepare(
+    `SELECT minute_at, samples, connected_samples, bitrate_sum
+       FROM belabox_minutes
+      WHERE channel_id = ? AND stream_id = ?
+      ORDER BY minute_at ASC`,
+  ).bind(channelId, streamId).all<{
+    minute_at: string;
+    samples: number;
+    connected_samples: number;
+    bitrate_sum: number;
+  }>();
+  return result.results.flatMap((row) => {
+    const timestamp = Date.parse(row.minute_at);
+    if (!Number.isFinite(timestamp) || !Number.isFinite(row.samples) || row.samples < 1 ||
+        !Number.isFinite(row.connected_samples) || !Number.isFinite(row.bitrate_sum)) return [];
+    return [[timestamp, row.bitrate_sum / row.samples, row.connected_samples / row.samples] as const];
+  });
+};
+
+export const listBelaboxStreams = async (db: D1Database, channelId: string): Promise<BelaboxStreamSummary[]> => {
+  const result = await db.prepare(
+    `SELECT stream_id, started_at, ended_at, samples, bitrate_avg, bitrate_p10,
+            low_seconds, disconnected_seconds, disconnect_count, dropped_total
+       FROM belabox_streams
+      WHERE channel_id = ?
+      ORDER BY started_at DESC`,
+  ).bind(channelId).all<{
+    stream_id: string;
+    started_at: string;
+    ended_at: string | null;
+    samples: number;
+    bitrate_avg: number;
+    bitrate_p10: number | null;
+    low_seconds: number;
+    disconnected_seconds: number;
+    disconnect_count: number;
+    dropped_total: number;
+  }>();
+  return result.results.map((row) => ({
+    streamId: row.stream_id,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    samples: row.samples,
+    bitrateAvg: row.bitrate_avg,
+    bitrateP10: row.bitrate_p10,
+    lowSeconds: row.low_seconds,
+    disconnectedSeconds: row.disconnected_seconds,
+    disconnectCount: row.disconnect_count,
+    droppedTotal: row.dropped_total,
+  }));
+};
+
+export const finalizeBelaboxStream = async (
+  db: D1Database,
+  channelId: string,
+  endedAt: string,
+  lowBitrateKbps = BELABOX_LOW_BITRATE_KBPS,
+): Promise<boolean> => {
+  const status = await getBelaboxStatus(db, channelId);
+  if (status?.streamId === null || status?.streamId === undefined ||
+      status.belaboxStreamId !== status.streamId) return false;
+  const streamId = status.streamId;
+  const minutes = await db.prepare(
+    `SELECT samples, bitrate_sum FROM belabox_minutes
+      WHERE channel_id = ? AND stream_id = ?
+      ORDER BY minute_at ASC`,
+  ).bind(channelId, streamId).all<{ samples: number; bitrate_sum: number }>();
+  const p10 = bitrateP10(minutes.results.flatMap((row) =>
+    Number.isFinite(row.samples) && row.samples > 0 && Number.isFinite(row.bitrate_sum)
+      ? [row.bitrate_sum / row.samples]
+      : []));
+  const ending = Date.parse(endedAt);
+  const normalizedEndedAt = Number.isFinite(ending) ? new Date(ending).toISOString() : new Date().toISOString();
+  const tailSeconds = status.sample === null
+    ? 0
+    : elapsedSampleSeconds(status.sample, { ...status.sample, at: normalizedEndedAt });
+  const lowTail = status.sample?.connected === true && status.sample.bitrateKbps < lowBitrateKbps ? tailSeconds : 0;
+  const disconnectedTail = status.sample?.connected === false ? tailSeconds : 0;
+  const result = await db.prepare(
+    `UPDATE belabox_streams
+        SET ended_at = ?,
+            bitrate_p10 = ?,
+            low_seconds = low_seconds + ?,
+            disconnected_seconds = disconnected_seconds + ?
+      WHERE channel_id = ? AND stream_id = ? AND ended_at IS NULL`,
+  ).bind(normalizedEndedAt, p10, lowTail, disconnectedTail, channelId, streamId).run();
+  return result.meta.changes > 0;
+};
+
+export const purgeExpiredBelaboxMinutes = async (db: D1Database, now: string): Promise<void> => {
+  const cutoff = new Date(Date.parse(now) - 30 * 24 * 60 * 60_000).toISOString();
+  await db.prepare("DELETE FROM belabox_minutes WHERE minute_at < ?").bind(cutoff).run();
+};
+
 const encodedRecent = (recent: readonly BelaboxRecentPoint[]): string => JSON.stringify(
   recent.map(({ at, bitrateKbps, rttMs, connected }) => [at, bitrateKbps, rttMs, connected]),
 );
@@ -128,6 +246,12 @@ const encodedPhase = (phase: BelaboxFetchPhase): string => JSON.stringify({
   consecutiveFailures: phase.consecutiveFailures,
   fetchFailing: phase.failing,
 });
+
+export const belaboxHistoryStatusGuard = `WHERE EXISTS (
+    SELECT 1 FROM belabox_status
+     WHERE channel_id = ? AND revision = ? AND sampled_at = ? AND sample_json = ?
+       AND stream_id = ? AND belabox_stream_id = ?
+  )`;
 
 export const setBelaboxPollingState = async (
   db: D1Database,
@@ -201,9 +325,19 @@ export const writeBelaboxFetch = async (
     recent: readonly BelaboxRecentPoint[];
     expectedSecretVersion: string;
     expectedStatusRevision: number | null;
+    history?: {
+      streamId: string;
+      startedAt: string;
+      minuteAt: string;
+      droppedDelta: number;
+      lowSeconds: number;
+      disconnectedSeconds: number;
+      disconnectCount: number;
+    };
   },
 ): Promise<number | null> => {
-  const row = await db.prepare(
+  const sampleJson = input.sample === null ? null : JSON.stringify(input.sample);
+  const statusWrite = db.prepare(
     `INSERT INTO belabox_status
       (channel_id, sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
        fetch_phase_json, recent_json, revision)
@@ -237,7 +371,7 @@ export const writeBelaboxFetch = async (
   ).bind(
     input.channelId,
     input.sample?.at ?? null,
-    input.sample === null ? null : JSON.stringify(input.sample),
+    sampleJson,
     input.errorCode,
     Number(input.polling),
     input.streamId,
@@ -252,8 +386,81 @@ export const writeBelaboxFetch = async (
     input.channelId,
     input.expectedStatusRevision,
     input.expectedStatusRevision ?? -1,
-  ).first<{ revision: number }>();
-  return row?.revision ?? null;
+  );
+  if (input.history === undefined || input.sample === null || sampleJson === null) {
+    const row = await statusWrite.first<{ revision: number }>();
+    return row?.revision ?? null;
+  }
+
+  const nextRevision = (input.expectedStatusRevision ?? 0) + 1;
+  const { history } = input;
+  const sample = input.sample;
+  const minuteWrite = db.prepare(
+    `INSERT INTO belabox_minutes
+      (channel_id, minute_at, stream_id, samples, connected_samples, bitrate_min, bitrate_max,
+       bitrate_sum, rtt_max, rtt_sum, dropped_delta)
+     SELECT ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?
+     ${belaboxHistoryStatusGuard}
+     ON CONFLICT (channel_id, minute_at, stream_id) DO UPDATE SET
+       samples = belabox_minutes.samples + 1,
+       connected_samples = belabox_minutes.connected_samples + excluded.connected_samples,
+       bitrate_min = MIN(belabox_minutes.bitrate_min, excluded.bitrate_min),
+       bitrate_max = MAX(belabox_minutes.bitrate_max, excluded.bitrate_max),
+       bitrate_sum = belabox_minutes.bitrate_sum + excluded.bitrate_sum,
+       rtt_max = MAX(belabox_minutes.rtt_max, excluded.rtt_max),
+       rtt_sum = belabox_minutes.rtt_sum + excluded.rtt_sum,
+       dropped_delta = belabox_minutes.dropped_delta + excluded.dropped_delta`,
+  ).bind(
+    input.channelId,
+    history.minuteAt,
+    history.streamId,
+    Number(sample.connected),
+    sample.bitrateKbps,
+    sample.bitrateKbps,
+    sample.bitrateKbps,
+    sample.rttMs,
+    sample.rttMs,
+    history.droppedDelta,
+    input.channelId,
+    nextRevision,
+    sample.at,
+    sampleJson,
+    history.streamId,
+    history.streamId,
+  );
+  const streamWrite = db.prepare(
+    `INSERT INTO belabox_streams
+      (channel_id, stream_id, started_at, ended_at, samples, bitrate_avg, bitrate_p10,
+       low_seconds, disconnected_seconds, disconnect_count, dropped_total)
+     SELECT ?, ?, ?, NULL, 1, ?, NULL, ?, ?, ?, ?
+     ${belaboxHistoryStatusGuard}
+     ON CONFLICT (channel_id, stream_id) DO UPDATE SET
+       samples = belabox_streams.samples + 1,
+       bitrate_avg = ((belabox_streams.bitrate_avg * belabox_streams.samples) + excluded.bitrate_avg) /
+                     (belabox_streams.samples + 1),
+       low_seconds = belabox_streams.low_seconds + excluded.low_seconds,
+       disconnected_seconds = belabox_streams.disconnected_seconds + excluded.disconnected_seconds,
+       disconnect_count = belabox_streams.disconnect_count + excluded.disconnect_count,
+       dropped_total = belabox_streams.dropped_total + excluded.dropped_total
+     WHERE belabox_streams.ended_at IS NULL`,
+  ).bind(
+    input.channelId,
+    history.streamId,
+    history.startedAt,
+    sample.bitrateKbps,
+    history.lowSeconds,
+    history.disconnectedSeconds,
+    history.disconnectCount,
+    history.droppedDelta,
+    input.channelId,
+    nextRevision,
+    sample.at,
+    sampleJson,
+    history.streamId,
+    history.streamId,
+  );
+  const results = await db.batch([statusWrite, minuteWrite, streamWrite]);
+  return (results[0]?.meta.changes ?? 0) > 0 ? nextRevision : null;
 };
 
 /*

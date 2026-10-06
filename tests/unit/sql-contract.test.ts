@@ -29,6 +29,7 @@ import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { chatVoteSelectColumns } from "../../src/modules/chat_voting/repository";
+import { belaboxHistoryStatusGuard } from "../../src/modules/belabox/adapters/d1";
 import { MANAGING_ROLES } from "../../src/contracts/values";
 import { ANY_MEMBER_ROLES } from "../../src/worker/db/guards";
 
@@ -102,6 +103,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["textBlockSelectColumns", textBlockSelectColumns],
   ["textBlockCategorySelectColumns", textBlockCategorySelectColumns],
   ["chatVoteSelectColumns", chatVoteSelectColumns],
+  ["belaboxHistoryStatusGuard", belaboxHistoryStatusGuard],
   ["guard", authorizeModuleMutation("channel-id", actor, now).sql],
   ["channelBotConsentCondition(\"channel\")", channelBotConsentCondition("channel")],
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
@@ -171,9 +173,9 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(48);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(40);
-      expect(objects).toHaveLength(88);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(50);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(42);
+      expect(objects).toHaveLength(92);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

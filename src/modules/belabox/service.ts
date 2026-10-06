@@ -15,6 +15,7 @@ import {
   type BelaboxSettings,
 } from "./contracts";
 import {
+  finalizeBelaboxStream,
   getBelaboxStatus,
   setBelaboxPollingState,
   writeBelaboxFetch,
@@ -22,6 +23,12 @@ import {
   type BelaboxRecentPoint,
 } from "./adapters/d1";
 import { fetchRelaySample } from "./adapters/stats-client";
+import {
+  BELABOX_LOW_BITRATE_KBPS,
+  droppedPacketDelta,
+  elapsedSampleSeconds,
+  minuteAtForSample,
+} from "./domain/history";
 import { validateBelaboxStatsUrl } from "./domain/stats-url";
 
 const LIVE_BUFFER_MS = 10 * 60_000;
@@ -168,6 +175,9 @@ const stopPolling = async (
   context: ModuleAlarmContext,
   prerequisites: AlarmPrerequisites,
 ): Promise<void> => {
+  if (prerequisites.streamState === "offline") {
+    await finalizeBelaboxStream(context.DB, context.channelId, new Date().toISOString());
+  }
   await setBelaboxPollingState(
     context.DB,
     context.channelId,
@@ -225,7 +235,23 @@ const storePollResult = async (
     const classified = alreadyClassified || result.ok && result.sample.connected && streamId !== null;
     const now = Date.now();
     const recent = sameStream ? pruneRecent(currentStatus.recent, now) : [];
-    const nextRecent = result.ok && alreadyClassified ? appendRecent(recent, result.sample, now) : recent;
+    const nextRecent = result.ok && classified ? appendRecent(recent, result.sample, now) : recent;
+    const previousSample = alreadyClassified ? currentStatus.sample : null;
+    const minuteAt = result.ok && classified ? minuteAtForSample(result.sample.at) : null;
+    const elapsedSeconds = result.ok ? elapsedSampleSeconds(previousSample, result.sample) : 0;
+    const history = result.ok && classified && minuteAt !== null
+      ? {
+        streamId,
+        startedAt: live.startedAt ?? result.sample.at,
+        minuteAt,
+        droppedDelta: droppedPacketDelta(result.sample, previousSample),
+        lowSeconds: previousSample?.connected === true && previousSample.bitrateKbps < BELABOX_LOW_BITRATE_KBPS
+          ? elapsedSeconds
+          : 0,
+        disconnectedSeconds: previousSample?.connected === false ? elapsedSeconds : 0,
+        disconnectCount: previousSample?.connected === true && !result.sample.connected ? 1 : 0,
+      }
+      : undefined;
     const written = await writeBelaboxFetch(context.DB, {
       channelId: context.channelId,
       sample: result.ok ? result.sample : null,
@@ -237,6 +263,7 @@ const storePollResult = async (
       recent: nextRecent,
       expectedSecretVersion: secretVersion,
       expectedStatusRevision: currentStatus?.revision ?? null,
+      ...(history === undefined ? {} : { history }),
     });
     if (written !== null) {
       await writePhaseDiagnostic(

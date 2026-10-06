@@ -26,7 +26,7 @@ const STREAM_ID = "stream-321";
 const SECRET_SENTINEL = "BELABOX_ALARM_SENTINEL_321";
 const STATS_URL = `http://relay.belabox.net:8080/${SECRET_SENTINEL}`;
 
-const relayPayload = (connected: boolean, bitrateKbps = 3_200) => ({
+const relayPayload = (connected: boolean, bitrateKbps = 3_200, droppedPackets = 7) => ({
   publishers: {
     [SECRET_SENTINEL]: {
       connected,
@@ -34,7 +34,7 @@ const relayPayload = (connected: boolean, bitrateKbps = 3_200) => ({
       rtt: connected ? 41 : 0,
       latency: connected ? 115 : 0,
       network: connected ? 2 : 0,
-      dropped_pkts: connected ? 7 : 0,
+      dropped_pkts: connected ? droppedPackets : 0,
     },
   },
 });
@@ -255,13 +255,17 @@ describe("BELABOX polling", () => {
       recent: [],
       sample: { connected: false },
     });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM belabox_minutes WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ count: number }>()).resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM belabox_streams WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ count: number }>()).resolves.toEqual({ count: 0 });
 
     vi.setSystemTime(Date.now() + 60_000);
     await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
     expect(scheduled.at(-1)?.deadline).toBe(Date.now() + 15_000);
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
       belaboxStreamId: STREAM_ID,
-      recent: [],
+      recent: [{ bitrateKbps: 3_200, connected: true }],
       sample: { connected: true },
     });
 
@@ -269,7 +273,135 @@ describe("BELABOX polling", () => {
     await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
       belaboxStreamId: STREAM_ID,
-      recent: [{ bitrateKbps: 3_200, connected: true }],
+      recent: [
+        { bitrateKbps: 3_200, connected: true },
+        { bitrateKbps: 3_200, connected: true },
+      ],
+    });
+  });
+
+  it("upserts minute and stream aggregates and treats a dropped-packet reset as a fresh counter", async () => {
+    await insertModule(database);
+    const { context } = alarmContext(database, { streamId: STREAM_ID });
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 500, 10)))
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 800, 14)))
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 2)))
+      .mockResolvedValueOnce(jsonResponse(relayPayload(false)));
+
+    for (let index = 0; index < 4; index += 1) {
+      vi.setSystemTime(new Date(`2026-10-05T12:00:${String(index * 15).padStart(2, "0")}.000Z`));
+      await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
+    }
+
+    const minute = await database.prepare(
+      `SELECT stream_id, samples, connected_samples, bitrate_min, bitrate_max, bitrate_sum,
+              rtt_max, rtt_sum, dropped_delta
+         FROM belabox_minutes WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>();
+    expect((await getBelaboxStatus(database as unknown as D1Database, CHANNEL_ID))?.recent).toHaveLength(4);
+    expect(minute).toEqual({
+      stream_id: STREAM_ID,
+      samples: 4,
+      connected_samples: 3,
+      bitrate_min: 0,
+      bitrate_max: 3_200,
+      bitrate_sum: 4_500,
+      rtt_max: 41,
+      rtt_sum: 123,
+      dropped_delta: 16,
+    });
+    await expect(database.prepare(
+      `SELECT stream_id, samples, bitrate_avg, ended_at, dropped_total
+         FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({
+      stream_id: STREAM_ID,
+      samples: 4,
+      bitrate_avg: 1_125,
+      ended_at: null,
+      dropped_total: 16,
+    });
+
+    const handleEvent = belaboxModule.handleEvent;
+    if (handleEvent === undefined) throw new Error("BELABOX event handler missing.");
+    await handleEvent({
+      channelId: CHANNEL_ID,
+      subscriptionType: "stream.offline",
+      triggerId: "stream-ended",
+      payload: {},
+      settings: BELABOX_DEFAULT_SETTINGS,
+      receivedAt: "2026-10-05T12:01:00.000Z",
+      eventSubTimestamp: "2026-10-05T12:01:00.000Z",
+      actor: null,
+      chatStatus: null,
+    }, {
+      DB: database as unknown as D1Database,
+      streamStateTransitionAccepted: true,
+      scheduleAlarm: () => Promise.resolve(),
+    } as unknown as ModuleExecutionContext);
+    await expect(database.prepare(
+      `SELECT ended_at, bitrate_p10 FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({
+      ended_at: "2026-10-05T12:01:00.000Z",
+      bitrate_p10: 1_125,
+    });
+    await expect(database.prepare(
+      `SELECT low_seconds, disconnected_seconds, disconnect_count
+         FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({
+      low_seconds: 30,
+      disconnected_seconds: 15,
+      disconnect_count: 1,
+    });
+  });
+
+  it("keeps separate minute aggregates when two BELABOX streams start in the same minute", async () => {
+    await insertModule(database);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 1_000)))
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 2_000)));
+    vi.setSystemTime("2026-10-05T12:00:05.000Z");
+    await handleBelaboxPollAlarm(alarmContext(database, { streamId: "stream-first" }).context,
+      BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
+    vi.setSystemTime("2026-10-05T12:00:20.000Z");
+    await handleBelaboxPollAlarm(alarmContext(database, { streamId: "stream-second" }).context,
+      BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
+
+    await expect(database.prepare(
+      `SELECT stream_id, samples, bitrate_sum FROM belabox_minutes
+        WHERE channel_id = ? ORDER BY stream_id`,
+    ).bind(CHANNEL_ID).all<Record<string, unknown>>()).resolves.toMatchObject({
+      results: [
+        { stream_id: "stream-first", samples: 1, bitrate_sum: 1_000 },
+        { stream_id: "stream-second", samples: 1, bitrate_sum: 2_000 },
+      ],
+    });
+  });
+
+  it("retains minute data for thirty days and keeps stream summaries", async () => {
+    await database.prepare(
+      `INSERT INTO belabox_minutes
+        (channel_id, minute_at, stream_id, samples, connected_samples, bitrate_min, bitrate_max,
+         bitrate_sum, rtt_max, rtt_sum, dropped_delta)
+       VALUES (?, '2026-09-04T11:59:00.000Z', 'old-stream', 1, 1, 1000, 1000, 1000, 20, 20, 0),
+              (?, '2026-09-05T12:00:00.000Z', 'recent-stream', 1, 1, 2000, 2000, 2000, 30, 30, 0)`,
+    ).bind(CHANNEL_ID, CHANNEL_ID).run();
+    await database.prepare(
+      `INSERT INTO belabox_streams
+        (channel_id, stream_id, started_at, samples, bitrate_avg, low_seconds, disconnected_seconds,
+         disconnect_count, dropped_total)
+       VALUES (?, 'old-stream', '2026-09-01T12:00:00.000Z', 1, 1000, 0, 0, 0, 0)`,
+    ).bind(CHANNEL_ID).run();
+
+    await belaboxModule.scheduledMaintenance?.(database as unknown as D1Database, "2026-10-05T12:00:00.000Z");
+
+    await expect(database.prepare("SELECT minute_at FROM belabox_minutes WHERE channel_id = ? ORDER BY minute_at")
+      .bind(CHANNEL_ID).all<{ minute_at: string }>()).resolves.toMatchObject({
+      results: [{ minute_at: "2026-09-05T12:00:00.000Z" }],
+    });
+    await expect(database.prepare("SELECT stream_id FROM belabox_streams WHERE channel_id = ?")
+      .bind(CHANNEL_ID).all<{ stream_id: string }>()).resolves.toMatchObject({
+      results: [{ stream_id: "old-stream" }],
     });
   });
 
