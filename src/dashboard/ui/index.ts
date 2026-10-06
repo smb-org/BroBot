@@ -3,6 +3,7 @@
 // in docs/input/DESIGN-neu.md.
 
 export { UiProvider } from "./Provider";
+export { Tabs } from "@mantine/core";
 export { Dialog } from "./Dialog";
 export { theme, colors, luminanceThreshold } from "./theme";
 export type { StateToken, FamilyToken } from "./theme";

@@ -90,7 +90,8 @@
 .ui-color-field__swatch input[data-unset="true"]:focus-visible + .ui-color-field__empty-swatch { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .ui-color-field input:disabled { cursor: not-allowed; }
 .ui-color-field__unset { color: var(--text-2); font-size: 12px; }
-.overlay-editor__style-lock { display: grid; gap: var(--s2); padding: var(--s3); border: 1px solid var(--warn); border-radius: var(--r-control); background: var(--warning-surface); color: var(--text); }
+.overlay-editor__style-lock { box-sizing: border-box; display: grid; height: 148px; align-content: start; gap: var(--s2); padding: var(--s3); border: 1px solid var(--warn); border-radius: var(--r-control); background: var(--warning-surface); color: var(--text); }
+.overlay-editor__style-lock[data-locked="false"] { border-color: transparent; background: transparent; }
 .overlay-editor__style-lock p, .overlay-editor__code-actions p { margin: 0; }
 .overlay-editor__style-actions, .overlay-editor__code-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2); }
 .overlay-editor__css-code textarea { display: block; width: 100%; min-height: 320px; resize: vertical; padding: var(--s3); border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-well); color: var(--text); font-family: var(--mantine-font-family-monospace); font-size: 12px; line-height: 1.5; tab-size: 2; }

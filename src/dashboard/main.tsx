@@ -57,7 +57,7 @@ import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, Icon, InspectorSection, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
 import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
@@ -256,13 +256,6 @@ const mergeModeratorStatus = <T extends { moderator: PanelModeratorStatus | null
 
 const formatTimestamp = (value: string): string => formatTimestampBase(value);
 
-const ErrorPanel = ({ message }: { message: string }): ReactElement => (
-  <section className="error-panel" data-status="error" role="alert">
-    <strong>{dashboardTexts().errors.title}</strong>
-    <p>{message}</p>
-  </section>
-);
-
 interface PanelSidebarProperties {
   route: DashboardRoute;
   channels: PanelChannelState[];
@@ -440,7 +433,6 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
   const [dialogControl, setDialogControl] = useState<"mute" | "pause" | null>(null);
   const [duration, setDuration] = useState<ChannelControlDuration>("unlimited");
   const [busy, setBusy] = useState<"mute" | "pause" | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const refreshRef = useRef(onRefresh);
   useEffect(() => { refreshRef.current = onRefresh; }, [onRefresh]);
   const mute = controls?.mute ?? CONTROL_OFF;
@@ -466,15 +458,17 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
   const apply = async (kind: "mute" | "pause", next: ChannelControlDuration | null): Promise<void> => {
     if (busy !== null) return;
     setBusy(kind);
-    setError(null);
     try {
       await setChannelControl(channelId, kind, next);
       setDialogControl(null);
       await onRefresh();
     } catch (requestError: unknown) {
-      setError(requestError instanceof PanelApiError
-        ? apiErrorText(requestError.code, labels.failure)
-        : labels.failure);
+      notify({
+        tone: "error",
+        message: requestError instanceof PanelApiError
+          ? apiErrorText(requestError.code, labels.failure)
+          : labels.failure,
+      });
     } finally {
       setBusy(null);
     }
@@ -492,10 +486,16 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
     return kind === "mute" ? labels.muteActive : labels.pauseActive;
   };
 
-  const timedIndicator = (control: typeof mute, kind: "mute" | "pause"): ReactElement | null => {
-    if (!control.active || control.mode !== "timed" || control.until === null || Date.parse(control.until) <= now) return null;
-    return <span className="dashboard-header__control-state"><Icon name="clock-hour-4" size={16} />{activeText(control, kind)}</span>;
+  const controlState = (control: typeof mute, kind: "mute" | "pause", configured: boolean): ReactElement | null => {
+    const label = configured ? activeText(control, kind) : null;
+    if (label === null) return null;
+    const timed = control.active && control.mode === "timed" && control.until !== null && Date.parse(control.until) > now;
+    return <span className="dashboard-header__control-state" title={label}>{timed ? <Icon name="clock-hour-4" size={16} /> : null}<span>{label}</span></span>;
   };
+
+  const controlStateSlot = (control: typeof mute, kind: "mute" | "pause", configured: boolean): ReactElement => (
+    <span className="dashboard-header__control-state-slot">{controlState(control, kind, configured)}</span>
+  );
 
   const durationOptions = CHANNEL_CONTROL_DURATIONS.map((choice) => ({
     value: choice,
@@ -518,22 +518,19 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
           ariaLabel={muteConfigured ? labels.muteDisable : labels.muteEnable}
           title={muteConfigured ? labels.muteDisable : labels.muteEnable}
           disabled={busy !== null}
-          onClick={() => { if (muteConfigured) void apply("mute", null); else { setDialogControl("mute"); setError(null); } }}
+          onClick={() => { if (muteConfigured) void apply("mute", null); else setDialogControl("mute"); }}
         />
-        {timedIndicator(mute, "mute")}
-        {!muteConfigured || mute.mode === "timed" ? null : <span className="dashboard-header__control-state">{activeText(mute, "mute")}</span>}
+        {controlStateSlot(mute, "mute", muteConfigured)}
         <Button
           icon={pauseConfigured ? "player-play" : "player-pause"}
           iconOnly
           ariaLabel={pauseConfigured ? labels.pauseDisable : labels.pauseEnable}
           title={pauseConfigured ? labels.pauseDisable : labels.pauseEnable}
           disabled={busy !== null}
-          onClick={() => { if (pauseConfigured) void apply("pause", null); else { setDialogControl("pause"); setError(null); } }}
+          onClick={() => { if (pauseConfigured) void apply("pause", null); else setDialogControl("pause"); }}
         />
-        {timedIndicator(pause, "pause")}
-        {!pauseConfigured || pause.mode === "timed" ? null : <span className="dashboard-header__control-state">{activeText(pause, "pause")}</span>}
+        {controlStateSlot(pause, "pause", pauseConfigured)}
       </div>
-      {error === null ? null : <span className="dashboard-header__control-error" role="alert">{error}</span>}
       <ControlDurationDialog
         opened={dialogControl !== null}
         title={labels.durationTitle(dialogControl === "mute" ? labels.muteName : labels.pauseName)}
@@ -615,31 +612,39 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, onNavigate,
   );
 };
 
-const OverviewPage = ({ channels, loadedAt, onNavigate }: { channels: PanelChannelState[]; loadedAt?: number | undefined; onNavigate: (route: DashboardRoute) => void }): ReactElement => {
+const OverviewPage = ({ channelState, onNavigate }: { channelState: LoadState<PanelChannelState[]>; onNavigate: (route: DashboardRoute) => void }): ReactElement => {
   const texts = dashboardTexts();
+  const channels = channelState.data ?? [];
+  const status = channelState.data !== null
+    ? channels.length === 0 ? "empty" : "success"
+    : channelState.status === "error" ? "error" : "loading";
   return (
     <>
       <ModuleHeading kind="overview" title={texts.navigation.overview} subtitle={channels.length === 1 ? texts.overview.oneChannelAvailable : <ModuleCount count={channels.length} label={texts.overview.channelsAvailableShort} />} />
-      {channels.length === 0 ? (
-        <section className="empty-state"><h2>{texts.overview.noChannelAvailable}</h2><p>{texts.overview.noMembership}</p></section>
-      ) : (
+      <UiLoadState
+        status={status}
+        minHeight={360}
+        loading={<Skeleton rows={3} height={132} />}
+        empty={<section className="empty-state"><h2>{texts.overview.noChannelAvailable}</h2><p>{texts.overview.noMembership}</p></section>}
+        error={<Skeleton rows={3} height={132} />}
+      >
         <div className="module-grid">
           {channels.map((channel) => (
             <ModuleTile
               key={channel.channelId}
               channelId={channel.channelId}
               moduleId={channel.channelId}
-              enabled={channelStatus(channel, loadedAt) === "healthy"}
+              enabled={channelStatus(channel, channelState.loadedAt) === "healthy"}
               name={channel.displayName}
-              ledStatus={channelToneToLedStatus(channelStatus(channel, loadedAt))}
-              ledLabel={statusText(channel, loadedAt)}
+              ledStatus={channelToneToLedStatus(channelStatus(channel, channelState.loadedAt))}
+              ledLabel={statusText(channel, channelState.loadedAt)}
               route={{ kind: "channel", channelId: channel.channelId, section: "overview" }}
               icon={<NavigationIcon kind="channel" className="module-glyph" />}
               onNavigate={onNavigate}
             />
           ))}
         </div>
-      )}
+      </UiLoadState>
     </>
   );
 };
@@ -682,7 +687,17 @@ const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, u
 }): ReactElement => {
   const texts = dashboardTexts();
   const [now, setNow] = useState(() => Date.now());
+  const notifiedError = useRef<string | null>(null);
   const nextAllowedAtMs = nextAllowedAt === null ? null : Date.parse(nextAllowedAt);
+  useEffect(() => {
+    if (checkError === null) {
+      notifiedError.current = null;
+      return;
+    }
+    if (notifiedError.current === checkError) return;
+    notifiedError.current = checkError;
+    notify({ tone: "error", message: checkError });
+  }, [checkError]);
   useEffect(() => {
     if (nextAllowedAtMs === null || !Number.isFinite(nextAllowedAtMs)) return;
     const timeoutId = window.setTimeout(() => { setNow(Date.now()); }, Math.max(0, nextAllowedAtMs - Date.now()));
@@ -691,12 +706,13 @@ const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, u
   const cooldownActive = nextAllowedAtMs !== null && Number.isFinite(nextAllowedAtMs) && nextAllowedAtMs > now;
   return (
     <div className="header-action">
-      <button className={urgent ? "button button--primary" : "button"} type="button" onClick={onCheck} disabled={!canCheck || checking || cooldownActive} aria-busy={checking}>
+      <button className={`button moderator-check-button${urgent ? " button--primary" : ""}`} type="button" onClick={onCheck} disabled={!canCheck || checking || cooldownActive} aria-busy={checking}>
         {checking ? texts.moderation.checkRunning : texts.moderation.checkModeratorStatus}
       </button>
-      {nextAllowedAt === null ? null : <p className="muted moderator-check-time">{texts.moderation.nextCheckFrom(formatTimestamp(nextAllowedAt))}</p>}
-      {!canCheck ? <span className="lock-reason">{texts.moderation.checkLocked}</span> : null}
-      {checkError === null ? null : <p className="form-error" role="alert">{checkError}</p>}
+      <div className="header-action__reason-slot" aria-live="polite">
+        {nextAllowedAt === null ? null : <span className="muted moderator-check-time">{texts.moderation.nextCheckFrom(formatTimestamp(nextAllowedAt))}</span>}
+        {!canCheck ? <span className="lock-reason">{texts.moderation.checkLocked}</span> : null}
+      </div>
     </div>
   );
 };
@@ -711,7 +727,7 @@ const ChannelBotConsentAction = ({ channelId, needed, canRequest }: {
   return (
     <div className="header-action">
       {canRequest ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/channel-bot`}>{texts.moderation.requestBroadcasterConsent}</a> : <button className="button" type="button" disabled>{texts.moderation.requestBroadcasterConsent}</button>}
-      {!canRequest ? <span className="lock-reason">{texts.moderation.broadcasterReauthorize}</span> : null}
+      <div className="header-action__reason-slot">{!canRequest ? <span className="lock-reason">{texts.moderation.broadcasterReauthorize}</span> : null}</div>
     </div>
   );
 };
@@ -726,7 +742,7 @@ const BroadcasterConsentAction = ({ login, needed, canRequest }: {
   return (
     <div className="header-action">
       {canRequest ? <a className="button button--primary" href={`/auth/login?channel=${encodeURIComponent(login)}`}>{texts.requestFullConsent}</a> : <button className="button" type="button" disabled>{texts.requestFullConsent}</button>}
-      {!canRequest ? <span className="lock-reason">{texts.fullConsentLocked}</span> : null}
+      <div className="header-action__reason-slot">{!canRequest ? <span className="lock-reason">{texts.fullConsentLocked}</span> : null}</div>
     </div>
   );
 };
@@ -959,6 +975,7 @@ interface ChannelOverviewPageProperties {
   onNavigate: (route: DashboardRoute) => void;
   /** Stream Manager: every module, switchable without a page change. */
   modules: PanelModuleState[];
+  modulesLoaded: boolean;
   onModulesChanged: () => Promise<void>;
   onLocationChanged: (channelId: string, location: NonNullable<PanelChannelOverview["location"]> | null) => void;
 }
@@ -985,35 +1002,34 @@ const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; chi
   );
 };
 
-const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, onModulesChanged, onLocationChanged }: ChannelOverviewPageProperties): ReactElement => {
+const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, modulesLoaded, onModulesChanged, onLocationChanged }: ChannelOverviewPageProperties): ReactElement => {
   const settingsTexts = channelSettingsTexts(dashboardLanguage());
   const [channelSettings, setChannelSettings] = useState<PanelChannelSettings | null>(null);
   const [timeZoneDraft, setTimeZoneDraft] = useState("");
   const [settingsBusy, setSettingsBusy] = useState(false);
-  const [settingsError, setSettingsError] = useState("");
   useEffect(() => {
     let active = true;
     fetchChannelSettings(overview.channelId).then((settings) => {
       if (!active) return;
       setChannelSettings(settings);
       setTimeZoneDraft(settings.timeZone);
-      setSettingsError("");
-    }).catch(() => { if (active) setSettingsError(settingsTexts.loadError); });
+    }).catch(() => {
+      if (active) notify({ tone: "error", message: settingsTexts.loadError });
+    });
     return () => { active = false; };
   }, [overview.channelId, settingsTexts.loadError]);
   const saveTimeZone = async (): Promise<void> => {
     if (channelSettings === null || timeZoneDraft.trim().length === 0 || !canManage(overview.role)) {
-      setSettingsError(settingsTexts.invalid);
+      notify({ tone: "error", message: settingsTexts.invalid });
       return;
     }
     setSettingsBusy(true);
-    setSettingsError("");
     try {
       const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZoneDraft.trim());
       setChannelSettings((current) => current === null ? null : { ...current, timeZone: saved.timeZone, revision: saved.revision });
       setTimeZoneDraft(saved.timeZone);
     } catch {
-      setSettingsError(settingsTexts.saveError);
+      notify({ tone: "error", message: settingsTexts.saveError });
     } finally {
       setSettingsBusy(false);
     }
@@ -1052,7 +1068,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
         title={overview.displayName}
         subtitle={roleLabel(overview.role)}
       />
-      <section className="content-section" aria-label={settingsTexts.section}>
+      <section className="content-section channel-overview-settings" aria-label={settingsTexts.section}>
         <div className="section-heading"><h2>{settingsTexts.section}</h2></div>
         <div className="form-actions">
           <ChannelTimeZoneField
@@ -1067,20 +1083,19 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
             ? <Button disabled={settingsBusy || channelSettings === null || timeZoneDraft === channelSettings.timeZone || timeZoneDraft.trim().length === 0} onClick={() => { void saveTimeZone(); }}>{settingsTexts.save}</Button>
             : <p className="muted">{settingsTexts.readOnly}</p>}
         </div>
-        {settingsError.length === 0 ? null : <p className="error-text" role="alert">{settingsError}</p>}
-        {channelSettings === null ? null : <ChannelLocationField
+        <ChannelLocationField
           channelId={overview.channelId}
           language={dashboardLanguage()}
-          value={channelSettings.location}
-          revision={channelSettings.locationRevision}
+          value={channelSettings?.location ?? null}
+          revision={channelSettings?.locationRevision ?? 0}
           onSaved={locationSaved}
-          channelTimeZone={channelSettings.timeZone}
+          channelTimeZone={channelSettings?.timeZone ?? ""}
           onSaveChannelTimeZone={saveSuggestedTimeZone}
           canEdit={canManage(overview.role)}
-          disabled={settingsBusy}
-        />}
+          disabled={settingsBusy || channelSettings === null}
+        />
       </section>
-      <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} modules={modules} />
+      <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} modules={modules} modulesLoaded={modulesLoaded} />
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
       <section className="content-section" aria-label={dashboardTexts().navigation.module}>
         <div className="section-heading"><h2>{dashboardTexts().navigation.module}</h2><span className="muted number">{formatNumber(overview.activeModules.length)}</span></div>
@@ -1104,15 +1119,21 @@ const SystemPage = ({ system, systemState }: SystemPageProperties): ReactElement
   return (
     <>
       <ModuleHeading kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
-      {system === null && systemState.status === "loading" ? <p className="loading-line">{texts.system.loadState}</p> : null}
-      {systemState.error !== null ? <ErrorPanel message={systemState.error} /> : null}
-      {system === null ? null : <>
-        <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot, systemState.loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
-        <BotPermissionsInspector permissions={system.botPermissions} />
-        <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
-        <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
-        <SystemProperties system={system} />
-      </>}
+      <UiLoadState
+        status={system !== null ? "success" : systemState.status === "error" ? "error" : "loading"}
+        minHeight={720}
+        loading={<Skeleton rows={8} height={58} />}
+        empty={<Skeleton rows={8} height={58} />}
+        error={<Skeleton rows={8} height={58} />}
+      >
+        {system === null ? null : <>
+          <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot, systemState.loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+          <BotPermissionsInspector permissions={system.botPermissions} />
+          <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
+          <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
+          <SystemProperties system={system} />
+        </>}
+      </UiLoadState>
     </>
   );
 };
@@ -1208,6 +1229,33 @@ export const DashboardApp = (): ReactElement => {
   // Same deep-link pattern, for Spotlight jumping straight to a channel
   // variable's inspector (#208) instead of just opening the variables page.
   const [pendingVariableSelection, setPendingVariableSelection] = useState<{ channelId: string; name: string } | null>(null);
+  const notifiedLoadErrors = useRef(new Map<string, string>());
+  const reportLoadError = useCallback((key: string, message: string | null): void => {
+    if (message === null) {
+      notifiedLoadErrors.current.delete(key);
+      return;
+    }
+    if (notifiedLoadErrors.current.get(key) === message) return;
+    notifiedLoadErrors.current.set(key, message);
+    notify({ tone: "error", message });
+  }, []);
+
+  useEffect(() => { reportLoadError("channels", channels.error); }, [channels.error, reportLoadError]);
+  useEffect(() => {
+    reportLoadError("overview", route.kind === "channel" || route.kind === "module" ? overview.error : null);
+  }, [overview.error, reportLoadError, route]);
+  useEffect(() => {
+    reportLoadError("system", route.kind === "channel" && route.section === "system" ? system.error : null);
+  }, [reportLoadError, route, system.error]);
+  useEffect(() => {
+    reportLoadError("members", route.kind === "channel" && route.section === "members" ? members.error : null);
+  }, [members.error, reportLoadError, route]);
+  useEffect(() => {
+    reportLoadError("audit", route.kind === "channel" && route.section === "audit" ? audit.error : null);
+  }, [audit.error, reportLoadError, route]);
+  useEffect(() => {
+    reportLoadError("events", route.kind === "channel" && route.section === "events" ? events.error : null);
+  }, [events.error, reportLoadError, route]);
   const requestLogin = useCallback((): void => { setAuthenticationRequired(true); }, []);
 
   useEffect(() => {
@@ -1984,6 +2032,9 @@ export const DashboardApp = (): ReactElement => {
   // above: installation-wide beats per-viewer, and without the bot nothing
   // works on any channel regardless of whether this one is released.
   const showChannelNotReleased = !showBotBlocking && isChannelOrModuleRoute && selectedChannel === null && channels.status === "success";
+  const overviewMatchesRoute = isChannelOrModuleRoute && overviewRoutePath === dashboardRoutePath(route) &&
+    overview.data !== null && overview.data.channelId === route.channelId;
+  const overviewPageStatus = overviewMatchesRoute ? "success" : overview.status === "error" ? "error" : "loading";
 
   return (
     <UiProvider>
@@ -1995,10 +2046,17 @@ export const DashboardApp = (): ReactElement => {
         closeSidebarLabel={dashboardTexts().navigation.closeSidebar}
       >
         <div className="main-content">
-        {channels.status === "loading" ? <p className="loading-line">{dashboardTexts().signIn.checkChannelAccess}</p> : null}
-        {channels.error !== null ? <ErrorPanel message={channels.error} /> : null}
-        {!showBotBlocking && route.kind === "overview" && channels.data !== null ? <OverviewPage channels={channels.data} loadedAt={channels.loadedAt} onNavigate={navigate} /> : null}
+        {!showBotBlocking && route.kind === "overview" ? <OverviewPage channelState={channels} onNavigate={navigate} /> : null}
         {route.kind === "platform" && isPlatform ? <PlatformPage onAuthenticationRequired={requestLogin} /> : null}
+        {!showBotBlocking && isChannelOrModuleRoute && selectedChannel === null && channels.status !== "success" ? (
+          <UiLoadState
+            status={channels.status === "error" ? "error" : "loading"}
+            minHeight={720}
+            loading={<Skeleton rows={8} height={58} />}
+            empty={<Skeleton rows={8} height={58} />}
+            error={<Skeleton rows={8} height={58} />}
+          >{null}</UiLoadState>
+        ) : null}
         {showChannelNotReleased ? <BlockingState
           tone="neutral"
           title={dashboardTexts().blocking.channelTitle}
@@ -2021,9 +2079,13 @@ export const DashboardApp = (): ReactElement => {
               ? { action: { label: loggingOut ? dashboardTexts().blocking.botSwitching : dashboardTexts().blocking.botSwitchAction, onClick: () => { void handleBotAccountSwitch(); } } }
               : { contact: dashboardTexts().blocking.botContact })}
         /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel?.modules ?? overview.data.modules ?? modules.data?.modules ?? []} onModulesChanged={reloadModules} onLocationChanged={(channelId, location) => {
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && selectedChannel !== null ? <UiLoadState
+          status={overviewPageStatus}
+          minHeight={960}
+          loading={<Skeleton rows={12} height={58} />}
+          empty={<Skeleton rows={12} height={58} />}
+          error={<Skeleton rows={12} height={58} />}
+        >{overviewMatchesRoute && overview.data !== null ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} modulesLoaded={selectedChannel.modules !== undefined || overview.data.modules !== undefined || modules.data !== null} onModulesChanged={reloadModules} onLocationChanged={(channelId, location) => {
           setChannels((current) => current.data === null ? current : {
             ...current,
             data: current.data.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),
@@ -2032,8 +2094,8 @@ export const DashboardApp = (): ReactElement => {
             ...current,
             data: { ...current.data, location },
           });
-        }} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null && (members.data !== null || members.status !== "idle") ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
+        }} /> : null}</UiLoadState> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading" || members.status === "idle"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection(name); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onOpenOverlay={(overlayId, initialVariable, initialOverlayName) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId, ...(initialVariable === undefined ? {} : { initialVariable }), ...(overlayId === "new" && initialOverlayName !== undefined ? { initialOverlayName } : {}) }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "overlays" && selectedChannel !== null
           ? route.editorOverlayId === undefined
@@ -2044,12 +2106,16 @@ export const DashboardApp = (): ReactElement => {
             }} />
           : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadModules} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection === null ? {} : { initialSelection: pendingModuleSelection })} /> : null}
-        {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && system.status !== "idle" ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} /> : null}
-        {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && audit.status !== "idle" ? <AuditPage key={route.channelId} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} filters={auditFilters} onFiltersChange={updateAuditFilters} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={selectedChannel?.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && selectedChannel !== null ? <UiLoadState
+          status={overviewPageStatus}
+          minHeight={720}
+          loading={<Skeleton rows={8} height={58} />}
+          empty={<Skeleton rows={8} height={58} />}
+          error={<Skeleton rows={8} height={58} />}
+        >{overviewMatchesRoute && overview.data !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection === null ? {} : { initialSelection: pendingModuleSelection })} /> : null}</UiLoadState> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} filters={auditFilters} onFiltersChange={updateAuditFilters} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={eventsChannelId === route.channelId ? events : idleState<PanelEventsResponse>()} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
         {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} isPlatformAdmin={isPlatform} {...(channels.status === "success" ? { botSignedIn } : {})} streamState={overviewForHeader === null ? selectedChannel.streamState : overviewForHeader.streamState} modules={selectedChannel.modules ?? modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} onOpenVariable={(channelId, name) => { setPendingVariableSelection({ channelId, name }); }} /> : null}
         </div>
       </Shell>

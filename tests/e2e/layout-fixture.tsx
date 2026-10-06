@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
-import { Field, FormDialog, NumberField, SaveBar, Select, TagInput, TextArea, UiProvider } from "../../src/dashboard/ui";
+import { Field, FormDialog, GamePicker, NumberField, SaveBar, Select, TagInput, TextArea, UiProvider, type GamePickerGame } from "../../src/dashboard/ui";
 import type { TextAreaMessages } from "../../src/dashboard/ui";
 import "../../src/dashboard/styles.css";
 
@@ -13,6 +13,23 @@ const textAreaMessages: TextAreaMessages = {
   worstCaseLength: (length, max) => `${String(length)} exceeds ${String(max)} characters.`,
 };
 
+const gamePickerMessages = {
+  label: "Games",
+  hint: "Add one or more games.",
+  search: "Search games",
+  searchHint: "Type at least two characters.",
+  loading: "Searching games …",
+  empty: "No games found.",
+  error: "Games could not be loaded.",
+  remove: (name: string) => `Remove ${name}`,
+};
+
+const fixtureGames: GamePickerGame[] = [
+  { id: "game-one", name: "Game One" },
+];
+
+const searchFixtureGames = (): Promise<readonly GamePickerGame[]> => Promise.resolve(fixtureGames);
+
 export function LayoutFixture() {
   const [showIssues, setShowIssues] = useState(false);
   const [previewLong, setPreviewLong] = useState(false);
@@ -20,6 +37,7 @@ export function LayoutFixture() {
   const [dialogError, setDialogError] = useState(false);
   const [savePending, setSavePending] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
+  const [games, setGames] = useState<GamePickerGame[]>([]);
   const [number, setNumber] = useState<number | "">(4);
   const errorProps = showIssues ? { error: "A validation error." } : {};
 
@@ -30,6 +48,10 @@ export function LayoutFixture() {
         <button id="toggle-preview" type="button" onClick={() => { setPreviewLong((current) => !current); }}>Toggle preview</button>
         <button id="toggle-save-pending" type="button" onClick={() => { setSavePending((current) => !current); }}>Toggle save pending</button>
         <button id="open-dialog" type="button" onClick={() => { setDialogOpen(true); }}>Open dialog</button>
+        <div className="layout-fixture__game-picker">
+          <GamePicker searchGames={searchFixtureGames} value={games} onChange={setGames} messages={gamePickerMessages} />
+          <button id="game-picker-outside-control" type="button">Check message</button>
+        </div>
         <div className="layout-fixture__compact-header" style={{ display: "flex", alignItems: "center", width: 320, height: 44 }}>
           <Select id="layout-header-channel" compact ariaLabel="Header channel" value="one" onChange={() => {}} options={[{ value: "one", label: "One" }]} hint="A reserved header hint." {...(showIssues ? { error: "A reserved header error." } : {})} />
         </div>

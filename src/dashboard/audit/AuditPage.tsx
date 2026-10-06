@@ -6,7 +6,7 @@ import { MODULES } from "../../modules/registry";
 import { auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
 import { ModuleHeading } from "../module-panels";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, LoadState as UiLoadState, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import type { LoadState } from "../load-state";
 import {
   auditActorLabel,
@@ -157,21 +157,30 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
       <ModuleHeading
         kind="audit"
         title={texts.audit.title}
-        subtitle={auditState.data === null ? "" : <><span className="number">{formatNumber(auditState.data.entries.length)}</span> {texts.audit.entries}</>}
+        subtitle={auditState.data === null
+          ? <span className="module-heading__subtitle-placeholder" aria-hidden="true"><span className="number">{formatNumber(0)}</span> {texts.audit.entries}</span>
+          : <><span className="number">{formatNumber(auditState.data.entries.length)}</span> {texts.audit.entries}</>}
       />
       <ListDetail
         onCloseInspector={closeAudit}
         list={
           <section className="content-section" aria-label={texts.audit.title}>
             <AuditFilterBar filters={filters} onChange={onFiltersChange} />
-            {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texts.audit.load}</p> : null}
-            {auditState.error !== null ? <p className="muted" role="alert">{auditState.error}</p> : null}
-            {auditState.data !== null && entries.length === 0 ? (
-              filterActive
+            <div className="audit-page__pagination-slot">
+              {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
+            </div>
+            <UiLoadState
+              status={auditState.data === null
+                ? auditState.status === "error" ? "error" : "loading"
+                : entries.length === 0 ? "empty" : "success"}
+              minHeight={420}
+              loading={<Skeleton rows={50} height={44} />}
+              empty={filterActive
                 ? <EmptyState title={texts.audit.noMatches} description={texts.audit.activeFilters} action={{ label: texts.audit.resetFilters, onClick: () => { onFiltersChange(emptyAuditFilter); } }} />
-                : <p className="empty-state">{texts.audit.empty}</p>
-            ) : null}
-            {entries.length > 0 ? <>
+                : <p className="empty-state">{texts.audit.empty}</p>}
+              error={<EmptyState title={texts.audit.loadError} description={texts.audit.load} />}
+            >
+              {entries.length > 0 ? <>
               <div className={auditState.status === "loading" ? "stale" : undefined}>
                 {dayGroups.map((day) => (
                   <section key={day.key} className="event-day">
@@ -206,8 +215,8 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
                   </section>
                 ))}
               </div>
-              {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
             </> : null}
+            </UiLoadState>
           </section>
         }
         inspector={selectedAudit === null ? null : (

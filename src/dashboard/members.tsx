@@ -7,7 +7,7 @@ import { apiErrorText, dashboardCommonTexts, formatDate } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
 import { MemberAvatar } from "./member-avatar";
 import { MemberGrantEditor } from "./member-grant-editor";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, ListDetail, useDraftGuard, useInspectorSelection } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, ListDetail, LoadState, notify, useDraftGuard, useInspectorSelection } from "./ui";
 import {
   addChannelMember,
   PanelApiError,
@@ -34,6 +34,7 @@ interface MembersPageProperties {
 }
 
 const manageableRoles = CHANNEL_ROLES;
+const MEMBERS_PAGE_SIZE = 100;
 
 /** The join date is days to years in the past; the time of day adds nothing there. */
 const formatJoinDate = (value: string): string => formatDate(value);
@@ -139,6 +140,25 @@ const MemberList = ({
     </div>
   );
 };
+
+const MemberListSkeleton = (): ReactElement => (
+  <div className="table-wrap members-page__skeleton">
+    <table className="table members-table" aria-hidden="true">
+      <thead className="sr-only"><tr><th scope="col" /></tr></thead>
+      <tbody>{Array.from({ length: MEMBERS_PAGE_SIZE }, (_, index) => (
+        <tr key={index}>
+          <th scope="row"><div className="avatar-row">
+            <span className="members-page__skeleton-avatar" />
+            <div><span className="members-page__skeleton-line members-page__skeleton-line--name" /><span className="members-page__skeleton-line members-page__skeleton-line--login" /></div>
+          </div></th>
+          <td><span className="members-page__skeleton-line members-page__skeleton-line--role" /></td>
+          <td><span className="members-page__skeleton-line members-page__skeleton-line--date" /></td>
+        </tr>
+      ))}</tbody>
+    </table>
+    <span className="sr-only">{membersTexts().load}</span>
+  </div>
+);
 
 /**
  * The member editor (15b): a role `ChoiceCards` as the only draft field,
@@ -277,7 +297,6 @@ export const MembersPage = ({
   const texts = membersTexts();
   const canManageMembers = canManage(ownRole);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [grantOpen, setGrantOpen] = useState(false);
   const grantButtonRef = useRef<HTMLButtonElement | null>(null);
   const [roleDraft, setRoleDraft] = useState<{ userId: string; role: ChannelRole } | null>(null);
@@ -294,7 +313,6 @@ export const MembersPage = ({
   const saveRoleDraft = async (): Promise<string | null> => {
     if (selectedMember === null || roleDraft === null || !roleDirty) return null;
     setBusyUserId(roleDraft.userId);
-    setActionError(null);
     try {
       await updateChannelMemberRole(channelId, roleDraft.userId, roleDraft.role);
       setRoleDraft(null);
@@ -336,13 +354,12 @@ export const MembersPage = ({
 
   const handleRemove = async (member: PanelMember): Promise<void> => {
     setBusyUserId(member.userId);
-    setActionError(null);
     try {
       await removeChannelMember(channelId, member.userId);
       closeSelection();
       await onReload();
     } catch (error: unknown) {
-      setActionError(errorMessage(error));
+      notify({ tone: "error", message: errorMessage(error) });
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setBusyUserId(null);
@@ -358,11 +375,18 @@ export const MembersPage = ({
         <div className="section-heading">
           <h2>{texts.membersWithAccess}</h2>
         </div>
-        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-        {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
+        <div className="members-page__pagination-slot">
+          {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
+        </div>
         <div className={loading ? "stale" : undefined}>
           <ListDetail
-            list={loading && members.length === 0 ? <p className="loading-line">{texts.load}</p> : <MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
+            list={<LoadState
+              status={members.length > 0 ? "success" : error !== null ? "error" : loading ? "loading" : "empty"}
+              minHeight={320}
+              loading={<MemberListSkeleton />}
+              empty={<MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
+              error={<MemberListSkeleton />}
+            >{members.length === 0 ? null : <MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>}
             inspector={selectedMember !== null ? (
               <MemberInspector
                 key={selectedMember.userId}
@@ -374,7 +398,6 @@ export const MembersPage = ({
                 dirty={roleDirty}
                 onRoleChange={(role) => { setRoleDraft({ userId: selectedMember.userId, role }); }}
                 pending={busyUserId === selectedMember.userId}
-                {...(actionError === null ? {} : { error: actionError })}
                 onSave={() => { void saveRoleDraft(); }}
                 onDiscard={() => { setRoleDraft(null); }}
                 onRemove={() => { void handleRemove(selectedMember); }}
@@ -410,7 +433,6 @@ export const MembersPage = ({
             onCloseInspector={closeFloating}
           />
         </div>
-        {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
       </section>
       <ConfirmDialog
         opened={draftGuard.confirmOpen}

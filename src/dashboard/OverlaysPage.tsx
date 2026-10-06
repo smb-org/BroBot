@@ -26,7 +26,7 @@ import {
   type PanelOverlayToken,
 } from "./api";
 import { apiErrorText, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
-import { ActionMenu, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, notify, NumberField, PageHeader, Select, SubInspector } from "./ui";
+import { ActionMenu, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -236,6 +236,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const [overlays, setOverlays] = useState<readonly PanelOverlaySummary[]>([]);
   const [maximum, setMaximum] = useState(20);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(initialSelection ?? null);
@@ -262,6 +263,8 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const [revokeTarget, setRevokeTarget] = useState<PanelOverlayAccess | null>(null);
   const [replaceTarget, setReplaceTarget] = useState<PanelOverlayAccess | null>(null);
   const [legacyTokens, setLegacyTokens] = useState<readonly PanelOverlayToken[]>([]);
+  const [legacyLoading, setLegacyLoading] = useState(true);
+  const [legacyLoadFailed, setLegacyLoadFailed] = useState(false);
   const [legacyNextOffset, setLegacyNextOffset] = useState<number | null>(null);
   const [legacyError, setLegacyError] = useState<string | null>(null);
   const [legacyRevokeTarget, setLegacyRevokeTarget] = useState<PanelOverlayToken | null>(null);
@@ -330,12 +333,14 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       if (!isActive() || version !== requestVersion.current) return;
       setOverlays(result.overlays);
       setMaximum(result.maximum);
+      setLoadFailed(false);
       setError(null);
       if (selectedIdRef.current === null && initialSelection !== undefined && result.overlays.some((item) => item.id === initialSelection)) {
         changeSelection(initialSelection);
       }
     } catch (caught) {
       if (!isActive() || version !== requestVersion.current) return;
+      setLoadFailed(true);
       notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
     } finally {
       if (isActive() && version === requestVersion.current) setLoading(false);
@@ -344,15 +349,20 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
 
   const loadLegacyTokens = useCallback(async (offset = 0, append = false): Promise<void> => {
     const version = ++legacyRequestVersion.current;
+    if (!append) setLegacyLoading(true);
     try {
       const result = await fetchOverlayTokens(channelId, offset);
       if (!pageActiveRef.current || legacyRequestVersion.current !== version || channelIdRef.current !== channelId) return;
       setLegacyTokens((current) => append ? [...current, ...result.tokens] : result.tokens);
       setLegacyNextOffset(result.nextOffset);
+      setLegacyLoadFailed(false);
       setLegacyError(null);
     } catch (caught) {
       if (!pageActiveRef.current || legacyRequestVersion.current !== version || channelIdRef.current !== channelId) return;
+      setLegacyLoadFailed(true);
       notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
+    } finally {
+      if (!append && pageActiveRef.current && legacyRequestVersion.current === version) setLegacyLoading(false);
     }
   }, [channelId, labels.loadError]);
 
@@ -708,47 +718,63 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     ? labels.legacyTokenName
     : `${labels.legacyTokenName} (${legacyRevokeTarget.id.slice(0, 8)})`;
   const list = <section className="overlays-page config-section" aria-label={labels.list}>
-    {loading ? <p className="loading-line">{labels.loading}</p> : null}
-    {!loading && overlays.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
-    {!loading && overlays.length > 0 ? <div className={`table-wrap overlays-table-wrap${selectedId !== null || creating ? " overlays-table-wrap--inspector-open" : ""}`}>
-      <table className="table overlays-table">
-        <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.elements}</th><th scope="col">{labels.accesses}</th><th scope="col">{labels.lastUsedAt}</th></tr></thead>
-        <tbody>{overlays.map((overlay) => <tr key={overlay.id} tabIndex={0} aria-selected={overlay.id === selectedId}
-          onClick={() => { setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); }}
-          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); } }}>
-          <th scope="row">{overlay.name}</th>
-          <td>{overlay.elementCount}</td>
-          <td>{overlay.accessCount}</td>
-          <td>{overlay.lastUsedAt === null ? labels.never : <time dateTime={overlay.lastUsedAt}>{formatTimestamp(overlay.lastUsedAt)}</time>}</td>
-        </tr>)}</tbody>
-      </table>
-    </div> : null}
-    {legacyTokens.length > 0 ? <section className="overlay-legacy-links" aria-label={labels.legacyTitle}>
-      <div className="overlay-legacy-links__heading">
-        <h2>{labels.legacyTitle}</h2>
-        <Button variant="neutral" disabled={!canManage || pending} onClick={() => {
-          setLegacyImportLink("");
-          setLegacyImportError(null);
-          setLegacyImportOpen(true);
-        }}>{labels.legacyImport}</Button>
+    <LoadState
+      status={loading && overlays.length === 0 ? "loading" : loadFailed && overlays.length === 0 ? "error" : overlays.length === 0 ? "empty" : "success"}
+      minHeight={360}
+      loading={<Skeleton rows={6} height={34} />}
+      empty={<p className="empty-state">{labels.empty}</p>}
+      error={<Skeleton rows={6} height={34} />}
+    >
+      <div className={`table-wrap overlays-table-wrap${selectedId !== null || creating ? " overlays-table-wrap--inspector-open" : ""}`}>
+        <table className="table overlays-table">
+          <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.elements}</th><th scope="col">{labels.accesses}</th><th scope="col">{labels.lastUsedAt}</th></tr></thead>
+          <tbody>{overlays.map((overlay) => <tr key={overlay.id} tabIndex={0} aria-selected={overlay.id === selectedId}
+            onClick={() => { setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); }}
+            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); } }}>
+            <th scope="row">{overlay.name}</th>
+            <td>{overlay.elementCount}</td>
+            <td>{overlay.accessCount}</td>
+            <td>{overlay.lastUsedAt === null ? labels.never : <time dateTime={overlay.lastUsedAt}>{formatTimestamp(overlay.lastUsedAt)}</time>}</td>
+          </tr>)}</tbody>
+        </table>
       </div>
-      <p className="muted">{labels.legacyDescription}</p>
-      {manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}
-      <ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item overlay-access-list__item--legacy">
-        <div className="overlay-access-list__summary">
-          <strong>{labels.legacyTokenName}</strong>
-          <span className="mono muted">{labels.legacyTokenId}: {token.id.slice(0, 8)}</span>
-          <span className="muted">{labels.legacyCreatedAt}: {formatTimestamp(token.createdAt)}</span>
-          <span className="muted">{token.createdBy ?? labels.legacyCreatedByUnknown}</span>
-          <span className="muted">{token.lastUsedAt === null ? labels.never : `${labels.lastUsedAt}: ${formatTimestamp(token.lastUsedAt)}`}</span>
+    </LoadState>
+    <section aria-label={labels.legacyTitle}>
+      <details className="overlay-legacy-links">
+        <summary><h2>{labels.legacyTitle} ({legacyTokens.length})</h2></summary>
+        <div className="overlay-legacy-links__heading">
+          <Button variant="neutral" disabled={!canManage || pending} onClick={() => {
+            setLegacyImportLink("");
+            setLegacyImportError(null);
+            setLegacyImportOpen(true);
+          }}>{labels.legacyImport}</Button>
         </div>
-        <div className="overlay-access-list__actions"><ActionMenu label={labels.accessActions(`${labels.legacyTokenName} ${token.id.slice(0, 8)}`)} items={[
-          { label: `${labels.revoke} …`, disabled: !canManage || pending, danger: true, onSelect: () => { setLegacyRevokeTarget(token); } },
-        ]} /></div>
-      </li>)}</ul>
-      {legacyNextOffset === null ? null : <Button variant="subtle" disabled={pending}
-        onClick={() => { void loadLegacyTokens(legacyNextOffset, true); }}>{labels.loadMore}</Button>}
-    </section> : null}
+        <p className="muted">{labels.legacyDescription}</p>
+        <div className="overlay-legacy-links__reason-slot">{manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}</div>
+        <div className="overlay-legacy-links__pagination-slot">{legacyNextOffset === null ? null : <Button variant="subtle" disabled={pending}
+          onClick={() => { void loadLegacyTokens(legacyNextOffset, true); }}>{labels.loadMore}</Button>}</div>
+        <LoadState
+          status={legacyLoading && legacyTokens.length === 0 ? "loading" : legacyLoadFailed && legacyTokens.length === 0 ? "error" : legacyTokens.length === 0 ? "empty" : "success"}
+          minHeight={260}
+          loading={<Skeleton rows={4} height={58} />}
+          empty={<p className="empty-state">{labels.legacyEmpty}</p>}
+          error={<Skeleton rows={4} height={58} />}
+        >
+          <ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item overlay-access-list__item--legacy">
+            <div className="overlay-access-list__summary">
+              <strong>{labels.legacyTokenName}</strong>
+              <span className="mono muted">{labels.legacyTokenId}: {token.id.slice(0, 8)}</span>
+              <span className="muted">{labels.legacyCreatedAt}: {formatTimestamp(token.createdAt)}</span>
+              <span className="muted">{token.createdBy ?? labels.legacyCreatedByUnknown}</span>
+              <span className="muted">{token.lastUsedAt === null ? labels.never : `${labels.lastUsedAt}: ${formatTimestamp(token.lastUsedAt)}`}</span>
+            </div>
+            <div className="overlay-access-list__actions"><ActionMenu label={labels.accessActions(`${labels.legacyTokenName} ${token.id.slice(0, 8)}`)} items={[
+              { label: `${labels.revoke} …`, disabled: !canManage || pending, danger: true, onSelect: () => { setLegacyRevokeTarget(token); } },
+            ]} /></div>
+          </li>)}</ul>
+        </LoadState>
+      </details>
+    </section>
   </section>;
 
   const inspector = creating ? <SubInspector ariaLabel={labels.createTitle} title={labels.createTitle} closeLabel={labels.close} onClose={closeInspector}>
