@@ -259,6 +259,44 @@ export const finalizeOpenBelaboxStreams = async (
   }
 };
 
+export const reopenCurrentBelaboxStream = async (
+  db: D1Database,
+  channelId: string,
+): Promise<void> => {
+  await db.batch([
+    db.prepare(
+      `UPDATE belabox_streams
+          SET ended_at = NULL, bitrate_p10 = NULL
+        WHERE channel_id = ? AND ended_at IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM channel_stream_state
+             WHERE channel_id = belabox_streams.channel_id
+               AND state = 'online'
+               AND stream_id = belabox_streams.stream_id
+          )`,
+    ).bind(channelId),
+    db.prepare(
+      `UPDATE belabox_status
+          SET history_sample_json = NULL, revision = revision + 1
+        WHERE channel_id = ?
+          AND EXISTS (
+            SELECT 1 FROM channel_stream_state
+             WHERE channel_id = belabox_status.channel_id
+               AND state = 'online'
+               AND stream_id = belabox_status.stream_id
+          )`,
+    ).bind(channelId),
+  ]);
+};
+
+export const belaboxStreamExists = async (
+  db: D1Database,
+  channelId: string,
+  streamId: string,
+): Promise<boolean> => (await db.prepare(
+  "SELECT 1 AS present FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
+).bind(channelId, streamId).first<{ present: number }>()) !== null;
+
 export const purgeExpiredBelaboxMinutes = async (db: D1Database, now: string): Promise<void> => {
   const cutoff = new Date(Date.parse(now) - 30 * 24 * 60 * 60_000).toISOString();
   const channels = await db.prepare("SELECT channel_id FROM channels").all<{ channel_id: string }>();
@@ -404,8 +442,7 @@ export const writeBelaboxFetch = async (
        recent_json = excluded.recent_json,
        history_sample_json = CASE
          WHEN ? = 1 THEN excluded.history_sample_json
-         WHEN excluded.stream_id IS NOT belabox_status.stream_id THEN NULL
-         ELSE belabox_status.history_sample_json
+         ELSE NULL
        END,
        revision = belabox_status.revision + 1
      WHERE belabox_status.revision = ?
@@ -533,6 +570,7 @@ export const prepareBelaboxSampleWrite = (
        WHEN belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at
        THEN excluded.sample_json ELSE belabox_status.sample_json END,
      error_code = NULL,
+     history_sample_json = NULL,
      revision = belabox_status.revision + 1`,
 ).bind(channelId, sample.at, JSON.stringify(sample), encodedPhase(EMPTY_FETCH_PHASE), ...authorization.values,
   channelId, BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET, expectedSecretVersion);
@@ -547,8 +585,20 @@ export const prepareBelaboxSampleClear = (
           sample_json = NULL,
           error_code = NULL,
           belabox_stream_id = NULL,
+          history_sample_json = NULL,
           fetch_phase_json = ?,
           recent_json = '[]',
           revision = revision + 1
     WHERE channel_id = ? ${authorization.sql}`,
 ).bind(encodedPhase(EMPTY_FETCH_PHASE), channelId, ...authorization.values);
+
+export const prepareBelaboxHistorySampleReset = (
+  db: D1Database,
+  channelId: string,
+  authorization: ModuleMutationAuthorization,
+): D1PreparedStatement => db.prepare(
+  `UPDATE belabox_status
+      SET history_sample_json = NULL,
+          revision = revision + 1
+    WHERE channel_id = ? ${authorization.sql}`,
+).bind(channelId, ...authorization.values);

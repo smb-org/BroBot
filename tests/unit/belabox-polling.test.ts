@@ -15,7 +15,7 @@ import {
   BELABOX_STATS_URL_SECRET,
   type BelaboxSettings,
 } from "../../src/modules/belabox/contracts";
-import { getBelaboxStatus, listBelaboxStreams, prepareBelaboxSampleWrite } from "../../src/modules/belabox/adapters/d1";
+import { getBelaboxStatus, listBelaboxStreams, prepareBelaboxSampleClear, prepareBelaboxSampleWrite } from "../../src/modules/belabox/adapters/d1";
 import { currentBelaboxSample, ensureBelaboxPoll, handleBelaboxPollAlarm } from "../../src/modules/belabox/service";
 import { writeModuleDiagnostics } from "../../src/worker/event-log";
 import { insertChannel, jsonResponse } from "./fixtures";
@@ -35,6 +35,19 @@ const relayPayload = (connected: boolean, bitrateKbps = 3_200, droppedPackets = 
       latency: connected ? 115 : 0,
       network: connected ? 2 : 0,
       dropped_pkts: connected ? droppedPackets : 0,
+    },
+  },
+});
+
+const disconnectedRelayPayload = (droppedPackets: number) => ({
+  publishers: {
+    [SECRET_SENTINEL]: {
+      connected: false,
+      bitrate: 0,
+      rtt: 0,
+      latency: 0,
+      network: 0,
+      dropped_pkts: droppedPackets,
     },
   },
 });
@@ -667,7 +680,7 @@ describe("BELABOX polling", () => {
     expect(await getBelaboxStatus(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({ polling: true });
   });
 
-  it("records three polls against the history baseline across an interleaved connection test", async () => {
+  it("resets the dropped-packet baseline across an interleaved connection test", async () => {
     await insertModule(database);
     const { context } = alarmContext(database);
     vi.setSystemTime("2026-10-05T12:00:00.000Z");
@@ -688,7 +701,7 @@ describe("BELABOX polling", () => {
     ).run();
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
       sample: { at: "2026-10-05T12:00:25.000Z", droppedPackets: 14, bitrateKbps: 2_000 },
-      historySample: { droppedPackets: 10, bitrateKbps: 500 },
+      historySample: null,
     });
 
     vi.setSystemTime("2026-10-05T12:00:15.000Z");
@@ -715,17 +728,17 @@ describe("BELABOX polling", () => {
 
     await expect(database.prepare(
       `SELECT samples, dropped_delta FROM belabox_minutes WHERE channel_id = ? AND stream_id = ?`,
-    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ samples: 3, dropped_delta: 18 });
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ samples: 3, dropped_delta: 14 });
     await expect(database.prepare(
       `SELECT samples, low_seconds, dropped_total FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
-    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ samples: 3, low_seconds: 30, dropped_total: 18 });
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ samples: 3, low_seconds: 15, dropped_total: 14 });
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
       sample: { droppedPackets: 18, bitrateKbps: 500 },
       historySample: { droppedPackets: 18, bitrateKbps: 500 },
     });
   });
 
-  it("preserves the last dropped counter across a missing publisher", async () => {
+  it("does not count dropped packets across a missing publisher", async () => {
     await insertModule(database);
     const { context } = alarmContext(database);
     const fetcher = vi.fn<typeof fetch>()
@@ -744,7 +757,7 @@ describe("BELABOX polling", () => {
       if (index === 1) {
         expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
           sample: { connected: false, droppedPackets: 0 },
-          historySample: { connected: false, droppedPackets: 10 },
+          historySample: { connected: false, droppedPackets: 0 },
         });
       }
     }
@@ -755,12 +768,68 @@ describe("BELABOX polling", () => {
       results: [
         { minute_at: "2026-10-05T12:00:00.000Z", dropped_delta: 10 },
         { minute_at: "2026-10-05T12:01:00.000Z", dropped_delta: 0 },
-        { minute_at: "2026-10-05T12:02:00.000Z", dropped_delta: 2 },
+        { minute_at: "2026-10-05T12:02:00.000Z", dropped_delta: 0 },
       ],
     });
     await expect(database.prepare(
       `SELECT dropped_total FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
-    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ dropped_total: 12 });
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ dropped_total: 10 });
+  });
+
+  it("does not count a disconnected publisher's counter again after reconnection", async () => {
+    await insertModule(database);
+    const { context } = alarmContext(database);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 10)))
+      .mockResolvedValueOnce(jsonResponse(disconnectedRelayPayload(12)))
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 12)));
+
+    for (const at of [
+      "2026-10-05T12:00:00.000Z",
+      "2026-10-05T12:01:00.000Z",
+      "2026-10-05T12:02:00.000Z",
+    ]) {
+      vi.setSystemTime(new Date(at));
+      await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
+    }
+
+    await expect(database.prepare(
+      `SELECT minute_at, dropped_delta FROM belabox_minutes WHERE channel_id = ? AND stream_id = ? ORDER BY minute_at`,
+    ).bind(CHANNEL_ID, STREAM_ID).all<Record<string, unknown>>()).resolves.toMatchObject({
+      results: [
+        { minute_at: "2026-10-05T12:00:00.000Z", dropped_delta: 10 },
+        { minute_at: "2026-10-05T12:01:00.000Z", dropped_delta: 0 },
+        { minute_at: "2026-10-05T12:02:00.000Z", dropped_delta: 0 },
+      ],
+    });
+    await expect(database.prepare(
+      `SELECT dropped_total FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ dropped_total: 10 });
+  });
+
+  it("uses the current sample as a dropped-packet baseline after the stats URL is replaced", async () => {
+    await insertModule(database);
+    const { context } = alarmContext(database);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 10)))
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 12)));
+
+    await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
+    await prepareBelaboxSampleClear(context.DB, CHANNEL_ID, { sql: "", values: [] }).run();
+    vi.setSystemTime("2026-10-05T12:01:00.000Z");
+    await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
+
+    await expect(database.prepare(
+      `SELECT minute_at, dropped_delta FROM belabox_minutes WHERE channel_id = ? AND stream_id = ? ORDER BY minute_at`,
+    ).bind(CHANNEL_ID, STREAM_ID).all<Record<string, unknown>>()).resolves.toMatchObject({
+      results: [
+        { minute_at: "2026-10-05T12:00:00.000Z", dropped_delta: 10 },
+        { minute_at: "2026-10-05T12:01:00.000Z", dropped_delta: 0 },
+      ],
+    });
+    await expect(database.prepare(
+      `SELECT dropped_total FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({ dropped_total: 10 });
   });
 
   it("keeps polling when a stored-URL test writes a sample during the fetch", async () => {

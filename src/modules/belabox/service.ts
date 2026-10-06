@@ -15,6 +15,7 @@ import {
   type BelaboxSettings,
 } from "./contracts";
 import {
+  belaboxStreamExists,
   finalizeOpenBelaboxStreams,
   getBelaboxStatus,
   setBelaboxPollingState,
@@ -239,12 +240,23 @@ const storePollResult = async (
     const previousSample = alreadyClassified ? currentStatus.historySample : null;
     const minuteAt = result.ok && classified ? minuteAtForSample(result.sample.at) : null;
     const elapsedSeconds = result.ok ? elapsedSampleSeconds(previousSample, result.sample) : 0;
+    let droppedDelta = 0;
+    if (result.ok && result.sample.connected && streamId !== null) {
+      if (previousSample?.connected === true) {
+        droppedDelta = droppedPacketDelta(result.sample, previousSample);
+      } else if (previousSample === null) {
+        const summaryExists = await belaboxStreamExists(context.DB, context.channelId, streamId);
+        if (!summaryExists) {
+          droppedDelta = result.sample.droppedPackets;
+        }
+      }
+    }
     const history = result.ok && classified && minuteAt !== null
       ? {
         streamId,
         startedAt: live.startedAt ?? result.sample.at,
         minuteAt,
-        droppedDelta: droppedPacketDelta(result.sample, previousSample),
+        droppedDelta,
         lowSeconds: previousSample?.connected === true && previousSample.bitrateKbps < BELABOX_LOW_BITRATE_KBPS
           ? elapsedSeconds
           : 0,
@@ -252,11 +264,7 @@ const storePollResult = async (
         disconnectCount: previousSample?.connected === true && !result.sample.connected ? 1 : 0,
       }
       : undefined;
-    const historySample = result.ok
-      ? result.sample.connected || previousSample === null
-        ? result.sample
-        : { ...result.sample, droppedPackets: previousSample.droppedPackets }
-      : null;
+    const historySample = result.ok ? result.sample : null;
     const written = await writeBelaboxFetch(context.DB, {
       channelId: context.channelId,
       sample: result.ok ? result.sample : null,

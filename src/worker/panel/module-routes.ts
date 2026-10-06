@@ -11,7 +11,7 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import { finalizeOpenBelaboxStreams } from "../../modules/belabox/adapters/d1";
+import { finalizeOpenBelaboxStreams, reopenCurrentBelaboxStream } from "../../modules/belabox/adapters/d1";
 import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
 import { MODULES, templateVariableGroupForModule, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
@@ -639,6 +639,9 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   if (!changed) return context.json({ error: "module_changed_concurrently" }, 409);
   if (module.id === "belabox" && !enabled && existing?.enabled === true) {
     await finalizeOpenBelaboxStreams(context.env.DB, channelId, now);
+  }
+  if (module.id === "belabox" && enabled && existing?.enabled !== true) {
+    await reopenCurrentBelaboxStream(context.env.DB, channelId);
   }
   if (module.id === "belabox" && module.settingsChangedAlarm !== undefined) {
     await runModuleAlarmAfterMutation(

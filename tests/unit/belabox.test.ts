@@ -258,6 +258,33 @@ describe("BELABOX secret and route redaction", () => {
     vi.restoreAllMocks();
   });
 
+  it("resets history continuity for connection tests using an ad hoc URL", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { send, db } = await createBelaboxRouteHarness(testDatabase);
+    const sample = {
+      at: "2026-10-05T12:00:00.000Z",
+      connected: true,
+      bitrateKbps: 2_400,
+      rttMs: 45,
+      latencyMs: 125,
+      network: 3,
+      droppedPackets: 8,
+    };
+    await db.prepare(
+      `INSERT INTO belabox_status (channel_id, history_sample_json)
+       VALUES (?, ?)`,
+    ).bind(CHANNEL_ID, JSON.stringify(sample)).run();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(relayPayload(SENTINEL_KEY)))));
+
+    const response = await send("/test", "POST", { url: STATS_URL });
+
+    expect(response.status).toBe(200);
+    await expect(db.prepare(
+      "SELECT history_sample_json FROM belabox_status WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ history_sample_json: null });
+  });
+
   it("keeps a sentinel URL out of logs, route results, audits, events, and module rows for every fetch outcome", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;

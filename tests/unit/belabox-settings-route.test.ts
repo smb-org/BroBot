@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { BELABOX_POLL_ALARM_KEY } from "../../src/modules/belabox/contracts";
+import { handleBelaboxPollAlarm } from "../../src/modules/belabox/service";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -172,5 +174,74 @@ describe("BELABOX settings route", () => {
     ).bind(CHANNEL_ID, streamId).first<{ ended_at: string | null; bitrate_p10: number | null }>();
     expect(summary?.ended_at).not.toBeNull();
     expect(summary?.bitrate_p10).toBe(3_200);
+  });
+
+  it("resumes the current stream summary after re-enabling and finalizes it offline", async () => {
+    const streamId = "belabox-resumed-online-stream";
+    const startedAt = "2026-10-07T09:00:00.000Z";
+    const sample = {
+      at: "2026-10-07T09:10:00.000Z",
+      connected: true,
+      bitrateKbps: 3_200,
+      rttMs: 41,
+      latencyMs: 115,
+      network: 2,
+      droppedPackets: 10,
+    };
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES (?, 'online', ?, 'eventsub', ?, ?)`,
+    ).bind(CHANNEL_ID, startedAt, startedAt, streamId).run();
+    await database.prepare(
+      `INSERT INTO belabox_streams
+        (channel_id, stream_id, started_at, ended_at, samples, bitrate_avg, bitrate_p10)
+       VALUES (?, ?, ?, '2026-10-07T09:20:00.000Z', 1, 3_200, 3_200)`,
+    ).bind(CHANNEL_ID, streamId, startedAt).run();
+    await database.prepare(
+      `INSERT INTO belabox_minutes
+        (channel_id, minute_at, stream_id, samples, connected_samples, bitrate_min, bitrate_max,
+         bitrate_sum, rtt_max, rtt_sum, dropped_delta)
+       VALUES (?, '2026-10-07T09:10:00.000Z', ?, 1, 1, 3_200, 3_200, 3_200, 41, 41, 10)`,
+    ).bind(CHANNEL_ID, streamId).run();
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, sampled_at, sample_json, history_sample_json, polling, stream_id,
+         belabox_stream_id, fetch_phase_json, recent_json, revision)
+       VALUES (?, ?, ?, ?, 0, ?, ?, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, sample.at, JSON.stringify(sample), JSON.stringify(sample), streamId, streamId).run();
+
+    const runModuleAlarm = vi.fn(() => Promise.resolve());
+    const environment = {
+      DB: database as unknown as D1Database,
+      SESSION_COOKIE_KEYS,
+      TOKEN_ENCRYPTION_KEYS,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ runModuleAlarm }),
+      },
+    } as unknown as Env;
+    const disabled = await panelRouter.fetch(await requestFor({ enabled: false }, ""), environment);
+    expect(disabled.status).toBe(200);
+    const enabled = await panelRouter.fetch(await requestFor({ enabled: true }, ""), environment);
+    expect(enabled.status).toBe(200);
+
+    await expect(database.prepare(
+      "SELECT ended_at, bitrate_p10 FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
+    ).bind(CHANNEL_ID, streamId).first()).resolves.toEqual({ ended_at: null, bitrate_p10: null });
+    await expect(database.prepare(
+      "SELECT history_sample_json FROM belabox_status WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ history_sample_json: null });
+
+    await handleBelaboxPollAlarm({
+      DB: database as unknown as D1Database,
+      channelId: CHANNEL_ID,
+      streamState: () => Promise.resolve("offline"),
+    } as unknown as Parameters<typeof handleBelaboxPollAlarm>[0], BELABOX_POLL_ALARM_KEY, Date.now());
+
+    const finalized = await database.prepare(
+      "SELECT ended_at, bitrate_p10 FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
+    ).bind(CHANNEL_ID, streamId).first<{ ended_at: string | null; bitrate_p10: number | null }>();
+    expect(finalized?.ended_at).not.toBeNull();
+    expect(finalized?.bitrate_p10).toBe(3_200);
   });
 });
