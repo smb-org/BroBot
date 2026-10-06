@@ -69,6 +69,11 @@ describe("Twitch OAuth", () => {
       "moderator:read:vips",
       "moderator:manage:automod",
       "moderator:read:suspicious_users",
+      "moderator:read:banned_users",
+      "moderator:read:chat_messages",
+      "moderator:read:chat_settings",
+      "moderator:read:unban_requests",
+      "moderator:read:warnings",
     ]));
     expect(loginUrl.searchParams.get("state")).not.toBe(botUrl.searchParams.get("state"));
   });
