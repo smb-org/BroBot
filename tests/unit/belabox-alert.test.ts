@@ -84,7 +84,8 @@ describe("BELABOX alert state machine", () => {
 
   it("keeps a relapse in the same alarm episode without another alert", () => {
     const lowAlarm = enterLowAlarm();
-    const recovering = advanceAlert(lowAlarm.state, sample(11, 2_100), settings, 11_000);
+    const sent = settleAlertChat(lowAlarm.state, { sent: true, retryable: false }, 10_000);
+    const recovering = advanceAlert(sent, sample(11, 2_100), settings, 11_000);
     const relapse = advanceAlert(recovering.state, sample(16, 900), settings, 16_000);
 
     expect(relapse.state).toMatchObject({ phase: "alarm", kind: "low", episodeStartedAt: sample(0).at });
@@ -100,13 +101,46 @@ describe("BELABOX alert state machine", () => {
     expect(bandSample.outputs).toEqual({ phaseChange: null, chat: null });
   });
 
-  it("leaves a recovering episode unchanged while bitrate stays in the hysteresis band", () => {
+  it.each([
+    {
+      name: "drops below the recovery threshold",
+      relaySample: sample(26, 1_500),
+      kind: "low",
+      diagnostic: null,
+      chatKind: "alert",
+    },
+    {
+      name: "disconnects during recovery",
+      relaySample: sample(26, 0, false),
+      kind: "disconnect",
+      diagnostic: { code: "belabox.alert_escalated", detail: { kind: "disconnect", threshold: 0, seconds: settings.holdSeconds } },
+      chatKind: "escalate",
+    },
+  ] as const)("returns to alarm when recovery $name", ({ relaySample, kind, diagnostic, chatKind }) => {
     const lowAlarm = enterLowAlarm();
     const recovering = advanceAlert(lowAlarm.state, sample(11, 2_100), settings, 11_000);
-    const bandSample = advanceAlert(recovering.state, sample(20, 1_500), settings, 20_000);
+    const next = advanceAlert(recovering.state, relaySample, settings, Date.parse(relaySample.at));
 
-    expect(bandSample.state).toEqual(recovering.state);
-    expect(bandSample.outputs).toEqual({ phaseChange: null, chat: null });
+    expect(next.state).toMatchObject({ phase: "alarm", kind, episodeStartedAt: sample(0).at });
+    expect(next.outputs.phaseChange).toEqual(diagnostic);
+    expect(next.outputs.chat).toMatchObject({ idempotencyKind: chatKind });
+    expect(next.state.pendingChat).toEqual(next.outputs.chat);
+  });
+
+  it("restarts the recovery hold after a sample drops below the recovery threshold", () => {
+    const lowAlarm = enterLowAlarm();
+    const sent = settleAlertChat(lowAlarm.state, { sent: true, retryable: false }, 10_000);
+    const recovering = advanceAlert(sent, sample(11, 2_100), settings, 11_000);
+    const returnedToAlarm = advanceAlert(recovering.state, sample(20, 1_500), settings, 20_000);
+    const restarted = advanceAlert(returnedToAlarm.state, sample(21, 2_100), settings, 21_000);
+    const heldForFourteenSeconds = advanceAlert(restarted.state, sample(35, 2_100), settings, 35_000);
+    const recovered = advanceAlert(heldForFourteenSeconds.state, sample(36, 2_100), settings, 36_000);
+
+    expect(returnedToAlarm.state.phase).toBe("alarm");
+    expect(restarted.state).toMatchObject({ phase: "recovering", since: sample(21, 2_100).at });
+    expect(heldForFourteenSeconds.state.phase).toBe("recovering");
+    expect(recovered.state.phase).toBe("ok");
+    expect(recovered.outputs.phaseChange?.code).toBe("belabox.alert_recovered");
   });
 
   it("holds alert chat output until its cooldown expires", () => {
@@ -142,12 +176,12 @@ describe("BELABOX alert state machine", () => {
     expect(offline.outputs).toEqual({ phaseChange: null, chat: null });
   });
 
-  it("retries only the same pending output and records delivery without mutating the input", () => {
+  it.each([false, true])("records a sent chat when retryable is %s", (retryable) => {
     const lowAlarm = enterLowAlarm();
-    const retryable = settleAlertChat(lowAlarm.state, { sent: false, retryable: true }, 11_000);
-    const sent = settleAlertChat(retryable, { sent: true, retryable: false }, 12_000);
+    const pending = settleAlertChat(lowAlarm.state, { sent: false, retryable: true }, 11_000);
+    const sent = settleAlertChat(pending, { sent: true, retryable }, 12_000);
 
-    expect(retryable.pendingChat).toEqual(lowAlarm.state.pendingChat);
+    expect(pending.pendingChat).toEqual(lowAlarm.state.pendingChat);
     expect(sent).toMatchObject({ chatSentInEpisode: true, pendingChat: null, lastChatSentAt: new Date(12_000).toISOString() });
     expect(lowAlarm.state.chatSentInEpisode).toBe(false);
   });

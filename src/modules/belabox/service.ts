@@ -133,10 +133,11 @@ const writePollDiagnostics = async (
   result: BelaboxFetchResult,
   previous: BelaboxFetchPhase,
   next: BelaboxFetchPhase,
+  classified: boolean,
   alertDiagnostic: BelaboxAlertDiagnostic | null,
 ): Promise<void> => {
   const diagnostics = [
-    ...[phaseDiagnostic(result, previous, next)].filter((item) => item !== null),
+    ...(classified ? [phaseDiagnostic(result, previous, next)].filter((item) => item !== null) : []),
     ...(alertDiagnostic === null ? [] : [alertDiagnostic]),
   ];
   if (writer === undefined || diagnostics.length === 0) return;
@@ -288,6 +289,7 @@ const storePollResult = async (
         result,
         previousPhase,
         phase,
+        classified,
         classified ? alert.outputs.phaseChange : null,
       );
       return { kind: "stored", classified, streamId: streamId ?? "", alertChat: alert.outputs.chat };
@@ -339,7 +341,7 @@ const sendPendingAlert = async (
     }
     return currentStatus.alertState.phase === "ok" && currentStatus.alertState.completedEpisodeAt === output.episodeStartedAt;
   }, message.target);
-  if (!result.retryable) {
+  if (result.sent || !result.retryable) {
     const latest = await getBelaboxStatus(context.DB, context.channelId);
     if (latest?.alertState.pendingChat?.idempotencyKind !== output.idempotencyKind ||
         latest.alertState.pendingChat.episodeStartedAt !== output.episodeStartedAt) return;
@@ -471,12 +473,15 @@ export const currentBelaboxSample = async (
       expectedStatusRevision: currentStatus?.revision ?? null,
     });
     if (revision !== null) {
+      const classified = currentStatus !== null && currentStatus.streamId !== null &&
+        currentStatus.belaboxStreamId === currentStatus.streamId;
       await writePollDiagnostics(
         context.writeDiagnostics,
         "belabox:on_demand",
         result,
         previousPhase,
         phase,
+        classified,
         null,
       );
       break;

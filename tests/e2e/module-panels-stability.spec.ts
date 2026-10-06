@@ -212,6 +212,44 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
   await expect.poll(() => faqCreated).toBe(true);
 });
 
+test("BELABOX immediate action keeps manual results separate from live notices", async ({ page }) => {
+  const connectedStatus = {
+    configured: true, updatedAt: "2030-01-01T12:00:00.000Z",
+    sample: { at: "2030-01-01T12:00:00.000Z", connected: true, bitrateKbps: 3200, rttMs: 41, latencyMs: 115, network: 2, droppedPackets: 0 },
+    errorCode: null, polling: true, pollingDesired: true, streamId: "stream-a", belaboxStreamId: "stream-a",
+    alertNotice: null, fetchFailureNotice: false, intervalSeconds: 5,
+  };
+  const disconnectedStatus = {
+    ...connectedStatus,
+    sample: { ...connectedStatus.sample, connected: false, bitrateKbps: 0 },
+    alertNotice: { phase: "alarm", kind: "disconnect", bitrateKbps: 0 },
+  };
+  let statusCalls = 0;
+  await page.route("**/api/channels/channel-a/modules/belabox/status", async (route) => {
+    statusCalls += 1;
+    const value = statusCalls >= 3 ? disconnectedStatus : connectedStatus;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
+  });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/modules/belabox/test", { ok: true, connected: true, bitrateKbps: 4200 }, "POST");
+  await gotoPanel(page, "belabox-action");
+
+  const notice = page.getByTestId("belabox-immediate-status-slot");
+  const result = page.getByTestId("immediate-action-result-slot");
+  const button = page.getByRole("button", { name: "Check now" });
+  await expect(notice).toContainText("Connected");
+  const layoutBefore = { notice: await box(notice), result: await box(result), button: await box(button) };
+
+  await button.click();
+  await expect(result).toContainText("4200 kbps");
+  await expect(notice).toContainText("Connected");
+  expect({ notice: await box(notice), result: await box(result), button: await box(button) }).toEqual(layoutBefore);
+
+  await expect(notice).toContainText(/BELABOX encoder disconnected|BELABOX-Encoder getrennt/u, { timeout: 10_000 });
+  await expect(result).toBeEmpty();
+  expect({ notice: await box(notice), result: await box(result), button: await box(button) }).toEqual(layoutBefore);
+});
+
 test("Belabox test results stay inside the reserved result box", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/belabox/status", {
     configured: false, updatedAt: null, sample: null, errorCode: null, polling: false,

@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BelaboxStatusResponse } from "../../src/modules/belabox/contracts";
@@ -45,5 +45,18 @@ describe("BELABOX alert surfaces", () => {
 
     expect(await screen.findByTestId("belabox-immediate-status-slot")).toHaveTextContent(/BELABOX encoder disconnected|BELABOX-Encoder getrennt/u);
     expect(screen.getByRole("button", { name: /Check now|Jetzt prüfen/u })).toBeEnabled();
+  });
+
+  it("reloads status when stream availability changes from offline to live", async () => {
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json(status)));
+    vi.stubGlobal("fetch", fetcher);
+    const view = renderWithUi(<BelaboxStatusAction channelId="channel-a" canManage availabilityReason="Stream is offline." />);
+
+    expect(await screen.findByTestId("belabox-immediate-status-slot")).toHaveTextContent("Stream is offline.");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    view.rerender(<UiProvider><BelaboxStatusAction channelId="channel-a" canManage availabilityReason={null} /></UiProvider>);
+
+    await waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(2); });
+    expect(await screen.findByTestId("belabox-immediate-status-slot")).toHaveTextContent(/BELABOX encoder disconnected|BELABOX-Encoder getrennt/u);
   });
 });

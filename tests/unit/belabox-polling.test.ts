@@ -317,6 +317,7 @@ describe("BELABOX polling", () => {
     });
     const { context, sendChat } = alarmContext(database);
     sendChat.mockResolvedValueOnce({ sent: false, reason: "temporary_failure", retryable: true });
+    sendChat.mockResolvedValueOnce({ sent: true, reason: null, retryable: true });
     const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(relayPayload(true, 900))));
 
     await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
@@ -876,6 +877,26 @@ describe("BELABOX polling", () => {
     ]);
   });
 
+  it("does not emit fetch diagnostics before the stream is classified as BELABOX", async () => {
+    await insertModule(database);
+    const { context, diagnostics } = alarmContext(database);
+    const failing = vi.fn<typeof fetch>(() => Promise.reject(new TypeError("relay unavailable")));
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, failing);
+      vi.setSystemTime(Date.now() + 15_000);
+    }
+
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      fetchPhase: { consecutiveFailures: 4, failing: true },
+      belaboxStreamId: null,
+    });
+    expect(diagnostics).toEqual([]);
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM event_log WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ count: 0 });
+  });
+
   it("never throws or leaks the secret through the alarm path", async () => {
     await insertModule(database);
     const { context } = alarmContext(database);
@@ -946,8 +967,11 @@ describe("BELABOX polling", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("writes on-demand failure and recovery diagnostics only at phase changes", async () => {
+  it("writes on-demand fetch diagnostics only for a classified BELABOX stream", async () => {
     await insertModule(database, { mode: "on_demand", intervalSeconds: 15 });
+    await database.prepare(
+      "INSERT INTO belabox_status (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision) VALUES (?, 0, ?, ?, '{}', '[]', 1)",
+    ).bind(CHANNEL_ID, STREAM_ID, STREAM_ID).run();
     const options = {
       DB: database as unknown as D1Database,
       channelId: CHANNEL_ID,
@@ -977,7 +1001,7 @@ describe("BELABOX polling", () => {
     ]);
   });
 
-  it("counts concurrent on-demand failures once each and emits one phase diagnostic", async () => {
+  it("does not emit on-demand fetch diagnostics for an unclassified stream", async () => {
     await insertModule(database, { mode: "on_demand", intervalSeconds: 15 });
     const diagnostics = vi.fn((
       triggerId: string,
@@ -1007,17 +1031,10 @@ describe("BELABOX polling", () => {
     expect(await getBelaboxStatus(options.DB, CHANNEL_ID)).toMatchObject({
       fetchPhase: { consecutiveFailures: 3, failing: true },
     });
-    expect(diagnostics).toHaveBeenCalledOnce();
-    expect(diagnostics).toHaveBeenCalledWith(
-      "belabox:on_demand",
-      [{ code: "belabox.fetch_failing", detail: { reason: "network" } }],
-      expect.any(String),
-    );
+    expect(diagnostics).not.toHaveBeenCalled();
     await expect(database.prepare(
       "SELECT code, detail_json FROM event_log WHERE channel_id = ?",
-    ).bind(CHANNEL_ID).all()).resolves.toMatchObject({ results: [
-      { code: "belabox.fetch_failing", detail_json: JSON.stringify({ reason: "network" }) },
-    ] });
+    ).bind(CHANNEL_ID).all()).resolves.toMatchObject({ results: [] });
   });
 
   it("does not let a delayed on-demand success replace a newer stored sample", async () => {

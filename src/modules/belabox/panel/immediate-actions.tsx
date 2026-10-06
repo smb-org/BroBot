@@ -17,17 +17,23 @@ const BelaboxStatusAction = ({ channelId, canManage = false, availabilityReason 
   useEffect(() => {
     let active = true;
     void loadBelaboxStatus(channelId).then((next) => {
-      if (active) setStatus(next);
+      if (active) {
+        setStatus(next);
+        setResult("");
+      }
     }).catch(() => undefined);
     return () => {
       active = false;
     };
-  }, [channelId]);
+  }, [availabilityReason, channelId]);
 
   useEffect(() => {
     if (!status?.pollingDesired) return;
     const timer = window.setInterval(() => {
-      void loadBelaboxStatus(channelId).then(setStatus).catch(() => undefined);
+      void loadBelaboxStatus(channelId).then((next) => {
+        setStatus(next);
+        setResult("");
+      }).catch(() => undefined);
     }, Math.max(5, status.intervalSeconds) * 1_000);
     return () => window.clearInterval(timer);
   }, [channelId, status?.intervalSeconds, status?.pollingDesired]);
@@ -73,9 +79,9 @@ const BelaboxStatusAction = ({ channelId, canManage = false, availabilityReason 
   return <div className="stream-manager-action">
     <div className="stream-manager-action__header"><Icon name="broadcast" size={20} /><h3>{labels.title}</h3></div>
     <p className={status?.fetchFailureNotice === true || (status?.alertNotice !== null && status?.alertNotice !== undefined) ? "" : "muted"}
-      data-testid="belabox-immediate-status-slot" role="status" aria-live="polite" title={result || notice}
+      data-testid="belabox-immediate-status-slot" role="status" aria-live="polite" title={availabilityReason ?? notice}
       style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }}>
-      {availabilityReason ?? (result || notice)}
+      {availabilityReason ?? notice}
     </p>
     <Button className="stream-manager-action__button" icon="reload" disabled={checking || availabilityReason !== null || !canManage || status?.configured !== true}
       {...(availabilityReason !== null ? { describedBy: availabilityReasonId } : !canManage ? { describedBy: availabilityReasonId } : {})}
@@ -84,8 +90,8 @@ const BelaboxStatusAction = ({ channelId, canManage = false, availabilityReason 
     </Button>
     <p className="lock-reason" id={availabilityReasonId} data-testid="immediate-action-result-slot"
       style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite"
-      title={availabilityReason ?? (!canManage ? labels.readOnly : undefined)}>
-      {availabilityReason ?? (!canManage ? labels.readOnly : "")}
+      title={availabilityReason ?? (!canManage ? labels.readOnly : result || undefined)}>
+      {availabilityReason ?? (!canManage ? labels.readOnly : result)}
     </p>
   </div>;
 };

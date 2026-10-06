@@ -189,16 +189,33 @@ export const advanceAlert = (
           : null,
       };
     } else if (relaySample.connected && relaySample.bitrateKbps >= settings.recoverBitrateKbps) {
-      next = { ...state, phase: "recovering", since: relaySample.at, pendingChat: null };
+      next = {
+        ...state,
+        phase: "recovering",
+        since: relaySample.at,
+        pendingChat: settings.chatEnabled ? state.pendingChat : null,
+      };
     }
   } else {
-    if (problem !== null) {
+    if (problem !== null || relaySample.bitrateKbps < settings.recoverBitrateKbps) {
+      const episodeStartedAt = state.episodeStartedAt;
+      const escalated = state.kind === "low" && !relaySample.connected && episodeStartedAt !== null;
+      if (escalated) {
+        phaseChange = {
+          code: "belabox.alert_escalated",
+          detail: { kind: "disconnect", threshold: 0, seconds: settings.holdSeconds },
+        };
+      }
       next = {
         ...state,
         phase: "alarm",
-        kind: state.kind === "disconnect" ? "disconnect" : problem,
+        kind: state.kind === "disconnect" || problem === "disconnect" ? "disconnect" : state.kind ?? "low",
         since: null,
-        pendingChat: null,
+        pendingChat: !settings.chatEnabled
+          ? null
+          : escalated
+            ? pendingMessage("disconnect", "escalate", episodeStartedAt, settings)
+            : state.pendingChat,
       };
     } else if (state.since !== null && (elapsedSeconds(state.since, relaySample.at) ?? -1) >= settings.recoverHoldSeconds &&
         state.episodeStartedAt !== null && state.kind !== null) {
