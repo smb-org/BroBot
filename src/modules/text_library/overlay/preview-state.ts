@@ -3,8 +3,7 @@ import type { JsonObject } from "../../contract";
 const previewStateText = (text: string, examples: Readonly<Record<string, string>>): string => text.replace(/\{([a-z][a-z0-9_.]{0,63})\}/gu,
   (token, name: string) => name === "sun.set_in" || name === "sun.rise_in" ? token : examples[name] ?? (name.includes(".") ? "42" : name));
 
-export const previewStateFor = (text: string, examples: Readonly<Record<string, string>>): JsonObject => {
-  const now = Date.now();
+export const previewStateFor = (text: string, examples: Readonly<Record<string, string>>, now = Date.now()): JsonObject => {
   return {
     serverNow: new Date(now).toISOString(),
     timeZone: "Europe/Berlin",

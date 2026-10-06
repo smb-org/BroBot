@@ -1,5 +1,7 @@
-import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
+import { Popover as MantinePopover } from "@mantine/core";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
 
+import { dashboardCommonTexts } from "../locale";
 import { FormDensity } from "./FormDensity";
 import { Icon, type IconName } from "./Icon";
 import { InspectorHeading } from "./Inspector";
@@ -61,9 +63,115 @@ export interface EditorShellProps {
 const fieldById = (root: HTMLElement | null, id: string): HTMLElement | undefined =>
   root === null ? undefined : [...root.querySelectorAll<HTMLElement>("[id]")].find((candidate) => candidate.id === id);
 
-/** Opens every collapsed <details> around the field, then focuses it. */
-const revealAndFocus = (field: HTMLElement): void => {
-  for (let details = field.closest("details"); details !== null; details = details.parentElement?.closest("details") ?? null) details.open = true;
+const invalidFieldKey = ({ sectionId, id, focusId, message }: EditorInvalidField): string =>
+  JSON.stringify([sectionId, id, focusId ?? id, message]);
+
+function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly EditorInvalidField[]; onFocusField: (field: EditorInvalidField) => void }) {
+  const [opened, setOpened] = useState(false);
+  const popoverId = useId();
+  const common = dashboardCommonTexts();
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const openedFromKeyboard = useRef(false);
+
+  const focusFirstErrorLink = (): void => {
+    if (!openedFromKeyboard.current) return;
+    openedFromKeyboard.current = false;
+    dropdownRef.current?.querySelector<HTMLElement>("button")?.focus();
+  };
+
+  // Dismissal (Escape, outside click) returns focus to the trigger; activating an error link must not.
+  const [linkActivated, setLinkActivated] = useState(false);
+  const setOpenedState = (next: boolean): void => {
+    if (next) setLinkActivated(false);
+    setOpened(next);
+  };
+
+  useEffect(() => {
+    if (!opened) return undefined;
+    // Capture on window so the inspector's native Escape listener never sees this key press.
+    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpened(false);
+    };
+    window.addEventListener("keydown", closeOnEscape, true);
+    return () => { window.removeEventListener("keydown", closeOnEscape, true); };
+  }, [opened]);
+
+  return (
+    <>
+      <span className="ui-save-bar__invalid-summary">{common.invalidFieldCount(fields.length)}</span>
+      <MantinePopover
+        id={popoverId}
+        opened={opened}
+        onChange={setOpenedState}
+        withinPortal={false}
+        floatingStrategy="fixed"
+        position="top-start"
+        width={280}
+        middlewares={{ flip: true, shift: true }}
+        shadow="xs"
+        closeOnEscape={false}
+        // No exit fade: a fading popover keeps clickable links that unmount mid-click.
+        transitionProps={{ exitDuration: 0 }}
+        returnFocus={!linkActivated}
+        hideDetached={false}
+        onEnterTransitionEnd={focusFirstErrorLink}
+      >
+        <MantinePopover.Target>
+          <button
+            className="ui-save-bar__invalid-trigger"
+            type="button"
+            aria-label={opened ? common.hideInvalidFields : common.showInvalidFields}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") openedFromKeyboard.current = !opened;
+            }}
+            onClick={() => { setOpenedState(!opened); }}
+          >
+            <Icon name="cause" size={16} />
+          </button>
+        </MantinePopover.Target>
+        <MantinePopover.Dropdown ref={dropdownRef} className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`}>
+          <div>
+            <h2 id={`${popoverId}-title`} className="sr-only">{common.invalidFieldsTitle}</h2>
+            <ul className="ui-save-bar__invalid-fields">
+              {fields.map((field) => (
+                <li key={`${field.sectionId}:${field.id}`}>
+                  <button type="button" aria-label={`${field.label}: ${field.message}`} onClick={() => { setLinkActivated(true); onFocusField(field); setOpened(false); }}>
+                    <span>{field.label}</span>
+                    <span>{field.message}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </MantinePopover.Dropdown>
+      </MantinePopover>
+    </>
+  );
+}
+
+/** Focuses an invalid field without expanding sections that the editor has kept closed. */
+const focusInvalidTarget = (field: HTMLElement, errorKey: string): void => {
+  const details: HTMLDetailsElement[] = [];
+  for (let current = field.closest("details"); current !== null; current = current.parentElement?.closest("details") ?? null) {
+    details.push(current);
+  }
+  const collapsed = details.filter((current) => !current.open);
+  if (collapsed.length > 0) {
+    for (const current of collapsed) {
+      const errorKeys = new Set(JSON.parse(current.dataset.editorErrorKeys ?? "[]") as string[]);
+      errorKeys.add(errorKey);
+      current.dataset.editorErrorKeys = JSON.stringify([...errorKeys]);
+      current.dataset.editorError = "true";
+    }
+    const summary = collapsed[collapsed.length - 1]?.querySelector<HTMLElement>("summary");
+    summary?.scrollIntoView({ block: "center" });
+    summary?.focus();
+    return;
+  }
+  field.scrollIntoView({ block: "center" });
   field.focus();
 };
 
@@ -107,6 +215,7 @@ export function EditorShell({
   const pendingValidationFocus = useRef(false);
   // Bumped on every invalid save so the focus effect re-runs even when the parent state is unchanged.
   const [saveAttempt, setSaveAttempt] = useState(0);
+  const invalidFieldSignature = JSON.stringify(invalidFields.map(invalidFieldKey).sort());
   const activeSectionId = section ?? internalSection;
   const activeSection = sections.find((candidate) => candidate.id === activeSectionId) ?? sections[0];
   const activeIndex = useMemo(() => Math.max(0, sections.findIndex((candidate) => candidate.id === activeSection?.id)), [activeSection?.id, sections]);
@@ -114,6 +223,20 @@ export function EditorShell({
   const closeAction = onClose === undefined || closeLabel === undefined
     ? undefined
     : { kind: "close" as const, label: closeLabel, onClick: onClose };
+
+  useLayoutEffect(() => {
+    const activeErrorKeys = new Set(JSON.parse(invalidFieldSignature) as string[]);
+    contentRef.current?.querySelectorAll<HTMLElement>("details[data-editor-error]").forEach((details) => {
+      const retainedErrorKeys = (JSON.parse(details.dataset.editorErrorKeys ?? "[]") as string[])
+        .filter((errorKey) => activeErrorKeys.has(errorKey));
+      if (retainedErrorKeys.length > 0) {
+        details.dataset.editorErrorKeys = JSON.stringify(retainedErrorKeys);
+        return;
+      }
+      delete details.dataset.editorError;
+      delete details.dataset.editorErrorKeys;
+    });
+  }, [invalidFieldSignature]);
 
   useLayoutEffect(() => {
     if (pendingValidationFocus.current) {
@@ -133,8 +256,8 @@ export function EditorShell({
       }
       pendingValidationFocus.current = false;
       pendingFocus.current = null;
-      const revealedField = fieldById(contentRef.current, firstInvalidField.focusId ?? firstInvalidField.id);
-      if (revealedField !== undefined && !revealedField.matches("[disabled]")) revealAndFocus(revealedField);
+      const invalidTarget = fieldById(contentRef.current, firstInvalidField.focusId ?? firstInvalidField.id);
+      if (invalidTarget !== undefined && !invalidTarget.matches("[disabled]")) focusInvalidTarget(invalidTarget, invalidFieldKey(firstInvalidField));
       return;
     }
     const fieldId = pendingFocus.current;
@@ -145,7 +268,8 @@ export function EditorShell({
       return;
     }
     const field = fieldById(contentRef.current, fieldId);
-    if (field !== undefined && !field.matches("[disabled]")) revealAndFocus(field);
+    const invalidField = invalidFields.find((candidate) => (candidate.focusId ?? candidate.id) === fieldId);
+    if (field !== undefined && !field.matches("[disabled]")) focusInvalidTarget(field, invalidField === undefined ? fieldId : invalidFieldKey(invalidField));
   }, [activeSection?.id, invalidFields, onSectionChange, section, saveAttempt]);
 
   const selectSection = (id: string): void => {
@@ -161,7 +285,7 @@ export function EditorShell({
       return;
     }
     const target = fieldById(contentRef.current, focusId);
-    if (target !== undefined && !target.matches("[disabled]")) revealAndFocus(target);
+    if (target !== undefined && !target.matches("[disabled]")) focusInvalidTarget(target, invalidFieldKey(field));
   };
 
   const focusFirstInvalid = (): void => {
@@ -201,20 +325,7 @@ export function EditorShell({
     onSave();
   };
 
-  const invalidStatus = invalidMessage === undefined || invalidFields.length === 0 ? undefined : (
-    <>
-      <span>× {invalidMessage}</span>
-      <ul className="ui-save-bar__invalid-fields">
-        {invalidFields.map((field) => (
-          <li key={`${field.sectionId}:${field.id}`}>
-            <button type="button" aria-label={`${field.label}: ${field.message}`} title={field.message} onClick={() => { focusInvalidField(field); }}>
-              {field.label}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </>
-  );
+  const invalidStatus = invalidFields.length === 0 ? undefined : <InvalidFieldsStatus fields={invalidFields} onFocusField={focusInvalidField} />;
 
   const handleSubmit = (event: SyntheticEvent<HTMLFormElement>): void => {
     event.preventDefault();

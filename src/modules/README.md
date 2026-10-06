@@ -29,7 +29,10 @@ Die äußerste Ansicht liegt in `.module-stack` (normalerweise als `<section>`
 mit `aria-label`). Diese Hülle ist die Gestaltungskonvention des Hosts: Sie
 vererbt die Regeln für Beschriftungen, Eingabefelder, Textareas, Selects und
 Hinweise an die Modul-Ansicht. Ohne `.module-stack` bleibt eine neue Ansicht
-unformatiert und fällt auf das Browser-Standardaussehen zurück.
+unformatiert und fällt auf das Browser-Standardaussehen zurück. Panel-Autoren
+übernehmen außerdem die Regeln aus [DESIGN.md, „Stabile Layouts"](../../DESIGN.md#stabile-layouts):
+Statuswechsel belegen reservierte Zeilen oder erscheinen als Toast-Overlay,
+und Lade-, Leer- und Fehlerzustände behalten dieselbe Mindesthöhe.
 
 Eine Konfigurationsfläche teilt ihren Inhalt in `.config-section`-Abschnitte.
 Jeder Abschnitt beginnt mit einer Überschrift in `.section-heading`, die von
@@ -45,8 +48,17 @@ Feldzeilen setzen das Label links und füllen die rechte Kontrollspalte. Hilfen
 stehen am Info-Symbol, Speichern und Verwerfen bleiben am Inspektorfuß, und
 Lösch- oder Widerrufshandlungen gehören in `DangerSection`. Tabellen zeigen
 Status-Badges; ihre Spalten folgen dem Inhalt und kurze Werte werden nicht
-abgeschnitten. Module importieren diese Bauteile aus dem UI-Seam; der Host
-enthält keine modulabhängigen Sonderfälle.
+abgeschnitten. Module importieren diese Bauteile und den Toast-Helfer aus dem
+UI-Seam, nie direkt aus Mantine:
+
+```ts
+import { notify } from "../../../dashboard/ui";
+
+notify({ tone: "success", message: labels.saved });
+```
+
+Der Toast-Host sitzt einmal im Dashboard-Shell; der Host enthält keine
+modulabhängigen Sonderfälle.
 
 Eine Tabelle mit wählbaren Zeilen und ihrem Inspektor verwendet das gemeinsame
 `ListDetail`: Die Ansicht übergibt `list` und `inspector`, die Komponente hält
@@ -516,6 +528,9 @@ overlayElements: [{
   `reloadStateOnModuleMessages` und `reloadStateOnHostEvents`
   (`channel.game.changed`, `stream.state.changed`, `template.data.changed`)
   veranlassen stattdessen ein Neuladen über `initialState`.
+- **`previewState(config, language, now)`** (optional) erzeugt einen
+  sprachabhängigen Beispielzustand für die Kompositionsvorschau aus Konfiguration,
+  Kanalsprache und aktuellem Zeitpunkt.
 - Der Host speichert `kind` und Konfiguration als JSON; `parseConfig` validiert
   beim Speichern und liefert `null` bei ungültiger Eingabe.
 
@@ -569,6 +584,12 @@ alarms: [{
 - Routen können einen Handler sofort ausführen
   (`runModuleAlarm(channelId, moduleId, handlerKey, alarmKey)`); dort gibt es
   keine automatische Wiederholung.
+- **Externe Datenquellen:** Alarme mit externen Abrufen verwenden das gemeinsame
+  `ModuleAlarmContext.externalFetchBudget`. Erwartbare Anbieterfehler werden als
+  modulinterner Zustand gespeichert und nicht geworfen, wenn der Host sie weder
+  loggen noch mit seinem Alarm-Backoff wiederholen soll. Phasenwechsel können
+  über `ModuleAlarmContext.writeDiagnostics` in das Ereignisprotokoll geschrieben
+  werden; Details bleiben dabei auf feste Codes begrenzt.
 
 ### Host-Variablen und Kanalvariablen
 

@@ -1,8 +1,10 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ListDetail, SubInspector } from "../../src/dashboard/ui";
+import { ListDetail, SubInspector, notify } from "../../src/dashboard/ui";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
+import { UiProvider } from "../../src/dashboard/ui/Provider";
 
 const list = <section role="region" aria-label="Liste">Liste</section>;
 const inspector = <section role="region" aria-label="Details">Details</section>;
@@ -104,5 +106,37 @@ describe("ListDetail", () => {
     expect(screen.queryByRole("dialog", { name: "Details" })).not.toBeInTheDocument();
     expect(document.activeElement).toBe(row);
     expect(screen.getByText("Page header action").closest("button")).not.toHaveAttribute("inert");
+  });
+
+  it("keeps an existing error notification available when the narrow inspector opens", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    function ToastAndInspectorHarness() {
+      const [open, setOpen] = useState(false);
+      return <UiProvider>
+        <ToastHost />
+        <ListDetail
+          list={<button type="button" onClick={() => { setOpen(true); }}>Open inspector</button>}
+          inspector={open ? inspector : null}
+          onCloseInspector={() => { setOpen(false); }}
+        />
+      </UiProvider>;
+    }
+    render(<ToastAndInspectorHarness />);
+
+    act(() => { notify({ tone: "error", message: "The inspector update failed." }); });
+    const toast = screen.getByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "Open inspector" }));
+    expect(screen.getByRole("dialog", { name: "Details" })).toBeInTheDocument();
+    const host = toast.closest(".ui-toast-host");
+    expect(host).not.toBeNull();
+    for (let ancestor = host; ancestor !== null && ancestor !== document.body; ancestor = ancestor.parentElement) {
+      expect(ancestor).not.toHaveAttribute("inert");
+      expect(ancestor).not.toHaveAttribute("aria-hidden", "true");
+    }
+
+    const close = within(toast).getByRole("button");
+    expect(close).toBeEnabled();
+    fireEvent.click(close);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
