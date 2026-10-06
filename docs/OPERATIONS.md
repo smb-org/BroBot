@@ -382,16 +382,15 @@ Zeile in `twitch_connections` wird für diesen globalen Bot nicht angelegt.
 
 ### Wenn die Bot-Scopes erweitert wurden
 
-Die erneute Zustimmung ist eine Betreiberaufgabe und wird genau in dieser
-Reihenfolge durchgeführt:
+Die erneute Zustimmung ist eine Betreiberaufgabe. `GET /auth/bot/login`
+verlangt eine Panel-Sitzung, die zum **Bot-Konto** gehört
+(`TWITCH_BOT_LOGIN`); Sitzungen anderer Konten, auch der Betreiber, erhalten
+403 (`bot_account_only_connects_itself`). Reihenfolge:
 
-1. Bei Twitch mit dem **eigenen** Konto anmelden.
-2. Am Panel anmelden. Dadurch entsteht die Panel-Sitzung, die die Route
-   verlangt.
-3. Erst jetzt bei Twitch abmelden und mit dem **Bot-Konto** anmelden. Die
-   Panel-Sitzung ist ein eigener Cookie und überlebt den Wechsel des Twitch-
-   Kontos.
-4. `GET /auth/bot/login` aufrufen und den Zustimmungsdialog bestätigen.
+1. Bei Twitch mit dem **Bot-Konto** anmelden.
+2. Am Panel mit diesem Bot-Konto anmelden. Dadurch entsteht die Panel-Sitzung
+   des Bot-Kontos.
+3. `GET /auth/bot/login` aufrufen und den Zustimmungsdialog bestätigen.
 
 Der richtige Dialog listet alle Bot-Scopes auf, nicht nur die beiden Login-
 Scopes. Sieht man nur „Lies die Liste von Kanälen, für die du
@@ -399,11 +398,10 @@ Moderator-Berechtigungen hast“ und „Tritt dem Chat deines Kanals als
 Bot-Nutzer bei“, ist man im Panel-Login gelandet und bei Twitch mit dem
 falschen Konto angemeldet.
 
-Der Bot fordert **alle** Bot-Scopes in einem Zug an (`BOT_SCOPES` in
-`src/worker/auth/oauth.ts`). Dass auch der übrige Moderator-Satz (Lese- und
-Verwaltungsvarianten) schon jetzt dabei ist, ist Absicht: So braucht der Bot-
-Account später keine weitere Zustimmungsrunde, wenn ein Modul eine dieser
-Fähigkeiten erstmals nutzt.
+Der Bot fordert alle Bot-Scopes in einem Zug an (`BOT_SCOPES` in
+`src/worker/auth/oauth.ts`). Scopes werden nur angefordert, wenn ein Feature
+sie nutzt (Twitch-Vorgabe). AutoMod-Einstellungen, Shield Mode und Guest Star
+folgen später mit dem nutzenden Modul; dann ist eine erneute Zustimmung nötig.
 
 | Scope | Zweck |
 |---|---|
@@ -420,15 +418,13 @@ Fähigkeiten erstmals nutzt.
 | `moderator:manage:blocked_terms` / `moderator:read:blocked_terms` | gesperrte Begriffe ändern / lesen |
 | `moderator:manage:chat_settings` / `moderator:read:chat_settings` | Chat-Einstellungen ändern / lesen |
 | `moderator:manage:unban_requests` / `moderator:read:unban_requests` | Entsperranträge bearbeiten / lesen |
-| `moderator:manage:banned_users` / `moderator:read:banned_users` | bannen, timeouten, entbannen / Bannliste lesen |
+| `moderator:manage:banned_users` / `moderator:read:banned_users` | bannen, timeouten, entbannen / Bann-Ereignisse (EventSub) lesen |
 | `moderator:manage:warnings` / `moderator:read:warnings` | Verwarnungen aussprechen / lesen |
-| `moderator:read:moderators` | Moderatorenliste lesen |
-| `moderator:read:vips` | VIP-Liste lesen |
+| `moderator:read:moderators` | Moderator-Ereignisse (EventSub) lesen |
+| `moderator:read:vips` | VIP-Ereignisse (EventSub) lesen |
 | `moderator:manage:automod` | zurückgehaltene Nachrichten freigeben oder ablehnen |
-| `moderator:manage:automod_settings` / `moderator:read:automod_settings` | AutoMod-Einstellungen ändern / lesen |
 | `moderator:read:suspicious_users` | Twitchs Bann-Umgehungs-Erkennung lesen |
-| `moderator:manage:shield_mode` / `moderator:read:shield_mode` | Shield Mode schalten / Status lesen |
-| `moderator:manage:guest_star` / `moderator:read:guest_star` | Guest-Star-Sitzungen steuern / lesen |
+| AutoMod-Einstellungen, Shield Mode, Guest Star | später mit dem nutzenden Modul |
 
 Die routinemäßige Erneuerung läuft automatisch über den Refresh-Token im
 stündlichen Lauf. Manuell ist die Autorisierung nur nötig, wenn Scopes
