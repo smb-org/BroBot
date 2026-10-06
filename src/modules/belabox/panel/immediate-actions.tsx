@@ -8,6 +8,8 @@ import { loadBelaboxStatus, testBelaboxConnection } from "./service";
 
 const language = typeof navigator === "undefined" || !navigator.language.toLowerCase().startsWith("en") ? "de" : "en";
 
+const RETRY_DELAYS_MS = [5_000, 10_000, 30_000];
+
 const BelaboxStatusAction = ({ channelId, canManage = false, availabilityReason }: ModuleImmediateActionProperties): ReactElement => {
   const labels = belaboxPanelTexts(language);
   const [status, setStatus] = useState<BelaboxStatusResponse | null>(null);
@@ -16,14 +18,22 @@ const BelaboxStatusAction = ({ channelId, canManage = false, availabilityReason 
 
   useEffect(() => {
     let active = true;
-    void loadBelaboxStatus(channelId).then((next) => {
-      if (active) {
-        setStatus(next);
-        setResult("");
-      }
-    }).catch(() => undefined);
+    let timer: number | undefined;
+    // Failed loads are retried with a bounded backoff until a status arrives.
+    const load = (attempt: number): void => {
+      void loadBelaboxStatus(channelId).then((next) => {
+        if (active) {
+          setStatus(next);
+          setResult("");
+        }
+      }).catch(() => {
+        if (active) timer = window.setTimeout(() => { load(attempt + 1); }, RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]);
+      });
+    };
+    load(0);
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
   }, [availabilityReason, channelId]);
 
@@ -83,7 +93,7 @@ const BelaboxStatusAction = ({ channelId, canManage = false, availabilityReason 
       style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }}>
       {availabilityReason ?? notice}
     </p>
-    <Button className="stream-manager-action__button" icon="reload" disabled={checking || availabilityReason !== null || !canManage || status?.configured !== true}
+    <Button className="stream-manager-action__button" icon="reload" disabled={checking || availabilityReason !== null || !canManage || status?.configured === false}
       {...(availabilityReason !== null ? { describedBy: availabilityReasonId } : !canManage ? { describedBy: availabilityReasonId } : {})}
       onClick={() => { void checkNow(); }}>
       {labels.checkNow}

@@ -88,4 +88,29 @@ describe("BELABOX alert surfaces", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(notice).toHaveTextContent("BELABOX encoder disconnected");
   });
+
+  it("retries a failed initial action-card status request and then starts refreshing", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue(Response.json(status));
+    vi.stubGlobal("fetch", fetcher);
+    vi.useFakeTimers();
+    try {
+      renderWithUi(<BelaboxStatusAction channelId="channel-a" canManage availabilityReason={null} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("belabox-immediate-status-slot")).toHaveTextContent(/not available yet|noch nicht verfügbar/u);
+      expect(screen.getByRole("button", { name: /Check now|Jetzt prüfen/u })).toBeEnabled();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId("belabox-immediate-status-slot")).toHaveTextContent(/BELABOX encoder disconnected|BELABOX-Encoder getrennt/u);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      expect(fetcher).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
