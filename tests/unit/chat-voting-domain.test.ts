@@ -137,7 +137,7 @@ describe("chat voting command and result domain", () => {
 describe("chat voting normalization performance", () => {
   it("normalizes pathological long input in linear time", () => {
     const noise = " .!?*😀\t".repeat(7_200);
-    const inputs = [noise, `${"*".repeat(50_000)}x`, `x${"*".repeat(50_000)} y`, " ".repeat(50_000) + "!"];
+    const inputs = [noise, `${"*".repeat(50_000)}x`, `x${"*".repeat(50_000)} y`, " ".repeat(50_000) + "!", `x${"*".repeat(50_000)}y`, `${"*".repeat(50_000)}y${"*".repeat(50_000)}x`];
     const started = performance.now();
     for (const input of inputs) {
       normalizeFreeTextVote(input, "whole_message");
