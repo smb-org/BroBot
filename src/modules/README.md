@@ -48,11 +48,12 @@ Feldzeilen setzen das Label links und füllen die rechte Kontrollspalte. Hilfen
 stehen am Info-Symbol, Speichern und Verwerfen bleiben am Inspektorfuß, und
 zerstörende Handlungen stehen an ihrem Objekt: als letzter roter Menüpunkt nach
 einer Trennlinie bei einer Zeile oder ohne eigene Überschrift im
-`InspectorActions`-Fuß des geöffneten Objekts. Zerstörende Aktionen fragen mit
-`ConfirmDialog` nach; der Titel nennt das Objekt als Frage, die Beschreibung
-nennt in einem Satz die Folge und die Bestätigung nennt Verb und Objekt.
-Entwurfsschritte bleiben neutral und ohne Nachfrage. Gesperrte Aktionen bleiben
-sichtbar und deaktiviert; der Grund steht einmal am Abschnitt. Tabellen zeigen
+`InspectorActions`-Fuß des geöffneten Objekts als roter Knopf. Zerstörende
+Aktionen fragen mit `ConfirmDialog` nach; der Titel nennt das Objekt als Frage,
+die Beschreibung nennt in einem Satz die Folge und die Bestätigung nennt Verb
+und Objekt. Entwurfsschritte bleiben neutral und ohne Nachfrage. Gesperrte
+Aktionen bleiben für Operatoren sichtbar und deaktiviert; der Grund steht einmal
+am Abschnitt. Tabellen zeigen
 Status-Badges; ihre Spalten folgen dem Inhalt und kurze Werte werden nicht
 abgeschnitten. Module importieren diese Bauteile und den Toast-Helfer aus dem
 UI-Seam, nie direkt aus Mantine:
@@ -80,89 +81,581 @@ Escape. Die Auswahl bleibt beim Nachladen bestehen, solange die Zeile noch
 existiert. Zerstörende Handlungen folgen dem Muster am Objekt und bestätigen
 mit `ConfirmDialog`. Eine Liste fehlender Berechtigungen ist kein Inspektor und
 trägt `.sub-inspector` nicht.
-
 ## Registrierung
 
 1. Das Modulverzeichnis mit der Pflichtstruktur anlegen.
-2. Einen `BotModule`-Wert mit `id`, Settings-Schema und Defaults definieren; optionale EventSub-Typen, `handleEvent`, Routen sowie `overlayElements` und/oder Panel nur bei Bedarf ergänzen.
-3. Genau diesen Wert in `src/modules/registry.ts` in `MODULES` eintragen. Das ist die einzige globale Kenntnis aller Module.
+2. Einen `BotModule`-Wert definieren. Pflicht sind `id`, `navigationCategory`,
+   `settingsSchema` und `defaultSettings`; alles andere (EventSub-Typen,
+   `handleEvent`, Routen, Panel, Overlay-Elemente, Alarme, Secrets-Nutzung)
+   kommt nur bei Bedarf dazu. Jedes Feld ist in `src/modules/contract.ts`
+   dokumentiert; der Contract ist die Quelle, dieser Leitfaden erklärt, wann man
+   welches Feld braucht.
+3. Genau diesen Wert in `src/modules/registry.ts` in `MODULES` eintragen. Das ist
+   die einzige globale Kenntnis aller Module; die Reihenfolge bestimmt auch die
+   Dispatch-Reihenfolge je Ereignis.
 4. Prüfen: `pnpm run check`.
 
-### Generische Erweiterungspunkte
+Die Registry validiert beim Laden und bricht bei Verstößen ab: Overlay-`kind`
+mit Modulpräfix und eindeutig, Ereigniszeit-Kennungen (`^[a-z][a-z0-9_]*$`,
+zweisprachiges Label), punktgetrennte Variablennamen, eine Variablengruppe sowie
+zweisprachige Picker-Texte für jede deklarierte Variable.
 
-Jedes Modul ordnet seine Seitenleiste über `navigationCategory` einer der
-Kategorien `chat`, `interaction`, `data` oder `twitch` zu. Der Host gruppiert
-aktivierte und berechtigte Module unter den lokalisierten Kategorieüberschriften
-und verwendet den Modulnamen als Zieleintrag, wenn keine eigenen
-`navigationEntries` deklariert sind. Eigene Einträge können über
-`navigationEntries` zusätzlich lokalisierten Namen, Beschreibungen, Symbole und
-Suchbegriffe für die Seitenleiste und Spotlight bereitstellen; sie wählen keine
-eigene Kategorie.
-`showMainSwitch: false` blendet bei dauerhaft verfügbaren Modulansichten den
-nicht bedienbaren Hauptschalter aus. Der Host baut daraus Modulrouten; Namen,
-Texte, Symbole und Suchbegriffe bleiben beim Modul.
-Für nicht abschaltbare Module kann `mandatoryReason` den Grund je Sprache
-angeben.
+Optionale Lebenszyklusfelder: `defaultEnabled` (neue Kanäle erhalten das Modul
+aktiviert; Bestandskanäle brauchen eine Backfill-Migration), `mandatory` mit
+`mandatoryReason` (nicht abschaltbar), `broadcasterScopes` (Zustimmung, die der
+Host vor dem EventSub-Abo prüft), `onEnable` (einmalige Initialdaten),
+`scheduledMaintenance` (stündliche Aufräumarbeit) und `variableReferences`
+(Kanalvariablen in eigenen Daten; für Einstellungen genügt
+`settingsVariableReferences(moduleId, fields)`).
 
-Module können Vorlagenwerte über `resolveTemplateValues(names, context)`
-bereitstellen und ihre Namen über `templateFields` oder
-`templateVariables(db, channelId)` deklarieren. Der Host extrahiert die Namen
-aus dem ursprünglichen Text, fragt nur passende Provider ab und rendert den
-Text genau einmal. Eingefügte Werte werden dabei nie erneut als Vorlage
-eingelesen. Ein Provider liefert eine Zuordnung von Variablenname zu
-Zeichenkette; er schreibt nicht den gesamten Vorlagentext um.
-Für zeitabhängige Overlaywerte liefert `resolveOverlayTemplateValues` optional
-`nextChangeAt` pro Wert. Die Textbibliothek verwendet diese Contract-Angabe
-generisch für den nächsten Overlay-Neuaufbau; sie kennt keine Modulanamen.
+## Wie ein Modul zu seinem Ereignis kommt
 
-Neue Host- und Datenquellenvariablen verwenden einen Punkt im Namen, etwa
-`{sun.set}`, `{sun.set_in}` oder `{weather.temp}`. Ein einfacher Name wie
-`{welcome}` ist ein Textblock aus `text_library`. Bereits vorhandene einfache
-Hostnamen bleiben reserviert und können nicht als Blockname angelegt werden.
-Ein Blockverweis wie `{welcome}` wird nur erkannt, wenn er im ursprünglichen
-Vorlagentext steht. Eingefügte Chatwerte mit demselben Inhalt bleiben Text und
-werden nicht nachträglich als Blockverweis interpretiert.
-Die Registry prüft Moduldeklarationen: Nur der ausdrücklich markierte
-Textblock-Provider darf einfache Namen deklarieren; alle anderen neuen
-Modulvariablen müssen punktgetrennt sein. Die Textbibliothek löst verschachtelte
-Blöcke selbst auf und nutzt `context.renderTemplate` nur für die darin
-enthaltenen Host-Fragmente. Zufallsauswahl wird nur bei Chat-Ausgaben
-gespeichert; Vorschau- und Overlay-Aufrufe bleiben lesend.
+`handleEvent` ist der fachliche Einstiegspunkt. Es beschreibt weiterhin in
+`ModuleResult.actions`, was geschehen soll, und führt Chataktionen nicht selbst
+aus; der Host führt sie aus und protokolliert ihren Ausgang. Für Module mit
+eigenem Zustand erhält der Einstiegspunkt zusätzlich den
+`ModuleExecutionContext`: Er enthält den D1-Binding und eine vom Host erzeugte,
+kanalgebundene Mutationsautorisierung. Das Modul kapselt den Bindingzugriff in
+seinem Adapter und kennt weder `channel_members` noch die Sitzungsprüfung.
+Das Modul begründet Handeln oder Nicht-Handeln mit `diagnostics` (Entscheidung
+0004).
+
+Ein Ereignis erreicht ein Modul nur, wenn alle drei Bedingungen gelten: Das
+Modul ist in diesem Kanal aktiviert, es steht in `MODULES`, und der Abo-Typ
+steht in seinen `eventSubTypes`.
+
+Der Zielkanal kommt aus dem geprüften Ereignis und wird dem Modul in
+`ModuleEvent.channelId` mitgeteilt. Der Host löst außerdem den Akteur anhand
+von `channel_members` auf und übergibt `actor` mit User-ID, Login und Rolle.
+Eine Rolle `null` bedeutet, dass der Nutzer kein Mitglied dieses Kanals ist;
+`actor: null` bedeutet nur, dass der Payload kein `chatter_user_id` trägt: Der
+Host wertet ausschließlich dieses Feld aus. Ein Raid-Ereignis enthält
+`from_broadcaster_user_id`, erhält aber trotzdem `actor: null`. Wer
+Berechtigungen aus `actor` ableitet, darf `null` daher nicht als „kein Nutzer
+beteiligt“ lesen.
+Bei `channel.chat.message` leitet der Host zusätzlich aus den Twitch-Badges
+den eigenständigen `ModuleEvent.chatStatus` ab. `founder` zählt dabei als
+`subscriber`; `moderator` und `broadcaster` erfüllen auch niedrigere Stufen.
+Ereignisse ohne Chatbezug tragen dort `null`. Ein Modul kann keinen anderen
+Kanal angeben — die Mandantentrennung liegt beim Host.
+
+Wirft `handleEvent`, hält das weder den Worker noch die übrigen Module auf. Der
+Fehler landet als `host.module.error` im Ereignisprotokoll.
+
+Ein Modul beschreibt gewünschte Aktionen in der geordneten Liste
+`ModuleResult.actions`; die Reihenfolge bleibt erhalten, neue Aktionsarten kommen
+additiv hinzu. Es gibt `chat`, `announcement`, `shoutout`, `timeout`, `ban` und
+`overlay`; das Modul führt keine davon selbst aus. Ausgabeziele,
+Ausgabegrenze und Moderation stehen unter „Contract-Fähigkeiten“.
+
+Zusätzlich meldet ein Modul eine fachliche Entscheidung über das Feld
+`diagnostics`. Das gilt auch dann, wenn es keine Aktion erzeugt. So kann der
+Host erklären, warum eine Aktion bewusst unterblieben ist.
+
+```ts
+return {
+  actions: [{ kind: "chat", text: "Danke für den Raid!", target: "source_only" }],
+  diagnostics: [{
+    code: "shoutout.suppressed",
+    detail: { reason: "raid_detected", viewers: 8, threshold: 10 },
+  }],
+};
+```
+
+`code` ist eine stabile, maschinenlesbare Kennung. `detail` enthält nur die
+kleinen Werte, die den Grund erklären, und wird vom Host als JSON gespeichert.
+Das Modul schreibt weder selbst in `event_log` noch verwendet es eine
+Logging-API. Das Modul begründet Nicht-Handeln. Der Host kennt Kanal, Modul,
+`triggerId`, auslösenden Nutzer und Zeitpunkt und protokolliert Handeln und
+dessen Ausgang mit host-erzeugten Diagnosen wie `host.chat.sent` oder
+`host.shoutout.failed` samt Ursache. Die Schreibfunktion
+fügt nur ein; Aufbewahrungsfrist und Zeilenlimit setzt die geplante Wartung
+(`scheduled`) separat durch.
+
+Der Host mountet registrierte Modulrouten kanalbezogen unter
+`/api/channels/:channelId/modules/<id>`. Textbefehle stellen dort die
+CRUD-Routen unter `/commands` bereit. Die Host-Middleware prüft Session,
+CSRF und Mitgliedschaft und gibt dem Modul anschließend den Akteur, eine
+SQL-gebundene Mutationsautorisierung und eine vorbereitete Audit-Funktion für
+Moduldatenänderungen weiter. Das Modul entscheidet selbst, ob es diese
+Funktion nutzt; der Host erzwingt sie nicht rückwirkend.
+
+Das optionale Feld `panel` ist eine Funktion, die ein `import()`-Promise
+zurückgibt. So kann Vite für die Panel-Ansicht einen eigenen Chunk schneiden;
+ein deaktiviertes Modul kostet im Panel-Bundle null Bytes. Panel-Ansichten
+erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
+
+## Contract-Fähigkeiten
+
+Jeder Abschnitt nennt Zweck, Einsatz, ein kurzes Beispiel und die Grenzen.
+Architekturhintergrund (Durable Objects, Datenfluss) steht in
+[`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) und wird hier nicht
+wiederholt.
+
+### Vorlagenvariablen, Value-Provider und `nextChangeAt`
+
+**Zweck:** Ein Modul stellt Werte für Chattexte, Textblöcke und Overlays
+bereit, ohne Vorlagentexte selbst zu rendern.
+
+**Einsatz:** Deklarieren über `templateFields` (je Einstellungsfeld),
+`templateVariableCatalog` (statisch, Pflicht bei `templateVariables`) oder
+`templateVariables(db, channelId)` (dynamisch), dazu `templateVariableGroup` und
+zweisprachige `picker`-Texte. Auflösen über `resolveTemplateValues(names,
+context)`; parametrisierte Werte wie `{currency.convert USD EUR}` über
+`resolveTemplateParameter`. `templateUnavailableText` ist der zweisprachige
+Rückfalltext.
+
+```ts
+templateVariableGroup: { label: { de: "Sonne", en: "Sun" }, icon: { paths: ["M12 3v3"] } },
+templateVariableCatalog: [{ name: "sun.set", maxLength: 5, sample: "20:41", picker }],
+resolveTemplateValues: async (names, context) => {
+  const location = await context.channelLocation();
+  return location === null ? {} : { "sun.set": formatSunset(location, context.now) };
+},
+```
+
+**Grenzen:**
+
+- Neue Variablen sind **punktgetrennt** (`{sun.set}`, `{weather.temp}`). Bare
+  Namen sind Textblöcke aus `text_library` (nur dort mit
+  `templateVariableNamespace: "text_blocks"`) oder bereits reservierte
+  Host-Namen; die Registry lehnt alles andere ab.
+- Der Host extrahiert die Namen aus dem Originaltext, fragt nur zuständige
+  Provider ab und rendert genau einmal. Eingefügte Werte werden nie erneut als
+  Vorlage gelesen; ein Provider liefert nur Name-zu-Zeichenketten-Zuordnungen.
+- Kontextwerte kommen aus `ModuleTemplateValueContext` (`channelLocation`,
+  `channelTimeZone`, `channelInfo`, `mode`, `secrets` nur lesend,
+  `externalFetchBudget`); `mode` unterscheidet `chat`, `preview` und `overlay`.
+  Vorschau und Overlay dürfen keinen Zustand schreiben (z. B. keine
+  gespeicherte Zufallsauswahl).
+- `{date}`, `{time}` und zeitabhängige Bedingungen nutzen die Kanalzeitzone.
+- **`nextChangeAt`:** Zeitabhängige Overlaywerte liefert
+  `resolveOverlayTemplateValues` als `{ available, targetAt?, targetAts?,
+  nextChangeAt? }`. `nextChangeAt` ist der UTC-Zeitpunkt (ISO), ab dem sich der
+  Wert ändern kann; der Overlay-Host baut den Text dann neu auf. Browserseitig
+  formatierte Werte (Countdowns) werden zusätzlich in
+  `dynamicTemplateVariableNames` genannt. Bedingungen melden den Zeitpunkt über
+  `addTemplateConditionNextChangeAt` bzw. `resolveTemplateConditionTransitions`.
+  Der Host kennt dabei keine Modulnamen.
+- Bedingungen für Textblockvarianten: `textBlockConditions` (oder
+  `textBlockConditionsForChannel`) mit punktgetrennter Kennung; der aktuelle Wert
+  kommt aus `resolveTemplateConditions`, `timeDependent: true` markiert
+  zeitabhängige Werte.
+- `templateUsageSources` meldet eigene Vorlagentexte für die generische
+  Nutzungsanzeige; Module fragen dafür keine Tabellen anderer Module ab.
+- Host-Variablen (`src/template-variables.ts`) und Modulvariablen: Eine
+  Modulvariable darf innerhalb der Felder des Moduls einen gleichnamigen
+  Systemnamen überlagern; Kanalvariablen liegen immer im Namensraum `var.`.
 
 Der Host stellt `/api/channels/:channelId/template-variables` für die
-Variablenpicker aller Module und `/api/channels/:channelId/games?q=...` für die
-Twitch-Kategoriesuche bereit. Module verwenden diese gemeinsamen Routen statt
-die HTTP-Routen eines Geschwistermoduls aufzurufen. `{date}`, `{time}` und
-zeitabhängige Textblockbedingungen verwenden die Zeitzone aus den
-Kanal-Einstellungen.
+Variablenpicker und `/api/channels/:channelId/games?q=...` für die
+Twitch-Kategoriesuche bereit; Module nutzen diese Routen statt die eines
+Geschwistermoduls aufzurufen. Eigene Einstellungen eines Moduls gehören auf
+dessen Seite (`panel` oder `settingsEditor`), nicht in die Kanaleinstellungen.
 
-Ein Modul kann über `textBlockConditions` Bedingungen für Varianten von
-Textblöcken bereitstellen. Die Kennung ist punktgetrennt; das Modul löst den
-aktuellen Wert beim Rendern auf, während die Textbibliothek Definitionen und
-Auswahl speichert. Die gemeinsamen Kanaleinstellungen enthalten ausschließlich
-Host-Einstellungen wie Kanalzeitzone und Standort. Eigene Moduleinstellungen
-gehören auf die Seite des Moduls (`panel` oder `settingsEditor`). Module
-bekommen Host-Werte bei Bedarf über den schreibgeschützten Contract.
+### Ereigniszeiten (`eventTimeSources`)
 
-Host-verwaltete Modul-Secrets liegen außerhalb der Einstellungen und des
-Audit-Payloads. Routen beziehen sie über `ModuleRouteVariables.secrets(channelId)`,
-Alarme über `ModuleAlarmContext.secrets`; Vorlagenprovider erhalten in
-`ModuleTemplateValueContext.secrets` nur `status` und `read`. Der Host bindet
-den Zugriff an Kanal und Modul. Schreib- und Löschstatements tragen die
-verwaltende Rollenprüfung und werden im selben D1-Batch wie ihr Audit ausgeführt;
-Audit-Snapshots enthalten dafür nur `replaced` oder `removed`, nie den Wert.
-Abhängige Schreibvorgänge (z. B. ein Testergebnis) sichern sich mit der opaken
-`version` aus `readWithVersion` ab: sie ist die gespeicherte verschlüsselte Hülle,
-wiederholt sich nie (zufällige IV, auch nach Löschen und Neuanlegen) und gibt den
-Klartext nicht preis; nur auf Gleichheit prüfen, nie loggen oder ausliefern.
-Overlay-`initialState` erhält keinen Secret-Zugriff.
+**Zweck:** Ein Modul nennt Zeitpunkte, auf die andere Module planen können
+("vor der nächsten Werbepause"), ohne einander zu kennen.
 
-Alarme mit externen Datenquellen verwenden das gemeinsame
-`ModuleAlarmContext.externalFetchBudget`. Erwartbare Anbieterfehler werden als
-modulinterner Zustand gespeichert und nicht geworfen, wenn der Host sie weder
-loggen noch mit seinem Alarm-Backoff wiederholen soll. Phasenwechsel können
-über `ModuleAlarmContext.writeDiagnostics` in das Ereignisprotokoll geschrieben
-werden; Details bleiben dabei auf feste Codes begrenzt.
+**Einsatz:** `eventTimeSources: [{ id, label: {de, en}, resolve }]`. `resolve`
+liefert die künftigen Zeitpunkte als ISO-Strings. Verbraucher rufen
+`ModuleAlarmContext.resolveEventTimes(now)` bzw. in Routen `listEventTimeSources`
+und `resolveEventTimes` auf; die Kennung erhält vom Host einen Namensraum
+(`<moduleId>.<id>`).
+
+```ts
+eventTimeSources: [{
+  id: "next_ad_break",
+  label: { de: "Nächste Werbepause", en: "Next ad break" },
+  resolve: async ({ DB, channelId, now }) => (await nextAdAt(DB, channelId, now)) ?? [],
+}],
+```
+
+**Grenzen:** Nur Zeitpunkte in der Zukunft liefern, keine Modulkennung im
+Label. Ändert sich eine Quelle oder die Kanalzeitzone, ruft der Host
+`onScheduleInputsChanged` der betroffenen Alarmdefinitionen mit
+`event_times` bzw. `channel_time_zone` auf; Verbraucher planen dort neu.
+
+### Inhaltsprüfung (`validateTemplateContent`)
+
+**Zweck:** Ein Verbraucher von Textblöcken (etwa FAQ oder Timer) kann Änderungen
+an einem bereits verwendeten Block ablehnen, ohne dass die Textbibliothek ihn
+oder seine Tabellen kennt.
+
+**Einsatz:** `validateTemplateContent({ DB, channelId, candidate,
+registeredVariables })` liefert eine Liste von `{ reason: "input_dependent",
+consumerName }`. Der Host ruft die Prüfung beim Anlegen und Bearbeiten eines
+Textblocks mit dem vorgeschlagenen Inhalt auf (in Routen über
+`validateTemplateContentMutation`); die Textbibliothek übersetzt die Gründe in
+eine lokalisierte Fehlermeldung.
+
+**Grenzen:** Nur maschinenlesbare Gründe und der Name des betroffenen Eintrags,
+keine Texte. Eine leere Liste bedeutet "zulässig".
+
+### Chat-Ausgabeziele und Namensnennung
+
+**Zweck:** Chatausgaben wählen, ob sie bei Shared Chat in allen Chats oder nur
+im Quellchat erscheinen.
+
+**Einsatz:** `chat` und `announcement` setzen `target: "all_chats"` oder
+`"source_only"`; Antworten (`replyToMessageId`) dürfen zusätzlich
+`"where_asked"`. Ohne Angabe gilt `source_only`. In Panels bietet
+`ChatOutputTargetControl` das Zielmenü (zweisprachig, mit Infoknopf); in
+`SettingsEditorSpec` gibt es dafür ein eigenes Bauteil.
+
+```ts
+return { actions: [{ kind: "chat", text, target: "source_only" }], diagnostics: [] };
+```
+
+**Grenzen:**
+
+- Module kennen weder Twitchs `for_source_only` noch eigene
+  Shared-Chat-Logik; der Host reicht den Quellkanal der Nachricht weiter.
+- **Namensnennung:** Meldet ein Provider Quellenangaben
+  (`addTemplateValueAttribution`, `ModuleResult.attributions`), ergänzt der Host
+  sie einmal je Chatnachricht und zeigt sie bei Textblock-Overlays am Element.
+  Das Modul platziert sie nicht selbst.
+- **Automatisierungsgrenze:** Automatische Chat-Ausgaben laufen durch eine
+  gemeinsame Kanalbegrenzung von höchstens einer Nachricht je fünf Sekunden
+  (isolatübergreifend). Event-Aktionen ohne freien Platz werden verworfen, nicht
+  vorgemerkt; der Host protokolliert `automated_output_rate_limited`. Als
+  automatisch gilt jede Ausgabe, außer das Modul setzt `automated: false`
+  (direkt angeforderte Befehlsantworten). Alarme senden über
+  `ModuleAlarmContext.sendChat` mit Idempotenzschlüssel; bei Ratenbegrenzung
+  liefert es `retryable: true`, der Alarm-Handler wirft dann und der Host
+  wiederholt ihn (Timer und Chat-Abstimmung tun das); Nachrichten sind auf
+  500 Zeichen begrenzt.
+- `onDelivery(delivery)` an einer Chataktion meldet `sent`, `rejected`,
+  `ambiguous` oder `not_attempted`, damit ein Modul einen Claim (z. B.
+  Abkühlzeit) abschließen oder freigeben kann.
+
+### Host-Moderationsaktionen
+
+**Zweck:** Ein Modul beschreibt eine Moderationsmaßnahme; der Host führt sie über
+Twitch Helix mit dem Bot-Token aus (`src/worker/moderation.ts`).
+
+**Einsatz:** `{ kind: "timeout", userId, durationSeconds, reason, onSuccess?,
+onFailure? }`. `onSuccess`/`onFailure` sind vorgerenderte Chataktionen; der Host
+sendet höchstens eine, bei unklarem Helix-Ausgang keine. Die Hilfen
+`rollTimeoutSeconds`, `TimeoutDurationRange` und `formatTimeoutDuration` liegen
+in `src/modules/contracts/moderation.ts`.
+
+**Grenzen:**
+
+- Dauer 1 bis 1.209.600 Sekunden, Grund höchstens 500 Zeichen. Der Host schützt
+  Broadcaster und Bot, verlangt den gespeicherten Moderatorstatus, beachtet die
+  kanalgebundene 429-Abklingzeit und wiederholt nie.
+- Bei **Stummschaltung oder Pause** wird die Aktion unterdrückt
+  (`channel_muted`, `channel_paused`); der Host prüft das vor und nochmals kurz
+  vor dem Helix-Aufruf, weil sich die Kanalsteuerung dazwischen ändern kann.
+  Aufheben ist davon ausgenommen.
+- Alarme, die eine Maßnahme nachholen, rufen `ModuleAlarmContext.executeTimeout`
+  auf (Ergebnis `applied`, `rejected`, `ambiguous` oder `suppressed`). Wer
+  zeitversetzt handelt, prüft Aktivierung und Zustand dort erneut, statt der
+  Planung zu vertrauen (siehe Alarme).
+- Der Aktionstyp `ban` ist im Contract vorhanden, aber **derzeit keinem Modul
+  oder Panel angeboten**; nur `timeout` ist offen.
+- `ModuleRouteVariables.liftModerationBan(channelId, userId, expected)` hebt eine
+  Sperre aus einer Modulroute auf. `expected` (Grund, Dauer, Beginn) sichert ab,
+  dass nur der erwartete Timeout aufgehoben wird; Twitch bietet keine bedingte
+  Löschung, ein Wechsel direkt zwischen Prüfung und Löschung bleibt daher
+  möglich.
+
+### Ballot-Speicher
+
+**Zweck:** Flüchtige, personenfreie Abstimmungen im Channel Durable Object
+(Chat-Abstimmung, Votekick), ohne einzelne Stimmen in D1 zu speichern.
+
+**Einsatz:** `context.ballots` (Ereignis, Alarm) bzw. `ballots(channelId)`
+(Route) ist bereits an Kanal und Modul gebunden:
+
+```ts
+const opened = await context.ballots.open(id, 2, expiresAt, {
+  passIf: { yes: 0, no: 1, netAtLeast: 5 },
+});
+if (opened.status === "busy") return busyResult(opened.moduleId);
+const choice = ballotChoiceFromMessage(text, 2);        // null unless a lone digit
+if (choice !== null) await context.ballots.cast(id, userId, choice);
+const { outcome, counts } = await context.ballots.finalize(id); // passed | expired | open | not_open
+```
+
+**Grenzen:**
+
+- **Ein offener Ballot je Kanal**, modulübergreifend: `open` meldet `busy` mit
+  der Modulkennung des Besitzers; `hasOpenBallot()` fragt die Sperre ab, damit
+  ein Panel den Start deaktivieren und erklären kann.
+- Stimmen nur über `ballotChoiceFromMessage(text, optionCount)` (einzelne Ziffer
+  1 bis 9, höchstens `optionCount`). Ein Nutzer darf umentscheiden, die letzte
+  Wahl zählt. Der Ablaufzeitpunkt liegt höchstens 24 Stunden in der Zukunft.
+- Die **Passregel** wird beim Öffnen als Daten (`BallotFinalizeRule`) gespeichert
+  und bei `finalize` atomar gegen den aktuellen Stand ausgewertet; ein Modul
+  rechnet nie selbst nach.
+- `finalize` ist **idempotent**: Wiederholen liefert denselben Ausgang. Ein
+  finalisierter Ballot bleibt mit eingefrorenem Zählerstand lesbar und weist
+  Stimmen mit `not_open` ab. `close` löscht die Ballotdaten und legt einen
+  Wiederholungs-Snapshot für wiederholte Closes ab; erst `acknowledgeClosed`
+  (nach dem Persistieren des Ergebnisses) entfernt ihn**. Den
+  Kanalplatz gibt bereits die terminale Finalisierung frei, ein anderes Modul
+  kann also schon vorher einen neuen Ballot öffnen.
+- Gespeichert werden nur Zähler, Revision und je Person ein HMAC; Ergebniszeilen
+  in D1 enthalten keine einzelnen Wählerkennungen (Votekick speichert zusätzlich
+  Ziel und Initiator und löscht sie nach 14 Tagen). Overlays lesen über
+  `ModuleOverlayElementContext.readBallot` ausschließlich den Ballot des eigenen
+  Moduls.
+
+### Aktive Chatter (`needsActiveChatters`)
+
+**Zweck:** Schwellen, die von der Zahl aktiver Chatter abhängen (Votekick),
+ohne dass jedes Modul Chatverläufe mitschreibt.
+
+**Einsatz:** `needsActiveChatters: true` im Modul; dann liefert
+`ModuleExecutionContext.activeChatters` `count(windowMs)` (verschiedene Chatter
+im Fenster) und `seen(userId)` (erster und letzter Aktivitätszeitpunkt).
+
+```ts
+const active = await context.activeChatters.count(10 * 60_000);
+const threshold = Math.max(minNetYes, Math.ceil(active * share));
+```
+
+**Grenzen:** Der Host speichert Aktivität nur, solange mindestens ein Modul mit
+dieser Deklaration im Kanal aktiviert ist. Das ist ein rollendes Fenster pro
+Chatter unter einem HMAC mit kanalgebundenem Zufallsschlüssel (spätestens nach
+24 Stunden rotiert, dabei werden alle Einträge gelöscht). **Aufbewahrung:** Ein
+keyed Host-Alarm löscht Einträge nach 60 Minuten Inaktivität plus
+Alarmverzögerung; `stream.offline` löscht sofort. Eine laufende
+Chatverarbeitung kann Daten neu anlegen, die der Alarm wieder entfernt.
+
+### Navigation (`navigationCategory`) und Seitenleiste
+
+**Zweck:** Der Host baut die Seitenleiste aus den Modulen; Namen, Texte und
+Symbole bleiben beim Modul.
+
+**Einsatz:** Jedes Modul deklariert genau eine `navigationCategory`: `chat`,
+`interaction`, `data` oder `twitch`. Der Host gruppiert aktivierte, berechtigte
+Module unter den lokalisierten Kategorieüberschriften (nur diese vier Texte
+übersetzt der Host) und nutzt den Modulnamen als Eintrag. Eigene
+`navigationEntries` (`id`, zweisprachiges `label` und `description`, `iconKind`,
+`keywords`) ersetzen Namen und Symbol für Seitenleiste und Spotlight; sie wählen
+keine eigene Kategorie. `panelIcon` liefert Pfaddaten für das Symbol.
+
+**Grenzen:** Die frühere Angabe `group: "channel"` entfällt. `showMainSwitch:
+false` am Eintrag blendet den Hauptschalter bei dauerhaft verfügbaren Seiten aus;
+`mandatory` mit `mandatoryReason` erklärt, warum ein Modul nicht abschaltbar ist.
+
+### Modul-Secrets (`ModuleSecretAccess`)
+
+**Zweck:** Zugangsdaten eines Moduls (z. B. eine Statistik-URL mit Schlüssel)
+liegen verschlüsselt pro Kanal und Modul außerhalb von Einstellungen und
+Audit-Payload.
+
+**Einsatz:** Routen erhalten `secrets(channelId)`, Alarme `context.secrets`,
+Vorlagenprovider nur `status` und `read`. Schreiben und Löschen laufen als
+vorbereitete Statements:
+
+```ts
+const write = await secrets.prepareWrite(NAME, value, actor, now);
+const audit = prepareModuleAudit({ channelId, moduleId, action: "module.secret.replaced",
+  before: null, after: { statsUrl: "replaced" } }, now);
+const result = await DB.batch([write, audit]);
+if ((result[0]?.meta.changes ?? 0) === 0) return managementDenied(context);
+```
+
+**Grenzen:**
+
+- Das Schreib- und Löschstatement trägt die **verwaltende Rollenprüfung** (siehe
+  `authorizeManagementMutation`) und gehört **im selben D1-Batch** wie sein
+  Audit-Statement; eine nicht berechtigte Rolle ändert null Zeilen. Audit-Werte
+  sind nur `replaced` oder `removed`, nie der Klartext.
+- `readWithVersion(name)` liefert `{ value, version }`. `version` ist die
+  gespeicherte verschlüsselte Hülle: wiederholt sich nie (zufällige IV, auch nach
+  Löschen und Neuanlegen), verrät nichts und dient nur dem **Gleichheitsvergleich**
+  für abhängige Schreibvorgänge (z. B. ein Testergebnis, das nur zur gelesenen
+  Fassung passen darf).
+- **Nie loggen, nie zurückgeben:** weder Wert noch `version` in Logs, Fehlern,
+  Routenantworten, Audits, Ereignisprotokoll oder Moduldaten. Routen melden feste
+  Fehlercodes. Dauert eine Route (Body lesen, Netzwerkabruf), prüft sie die
+  Verwaltungsberechtigung vor dem Zugriff auf das Secret erneut, wie `belabox`.
+- Overlay-`initialState` hat keinen Secret-Zugriff. Die Host-Verschlüsselung
+  bindet Hülle an Kanal, Modul und Name; kopierte Zeilen lassen sich nicht lesen.
+
+### Sofortaktionen (`immediateActions`)
+
+**Zweck:** Eine Karte in der Sofortaktionsleiste des Kanals (Werbung, Raid,
+Clip), nur solange das Modul aktiviert ist.
+
+**Einsatz:**
+
+```ts
+immediateActions: { requires: ["streamLive"], load: () => import("./panel/immediate-actions") },
+```
+
+**Grenzen:** `requires` listet Bedingungen, die der Host selbst auswertet
+(derzeit nur `streamLive`); er übergibt `availabilityReason` lokalisiert an die
+Karte, die ihre Steuerung entsprechend sperrt. `load` bleibt ein lazy `import()`,
+damit ein deaktiviertes Modul null Bytes kostet. Die Karte ruft Modul- oder Host-Routen auf (Clip und Raid
+nutzen `/api/channels/:channelId/clips` bzw. `/shoutout`);
+`requires` ist eine reine Verfügbarkeitsprüfung im Dashboard. Voraussetzungen
+auf der Serverseite setzt jede Route selbst durch (Berechtigung, Aktivierung)
+oder Twitch (etwa ein Clip nur bei laufendem Stream).
+
+### Overlay-Elemente (`overlayElements`)
+
+**Zweck:** Ein Modul liefert Darstellungen für gespeicherte Overlays
+(Textblock, Abstimmungsstand, Werbe-Countdown).
+
+**Einsatz:** Pro Element `kind` (`<moduleId>.<name>`, eindeutig), `configVersion`,
+`defaultSize`, `defaultConfig`, `parseConfig` und `load`; optional `editor`.
+
+```ts
+overlayElements: [{
+  kind: "chat_voting.tally", configVersion: 1, defaultSize: { width: 480, height: 240 },
+  defaultConfig: {}, parseConfig, load: () => import("./overlay/tally"),
+  initialState: (db, channelId) => readOpenTally(db, channelId),
+  mergeRealtimeState: (current, incoming) => ({ ...current, ...incoming }),
+}],
+```
+
+**Grenzen:**
+
+- **Lazy:** `load` und `editor` sind `import()`-Loader. Eine deaktivierte
+  Deklaration bleibt im Entwurf erhalten, rendert nicht und lädt ihren Chunk
+  nicht; direkte Imports der Ansicht heben die Bundle-Grenze auf (ESLint
+  prüft das). `overlay/` importiert weder Worker- noch Zod-Code.
+- **`initialState(db, channelId, config, context?)`** läuft beim Bootstrap nur,
+  wenn das Modul im Kanal aktiviert ist, und erhält keinen Secret-Zugriff.
+  `initialStateNeedsContext: true` reicht Vorlagen-, Bedingungs- und
+  Kanalkontext durch.
+- **Echtzeit:** Das Modul sendet Zustandsänderungen mit
+  `publishModuleOverlayMessage` bzw. der Aktion `kind: "overlay"`
+  (optional mit `recipientConfig`, um nur Overlays mit passender Konfiguration
+  zu erreichen). `mergeRealtimeState` führt Teilzustände in den aktuellen Stand
+  zusammen, ohne Lebenszyklusdaten zu ersetzen; Zähler tragen eine monotone
+  Revision (`chat_voting.tally` nutzt sie, um veraltete Stände zu ignorieren).
+  `reloadStateOnModuleMessages` und `reloadStateOnHostEvents`
+  (`channel.game.changed`, `stream.state.changed`, `template.data.changed`)
+  veranlassen stattdessen ein Neuladen über `initialState`.
+- **`previewState(config, language, now)`** (optional) erzeugt einen
+  sprachabhängigen Beispielzustand für die Kompositionsvorschau aus Konfiguration,
+  Kanalsprache und aktuellem Zeitpunkt.
+- Der Host speichert `kind` und Konfiguration als JSON; `parseConfig` validiert
+  beim Speichern und liefert `null` bei ungültiger Eingabe.
+
+### Keyed Modul-Alarme (`alarms`)
+
+**Zweck:** Zeitgesteuerte Arbeit (Abstimmung schließen, Timer auslösen) über
+die gemeinsame Alarmtabelle des Channel Durable Object, statt eigener
+Scheduler.
+
+**Einsatz:** Ein Modul registriert je Handler eine `ModuleAlarmDefinition` mit
+stabilem `key`; geplant wird ein **Alarmschlüssel** (eine Instanz, z. B.
+`timer:<id>`) mit Fälligkeit. Aus `handleEvent` über
+`context.scheduleAlarm(handlerKey, alarmKey, deadline, ownerRevision?)` und
+`clearAlarm`, aus dem Handler über `context.schedule(key, deadline)` und `clear`.
+
+```ts
+alarms: [{
+  key: "close",
+  retryDelaysMs: [5_000, 15_000, 60_000],
+  handle: async (context, alarmKey) => closeExpired(context, alarmKey),
+  onScheduleInputsChanged: async (context, reason) => replan(context, reason),
+}],
+```
+
+**Grenzen:**
+
+- **Der Host wiederholt jede geworfene Ausnahme.** Er klassifiziert keine
+  vorübergehenden Fehler, sondern protokolliert und wiederholt mit
+  `retryDelaysMs` (letzter Wert wird unbegrenzt wiederverwendet). Bei veralteter
+  Arbeit (gelöschter Eintrag, überholte `ownerRevision`, erledigter Vorgang)
+  kehrt der Handler daher einfach normal zurück; ein normaler Rückgang schließt
+  nur den unveränderten, beanspruchten Eintrag ab und lässt neuere Pläne
+  unberührt. Ein ausdrückliches `clear` trägt `ownerRevision`. Geworfen wird nur,
+  wenn eine Wiederholung gewollt ist. Deshalb muss der
+  Handler **idempotent** sein und jeden Zustand selbst prüfen, statt dem Alarm zu
+  vertrauen.
+- `ownerRevision` verhindert, dass ein veralteter Alarm einen neu geplanten
+  überschreibt: Handler vergleicht sie mit der Revision der eigenen Zeile.
+- `ModuleAlarmContext` bietet `DB`, `secrets`, `ballots`, `storage`
+  (`get`/`put`/`delete`, auf das Modul beschränkt), `renderTemplate`,
+  `sendChat` (siehe Ausgabegrenze; `stillValid` prüft unmittelbar vor dem Senden
+  erneut, ob die Ausgabe noch gelten soll), `executeTimeout`,
+  `publishModuleOverlayMessage` und `resolveEventTimes`.
+- `onScheduleInputsChanged(context, reason)` plant dauerhafte Pläne neu bei
+  `event_times`, `channel_time_zone` und `activation`. **`activation`** deckt den
+  Fall ab, dass ein Modul oder der Kanal ausgeschaltet war: der Host stellt ein
+  Ereignis nur an aktivierte Module zu, ein `stream.online` im
+  ausgeschalteten Zustand erreicht das Modul nie. Eine Kanalpause hält
+  Dispatch an nicht verpflichtende Module an; `mandatory`-Module (etwa
+  `channel_events` mit `stream.online`) erhalten Ereignisse trotzdem.
+- Routen können einen Handler sofort ausführen
+  (`runModuleAlarm(channelId, moduleId, handlerKey, alarmKey)`); dort gibt es
+  keine automatische Wiederholung.
+- **Externe Datenquellen:** Alarme mit externen Abrufen verwenden das gemeinsame
+  `ModuleAlarmContext.externalFetchBudget`. Erwartbare Anbieterfehler werden als
+  modulinterner Zustand gespeichert und nicht geworfen, wenn der Host sie weder
+  loggen noch mit seinem Alarm-Backoff wiederholen soll. Phasenwechsel können
+  über `ModuleAlarmContext.writeDiagnostics` in das Ereignisprotokoll geschrieben
+  werden; Details bleiben dabei auf feste Codes begrenzt.
+
+### Host-Variablen und Kanalvariablen
+
+`src/template-variables.ts` deklariert Namen, Kontexte, Gruppen und maximale
+Ausgabelängen der Systemvariablen; die zweisprachigen Beschreibungen und
+Beispiele liegen in `src/dashboard/locale.ts`. Der Host übergibt `renderTemplate`
+und die kanalgebundene Funktion `readChannelVariables` über den
+`ModuleExecutionContext`. Der Renderer sucht zuerst die Token im Originaltext
+und fragt nur die dafür nötigen Quellen ab: Ein Text ohne Token löst weder einen
+D1-Lesezugriff auf Variablen noch eine Helix-Anfrage aus, und Kanalvariablen
+werden mit einer einzigen `channel_id`-gebundenen Abfrage gelesen.
+
+Variablenaktionen von Textbefehlen liegen in `text_commands` und werden vom Host
+vorbereitet. Die Aktualisierung teilt sich den Claim-Batch des Befehls und läuft
+vor dem Claim; dieser prüft ihr `changes()`-Ergebnis. Die Abkühlzeit sichern
+Prädikate in der Variablenaktualisierung selbst, eine Ablehnung ändert den
+Wert daher nie. Revisionsprüfung, Alias-Index und Reihenfolge der
+Abkühlzeit-Aktualisierung bleiben erhalten.
+
+## Aktivierung und Bundles
+
+Ein Modul wird pro Kanal über das Panel aktiviert, nicht per Hand-SQL: Ein Broadcaster
+oder Verwalter des Kanals ruft `GET /api/channels/:channelId/modules` auf, um die
+Registry mit dem gespeicherten Zustand jedes Moduls zu sehen, und schaltet es über
+`PATCH /api/channels/:channelId/modules/:moduleId` mit `{ "enabled": true }` ein oder
+aus. Ein `operator` darf die Liste lesen, aber nicht schreiben. Beim Einschalten
+schreibt der Worker `defaultSettings` des Moduls in `channel_modules.settings`; Einstellungen
+liest der Host über `GET /api/channels/:channelId/modules/:moduleId/settings` und
+schreibt sie über `PATCH` derselben Route (mit `settings` und `revision` im Body, Prüfung gegen
+`settingsSchema`, Verwalter-Berechtigung und Revisionskonflikt); für eigene
+Formulare ist `module.panel` bzw. `module.settingsEditor` vorgesehen. Ein Modul kann zusätzlich über den Aktivierungshook einmalige, eigene
+Initialdaten anlegen. Das erfordert keinen Deploy.
+
+Für ein Modul, dessen Einstellungen sich vollständig aus den Naht-Bauteilen
+zusammensetzen (Zahl, Text, Vorlage, Segment, Kartenwahl, Schalterkarte,
+Chat-Ausgabeziel), muss
+kein eigenes Formular geschrieben werden: `module.settingsEditor` nimmt
+stattdessen eine `SettingsEditorSpec<Settings>`-Deklaration entgegen — lazy wie
+`panel`, in `modules/<id>/panel/settings-editor.ts`, damit ein ausgeschaltetes
+Modul weiterhin null Bytes kostet. Der Host rendert daraus in
+`module-panels.tsx` den `EditorShell` samt Laden, Speichern, Server-Hinweisen,
+409-Konflikt und der lesenden Fassung für Rollen ohne Recht — einmal gebaut,
+nicht je Modul. Hat `settingsSchema` mindestens einen Schlüssel, verlangt ein
+Guard-Test (`module-settings-editor-guard.test.ts`) die Deklaration; ein leeres
+Schema (etwa Kanalereignisse) bleibt ohne Editor. `panel` bleibt daneben für
+Module mit eigenem Zustand oder Sofortaktionen (Werbung); wo beide stehen,
+erscheint `panel` oben und der `settingsEditor` darunter.
+
+Jede Validierung, die das Speichern blockiert, muss einen sichtbaren Feldfehler
+liefern. `EditorShell.invalidFields` verwendet `{ id, label, message, sectionId }`
+für die Feldliste in der Speicherleiste, die Tab-Fehlerpunkte und den Fokus auf
+das erste fehlerhafte Feld. Die Liste und `SettingsEditor.fieldErrors` müssen
+daher dieselbe Validierung abbilden.
+
+## Referenzmodule
+
+Die folgenden Module zeigen die Fähigkeiten im Zusammenspiel; Details ihrer Fachlogik stehen hier, nicht im Contract.
+
+### Astronomie-, Wetter- und Währungsquellen
 
 Die Sonnendatenquelle liegt eigenständig unter `src/modules/sun/`. Sie nutzt
 Open-Meteo-Geocoding über den Host für die Standortsuche. Der Host speichert
@@ -172,8 +665,8 @@ Name, Koordinaten und Standortzeitzone in `channels` und stellt sie Sun über
 Sonnenaufgang, Sonnenuntergang, bürgerliche Dämmerung, Sonnenhöchststand,
 Tageslänge sowie goldene und blaue Stunde berechnet das Modul bei jeder
 Auflösung lokal mit NOAA-Gleichungen nach Meeus. Die Ausgabezeiten folgen
-weiterhin der Kanalzeitzone. Bei Polartag gilt die Sonnenphase als Tag, bei
-Polarnacht als Nacht; fehlende Ereigniszeiten verwenden den konfigurierbaren
+weiterhin der Kanalzeitzone. Bei Polartag bzw. Polarnacht liefert die Höhenwinkel-Phase
+weiterhin `golden_hour` oder `blue_hour` vorrangig; sonst gilt Tag bzw. Nacht; fehlende Ereigniszeiten verwenden den konfigurierbaren
 zweisprachigen Fehlertext.
 
 Die Monddatenquelle unter `src/modules/moon/` berechnet Mondphase, Beleuchtung
@@ -215,7 +708,7 @@ Beispiele ohne JavaScript:
 
 - **Sonnenuntergang:** URL
   `https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&daily=sunset&timezone=Europe%2FBerlin`, Ausdruck
-  `$fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]')`, Quelle `sunset`.
+  `$substring($.daily.sunset[0], 11, 5)`, Quelle `sunset`.
 - **USD nach EUR:** URL
   bei einer JSON-Antwort mit `rates.EUR` und `amount` zum Beispiel
   `$formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'`, Quelle
@@ -277,17 +770,7 @@ DNS-Name kann nach der Prüfung auf eine interne IP-Adresse aufgelöst werden;
 Workers `fetch` legt die aufgelöste IP nicht offen und erlaubt nicht, sie für
 die Verbindung festzuhalten.
 
-`templateUsageSources` meldet eigene Vorlagentexte für generische
-Nutzungsanzeigen. Der Host ergänzt seine eigenen Oberflächenquellen; Module
-fragen dafür keine Tabellen anderer Module ab.
-
-Module, die Textblöcke ausführen, können `validateTemplateContent` bereitstellen.
-Der Host ruft diese Prüfung beim Anlegen und Bearbeiten eines Textblocks mit
-dem vorgeschlagenen Inhalt auf. Das Modul liefert maschinenlesbare Gründe und
-den Namen des betroffenen Eintrags; die Textbibliothek zeigt daraus eine
-lokalisierte Fehlermeldung. So bleiben auch spätere Änderungen an bereits
-verwendeten Blöcken validiert, ohne dass ein Modul sein konsumierendes Modul
-importiert oder dessen Tabellen kennt.
+### FAQ
 
 Das FAQ-Modul unter `src/modules/faq/` wird direkt nach `text_commands` in der
 Registry aufgeführt und nutzt denselben Chat-Event-Typ. Die Dispatch-Reihenfolge
@@ -311,6 +794,8 @@ Befehls-Eingabevariablen geprüft. Panel-Test, Aktivierung und Reihenfolge sind
 kanalgebundene Modulrouten; Änderungen werden mit Audit-Einträgen gespeichert.
 Das Datenmodell lässt einen späteren Regex-Matcher zu, aber die erste
 Panel-Version kennt nur Schlüsselwörter und Wortgruppen.
+
+### Chat-Abstimmung
 
 Das Modul `src/modules/chat_voting/` startet Ja/Nein-, 1-bis-5- und
 2-bis-9-Optionen-Abstimmungen über das Panel oder `!vote yesno`, `!vote scale`
@@ -345,6 +830,8 @@ importieren. Leere Beschriftungen verwenden Platzhalterwerte als Vorschau und
 bleiben optional; ungültige eigene Beschriftungen werden erst nach Interaktion
 markiert. Der Wert `autoCloseSeconds: 0` zeigt „Aus“ im Panel.
 
+### Textbefehle
+
 Das erste Modul ist `src/modules/text_commands/`. Es ist in der Registry als
 `text_commands` eingetragen, abonniert `channel.chat.message` und definiert
 seine Tabellen in der zentralen D1-Kette unter `migrations/`. Der D1-Adapter
@@ -366,6 +853,26 @@ Antwortbefehle mit Timeoutaktion in `timeout` um und bewahrt ihre übrigen Felde
 Migration `0033_text_command_silent_timeout.sql` erlaubt leere Erfolgstexte für
 `timeout`-Befehle, während Antworttext für andere Arten weiter erforderlich bleibt.
 
+Textbefehle werden im Panel angelegt, bearbeitet und entfernt. Jede Zeile hat
+eine Art (`text`, `list`, `shoutout` oder `timeout`), einen Schalter und eine Mindeststufe
+(`everyone`, `subscriber`, `vip`, `moderator` oder `broadcaster`). Die Art `list`
+zählt beim Auslösen alle eingeschalteten Zeilen auf. Die angelegten Befehle
+werden kanalbezogen als `!<name>` ausgelöst. Der Host löst Systemvariablen und
+`{var.<name>}`-Kanalvariablen erst bei der Ausgabe auf; Helix- und D1-Lookups
+bleiben lazy und lesen nur die angeforderten Werte. Ein Befehl kann zusätzlich
+eine Kanalvariable atomar im Claim-Batch ändern. Revision-CAS und die indizierte
+Alias-Tabelle bleiben Teil der bestehenden Befehlsmutationen.
+
+Das Antwortfeld bietet am Textanfang `/timeout {user} <seconds|min-max>
+[reason]`, `/announce <text>` und `/shoutout {target}` an. Beim Speichern werden
+gültige Formen in Art, Antwortart und Timeoutfelder umgewandelt und aus dem
+Antworttext entfernt. Zur Laufzeit wird kein Slash-Befehl geparst; gerenderte
+`{args}`-Werte können daher keine Aktion auslösen.
+
+Ein Chatbefehl, dessen gesamte Konfiguration aus Name, Mindeststufe, Abkühlzeit, Vorlage und genau einer Host-Aktion besteht, ist eine Art der Textbefehle; eine Funktion mit eigenem Zustand oder eigenen Ereignissen gehört in ein eigenes Modul.
+
+### Votekick
+
 `src/modules/votekick/` nutzt den gemeinsamen Ballot-Speicher und die
 Aktivitätsübersicht der letzten zehn Minuten. VIPs, Moderatoren und Broadcaster
 können `!votekick <login>` starten; Broadcaster, Moderatoren und der Bot sind
@@ -383,218 +890,16 @@ mit Moderator, Ballot-ID, Dauer und Ablaufzeit. Twitch bietet für das Löschen
 keine bedingte Sperr-ID; eine Änderung direkt zwischen Prüfung und Löschung
 kann daher nicht atomar ausgeschlossen werden.
 
-Der Host mountet registrierte Modulrouten kanalbezogen unter
-`/api/channels/:channelId/modules/<id>`. Textbefehle stellen dort die
-CRUD-Routen unter `/commands` bereit. Die Host-Middleware prüft Session,
-CSRF und Mitgliedschaft und gibt dem Modul anschließend den Akteur, eine
-SQL-gebundene Mutationsautorisierung und eine vorbereitete Audit-Funktion für
-Moduldatenänderungen weiter. Das Modul entscheidet selbst, ob es diese
-Funktion nutzt; der Host erzwingt sie nicht rückwirkend.
+## Checkliste für ein neues Modul
 
-## Aktivierung und Bundles
-
-Jedes Modul deklariert im Contract genau eine `navigationCategory`: `chat`,
-`interaction`, `data` oder `twitch`. Der Host übersetzt nur die vier
-Gruppenüberschriften; die Registry sortiert aktivierte, berechtigte Module
-dort ein. `navigationEntries` kann den generischen Namen und das Symbol eines
-Moduls durch moduldefinierte Navigationsangaben ersetzen.
-
-Ein Modul wird pro Kanal über das Panel aktiviert, nicht per Hand-SQL: Ein Broadcaster
-oder Verwalter des Kanals ruft `GET /api/channels/:channelId/modules` auf, um die
-Registry mit dem gespeicherten Zustand jedes Moduls zu sehen, und schaltet es über
-`PATCH /api/channels/:channelId/modules/:moduleId` mit `{ "enabled": true }` ein oder
-aus. Ein `operator` darf die Liste lesen, aber nicht schreiben. Beim Einschalten
-schreibt der Worker `defaultSettings` des Moduls in `channel_modules.settings`; eine
-eigene Route zum Bearbeiten von Einstellungen gibt es bewusst nicht — dafür ist
-`module.panel` aus dem Contract vorgesehen, sobald ein Modul eigene Einstellungen
-braucht. Ein Modul kann zusätzlich über den Aktivierungshook einmalige, eigene
-Initialdaten anlegen. Das erfordert keinen Deploy.
-
-Für ein Modul, dessen Einstellungen sich vollständig aus den Naht-Bauteilen
-zusammensetzen (Zahl, Text, Vorlage, Segment, Kartenwahl, Schalterkarte,
-Chat-Ausgabeziel), muss
-kein eigenes Formular geschrieben werden: `module.settingsEditor` nimmt
-stattdessen eine `SettingsEditorSpec<Settings>`-Deklaration entgegen — lazy wie
-`panel`, in `modules/<id>/panel/settings-editor.ts`, damit ein ausgeschaltetes
-Modul weiterhin null Bytes kostet. Der Host rendert daraus in
-`module-panels.tsx` den `EditorShell` samt Laden, Speichern, Server-Hinweisen,
-409-Konflikt und der lesenden Fassung für Rollen ohne Recht — einmal gebaut,
-nicht je Modul. Hat `settingsSchema` mindestens einen Schlüssel, verlangt ein
-Guard-Test (`module-settings-editor-guard.test.ts`) die Deklaration; ein leeres
-Schema (etwa Kanalereignisse) bleibt ohne Editor. `panel` bleibt daneben für
-Module mit eigenem Zustand oder Sofortaktionen (Werbung); wo beide stehen,
-erscheint `panel` oben und der `settingsEditor` darunter.
-
-Jede Validierung, die das Speichern blockiert, muss einen sichtbaren Feldfehler
-liefern. `EditorShell.invalidFields` verwendet `{ id, label, message, sectionId }`
-für die Feldliste in der Speicherleiste, die Tab-Fehlerpunkte und den Fokus auf
-das erste fehlerhafte Feld. Die Liste und `SettingsEditor.fieldErrors` müssen
-daher dieselbe Validierung abbilden.
-
-Das gemeinsame `ChatOutputTargetControl` stellt das kompakte Zielmenü für
-einzelne Ausgaben bereit. Es bietet „Alle Chats“ und „Nur unser Chat“ sowie für
-Antworten „Wo gefragt“. Ein Infoknopf erklärt, dass das Ziel nur bei Shared
-Chat greift. Die sichtbaren Texte sind zweisprachig.
-
-## Wie ein Modul zu seinem Ereignis kommt
-
-`handleEvent` ist der fachliche Einstiegspunkt. Es beschreibt weiterhin in
-`ModuleResult.actions`, was geschehen soll, und führt Chataktionen nicht selbst
-aus; der Host führt sie aus und protokolliert ihren Ausgang. Für Module mit
-eigenem Zustand erhält der Einstiegspunkt zusätzlich den
-`ModuleExecutionContext`: Er enthält den D1-Binding und eine vom Host erzeugte,
-kanalgebundene Mutationsautorisierung. Das Modul kapselt den Bindingzugriff in
-seinem Adapter und kennt weder `channel_members` noch die Sitzungsprüfung.
-Das Modul begründet Handeln oder Nicht-Handeln mit `diagnostics` (Entscheidung
-0004).
-
-Ein Ereignis erreicht ein Modul nur, wenn alle drei Bedingungen gelten: Das
-Modul ist in diesem Kanal aktiviert, es steht in `MODULES`, und der Abo-Typ
-steht in seinen `eventSubTypes`.
-
-Ein Modul, das `needsActiveChatters: true` deklariert, erhält über
-`ModuleExecutionContext.activeChatters` die Zahl verschiedener Chatter in
-einem Zeitfenster sowie `seen(userId)` mit erstem und letztem
-Aktivitätszeitpunkt. Der Host speichert neue Aktivität im Channel Durable Object
-nur, solange mindestens ein solches Modul im Kanal aktiviert ist. Pro Kanal
-gibt es einen zufälligen HMAC-Schlüssel, der spätestens nach 24 Stunden rotiert;
-dabei werden alle Einträge gelöscht. Ein keyed Host-Alarm löscht Einträge nach
-60 Minuten Inaktivität plus Alarmverzögerung und den Schlüssel, wenn keine
-Einträge übrig sind. `stream.offline` löscht Schlüssel und Einträge sofort,
-doch eine bereits laufende Chatverarbeitung kann Daten neu anlegen, die der
-Alarm innerhalb des Aufbewahrungsfensters entfernt. Nur Module mit dieser
-Deklaration erhalten die Werte über ihren Ausführungskontext.
-
-Der Zielkanal kommt aus dem geprüften Ereignis und wird dem Modul in
-`ModuleEvent.channelId` mitgeteilt. Der Host löst außerdem den Akteur anhand
-von `channel_members` auf und übergibt `actor` mit User-ID, Login und Rolle.
-Eine Rolle `null` bedeutet, dass der Nutzer kein Mitglied dieses Kanals ist;
-`actor: null` bedeutet, dass das Ereignis keinen Nutzer enthält.
-Bei `channel.chat.message` leitet der Host zusätzlich aus den Twitch-Badges
-den eigenständigen `ModuleEvent.chatStatus` ab. `founder` zählt dabei als
-`subscriber`; `moderator` und `broadcaster` erfüllen auch niedrigere Stufen.
-Ereignisse ohne Chatbezug tragen dort `null`. Ein Modul kann keinen anderen
-Kanal angeben — die Mandantentrennung liegt beim Host.
-
-Wirft `handleEvent`, hält das weder den Worker noch die übrigen Module auf. Der
-Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
-
-`overlayElements` deklariert pro Element einen eindeutigen, mit der Modulkennung
-präfigierten `kind`, eine `configVersion`, `defaultSize`, `parseConfig` und
-`load`. `previewState` kann einen sprachabhängigen Beispielzustand für die
-Kompositionsvorschau aus Konfiguration, Kanalsprache und aktuellem Zeitpunkt
-erzeugen. Der Render-Code wird mit `import()` geladen; ein optionaler Editor
-verwendet ebenfalls einen Lazy Loader. `initialState` erhält D1-Binding,
-Kanalkennung und validierte Konfiguration und läuft beim Bootstrap nur, wenn
-das Modul im Kanal aktiviert ist. Der Host speichert `kind` und Konfiguration
-als JSON; der Parser validiert sie beim Speichern. Eine deaktivierte Deklaration
-bleibt im Entwurf erhalten, rendert nicht und lädt ihren Overlay-Chunk nicht.
-Direkte Imports der Ansicht würden diese Bundle-Grenze aufheben.
-
-Das optionale Feld `panel` ist eine Funktion, die ein `import()`-Promise
-zurückgibt. So kann Vite für die Panel-Ansicht einen eigenen Chunk schneiden;
-ein deaktiviertes Modul kostet im Panel-Bundle null Bytes. Panel-Ansichten
-erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
-
-Textbefehle werden im Panel angelegt, bearbeitet und entfernt. Jede Zeile hat
-eine Art (`text`, `list`, `shoutout` oder `timeout`), einen Schalter und eine Mindeststufe
-(`everyone`, `subscriber`, `vip`, `moderator` oder `broadcaster`). Die Art `list`
-zählt beim Auslösen alle eingeschalteten Zeilen auf. Die angelegten Befehle
-werden kanalbezogen als `!<name>` ausgelöst. Der Host löst Systemvariablen und
-`{var.<name>}`-Kanalvariablen erst bei der Ausgabe auf; Helix- und D1-Lookups
-bleiben lazy und lesen nur die angeforderten Werte. Ein Befehl kann zusätzlich
-eine Kanalvariable atomar im Claim-Batch ändern. Revision-CAS und die indizierte
-Alias-Tabelle bleiben Teil der bestehenden Befehlsmutationen.
-
-Das Antwortfeld bietet am Textanfang `/timeout {user} <seconds|min-max>
-[reason]`, `/announce <text>` und `/shoutout {target}` an. Beim Speichern werden
-gültige Formen in Art, Antwortart und Timeoutfelder umgewandelt und aus dem
-Antworttext entfernt. Zur Laufzeit wird kein Slash-Befehl geparst; gerenderte
-`{args}`-Werte können daher keine Aktion auslösen.
-
-A chat command whose complete configuration is its name, minimum tier, cooldown, template, and exactly one host action is a text-command kind; a feature with its own state or events belongs in its own module.
-
-## Host-owned template variables
-
-`src/template-variables.ts` declares the system-variable names, contexts,
-groups, and maximum output lengths. The dashboard owns the bilingual system
-descriptions and examples in `src/dashboard/locale.ts`. Module variables may
-shadow a same-named system variable within that module's template fields;
-channel variables always use the separate `var.` namespace.
-
-The host passes `renderTemplate` and a channel-bound `readChannelVariables`
-function through `ModuleExecutionContext`. The renderer first discovers tokens
-in the source text, then asks only for the sources those tokens require. A text
-without tokens makes no variable D1 read or Helix request. Channel variable
-reads use one `channel_id`-scoped query for all requested names.
-
-Text-command variable actions are stored in `text_commands` and are prepared by
-the host. The action update shares the command claim batch and is gated by the
-claim's `changes()` result, so cooldown rejection cannot change the value. The
-action preserves command revision checks, alias indexing, and the existing
-cooldown update order.
-
-## Aktionen und Begründungen melden
-
-Ein Modul beschreibt gewünschte Aktionen in der geordneten Liste `actions`.
-Chat und Overlay sind semantisch getrennte Varianten; die Reihenfolge bleibt
-erhalten und neue Aktionsarten können später additiv ergänzt werden. Das Modul
-führt die Aktionen nicht selbst aus.
-
-Chat- und Ankündigungsaktionen können `target: "all_chats"` oder
-`target: "source_only"` setzen; fehlende Ziele werden vom Host als
-`source_only` behandelt. Antwortaktionen dürfen zusätzlich
-`target: "where_asked"` nutzen. Dabei wird der Quellkanal der auslösenden
-Chatnachricht generisch vom Host an den Sender weitergereicht. Module kennen
-weder Twitchs `for_source_only`-Parameter noch implementieren sie eigene
-Shared-Chat-Versandlogik. Auto-Antworten (#245) können denselben
-`ModuleAction`-Contract verwenden.
-
-Automatische Chat-Ausgaben laufen durch eine gemeinsame Kanalbegrenzung von
-höchstens einer Nachricht je fünf Sekunden. Die Begrenzung gilt über Worker-
-Isolate hinweg; Ausgaben, die gerade keinen Platz haben, werden verworfen und
-nicht vorgemerkt. Direkt angeforderte Befehlsantworten kennzeichnet das Modul
-im Contract als nicht automatisch.
-
-Zusätzlich meldet ein Modul eine fachliche Entscheidung über das Feld
-`diagnostics`. Das gilt auch dann, wenn es keine Aktion erzeugt. So kann der
-Host erklären, warum eine Aktion bewusst unterblieben ist.
-
-```ts
-return {
-  actions: [{ kind: "chat", text: "Danke für den Raid!", target: "source_only" }],
-  diagnostics: [{
-    code: "shoutout.suppressed",
-    detail: { grund: "raid_erkannt", zuschauer: 8, schwelle: 10 },
-  }],
-};
-```
-
-`code` ist eine stabile, maschinenlesbare Kennung. `detail` enthält nur die
-kleinen Werte, die den Grund erklären, und wird vom Host als JSON gespeichert.
-Das Modul schreibt weder selbst in `event_log` noch verwendet es eine
-Logging-API. Das Modul begründet Nicht-Handeln. Der Host kennt Kanal, Modul,
-`triggerId`, auslösenden Nutzer und Zeitpunkt und protokolliert Handeln und
-dessen Ausgang mit host-erzeugten Diagnosen wie `chat.gesendet` oder
-`shoutout.fehlgeschlagen` samt Ursache. Dieselbe Schreibfunktion übernimmt
-auch die Begrenzung und Löschung der Zeilen.
-
-`ModuleAction` stellt außerdem `timeout` und `ban` bereit. Das Modul nennt
-Nutzer-ID, Grund und bei einem Timeout die Dauer; der Host führt die Aktion
-über Twitch Helix mit dem Bot-Nutzer-Token aus. Gründe werden auf 500 Zeichen
-gekürzt, Timeout-Dauern auf 1 bis 1.209.600 Sekunden begrenzt. Der Host schützt
-Broadcaster und Bot, prüft den gespeicherten Moderatorstatus sowie die
-kanalgebundene 429-Abklingzeit und unterdrückt Moderationsaktionen bei
-Stummschaltung oder Pause. Es gibt keine Wiederholung. Eine Aktion kann je
-einen vorgerenderten Chattext für Erfolg und sichere Ablehnung mitgeben; der
-Host sendet höchstens einen davon. Bei unklarem Helix-Ausgang sendet er keinen
-Folgetext. Der gemeinsame Host-Vertrag
-`src/modules/contracts/moderation.ts` enthält die validierte
-`TimeoutDurationRange`, den Zufallswert und die sprachabhängige Daueranzeige.
-`ModuleRouteVariables.liftModerationBan(channelId, userId)` stellt einer
-Modulroute dieselbe Host-Ausführung zum Aufheben eines Banns bereit.
-
-Der Aktionstyp `ban` ist derzeit keinem Modul oder Panel angeboten.
+- [ ] **Contract:** `id`, `navigationCategory`, `settingsSchema`, `defaultSettings`; nur benötigte optionale Felder (`eventSubTypes`, `routes`, `panel` oder `settingsEditor` lazy, `defaultEnabled` bewusst gewählt). Bei Secrets, Ballots oder aktiven Chattern die jeweilige Deklaration und den Zugriff nur über den Kontext nutzen.
+- [ ] **Registry:** Wert in `MODULES` in `src/modules/registry.ts` eintragen, an der Stelle, die die Dispatch-Reihenfolge verlangt; die Registry-Validierung (Variablen, Overlay-`kind`, Ereigniszeiten) läuft grün.
+- [ ] **Migrationen:** Tabellen in der zentralen Kette unter `migrations/`, immer mit `channel_id`; für Bestandskanäle bei `defaultEnabled` eine Backfill-Migration; Schreibvorgänge mit `authorizeMutation` und Audit im selben D1-Batch.
+- [ ] **Zweisprachige Kataloge:** Modulname in `src/dashboard/module-labels.ts`, Panel- und Fehlertexte, Picker-Texte, Navigationseinträge, Bedingungen und Ereigniszeit-Labels jeweils mit `de` und `en`. Deutsche Texte nur in den dafür freigegebenen Katalogdateien (`tests/unit/german-guard.test.ts`).
+- [ ] **Panel:** `.module-stack`-Hülle, Bauteile aus `src/dashboard/ui`, jede blockierende Validierung als sichtbarer Feldfehler; `settingsEditor`, sobald `settingsSchema` Schlüssel hat.
+- [ ] **Tests:** Domain und Service als Unit-Tests, Routen mit Rollen (Operator darf nicht verwalten), Mandantentrennung über `channelId`. **Bei Secrets zusätzlich Leak-Tests:** ein Sentinel-Wert darf in Logs, Routenantworten, Audits, Ereignisprotokoll und Moduldaten für jeden Ausgang (Erfolg, Fehler, Timeout) nirgends auftauchen (Vorbild: `tests/unit/belabox.test.ts`, `tests/unit/module-secrets.test.ts`). Alarmhandler idempotent und mit überholtem Zustand prüfen.
+- [ ] **Doku:** Fachliche Besonderheiten in diesem Leitfaden, Architekturwirkung in `docs/ARCHITECTURE.md` (verlinken statt wiederholen), Betrieb in `docs/OPERATIONS.md`. Nur Platzhalter und fiktive Logins, keine echten Namen oder Secrets.
+- [ ] **Vor dem Push:** `pnpm run check`.
 
 ## Grenzen
 
