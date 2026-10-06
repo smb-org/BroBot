@@ -24,6 +24,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const [loadFailed, setLoadFailed] = useState(false);
   const [testOutcome, setTestOutcome] = useState<string | null>(null);
   const pollingInactive = status?.pollingDesired === true && !status.polling;
+  const pollingIntervalSeconds = status?.pollingDesired === true ? status.intervalSeconds : null;
 
   const refresh = useCallback(async (): Promise<void> => {
     setStatus(await loadBelaboxStatus(channelId));
@@ -44,6 +45,14 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     });
     return () => { active = false; };
   }, [channelId, labels.testFailed]);
+
+  useEffect(() => {
+    if (pollingIntervalSeconds === null) return;
+    const timer = window.setInterval(() => {
+      void refresh().catch(() => undefined);
+    }, Math.max(5, pollingIntervalSeconds) * 1_000);
+    return () => window.clearInterval(timer);
+  }, [pollingIntervalSeconds, refresh]);
 
   useEffect(() => {
     if (pollingInactive) notify({ tone: "error", message: labels.pollingInactive });
@@ -110,6 +119,28 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     }
   };
 
+  const checkNow = async (): Promise<void> => {
+    if (!canManage || busy) return;
+    setBusy(true);
+    try {
+      const result = await testBelaboxConnection(channelId);
+      if (!result.ok) {
+        const message = belaboxReasonText(labels, result.reason);
+        setTestOutcome(message);
+        notify({ tone: "error", message });
+        return;
+      }
+      await refresh();
+      const message = `${result.connected ? labels.connected : labels.disconnected} · ${labels.bitrate}: ${String(result.bitrateKbps)} kbps`;
+      setTestOutcome(message);
+      notify({ tone: result.connected ? "success" : "info", message });
+    } catch {
+      notify({ tone: "error", message: labels.testFailed });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async (): Promise<void> => {
     if (!canManage || busy || status?.configured !== true) return;
     setBusy(true);
@@ -131,6 +162,9 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       pollingDesired: false,
       streamId: null,
       belaboxStreamId: null,
+      alertNotice: null,
+      fetchFailureNotice: false,
+      intervalSeconds: 15,
     });
     setRemoveConfirmOpen(false);
     try {
@@ -147,6 +181,12 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     ? null
     : `${status.sample.connected ? labels.connected : labels.disconnected} · ${labels.bitrate}: ${String(status.sample.bitrateKbps)} kbps`;
   const connectionStatus = status === null ? loadFailed ? "error" : "loading" : "success";
+  const alertNoticeText = status?.alertNotice === null || status?.alertNotice === undefined
+    ? null
+    : `${status.alertNotice.phase === "pending" ? labels.alertPending : status.alertNotice.phase === "recovering"
+      ? labels.alertRecovering : status.alertNotice.kind === "disconnect" ? labels.alertDisconnect : labels.alertLow}${
+      status.alertNotice.bitrateKbps === null ? "" : ` · ${labels.bitrate}: ${String(status.alertNotice.bitrateKbps)} kbps`}`;
+  const noticeText = status?.fetchFailureNotice === true ? labels.fetchFailureNotice : alertNoticeText;
 
   return <section className="module-stack" aria-label={labels.title}>
     <InspectorSection title={labels.connection}>
@@ -166,6 +206,14 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
           style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflowWrap: "anywhere" }}>
           {sampleSummary === null ? "" : `${labels.latestSample}: ${sampleSummary}`}
         </p>
+        <div className="belabox-alert-notice-slot" role="status" aria-live="polite" data-testid="belabox-alert-notice-slot"
+          style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--s2)" }}>
+          <span className={noticeText === null ? "muted" : ""} title={noticeText ?? undefined}
+            style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{noticeText ?? ""}</span>
+          {noticeText !== null && status?.configured === true && canManage
+            ? <Button disabled={busy} onClick={() => { void checkNow(); }}>{labels.checkNow}</Button>
+            : null}
+        </div>
         <Button disabled={!canManage || busy || status === null} onClick={() => { void test(); }}>{labels.testConnection}</Button>
         <p className="muted" data-testid="belabox-test-result-slot" role="status" aria-live="polite" title={testOutcome ?? undefined}
           style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflowWrap: "anywhere" }}>{testOutcome ?? ""}</p>

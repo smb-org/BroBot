@@ -492,7 +492,9 @@ immediateActions: { requires: ["streamLive"], load: () => import("./panel/immedi
 
 **Grenzen:** `requires` listet Bedingungen, die der Host selbst auswertet
 (derzeit nur `streamLive`); er übergibt `availabilityReason` lokalisiert an die
-Karte, die ihre Steuerung entsprechend sperrt. `load` bleibt ein lazy `import()`,
+Karte, die ihre Steuerung entsprechend sperrt. `canManage` übergibt zusätzlich
+die Kanalrolle für managementpflichtige Kartenaktionen; die Route prüft die
+Berechtigung weiterhin selbst. `load` bleibt ein lazy `import()`,
 damit ein deaktiviertes Modul null Bytes kostet. Die Karte ruft Modul- oder Host-Routen auf (Clip und Raid
 nutzen `/api/channels/:channelId/clips` bzw. `/shoutout`);
 `requires` ist eine reine Verfügbarkeitsprüfung im Dashboard. Voraussetzungen
@@ -885,6 +887,37 @@ Antworttext entfernt. Zur Laufzeit wird kein Slash-Befehl geparst; gerenderte
 `{args}`-Werte können daher keine Aktion auslösen.
 
 Ein Chatbefehl, dessen gesamte Konfiguration aus Name, Mindeststufe, Abkühlzeit, Vorlage und genau einer Host-Aktion besteht, ist eine Art der Textbefehle; eine Funktion mit eigenem Zustand oder eigenen Ereignissen gehört in ein eigenes Modul.
+
+### BELABOX-Bitraten- und Verbindungsalarme (#323)
+
+`src/modules/belabox/domain/alert.ts` hält den Alarmablauf als reine Funktion
+`advanceAlert(state, sample, settings, now)` fest. Halte- und Erholungszeiten
+werden gegen Zeitstempel erfolgreicher Relay-Messungen gerechnet; `now` dient
+nur der Chat-Abkühlzeit. Eine bestätigte BELABOX-Verbindung ist Voraussetzung
+für Alarme und Abrufhinweise. Ein Stream ohne erfolgreiche Encoder-Verbindung
+bleibt im Probe-Modus und erzeugt keinen Disconnect- oder Abrufhinweis.
+
+Die Einstellungen beginnen bei 1.000 kbps für den Niedrig- und 2.000 kbps für
+den Erholungsschwellwert. Haltezeiten müssen mindestens dem Abrufintervall
+entsprechen. Weil der bestehende Abrufstandard 15 Sekunden beträgt, startet
+`holdSeconds` ebenfalls bei 15 Sekunden; bei einem 5-Sekunden-Intervall ist
+der kürzere 10-Sekunden-Wert zulässig. Die drei Chatvorlagen werden beim
+Aktivieren passend zur Kanalsprache gesetzt; Migration
+`0041_belabox_alerts.sql` ergänzt auch Bestandskonfigurationen sprachgerecht.
+Die Vorlagen nutzen deklarierte
+`{belabox.bitrate}`- und `{belabox.down_for}`-Variablen.
+
+Der Statusadapter speichert ausschließlich normalisierte Stichproben und den
+Alarmzustand; rohe Relay-Antworten bleiben flüchtig. Die Alarmmeldung läuft
+über `ModuleAlarmContext.sendChat` mit stream- und episodenbezogenem
+Idempotenzschlüssel sowie einer erneuten Phasenprüfung direkt vor der Ausgabe.
+Abruffehler senden nie Chat; ein dauerhafter Hinweis erscheint erst nach drei
+aufeinanderfolgenden Fehlern. Die Modulansicht reserviert dafür eine feste
+Statuszeile. „Jetzt prüfen“ testet die gespeicherte URL über `/test` und
+aktualisiert den Sample-Stand. Die Sofortaktion wird nur bei live erkanntem
+Stream aus ihrem lazy Modul-Loader geladen. Phasenwechsel verwenden ausschließlich die festen
+Diagnosecodes `belabox.alert_started`, `belabox.alert_escalated` und
+`belabox.alert_recovered` mit numerischen Schwell- und Zeitwerten.
 
 ### Votekick
 
