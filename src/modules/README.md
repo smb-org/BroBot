@@ -151,6 +151,13 @@ wiederholt sich nie (zufällige IV, auch nach Löschen und Neuanlegen) und gibt 
 Klartext nicht preis; nur auf Gleichheit prüfen, nie loggen oder ausliefern.
 Overlay-`initialState` erhält keinen Secret-Zugriff.
 
+Alarme mit externen Datenquellen verwenden das gemeinsame
+`ModuleAlarmContext.externalFetchBudget`. Erwartbare Anbieterfehler werden als
+modulinterner Zustand gespeichert und nicht geworfen, wenn der Host sie weder
+loggen noch mit seinem Alarm-Backoff wiederholen soll. Phasenwechsel können
+über `ModuleAlarmContext.writeDiagnostics` in das Ereignisprotokoll geschrieben
+werden; Details bleiben dabei auf feste Codes begrenzt.
+
 Die Sonnendatenquelle liegt eigenständig unter `src/modules/sun/`. Sie nutzt
 Open-Meteo-Geocoding über den Host für die Standortsuche. Der Host speichert
 Name, Koordinaten und Standortzeitzone in `channels` und stellt sie Sun über

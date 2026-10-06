@@ -609,12 +609,16 @@ export interface ModuleExecutionContext {
   /** Schedules or clears an alarm registered by this module. */
   scheduleAlarm: (handlerKey: string, alarmKey: string, deadline: number, ownerRevision?: number) => Promise<void>;
   clearAlarm: (alarmKey: string, ownerRevision?: number) => Promise<void>;
+  /** Reads the current execution time for a module-owned alarm key, if one is scheduled. */
+  getAlarmDeadline?: (alarmKey: string) => Promise<number | null>;
 }
 
 /** Durable storage and alarm access given to a module alarm handler. */
 export interface ModuleAlarmContext {
   DB: D1Database;
   channelId: string;
+  /** Shared per-dispatch allowance for external provider requests. */
+  externalFetchBudget?: ModuleExternalFetchBudget;
   /** Secret access bound to this alarm's channel and module. */
   secrets: ModuleSecretAccess;
   /** Ephemeral ballot access bound to this alarm's channel and module. */
@@ -632,6 +636,8 @@ export interface ModuleAlarmContext {
   /** Schedule or clear another key owned by this module and handled by this registration. */
   schedule: (key: string, deadline: number, ownerRevision?: number) => Promise<void>;
   clear: (key: string, ownerRevision?: number) => Promise<void>;
+  /** Reads the current execution time for a module-owned alarm key, if one is scheduled. */
+  getAlarmDeadline?: (key: string) => Promise<number | null>;
   /** Renders a host template in the channel's event context. */
   renderTemplate: (
     text: string,
@@ -658,6 +664,8 @@ export interface ModuleAlarmContext {
   resolveEventTimes: (now: number) => Promise<readonly ResolvedModuleEventTime[]>;
   streamState: () => Promise<ModuleStreamState>;
   streamStartedAt: () => Promise<{ streamId: string | null; startedAt: string | null }>;
+  /** Writes diagnostics through the host event-log boundary. */
+  writeDiagnostics?: (triggerId: string, diagnostics: readonly ModuleDiagnostic[], now: string) => Promise<unknown>;
 }
 
 export type ModuleTimeoutOutcome = "applied" | "rejected" | "ambiguous" | "suppressed";
@@ -1263,6 +1271,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   /** Broadcaster consent the host verifies before the EventSub subscription. */
   broadcasterScopes?: readonly string[];
   eventSubTypes?: readonly string[];
+  /** Lifecycle inputs this optional module must still receive while channel automation is paused. */
+  pauseSafeEventSubTypes?: readonly string[];
   routes?: Hono<ModuleRouteEnvironment>;
   /** Overlay presentation declarations, with view and editor chunks loaded on demand. */
   overlayElements?: readonly ModuleOverlayElementDefinition[];
@@ -1301,6 +1311,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
   /** Lazily loaded editor declaration for this module's settings. */
   settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<z.output<SettingsSchema>> }>;
+  /** Reconciles one module-owned alarm immediately after settings are saved. */
+  settingsChangedAlarm?: { handlerKey: string; alarmKey: string };
   /** Lazily loaded immediate-action card, shown only while this module is enabled. */
   immediateActions?: ModuleImmediateActionDefinition;
 };

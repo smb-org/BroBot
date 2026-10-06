@@ -180,7 +180,7 @@ describe("dashboard locale", () => {
       "host.action.failed", "host.action.suppressed", "host.chat.failed", "host.chat.sent", "host.chat.skipped", "host.announcement.failed", "host.announcement.sent",
       "host.timeout.applied", "host.timeout.failed", "host.timeout.ambiguous", "host.ban.applied", "host.ban.failed", "host.ban.ambiguous",
       "template_truncated", "host.module.error",
-      "host.module.unknown", "host.overlay.not_executed", "host.shoutout.failed", "host.shoutout.sent", "host.clip.failed", "channel_events.raid.incoming",
+      "host.module.unknown", "host.overlay.not_executed", "host.shoutout.failed", "host.shoutout.sent", "host.clip.failed", "belabox.fetch_failing", "belabox.fetch_recovered", "channel_events.raid.incoming",
       "channel_events.raid.outgoing", "channel_events.shoutout.sent", "channel_events.shoutout.received",
       "channel_events.chat.sub", "channel_events.chat.resub", "channel_events.chat.gift_sub",
       "channel_events.chat.community_gift", "channel_events.chat.announcement", "channel_events.chat.unknown",
