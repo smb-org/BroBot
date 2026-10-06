@@ -584,6 +584,22 @@ describe("EditorShell and declaration renderer", () => {
     expect(attemptOrder).toEqual(["validate", "save"]);
   });
 
+  it("keeps the error summary links mounted across re-renders with equal invalid fields and drops them at once on activation", async () => {
+    const makeFields = () => [{ id: "settings-name", label: "Name", message: "Required", sectionId: "settings" }];
+    const shell = () => <UiProvider><EditorShell {...baseProps} dirty invalid invalidMessage="Correct the marked fields." invalidFields={makeFields()} /></UiProvider>;
+    const { rerender } = render(shell());
+
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const link = within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getByRole("button", { name: "Name: Required" });
+    rerender(shell());
+
+    expect(within(screen.getByRole("dialog", { name: "Fehlerhafte Felder" })).getByRole("button", { name: "Name: Required" })).toBe(link);
+    expect(link.isConnected).toBe(true);
+
+    fireEvent.click(link);
+    expect(screen.queryByRole("dialog", { name: "Fehlerhafte Felder" })).toBeNull();
+  });
+
   it("reveals every validator when saving with a known blocking field", async () => {
     function Harness() {
       const [attempted, setAttempted] = useState(false);
