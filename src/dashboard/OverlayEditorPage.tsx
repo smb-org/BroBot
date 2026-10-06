@@ -1138,12 +1138,14 @@ function OverlayEditorWorkspace({
                 onChange={(value) => { if (value !== null) setStyleTargetId(value); }} />
               {!canManage ? <p className="muted" id="overlay-style-disabled-reason" role="note">{labels.editorStyleReadOnlyReason}</p> : null}
               <p className="form-hint">{labels.editorStyleOwnCssHint}</p>
-              {styleLocked ? <div className="overlay-editor__style-lock" role="status">
-                <p {...(canManage ? { id: "overlay-style-disabled-reason" } : {})}>{labels.editorStyleLocked}</p>
-                <Button variant="neutral" disabled={!canEdit || parsedStyleBlock.contentStart === null}
-                  {...(canManage ? {} : { title: labels.editorStyleReadOnlyReason, describedBy: "overlay-style-disabled-reason" })}
-                  onClick={rewriteStylesFromEditor}>{labels.editorStyleRewrite}</Button>
-              </div> : null}
+              <div className="overlay-editor__style-lock" data-locked={styleLocked} {...(styleLocked ? { role: "status" } : { "aria-hidden": true })}>
+                {styleLocked ? <>
+                  <p {...(canManage ? { id: "overlay-style-disabled-reason" } : {})}>{labels.editorStyleLocked}</p>
+                  <Button variant="neutral" disabled={!canEdit || parsedStyleBlock.contentStart === null}
+                    {...(canManage ? {} : { title: labels.editorStyleReadOnlyReason, describedBy: "overlay-style-disabled-reason" })}
+                    onClick={rewriteStylesFromEditor}>{labels.editorStyleRewrite}</Button>
+                </> : null}
+              </div>
               <StyleDisclosureSection key={`${effectiveStyleTargetId}:font`} section="font" icon="styleFont" title={labels.editorStyleFontSection}
                 summary={styleSectionSummary(targetStyle, "font", labels.editorStyleSectionUnset, labels.editorStyleLeft, labels.editorStyleCenter, labels.editorStyleRight)} defaultExpanded>
                 <div className="overlay-editor__style-grid">

@@ -119,3 +119,25 @@ test("clipped hints and dialog errors keep full copy in fixed reserved rows", as
   expect((await error.boundingBox())?.height).toBe(36);
   expect((await dialog.boundingBox())?.height).toBe(dialogHeight);
 });
+
+test("game search results close on outside click, focus exit, and Escape at 390px", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tests/e2e/layout-fixture.html");
+  const search = page.getByRole("searchbox", { name: "Games" });
+  const results = page.locator(".ui-game-picker__results-slot");
+
+  await search.fill("ga");
+  await expect(results).toBeVisible();
+  await page.getByRole("button", { name: "Toggle issues" }).click();
+  await expect(results).toHaveCount(0);
+
+  await search.fill("ga");
+  await expect(results).toBeVisible();
+  await page.locator("#game-picker-outside-control").focus();
+  await expect(results).toHaveCount(0);
+
+  await search.fill("ga");
+  await expect(results).toBeVisible();
+  await search.press("Escape");
+  await expect(results).toHaveCount(0);
+});

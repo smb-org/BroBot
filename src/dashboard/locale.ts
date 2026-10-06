@@ -180,6 +180,7 @@ export interface ChannelVariablesTexts {
   empty: string;
   loading: string;
   loadError: string;
+  retry: string;
   saveError: string;
   deleteError: string;
   name: string;
@@ -239,7 +240,7 @@ export interface ChannelVariablesTexts {
 const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
   de: {
     title: "Kanalvariablen", list: "Variablen", create: "Variable anlegen", count: (count, maximum) => `${String(count)} von ${String(maximum)}`,
-    empty: "Noch keine Kanalvariablen angelegt.", loading: "Kanalvariablen werden geladen …", loadError: "Kanalvariablen konnten nicht geladen werden.",
+    empty: "Noch keine Kanalvariablen angelegt.", loading: "Kanalvariablen werden geladen …", loadError: "Kanalvariablen konnten nicht geladen werden.", retry: "Erneut versuchen",
     saveError: "Die Kanalvariable konnte nicht gespeichert werden.", deleteError: "Die Kanalvariable konnte nicht gelöscht werden.",
     name: "Name", nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; höchstens 32 Zeichen.", nameInvalid: "Nur Kleinbuchstaben, Zahlen und Unterstrich.",
     description: "Beschreibung", descriptionHint: "Erscheint in der Variablenauswahl. Höchstens 80 Zeichen.", noDescription: "Keine Beschreibung",
@@ -270,7 +271,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
   },
   en: {
     title: "Channel variables", list: "Variables", create: "Create variable", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
-    empty: "No channel variables yet.", loading: "Loading channel variables …", loadError: "Channel variables could not be loaded.",
+    empty: "No channel variables yet.", loading: "Loading channel variables …", loadError: "Channel variables could not be loaded.", retry: "Retry",
     saveError: "The channel variable could not be saved.", deleteError: "The channel variable could not be deleted.",
     name: "Name", nameHint: "Lowercase letters, numbers, and underscores; up to 32 characters.", nameInvalid: "Use lowercase letters, numbers, and underscores only.",
     description: "Description", descriptionHint: "Shown in the variable picker. Up to 80 characters.", noDescription: "No description",

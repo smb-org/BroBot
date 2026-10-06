@@ -7,7 +7,7 @@ import { apiErrorText, dashboardCommonTexts, formatDate } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
 import { MemberAvatar } from "./member-avatar";
 import { MemberGrantEditor } from "./member-grant-editor";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, ListDetail, LoadState, notify, Skeleton, useDraftGuard, useInspectorSelection } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, ListDetail, LoadState, notify, useDraftGuard, useInspectorSelection } from "./ui";
 import {
   addChannelMember,
   PanelApiError,
@@ -34,6 +34,7 @@ interface MembersPageProperties {
 }
 
 const manageableRoles = CHANNEL_ROLES;
+const MEMBERS_PAGE_SIZE = 100;
 
 /** The join date is days to years in the past; the time of day adds nothing there. */
 const formatJoinDate = (value: string): string => formatDate(value);
@@ -139,6 +140,25 @@ const MemberList = ({
     </div>
   );
 };
+
+const MemberListSkeleton = (): ReactElement => (
+  <div className="table-wrap members-page__skeleton">
+    <table className="table members-table" aria-hidden="true">
+      <thead className="sr-only"><tr><th scope="col" /></tr></thead>
+      <tbody>{Array.from({ length: MEMBERS_PAGE_SIZE }, (_, index) => (
+        <tr key={index}>
+          <th scope="row"><div className="avatar-row">
+            <span className="members-page__skeleton-avatar" />
+            <div><span className="members-page__skeleton-line members-page__skeleton-line--name" /><span className="members-page__skeleton-line members-page__skeleton-line--login" /></div>
+          </div></th>
+          <td><span className="members-page__skeleton-line members-page__skeleton-line--role" /></td>
+          <td><span className="members-page__skeleton-line members-page__skeleton-line--date" /></td>
+        </tr>
+      ))}</tbody>
+    </table>
+    <span className="sr-only">{membersTexts().load}</span>
+  </div>
+);
 
 /**
  * The member editor (15b): a role `ChoiceCards` as the only draft field,
@@ -360,9 +380,9 @@ export const MembersPage = ({
             list={<LoadState
               status={members.length > 0 ? "success" : error !== null ? "error" : loading ? "loading" : "empty"}
               minHeight={320}
-              loading={<Skeleton rows={8} height={34} />}
+              loading={<MemberListSkeleton />}
               empty={<MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
-              error={<Skeleton rows={8} height={34} />}
+              error={<MemberListSkeleton />}
             >{members.length === 0 ? null : <MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>}
             inspector={selectedMember !== null ? (
               <MemberInspector

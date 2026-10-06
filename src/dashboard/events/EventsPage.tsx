@@ -300,7 +300,7 @@ export const EventsPage = ({
                 ? eventsState.status === "error" ? "error" : "loading"
                 : eventEntries.length === 0 ? "empty" : "success"}
               minHeight={420}
-              loading={<Skeleton rows={8} height={34} />}
+              loading={<Skeleton rows={50} height={34} />}
               empty={filterActive ? (
                 <EmptyState
                   title={texts.events.noMatches}

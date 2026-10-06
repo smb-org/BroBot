@@ -171,7 +171,7 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
                 ? auditState.status === "error" ? "error" : "loading"
                 : entries.length === 0 ? "empty" : "success"}
               minHeight={420}
-              loading={<Skeleton rows={6} height={44} />}
+              loading={<Skeleton rows={50} height={44} />}
               empty={filterActive
                 ? <EmptyState title={texts.audit.noMatches} description={texts.audit.activeFilters} action={{ label: texts.audit.resetFilters, onClick: () => { onFiltersChange(emptyAuditFilter); } }} />
                 : <p className="empty-state">{texts.audit.empty}</p>}

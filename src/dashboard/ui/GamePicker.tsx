@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement } from "react";
 
 import { LoadState } from "./LoadState";
 import { Skeleton } from "./Skeleton";
@@ -63,8 +63,10 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
   visuallyHiddenLabel?: boolean;
 }): ReactElement {
   const id = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [searchState, setSearchState] = useState<GameSearchState | null>(null);
+  const [resultsOpen, setResultsOpen] = useState(false);
 
   useEffect(() => {
     const search = query.trim();
@@ -83,19 +85,32 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
   }, [query, searchGames]);
 
   const search = query.trim();
+  const showResults = search.length >= 2 && resultsOpen;
   const currentSearch = searchState?.query === search ? searchState : null;
   const searchStatus = search.length < 2 ? "empty" : currentSearch?.status === "error" ? "error"
     : currentSearch?.status === "ready" ? currentSearch.results.length === 0 ? "empty" : "success"
       : "loading";
 
+  useEffect(() => {
+    if (!showResults) return;
+    const dismissOutside = (event: PointerEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) setResultsOpen(false);
+    };
+    document.addEventListener("pointerdown", dismissOutside);
+    return () => { document.removeEventListener("pointerdown", dismissOutside); };
+  }, [showResults]);
+
   const add = (game: GamePickerGame): void => {
     if (value.some((entry) => entry.id === game.id)) return;
     onChange([...value, game]);
     setQuery("");
+    setResultsOpen(false);
   };
 
   return (
-    <div className="ui-game-picker">
+    <div className="ui-game-picker" ref={rootRef}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setResultsOpen(false); }}
+      onKeyDown={(event) => { if (event.key === "Escape") setResultsOpen(false); }}>
       <label className={`ui-game-picker__label${visuallyHiddenLabel ? " sr-only" : ""}`} htmlFor={id}>{messages.label}</label>
       <p className="ui-game-picker__hint">{messages.hint}</p>
       <div className="ui-game-picker__selected" aria-live="polite">
@@ -116,9 +131,10 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
           placeholder={messages.search}
           aria-describedby={`${id}-hint`}
           disabled={disabled}
-          onChange={(event) => setQuery(event.currentTarget.value)}
+          onFocus={() => setResultsOpen(true)}
+          onChange={(event) => { setQuery(event.currentTarget.value); setResultsOpen(true); }}
         />
-        {search.length < 2 ? null : <div className="ui-game-picker__results-slot">
+        {!showResults ? null : <div className="ui-game-picker__results-slot">
           <LoadState
             status={searchStatus}
             minHeight={220}

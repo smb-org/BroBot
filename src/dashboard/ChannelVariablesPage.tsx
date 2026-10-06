@@ -300,16 +300,21 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     }
   };
 
-  const listStatus = loading ? "loading" : loadFailed ? "error" : variables.length === 0 ? "empty" : "success";
+  const listStatus = loading && variables.length === 0 ? "loading"
+    : variables.length === 0 ? loadFailed ? "error" : "empty"
+      : "success";
   const list = <section className="channel-variables-page config-section" aria-label={labels.list}>
     <p className="muted channel-variables-limit-note" role="note">{labels.limitNote(maximum)}</p>
-    <div className="channel-variables-limit-slot" aria-live="polite">{canManageContent && variables.length >= maximum ? <p className="muted" role="note">{labels.limitReached}</p> : null}</div>
+    <div className="channel-variables-limit-slot" aria-live="polite">
+      {canManageContent && variables.length >= maximum ? <p className="muted" role="note">{labels.limitReached}</p> : null}
+      {loadFailed && variables.length > 0 ? <Button variant="subtle" onClick={() => { void refresh(); }}>{labels.retry}</Button> : null}
+    </div>
     <LoadState
       status={listStatus}
       minHeight={360}
       loading={<Skeleton rows={8} height={34} />}
       empty={<p className="empty-state">{labels.empty}</p>}
-      error={<Skeleton rows={8} height={34} />}
+      error={<div className="empty-state"><p>{labels.loadError}</p><Button variant="neutral" onClick={() => { void refresh(); }}>{labels.retry}</Button></div>}
     >{variables.length === 0 ? null : <div className="table-wrap channel-variables-table-wrap">
       <table className="table channel-variables-table">
         <thead><tr>

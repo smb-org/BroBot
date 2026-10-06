@@ -101,6 +101,24 @@ const MembersTable = ({
   );
 };
 
+const PlatformMembersSkeleton = (): ReactElement => {
+  const texts = platformTexts();
+  return (
+    <div className="table-wrap">
+      <table className="table platform-members-table" aria-hidden="true">
+        <thead><tr><th scope="col"><span className="platform-members__skeleton-heading" /></th><th scope="col"><span className="platform-members__skeleton-heading platform-members__skeleton-heading--role" /></th></tr></thead>
+        <tbody>{Array.from({ length: 100 }, (_, index) => (
+          <tr key={index}>
+            <th scope="row"><span className="platform-members__skeleton-name" /><span className="platform-members__skeleton-login" /></th>
+            <td><span className="platform-members__skeleton-role" /></td>
+          </tr>
+        ))}</tbody>
+      </table>
+      <span className="sr-only">{texts.loadMembers}</span>
+    </div>
+  );
+};
+
 const ChannelInspector = ({
   channel: channel,
   onAuthenticationRequired: onAuthenticationRequired,
@@ -223,9 +241,9 @@ const ChannelInspector = ({
         <LoadStateView
           status={members.data === null ? members.status === "error" ? "error" : "loading" : members.data.members.length === 0 ? "empty" : "success"}
           minHeight={220}
-          loading={<Skeleton rows={4} height={34} />}
+          loading={<PlatformMembersSkeleton />}
           empty={<MembersTable members={[]} selectedUserId={selectedMemberId} onSelect={(member) => { setSelectedMemberId(member.userId); }} />}
-          error={<Skeleton rows={4} height={34} />}
+          error={<PlatformMembersSkeleton />}
         >{members.data === null || members.data.members.length === 0 ? null : <MembersTable
             members={members.data.members}
             selectedUserId={selectedMemberId}
@@ -451,9 +469,9 @@ const PlatformAudit = ({
       <LoadStateView
         status={status}
         minHeight={280}
-        loading={<Skeleton rows={6} height={34} />}
+        loading={<Skeleton rows={50} height={34} />}
         empty={<p className="muted">{texts.auditEmpty}</p>}
-        error={<Skeleton rows={6} height={34} />}
+        error={<Skeleton rows={50} height={34} />}
       >{auditState.data === null || auditState.data.entries.length === 0 ? null : (
         <div className="table-wrap">
           <table className="table">
