@@ -3,6 +3,7 @@ import {
   createE2ESessionCredentials,
   e2eChannelId,
   e2eOverlayToken,
+  e2eWorkerOrigin,
   seedE2EOverlay,
 } from "./worker-fixtures";
 
@@ -42,7 +43,7 @@ test("a sandboxed opaque-origin embed loads bootstrap and applies a realtime upd
   });
 
   await page.route("**/__e2e/overlay-embed", async (route) => {
-    const overlayUrl = "http://127.0.0.1:8787/overlay.html#token=e2e-token";
+    const overlayUrl = `${e2eWorkerOrigin}/overlay.html#token=e2e-token`;
     await route.fulfill({
       contentType: "text/html",
       body: `<!doctype html>
@@ -101,7 +102,7 @@ test("a sandboxed opaque-origin embed loads bootstrap and applies a realtime upd
     }));
   });
 
-  await page.goto("http://127.0.0.1:8787/__e2e/overlay-embed");
+  await page.goto(`${e2eWorkerOrigin}/__e2e/overlay-embed`);
   const frame = page.frameLocator("#overlay-frame");
   await expect.poll(async () => frame.locator("body").evaluate(() => globalThis.origin)).toBe("null");
   await expect.poll(() => bootstrapSeen).toBe(true);
@@ -136,7 +137,7 @@ test("a sandboxed embed bootstraps through Worker CORS and receives a real Worke
     });
   });
 
-  await page.goto(`/tests/e2e/fixtures/overlay-embed.html#token=${e2eOverlayToken}`);
+  await page.goto(`/tests/e2e/fixtures/overlay-embed.html#token=${e2eOverlayToken}&origin=${encodeURIComponent(e2eWorkerOrigin)}`);
   const frame = page.frameLocator("#overlay-frame");
   await expect.poll(() => frame.locator("body").evaluate(() => globalThis.origin)).toBe("null");
   await expect(frame.locator(".brobot-variable__value")).toHaveText("7");
@@ -146,7 +147,7 @@ test("a sandboxed embed bootstraps through Worker CORS and receives a real Worke
   expect(overlayAssetCorsHeaders).toContain("*");
 
   const response = await page.request.post(
-    `http://127.0.0.1:8787/api/channels/${e2eChannelId}/variables/score/value`,
+    `${e2eWorkerOrigin}/api/channels/${e2eChannelId}/variables/score/value`,
     {
       headers: {
         Cookie: `__Host-brobot_session=${credentials.cookie}; __Host-brobot_csrf=${credentials.csrfToken}`,
