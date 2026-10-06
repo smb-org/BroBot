@@ -1702,7 +1702,7 @@ describe("ChannelObject realtime path", () => {
       status: "busy",
       moduleId: "chat_voting",
     });
-    await expect(object.openBallot("chat_voting", "poll-a", 0, 30_000)).rejects.toThrow(RangeError);
+    await expect(object.openBallot("chat_voting", "poll-a", -1, 30_000)).rejects.toThrow(RangeError);
 
     expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey]).toEqual(originalEntry);
     expect(storage.setAlarm).not.toHaveBeenCalled();
@@ -1768,6 +1768,60 @@ describe("ChannelObject realtime path", () => {
       counts: [],
       revision: 0,
     });
+  });
+
+  it("stores only hashed term voters, applies blocked filters, and approves terms for one ballot", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "text-poll", 0, 20_000, undefined, { blockedTerms: ["blocked"] });
+
+    await expect(object.castBallotTerm("chat_voting", "text-poll", "fictional-viewer", "alpha")).resolves.toMatchObject({
+      status: "counted",
+      terms: [{ term: "alpha", count: 1, approved: false }],
+      termFilterReady: true,
+    });
+    await expect(object.castBallotTerm("chat_voting", "text-poll", "fictional-viewer", "beta")).resolves.toMatchObject({
+      status: "changed",
+      terms: [{ term: "beta", count: 1, approved: false }],
+    });
+    await expect(object.castBallotTerm("chat_voting", "text-poll", "another-viewer", "blocked")).resolves.toMatchObject({
+      status: "blocked",
+      terms: [{ term: "beta", count: 1, approved: false }],
+    });
+
+    await object.setBlockedTerms("chat_voting", "text-poll", ["blocked"]);
+    const approval = await object.approveTerm("chat_voting", "text-poll", "beta");
+    expect(approval).toMatchObject({
+      status: "approved",
+      snapshot: { terms: [{ term: "beta", count: 1, approved: true }], termFilterReady: true },
+    });
+    const voterKeys = [...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:chat_voting:text-poll:v:"));
+    expect(voterKeys).toHaveLength(1);
+    expect(voterKeys[0]).not.toContain("fictional-viewer");
+    expect(storageOf(object).values.get(voterKeys[0] ?? "")).toBe("beta");
+  });
+
+  it("bounds distinct text terms, counts overflow, and deletes hashed voters on close", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "bounded-poll", 0, 20_000, undefined, { blockedTerms: [] });
+    for (let index = 0; index < 200; index += 1) {
+      const result = await object.castBallotTerm("chat_voting", "bounded-poll", `viewer-${String(index)}`, `term-${String(index)}`);
+      expect(result.status).toBe("counted");
+    }
+
+    const overflow = await object.castBallotTerm("chat_voting", "bounded-poll", "viewer-0", "overflow-term");
+    expect(overflow.status).toBe("overflow");
+    expect(overflow.terms?.find(({ term }) => term === "term-0")).toEqual({ term: "term-0", count: 1, approved: false });
+    expect(overflow.more).toBe(1);
+    expect(overflow.terms).toHaveLength(200);
+    const closed = await object.closeBallot("chat_voting", "bounded-poll");
+    expect(closed?.terms).toHaveLength(200);
+    expect(closed?.more).toBe(1);
+    expect(closed?.termFilterReady).toBe(true);
+    expect([...storageOf(object).values.keys()].filter((key) => key.startsWith("ballot:chat_voting:bounded-poll:v:"))).toEqual([]);
   });
 
   it("deletes voter entries and the per-ballot key when the ballot closes", async () => {

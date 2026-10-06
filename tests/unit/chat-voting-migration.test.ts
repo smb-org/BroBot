@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0029_chat_voting.sql"), "utf8");
 const requestedDurationMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0032_chat_voting_requested_duration.sql"), "utf8");
+const textPresetMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0038_chat_voting_text_presets.sql"), "utf8");
 
 describe("chat voting migration", () => {
   it("backfills requested timer durations without treating the four-hour hard limit as a request", () => {
@@ -35,6 +36,7 @@ describe("chat voting migration", () => {
       insertLegacyVote.run("legacy-hard-limit", "2026-10-04T10:00:00.000Z", "2026-10-04T14:00:00.000Z", "2026-10-04T14:00:00.000Z", "limit");
 
       database.exec(requestedDurationMigration);
+      database.exec(textPresetMigration);
 
       expect(database.prepare(`
         SELECT poll_id, requested_duration_seconds
@@ -67,6 +69,7 @@ describe("chat voting migration", () => {
       `);
       database.exec(migration);
       database.exec(requestedDurationMigration);
+      database.exec(textPresetMigration);
 
       const moduleRow = database.prepare(
         "SELECT enabled, settings FROM channel_modules WHERE channel_id = 'fictional-channel' AND module_id = 'chat_voting'",
@@ -100,6 +103,31 @@ describe("chat voting migration", () => {
         UPDATE chat_votes SET close_reason = 'manual'
          WHERE channel_id = 'fictional-channel' AND poll_id = 'poll-b'
       `).run();
+      database.prepare(`
+        UPDATE chat_votes
+           SET status = 'closed', closed_at = '2026-10-04T11:00:00.000Z', counts_json = '[0,0]', voter_count = 0
+         WHERE poll_id = 'poll-b'
+      `).run();
+
+      database.prepare(`
+        INSERT INTO chat_votes
+          (channel_id, poll_id, preset, option_count, labels_json, text_mode, term_filter_ready,
+           status, opened_at, closes_at, close_reason)
+        VALUES ('fictional-channel', 'text-poll', 'free_text', 0, '[]', 'first_word', 1,
+                'open', '2026-10-04T10:00:00.000Z', '2026-10-04T14:00:00.000Z', 'limit')
+      `).run();
+      database.prepare(`
+        UPDATE chat_votes
+           SET status = 'closed', closed_at = '2026-10-04T11:00:00.000Z', counts_json = '[]', voter_count = 2,
+               text_results_json = '[{"term":"kappa","count":2,"approved":true}]', more_terms = 3
+         WHERE poll_id = 'text-poll'
+      `).run();
+      expect(() => database.prepare(`
+        INSERT INTO chat_votes
+          (channel_id, poll_id, preset, option_count, labels_json, text_mode, status, opened_at, closes_at, close_reason)
+        VALUES ('fictional-channel', 'text-missing-filter', 'free_text', 0, '[]', 'whole_message',
+                'open', 'a', 'b', 'limit')
+      `).run()).toThrow();
 
       expect(database.prepare(
         "SELECT counts_json, voter_count, requested_duration_seconds FROM chat_votes WHERE channel_id = 'fictional-channel' AND poll_id = 'poll-a'",
@@ -107,6 +135,16 @@ describe("chat voting migration", () => {
       expect(database.prepare(
         "SELECT requested_duration_seconds FROM chat_votes WHERE channel_id = 'fictional-channel' AND poll_id = 'poll-b'",
       ).get()).toEqual({ requested_duration_seconds: 60 });
+      expect(database.prepare(
+        "SELECT preset, option_count, text_mode, term_filter_ready, text_results_json, more_terms FROM chat_votes WHERE poll_id = 'text-poll'",
+      ).get()).toEqual({
+        preset: "free_text",
+        option_count: 0,
+        text_mode: "first_word",
+        term_filter_ready: 1,
+        text_results_json: '[{"term":"kappa","count":2,"approved":true}]',
+        more_terms: 3,
+      });
       const columns = database.prepare("PRAGMA table_info(chat_votes)").all() as Array<{ name: string }>;
       expect(columns.map(({ name }) => name)).not.toContain("voter_user_id");
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);

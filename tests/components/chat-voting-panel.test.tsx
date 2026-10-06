@@ -73,7 +73,7 @@ describe("chat voting live panel", () => {
     const duration = screen.getByRole("radiogroup", { name: "Duration" });
     expect(within(duration).getByRole("radio", { name: "2 min" })).toBeChecked();
 
-    for (const name of ["Yes / No", "Scale 1–5", "Options 2–9", "Scale 1–5"]) {
+    for (const name of ["Yes / No", "0 / 1", "1 / 2", "Free text", "Scale 1–5", "Options 2–9", "Scale 1–5"]) {
       fireEvent.click(within(type).getByRole("radio", { name }));
     }
     for (const name of ["Open", "1 min", "2 min", "5 min", "Custom", "5 min"]) {
@@ -88,6 +88,30 @@ describe("chat voting live panel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(startPayload).toEqual({ preset: "scale_5", durationSeconds: 300 }));
+  });
+
+  it("starts a free-text vote with the selected whole-message mode", async () => {
+    let startPayload: unknown;
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request
+        ? new URL(input.url).pathname
+        : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path.endsWith("/start")) {
+        startPayload = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
+        return Promise.resolve(jsonResponse({ vote: { ...openVote, preset: "free_text", optionCount: 0, labels: [], textMode: "whole_message" } }));
+      }
+      return Promise.resolve(jsonResponse({ vote: null, counts: null, revision: 0, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    fireEvent.click(within(await screen.findByRole("radiogroup", { name: "Vote type" })).getByRole("radio", { name: "Free text" }));
+    const mode = screen.getByRole("radiogroup", { name: "Counting mode" });
+    fireEvent.click(within(mode).getByRole("radio", { name: "Whole message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    await waitFor(() => expect(startPayload).toEqual({ preset: "free_text", durationSeconds: 120, textMode: "whole_message" }));
   });
 
   it("uses a non-preset saved auto-close duration as the custom default", async () => {
@@ -481,8 +505,9 @@ describe("chat voting live panel", () => {
     await screen.findByRole("heading", { name: "Voting" });
     expect(container.querySelector<HTMLElement>(".chat-voting-result-area")).toHaveStyle({ height: "calc(var(--s10) * 7)" });
     const reservedFields = Array.from(container.querySelectorAll<HTMLElement>(".chat-voting-configuration__field-slot"));
-    expect(reservedFields).toHaveLength(2);
+    expect(reservedFields).toHaveLength(3);
     expect(reservedFields.map((field) => field.style.height)).toEqual([
+      "calc(var(--s10) + var(--s6))",
       "calc(var(--s10) + var(--s6))",
       "calc(var(--s10) + var(--s6))",
     ]);

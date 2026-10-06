@@ -21,7 +21,13 @@ export interface ChatVotingPanelTexts {
   increaseDuration: string;
   decreaseDuration: string;
   yesNo: string;
+  zeroOne: string;
+  oneTwo: string;
   scale: string;
+  freeText: string;
+  textMode: string;
+  firstWord: string;
+  wholeMessage: string;
   optionCount: string;
   options: string;
   increaseOptionCount: string;
@@ -39,6 +45,13 @@ export interface ChatVotingPanelTexts {
   invalidOptionCount: string;
   voterCount: (count: number) => string;
   resultBar: (label: string, count: number, percent: number) => string;
+  approveTerm: (term: string) => string;
+  approved: string;
+  termsUnavailable: string;
+  approvalFailed: string;
+  approvalSaved: string;
+  noTerms: string;
+  moreTerms: (count: number) => string;
   count: string;
   percent: string;
 }
@@ -65,7 +78,13 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     increaseDuration: "Dauer erhöhen",
     decreaseDuration: "Dauer verringern",
     yesNo: "Ja/Nein",
+    zeroOne: "0/1",
+    oneTwo: "1/2",
     scale: "Skala 1–5",
+    freeText: "Freitext",
+    textMode: "Zählweise",
+    firstWord: "Erstes Wort",
+    wholeMessage: "Ganze Nachricht",
     optionCount: "Anzahl der Optionen",
     options: "Optionen 2–9",
     increaseOptionCount: "Optionszahl erhöhen",
@@ -83,6 +102,13 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     invalidOptionCount: "Gib eine Zahl von 2 bis 9 ein.",
     voterCount: (count) => `${String(count)} Stimmen`,
     resultBar: (label, count, percent) => `${label}: ${String(count)} Stimmen, ${String(percent)} Prozent`,
+    approveTerm: (term) => `„${term}“ freigeben`,
+    approved: "Freigegeben",
+    termsUnavailable: "Die Twitch-Sperrliste ist nicht verfügbar. Begriffe bleiben verborgen, bis sie geprüft werden können.",
+    approvalFailed: "Der Begriff konnte nicht freigegeben werden.",
+    approvalSaved: "Begriff für diese Abstimmung freigegeben.",
+    noTerms: "Noch keine Begriffe eingegangen.",
+    moreTerms: (count) => `Weitere ignorierte Begriffe: ${String(count)}`,
     count: "Stimmen",
     percent: "Anteil",
   },
@@ -107,7 +133,13 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     increaseDuration: "Increase duration",
     decreaseDuration: "Decrease duration",
     yesNo: "Yes / No",
+    zeroOne: "0 / 1",
+    oneTwo: "1 / 2",
     scale: "Scale 1–5",
+    freeText: "Free text",
+    textMode: "Counting mode",
+    firstWord: "First word",
+    wholeMessage: "Whole message",
     optionCount: "Number of options",
     options: "Options 2–9",
     increaseOptionCount: "Increase option count",
@@ -125,6 +157,13 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     invalidOptionCount: "Enter a number from 2 to 9.",
     voterCount: (count) => `${String(count)} votes`,
     resultBar: (label, count, percent) => `${label}: ${String(count)} votes, ${String(percent)} percent`,
+    approveTerm: (term) => `Approve “${term}”`,
+    approved: "Approved",
+    termsUnavailable: "Twitch’s blocked-term list is unavailable. Terms stay hidden until they can be checked.",
+    approvalFailed: "The term could not be approved.",
+    approvalSaved: "Term approved for this vote.",
+    noTerms: "No terms received yet.",
+    moreTerms: (count) => `Additional ignored terms: ${String(count)}`,
     count: "Votes",
     percent: "Share",
   },

@@ -27,11 +27,17 @@ const initialTallyState = async (
   if (vote === null) return null;
   let counts: readonly number[] | null = vote.counts;
   let revision = 0;
+  let terms = vote.textResults ?? null;
+  let more = vote.moreTerms;
+  let termFilterReady = vote.termFilterReady ?? false;
   if (vote.status === "open") {
     const snapshot = await context?.readBallot(vote.id) ?? null;
     if (snapshot === null) return null;
     counts = snapshot.counts;
     revision = snapshot.revision;
+    terms = snapshot.terms ?? null;
+    more = snapshot.more ?? null;
+    termFilterReady = snapshot.termFilterReady ?? false;
   } else {
     const hiddenAfterSeconds = typeof config.hideAfterCloseSeconds === "number" ? config.hideAfterCloseSeconds : 15;
     const closedAt = vote.closedAt === null ? Number.NaN : Date.parse(vote.closedAt);
@@ -43,8 +49,12 @@ const initialTallyState = async (
     status: vote.status,
     preset: vote.preset,
     optionCount: vote.optionCount,
+    textMode: vote.textMode ?? null,
     labels: [...vote.labels],
     counts: [...counts],
+    ...(terms === null ? {} : { terms: terms.map((entry) => ({ ...entry })) }),
+    ...(more === null ? {} : { more }),
+    termFilterReady,
     revision,
     openedAt: vote.openedAt,
     closesAt: vote.closesAt,

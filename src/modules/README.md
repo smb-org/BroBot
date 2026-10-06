@@ -801,10 +801,11 @@ Das Modul `src/modules/chat_voting/` startet Ja/Nein-, 1-bis-5- und
 2-bis-9-Optionen-Abstimmungen über das Panel oder `!vote yesno`, `!vote scale`
 und `!vote <n>`. Nur Moderatoren und Broadcaster können Chatbefehle starten
 oder beenden; die Panel-Aktion steht allen Kanalmitgliedern offen. Stimmen
-werden ausschließlich über `ballotChoiceFromMessage` und den kanalgebundenen
-Ballot im Channel Durable Object gezählt. Ein Nutzer kann seine Stimme ändern;
-die letzte Wahl zählt. Pro Kanal bleibt höchstens ein Ballot offen, auch wenn
-ein anderes Modul ihn gestartet hat.
+Ziffernstimmen werden nur bei einer exakten Ziffer über den kanalgebundenen
+Ballot im Channel Durable Object gezählt; Freitext-Stimmen verwenden dessen
+generischen Term-Ballot. Ein Nutzer kann seine Stimme ändern; die letzte Wahl
+zählt. Pro Kanal bleibt höchstens ein Ballot offen, auch wenn ein anderes Modul
+ihn gestartet hat.
 
 Die Modulroute startet und beendet Abstimmungen, und ein einzelner
 Modul-Alarm schließt sie nach dem optionalen Timer oder spätestens nach vier
@@ -813,6 +814,20 @@ Beschriftungen und aggregierte Zähler; einzelne Abstimmende werden nicht in D1
 gespeichert. Das Overlay-Element `chat_voting.tally` lädt den offenen Stand
 beim Start und nimmt Zähler mit monotoner Revision entgegen. Panel und Overlay
 bleiben lazy geladen.
+
+Die Presets `!vote 01` und `!vote 12` zählen ausschließlich Nachrichten, die
+genau aus der jeweiligen Ziffer bestehen; `0` gilt nur bei `01`. Im Panel sind
+die beiden Beschriftungspaare frei änderbar. `!vote text`, `!vote text word`
+und `!vote text message` starten Freitext-Abstimmungen: `word` (Standard)
+zählt das erste normalisierte Wort, `message` die normalisierte Nachricht mit
+höchstens 25 Zeichen. Pro Zuschauer zählt die letzte gültige Stimme. Das Panel
+zeigt alle Begriffe, das Overlay die fünf häufigsten mit Anzahl und Prozent.
+Neue Begriffe bleiben dort als `?` verborgen, bis ein Moderator sie im Panel
+freigibt. Die Freigabe lädt zuerst die aktuelle Twitch-Liste blockierter
+Begriffe; kann Twitch diese Liste nicht liefern, bleibt der Begriff im Overlay
+verborgen. Der generische Ballot-Contract speichert Stimmen pro Abstimmung nur
+unter einem gehashten Zuschauerschlüssel und begrenzt die Zahl verschiedener
+Begriffe auf 200; weitere Stimmen fließen in den Zähler „weitere“.
 
 Das Panel hält Konfiguration, Ergebnis und die einzige Start-/Stop-Aktion in
 einer stabilen Abstimmungskarte. Typ- und Dauersegmente konfigurieren nur; erst

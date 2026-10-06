@@ -3,10 +3,12 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from "rea
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import { Button, Led, LoadState, notify, NumberField, SegmentedControl, Skeleton } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
-import type { ChatVotePreset } from "../contracts";
+import { CHAT_VOTING_MAX_TEXT_TERMS } from "../contracts";
+import type { ChatVotePreset, ChatVotingTextMode } from "../contracts";
 import type { ChatVotingPanelState } from "./service";
-import { closeChatVoting, loadChatVotingState, startChatVoting } from "./service";
+import { approveChatVotingTerm, closeChatVoting, loadChatVotingState, startChatVoting } from "./service";
 import { chatVotingPanelTexts } from "./locale-panel";
+import { rankVoteTerms } from "../domain";
 
 const dateText = (value: string | null, language: DashboardLanguage): string => {
   if (value === null || !Number.isFinite(Date.parse(value))) return "—";
@@ -34,6 +36,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   const [busy, setBusy] = useState(false);
   const [draftPreset, setDraftPreset] = useState<ChatVotePreset>("yes_no");
   const [draftOptionCount, setDraftOptionCount] = useState<number | "">(2);
+  const [draftTextMode, setDraftTextMode] = useState<ChatVotingTextMode>("first_word");
   const [draftDurationPreset, setDraftDurationPreset] = useState<DurationPreset | null>(null);
   const [draftCustomDurationSeconds, setDraftCustomDurationSeconds] = useState<number | "">(60);
   const configurationInitialized = useRef(false);
@@ -82,7 +85,13 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
         draftPreset === "options_n" && !validOptionCount) return;
     setBusy(true);
     try {
-      await startChatVoting(channelId, draftPreset, draftPreset === "options_n" ? draftOptionCount as number : undefined, durationSeconds);
+      await startChatVoting(
+        channelId,
+        draftPreset,
+        draftPreset === "options_n" ? draftOptionCount as number : undefined,
+        durationSeconds,
+        draftPreset === "free_text" ? draftTextMode : undefined,
+      );
       const defaultDurationSeconds = state?.defaultDurationSeconds ?? 0;
       const defaultDurationPreset = durationPresetFor(defaultDurationSeconds);
       setDraftDurationPreset(defaultDurationPreset);
@@ -108,6 +117,20 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
     }
   };
 
+  const approveTerm = async (term: string): Promise<void> => {
+    setBusy(true);
+    try {
+      await approveChatVotingTerm(channelId, term);
+      notify({ tone: "success", message: labels.approvalSaved });
+      await refresh();
+    } catch (error: unknown) {
+      const unavailable = error instanceof Error && "code" in error && error.code === "chat_voting_blocked_terms_unavailable";
+      notify({ tone: "error", message: unavailable ? labels.termsUnavailable : labels.approvalFailed });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (state === null) return <section className="module-stack chat-voting-panel" aria-label={labels.title}>
     <LoadState
       status={loadFailed ? "error" : "loading"}
@@ -121,11 +144,15 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   const running = vote?.status === "open";
   const counts = state.counts ?? vote?.counts ?? [];
   const total = counts.reduce((sum, count) => sum + count, 0);
+  const terms = state.terms ?? vote?.textResults ?? [];
+  const textTotal = terms.reduce((sum, entry) => sum + entry.count, 0);
+  const moreTerms = state.moreTerms ?? vote?.moreTerms ?? 0;
   const closed = vote?.status === "closed";
   const activeBallot = running || state.hasOpenBallot;
   const configurationDisabled = busy || activeBallot || !canOperate;
   const displayedPreset = running ? vote.preset : draftPreset;
   const displayedOptionCount = running ? vote.optionCount : draftOptionCount;
+  const displayedTextMode = running ? vote.textMode ?? "first_word" : draftTextMode;
   const displayedDurationPreset = running
     ? durationPresetFor(vote.requestedDurationSeconds ?? 0)
     : draftDurationPreset;
@@ -168,6 +195,30 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
       <div className="chat-voting-result-area" style={{ height: "calc(var(--s10) * 7)", overflowY: "auto" }}>
         {vote === null ? <>
           <p className="empty-state">{labels.noVote}</p>
+        </> : vote.preset === "free_text" ? <>
+          <p className="muted">{labels.starts(dateText(vote.openedAt, language))}</p>
+          <div className="chat-voting-results" aria-label={labels.results}>
+            <div className="chat-voting-results__header" aria-hidden="true">
+              <span /> <span /> <span>{labels.count}</span> <span>{labels.percent}</span> <span />
+            </div>
+            {rankVoteTerms(terms, CHAT_VOTING_MAX_TEXT_TERMS).map(({ term, count, approved }) => {
+              const percent = textTotal === 0 ? 0 : Math.round(count * 100 / textTotal);
+              return <div className="chat-voting-results__row chat-voting-results__term-row" key={`${vote.id}-${term}`} role="group" aria-label={labels.resultBar(term, count, percent)}>
+                <span className="chat-voting-results__label" title={term}>{term}</span>
+                <span className="chat-voting-results__track" aria-hidden="true"><span style={{ width: `${String(percent)}%` }} /></span>
+                <span className="number">{String(count)}</span>
+                <span className="number">{String(percent)}%</span>
+                <span>
+                  {approved
+                    ? <span className="muted">{labels.approved}</span>
+                    : <Button disabled={busy || !canOperate || !running} onClick={() => { void approveTerm(term); }}>{labels.approveTerm(term)}</Button>}
+                </span>
+              </div>;
+            })}
+            {terms.length === 0 ? <p className="empty-state">{labels.noTerms}</p> : null}
+            {moreTerms > 0 ? <p className="muted">{labels.moreTerms(moreTerms)}</p> : null}
+          </div>
+          <p className="muted">{labels.voterCount(closed ? vote.voterCount ?? textTotal : textTotal)}</p>
         </> : <>
           <p className="muted">{labels.starts(dateText(vote.openedAt, language))}</p>
           <div className="chat-voting-results" aria-label={labels.results}>
@@ -197,8 +248,11 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
           onChange={(value) => setDraftPreset(value as ChatVotePreset)}
           options={[
             { value: "yes_no", label: labels.yesNo },
+            { value: "digit_01", label: labels.zeroOne },
+            { value: "digit_12", label: labels.oneTwo },
             { value: "scale_5", label: labels.scale },
             { value: "options_n", label: labels.options },
+            { value: "free_text", label: labels.freeText },
           ]}
         />
         <div className="chat-voting-configuration__field-slot" data-testid="chat-voting-option-count-slot" aria-hidden={displayedPreset !== "options_n"} style={{ height: "calc(var(--s10) + var(--s6))", visibility: displayedPreset === "options_n" ? "visible" : "hidden" }}>
@@ -213,6 +267,18 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
             decreaseLabel={labels.decreaseOptionCount}
             disabled={configurationDisabled || displayedPreset !== "options_n"}
             onChange={setDraftOptionCount}
+          />
+        </div>
+        <div className="chat-voting-configuration__field-slot" data-testid="chat-voting-text-mode-slot" aria-hidden={displayedPreset !== "free_text"} style={{ height: "calc(var(--s10) + var(--s6))", visibility: displayedPreset === "free_text" ? "visible" : "hidden" }}>
+          <SegmentedControl
+            label={labels.textMode}
+            value={displayedTextMode}
+            disabled={configurationDisabled || displayedPreset !== "free_text"}
+            onChange={(value) => setDraftTextMode(value as ChatVotingTextMode)}
+            options={[
+              { value: "first_word", label: labels.firstWord },
+              { value: "whole_message", label: labels.wholeMessage },
+            ]}
           />
         </div>
         <SegmentedControl

@@ -27,6 +27,16 @@ describe("chat voting settings editor", () => {
     render(<Harness />);
 
     expect(screen.getByRole("textbox", { name: "Yes/no labels" })).toHaveAttribute("placeholder", "Yes|No");
+    const zeroOne = screen.getByRole("textbox", { name: "0/1 labels" });
+    const oneTwo = screen.getByRole("textbox", { name: "1/2 labels" });
+    expect(zeroOne).toHaveAttribute("placeholder", "No|Yes");
+    expect(oneTwo).toHaveAttribute("placeholder", "1|2");
+    expect(zeroOne).not.toBeRequired();
+    expect(oneTwo).not.toBeRequired();
+    fireEvent.change(zeroOne, { target: { value: "Nein|Doch" } });
+    fireEvent.change(oneTwo, { target: { value: "Eins|Zwei" } });
+    expect(zeroOne).toHaveValue("Nein|Doch");
+    expect(oneTwo).toHaveValue("Eins|Zwei");
     expect(screen.getByRole("textbox", { name: "Scale labels" })).toHaveAttribute("placeholder", "1|2|3|4|5");
     expect(screen.getByRole("textbox", { name: "Labels for 2–9 options" })).toHaveAttribute("placeholder", "1|2|3|…|9");
     expect(screen.getByRole("textbox", { name: "Yes/no labels" })).not.toBeRequired();

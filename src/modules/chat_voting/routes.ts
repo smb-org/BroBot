@@ -6,6 +6,7 @@ import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_L
 import type { ChatVotePreset } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, startChatVote } from "./service";
+import { normalizeBlockedVoteTerm } from "./domain";
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -40,7 +41,7 @@ chatVotingRoutes.get("/current", async (context) => {
   const ballots = context.get("ballots")(channelId);
   if (vote === null) {
     const hasOpenBallot = await ballots.hasOpenBallot?.() ?? false;
-    return context.json({ vote: null, counts: null, revision: 0, hasOpenBallot, defaultDurationSeconds: settings?.autoCloseSeconds ?? 0 });
+    return context.json({ vote: null, counts: null, revision: 0, terms: null, moreTerms: null, hasOpenBallot, defaultDurationSeconds: settings?.autoCloseSeconds ?? 0 });
   }
   const [snapshot, hasOpenBallot] = await Promise.all([
     vote.status === "open" ? ballots.read(vote.id) : Promise.resolve(null),
@@ -50,6 +51,9 @@ chatVotingRoutes.get("/current", async (context) => {
     vote,
     counts: snapshot?.counts ?? vote.counts,
     revision: snapshot?.revision ?? 0,
+    terms: snapshot?.terms ?? vote.textResults,
+    moreTerms: snapshot?.more ?? vote.moreTerms,
+    termFilterReady: snapshot?.termFilterReady ?? vote.termFilterReady ?? false,
     hasOpenBallot,
     defaultDurationSeconds: settings?.autoCloseSeconds ?? 0,
   });
@@ -58,12 +62,20 @@ chatVotingRoutes.get("/current", async (context) => {
 chatVotingRoutes.post("/start", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const body = await readBody(context.req.raw);
-  if (!isRecord(body) || (body.preset !== "yes_no" && body.preset !== "scale_5" && body.preset !== "options_n")) {
+  if (!isRecord(body) || !["yes_no", "scale_5", "options_n", "digit_01", "digit_12", "free_text"].includes(String(body.preset))) {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
-  const preset: ChatVotePreset = body.preset;
-  const optionCount = preset === "yes_no" ? 2 : preset === "scale_5" ? 5 : body.optionCount;
-  if (!Number.isSafeInteger(optionCount) || (optionCount as number) < 2 || (optionCount as number) > 9) {
+  const preset = body.preset as ChatVotePreset;
+  const optionCount = preset === "free_text" ? 0
+    : preset === "yes_no" || preset === "digit_01" || preset === "digit_12" ? 2
+      : preset === "scale_5" ? 5 : body.optionCount;
+  if (!Number.isSafeInteger(optionCount) || (optionCount as number) < 0 || (optionCount as number) > 9 ||
+      preset === "options_n" && (optionCount as number) < 2) {
+    return context.json({ error: "chat_voting_request_invalid" }, 400);
+  }
+  const textMode = body.textMode === undefined ? "first_word"
+    : body.textMode === "first_word" || body.textMode === "whole_message" ? body.textMode : null;
+  if (preset === "free_text" && textMode === null || preset !== "free_text" && body.textMode !== undefined) {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
   const durationSeconds = body.durationSeconds;
@@ -77,12 +89,20 @@ chatVotingRoutes.post("/start", async (context) => {
   const now = new Date().toISOString();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
+  let blockedTerms: readonly string[] | null = null;
+  if (preset === "free_text") {
+    try {
+      const readBlockedTerms = context.get("readChannelBlockedTerms");
+      blockedTerms = readBlockedTerms === undefined ? null : await readBlockedTerms(channelId);
+    } catch { blockedTerms = null; }
+  }
   let result: Awaited<ReturnType<typeof startChatVote>>;
   try {
     result = await startChatVote(repository, {
       channelId,
       preset,
       optionCount: optionCount as number,
+      ...(preset === "free_text" ? { textMode: textMode ?? "first_word", blockedTerms } : {}),
       settings: { ...settings, autoCloseSeconds: durationSeconds as number },
       language: await channelLanguage(context.env.DB, channelId),
       authorization,
@@ -115,6 +135,54 @@ chatVotingRoutes.post("/start", async (context) => {
     { pollId: result.vote.id },
   );
   return context.json({ vote: result.vote });
+});
+
+chatVotingRoutes.post("/approve-term", async (context) => {
+  const channelId = context.req.param("channelId") ?? "";
+  const body = await readBody(context.req.raw);
+  if (!isRecord(body) || typeof body.term !== "string" || Array.from(body.term).length < 1 || Array.from(body.term).length > 25) {
+    return context.json({ error: "chat_voting_request_invalid" }, 400);
+  }
+  const vote = await createChatVotingRepository(context.env.DB).open(channelId);
+  if (vote === null || vote.preset !== "free_text") return context.json({ error: "chat_voting_not_running" }, 409);
+  let rawBlockedTerms: readonly string[] | null;
+  try {
+    const readBlockedTerms = context.get("readChannelBlockedTerms");
+    rawBlockedTerms = readBlockedTerms === undefined ? null : await readBlockedTerms(channelId);
+  } catch { rawBlockedTerms = null; }
+  if (rawBlockedTerms === null) return context.json({ error: "chat_voting_blocked_terms_unavailable" }, 503);
+  const blockedTerms = [...new Set(rawBlockedTerms.map(normalizeBlockedVoteTerm).filter((term) => term.length > 0))];
+  const term = normalizeBlockedVoteTerm(body.term);
+  const ballots = context.get("ballots")(channelId);
+  const filtered = await ballots.setBlockedTerms?.(vote.id, blockedTerms);
+  if (filtered === undefined || filtered === null) return context.json({ error: "chat_voting_not_running" }, 409);
+  if (blockedTerms.includes(term)) return context.json({ error: "chat_voting_term_blocked" }, 409);
+  const approval = await ballots.approveTerm?.(vote.id, term);
+  if (approval === undefined || approval.status === "not_open") return context.json({ error: "chat_voting_not_running" }, 409);
+  if (approval.status === "unavailable") return context.json({ error: "chat_voting_blocked_terms_unavailable" }, 503);
+  if (approval.status === "blocked") return context.json({ error: "chat_voting_term_blocked" }, 409);
+  if (approval.snapshot === null) return context.json({ error: "chat_voting_not_running" }, 409);
+  const snapshot = approval.snapshot;
+  await context.get("publishModuleOverlayMessage")(
+    channelId,
+    CHAT_VOTING_MODULE_ID,
+    "tally",
+    CHAT_VOTING_ELEMENT_KIND,
+    {
+      pollId: vote.id,
+      openedAt: vote.openedAt,
+      preset: vote.preset,
+      optionCount: vote.optionCount,
+      textMode: vote.textMode,
+      labels: [...vote.labels],
+      counts: [...snapshot.counts],
+      terms: (snapshot.terms ?? []).map((entry) => ({ ...entry })),
+      more: snapshot.more ?? 0,
+      termFilterReady: snapshot.termFilterReady ?? false,
+      revision: snapshot.revision,
+    },
+  );
+  return context.json({ terms: snapshot.terms ?? [], moreTerms: snapshot.more ?? 0, revision: snapshot.revision });
 });
 
 chatVotingRoutes.post("/close", async (context) => {

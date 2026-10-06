@@ -1,5 +1,5 @@
 import type { ModuleMutationAuthorization } from "../contract";
-import type { ChatVote, ChatVoteCloseReason, ChatVoteDraft, ChatVotingPreset } from "./contracts";
+import type { ChatVote, ChatVoteCloseReason, ChatVoteDraft, ChatVoteTerm, ChatVotingPreset, ChatVotingTextMode } from "./contracts";
 
 interface ChatVoteRow {
   channel_id: string;
@@ -7,6 +7,8 @@ interface ChatVoteRow {
   preset: ChatVotingPreset;
   option_count: number;
   labels_json: string;
+  text_mode: ChatVotingTextMode | null;
+  term_filter_ready: number | null;
   status: "open" | "closed";
   opened_at: string;
   closes_at: string;
@@ -15,6 +17,8 @@ interface ChatVoteRow {
   close_reason: ChatVoteCloseReason;
   counts_json: string | null;
   voter_count: number | null;
+  text_results_json: string | null;
+  more_terms: number | null;
 }
 
 const parseStringArray = (value: string | null): string[] | null => {
@@ -33,12 +37,33 @@ const parseNumberArray = (value: string | null): number[] | null => {
   } catch { return null; }
 };
 
+const isChatVoteTerm = (entry: unknown): entry is ChatVoteTerm => {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+  const term: unknown = Reflect.get(entry, "term");
+  const count: unknown = Reflect.get(entry, "count");
+  const approved: unknown = Reflect.get(entry, "approved");
+  return typeof term === "string" && Array.from(term).length <= 25 &&
+    Number.isSafeInteger(count) && (count as number) > 0 && typeof approved === "boolean";
+};
+
+const parseTermArray = (value: string | null): ChatVoteTerm[] | null => {
+  if (value === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((entry: unknown) => isChatVoteTerm(entry))
+      ? parsed
+      : null;
+  } catch { return null; }
+};
+
 const mapRow = (row: ChatVoteRow): ChatVote => ({
   id: row.poll_id,
   channelId: row.channel_id,
   preset: row.preset,
   optionCount: row.option_count,
   labels: parseStringArray(row.labels_json) ?? [],
+  textMode: row.text_mode,
+  termFilterReady: row.term_filter_ready === null ? null : row.term_filter_ready === 1,
   status: row.status,
   openedAt: row.opened_at,
   closesAt: row.closes_at,
@@ -47,11 +72,14 @@ const mapRow = (row: ChatVoteRow): ChatVote => ({
   closeReason: row.close_reason,
   counts: parseNumberArray(row.counts_json),
   voterCount: row.voter_count,
+  textResults: parseTermArray(row.text_results_json),
+  moreTerms: row.more_terms,
 });
 
 export const chatVoteSelectColumns = `channel_id, poll_id, preset, option_count, labels_json, status,
                                       opened_at, closes_at, requested_duration_seconds, closed_at,
-                                      close_reason, counts_json, voter_count`;
+                                      close_reason, counts_json, voter_count, text_mode, text_results_json, more_terms,
+                                      term_filter_ready`;
 
 export interface ChatVotingRepository {
   open(channelId: string): Promise<ChatVote | null>;
@@ -59,7 +87,16 @@ export interface ChatVotingRepository {
   byId(channelId: string, pollId: string): Promise<ChatVote | null>;
   insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization): Promise<boolean>;
   requestManualClose(channelId: string, pollId: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
-  finish(channelId: string, pollId: string, closeReason: ChatVoteCloseReason, closedAt: string, counts: readonly number[]): Promise<boolean>;
+  finish(
+    channelId: string,
+    pollId: string,
+    closeReason: ChatVoteCloseReason,
+    closedAt: string,
+    counts: readonly number[],
+    textResults?: readonly ChatVoteTerm[] | null,
+    moreTerms?: number,
+    termFilterReady?: boolean | null,
+  ): Promise<boolean>;
 }
 
 export const createChatVotingRepository = (db: D1Database): ChatVotingRepository => ({
@@ -86,15 +123,17 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `INSERT INTO chat_votes
-         (channel_id, poll_id, preset, option_count, labels_json, status, opened_at, closes_at,
+         (channel_id, poll_id, preset, option_count, labels_json, text_mode, term_filter_ready, status, opened_at, closes_at,
           requested_duration_seconds, close_reason)
-       SELECT ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
+       SELECT ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
     ).bind(
       vote.channelId,
       vote.id,
       vote.preset,
       vote.optionCount,
       JSON.stringify(vote.labels),
+      vote.textMode ?? null,
+      vote.termFilterReady === null || vote.termFilterReady === undefined ? null : Number(vote.termFilterReady),
       vote.openedAt,
       vote.closesAt,
       vote.requestedDurationSeconds,
@@ -115,12 +154,24 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     const result = await statement.run();
     return result.meta.changes > 0;
   },
-  async finish(channelId, pollId, closeReason, closedAt, counts) {
+  async finish(channelId, pollId, closeReason, closedAt, counts, textResults = null, moreTerms = 0, termFilterReady = null) {
     const statement = db.prepare(
       `UPDATE chat_votes
-          SET status = 'closed', closed_at = ?, close_reason = ?, counts_json = ?, voter_count = ?
+          SET status = 'closed', closed_at = ?, close_reason = ?, counts_json = ?, voter_count = ?,
+              text_results_json = ?, more_terms = ?, term_filter_ready = ?
         WHERE channel_id = ? AND poll_id = ? AND status = 'open'`,
-    ).bind(closedAt, closeReason, JSON.stringify(counts), counts.reduce((sum, count) => sum + count, 0), channelId, pollId);
+    ).bind(
+      closedAt,
+      closeReason,
+      JSON.stringify(counts),
+      textResults === null ? counts.reduce((sum, count) => sum + count, 0)
+        : textResults.reduce((sum, entry) => sum + entry.count, 0),
+      textResults === null ? null : JSON.stringify(textResults),
+      textResults === null ? null : moreTerms,
+      textResults === null || termFilterReady === null ? null : Number(termFilterReady),
+      channelId,
+      pollId,
+    );
     const result = await statement.run();
     return result.meta.changes > 0;
   },

@@ -24,6 +24,7 @@ import type {
   BallotFinalizeRule,
   BallotOpenResult,
   BallotSnapshot,
+  BallotTermFilter,
   BotModule,
   HelixRequest,
   HelixRequestOptions,
@@ -68,9 +69,11 @@ import {
 import {
   BALLOT_EXPIRY_ALARM_HANDLER,
   BALLOT_HARD_DELETE_ALARM_HANDLER,
+  approveStoredBallotTerm,
   ballotExpiryAlarmKey,
   ballotIdentityFromExpiryAlarmKey,
   castStoredBallot,
+  castStoredBallotTerm,
   closeStoredBallot,
   forgetClosedStoredBallot,
   expireStoredBallot,
@@ -79,6 +82,7 @@ import {
   hardDeleteFinalizedStoredBallot,
   openStoredBallot,
   readStoredBallot,
+  setStoredBallotBlockedTerms,
 } from "./ballots";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
@@ -1509,8 +1513,11 @@ export class ChannelObject extends DurableObject<Env> {
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
     return {
-      open: (ballotId, optionCount, expiresAt, rule) => this.openBallot(moduleId, ballotId, optionCount, expiresAt, rule),
+      open: (ballotId, optionCount, expiresAt, rule, termFilter) => this.openBallot(moduleId, ballotId, optionCount, expiresAt, rule, termFilter),
       cast: (ballotId, userId, choice) => this.castBallot(moduleId, ballotId, userId, choice),
+      castTerm: (ballotId, userId, term) => this.castBallotTerm(moduleId, ballotId, userId, term),
+      setBlockedTerms: (ballotId, terms) => setStoredBallotBlockedTerms(this.ctx.storage, moduleId, ballotId, terms),
+      approveTerm: (ballotId, term) => approveStoredBallotTerm(this.ctx.storage, moduleId, ballotId, term),
       read: (ballotId) => this.readBallot(moduleId, ballotId),
       close: (ballotId) => this.closeBallot(moduleId, ballotId),
       finalize: (ballotId) => this.finalizeBallot(moduleId, ballotId),
@@ -1525,6 +1532,7 @@ export class ChannelObject extends DurableObject<Env> {
     optionCount: number,
     expiresAt: number,
     passRule?: BallotFinalizeRule,
+    termFilter?: BallotTermFilter,
   ): Promise<BallotOpenResult> {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Ballots require a named Durable Object.");
@@ -1549,6 +1557,7 @@ export class ChannelObject extends DurableObject<Env> {
           hardDeleteAt,
         );
       },
+      termFilter,
     );
     if (result.status === "opened") {
       return { status: "opened" };
@@ -1565,6 +1574,33 @@ export class ChannelObject extends DurableObject<Env> {
     const channelId = this.ownChannelId();
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
     return await castStoredBallot(this.ctx.storage, channelId, moduleId, ballotId, userId, choice);
+  }
+
+  public async castBallotTerm(
+    moduleId: string,
+    ballotId: string,
+    userId: string,
+    term: string,
+  ): Promise<BallotCastResult> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
+    return await castStoredBallotTerm(this.ctx.storage, channelId, moduleId, ballotId, userId, term);
+  }
+
+  public async setBlockedTerms(
+    moduleId: string,
+    ballotId: string,
+    blockedTerms: readonly string[],
+  ): Promise<BallotSnapshot | null> {
+    return await setStoredBallotBlockedTerms(this.ctx.storage, moduleId, ballotId, blockedTerms);
+  }
+
+  public async approveTerm(
+    moduleId: string,
+    ballotId: string,
+    term: string,
+  ): ReturnType<typeof approveStoredBallotTerm> {
+    return await approveStoredBallotTerm(this.ctx.storage, moduleId, ballotId, term);
   }
 
   public async readBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
