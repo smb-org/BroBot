@@ -23,7 +23,7 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { Badge, Button, ConfirmDialog, EditorShell, Field, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, PageHeader, Select, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
+import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, LoadState as LoadStateView, notify, PageHeader, Select, Skeleton, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
 import { MemberGrantEditor } from "./member-grant-editor";
 import { StateRow, type StateTone } from "./module-panels";
 
@@ -118,8 +118,8 @@ const ChannelInspector = ({
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<PanelMember | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [consentInProgress, setConsentInProgress] = useState(false);
+  const notifiedMembersError = useRef<string | null>(null);
 
   const loadMembers = async (): Promise<void> => {
     setMembers((current) => current.data === null ? loadState() : { ...current, status: "loading", error: null });
@@ -148,14 +148,23 @@ const ChannelInspector = ({
     return () => { aborted = true; };
   }, [channel.channelId, onAuthenticationRequired, texts.error]);
 
+  useEffect(() => {
+    if (members.error === null) {
+      notifiedMembersError.current = null;
+      return;
+    }
+    if (notifiedMembersError.current === members.error) return;
+    notifiedMembersError.current = members.error;
+    notify({ tone: "error", message: members.error });
+  }, [members.error]);
+
   const toggleConsent = async (): Promise<void> => {
     setConsentInProgress(true);
-    setActionError(null);
     try {
       await setPlatformFullConsent(channel.channelId, !channel.fullConsent);
       await onReload();
     } catch (error: unknown) {
-      setActionError(errorText(error, texts.error));
+      notify({ tone: "error", message: errorText(error, texts.error) });
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setConsentInProgress(false);
@@ -164,12 +173,11 @@ const ChannelInspector = ({
 
   const changeRole = async (member: PanelMember, role: "manager" | "operator"): Promise<void> => {
     setBusyUserId(member.userId);
-    setActionError(null);
     try {
       await changePlatformMember(channel.channelId, member.userId, role);
       await loadMembers();
     } catch (error: unknown) {
-      setActionError(errorText(error, texts.error));
+      notify({ tone: "error", message: errorText(error, texts.error) });
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setBusyUserId(null);
@@ -180,13 +188,12 @@ const ChannelInspector = ({
 
   const removeMember = async (member: PanelMember): Promise<void> => {
     setBusyUserId(member.userId);
-    setActionError(null);
     try {
       await removePlatformMember(channel.channelId, member.userId);
       setPendingRemoval(null);
       await loadMembers();
     } catch (error: unknown) {
-      setActionError(errorText(error, texts.error));
+      notify({ tone: "error", message: errorText(error, texts.error) });
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setBusyUserId(null);
@@ -213,16 +220,17 @@ const ChannelInspector = ({
       </section>
       <InvitationLink channel={channel} />
       <InspectorSection title={texts.members}>
-        {members.status === "loading" && members.data === null ? <p className="loading-line">{texts.loadMembers}</p> : null}
-        {members.error === null ? null : <p className="form-error" role="alert">{members.error}</p>}
-        {members.data === null ? null : (
-          <MembersTable
+        <LoadStateView
+          status={members.data === null ? members.status === "error" ? "error" : "loading" : members.data.members.length === 0 ? "empty" : "success"}
+          minHeight={220}
+          loading={<Skeleton rows={4} height={34} />}
+          empty={<MembersTable members={[]} selectedUserId={selectedMemberId} onSelect={(member) => { setSelectedMemberId(member.userId); }} />}
+          error={<Skeleton rows={4} height={34} />}
+        >{members.data === null || members.data.members.length === 0 ? null : <MembersTable
             members={members.data.members}
             selectedUserId={selectedMemberId}
             onSelect={(member) => { setSelectedMemberId(member.userId); }}
-          />
-        )}
-        {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
+          />}</LoadStateView>
       </InspectorSection>
         {selectedMember === null ? null : <>
           <InspectorSection title={roleLabel(selectedMember.role)}>
@@ -281,10 +289,12 @@ const ChannelInspector = ({
 };
 
 const ChannelRelease = ({
+  opened,
   onReloadOverview: onReload,
   onAuthenticationRequired: onAuthenticationRequired,
   onClose,
 }: {
+  opened: boolean;
   onReloadOverview: () => Promise<void>;
   onAuthenticationRequired: () => void;
   onClose: () => void;
@@ -299,6 +309,16 @@ const ChannelRelease = ({
   const [confirmation, setConfirmation] = useState(false);
   const [releaseInProgress, setReleaseInProgress] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>(undefined);
+
+  const close = (): void => {
+    if (searchInProgress || releaseInProgress) return;
+    setConfirmation(false);
+    setSearchError(undefined);
+    setActionError(undefined);
+    setFound(null);
+    setLogin("");
+    onClose();
+  };
 
   const searchUser = async (): Promise<void> => {
     const trimmed = login.trim();
@@ -327,6 +347,8 @@ const ChannelRelease = ({
       setFound(null);
       setLogin("");
       await onReload();
+      notify({ tone: "success", message: common.saved });
+      onClose();
     } catch (error: unknown) {
       setConfirmation(false);
       setActionError(errorText(error, texts.error));
@@ -338,40 +360,30 @@ const ChannelRelease = ({
 
   return (
     <>
-      <EditorShell
-        ariaLabel={texts.releaseChannel}
+      <FormDialog
+        opened={opened}
         title={texts.releaseChannel}
-        sections={[{
-          id: "release",
-          label: texts.releaseChannel,
-          content: (
-            <>
-              <div className="form-row">
-                <Field label={texts.twitchLogin} hint={texts.twitchLoginHint} prefix="@" value={login} onChange={setLogin} {...(searchError === undefined ? {} : { error: searchError })} disabled={searchInProgress} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); void searchUser(); }} />
-                <Button variant="neutral" disabled={searchInProgress || login.trim().length === 0} onClick={() => { void searchUser(); }}>{searchInProgress ? texts.searching : texts.search}</Button>
-              </div>
-              {found === null ? null : (
-                <div className="member-grant-editor__result">
-                  <div><strong>{texts.userFound}: {found.displayName}</strong><span>@{found.login} · {texts.twitchId(found.userId)}</span></div>
-                  <Switch layout="card" label={texts.fullConsent} description={texts.fullConsentCardDescription} checked={fullConsent} onChange={setFullConsent} />
-                </div>
-              )}
-            </>
-          ),
-        }]}
-        dirty={found !== null}
-        pending={releaseInProgress}
+        pending={searchInProgress || releaseInProgress}
+        confirmDisabled={found === null}
         {...(actionError === undefined ? {} : { error: actionError })}
-        onSave={() => { if (found !== null) setConfirmation(true); }}
-        onDiscard={() => { setFound(null); setSearchError(undefined); }}
-        saveLabel={texts.releaseChannel}
-        discardLabel={common.discard}
-        savedLabel={common.saved}
-        pendingLabel={common.saving}
-        issueLabels={{ error: common.error, warning: common.warning }}
-        onClose={onClose}
-        closeLabel={common.close}
-      />
+        onConfirm={() => { if (found !== null) setConfirmation(true); }}
+        onCancel={close}
+        confirmLabel={texts.releaseChannel}
+        cancelLabel={common.cancel}
+      >
+        <div className="form-row platform-channel-release__search">
+          <Field label={texts.twitchLogin} hint={texts.twitchLoginHint} prefix="@" value={login} onChange={(value) => { setLogin(value); setSearchError(undefined); }} {...(searchError === undefined ? {} : { error: searchError })} disabled={searchInProgress || releaseInProgress} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); void searchUser(); }} />
+          <Button className="platform-channel-release__search-button" variant="neutral" disabled={searchInProgress || releaseInProgress || login.trim().length === 0} onClick={() => { void searchUser(); }}>{searchInProgress ? texts.searching : texts.search}</Button>
+        </div>
+        <div className="platform-channel-release__result-slot">
+          {found === null ? null : (
+            <div className="member-grant-editor__result">
+              <div><strong>{texts.userFound}: {found.displayName}</strong><span>@{found.login} · {texts.twitchId(found.userId)}</span></div>
+              <Switch layout="card" label={texts.fullConsent} description={texts.fullConsentCardDescription} checked={fullConsent} disabled={releaseInProgress} onChange={setFullConsent} />
+            </div>
+          )}
+        </div>
+      </FormDialog>
       {found === null ? null : (
         <ConfirmDialog
           opened={confirmation}
@@ -381,6 +393,7 @@ const ChannelRelease = ({
           cancelLabel={common.cancel}
           onCancel={() => { setConfirmation(false); }}
           onConfirm={() => { void releaseChannel(); }}
+          pending={releaseInProgress}
         />
       )}
     </>
@@ -429,21 +442,29 @@ const PlatformAudit = ({
     entry.actorDisplayName ?? (entry.actorLogin == null ? entry.actorUserId : `@${entry.actorLogin}`);
   const actor = (entry: PanelPlatformAuditEntry): string =>
     (entry.actorKind === "platform_admin" ? texts.platformAdmin : texts.member) + " · " + actorName(entry);
+  const status = auditState.data === null
+    ? auditState.status === "error" ? "error" : "loading"
+    : auditState.data.entries.length === 0 ? "empty" : "success";
   return (
     <section className="config-section" aria-label={texts.audit}>
       <div className="section-heading"><h2>{texts.audit}</h2></div>
-      {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texts.loadAudit}</p> : null}
-      {auditState.error === null ? null : <p className="form-error" role="alert">{auditState.error}</p>}
-      {auditState.data?.entries.length === 0 ? <p className="muted">{texts.auditEmpty}</p> : null}
-      {auditState.data === null ? null : auditState.data.entries.length === 0 ? null : (
+      <LoadStateView
+        status={status}
+        minHeight={280}
+        loading={<Skeleton rows={6} height={34} />}
+        empty={<p className="muted">{texts.auditEmpty}</p>}
+        error={<Skeleton rows={6} height={34} />}
+      >{auditState.data === null || auditState.data.entries.length === 0 ? null : (
         <div className="table-wrap">
           <table className="table">
             <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.action}</th><th scope="col">{texts.actor}</th><th scope="col">{texts.timestamp}</th></tr></thead>
             <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId}><th scope="row">{channelNames.get(entry.channelId) ?? <span className="mono">{entry.channelId}</span>}</th><td>{platformActionLabel(entry.action)}</td><td className="mono">{actor(entry)}</td><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td></tr>)}</tbody>
           </table>
         </div>
-      )}
-      {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? texts.loadingMore : texts.loadMore}</button>}
+      )}</LoadStateView>
+      <div className="platform-audit__pagination-slot">
+        {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? texts.loadingMore : texts.loadMore}</button>}
+      </div>
     </section>
   );
 };
@@ -456,6 +477,18 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
   const [channelReleaseOpen, setChannelReleaseOpen] = useState(false);
   const channelReleaseButton = useRef<HTMLButtonElement | null>(null);
   const [auditLoadingMore, setAuditLoadingMore] = useState(false);
+  const notifiedPageError = useRef<string | null>(null);
+  const pageError = overview.error ?? audit.error;
+
+  useEffect(() => {
+    if (pageError === null) {
+      notifiedPageError.current = null;
+      return;
+    }
+    if (notifiedPageError.current === pageError) return;
+    notifiedPageError.current = pageError;
+    notify({ tone: "error", message: pageError });
+  }, [pageError]);
 
   const openChannelRelease = (): void => {
     closeChannel();
@@ -469,9 +502,8 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
   };
 
   const closeFloating = useCallback((): void => {
-    if (selectedChannelId !== null) { closeChannel(); return; }
-    if (channelReleaseOpen) closeChannelRelease();
-  }, [selectedChannelId, closeChannel, channelReleaseOpen]);
+    if (selectedChannelId !== null) closeChannel();
+  }, [selectedChannelId, closeChannel]);
 
   const loadOverview = async (): Promise<void> => {
     setOverview((current) => current.data === null ? loadState() : { ...current, status: "loading", error: null });
@@ -509,7 +541,10 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
   }, [onAuthenticationRequired, closeChannel, texts.error]);
 
   const selectedChannel = overview.data?.find((channel) => channel.channelId === selectedChannelId) ?? null;
-  const inspectorOpen = selectedChannelId !== null || channelReleaseOpen;
+  const inspectorOpen = selectedChannelId !== null;
+  const overviewStatus = overview.data === null
+    ? overview.status === "error" ? "error" : "loading"
+    : overview.data.length === 0 ? "empty" : "success";
 
   const loadMoreAudit = async (): Promise<void> => {
     if (auditLoadingMore || audit.data?.nextCursor === null || audit.data?.nextCursor === undefined) return;
@@ -535,10 +570,13 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
           list={
             <div>
               <InspectorHeading level="h2" title={texts.channelOverview} />
-              {overview.status === "loading" && overview.data === null ? <p className="loading-line">{texts.load}</p> : null}
-              {overview.error === null ? null : <p className="form-error" role="alert">{overview.error}</p>}
-              {overview.data?.length === 0 ? <p className="muted">{texts.noChannels}</p> : null}
-              {overview.data === null ? null : overview.data.length === 0 ? null : (
+              <LoadStateView
+                status={overviewStatus}
+                minHeight={360}
+                loading={<Skeleton rows={6} height={34} />}
+                empty={<p className="muted">{texts.noChannels}</p>}
+                error={<Skeleton rows={6} height={34} />}
+              >{overview.data === null || overview.data.length === 0 ? null : (
                 <div className="table-wrap">
                   <table className={`table table--content platform-channel-table${inspectorOpen ? " platform-channel-table--inspector-open" : ""}`}>
                     <thead><tr><th scope="col">{texts.login}</th>{inspectorOpen ? null : <th scope="col">{texts.identifier}</th>}<th scope="col" title={texts.fullConsent}>{texts.fullConsentColumn}</th><th scope="col" title={`${texts.broadcaster} · ${texts.manager} · ${texts.operator}`}>{texts.members}</th><th scope="col">{inspectorOpen ? texts.identityShort : texts.identity}</th></tr></thead>
@@ -554,16 +592,16 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
                     })}</tbody>
                   </table>
                 </div>
-              )}
+              )}</LoadStateView>
             </div>
           }
-          inspector={selectedChannel === null
-            ? channelReleaseOpen ? <ChannelRelease onReloadOverview={loadOverview} onAuthenticationRequired={onAuthenticationRequired} onClose={closeChannelRelease} /> : null
+          inspector={selectedChannel === null ? null
             : <ChannelInspector key={selectedChannel.channelId} channel={selectedChannel} onAuthenticationRequired={onAuthenticationRequired} onReloadOverview={loadOverview} onClose={closeChannel} />}
           onCloseInspector={closeFloating}
         />
       </section>
       <PlatformAudit auditState={audit} channels={overview.data ?? []} onLoadMore={() => { void loadMoreAudit(); }} loadingMore={auditLoadingMore} />
+      <ChannelRelease opened={channelReleaseOpen} onReloadOverview={loadOverview} onAuthenticationRequired={onAuthenticationRequired} onClose={closeChannelRelease} />
     </section>
   );
 };

@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Field, UiProvider } from "../../src/dashboard/ui";
@@ -117,8 +117,10 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
     renderWithMantine(<PlatformPage onAuthenticationRequired={() => {}} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Kanal freigeben" }));
-    const freigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
+    const freigabe = await screen.findByRole("dialog", { name: "Kanal freigeben" });
     expectEveryFieldHasHelperText(freigabe);
+    fireEvent.click(within(freigabe).getByRole("button", { name: "Abbrechen" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Kanal freigeben" })).not.toBeInTheDocument());
 
     fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
     const inspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });

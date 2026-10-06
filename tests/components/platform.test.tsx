@@ -296,7 +296,7 @@ describe("Platform level", () => {
     expect(row).toHaveFocus();
   });
 
-  it("opens channel access grant in the inspector column and switches without double-occupying it", async () => {
+  it("opens channel access grant in a dialog and switches cleanly with the channel inspector", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -308,29 +308,29 @@ describe("Platform level", () => {
     const plus = screen.getByRole("button", { name: "Kanal freigeben" });
     expect(plus.parentElement).toHaveClass("page-header__actions");
     fireEvent.click(plus);
-    const freigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
-    expect(bereich.children[0]).toHaveClass("list-detail--open");
+    const freigabe = await screen.findByRole("dialog", { name: "Kanal freigeben" });
+    expect(bereich.children[0]).not.toHaveClass("list-detail--open");
 
     const row = await screen.findByRole("row", { name: /alpha_login/ });
     row.focus();
     fireEvent.click(row);
-    expect(screen.queryByRole("region", { name: "Kanal freigeben" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Kanal freigeben" })).not.toBeInTheDocument());
     expect(await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" })).toBeInTheDocument();
 
     plus.focus();
     fireEvent.click(plus);
     expect(screen.queryByRole("region", { name: "Kanal bearbeiten: Alpha" })).not.toBeInTheDocument();
-    const reopenedFreigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
+    const reopenedFreigabe = await screen.findByRole("dialog", { name: "Kanal freigeben" });
     expect(row).toHaveAttribute("aria-selected", "false");
 
-    fireEvent.click(within(reopenedFreigabe).getByRole("button", { name: "Schließen" }));
-    expect(screen.queryByRole("region", { name: "Kanal freigeben" })).not.toBeInTheDocument();
+    fireEvent.click(within(reopenedFreigabe).getByRole("button", { name: "Abbrechen" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Kanal freigeben" })).not.toBeInTheDocument());
     expect(plus).toHaveFocus();
 
     fireEvent.click(plus);
-    const escapedFreigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
+    const escapedFreigabe = await screen.findByRole("dialog", { name: "Kanal freigeben" });
     fireEvent.keyDown(escapedFreigabe, { key: "Escape" });
-    expect(screen.queryByRole("region", { name: "Kanal freigeben" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Kanal freigeben" })).not.toBeInTheDocument());
     expect(plus).toHaveFocus();
     expect(freigabe).not.toBeInTheDocument();
   });
@@ -355,7 +355,7 @@ describe("Platform level", () => {
 
     const plus = await screen.findByRole("button", { name: "Kanal freigeben" });
     fireEvent.click(plus);
-    const freigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
+    const freigabe = await screen.findByRole("dialog", { name: "Kanal freigeben" });
     fireEvent.change(within(freigabe).getByRole("textbox", { name: "Twitch-Login" }), { target: { value: "beta_login" } });
     fireEvent.click(within(freigabe).getByRole("button", { name: "Nutzer suchen" }));
     expect(await within(freigabe).findByText(/Beta/)).toBeInTheDocument();
@@ -363,5 +363,6 @@ describe("Platform level", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Endgültig freigeben" }));
 
     await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => requestUrl(input).pathname === "/api/platform/channels" && init?.method === "POST")).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Kanal freigeben" })).not.toBeInTheDocument());
   });
 });

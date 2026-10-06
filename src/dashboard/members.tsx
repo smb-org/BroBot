@@ -7,7 +7,7 @@ import { apiErrorText, dashboardCommonTexts, formatDate } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
 import { MemberAvatar } from "./member-avatar";
 import { MemberGrantEditor } from "./member-grant-editor";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, ListDetail, useDraftGuard, useInspectorSelection } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, ListDetail, LoadState, notify, Skeleton, useDraftGuard, useInspectorSelection } from "./ui";
 import {
   addChannelMember,
   PanelApiError,
@@ -277,7 +277,6 @@ export const MembersPage = ({
   const texts = membersTexts();
   const canManageMembers = canManage(ownRole);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [grantOpen, setGrantOpen] = useState(false);
   const grantButtonRef = useRef<HTMLButtonElement | null>(null);
   const [roleDraft, setRoleDraft] = useState<{ userId: string; role: ChannelRole } | null>(null);
@@ -294,7 +293,6 @@ export const MembersPage = ({
   const saveRoleDraft = async (): Promise<string | null> => {
     if (selectedMember === null || roleDraft === null || !roleDirty) return null;
     setBusyUserId(roleDraft.userId);
-    setActionError(null);
     try {
       await updateChannelMemberRole(channelId, roleDraft.userId, roleDraft.role);
       setRoleDraft(null);
@@ -336,13 +334,12 @@ export const MembersPage = ({
 
   const handleRemove = async (member: PanelMember): Promise<void> => {
     setBusyUserId(member.userId);
-    setActionError(null);
     try {
       await removeChannelMember(channelId, member.userId);
       closeSelection();
       await onReload();
     } catch (error: unknown) {
-      setActionError(errorMessage(error));
+      notify({ tone: "error", message: errorMessage(error) });
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setBusyUserId(null);
@@ -358,11 +355,15 @@ export const MembersPage = ({
         <div className="section-heading">
           <h2>{texts.membersWithAccess}</h2>
         </div>
-        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-        {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
         <div className={loading ? "stale" : undefined}>
           <ListDetail
-            list={loading && members.length === 0 ? <p className="loading-line">{texts.load}</p> : <MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
+            list={<LoadState
+              status={members.length > 0 ? "success" : error !== null ? "error" : loading ? "loading" : "empty"}
+              minHeight={320}
+              loading={<Skeleton rows={8} height={34} />}
+              empty={<MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
+              error={<Skeleton rows={8} height={34} />}
+            >{members.length === 0 ? null : <MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>}
             inspector={selectedMember !== null ? (
               <MemberInspector
                 key={selectedMember.userId}
@@ -374,7 +375,6 @@ export const MembersPage = ({
                 dirty={roleDirty}
                 onRoleChange={(role) => { setRoleDraft({ userId: selectedMember.userId, role }); }}
                 pending={busyUserId === selectedMember.userId}
-                {...(actionError === null ? {} : { error: actionError })}
                 onSave={() => { void saveRoleDraft(); }}
                 onDiscard={() => { setRoleDraft(null); }}
                 onRemove={() => { void handleRemove(selectedMember); }}
@@ -410,7 +410,9 @@ export const MembersPage = ({
             onCloseInspector={closeFloating}
           />
         </div>
-        {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
+        <div className="members-page__pagination-slot">
+          {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
+        </div>
       </section>
       <ConfirmDialog
         opened={draftGuard.confirmOpen}

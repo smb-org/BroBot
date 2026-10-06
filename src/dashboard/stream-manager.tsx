@@ -10,7 +10,7 @@ import { eventCause, eventDetail, eventMetadata } from "./events/model";
 import { emptyEventFilter } from "./events/model";
 import { useRealtimeEventFeed } from "./realtime";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
-import { Popover } from "./ui";
+import { LoadState, notify, Popover, Skeleton } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
 const lazyActions = new Map<string, LazyExoticComponent<ComponentType<ModuleImmediateActionProperties>>>();
@@ -49,7 +49,7 @@ export const ImmediateActions = ({ channelId, streamState, modules = [] }: { cha
       <div className="section-heading"><h2>{texts.streamManager.immediateActions}</h2></div>
       <div className="stream-manager-actions">
         {moduleCards.map(({ id, ActionCard, availabilityReason }) => (
-          <Suspense key={id} fallback={null}>
+          <Suspense key={id} fallback={<div className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>}>
             <ActionCard channelId={channelId} streamState={streamState ?? null} availabilityReason={availabilityReason} />
           </Suspense>
         ))}
@@ -66,6 +66,8 @@ export const ImmediateActions = ({ channelId, streamState, modules = [] }: { cha
 export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: string; onNavigate?: (route: DashboardRoute) => void }): ReactElement => {
   const texts = dashboardTexts();
   const [entries, setEntries] = useState<readonly PanelEventEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
   const allAlertsRoute: DashboardRoute = {
     kind: "channel",
     channelId,
@@ -73,15 +75,20 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
     filters: { ...emptyEventFilter, tones: ["warning", "error"] },
   };
   const refreshFirstPage = useCallback(async (): Promise<void> => {
-    const response = await fetchEvents(channelId);
-    setEntries(response.entries
-      .filter((entry) => {
-        const tone = eventMetadata(entry.code)?.tone;
-        return tone === "warning" || tone === "error";
-      })
-      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-      .slice(0, 3));
-  }, [channelId]);
+    try {
+      const response = await fetchEvents(channelId);
+      setFailed(false);
+      setEntries(response.entries
+        .filter((entry) => {
+          const tone = eventMetadata(entry.code)?.tone;
+          return tone === "warning" || tone === "error";
+        })
+        .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+        .slice(0, 3));
+    } catch {
+      notify({ tone: "error", message: texts.events.connectionLost });
+    }
+  }, [channelId, texts.events.connectionLost]);
   const atBeginning = useCallback((): boolean => true, []);
   const scrollToBeginning = useCallback((): void => undefined, []);
   useRealtimeEventFeed({ channelId, filters: emptyEventFilter, atBeginning, refreshFirstPage, scrollToBeginning });
@@ -91,6 +98,7 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
     fetchEvents(channelId, null, controller.signal)
       .then((response) => {
         if (controller.signal.aborted) return;
+        setFailed(false);
         setEntries(response.entries
           .filter((entry) => {
             const tone = eventMetadata(entry.code)?.tone;
@@ -99,17 +107,26 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
           .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
           .slice(0, 3));
       })
-      .catch(() => { if (!controller.signal.aborted) setEntries([]); });
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setFailed(true);
+        notify({ tone: "error", message: texts.events.connectionLost });
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); };
-  }, [channelId]);
+  }, [channelId, texts.events.connectionLost]);
 
   return (
     <section className="content-section" aria-label={texts.streamManager.feedTitle}>
       <div className="section-heading"><h2>{texts.streamManager.feedTitle}</h2><a className="stream-manager-feed__all" href={dashboardRoutePath(allAlertsRoute)} onClick={onNavigate === undefined ? undefined : (event) => { event.preventDefault(); onNavigate(allAlertsRoute); }}>{texts.streamManager.feedAll}</a></div>
-      {entries.length === 0 ? (
-        <p className="stream-manager-feed__empty">{texts.streamManager.feedEmpty}</p>
-      ) : (
-        <ul className="stream-manager-feed">
+      <LoadState
+        status={loading ? "loading" : failed ? "error" : entries.length === 0 ? "empty" : "success"}
+        minHeight={132}
+        loading={<Skeleton rows={3} height={44} />}
+        empty={<p className="stream-manager-feed__empty">{texts.streamManager.feedEmpty}</p>}
+        error={<Skeleton rows={3} height={44} />}
+      >
+        {entries.length === 0 ? null : <ul className="stream-manager-feed">
           {entries.map((entry) => {
             const label = eventText(entry.code, eventDetail(entry.detail, entry.code));
             const metadata = eventMetadata(entry.code);
@@ -141,8 +158,8 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
               </li>
             );
           })}
-        </ul>
-      )}
+        </ul>}
+      </LoadState>
     </section>
   );
 };

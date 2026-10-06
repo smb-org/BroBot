@@ -363,7 +363,7 @@ export interface OverlaysTexts {
   conflict: string; guide: string; issueReason: string; elementCount: (count: number) => string;
   elementsSummary: (count: number, names: string) => string;
   missingVariable: (name: string) => string;
-  legacyTitle: string; legacyDescription: string; legacyTokenName: string; legacyCreatedByUnknown: string;
+  legacyTitle: string; legacyDescription: string; legacyEmpty: string; legacyTokenName: string; legacyCreatedByUnknown: string;
   legacyCreatedAt: string; legacyTokenId: string; legacyRevokeTitle: (name: string) => string; legacyRevokeDescription: (name: string) => string;
   legacyRevokeConfirm: (name: string) => string; legacyRevocationReason: string; loadMore: string;
   legacyImport: string; legacyImportTitle: string; legacyImportDescription: string; legacyImportLinkLabel: string;
@@ -460,6 +460,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     missingVariable: (name) => `Variable ${name} fehlt`,
     legacyTitle: "Alte Links (Konfiguration im Link)",
     legacyDescription: "Diese ungebundenen Links verwenden noch die alte Konfiguration im Fragment. Hier kannst du sie widerrufen.",
+    legacyEmpty: "Keine ungebundenen alten Links.",
     legacyTokenName: "Unbenannter Alt-Link", legacyCreatedByUnknown: "Ersteller unbekannt", legacyCreatedAt: "Erstellt", legacyTokenId: "Link-ID",
     legacyRevokeTitle: (name) => `Alten Link „${name}“ widerrufen?`,
     legacyRevokeDescription: () => `Der alte Link wird ungültig und verbundene Quellen werden geschlossen.`,
@@ -564,6 +565,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     missingVariable: (name) => `Variable ${name} is missing`,
     legacyTitle: "Legacy links (configuration in the link)",
     legacyDescription: "These unbound links still use the old fragment configuration. You can revoke them here.",
+    legacyEmpty: "No unbound legacy links.",
     legacyTokenName: "Unnamed legacy link", legacyCreatedByUnknown: "Creator unknown", legacyCreatedAt: "Created", legacyTokenId: "Link ID",
     legacyRevokeTitle: (name) => `Revoke legacy link “${name}”?`,
     legacyRevokeDescription: () => `The legacy link will stop working and connected sources will close.`,
@@ -757,6 +759,7 @@ export interface DashboardTexts {
     who: string;
     systemActor: string;
     load: string;
+    loadError: string;
     empty: string;
     changeData: string;
     before: string;
@@ -1072,7 +1075,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     audit: {
       title: "Audit-Log", entries: "Einträge", who: "Wer", systemActor: "Automatisches System",
-      load: "Audit-Log wird geladen …", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
+      load: "Audit-Log wird geladen …", loadError: "Der Audit-Log konnte nicht geladen werden.", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
       before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loadingOlderEntries: "Ältere Einträge werden geladen …",
       yes: "Ja", no: "Nein", newValue: "neu", removedValue: "entfernt",
       changedTruncated: "geändert (Text länger als die Vorschau)", changesHeading: "Änderungen",
@@ -1359,7 +1362,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     audit: {
       title: "Audit log", entries: "entries", who: "Who", systemActor: "Automated system",
-      load: "Loading audit log …", empty: "No audit entries saved yet.", changeData: "Change data",
+      load: "Loading audit log …", loadError: "The audit log could not be loaded.", empty: "No audit entries saved yet.", changeData: "Change data",
       before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
       yes: "Yes", no: "No", newValue: "new", removedValue: "removed",
       changedTruncated: "changed (text longer than preview)", changesHeading: "Changes",

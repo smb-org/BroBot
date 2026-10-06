@@ -3376,7 +3376,8 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Moderatorstatus prüfen" }));
 
-    expect(await screen.findByText("Moderatorstatus konnte nicht gelesen werden.", { selector: "p" })).toBeInTheDocument();
+    const moderatorError = await screen.findByText("Moderatorstatus konnte nicht gelesen werden.");
+    expect(moderatorError.closest(".ui-toast--error")).toHaveAttribute("role", "alert");
     expect(screen.queryByText("Nicht geprüft")).not.toBeInTheDocument();
     expect(screen.getByRole("article", { name: "Moderatorstatus" })).toHaveAttribute("data-status", "healthy");
   });

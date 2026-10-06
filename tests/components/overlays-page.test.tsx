@@ -752,7 +752,7 @@ describe("Overlays page", () => {
     expect(await findToast("Zugang widerrufen.")).toHaveAttribute("role", "status");
     const revoke = fetcher.mock.calls.find(([input, init]) => requestPath(input).endsWith("/legacy-access-a/revoke") && init?.method === "POST");
     expect(revoke?.[1]?.body).toContain("Über Alte Links im Dashboard widerrufen");
-    expect(screen.queryByRole("region", { name: "Alte Links (Konfiguration im Link)" })).not.toBeInTheDocument();
+    expect(within(legacy).getByText("Keine ungebundenen alten Links.")).toBeInTheDocument();
   });
 
   it.each([

@@ -7,7 +7,7 @@ import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, ErrorPanel, Field, FilterBar, InspectorSection, ListDetail, Popover, Select as UiSelect, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
+import { ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, LoadState as UiLoadState, Popover, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import type { LoadState } from "../load-state";
 import {
   actorLabel,
@@ -283,26 +283,25 @@ export const EventsPage = ({
     : filters.tone === null ? [] : [filters.tone];
   return (
     <>
-      <ModuleHeading kind="events" title={texts.events.title} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texts.events.count} />} actions={<RealtimeFeedStatus status={realtime.status} />} />
+      <ModuleHeading kind="events" title={texts.events.title} subtitle={eventsState.data === null
+        ? <span className="module-heading__subtitle-placeholder" aria-hidden="true"><ModuleCount count={0} label={texts.events.count} /></span>
+        : <ModuleCount count={eventsState.data.entries.length} label={texts.events.count} />} actions={<RealtimeFeedStatus status={realtime.status} />} />
       <ListDetail
         onCloseInspector={closeGroup}
         list={
           <section className="content-section" aria-label={texts.events.log}>
             <div className="section-heading"><h2>{texts.events.log}</h2></div>
             <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
-            {realtime.pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
-            {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texts.events.load}</p> : null}
-            {/* Connection lost: nothing could ever be loaded -- distinct from a background refresh failing once data already exists. */}
-            {eventsState.status === "error" && eventsState.data === null ? (
-              <ErrorPanel
-                title={texts.events.connectionLost}
-                reason={eventsState.error ?? ""}
-                action={{ label: texts.events.retry, onClick: () => { void onRefreshFirstPage(channelId, filters); } }}
-              />
-            ) : null}
-            {eventsState.error !== null && eventsState.data !== null ? <p className="muted" role="alert">{eventsState.error}</p> : null}
-            {eventsState.data !== null && eventEntries.length === 0 ? (
-              filterActive ? (
+            <div className="realtime-feed__notice-slot">
+              {realtime.pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
+            </div>
+            <UiLoadState
+              status={eventsState.data === null
+                ? eventsState.status === "error" ? "error" : "loading"
+                : eventEntries.length === 0 ? "empty" : "success"}
+              minHeight={420}
+              loading={<Skeleton rows={8} height={34} />}
+              empty={filterActive ? (
                 <EmptyState
                   title={texts.events.noMatches}
                   description={`${texts.events.activeFilters} ${[
@@ -314,10 +313,15 @@ export const EventsPage = ({
                   ].filter((value): value is string => value !== null).join(" · ")}`}
                   action={{ label: texts.events.resetFilters, onClick: () => { onFiltersChange(emptyEventFilter); } }}
                 />
-              ) : <p className="empty-state">{texts.events.none}</p>
-            ) : null}
-            {eventsState.data !== null ? <>
-              {eventEntries.length === 0 ? null : <div ref={feedRef} className="event-feed">
+              ) : <p className="empty-state">{texts.events.none}</p>}
+              error={<EmptyState
+                title={texts.events.connectionLost}
+                description={eventsState.error ?? texts.events.load}
+                action={{ label: texts.events.retry, onClick: () => { void onRefreshFirstPage(channelId, filters); } }}
+              />}
+            >
+              <>
+              <div ref={feedRef} className="event-feed">
                 <div className={eventsState.status === "loading" ? "stale" : undefined}>
                   {dayGroups.map((day) => (
                     <section key={day.key} className="event-day">
@@ -365,9 +369,12 @@ export const EventsPage = ({
                     </section>
                   ))}
                 </div>
-              </div>}
-              <EventFeedEnd nextCursor={eventsState.data.nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
-            </> : null}
+              </div>
+              </>
+            </UiLoadState>
+            <div className="events-page__pagination-slot">
+              {eventsState.data === null ? null : <EventFeedEnd nextCursor={eventsState.data.nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />}
+            </div>
           </section>
         }
         inspector={selectedGroup === null ? null : (

@@ -16,7 +16,7 @@ import {
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage } from "./locale";
 import { useRealtimeVariableUpdates } from "./realtime";
-import { Button, ConfirmDialog, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, NumberField, PageHeader, Select, SubInspector, Switch } from "./ui";
+import { Button, ConfirmDialog, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 
 interface ChannelVariablesPageProperties {
@@ -52,7 +52,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
   const [maximum, setMaximum] = useState(CHANNEL_VARIABLE_MAXIMUM_COUNT);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -72,7 +72,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [creatingOverlay, setCreatingOverlay] = useState(false);
   const [newOverlayName, setNewOverlayName] = useState("");
   const [overlayPending, setOverlayPending] = useState(false);
-  const [overlayError, setOverlayError] = useState<string | null>(null);
   const refreshRequest = useRef(0);
   const invalidateRefresh = useCallback((): void => { refreshRequest.current++; }, []);
   const lastInitialSelection = useRef<string | undefined>(undefined);
@@ -84,11 +83,12 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       if (requestId !== refreshRequest.current) return;
       setVariables(result.variables);
       setMaximum(result.maximum);
-      setError(null);
+      setLoadFailed(false);
     } catch (caught) {
       if (requestId !== refreshRequest.current) return;
       const loadErrorText = channelVariablesTexts(dashboardLanguage()).loadError;
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, loadErrorText) : loadErrorText);
+      setLoadFailed(true);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, loadErrorText) : loadErrorText });
     } finally {
       if (requestId === refreshRequest.current) setLoading(false);
     }
@@ -140,8 +140,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setOverlaySelection("");
     setCreatingOverlay(false);
     setNewOverlayName("");
-    setOverlayError(null);
-    setError(null);
   };
   const selectVariable = (variable: PanelChannelVariable): void => {
     setCreating(false);
@@ -156,8 +154,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setOverlaySelection("");
     setCreatingOverlay(false);
     setNewOverlayName("");
-    setOverlayError(null);
-    setError(null);
   };
   // Latest-ref indirection, not a direct `selectVariable(match)` call: the
   // effect only ever reads through `.current`, so applying a deep-linked
@@ -180,14 +176,12 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const closeInspector = (): void => {
     setCreating(false);
     setSelectedName(null);
-    setError(null);
     setEditingValue(false);
   };
   const save = async (): Promise<void> => {
     const name = normalizedVariableName(draftName);
     if (!canManageContent || nameInvalid || draftSetValue === "" || !Number.isInteger(draftSetValue)) return;
     setPending(true);
-    setError(null);
     try {
       if (creating) {
         const response = await createChannelVariable(channelId, {
@@ -208,12 +202,10 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         await refresh();
         setSelectedName(response.variable.name);
         setDraftName(response.variable.name);
-        if (response.variable.name !== selected.name) {
-          setOverlayError(null);
-        }
+        if (response.variable.name !== selected.name) setUseOverlayOpen(false);
       }
     } catch (caught) {
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError });
     } finally {
       setPending(false);
     }
@@ -221,14 +213,13 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const changeValue = async (operation: "add" | "subtract" | "set", amount: number): Promise<boolean> => {
     if (selected === null || pending) return false;
     setPending(true);
-    setError(null);
     try {
       const response = await changeChannelVariableValue(channelId, selected.name, operation, amount);
       setVariables((current) => current.map((variable) => variable.name === selected.name ? { ...variable, ...response.variable } : variable));
       setDraftSetValue(response.variable.value);
       return true;
     } catch (caught) {
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError });
       return false;
     } finally {
       setPending(false);
@@ -245,7 +236,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const beginUseInOverlay = async (): Promise<void> => {
     if (selected === null || !canManageContent || overlayPending) return;
     setOverlayPending(true);
-    setOverlayError(null);
     try {
       const result = await fetchOverlays(channelId);
       setOverlayOptions(result.overlays.map(({ id, name, elementCount }) => ({ id, name, elementCount })));
@@ -254,7 +244,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       setNewOverlayName(labels.defaultOverlayName(selected.name));
       setUseOverlayOpen(true);
     } catch (caught) {
-      setOverlayError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError });
     } finally {
       setOverlayPending(false);
     }
@@ -274,12 +264,11 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const reconnectElement = async (usage: PanelChannelVariable["usages"][number]): Promise<void> => {
     if (selected === null || usage.overlayId === undefined || usage.elementId === undefined || !canManageContent || overlayPending) return;
     setOverlayPending(true);
-    setOverlayError(null);
     try {
       const overlay = (await fetchOverlay(channelId, usage.overlayId)).overlay;
       const target = overlay.elements.find((element) => element.id === usage.elementId);
       if (target === undefined || target.variableName !== null || target.missingVariableName !== selected.name) {
-        setOverlayError(labels.reconnectConflict);
+        notify({ tone: "error", message: labels.reconnectConflict });
         return;
       }
       const elements = overlay.elements.map((element) => ({
@@ -290,9 +279,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         name: overlay.name, width: overlay.width, height: overlay.height, css: overlay.css, elements,
       }, { elementId: usage.elementId, missingVariableName: selected.name });
       await refresh();
-      setOverlayError(null);
     } catch (caught) {
-      setOverlayError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError });
     } finally {
       setOverlayPending(false);
     }
@@ -300,26 +288,29 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const remove = async (): Promise<void> => {
     if (selected === null || !canManageContent || selectedUsages.some((usage) => usage.kind === "action")) return;
     setPending(true);
-    setError(null);
     try {
       await deleteChannelVariable(channelId, selected.name);
       setConfirmDelete(false);
       await refresh();
       closeInspector();
     } catch (caught) {
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.deleteError) : labels.deleteError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.deleteError) : labels.deleteError });
     } finally {
       setPending(false);
     }
   };
 
+  const listStatus = loading ? "loading" : loadFailed ? "error" : variables.length === 0 ? "empty" : "success";
   const list = <section className="channel-variables-page config-section" aria-label={labels.list}>
     <p className="muted channel-variables-limit-note" role="note">{labels.limitNote(maximum)}</p>
-    {canManageContent && variables.length >= maximum ? <p className="muted" role="note">{labels.limitReached}</p> : null}
-    {loading ? <p className="loading-line">{labels.loading}</p> : null}
-    {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-    {!loading && variables.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
-    {!loading && variables.length > 0 ? <div className="table-wrap channel-variables-table-wrap">
+    <div className="channel-variables-limit-slot" aria-live="polite">{canManageContent && variables.length >= maximum ? <p className="muted" role="note">{labels.limitReached}</p> : null}</div>
+    <LoadState
+      status={listStatus}
+      minHeight={360}
+      loading={<Skeleton rows={8} height={34} />}
+      empty={<p className="empty-state">{labels.empty}</p>}
+      error={<Skeleton rows={8} height={34} />}
+    >{variables.length === 0 ? null : <div className="table-wrap channel-variables-table-wrap">
       <table className="table channel-variables-table">
         <thead><tr>
           <th scope="col">{labels.name}</th>
@@ -340,7 +331,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           </tr>
         ))}</tbody>
       </table>
-    </div> : null}
+    </div>}</LoadState>
     {!canManageContent ? <p className="muted" role="note">{labels.managementLocked}</p> : null}
   </section>;
 
@@ -353,14 +344,14 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       onClose={closeInspector}
     >
       <div className="channel-variable-editor">
-        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-        {overlayError === null ? null : <p className="form-error" role="alert">{overlayError}</p>}
         <InspectorSection title={labels.generalSection}>
           <InspectorFieldRow label={labels.name} help={creating ? labels.nameHint : labels.renameHint}>
             <Field id="channel-variable-name" label={labels.name} value={draftName} normalize={normalizedVariableName} maxLength={32} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManageContent || pending} onChange={setDraftName} {...(nameInvalid ? { error: labels.nameInvalid } : {})} />
           </InspectorFieldRow>
-          {selected !== null && hasLegacyLinks && normalizedVariableName(draftName) !== selected.name
-            ? <p className="muted" role="note">{labels.legacyRenameWarning}</p> : null}
+          <div className="channel-variable-legacy-slot" aria-live="polite">
+            {selected !== null && hasLegacyLinks && normalizedVariableName(draftName) !== selected.name
+              ? <p className="muted" role="note" title={labels.legacyRenameWarning}>{labels.legacyRenameWarning}</p> : null}
+          </div>
           <InspectorFieldRow label={labels.description} help={labels.descriptionHint}>
             <Field id="channel-variable-description" label={labels.description} value={draftDescription} maxLength={80} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManageContent || pending} onChange={setDraftDescription} />
           </InspectorFieldRow>

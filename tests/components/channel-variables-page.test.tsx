@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
 import { UiProvider } from "../../src/dashboard/ui";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { jsonResponse } from "../unit/fixtures";
 import { TestWebSocket } from "./test-websocket";
 
@@ -25,6 +27,7 @@ const setBrowserLanguage = (language: string): void => {
 describe("Channel variables page", () => {
   afterEach(() => {
     cleanup();
+    for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.useRealTimers();
     vi.unstubAllGlobals();
     TestWebSocket.instances = [];
@@ -259,7 +262,7 @@ describe("Channel variables page", () => {
       return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
     });
     vi.stubGlobal("fetch", fetcher);
-    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    render(<UiProvider><ToastHost /><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
     fireEvent.click(await screen.findByRole("row", { name: /score/i }));
     fireEvent.click(screen.getByRole("button", { name: "Neu verbinden" }));
 
