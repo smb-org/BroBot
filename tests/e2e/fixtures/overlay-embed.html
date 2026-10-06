@@ -4,9 +4,11 @@
   <body>
     <iframe id="overlay-frame" title="BroBot overlay" sandbox="allow-scripts"></iframe>
     <script>
-      var token = new URLSearchParams(window.location.hash.slice(1)).get('token') || '';
+      var params = new URLSearchParams(window.location.hash.slice(1));
+      var token = params.get('token') || '';
+      var origin = params.get('origin') || 'http://127.0.0.1:8787';
       document.getElementById('overlay-frame').src =
-        'http://127.0.0.1:8787/overlay.html#token=' + encodeURIComponent(token);
+        origin + '/overlay.html#token=' + encodeURIComponent(token);
     </script>
   </body>
 </html>
