@@ -74,10 +74,45 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
     : (current.terms ?? []).filter((entry) => entry.approved);
   const textTerms = current.preset === "free_text" ? rankVoteTerms(visibleTextTerms) : [];
   const textTotal = visibleTextTerms.reduce((sum, entry) => sum + entry.count, 0);
+  const textRowStyle = {
+    flex: layout === "strip" ? "1 1 8em" : undefined,
+    minHeight: "2.3em",
+    minWidth: 0,
+    width: layout === "bars" ? "100%" : undefined,
+    boxSizing: "border-box" as const,
+  };
+  const textCaptionStyle = {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 10rem",
+    alignItems: "center",
+    gap: "0 0.5em",
+    minWidth: 0,
+    width: "100%",
+    boxSizing: "border-box" as const,
+  };
+  const textLabelStyle = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const };
+  const textCountStyle = {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "clip",
+    textAlign: "right" as const,
+    whiteSpace: "nowrap" as const,
+    fontSize: "0.5em",
+    fontVariantNumeric: "tabular-nums" as const,
+  };
+  const textTrackStyle = {
+    height: "0.45em",
+    width: "100%",
+    minWidth: 0,
+    boxSizing: "border-box" as const,
+    borderRadius: "999px",
+    background: "rgba(127, 127, 127, 0.25)",
+    overflow: "hidden",
+  };
   return <section
     className={`brobot-module-text chat-voting-tally chat-voting-tally--${layout}`}
     aria-label={current.status === "closed" ? labels.closed : labels.title}
-    style={{ display: "grid", gap: "0.6em", width: "100%" }}
+    style={{ display: "grid", gap: "0.6em", width: "100%", minWidth: 0, boxSizing: "border-box" }}
   >
     {current.status === "closed" ? <strong>{labels.closed}</strong> : null}
     <div className="chat-voting-tally__options" style={{
@@ -85,25 +120,27 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
       flexDirection: layout === "strip" ? "row" : "column",
       flexWrap: "wrap",
       gap: "0.65em",
+      width: "100%",
+      minWidth: 0,
+      boxSizing: "border-box",
       ...(current.preset === "free_text" && layout === "strip" ? { height: "14.1em" } : {}),
     }}>
       {current.preset === "free_text" ? <>
         {Array.from({ length: 5 }, (_, index) => {
           const entry = textTerms[index];
-          const rowStyle = { flex: layout === "strip" ? "1 1 8em" : undefined, minHeight: "2.3em", boxSizing: "border-box" as const };
-          if (entry === undefined) return <div className="chat-voting-tally__option" key={`${current.pollId}-empty-${String(index)}`} aria-hidden="true" style={{ ...rowStyle, visibility: "hidden" }}>
-            <div className="chat-voting-tally__caption" style={{ display: "flex", justifyContent: "space-between", gap: "0.5em", whiteSpace: "nowrap" }}>
-              <span>&nbsp;</span><span>&nbsp;</span>
+          if (entry === undefined) return <div className="chat-voting-tally__option" key={`${current.pollId}-empty-${String(index)}`} aria-hidden="true" style={{ ...textRowStyle, visibility: "hidden" }}>
+            <div className="chat-voting-tally__caption" style={textCaptionStyle}>
+              <span style={textLabelStyle}>&nbsp;</span><span style={textCountStyle}>&nbsp;</span>
             </div>
-            {layout === "bars" ? <div className="chat-voting-tally__track" style={{ height: "0.45em", borderRadius: "999px", background: "rgba(127, 127, 127, 0.25)" }} /> : null}
+            {layout === "bars" ? <div className="chat-voting-tally__track" style={textTrackStyle} /> : null}
           </div>;
           const percent = textTotal === 0 ? 0 : Math.round(entry.count * 100 / textTotal);
-          return <div className="chat-voting-tally__option" key={`${current.pollId}-${entry.term}`} style={rowStyle}>
-            <div className="chat-voting-tally__caption" style={{ display: "flex", justifyContent: "space-between", gap: "0.5em", whiteSpace: "nowrap" }}>
-              <span title={entry.approved ? entry.term : "?"} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{entry.approved ? entry.term : "?"}</span>
-              <span>{String(entry.count)}{config.showPercent === false ? "" : ` · ${String(percent)}%`}</span>
+          return <div className="chat-voting-tally__option" key={`${current.pollId}-${entry.term}`} style={textRowStyle}>
+            <div className="chat-voting-tally__caption" style={textCaptionStyle}>
+              <span title={entry.approved ? entry.term : "?"} style={textLabelStyle}>{entry.approved ? entry.term : "?"}</span>
+              <span style={textCountStyle}>{String(entry.count)}{config.showPercent === false ? "" : ` · ${String(percent)}%`}</span>
             </div>
-            {layout === "bars" ? <div className="chat-voting-tally__track" aria-hidden="true" style={{ height: "0.45em", borderRadius: "999px", background: "rgba(127, 127, 127, 0.25)", overflow: "hidden" }}>
+            {layout === "bars" ? <div className="chat-voting-tally__track" aria-hidden="true" style={textTrackStyle}>
               <span style={{ display: "block", height: "100%", width: `${String(percent)}%`, borderRadius: "inherit", background: "currentColor", opacity: 0.8 }} />
             </div> : null}
           </div>;

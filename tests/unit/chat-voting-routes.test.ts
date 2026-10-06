@@ -97,7 +97,11 @@ describe("chat voting routes", () => {
     const database = await createDatabase();
     const readBlockedTerms = vi.fn(() => Promise.resolve([]));
     const setBlockedTerms = vi.fn(() => Promise.resolve({ counts: [], terms: [], more: 0, termFilterReady: true, revision: 1 }));
-    const app = appFor(ballotAccess({ setBlockedTerms }), readBlockedTerms);
+    const app = appFor(ballotAccess({
+      setBlockedTerms,
+      read: vi.fn(() => Promise.resolve({ counts: [], terms: [{ term: "alpha", count: 1, approved: false }], more: 0, termFilterReady: true, revision: 1 })),
+      approveTerm: vi.fn(() => Promise.resolve({ status: "approved" as const, snapshot: null })),
+    }), readBlockedTerms);
 
     const response = await app.fetch(approveRequest("stale-text-poll", "alpha"), {
       DB: database as unknown as D1Database,
@@ -117,7 +121,11 @@ describe("chat voting routes", () => {
       return [];
     });
     const setBlockedTerms = vi.fn(() => Promise.resolve({ counts: [], terms: [], more: 0, termFilterReady: true, revision: 1 }));
-    const app = appFor(ballotAccess({ setBlockedTerms }), readBlockedTerms);
+    const app = appFor(ballotAccess({
+      setBlockedTerms,
+      read: vi.fn(() => Promise.resolve({ counts: [], terms: [{ term: "alpha", count: 1, approved: false }], more: 0, termFilterReady: true, revision: 1 })),
+      approveTerm: vi.fn(() => Promise.resolve({ status: "approved" as const, snapshot: null })),
+    }), readBlockedTerms);
 
     const response = await app.fetch(approveRequest(openTextVote.id, "alpha"), {
       DB: database as unknown as D1Database,
@@ -126,6 +134,47 @@ describe("chat voting routes", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: "chat_voting_not_authorized" });
     expect(setBlockedTerms).not.toHaveBeenCalled();
+  });
+
+  it("guards the D1 approval write when membership is revoked while the mutation batch is pending", async () => {
+    const database = await createDatabase();
+    const publish = vi.fn(() => Promise.resolve());
+    const setBlockedTerms = vi.fn(() => Promise.resolve({ counts: [], terms: [], more: 0, termFilterReady: true, revision: 1 }));
+    const approveTerm = vi.fn(() => Promise.resolve({ status: "approved" as const, snapshot: {
+      counts: [], terms: [{ term: "alpha", count: 1, approved: true }], more: 0, termFilterReady: true, revision: 2,
+    } }));
+    const app = appFor(ballotAccess({
+      read: vi.fn(() => Promise.resolve({ counts: [], terms: [{ term: "alpha", count: 1, approved: false }], more: 0, termFilterReady: true, revision: 1 })),
+      setBlockedTerms,
+      approveTerm,
+    }), () => Promise.resolve([]), publish);
+    const originalBatch = database.batch.bind(database);
+    let signalBatchStarted!: () => void;
+    const batchStarted = new Promise<void>((resolve) => { signalBatchStarted = resolve; });
+    let releaseBatch!: () => void;
+    const batchGate = new Promise<void>((resolve) => { releaseBatch = resolve; });
+    database.batch = async (statements) => {
+      signalBatchStarted();
+      await batchGate;
+      return await originalBatch(statements);
+    };
+
+    const responsePromise = app.fetch(approveRequest(openTextVote.id, "alpha"), {
+      DB: database as unknown as D1Database,
+    });
+    await batchStarted;
+    await database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
+      .bind(CHANNEL_ID, ACTOR_ID).run();
+    releaseBatch();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "chat_voting_not_authorized" });
+    await expect(database.prepare("SELECT 1 FROM chat_vote_term_approvals WHERE channel_id = ? AND poll_id = ? AND term = ?")
+      .bind(CHANNEL_ID, openTextVote.id, "alpha").first()).resolves.toBeNull();
+    expect(setBlockedTerms).not.toHaveBeenCalled();
+    expect(approveTerm).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it("publishes a refreshed blocked filter before rejecting the now-blocked approval", async () => {
@@ -157,7 +206,7 @@ describe("chat voting routes", () => {
     }));
   });
 
-  it("rechecks authorization again immediately before saving the approval", async () => {
+  it("records an approval in D1 with the current actor in the guarded write batch", async () => {
     const database = await createDatabase();
     const calls: ReturnType<typeof authorizeModuleMutation>[] = [];
     const authorize = vi.fn((channelId: string, actor: { userId: string; sessionId?: string }, now: string) => {
@@ -177,6 +226,7 @@ describe("chat voting routes", () => {
       snapshot: { ...refreshed, terms: [{ term: "alpha", count: 1, approved: true }], revision: 2 },
     }));
     const app = appFor(ballotAccess({
+      read: vi.fn(() => Promise.resolve(refreshed)),
       setBlockedTerms: vi.fn(() => Promise.resolve(refreshed)),
       approveTerm,
     }), () => Promise.resolve([]), vi.fn(() => Promise.resolve()), authorize);
@@ -186,8 +236,11 @@ describe("chat voting routes", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(authorize).toHaveBeenCalledTimes(2);
-    expect(calls).toHaveLength(2);
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(calls).toHaveLength(1);
     expect(approveTerm).toHaveBeenCalledWith(openTextVote.id, "alpha");
+    await expect(database.prepare(
+      "SELECT approved_by FROM chat_vote_term_approvals WHERE channel_id = ? AND poll_id = ? AND term = ?",
+    ).bind(CHANNEL_ID, openTextVote.id, "alpha").first()).resolves.toEqual({ approved_by: ACTOR_ID });
   });
 });

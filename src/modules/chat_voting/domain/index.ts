@@ -89,13 +89,20 @@ const normalizeVoteText = (text: string): string => text.normalize("NFKC").toLow
   .replace(/\s+/gu, " ")
   .trim();
 
-const blockedPattern = (text: string): { value: string; wildcardPrefix: boolean; wildcardSuffix: boolean } => {
-  const source = text.normalize("NFKC").toLowerCase();
-  const wildcardPrefix = source.startsWith("*");
-  const wildcardSuffix = source.endsWith("*");
-  const value = normalizeVoteText(source.replace(/^\*+/u, "").replace(/\*+$/u, ""));
-  return { value, wildcardPrefix, wildcardSuffix };
-};
+interface BlockedPatternWord {
+  value: string;
+  wildcardPrefix: boolean;
+  wildcardSuffix: boolean;
+}
+
+const blockedPattern = (text: string): BlockedPatternWord[] => text.normalize("NFKC").toLowerCase()
+  .split(/\s+/u)
+  .flatMap((source) => {
+    const wildcardPrefix = source.startsWith("*");
+    const wildcardSuffix = source.endsWith("*");
+    const value = normalizeVoteText(source.replace(/^\*+/u, "").replace(/\*+$/u, ""));
+    return value.length === 0 ? [] : [{ value, wildcardPrefix, wildcardSuffix }];
+  });
 
 const firstCharacters = (text: string, maximum: number): string => Array.from(text).slice(0, maximum).join("");
 
@@ -113,31 +120,40 @@ export const normalizeFreeTextVoteForMatching = (text: string): string => normal
 
 /** Normalizes a blocked pattern while keeping Twitch's edge wildcards intact. */
 export const normalizeBlockedVoteTerm = (text: string): string => {
-  const pattern = blockedPattern(text);
-  return `${pattern.wildcardPrefix ? "*" : ""}${pattern.value}${pattern.wildcardSuffix ? "*" : ""}`;
+  return blockedPattern(text).map(({ value, wildcardPrefix, wildcardSuffix }) =>
+    `${wildcardPrefix ? "*" : ""}${value}${wildcardSuffix ? "*" : ""}`,
+  ).join(" ");
 };
 
 /** Matches blocked words and phrases within the normalized chat message. */
 export const isBlockedFreeTextVote = (vote: string, blockedTerms: readonly string[]): boolean => {
   const words = normalizeVoteText(vote).split(" ").filter((word) => word.length > 0);
   return blockedTerms.some((blockedTerm) => {
-    const pattern = blockedPattern(blockedTerm);
-    const patternWords = pattern.value.split(" ").filter((word) => word.length > 0);
+    const patternWords = blockedPattern(blockedTerm);
     if (patternWords.length === 0 || patternWords.length > words.length) return false;
-    for (let start = 0; start <= words.length - patternWords.length; start += 1) {
-      const matches = patternWords.every((word, offset) => {
-        const candidate = words[start + offset];
-        if (candidate === undefined) return false;
-        const wildcardPrefix = offset === 0 && pattern.wildcardPrefix;
-        const wildcardSuffix = offset === patternWords.length - 1 && pattern.wildcardSuffix;
-        if (wildcardPrefix && wildcardSuffix) return candidate.includes(word);
-        if (wildcardPrefix) return candidate.endsWith(word);
-        if (wildcardSuffix) return candidate.startsWith(word);
-        return candidate === word;
-      });
-      if (matches) return true;
-    }
-    return false;
+    const matchingWord = (pattern: BlockedPatternWord, candidate: string): boolean => {
+      if (pattern.wildcardPrefix && pattern.wildcardSuffix) return candidate.includes(pattern.value);
+      if (pattern.wildcardPrefix) return candidate.endsWith(pattern.value);
+      if (pattern.wildcardSuffix) return candidate.startsWith(pattern.value);
+      return candidate === pattern.value;
+    };
+    const assignedPattern = Array<number>(words.length).fill(-1);
+    const assignPatternWord = (patternIndex: number, seen: boolean[]): boolean => {
+      const pattern = patternWords[patternIndex];
+      if (pattern === undefined) return false;
+      for (let wordIndex = 0; wordIndex < words.length; wordIndex += 1) {
+        const candidate = words[wordIndex];
+        if (candidate === undefined || seen[wordIndex] === true || !matchingWord(pattern, candidate)) continue;
+        seen[wordIndex] = true;
+        const previousPattern = assignedPattern[wordIndex] ?? -1;
+        if (previousPattern === -1 || assignPatternWord(previousPattern, seen)) {
+          assignedPattern[wordIndex] = patternIndex;
+          return true;
+        }
+      }
+      return false;
+    };
+    return patternWords.every((_pattern, index) => assignPatternWord(index, Array<boolean>(words.length).fill(false)));
   });
 };
 

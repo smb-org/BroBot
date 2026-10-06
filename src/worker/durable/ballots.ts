@@ -519,19 +519,38 @@ export const setStoredBallotBlockedTerms = async (
     const active = await transaction.get<ActiveBallot>(ACTIVE_BALLOT_KEY);
     if (active?.moduleId !== moduleId || active.ballotId !== ballotId) return null;
     const filteredTerms = (ballot.termCounts ?? []).filter(({ term }) => !isBlockedFreeTextVote(term, boundedTerms));
+    const retainedTerms = new Set(filteredTerms.map(({ term }) => term));
+    const prefix = voterPrefix(moduleId, ballotId);
+    let startAfter: string | undefined;
+    let votersChanged = false;
+    let hasMoreVoters = true;
+    while (hasMoreVoters) {
+      const voters = await transaction.list({ prefix, ...(startAfter === undefined ? {} : { startAfter }), limit: 128 });
+      const keys = [...voters]
+        .filter(([, term]) => typeof term === "string" && !retainedTerms.has(term))
+        .map(([key]) => key);
+      if (keys.length > 0) {
+        await transaction.delete(keys);
+        votersChanged = true;
+      }
+      const lastKey = [...voters.keys()].at(-1);
+      if (voters.size < 128 || lastKey === undefined) hasMoreVoters = false;
+      else startAfter = lastKey;
+    }
     const approvedTerms = approvedTermsOf(ballot);
     const approvalsChanged = approvedTerms.size !== (ballot.approvedTerms?.length ?? 0);
     const filterChanged = JSON.stringify(ballot.blockedTerms ?? null) !== JSON.stringify(boundedTerms);
     const tallyChanged = filteredTerms.length !== (ballot.termCounts ?? []).length;
+    const stateChanged = filterChanged || tallyChanged || votersChanged;
     const updated: StoredBallot = {
       ...ballot,
       blockedTerms: boundedTerms,
       termCounts: filteredTerms,
       approvedTerms: [...approvedTerms],
-      revision: ballot.revision + (filterChanged || tallyChanged ? 1 : 0),
+      revision: ballot.revision + Number(stateChanged),
     };
-    if (filterChanged || tallyChanged || approvalsChanged) await transaction.put(ballotKey(moduleId, ballotId), updated);
-    return snapshotOf(filterChanged || tallyChanged || approvalsChanged ? updated : ballot);
+    if (stateChanged || approvalsChanged) await transaction.put(ballotKey(moduleId, ballotId), updated);
+    return snapshotOf(stateChanged || approvalsChanged ? updated : ballot);
   });
 };
 

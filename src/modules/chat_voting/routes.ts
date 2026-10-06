@@ -191,21 +191,47 @@ chatVotingRoutes.post("/approve-term", async (context) => {
     );
   };
 
-  if (!await hasMutationAuthorization()) {
-    return context.json({ error: "chat_voting_not_authorized" }, 403);
+  if (term.length === 0 || Array.from(term).length > 25) {
+    return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
-  const filtered = await ballots.setBlockedTerms?.(vote.id, blockedTerms);
-  if (filtered === undefined || filtered === null) return context.json({ error: "chat_voting_not_running" }, 409);
-  // A refresh can remove previously counted terms. Publish that durable state
-  // before any later validation returns an error.
-  await publishTally(filtered);
-  if (isBlockedFreeTextVote(term, blockedTerms)) return context.json({ error: "chat_voting_term_blocked" }, 409);
+  if (isBlockedFreeTextVote(term, blockedTerms)) {
+    if (!await hasMutationAuthorization()) return context.json({ error: "chat_voting_not_authorized" }, 403);
+    const filtered = await ballots.setBlockedTerms?.(vote.id, blockedTerms);
+    if (filtered === undefined || filtered === null) return context.json({ error: "chat_voting_not_running" }, 409);
+    // Even a rejected term click refreshes and publishes newly blocked terms.
+    await publishTally(filtered);
+    return context.json({ error: "chat_voting_term_blocked" }, 409);
+  }
+  if (ballots.setBlockedTerms === undefined || ballots.approveTerm === undefined) {
+    return context.json({ error: "chat_voting_unavailable" }, 503);
+  }
+  const currentSnapshot = await ballots.read(vote.id);
+  if (currentSnapshot === null || !(currentSnapshot.terms ?? []).some(({ term: currentTerm }) => currentTerm === term)) {
+    return context.json({ error: "chat_voting_not_running" }, 409);
+  }
+  const authorization = context.get("authorizeMutation")(
+    channelId,
+    context.get("actor"),
+    new Date().toISOString(),
+  );
+  const persisted = await createChatVotingRepository(context.env.DB).approveTerm(
+    channelId,
+    vote.id,
+    term,
+    new Date().toISOString(),
+    context.get("actor").userId,
+    authorization,
+  );
+  if (!persisted.authorized) return context.json({ error: "chat_voting_not_authorized" }, 403);
+  if (!persisted.changed) return context.json({ error: "chat_voting_not_running" }, 409);
 
-  if (!await hasMutationAuthorization()) {
-    return context.json({ error: "chat_voting_not_authorized" }, 403);
-  }
-  const approval = await ballots.approveTerm?.(vote.id, term);
-  if (approval === undefined || approval.status === "not_open") return context.json({ error: "chat_voting_not_running" }, 409);
+  const filtered = await ballots.setBlockedTerms(vote.id, blockedTerms);
+  if (filtered === null) return context.json({ error: "chat_voting_not_running" }, 409);
+  // A refresh can remove previously counted terms. Publish that durable state
+  // only after the authorization-guarded approval write succeeds.
+  await publishTally(filtered);
+  const approval = await ballots.approveTerm(vote.id, term);
+  if (approval.status === "not_open") return context.json({ error: "chat_voting_not_running" }, 409);
   if (approval.status === "unavailable") return context.json({ error: "chat_voting_blocked_terms_unavailable" }, 503);
   if (approval.status === "blocked") return context.json({ error: "chat_voting_term_blocked" }, 409);
   if (approval.snapshot === null) return context.json({ error: "chat_voting_not_running" }, 409);

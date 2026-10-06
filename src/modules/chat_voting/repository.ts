@@ -85,6 +85,14 @@ export interface ChatVotingRepository {
   open(channelId: string): Promise<ChatVote | null>;
   latest(channelId: string): Promise<ChatVote | null>;
   byId(channelId: string, pollId: string): Promise<ChatVote | null>;
+  approveTerm(
+    channelId: string,
+    pollId: string,
+    term: string,
+    approvedAt: string,
+    approvedBy: string,
+    authorization: ModuleMutationAuthorization,
+  ): Promise<{ authorized: boolean; changed: boolean }>;
   insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization): Promise<boolean>;
   requestManualClose(channelId: string, pollId: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
   finish(
@@ -118,6 +126,27 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       `SELECT ${chatVoteSelectColumns} FROM chat_votes WHERE channel_id = ? AND poll_id = ? LIMIT 1`,
     ).bind(channelId, pollId).first<ChatVoteRow>();
     return row === null ? null : mapRow(row);
+  },
+  async approveTerm(channelId, pollId, term, approvedAt, approvedBy, authorization) {
+    const write = db.prepare(
+      `INSERT INTO chat_vote_term_approvals (channel_id, poll_id, term, approved_at, approved_by)
+       SELECT ?, ?, ?, ?, ?
+        WHERE EXISTS (
+          SELECT 1 FROM chat_votes
+           WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND preset = 'free_text'
+        ) ${authorization.sql}
+       ON CONFLICT (channel_id, poll_id, term) DO UPDATE SET
+         approved_at = excluded.approved_at,
+         approved_by = excluded.approved_by`,
+    ).bind(channelId, pollId, term, approvedAt, approvedBy, channelId, pollId, ...authorization.values);
+    const guard = db.prepare(
+      `SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`,
+    ).bind(...authorization.values);
+    const [result, guardResult] = await db.batch([write, guard]);
+    return {
+      authorized: (guardResult?.results.length ?? 0) > 0,
+      changed: (result?.meta.changes ?? 0) > 0,
+    };
   },
   async insertOpen(vote, authorization) {
     const guard = authorization?.sql ?? "";

@@ -102,6 +102,14 @@ describe("chat voting overlay tally", () => {
     expect((rows?.[1] as HTMLElement | undefined)?.style.minHeight).toBe("2.3em");
     expect(rows?.[0]?.querySelector(".chat-voting-tally__track")).not.toBeNull();
     expect(rows?.[1]?.querySelector(".chat-voting-tally__track")).not.toBeNull();
+    const caption = rows?.[0]?.querySelector(".chat-voting-tally__caption") as HTMLElement | null;
+    const count = caption?.children[1] as HTMLElement | undefined;
+    const track = rows?.[0]?.querySelector(".chat-voting-tally__track") as HTMLElement | null;
+    expect(caption?.style.display).toBe("grid");
+    expect(caption?.style.gridTemplateColumns).toBe("minmax(0, 1fr) 10rem");
+    expect(count?.style.fontVariantNumeric).toBe("tabular-nums");
+    expect(track?.style.width).toBe("100%");
+    expect(track?.style.minWidth).toBe("0px");
 
     cleanup();
     const strip = render(<Tally config={{ layout: "strip", showPercent: true, hideAfterCloseSeconds: 15 }} state={{

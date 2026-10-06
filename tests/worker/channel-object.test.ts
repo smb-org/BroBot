@@ -358,6 +358,23 @@ const objectFor = (
   return object;
 };
 
+const databaseWithTermApprovals = (pollId: string, terms: readonly string[]): D1Database => {
+  const approved = new Set(terms);
+  let bindings: unknown[] = [];
+  const statement = {
+    bind: vi.fn((...values: unknown[]) => {
+      bindings = values;
+      return statement;
+    }),
+    first: vi.fn(() => Promise.resolve(
+      bindings[1] === pollId && typeof bindings[2] === "string" && approved.has(bindings[2])
+        ? { approved: 1 }
+        : null,
+    )),
+  };
+  return { prepare: vi.fn(() => statement) } as unknown as D1Database;
+};
+
 const databaseWithCountdownOverlay = (): D1Database => {
   const statement = {
     bind: vi.fn(() => statement),
@@ -1773,7 +1790,7 @@ describe("ChannelObject realtime path", () => {
   it("stores only hashed term voters, applies blocked filters, and approves terms for one ballot", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
-    const object = objectFor([]);
+    const object = objectFor([], databaseWithTermApprovals("text-poll", ["beta"]));
     await object.openBallot("chat_voting", "text-poll", 0, 20_000, undefined, { blockedTerms: ["blocked"] });
 
     await expect(object.castBallotTerm("chat_voting", "text-poll", "fictional-viewer", "alpha")).resolves.toMatchObject({
@@ -1805,7 +1822,7 @@ describe("ChannelObject realtime path", () => {
   it("blocks phrases and wildcard variations before counting or approval", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
-    const object = objectFor([]);
+    const object = objectFor([], databaseWithTermApprovals("blocked-pattern-poll", ["bad phrase"]));
     await object.openBallot("chat_voting", "blocked-pattern-poll", 0, 20_000, undefined, {
       blockedTerms: ["bad phrase", "shoot*", "*hound", "*middle*"],
     });
@@ -1831,7 +1848,7 @@ describe("ChannelObject realtime path", () => {
   it("uses stable term keys when changing votes and keeps approvals after counts reach zero", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
-    const object = objectFor([]);
+    const object = objectFor([], databaseWithTermApprovals("stable-term-poll", ["beta"]));
     await object.openBallot("chat_voting", "stable-term-poll", 0, 20_000, undefined, { blockedTerms: [] });
 
     await object.castBallotTerm("chat_voting", "stable-term-poll", "viewer-alpha", "alpha");
@@ -1852,6 +1869,40 @@ describe("ChannelObject realtime path", () => {
     const recountedBeta = await object.castBallotTerm("chat_voting", "stable-term-poll", "viewer-new", "beta");
     expect(recountedBeta.terms?.find(({ term }) => term === "beta")).toEqual({ term: "beta", count: 1, approved: true });
     expect(recountedBeta.terms?.find(({ term }) => term === "gamma")).toEqual({ term: "gamma", count: 3, approved: false });
+  });
+
+  it("does not apply a Durable Object approval without the D1 record for that poll", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([], databaseWithTermApprovals("unapproved-poll", []));
+    await object.openBallot("chat_voting", "unapproved-poll", 0, 20_000, undefined, { blockedTerms: [] });
+    await object.castBallotTerm("chat_voting", "unapproved-poll", "viewer-alpha", "alpha");
+
+    await expect(object.approveTerm("chat_voting", "unapproved-poll", "alpha"))
+      .resolves.toMatchObject({ status: "not_open" });
+    await expect(object.readBallot("chat_voting", "unapproved-poll"))
+      .resolves.toMatchObject({ terms: [{ term: "alpha", count: 1, approved: false }] });
+  });
+
+  it("deletes voter records when a refreshed filter removes their term", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const object = objectFor([]);
+    await object.openBallot("chat_voting", "filtered-voters-poll", 0, 20_000, undefined, { blockedTerms: [] });
+    await object.castBallotTerm("chat_voting", "filtered-voters-poll", "viewer-alpha", "alpha");
+
+    await expect(object.setBlockedTerms("chat_voting", "filtered-voters-poll", ["alpha"]))
+      .resolves.toMatchObject({ terms: [] });
+    await object.setBlockedTerms("chat_voting", "filtered-voters-poll", []);
+    await object.castBallotTerm("chat_voting", "filtered-voters-poll", "viewer-beta", "alpha");
+
+    await expect(object.castBallotTerm("chat_voting", "filtered-voters-poll", "viewer-alpha", "alpha"))
+      .resolves.toMatchObject({ status: "counted", terms: [{ term: "alpha", count: 2, approved: false }] });
+    await expect(object.castBallotTerm("chat_voting", "filtered-voters-poll", "viewer-alpha", "beta"))
+      .resolves.toMatchObject({ status: "changed", terms: [
+        { term: "alpha", count: 1, approved: false },
+        { term: "beta", count: 1, approved: false },
+      ] });
   });
 
   it("carries approvals forward from running ballots created before approval history was stored separately", async () => {

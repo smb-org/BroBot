@@ -16,6 +16,7 @@ import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 import type { AdsSchedule } from "../../modules/ads/contracts";
+import { CHAT_VOTING_MODULE_ID } from "../../modules/chat_voting/contracts";
 import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
 import type {
   ActiveChatterActivity,
@@ -1601,6 +1602,16 @@ export class ChannelObject extends DurableObject<Env> {
     ballotId: string,
     term: string,
   ): ReturnType<typeof approveStoredBallotTerm> {
+    const channelId = this.ownChannelId();
+    if (channelId === null || moduleId !== CHAT_VOTING_MODULE_ID) {
+      return { status: "not_open", snapshot: null };
+    }
+    const approval = await this.env.DB.prepare(
+      `SELECT 1 AS approved
+         FROM chat_vote_term_approvals
+        WHERE channel_id = ? AND poll_id = ? AND term = ?`,
+    ).bind(channelId, ballotId, term).first<{ approved: number }>();
+    if (approval === null) return { status: "not_open", snapshot: null };
     return await approveStoredBallotTerm(this.ctx.storage, moduleId, ballotId, term);
   }
 

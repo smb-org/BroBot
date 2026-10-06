@@ -39,6 +39,7 @@ const repositoryWith = (overrides: Partial<ChatVotingRepository> = {}): ChatVoti
   open: vi.fn(() => Promise.resolve(null)),
   latest: vi.fn(() => Promise.resolve(null)),
   byId: vi.fn(() => Promise.resolve(null)),
+  approveTerm: vi.fn(() => Promise.resolve({ authorized: true, changed: true })),
   insertOpen: vi.fn(() => Promise.resolve(true)),
   requestManualClose: vi.fn(() => Promise.resolve(true)),
   finish: vi.fn(() => Promise.resolve(true)),

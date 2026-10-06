@@ -86,11 +86,16 @@ describe("chat voting command and result domain", () => {
     expect(normalizeBlockedVoteTerm("shoot*")).toBe("shoot*");
     expect(normalizeBlockedVoteTerm("*hound")).toBe("*hound");
     expect(isBlockedFreeTextVote("this is a BAD, phrase here", ["bad phrase"])).toBe(true);
+    expect(isBlockedFreeTextVote("hi there", ["hi there"])).toBe(true);
+    expect(isBlockedFreeTextVote("there hi", ["hi there"])).toBe(true);
+    expect(isBlockedFreeTextVote("there", ["hi there"])).toBe(false);
+    expect(isBlockedFreeTextVote("there hissing", ["hi* there"])).toBe(true);
+    expect(isBlockedFreeTextVote("there xhiss", ["hi* there"])).toBe(false);
     expect(isBlockedFreeTextVote("shooting", ["shoot*"])).toBe(true);
     expect(isBlockedFreeTextVote("bloodhound", ["*hound"])).toBe(true);
     expect(isBlockedFreeTextVote("middlepiece", ["*middle*"])).toBe(true);
     expect(isBlockedFreeTextVote("badger", ["bad"])).toBe(false);
-    expect(isBlockedFreeTextVote("phrase bad", ["bad phrase"])).toBe(false);
+    expect(isBlockedFreeTextVote("phrase bad", ["bad phrase"])).toBe(true);
   });
 
   it("ranks free-text terms by count then name and caps the tally at five", () => {

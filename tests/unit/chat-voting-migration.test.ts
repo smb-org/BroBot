@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0029_chat_voting.sql"), "utf8");
 const requestedDurationMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0032_chat_voting_requested_duration.sql"), "utf8");
 const textPresetMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0038_chat_voting_text_presets.sql"), "utf8");
+const termApprovalsMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0039_chat_voting_term_approvals.sql"), "utf8");
 
 describe("chat voting migration", () => {
   it("backfills requested timer durations without treating the four-hour hard limit as a request", () => {
@@ -37,6 +38,7 @@ describe("chat voting migration", () => {
 
       database.exec(requestedDurationMigration);
       database.exec(textPresetMigration);
+      database.exec(termApprovalsMigration);
 
       expect(database.prepare(`
         SELECT poll_id, requested_duration_seconds
@@ -70,6 +72,7 @@ describe("chat voting migration", () => {
       database.exec(migration);
       database.exec(requestedDurationMigration);
       database.exec(textPresetMigration);
+      database.exec(termApprovalsMigration);
 
       const moduleRow = database.prepare(
         "SELECT enabled, settings FROM channel_modules WHERE channel_id = 'fictional-channel' AND module_id = 'chat_voting'",
@@ -148,6 +151,8 @@ describe("chat voting migration", () => {
       const columns = database.prepare("PRAGMA table_info(chat_votes)").all() as Array<{ name: string }>;
       expect(columns.map(({ name }) => name)).not.toContain("voter_user_id");
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+      const approvalColumns = database.prepare("PRAGMA table_info(chat_vote_term_approvals)").all() as Array<{ name: string }>;
+      expect(approvalColumns.map(({ name }) => name)).toEqual(["channel_id", "poll_id", "term", "approved_at", "approved_by"]);
     } finally {
       database.close();
     }
