@@ -248,12 +248,13 @@ export function GroupedPicker<T = unknown>({
         {isSmallScreen ? (
           <div className="ui-grouped-picker__mobile-header">
             <span className="ui-grouped-picker__handle" aria-hidden="true" />
-            <h2>{messages.title}</h2>
+            <Drawer.Title component="h2">{messages.title}</Drawer.Title>
             <Button icon="close" iconOnly ariaLabel={messages.closeLabel} variant="subtle" onClick={() => close(true)} />
           </div>
         ) : null}
         <TextInput
           ref={searchRef}
+          data-autofocus
           id={`${surfacePanelId}-search`}
           className="ui-grouped-picker__search"
           aria-label={messages.searchLabel}
@@ -340,10 +341,21 @@ export function GroupedPicker<T = unknown>({
           position="bottom-end"
           width={width}
           closeOnEscape={false}
+          trapFocus
           closeOnClickOutside
         >
           <Popover.Target>{interactiveTrigger}</Popover.Target>
-          <Popover.Dropdown role="dialog" aria-label={messages.title} className="ui-grouped-picker__popover">
+          <Popover.Dropdown
+            role="dialog"
+            aria-label={messages.title}
+            className="ui-grouped-picker__popover"
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              close(true);
+            }}
+          >
             {renderContent("popover")}
           </Popover.Dropdown>
         </Popover>
@@ -356,7 +368,6 @@ export function GroupedPicker<T = unknown>({
         overlayProps={{ backgroundOpacity: 0.35, blur: 1 }}
         classNames={{ content: "ui-grouped-picker__drawer-content", body: "ui-grouped-picker__drawer-body" }}
         withinPortal
-        aria-label={messages.title}
       >
         {renderContent("sheet")}
       </Drawer>

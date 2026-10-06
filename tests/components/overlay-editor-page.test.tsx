@@ -1144,8 +1144,10 @@ describe("Overlay composition editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove: Score" }));
     await waitFor(() => expect(bounds?.querySelector('[data-brobot-editor-bound="element-a"]')).not.toBeInTheDocument());
     expect(bounds?.querySelector('[data-brobot-editor-bound="element-b"]')).toHaveAttribute("data-selected", "true");
+    await waitFor(() => expect(document.activeElement?.closest("[data-element-row]")).toHaveAttribute("data-element-row", "element-b"));
     fireEvent.click(screen.getByRole("button", { name: "Remove: Second" }));
     await waitFor(() => expect(bounds?.querySelectorAll("[data-brobot-editor-bound]")).toHaveLength(0));
+    await waitFor(() => expect(document.activeElement).toHaveClass("overlay-editor__add-trigger"));
   });
 
   it("shows the unsaved-changes status only once on the save bar", async () => {

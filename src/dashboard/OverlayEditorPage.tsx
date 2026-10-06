@@ -878,6 +878,15 @@ function OverlayEditorWorkspace({
   const removeElement = (elementId: string): void => {
     if (!canEdit) return;
     const remaining = draft.elements.filter(({ id }) => id !== elementId);
+    const rows = orderedElements.map(({ id }) => id);
+    const removedIndex = rows.indexOf(elementId);
+    const neighbourId = rows[removedIndex + 1] ?? rows[removedIndex - 1];
+    window.requestAnimationFrame(() => {
+      const target = neighbourId === undefined
+        ? document.querySelector<HTMLElement>(".overlay-editor__add-trigger")
+        : document.querySelector<HTMLElement>(`[data-element-row="${CSS.escape(neighbourId)}"] .overlay-editor__element-select`);
+      target?.focus();
+    });
     setDraft((current) => ({ ...current, elements: remaining }));
     setSelectedElementId((currentSelectedId) => currentSelectedId === elementId
       ? remaining[0]?.id ?? null
@@ -1070,7 +1079,7 @@ function OverlayEditorWorkspace({
         </div>
         {!canManage ? <p className="overlay-editor__locked-reason" id="overlay-editor-readonly-reason">{labels.editorLockedReason}</p> : null}
         {orderedElements.length === 0 ? <p className="muted">{labels.editorNoElements}</p> : <ul className="overlay-editor__element-list">
-          {orderedElements.map((element) => <li className="overlay-editor__element-row" key={element.id}>
+          {orderedElements.map((element) => <li className="overlay-editor__element-row" data-element-row={element.id} key={element.id}>
             <button className="overlay-editor__element-select" type="button" aria-pressed={element.id === selectedElementId} onClick={() => { setSelectedElementId(element.id); }}>
               <span>{element.kind === "variable"
                 ? element.label || element.variableName || labels.editorVariable

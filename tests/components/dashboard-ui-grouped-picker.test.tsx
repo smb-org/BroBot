@@ -96,6 +96,8 @@ describe("GroupedPicker", () => {
 
       const search = await screen.findByRole("combobox", { name: "Search elements" });
       expect(document.querySelector(".ui-grouped-picker__drawer-content .ui-grouped-picker--sheet")).toBeInTheDocument();
+      await waitFor(() => expect(document.activeElement).toBe(search));
+      expect(screen.getByRole("dialog", { name: "Choose an element" })).toBeInTheDocument();
       fireEvent.change(search, { target: { value: "poll" } });
       expect(screen.getByRole("option", { name: /Poll result/u, hidden: true })).toBeInTheDocument();
       expect(screen.queryByRole("option", { name: /Viewers/u, hidden: true })).not.toBeInTheDocument();
@@ -116,6 +118,17 @@ describe("GroupedPicker", () => {
 
     await waitFor(() => expect(screen.queryByRole("listbox", { name: "Choose an element", hidden: true })).not.toBeInTheDocument());
     await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("closes with Escape pressed on a non-search element inside the popover", async () => {
+    renderPicker(<GroupedPicker groups={groups} messages={messages} trigger={<button type="button">Add element</button>} onSelect={() => {}} />);
+    const trigger = screen.getByRole("button", { name: "Add element" });
+    fireEvent.click(trigger);
+    const option = (await screen.findByRole("option", { name: /Viewers/u, hidden: true }));
+
+    fireEvent.keyDown(option, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Choose an element", hidden: true })).not.toBeInTheDocument());
   });
 
   it("supports controlled visibility", async () => {
