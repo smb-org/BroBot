@@ -48,7 +48,18 @@ export const ImmediateActions = ({ channelId, streamState, modules = [], modules
   return (
     <section className="content-section" aria-label={texts.streamManager.immediateActions}>
       <div className="section-heading"><h2>{texts.streamManager.immediateActions}</h2></div>
-      <div className="stream-manager-actions">
+      <div
+        className="stream-manager-actions"
+        role="group"
+        aria-label={texts.streamManager.immediateActions}
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          event.currentTarget.scrollBy({ left: event.key === "ArrowRight" ? 316 : -316, behavior: "smooth" });
+        }}
+      >
         {modulesLoaded ? moduleCards.map(({ id, ActionCard, availabilityReason }) => (
           <Suspense key={id} fallback={<div className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>}>
             <ActionCard channelId={channelId} streamState={streamState ?? null} availabilityReason={availabilityReason} />

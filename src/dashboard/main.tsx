@@ -615,7 +615,7 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, onNavigate,
 const OverviewPage = ({ channelState, onNavigate }: { channelState: LoadState<PanelChannelState[]>; onNavigate: (route: DashboardRoute) => void }): ReactElement => {
   const texts = dashboardTexts();
   const channels = channelState.data ?? [];
-  const status = channelState.status === "success"
+  const status = channelState.data !== null
     ? channels.length === 0 ? "empty" : "success"
     : channelState.status === "error" ? "error" : "loading";
   return (

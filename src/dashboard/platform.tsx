@@ -23,7 +23,7 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, LoadState as LoadStateView, notify, PageHeader, Select, Skeleton, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
+import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, LoadState as LoadStateView, notify, PageHeader, Select, Skeleton, SubInspector, Switch, Tabs, useInspectorSelection, type SelectOption } from "./ui";
 import { MemberGrantEditor } from "./member-grant-editor";
 import { StateRow, type StateTone } from "./module-panels";
 
@@ -583,42 +583,52 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
       <PageHeader kind="platform" title={texts.title} subtitle={texts.subtitle(formatNumber(overview.data?.length ?? 0))} actions={
         <Button ref={channelReleaseButton} variant="primary" icon="add" onClick={openChannelRelease}>{texts.releaseChannel}</Button>
       } />
-      <PlatformAudit auditState={audit} channels={overview.data ?? []} onLoadMore={() => { void loadMoreAudit(); }} loadingMore={auditLoadingMore} />
-      <section className="config-section" aria-label={texts.channelOverview}>
-        <ListDetail
-          list={
-            <div>
-              <InspectorHeading level="h2" title={texts.channelOverview} />
-              <LoadStateView
-                status={overviewStatus}
-                minHeight={360}
-                loading={<Skeleton rows={6} height={34} />}
-                empty={<p className="muted">{texts.noChannels}</p>}
-                error={<Skeleton rows={6} height={34} />}
-              >{overview.data === null || overview.data.length === 0 ? null : (
-                <div className="table-wrap">
-                  <table className={`table table--content platform-channel-table${inspectorOpen ? " platform-channel-table--inspector-open" : ""}`}>
-                    <thead><tr><th scope="col">{texts.login}</th>{inspectorOpen ? null : <th scope="col">{texts.identifier}</th>}<th scope="col" title={texts.fullConsent}>{texts.fullConsentColumn}</th><th scope="col" title={`${texts.broadcaster} · ${texts.manager} · ${texts.operator}`}>{texts.members}</th><th scope="col">{inspectorOpen ? texts.identityShort : texts.identity}</th></tr></thead>
-                    <tbody>{overview.data.map((channel) => {
-                      const roleCountsTitle = `${texts.broadcaster} · ${texts.manager} · ${texts.operator}`;
-                      return <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}>
-                        <th scope="row" title={inspectorOpen ? channel.channelId : channel.login}>{channel.login}</th>
-                        {inspectorOpen ? null : <td className="mono" title={channel.channelId}>{channel.channelId}</td>}
-                        <td>{channel.fullConsent ? texts.yes : texts.no}</td>
-                        <td className="number" title={roleCountsTitle}>{[channel.memberCounts.broadcaster, channel.memberCounts.manager, channel.memberCounts.operator].map(formatNumber).join(" · ")}</td>
-                        <td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel, inspectorOpen)}</span></span></td>
-                      </tr>;
-                    })}</tbody>
-                  </table>
+      <Tabs className="platform-tabs" defaultValue="channels" keepMounted={false}>
+        <Tabs.List className="platform-tabs__list" aria-label={texts.title}>
+          <Tabs.Tab className="platform-tabs__tab" value="channels">{texts.channels}</Tabs.Tab>
+          <Tabs.Tab className="platform-tabs__tab" value="audit">{texts.auditTab}</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel className="platform-tabs__panel" value="channels">
+          <section className="config-section" aria-label={texts.channelOverview}>
+            <ListDetail
+              list={
+                <div>
+                  <InspectorHeading level="h2" title={texts.channelOverview} />
+                  <LoadStateView
+                    status={overviewStatus}
+                    minHeight={360}
+                    loading={<Skeleton rows={6} height={34} />}
+                    empty={<p className="muted">{texts.noChannels}</p>}
+                    error={<Skeleton rows={6} height={34} />}
+                  >{overview.data === null || overview.data.length === 0 ? null : (
+                    <div className="table-wrap">
+                      <table className={`table table--content platform-channel-table${inspectorOpen ? " platform-channel-table--inspector-open" : ""}`}>
+                        <thead><tr><th scope="col">{texts.login}</th>{inspectorOpen ? null : <th scope="col">{texts.identifier}</th>}<th scope="col" title={texts.fullConsent}>{texts.fullConsentColumn}</th><th scope="col" title={`${texts.broadcaster} · ${texts.manager} · ${texts.operator}`}>{texts.members}</th><th scope="col">{inspectorOpen ? texts.identityShort : texts.identity}</th></tr></thead>
+                        <tbody>{overview.data.map((channel) => {
+                          const roleCountsTitle = `${texts.broadcaster} · ${texts.manager} · ${texts.operator}`;
+                          return <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}>
+                            <th scope="row" title={inspectorOpen ? channel.channelId : channel.login}>{channel.login}</th>
+                            {inspectorOpen ? null : <td className="mono" title={channel.channelId}>{channel.channelId}</td>}
+                            <td>{channel.fullConsent ? texts.yes : texts.no}</td>
+                            <td className="number" title={roleCountsTitle}>{[channel.memberCounts.broadcaster, channel.memberCounts.manager, channel.memberCounts.operator].map(formatNumber).join(" · ")}</td>
+                            <td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel, inspectorOpen)}</span></span></td>
+                          </tr>;
+                        })}</tbody>
+                      </table>
+                    </div>
+                  )}</LoadStateView>
                 </div>
-              )}</LoadStateView>
-            </div>
-          }
-          inspector={selectedChannel === null ? null
-            : <ChannelInspector key={selectedChannel.channelId} channel={selectedChannel} onAuthenticationRequired={onAuthenticationRequired} onReloadOverview={loadOverview} onClose={closeChannel} />}
-          onCloseInspector={closeFloating}
-        />
-      </section>
+              }
+              inspector={selectedChannel === null ? null
+                : <ChannelInspector key={selectedChannel.channelId} channel={selectedChannel} onAuthenticationRequired={onAuthenticationRequired} onReloadOverview={loadOverview} onClose={closeChannel} />}
+              onCloseInspector={closeFloating}
+            />
+          </section>
+        </Tabs.Panel>
+        <Tabs.Panel className="platform-tabs__panel" value="audit">
+          <PlatformAudit auditState={audit} channels={overview.data ?? []} onLoadMore={() => { void loadMoreAudit(); }} loadingMore={auditLoadingMore} />
+        </Tabs.Panel>
+      </Tabs>
       <ChannelRelease opened={channelReleaseOpen} onReloadOverview={loadOverview} onAuthenticationRequired={onAuthenticationRequired} onClose={closeChannelRelease} />
     </section>
   );

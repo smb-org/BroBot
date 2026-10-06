@@ -229,6 +229,7 @@ describe("Platform level", () => {
 
     render(<DashboardApp />);
 
+    fireEvent.click(await screen.findByRole("tab", { name: "Audit" }));
     const audit = await screen.findByRole("region", { name: "Betreiber-Audit" });
     expect(await within(audit).findByText("Betreiber · Esembe")).toBeInTheDocument();
     expect(await within(audit).findByText("Betreiber · gelöscht")).toBeInTheDocument();

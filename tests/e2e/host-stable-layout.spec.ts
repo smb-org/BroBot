@@ -47,6 +47,7 @@ interface RequestGate {
 type ChannelGates = Partial<Record<"settings" | "members" | "audit" | "events" | "overlays" | "legacyTokens" | "variables" | "modules", RequestGate>>;
 
 interface ChannelMockData {
+  channelList?: readonly Record<string, unknown>[];
   settings?: Record<string, unknown>;
   members?: { members: readonly Record<string, unknown>[]; nextCursor: string | null };
   audit?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
@@ -65,7 +66,7 @@ const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: C
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [channel], bot: channel.bot }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: data.channelList ?? [channel], bot: channel.bot }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/overview`) {
@@ -373,6 +374,7 @@ test("platform audit and member controls stay above their growing lists", async 
 
   await page.goto("/platform");
   await auditStarted;
+  await page.getByRole("tab", { name: "Audit" }).click();
   const auditControlBefore = await measureBox(page, ".platform-audit__pagination-slot");
   releaseAudit();
   await expect(page.locator(".platform-audit__pagination-slot button")).toBeVisible();
@@ -382,6 +384,7 @@ test("platform audit and member controls stay above their growing lists", async 
   expect(await measureBox(page, ".platform-audit__pagination-slot")).toEqual(auditControlBefore);
   expect(auditControlBefore[1] + auditControlBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".platform-audit__pagination-slot + .ui-load-state"))[1]);
 
+  await page.getByRole("tab", { name: "Channels" }).click();
   await page.locator(".platform-channel-table tbody tr").click();
   await membersStarted;
   const grantEditor = page.locator('.platform-inspector-section[aria-label="Add member"]');
@@ -394,31 +397,35 @@ test("platform audit and member controls stay above their growing lists", async 
   expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".platform-members-table"))[1]);
 });
 
-test("platform audit controls stay above populated channel and audit lists at desktop and mobile widths", async ({ page }) => {
+test("platform tabs isolate populated channel and audit lists at desktop and mobile widths", async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    let releaseOverview!: () => void;
-    let markOverviewStarted!: () => void;
-    const overviewGate = new Promise<void>((resolve) => { releaseOverview = resolve; });
-    const overviewStarted = new Promise<void>((resolve) => { markOverviewStarted = resolve; });
-    await installPlatformMocks(page, { overview: { wait: overviewGate, started: markOverviewStarted } }, fullPlatformChannels);
+    await installPlatformMocks(page, {}, fullPlatformChannels);
 
     await page.goto("/platform");
-    await overviewStarted;
+    const channelTab = page.getByRole("tab", { name: "Channels" });
+    const auditTab = page.getByRole("tab", { name: "Audit" });
+    await expect(channelTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator(".platform-channel-table tbody tr")).toHaveCount(30);
+    await expect(page.getByRole("button", { name: "Release channel" })).toBeVisible();
+    await expect(page.locator(".platform-tabs [role='tabpanel']:visible")).toHaveCount(1);
+    const channelControls = await measureDocumentBox(page, ".platform-tabs__list");
+    const channelList = await measureDocumentBox(page, ".platform-channel-table");
+    expect(channelControls[1] + channelControls[3]).toBeLessThanOrEqual(channelList[1]);
+    await expect(page.locator(".platform-tabs__panel .platform-audit__pagination-slot")).toHaveCount(0);
+
+    await auditTab.click();
     const auditControl = page.locator(".platform-audit__pagination-slot");
     const auditList = page.locator(".platform-audit__pagination-slot + .ui-load-state");
-    const controlBefore = await measureDocumentBox(page, ".platform-audit__pagination-slot");
-
-    releaseOverview();
-    await expect(page.locator(".platform-channel-table tbody tr")).toHaveCount(30);
+    await expect(auditTab).toHaveAttribute("aria-selected", "true");
     await expect(auditControl.getByRole("button", { name: "Load more" })).toBeVisible();
     await expect(auditList).toHaveAttribute("data-status", "success");
     await expect(auditList.locator(".table tbody tr")).toHaveCount(50);
-    expect(await measureDocumentBox(page, ".platform-audit__pagination-slot")).toEqual(controlBefore);
-    const auditAfter = await measureDocumentBox(page, ".platform-audit__pagination-slot + .ui-load-state");
-    expect(controlBefore[1] + controlBefore[3]).toBeLessThanOrEqual(auditAfter[1]);
-    const channelsAfter = await measureDocumentBox(page, ".platform-channel-table");
-    expect(auditAfter[1] + auditAfter[3]).toBeLessThanOrEqual(channelsAfter[1]);
+    await expect(page.locator(".platform-tabs [role='tabpanel']:visible")).toHaveCount(1);
+    await expect(page.locator(".platform-channel-table")).toHaveCount(0);
+    const auditControls = await measureDocumentBox(page, ".platform-audit__pagination-slot");
+    const auditRows = await measureDocumentBox(page, ".platform-audit__pagination-slot + .ui-load-state");
+    expect(auditControls[1] + auditControls[3]).toBeLessThanOrEqual(auditRows[1]);
     await page.unrouteAll();
   }
 });
@@ -614,6 +621,15 @@ test("immediate-action cards keep their reserved strip height after a shoutout f
     const before = await measureDocumentBox(page, ".stream-manager-actions");
     const cardsBefore = await Promise.all(Array.from({ length: 3 }, (_, index) => measureBox(page, `.stream-manager-action:nth-child(${String(index + 1)})`)));
     expect(cardsBefore.map((box) => box[3])).toEqual([192, 192, 192]);
+    expect(cardsBefore.map((box) => box[2])).toEqual([300, 300, 300]);
+    await expect(strip).toHaveAttribute("tabindex", "0");
+    expect(await strip.evaluate((element) => getComputedStyle(element).scrollSnapType)).toContain("x mandatory");
+    if (width === 390) {
+      expect(await strip.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+      await strip.focus();
+      await page.keyboard.press("ArrowRight");
+      await expect.poll(() => strip.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    }
 
     await page.getByRole("textbox", { name: "Twitch login" }).fill("someone");
     await page.getByRole("button", { name: "Send shoutout" }).click();
@@ -623,7 +639,7 @@ test("immediate-action cards keep their reserved strip height after a shoutout f
   }
 });
 
-test("immediate-action strip reserves every registry card until module data arrives at desktop and mobile widths", async ({ page }) => {
+test("immediate-action strip keeps a fixed row through module loading and one enabled action at desktop and mobile widths", async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     let releaseModules!: () => void;
@@ -631,7 +647,7 @@ test("immediate-action strip reserves every registry card until module data arri
     const modulesGate = new Promise<void>((resolve) => { releaseModules = resolve; });
     const modulesStarted = new Promise<void>((resolve) => { markModulesStarted = resolve; });
     await installChannelMocks(page, { modules: { wait: modulesGate, started: markModulesStarted } }, {
-      modules: ["ads", "clips", "raid"].map((id) => ({ id, enabled: true, settings: "{}" })),
+      modules: [{ id: "raid", enabled: true, settings: "{}" }],
     });
 
     await page.goto(`/channels/${channelId}/overview`);
@@ -639,13 +655,56 @@ test("immediate-action strip reserves every registry card until module data arri
     const strip = page.locator(".stream-manager-actions");
     await expect(strip.locator(":scope > .stream-manager-action--loading")).toHaveCount(3);
     const before = await measureDocumentBox(page, ".stream-manager-actions");
-    expect(before[3]).toBe(width === 390 ? 608 : 192);
+    expect(before[3]).toBe(192);
 
     releaseModules();
     await expect(page.getByRole("textbox", { name: "Twitch login" })).toBeVisible();
     await expect(strip.locator(":scope > .stream-manager-action--loading")).toHaveCount(0);
-    await expect(strip.locator(":scope > .stream-manager-action")).toHaveCount(3);
+    await expect(strip.locator(":scope > .stream-manager-action")).toHaveCount(1);
     expect(await measureDocumentBox(page, ".stream-manager-actions")).toEqual(before);
+    const card = await measureBox(page, ".stream-manager-action");
+    expect(card[2]).toBe(300);
+    expect(card[3]).toBe(192);
+    await page.unrouteAll();
+  }
+});
+
+test("background channel refresh keeps populated overview cards through loading and failure", async ({ page }) => {
+  const secondChannel = {
+    ...channel,
+    channelId: "stable-host-layout-second",
+    login: "stable-channel-second",
+    displayName: "Stable Channel Second",
+  };
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installChannelMocks(page, {}, { channelList: [channel, secondChannel] });
+    await page.goto("/");
+    const grid = page.locator(".module-grid");
+    await expect(grid.locator(":scope > .module-tile")).toHaveCount(2);
+    const before = await measureDocumentBox(page, ".module-grid");
+
+    let releaseRefresh!: () => void;
+    let markRefreshStarted!: () => void;
+    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    const refreshStarted = new Promise<void>((resolve) => { markRefreshStarted = resolve; });
+    await page.route("**/api/channels", async (route) => {
+      markRefreshStarted();
+      await refreshGate;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "channels_unavailable" }) });
+    });
+
+    await page.evaluate(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    await refreshStarted;
+    await expect(page.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
+    await expect(grid.locator(":scope > .module-tile")).toHaveCount(2);
+    expect(await measureDocumentBox(page, ".module-grid")).toEqual(before);
+
+    releaseRefresh();
+    await expect(page.locator(".ui-toast--error")).toBeVisible();
+    await expect(page.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
+    await expect(grid.locator(":scope > .module-tile")).toHaveCount(2);
+    expect(await measureDocumentBox(page, ".module-grid")).toEqual(before);
     await page.unrouteAll();
   }
 });

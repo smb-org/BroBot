@@ -130,9 +130,9 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
   border-bottom: 1px solid var(--line);
 }
 
-.stream-manager-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s4); min-height: 192px; }
+.stream-manager-actions { display: flex; flex-flow: row nowrap; align-items: stretch; gap: var(--s4); width: 100%; height: 192px; min-height: 192px; max-height: 192px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; }
 .stream-manager-action {
-  display: flex; flex-direction: column; gap: var(--s3); min-width: 0; width: 100%; height: 192px; min-height: 192px; overflow-y: auto;
+  display: flex; flex: 0 0 300px; flex-direction: column; gap: var(--s3); min-width: 300px; width: 300px; height: 192px; min-height: 192px; max-height: 192px; overflow-y: auto; scroll-snap-align: start;
   padding: var(--s4); border: 1px solid var(--line-strong); border-radius: var(--r-container);
 }
 .stream-manager-action--loading { justify-content: flex-start; }
@@ -143,9 +143,12 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .stream-manager-action__button { width: 100%; margin-top: auto; }
 .stream-manager-action > .form-success,
 .stream-manager-action > .form-error { margin: 0; }
-@media (max-width: 768px) {
-  .stream-manager-actions { grid-template-columns: minmax(0, 1fr); }
-}
+.platform-tabs { width: min(var(--dashboard-content-width), 100%); }
+.platform-tabs__list { gap: var(--s2); border-bottom: 1px solid var(--line); }
+.platform-tabs__tab { min-height: 44px; padding-inline: var(--s4); border: 1px solid transparent; color: var(--text-2); }
+.platform-tabs__tab:hover { background: var(--surface-hover); color: var(--text); }
+.platform-tabs__tab[data-active] { border-color: transparent transparent var(--brand-text); color: var(--brand-text); }
+.platform-tabs__panel { padding-top: var(--s4); }
 .stream-manager-feed { display: grid; width: min(var(--dashboard-content-width), 100%); height: 132px; min-height: 132px; max-height: 132px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
 .stream-manager-feed > li { min-width: 0; border-bottom: 1px solid var(--line); }
 .stream-manager-feed__item { display: flex; align-items: center; gap: var(--s2); }
