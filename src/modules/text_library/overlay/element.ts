@@ -1,5 +1,7 @@
 import { TEXT_BLOCK_NAME_PATTERN } from "../contracts";
 import { textBlockOverlayEditorTexts } from "./locale";
+import { previewStateFor } from "./preview-state";
+import type { JsonObject, ModuleLanguage } from "../../contract";
 
 const editorTexts = textBlockOverlayEditorTexts;
 
@@ -10,6 +12,11 @@ export const textBlockOverlayElement = {
   configVersion: 1,
   defaultSize: { width: 360, height: 96 },
   defaultConfig: { blockName: "" },
+  previewState: (config: JsonObject, language: ModuleLanguage, now: number): JsonObject => {
+    const blockName = typeof config.blockName === "string" ? config.blockName : "";
+    const labels = textBlockOverlayEditorTexts[language];
+    return previewStateFor(blockName.length === 0 ? labels.previewPlaceholder : blockName, labels.sampleValues, now);
+  },
   editorLabel: { de: editorTexts.de.label, en: editorTexts.en.label },
   editorAddLabel: { de: editorTexts.de.addLabel, en: editorTexts.en.addLabel },
   editorModuleLabel: { de: editorTexts.de.moduleLabel, en: editorTexts.en.moduleLabel },

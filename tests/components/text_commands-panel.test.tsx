@@ -436,7 +436,8 @@ describe("Text command editor", () => {
     expect(minimum).toHaveAttribute("aria-invalid", "true");
     expect(maximum).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Dauer: Die Dauer muss zwischen 1 s und 14 Tagen liegen; das Minimum darf das Maximum nicht überschreiten." }));
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getByRole("button", { name: "Dauer: Die Dauer muss zwischen 1 s und 14 Tagen liegen; das Minimum darf das Maximum nicht überschreiten." }));
     expect(minimum).toHaveFocus();
   });
 
@@ -913,7 +914,8 @@ describe("Text command editor", () => {
     expect(screen.getByRole("combobox", { name: "Aliase" })).toBeDisabled();
     fireEvent.click(save);
 
-    const aliasError = screen.getByRole("button", { name: "Aliase: Das ist schon der Name." });
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const aliasError = within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getByRole("button", { name: "Aliase: Das ist schon der Name." });
     fireEvent.click(aliasError);
     expect(screen.getByRole("button", { name: "Alias !alias5 entfernen" })).toHaveFocus();
     expect(screen.getByRole("button", { name: "Alias !alias5 entfernen" })).toBeEnabled();

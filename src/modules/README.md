@@ -29,7 +29,10 @@ Die äußerste Ansicht liegt in `.module-stack` (normalerweise als `<section>`
 mit `aria-label`). Diese Hülle ist die Gestaltungskonvention des Hosts: Sie
 vererbt die Regeln für Beschriftungen, Eingabefelder, Textareas, Selects und
 Hinweise an die Modul-Ansicht. Ohne `.module-stack` bleibt eine neue Ansicht
-unformatiert und fällt auf das Browser-Standardaussehen zurück.
+unformatiert und fällt auf das Browser-Standardaussehen zurück. Panel-Autoren
+übernehmen außerdem die Regeln aus [DESIGN.md, „Stabile Layouts"](../../DESIGN.md#stabile-layouts):
+Statuswechsel belegen reservierte Zeilen oder erscheinen als Toast-Overlay,
+und Lade-, Leer- und Fehlerzustände behalten dieselbe Mindesthöhe.
 
 Eine Konfigurationsfläche teilt ihren Inhalt in `.config-section`-Abschnitte.
 Jeder Abschnitt beginnt mit einer Überschrift in `.section-heading`, die von
@@ -42,17 +45,26 @@ Für wiederkehrende Panel-Inhalte stellt `src/dashboard/ui` `InspectorSection`,
 `InspectorFieldRow`, `InspectorActions`, `ActionMenu`, `Badge` und `FilterBar`
 bereit. Inspektorabschnitte verwenden kurze Haarlinien-Überschriften;
 Feldzeilen setzen das Label links und füllen die rechte Kontrollspalte. Hilfen
-stehen am Info-Symbol, Speichern und Verwerfen bleiben am Inspektorfuß.
-Zerstörende Handlungen stehen an ihrem Objekt: als letzter roter Menüpunkt nach
+stehen am Info-Symbol, Speichern und Verwerfen bleiben am Inspektorfuß, und
+zerstörende Handlungen stehen an ihrem Objekt: als letzter roter Menüpunkt nach
 einer Trennlinie bei einer Zeile oder ohne eigene Überschrift im
-`InspectorActions`-Fuß des geöffneten Objekts. Beide fragen mit `ConfirmDialog`
-nach; der Titel nennt das Objekt als Frage, die Beschreibung nennt in einem Satz
-die Folge und die Bestätigung nennt Verb und Objekt. Entwurfsschritte bleiben
-neutral und ohne Nachfrage. Gesperrte Aktionen bleiben sichtbar und deaktiviert;
-der Grund steht einmal am Abschnitt. Tabellen zeigen Status-Badges; ihre Spalten
-folgen dem Inhalt und kurze Werte werden nicht abgeschnitten. Module importieren
-diese Bauteile aus dem UI-Seam; der Host enthält keine modulabhängigen
-Sonderfälle.
+`InspectorActions`-Fuß des geöffneten Objekts. Zerstörende Aktionen fragen mit
+`ConfirmDialog` nach; der Titel nennt das Objekt als Frage, die Beschreibung
+nennt in einem Satz die Folge und die Bestätigung nennt Verb und Objekt.
+Entwurfsschritte bleiben neutral und ohne Nachfrage. Gesperrte Aktionen bleiben
+sichtbar und deaktiviert; der Grund steht einmal am Abschnitt. Tabellen zeigen
+Status-Badges; ihre Spalten folgen dem Inhalt und kurze Werte werden nicht
+abgeschnitten. Module importieren diese Bauteile und den Toast-Helfer aus dem
+UI-Seam, nie direkt aus Mantine:
+
+```ts
+import { notify } from "../../../dashboard/ui";
+
+notify({ tone: "success", message: labels.saved });
+```
+
+Der Toast-Host sitzt einmal im Dashboard-Shell; der Host enthält keine
+modulabhängigen Sonderfälle.
 
 Eine Tabelle mit wählbaren Zeilen und ihrem Inspektor verwendet das gemeinsame
 `ListDetail`: Die Ansicht übergibt `list` und `inspector`, die Komponente hält
@@ -144,6 +156,13 @@ Abhängige Schreibvorgänge (z. B. ein Testergebnis) sichern sich mit der opaken
 wiederholt sich nie (zufällige IV, auch nach Löschen und Neuanlegen) und gibt den
 Klartext nicht preis; nur auf Gleichheit prüfen, nie loggen oder ausliefern.
 Overlay-`initialState` erhält keinen Secret-Zugriff.
+
+Alarme mit externen Datenquellen verwenden das gemeinsame
+`ModuleAlarmContext.externalFetchBudget`. Erwartbare Anbieterfehler werden als
+modulinterner Zustand gespeichert und nicht geworfen, wenn der Host sie weder
+loggen noch mit seinem Alarm-Backoff wiederholen soll. Phasenwechsel können
+über `ModuleAlarmContext.writeDiagnostics` in das Ereignisprotokoll geschrieben
+werden; Details bleiben dabei auf feste Codes begrenzt.
 
 Die Sonnendatenquelle liegt eigenständig unter `src/modules/sun/`. Sie nutzt
 Open-Meteo-Geocoding über den Host für die Standortsuche. Der Host speichert
@@ -462,7 +481,9 @@ Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
 
 `overlayElements` deklariert pro Element einen eindeutigen, mit der Modulkennung
 präfigierten `kind`, eine `configVersion`, `defaultSize`, `parseConfig` und
-`load`. Der Render-Code wird mit `import()` geladen; ein optionaler Editor
+`load`. `previewState` kann einen sprachabhängigen Beispielzustand für die
+Kompositionsvorschau aus Konfiguration, Kanalsprache und aktuellem Zeitpunkt
+erzeugen. Der Render-Code wird mit `import()` geladen; ein optionaler Editor
 verwendet ebenfalls einen Lazy Loader. `initialState` erhält D1-Binding,
 Kanalkennung und validierte Konfiguration und läuft beim Bootstrap nur, wenn
 das Modul im Kanal aktiviert ist. Der Host speichert `kind` und Konfiguration

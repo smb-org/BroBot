@@ -15,9 +15,11 @@ export interface ChatPreviewProps {
 export function ChatPreview({ label, speaker, text, countLabel }: ChatPreviewProps): ReactElement {
   return (
     <div className="ui-chat-preview">
-      <span className="ui-chat-preview__label">{label}</span>
-      <span className="ui-chat-preview__speaker">{speaker}</span>
-      <span className="ui-chat-preview__text">{text}</span>
+      <div className="ui-chat-preview__heading">
+        <span className="ui-chat-preview__label">{label}</span>
+        <span className="ui-chat-preview__speaker">{speaker}</span>
+      </div>
+      <span className="ui-chat-preview__text" title={text}>{text}</span>
       <span className="ui-chat-preview__count">{countLabel}</span>
     </div>
   );

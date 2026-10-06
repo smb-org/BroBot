@@ -1,7 +1,11 @@
 import type { ReactNode } from "react";
 
+import { useEffect, useRef } from "react";
+
 import { Button } from "./Button";
 import { Icon } from "./Icon";
+import { TruncatedText } from "./TruncatedText";
+import { notify } from "./toast-store";
 import { colors } from "./theme";
 
 export interface SaveBarProps {
@@ -53,6 +57,20 @@ export function SaveBar({
   saveDescribedBy,
   saveTitle,
 }: SaveBarProps) {
+  const lastToastedMessage = useRef<string | null>(null);
+  const longError = conflict?.message ?? error;
+  const visible = persistent || dirty || saved;
+
+  useEffect(() => {
+    if (!visible || longError === undefined || longError.length < 80) {
+      lastToastedMessage.current = null;
+      return;
+    }
+    if (lastToastedMessage.current === longError) return;
+    lastToastedMessage.current = longError;
+    notify({ tone: "error", message: longError });
+  }, [longError, visible]);
+
   if (!persistent && !dirty && !saved) return null;
 
   const warningStatus = warnings.length === 0 ? null : warningStatusLabel?.(warnings, saved && !dirty) ?? warnings[0];
@@ -72,33 +90,37 @@ export function SaveBar({
   const invalidAction = persistent && invalid && dirty && !pending && conflict === undefined;
   const saveDisabled = pending || conflict !== undefined || !dirty;
   const showButtons = dirty || persistent;
-
   return (
     <div className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}`} aria-busy={pending}>
       <div className="ui-save-bar__status" role="status" aria-live="polite">
         {warningStatus !== null && statusText === warningStatus || warningStatus !== null && saved && !dirty ? <Icon name="warning" size={16} /> : null}
         <div className="ui-save-bar__message" style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
-          {statusText}
+          {typeof statusText === "string" ? <TruncatedText className="ui-save-bar__message-copy" text={statusText} /> : statusText}
         </div>
-        {conflict === undefined ? null : <Button variant="neutral" icon="reload" onClick={conflict.onReload}>{conflict.reloadLabel}</Button>}
+        {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}
       </div>
-      {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer">{footer}</div>}
       {showButtons || destructive !== undefined ? (
         <div className={`ui-save-bar__actions${destructive === undefined ? "" : " ui-save-bar__actions--destructive"}`}>
           {destructive}
-          <div className="ui-save-bar__buttons">
-            {dirty && conflict === undefined ? <Button variant="subtle" onClick={onDiscard} disabled={pending}>{discardLabel}</Button> : null}
+          {conflict === undefined ? <div className="ui-save-bar__buttons">
+            {showButtons ? <Button className="ui-save-bar__discard" variant="subtle" onClick={onDiscard} disabled={!dirty || pending} ariaLabel={discardLabel} title={discardLabel}>{discardLabel}</Button> : null}
             {showButtons ? <Button
+              className="ui-save-bar__save"
               variant={persistent && invalid ? "neutral" : "primary"}
               onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
               disabled={saveDisabled && !invalidAction}
               ariaDisabled={invalidAction}
+              ariaLabel={saveLabel}
+              title={saveLabel}
               {...(saveDescribedBy === undefined ? {} : { describedBy: saveDescribedBy })}
               {...(saveTitle === undefined ? {} : { title: saveTitle })}
             >
-              {saveLabel}
+              <span className="ui-save-bar__save-labels">
+                <span aria-hidden={pending}>{saveLabel}</span>
+                <span aria-hidden={!pending}>{pendingLabel}</span>
+              </span>
             </Button> : null}
-          </div>
+          </div> : <Button className="ui-save-bar__reload" variant="neutral" icon="reload" onClick={conflict.onReload}>{conflict.reloadLabel}</Button>}
         </div>
       ) : null}
     </div>

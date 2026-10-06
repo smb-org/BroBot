@@ -7,6 +7,7 @@ import type { TemplateVariableGroup } from "../../contracts/values";
 import { Button } from "./Button";
 import { ChatPreview } from "./ChatPreview";
 import { Icon } from "./Icon";
+import { TruncatedText } from "./TruncatedText";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 import {
   TemplateVariableGroupHeading,
@@ -325,11 +326,10 @@ export function TextArea({
   const description: ReactNode = (
     <div className="ui-textarea__description-content">
       <div className="ui-textarea__helper-row">
-        <span>{describedHelper(hint, disabledReason, `textarea-${id}`)}</span>
+        <span><TruncatedText text={hint} />{describedHelper(null, disabledReason, `textarea-${id}`)}</span>
         {countNode}
       </div>
-      {unknownAdvice.length > 0 || worstCaseExceeded ? (
-        <div className="ui-textarea__warnings" id={`${id}-warnings`}>
+      <div className="ui-textarea__warnings" id={`${id}-warnings`}>
           {unknownAdvice.map(({ tokenName, suggestion }, index) => {
             const token = unknownPieces.find((piece) => piece.text === `{${tokenName}}`);
             return (
@@ -347,8 +347,7 @@ export function TextArea({
           {worstCaseExceeded ? (
             <div className="ui-textarea__warning"><Icon name="warning" size={16} /><span>{messages.worstCaseLength(worstCase, maxLength)}</span></div>
           ) : null}
-        </div>
-      ) : null}
+      </div>
       {preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
         <ChatPreview label={previewLabel} speaker={previewSpeaker} text={previewText ?? ""} countLabel={messages.previewCountLabel(previewCount)} />
       )}
@@ -380,7 +379,7 @@ export function TextArea({
         description={description}
         descriptionProps={{ component: "div" }}
         inputWrapperOrder={["label", "input", "description", "error"]}
-        error={effectiveError === undefined ? undefined : `× ${effectiveError}`}
+        error={effectiveError === undefined ? undefined : <span><span aria-hidden="true">× </span><TruncatedText text={effectiveError} /></span>}
         withAsterisk={required}
       >
         <div ref={frameRef} className="template-field" data-composing={composing ? "true" : undefined} data-readonly={readOnly ? "true" : undefined}>

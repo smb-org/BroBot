@@ -22,6 +22,11 @@ export const catalogString = (catalog: object, key: string): string | undefined 
 export interface DashboardCommonTexts {
   cancel: string;
   close: string;
+  dismissNotification: string;
+  invalidFieldCount: (count: number) => string;
+  invalidFieldsTitle: string;
+  showInvalidFields: string;
+  hideInvalidFields: string;
   save: string;
   /** `EditorShell.discardLabel` -- reverts an editor draft to its last saved value. */
   discard: string;
@@ -43,6 +48,11 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   de: {
     cancel: "Abbrechen",
     close: "Schließen",
+    dismissNotification: "Benachrichtigung schließen",
+    invalidFieldCount: (count) => `${String(count)} ${count === 1 ? "Feld" : "Felder"} fehlerhaft`,
+    invalidFieldsTitle: "Fehlerhafte Felder",
+    showInvalidFields: "Fehlerhafte Felder anzeigen",
+    hideInvalidFields: "Fehlerhafte Felder verbergen",
     save: "Speichern",
     discard: "Verwerfen",
     saved: "Gespeichert.",
@@ -64,6 +74,11 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   en: {
     cancel: "Cancel",
     close: "Close",
+    dismissNotification: "Dismiss notification",
+    invalidFieldCount: (count) => `${String(count)} invalid ${count === 1 ? "field" : "fields"}`,
+    invalidFieldsTitle: "Invalid fields",
+    showInvalidFields: "Show invalid fields",
+    hideInvalidFields: "Hide invalid fields",
     save: "Save",
     discard: "Discard",
     saved: "Saved.",
@@ -2060,6 +2075,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.ban.failed": (detail) => `Bann für ${detailText(detail, "target", "unbekannte ID")} fehlgeschlagen: ${eventCauseText("host.ban.failed", detail, "de") ?? "unbekannter Grund"}`,
     "host.ban.ambiguous": (detail) => `Ausgang des Banns für ${detailText(detail, "target", "unbekannte ID")} unklar`,
     "host.clip.failed": "Clip fehlgeschlagen",
+    "belabox.fetch_failing": "BELABOX-Abruf fehlgeschlagen",
+    "belabox.fetch_recovered": "BELABOX-Abruf wiederhergestellt",
     "channel_events.raid.incoming": (detail) => `Raid von ${detailText(detail, "source", "unbekannt")} mit ${detailNumber(detail, "viewers", "unbekannter Anzahl")} Zuschauern`,
     "channel_events.raid.outgoing": (detail) => `Raid zu ${detailText(detail, "target", "unbekannt")} mit ${detailNumber(detail, "viewers", "unbekannter Anzahl")} Zuschauern`,
     "channel_events.shoutout.sent": (detail) => `Shoutout an ${detailText(detail, "target", "unbekannt")}`,
@@ -2171,6 +2188,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.ban.failed": (detail) => `Ban failed for ${detailText(detail, "target", "unknown ID")}: ${eventCauseText("host.ban.failed", detail, "en") ?? "unknown reason"}`,
     "host.ban.ambiguous": (detail) => `Ban outcome for ${detailText(detail, "target", "unknown ID")} is unclear`,
     "host.clip.failed": "Clip failed",
+    "belabox.fetch_failing": "BELABOX fetch failing",
+    "belabox.fetch_recovered": "BELABOX fetch recovered",
     "channel_events.raid.incoming": (detail) => `Raid from ${detailText(detail, "source", "unknown")} with ${detailNumber(detail, "viewers", "unknown number")} viewers`,
     "channel_events.raid.outgoing": (detail) => `Raid to ${detailText(detail, "target", "unknown")} with ${detailNumber(detail, "viewers", "unknown number")} viewers`,
     "channel_events.shoutout.sent": (detail) => `Shoutout sent to ${detailText(detail, "target", "unknown")}`,
@@ -2321,6 +2340,8 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "ads.snooze": { family: "operations", tier: "outlined", word: { de: "Snooze", en: "Snooze" }, numberKey: null, tone: "info" },
   "ads.commercial.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.clip.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "belabox.fetch_failing": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "belabox.fetch_recovered": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.cooldown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: "remainingSeconds", tone: "warning" },
   "text_commands.user_cooldown": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: "remainingSeconds", tone: "info" },
   "text_commands.stream_state": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },

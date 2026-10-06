@@ -341,6 +341,36 @@ Titelzeile und Tabelle): zu asketisch. Die Welt darf souverän sein, ohne bunt
 zu werden — die einzigen Farben bedeuten Zustand oder markieren den Ort des
 Bedieners.
 
+## Stabile Layouts
+
+Ein Zustandswechsel darf den Inhalt darunter nicht verschieben. Fehlermeldung,
+Hinweis, Ladezustand und Leerzustand erhalten vorab denselben Platz wie ihr
+Gegenstück, oder liegen als Overlay über der Arbeitsfläche. Ein neuer
+Statusblock wird nie ungeplant in den Fluss eingefügt. Abstände, Farben,
+Schrift und Radien verwenden ausschließlich die hier definierten Tokens.
+
+- **Toast:** Der Dashboard-Shell enthält genau einen Toast-Host. Erfolg und Info
+  schließen sich nach kurzer Zeit; Fehler bleiben bis zum Schließen stehen.
+  Fehler verwenden `aria-live="assertive"`, Erfolg und Info `polite`. Ein Toast
+  liegt über der Seite und verändert deren Höhe nicht.
+- **Formularplätze:** Feldfehler und Warnungen belegen eine feste Zeile, auch
+  wenn sie leer ist. Zähler stehen in einer nicht umbrechenden Spalte mit
+  mindestens `8ch`. Lange Hinweise kürzen visuell ab, bleiben aber über den
+  vollständigen Feldtext erreichbar.
+- **Vorschau:** Chattext erhält ein festes Fenster von ungefähr drei Zeilen und
+  kann darin scrollen. Der Zähler bleibt in einer eigenen, nicht umbrechenden
+  Spalte; der vollständige Text steht beim Überfahren als `title` bereit.
+- **Speicherleiste und Dialoge:** Die Speicherleiste bleibt 64 px hoch und
+  zeigt ihren Status in einer Ellipse mit vollständigem `title`. Verwerfen
+  bleibt sichtbar und wird deaktiviert, wenn nichts zu verwerfen ist. Dialoge
+  reservieren neben den Aktionen eine Fehlerzeile.
+- **Lade-, Leer- und Fehlerzustand:** `LoadState` hält für alle drei denselben
+  `minHeight`; ein Skeleton nimmt dieselbe vorgesehene Fläche ein wie der
+  geladene Inhalt. Beim Nachladen bleiben vorhandene Werte stehen.
+- **Editor-Abschnitte:** Ein fehlgeschlagener Speicherversuch öffnet keine
+  geschlossenen `<details>`. Der Editor scrollt zum Abschnitt, fokussiert seine
+  Zusammenfassung und markiert sie mit einem Fehlerabzeichen.
+
 **Key Characteristics:**
 - Mattschwarz (#141312) mit warmen Graustufen; vier Textstufen, kein Verlauf, kein Schatten.
 - Tasten sind Objekte mit 12 px Radius in dunklen Rinnen; Steuerelemente haben 6 px. Es gibt keinen dritten Radius.

@@ -3,13 +3,18 @@ import { readFileSync } from "node:fs";
 import { URL as NodeURL } from "node:url";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 
 import streamElementsFields from "../../docs/embedding/streamelements/fields.json?raw";
 import streamElementsHtml from "../../docs/embedding/streamelements/widget.html?raw";
 import streamElementsJs from "../../docs/embedding/streamelements/widget.js?raw";
 import { OverlaysPage } from "../../src/dashboard/OverlaysPage";
-import { UiProvider } from "../../src/dashboard/ui";
+import { UiProvider as BaseUiProvider } from "../../src/dashboard/ui";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { jsonResponse } from "../unit/fixtures";
+
+const UiProvider = ({ children }: { children: ReactNode }) => <BaseUiProvider><ToastHost />{children}</BaseUiProvider>;
 
 const overlay = {
   id: "overlay-a", channelId: "channel-a", name: "Gameplay", width: 1920, height: 1080, css: "", revision: 4,
@@ -55,6 +60,12 @@ const openActionMenu = async (row: HTMLElement, triggerLabel: string): Promise<H
   if (menu === null) throw new Error("Action menu is missing.");
   return menu;
 };
+const findToast = async (message: string): Promise<HTMLElement> => {
+  const text = await screen.findByText(message);
+  const toast = text.closest<HTMLElement>(".ui-toast");
+  if (toast === null) throw new Error(`Toast was not found for: ${message}`);
+  return toast;
+};
 const openAccessMenu = async (row: HTMLElement, accessName = "OBS Main PC"): Promise<HTMLElement> => {
   return await openActionMenu(row, `Aktionen für ${accessName}`);
 };
@@ -87,6 +98,7 @@ const setBrowserLanguage = (language: string): void => {
 describe("Overlays page", () => {
   afterEach(() => {
     cleanup();
+    for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.unstubAllGlobals();
     setBrowserLanguage("de-DE");
   });
@@ -195,6 +207,7 @@ describe("Overlays page", () => {
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} onOpenEditor={onOpenEditor} /></UiProvider>);
 
     const table = await screen.findByRole("table");
+    expect(document.querySelector(".overlays-feedback-slot")).not.toBeInTheDocument();
     expect(table.closest(".overlays-table-wrap")).not.toHaveClass("overlays-table-wrap--inspector-open");
     expect(within(table).getByText("Gameplay")).toBeInTheDocument();
     expect(within(table).getAllByText("1", { selector: "td" })).toHaveLength(2);
@@ -273,7 +286,7 @@ describe("Overlays page", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Alter Overlay-Link" }), { target: { value: legacyLink } });
     fireEvent.click(screen.getByRole("button", { name: "Link importieren" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Overlay „score“ wurde importiert.");
+    expect(await findToast("Overlay „score“ wurde importiert.")).toHaveAttribute("role", "status");
     const importCall = fetcher.mock.calls.find(([input]) => requestPath(input).endsWith("/overlays/import-legacy"));
     expect(importCall).toBeDefined();
     const [request, init] = importCall ?? [];
@@ -380,7 +393,7 @@ describe("Overlays page", () => {
     expect(within(dialog).getByRole("heading")).toHaveTextContent(title);
     expect(dialog).toHaveTextContent(consequence);
     fireEvent.click(within(dialog).getByRole("button", { name: confirm }));
-    expect(await screen.findByRole("status")).toHaveTextContent(language === "de-DE" ? "Zugang widerrufen." : "Access revoked.");
+    expect(await findToast(language === "de-DE" ? "Zugang widerrufen." : "Access revoked.")).toHaveAttribute("role", "status");
     expect(fetcher.mock.calls.some(([input, init]) => requestPath(input).endsWith("/access-a/revoke") && init?.method === "POST")).toBe(true);
 
     const revokedCount = language === "de-DE" ? "1 widerrufene Zugänge" : "1 revoked accesses";
@@ -400,7 +413,7 @@ describe("Overlays page", () => {
     await waitFor(() => {
       expect(fetcher.mock.calls.some(([input, init]) => requestPath(input).endsWith("/access-a") && init?.method === "DELETE")).toBe(true);
     });
-    expect(await screen.findByRole("status")).toHaveTextContent(language === "de-DE" ? "Zugang entfernt." : "Access removed.");
+    expect(await findToast(language === "de-DE" ? "Zugang entfernt." : "Access removed.")).toHaveAttribute("role", "status");
     expect(screen.queryByRole("dialog", { name: /Entfernen|Remove/u })).not.toBeInTheDocument();
     expect(within(revokedSection).queryByText("OBS Main PC", { selector: "strong" })).not.toBeInTheDocument();
   });
@@ -458,7 +471,7 @@ describe("Overlays page", () => {
     expect(within(dialog).getByRole("heading")).toHaveTextContent("Zugang „OBS Main PC“ widerrufen?");
     expect(dialog).toHaveTextContent("Quellen mit diesem Zugang verlieren sofort den Zugriff.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Zugang widerrufen: OBS Main PC" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Zugang widerrufen.");
+    expect(await findToast("Zugang widerrufen.")).toHaveAttribute("role", "status");
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-replaced/revoke"))).toBe(true);
   });
 
@@ -736,7 +749,7 @@ describe("Overlays page", () => {
     expect(dialog).toHaveTextContent("legacy-a");
     expect(within(dialog).getByRole("heading")).toHaveTextContent("Alten Link „Unbenannter Alt-Link (legacy-a)“ widerrufen?");
     fireEvent.click(within(dialog).getByRole("button", { name: "Alten Link widerrufen: Unbenannter Alt-Link (legacy-a)" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Zugang widerrufen.");
+    expect(await findToast("Zugang widerrufen.")).toHaveAttribute("role", "status");
     const revoke = fetcher.mock.calls.find(([input, init]) => requestPath(input).endsWith("/legacy-access-a/revoke") && init?.method === "POST");
     expect(revoke?.[1]?.body).toContain("Über Alte Links im Dashboard widerrufen");
     expect(screen.queryByRole("region", { name: "Alte Links (Konfiguration im Link)" })).not.toBeInTheDocument();
@@ -767,7 +780,7 @@ describe("Overlays page", () => {
     expect(dialog).not.toHaveTextContent("aaaaaaaa");
     fireEvent.click(within(dialog).getByRole("button", { name: confirmLabel }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(pendingMessage);
+    expect(await findToast(pendingMessage)).toHaveAttribute("role", "status");
     expect(fetcher.mock.calls.some(([input, init]) => requestPath(input).endsWith("/bbbbbbbb-second/revoke") && init?.method === "POST")).toBe(true);
     expect(fetcher.mock.calls.some(([input, init]) => requestPath(input).endsWith("/aaaaaaaa-first/revoke") && init?.method === "POST")).toBe(false);
   });

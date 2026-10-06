@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -6,6 +7,13 @@ const mocks = vi.hoisted(() => ({
   getAdSchedule: vi.fn(),
   getAppAccessToken: vi.fn(),
   helixRequest: vi.fn(),
+  createModuleSecretAccess: vi.fn(() => ({
+    status: () => Promise.resolve({ configured: true, updatedAt: "2026-10-05T00:00:00.000Z" }),
+    read: () => Promise.resolve("http://relay.belabox.net:8080/relay-key"),
+    readWithVersion: () => Promise.resolve({ value: "http://relay.belabox.net:8080/relay-key", version: "belabox-secret-version" }),
+    prepareWrite: () => Promise.reject(new Error("Not used in ChannelObject tests.")),
+    prepareDelete: () => { throw new Error("Not used in ChannelObject tests."); },
+  })),
 }));
 
 vi.mock("../../src/worker/ad-prewarning", () => mocks);
@@ -13,6 +21,13 @@ vi.mock("../../src/modules/ads/adapters/prewarning-alarm", () => ({ refreshAdPre
 vi.mock("../../src/modules/ads/adapters/ad-schedule", () => ({ getAdSchedule: mocks.getAdSchedule }));
 vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAccessToken }));
 vi.mock("../../src/worker/twitch/helix", () => ({ helixRequest: mocks.helixRequest }));
+vi.mock("../../src/worker/module-secrets", () => ({
+  createModuleSecretAccess: mocks.createModuleSecretAccess,
+  createModuleSecretReadAccess: vi.fn(() => ({
+    status: () => Promise.resolve({ configured: true, updatedAt: "2026-10-05T00:00:00.000Z" }),
+    read: () => Promise.resolve("http://relay.belabox.net:8080/relay-key"),
+  })),
+}));
 
 import type {
   RealtimeEnvelope,
@@ -22,11 +37,21 @@ import type {
 } from "../../src/realtime-contract";
 import { OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON } from "../../src/realtime-contract";
 import type { AdsSchedule } from "../../src/modules/ads/contracts";
-import type { BotModule, ModuleAlarmContext, ModuleAlarmDefinition, ModuleExternalFetchBudget } from "../../src/modules/contract";
+import type {
+  BotModule,
+  ModuleAlarmContext,
+  ModuleAlarmDefinition,
+  ModuleExecutionContext,
+  ModuleExternalFetchBudget,
+} from "../../src/modules/contract";
+import { belaboxModule } from "../../src/modules/belabox";
+import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
+import { getBelaboxStatus } from "../../src/modules/belabox/adapters/d1";
 import { votekickModule } from "../../src/modules/votekick";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { ballotVoterHash } from "../../src/worker/durable/ballots";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
+import { jsonResponse } from "../unit/fixtures";
 
 const validPrincipal = (
   overrides: Partial<RealtimePanelPrincipal> = {},
@@ -125,6 +150,7 @@ const objectFor = (
   sockets: SocketDouble[],
   database?: D1Database,
   values = new Map<string, unknown>(),
+  channelId = "kanal-a",
 ): ChannelObject => {
   let transactionQueue = Promise.resolve();
   const chatterRows = new Map<string, { hmac: string; first_seen_at: string; last_seen_at: string }>();
@@ -260,7 +286,7 @@ const objectFor = (
     ? sockets
     : sockets.filter((socket) => socket.tags.includes(tag)));
   const state = {
-    id: { name: "kanal-a" },
+    id: { name: channelId },
     setWebSocketAutoResponse: vi.fn(),
     getWebSockets,
     blockConcurrencyWhile: vi.fn(async <T>(closure: () => Promise<T>) => await closure()),
@@ -1410,6 +1436,174 @@ describe("ChannelObject realtime path", () => {
     await object.clearModuleAlarm("timers", "timer:timer-a", 4);
     await object.scheduleModuleAlarm("timers", "run", "timer:timer-a", 10_000, 3);
     expect(storageOf(object).values.get(alarmTableKey) ?? {}).not.toHaveProperty(alarmKey);
+  });
+
+  it("preserves an online ensure that arrives while a claimed poll decides to stop", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-10-05T12:00:00.000Z");
+    const nowIso = new Date(now).toISOString();
+    vi.setSystemTime(now);
+    const database = (env as unknown as { DB: D1Database }).DB;
+    const channelId = `belabox-claimed-poll-${crypto.randomUUID()}`;
+    await database.prepare(
+      `CREATE TABLE IF NOT EXISTS channels (
+        channel_id TEXT PRIMARY KEY, login TEXT NOT NULL, display_name TEXT NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      )`,
+    ).run();
+    await database.prepare(
+      `CREATE TABLE IF NOT EXISTS channel_modules (
+        channel_id TEXT NOT NULL, module_id TEXT NOT NULL, enabled INTEGER NOT NULL, settings TEXT NOT NULL,
+        PRIMARY KEY (channel_id, module_id)
+      )`,
+    ).run();
+    await database.prepare(
+      `CREATE TABLE IF NOT EXISTS channel_stream_state (
+        channel_id TEXT PRIMARY KEY, state TEXT NOT NULL, changed_at TEXT NOT NULL,
+        source TEXT NOT NULL, started_at TEXT, stream_id TEXT, checked_at TEXT
+      )`,
+    ).run();
+    await database.prepare(
+      `CREATE TABLE IF NOT EXISTS module_secrets (
+        channel_id TEXT NOT NULL, module_id TEXT NOT NULL, name TEXT NOT NULL, ciphertext TEXT NOT NULL,
+        key_id TEXT NOT NULL, revision INTEGER NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL,
+        PRIMARY KEY (channel_id, module_id, name)
+      )`,
+    ).run();
+    await database.prepare(
+      `CREATE TABLE IF NOT EXISTS belabox_status (
+        channel_id TEXT PRIMARY KEY, sampled_at TEXT, sample_json TEXT, error_code TEXT,
+        polling INTEGER NOT NULL DEFAULT 0, stream_id TEXT, belabox_stream_id TEXT,
+        fetch_phase_json TEXT NOT NULL DEFAULT '{}', recent_json TEXT NOT NULL DEFAULT '[]',
+        revision INTEGER NOT NULL DEFAULT 1
+      )`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).bind(channelId, channelId, channelId, nowIso, nowIso).run();
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
+    ).bind(channelId, JSON.stringify(BELABOX_DEFAULT_SETTINGS)).run();
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES (?, 'offline', ?, 'eventsub', NULL, NULL)`,
+    ).bind(channelId, nowIso).run();
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, 'old-stream', 'old-stream', '{}', '[]', 1)`,
+    ).bind(channelId).run();
+    await database.prepare(
+      `INSERT INTO module_secrets
+        (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
+       VALUES (?, 'belabox', ?, 'belabox-secret-version', 'test', 1, ?, 'tester')`,
+    ).bind(channelId, BELABOX_STATS_URL_SECRET, nowIso).run();
+
+    let releaseStreamRead!: () => void;
+    let streamReadStarted!: () => void;
+    let observedStreamRow: unknown;
+    let holdStreamRead = true;
+    const streamReadBlocked = new Promise<void>((resolve) => { releaseStreamRead = resolve; });
+    const streamReadStartedPromise = new Promise<void>((resolve) => { streamReadStarted = resolve; });
+    const databaseBinding = {
+      prepare: (sql: string) => {
+        const statement = database.prepare(sql);
+        if (!sql.includes("FROM channel_stream_state")) return statement;
+        return {
+          bind: (...values: unknown[]) => {
+            const bound = statement.bind(...values);
+            return {
+              first: async <Value>() => {
+                const row = await bound.first<Value>();
+                if (holdStreamRead) {
+                  holdStreamRead = false;
+                  observedStreamRow = row;
+                  streamReadStarted();
+                  await streamReadBlocked;
+                }
+                return row;
+              },
+            };
+          },
+        } as unknown as D1PreparedStatement;
+      },
+      batch: database.batch.bind(database),
+    } as unknown as D1Database;
+    const object = objectFor([], databaseBinding, new Map(), channelId);
+    const pollRegistration = belaboxModule.alarms?.find(({ key }) => key === "poll");
+    if (pollRegistration === undefined) throw new Error("BELABOX poll alarm registration missing.");
+    const pollAlarmHandler = vi.spyOn(pollRegistration, "handle");
+    await object.scheduleModuleAlarm("belabox", "poll", "poll", now);
+
+    const alarmErrors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const stoppingRun = object.alarm();
+    await streamReadStartedPromise;
+    await database.prepare(
+      `UPDATE channel_stream_state
+          SET state = 'online', changed_at = ?, source = 'eventsub', started_at = ?, stream_id = ?
+        WHERE channel_id = ?`,
+    ).bind(nowIso, nowIso, "stream-321", channelId).run();
+    const handleEvent = belaboxModule.handleEvent;
+    if (handleEvent === undefined) throw new Error("BELABOX event handler missing.");
+    await handleEvent({
+      channelId,
+      subscriptionType: "stream.online",
+      triggerId: "online-during-stop",
+      payload: { id: "stream-321" },
+      settings: BELABOX_DEFAULT_SETTINGS,
+      receivedAt: nowIso,
+      actor: null,
+      chatStatus: null,
+    }, {
+      DB: databaseBinding,
+      streamStateTransitionAccepted: true,
+      streamState: () => Promise.resolve("online"),
+      getAlarmDeadline: (key: string) => object.getModuleAlarmDeadline("belabox", key),
+      scheduleAlarm: (handlerKey: string, alarmKey: string, deadline: number, ownerRevision?: number) =>
+        object.scheduleModuleAlarm("belabox", handlerKey, alarmKey, deadline, ownerRevision),
+      clearAlarm: (key: string, ownerRevision?: number) => object.clearModuleAlarm("belabox", key, ownerRevision),
+    } as unknown as ModuleExecutionContext);
+    releaseStreamRead();
+    await stoppingRun;
+
+    expect(pollAlarmHandler).toHaveBeenCalledOnce();
+    expect(pollAlarmHandler.mock.calls[0]?.[1]).toBe("poll");
+    expect(observedStreamRow).toMatchObject({ state: "offline" });
+    expect(alarmErrors).not.toHaveBeenCalled();
+    expect(storageOf(object).values.get("channel:alarm_schedule")).toMatchObject({
+      "module:belabox:poll": { deadline: now, handler: "module:belabox:poll" },
+    });
+    expect(storageOf(object).values.get("channel:alarm_schedule")).not.toHaveProperty("module:belabox:poll.nextAttemptAt");
+    expect(await getBelaboxStatus(databaseBinding, channelId)).toMatchObject({
+      polling: false,
+      streamId: null,
+    });
+
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
+      publishers: {
+        "relay-key": {
+          connected: true,
+          bitrate: 3_200,
+          rtt: 41,
+          latency: 115,
+          network: 2,
+          dropped_pkts: 7,
+        },
+      },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+    await object.alarm();
+
+    expect(alarmErrors).not.toHaveBeenCalled();
+    expect(await getBelaboxStatus(databaseBinding, channelId)).toMatchObject({
+      polling: true,
+      streamId: "stream-321",
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(storageOf(object).values.get("channel:alarm_schedule")).toMatchObject({
+      "module:belabox:poll": { deadline: now + 15_000 },
+    });
   });
 
   it("suppresses a recovered module timeout after the module is disabled", async () => {

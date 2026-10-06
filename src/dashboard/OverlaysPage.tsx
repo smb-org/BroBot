@@ -26,7 +26,7 @@ import {
   type PanelOverlayToken,
 } from "./api";
 import { apiErrorText, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
-import { ActionMenu, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, NumberField, PageHeader, Select, SubInspector } from "./ui";
+import { ActionMenu, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, notify, NumberField, PageHeader, Select, SubInspector } from "./ui";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -238,7 +238,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(initialSelection ?? null);
   const selectedIdRef = useRef<string | null>(initialSelection ?? null);
   const [selectedOverlayData, setSelectedOverlayData] = useState<{
@@ -337,7 +336,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       }
     } catch (caught) {
       if (!isActive() || version !== requestVersion.current) return;
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
     } finally {
       if (isActive() && version === requestVersion.current) setLoading(false);
     }
@@ -353,7 +352,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setLegacyError(null);
     } catch (caught) {
       if (!pageActiveRef.current || legacyRequestVersion.current !== version || channelIdRef.current !== channelId) return;
-      setLegacyError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
     }
   }, [channelId, labels.loadError]);
 
@@ -387,7 +386,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setError(null);
     }).catch((caught: unknown) => {
       if (!active) return;
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
     });
     return () => { active = false; };
   }, [canManage, channelId, labels.loadError, selectedId]);
@@ -425,7 +424,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       changeSelection(created.overlay.id);
       await load();
     } catch (caught) {
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError });
     } finally {
       setPending(false);
     }
@@ -448,7 +447,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       changeSelection(null);
       setSelectedOverlayData(null);
       await load();
-      setNotice(result?.closingPending ? labels.revokedPending : null);
+      if (result?.closingPending) notify({ tone: "info", message: labels.revokedPending });
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.code === "overlay_changed_concurrently") {
         setError(labels.conflict);
@@ -483,7 +482,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       await load();
     } catch (caught) {
       if (secretContextIsCurrent(version, overlayId, requestedChannelId)) {
-        setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
+        notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError });
       }
     } finally {
       setPending(false);
@@ -516,7 +515,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       }
     } catch (caught) {
       if (accessContextIsCurrent(overlayId, requestedChannelId)) {
-        setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
+        notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError });
       }
     } finally {
       setPending(false);
@@ -540,7 +539,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       if (accessContextIsCurrent(overlayId, requestedChannelId)) setSetupCopiedUrl(true);
     } catch (caught) {
       if (accessContextIsCurrent(overlayId, requestedChannelId)) {
-        setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.copyError);
+        notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.copyError });
       }
     } finally {
       setPending(false);
@@ -553,7 +552,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setSetupCopiedSnippet(`${target}:${kind}`);
       setError(null);
     } catch {
-      setError(labels.copyError);
+      notify({ tone: "error", message: labels.copyError });
     }
   };
 
@@ -573,7 +572,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setReplaceTarget(null);
       await refreshSelected();
       await load();
-      setNotice(replacement.closingPending ? labels.revokedPending : null);
+      if (replacement.closingPending) notify({ tone: "info", message: labels.revokedPending });
     } catch (caught) {
       if (secretContextIsCurrent(version, overlayId, requestedChannelId)) {
         setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
@@ -590,7 +589,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     try {
       const result = await revokeOverlayAccess(channelId, selectedOverlay.id, revokeTarget.tokenId);
       setRevokeTarget(null);
-      setNotice(result.closingPending ? labels.revokedPending : labels.revoked);
+      notify(result.closingPending
+        ? { tone: "info", message: labels.revokedPending }
+        : { tone: "success", message: labels.revoked });
       invalidateSecret();
       await refreshSelected();
       await load();
@@ -608,13 +609,13 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     setError(null);
     try {
       await removeOverlayAccess(channelId, overlayId, access.tokenId);
-      setNotice(labels.removed);
+      notify({ tone: "success", message: labels.removed });
       if (setupAccessId === access.tokenId) setSetupAccessId(null);
       invalidateSecret();
       await refreshSelected();
       await load();
     } catch (caught) {
-      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError });
     } finally {
       setPending(false);
     }
@@ -636,7 +637,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       if (accessContextIsCurrent(overlayId, requestedChannelId)) setCopiedAccessId(access.tokenId);
     } catch (caught) {
       if (accessContextIsCurrent(overlayId, requestedChannelId)) {
-        setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.copyError);
+        notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.copyError });
       }
     } finally {
       setPending(false);
@@ -650,7 +651,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     try {
       const result = await revokeOverlayToken(channelId, legacyRevokeTarget.id, labels.legacyRevocationReason);
       setLegacyRevokeTarget(null);
-      setNotice(result.closingPending ? labels.revokedPending : labels.revoked);
+      notify(result.closingPending
+        ? { tone: "info", message: labels.revokedPending }
+        : { tone: "success", message: labels.revoked });
       await loadLegacyTokens();
     } catch (caught) {
       setLegacyError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
@@ -674,7 +677,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setLegacyImportLink("");
       changeSelection(result.overlay.id);
       await Promise.all([load(), loadLegacyTokens()]);
-      setNotice(result.closingPending ? labels.legacyImportClosingPending : labels.legacyImportSuccess(result.overlay.name));
+      notify(result.closingPending
+        ? { tone: "info", message: labels.legacyImportClosingPending }
+        : { tone: "success", message: labels.legacyImportSuccess(result.overlay.name) });
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.code === "overlay_token_not_found") {
         setLegacyImportError(labels.legacyImportTokenNotFound);
@@ -702,9 +707,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const legacyRevokeIdentity = legacyRevokeTarget === null
     ? labels.legacyTokenName
     : `${labels.legacyTokenName} (${legacyRevokeTarget.id.slice(0, 8)})`;
-  const confirmationOpen = confirmDelete || replaceTarget !== null || revokeTarget !== null || legacyRevokeTarget !== null;
-  const feedbackMessage = confirmationOpen ? null : error ?? legacyError ?? notice;
-  const feedbackIsError = !confirmationOpen && (error !== null || legacyError !== null);
   const list = <section className="overlays-page config-section" aria-label={labels.list}>
     {loading ? <p className="loading-line">{labels.loading}</p> : null}
     {!loading && overlays.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
@@ -712,8 +714,8 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       <table className="table overlays-table">
         <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.elements}</th><th scope="col">{labels.accesses}</th><th scope="col">{labels.lastUsedAt}</th></tr></thead>
         <tbody>{overlays.map((overlay) => <tr key={overlay.id} tabIndex={0} aria-selected={overlay.id === selectedId}
-          onClick={() => { setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); setNotice(null); }}
-          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); setNotice(null); } }}>
+          onClick={() => { setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); }}
+          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); } }}>
           <th scope="row">{overlay.name}</th>
           <td>{overlay.elementCount}</td>
           <td>{overlay.accessCount}</td>
@@ -878,13 +880,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         {manageReason === undefined ? null : <p id={createManagementReasonId} className="overlays-page__create-reason" role="note">{manageReason}</p>}
       </div>
     } />
-    <div className="overlays-feedback-slot" {...(feedbackMessage === null ? {} : {
-      role: feedbackIsError ? "alert" : "status",
-      "aria-live": feedbackIsError ? "assertive" : "polite",
-      "aria-atomic": "true",
-    })}>
-      <p className={feedbackIsError ? "form-error" : "muted"}>{feedbackMessage ?? "\u00a0"}</p>
-    </div>
     <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
     <ConfirmDialog opened={confirmDelete} title={labels.deleteTitle(selected?.name ?? "")} description={labels.deleteDescription(selected?.name ?? "")}
       confirmLabel={labels.deleteConfirm(selected?.name ?? "")} cancelLabel={labels.cancel} onCancel={() => { setConfirmDelete(false); }}

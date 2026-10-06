@@ -300,7 +300,7 @@ export const selectModulesForEvent = (
     }
     const mandatory = module.mandatory === true;
     if (!activation.enabled && !mandatory) continue;
-    if (paused && !mandatory) continue;
+    if (paused && !mandatory && !(module.pauseSafeEventSubTypes ?? []).includes(subscriptionType)) continue;
     if (!(module.eventSubTypes ?? []).includes(subscriptionType)) continue;
     matches.push({ module, settings: activation.settings });
     matchedModules.add(module.id);
@@ -982,12 +982,22 @@ export const dispatchEventSubNotification = async (
             scheduleAlarm: async (handlerKey, alarmKey, deadline, ownerRevision) => {
               if (environment.CHANNEL === undefined) return;
               const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
-              await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline, ownerRevision);
+              if (ownerRevision === undefined) {
+                await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline);
+              } else {
+                await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline, ownerRevision);
+              }
             },
             clearAlarm: async (alarmKey, ownerRevision) => {
               if (environment.CHANNEL === undefined) return;
               const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
-              await object.clearModuleAlarm(module.id, alarmKey, ownerRevision);
+              if (ownerRevision === undefined) await object.clearModuleAlarm(module.id, alarmKey);
+              else await object.clearModuleAlarm(module.id, alarmKey, ownerRevision);
+            },
+            getAlarmDeadline: async (alarmKey) => {
+              if (environment.CHANNEL === undefined) return null;
+              const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+              return await object.getModuleAlarmDeadline(module.id, alarmKey);
             },
           });
     } catch (error: unknown) {
