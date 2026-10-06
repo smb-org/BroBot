@@ -4,11 +4,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
-import { ImmediateActions, WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
+import { ImmediateActions, WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
 import { jsonResponse } from "../unit/fixtures";
 
-const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
+const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider><ToastHost />{element}</UiProvider>);
 
 const ADS_ENABLED = [{ id: "ads", enabled: true }] as const;
 const RAID_ENABLED = [{ id: "raid", enabled: true }] as const;
@@ -278,7 +279,7 @@ describe("Stream Manager immediate actions", () => {
     await expectActionResult("Shoutout an streamerin gesendet", "success");
   });
 
-  it("shows the catalogue reason when a manual shoutout fails", async () => {
+  it("shows the catalogue reason in a toast when a manual shoutout fails", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
@@ -298,7 +299,7 @@ describe("Stream Manager immediate actions", () => {
   it.each([
     ["twitch_user_not_found", "Twitch-Nutzer nicht gefunden."],
     ["twitch_user_search_failed", "Twitch-Nutzersuche ist fehlgeschlagen."],
-  ])("localizes a top-level %s error when a manual shoutout fails", async (code, message) => {
+  ])("shows localized top-level %s errors in a toast when a manual shoutout fails", async (code, message) => {
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));

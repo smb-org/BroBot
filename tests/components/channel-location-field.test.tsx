@@ -1,10 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PanelChannelLocation, PanelChannelLocationResult } from "../../src/dashboard/api";
 import { ChannelLocationField } from "../../src/dashboard/ChannelLocationField";
 import { UiProvider } from "../../src/dashboard/ui";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 
 const api = vi.hoisted(() => ({
   saveChannelLocation: vi.fn(),
@@ -18,8 +20,12 @@ vi.mock("../../src/dashboard/api", () => ({
 
 afterEach(() => {
   cleanup();
+  for (const toast of toastsSnapshot()) dismissToast(toast.id);
   vi.clearAllMocks();
 });
+
+const renderWithToasts = (children: ReactNode): ReturnType<typeof render> =>
+  render(<UiProvider><ToastHost />{children}</UiProvider>);
 
 describe("ChannelLocationField", () => {
   it("saves a chosen location immediately and keeps the time zone suggestion", async () => {
@@ -50,7 +56,7 @@ describe("ChannelLocationField", () => {
         disabled={false}
       />;
     }
-    render(<UiProvider><Harness /></UiProvider>);
+    renderWithToasts(<Harness />);
 
     fireEvent.click(screen.getByRole("button", { name: "Change location" }));
     expect(await screen.findByRole("link", { name: "Location search by Open-Meteo.com" })).toHaveAttribute("href", "https://open-meteo.com/");
@@ -90,14 +96,15 @@ describe("ChannelLocationField", () => {
         disabled={false}
       />;
     }
-    render(<UiProvider><Harness /></UiProvider>);
+    renderWithToasts(<Harness />);
 
     fireEvent.click(screen.getByRole("button", { name: "Change location" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Search for a place" }), { target: { value: "Tromsø" } });
     fireEvent.click(await screen.findByRole("button", { name: "Search" }));
 
     const dialog = screen.getByRole("dialog");
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Locations could not be searched.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Locations could not be searched.");
+    expect(dialog).toBeVisible();
     expect(screen.queryByText("No matching locations found.")).not.toBeInTheDocument();
   });
 
@@ -127,7 +134,7 @@ describe("ChannelLocationField", () => {
         disabled={false}
       />;
     }
-    render(<UiProvider><Harness /></UiProvider>);
+    renderWithToasts(<Harness />);
 
     fireEvent.click(screen.getByRole("button", { name: "Change location" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Search for a place" }), { target: { value: "Tromsø" } });
@@ -135,7 +142,8 @@ describe("ChannelLocationField", () => {
     fireEvent.click(await screen.findByRole("option", { name: /Tromsø/u }));
 
     const dialog = screen.getByRole("dialog");
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Location could not be saved.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Location could not be saved.");
+    expect(dialog).toBeVisible();
     expect(within(dialog).getByRole("textbox", { name: "Search for a place" })).toBeInTheDocument();
   });
 });

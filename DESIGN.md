@@ -349,10 +349,18 @@ Gegenstück, oder liegen als Overlay über der Arbeitsfläche. Ein neuer
 Statusblock wird nie ungeplant in den Fluss eingefügt. Abstände, Farben,
 Schrift und Radien verwenden ausschließlich die hier definierten Tokens.
 
+Listen dürfen nach dem Laden mit den Daten wachsen. Ihr Skeleton muss Zeilen
+und Fläche nur annähern, nicht dieselbe Höhe wie die geladene Liste erreichen.
+Wichtige Steuerelemente und Aktionen liegen oberhalb einer wachsenden Liste
+oder in einem festen Kopf- oder Fußbereich. Unter einer Liste, deren Höhe mit
+den Daten wächst, steht nichts Wichtiges. Layouttests vergleichen die Position
+dieser Steuerelemente vor und nach dem Laden, nicht die Listenhöhe.
+
 - **Toast:** Der Dashboard-Shell enthält genau einen Toast-Host. Erfolg und Info
   schließen sich nach kurzer Zeit; Fehler bleiben bis zum Schließen stehen.
   Fehler verwenden `aria-live="assertive"`, Erfolg und Info `polite`. Ein Toast
-  liegt über der Seite und verändert deren Höhe nicht.
+  liegt über der Seite und modalen Backdrops, bleibt schließbar und verändert
+  die Seitenhöhe nicht.
 - **Formularplätze:** Feldfehler und Warnungen belegen eine feste Zeile, auch
   wenn sie leer ist. Zähler stehen in einer nicht umbrechenden Spalte mit
   mindestens `8ch`. Lange Hinweise kürzen visuell ab, bleiben aber über den
@@ -365,8 +373,8 @@ Schrift und Radien verwenden ausschließlich die hier definierten Tokens.
   bleibt sichtbar und wird deaktiviert, wenn nichts zu verwerfen ist. Dialoge
   reservieren neben den Aktionen eine Fehlerzeile.
 - **Lade-, Leer- und Fehlerzustand:** `LoadState` hält für alle drei denselben
-  `minHeight`; ein Skeleton nimmt dieselbe vorgesehene Fläche ein wie der
-  geladene Inhalt. Beim Nachladen bleiben vorhandene Werte stehen.
+  `minHeight`; ein Skeleton nähert den geladenen Inhalt an. Beim Nachladen
+  bleiben vorhandene Werte stehen.
 - **Editor-Abschnitte:** Ein fehlgeschlagener Speicherversuch öffnet keine
   geschlossenen `<details>`. Der Editor scrollt zum Abschnitt, fokussiert seine
   Zusammenfassung und markiert sie mit einem Fehlerabzeichen.

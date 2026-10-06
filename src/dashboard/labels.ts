@@ -57,6 +57,8 @@ export interface PlatformTexts {
   subtitle: (count: string) => string;
   navigation: string;
   channelOverview: string;
+  channels: string;
+  auditTab: string;
   login: string;
   identifier: string;
   fullConsent: string;
@@ -133,6 +135,8 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     subtitle: (count) => `${count} Kanäle verwalten`,
     navigation: "Betreiber",
     channelOverview: "Kanalübersicht",
+    channels: "Kanäle",
+    auditTab: "Audit",
     login: "Login",
     identifier: "Kennung",
     fullConsent: "Vollzustimmung",
@@ -210,6 +214,8 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     subtitle: (count) => `Manage ${count} channels`,
     navigation: "Operator",
     channelOverview: "Channel overview",
+    channels: "Channels",
+    auditTab: "Audit",
     login: "Login",
     identifier: "Identifier",
     fullConsent: "Full consent",

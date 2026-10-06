@@ -9,7 +9,7 @@ import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type Das
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -569,7 +569,6 @@ export const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onCh
   // the caller reloads `modules`, so the list, sidebar and overview agree.
   const [pendingEnabled, setPendingEnabled] = useState<Record<string, boolean>>({});
   const [busyModuleId, setBusyModuleId] = useState<string | null>(null);
-  const [toggleError, setToggleError] = useState<string | null>(null);
 
   const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
     // The seam `Switch` already disables itself while `pending`, but that
@@ -577,18 +576,17 @@ export const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onCh
     // click here too, so two toggles for the same module never race.
     if (busyModuleId === moduleId) return;
     setBusyModuleId(moduleId);
-    setToggleError(null);
     setPendingEnabled((current) => ({ ...current, [moduleId]: nextEnabled }));
     try {
       await setChannelModuleEnabled(channelId, moduleId, nextEnabled);
       await onChanged();
     } catch (toggleFailure: unknown) {
       if (toggleFailure instanceof PanelApiError && toggleFailure.status === 401) {
-        setToggleError(texts.errors.sessionInvalid);
+        notify({ tone: "error", message: texts.errors.sessionInvalid });
       } else {
-        setToggleError(toggleFailure instanceof PanelApiError
+        notify({ tone: "error", message: toggleFailure instanceof PanelApiError
           ? apiErrorText(toggleFailure.code, texts.errors.changeFailed)
-          : texts.errors.changeFailed);
+          : texts.errors.changeFailed });
       }
     } finally {
       setPendingEnabled((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== moduleId)));
@@ -598,7 +596,6 @@ export const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onCh
 
   return (
     <>
-      {toggleError === null ? null : <p className="form-error" role="alert">{toggleError}</p>}
       <div className="state-list">
         {MODULES.map((module) => {
           const state = modules.find((candidate) => candidate.id === module.id);
@@ -624,11 +621,14 @@ export const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onCh
 };
 
 export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate, onChanged }: ModuleWorkspaceProperties): ReactElement => {
+  useEffect(() => {
+    if (error !== null) notify({ tone: "error", message: error });
+  }, [error]);
+
   return (
     <section className="module-workspace" aria-label={dashboardTexts().navigation.module}>
       <div className="module-workspace__main">
         <PageHeader kind="modules" title={dashboardTexts().navigation.module} subtitle={loading ? dashboardTexts().module.load : dashboardTexts().module.available} />
-        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         <ModuleToggleList channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onChanged={onChanged} />
       </div>
     </section>
