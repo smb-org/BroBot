@@ -8,6 +8,7 @@ const channel = {
   login: "stable-channel",
   displayName: "Stable Channel",
   role: "manager",
+  streamState: "online",
   broadcasterConnection: "connected",
   channelBotConsent: "granted",
   bot: { status: "connected", reason: null, updatedAt: "2026-09-20T08:00:00.000Z" },
@@ -43,14 +44,21 @@ interface RequestGate {
   started: () => void;
 }
 
-type ChannelGates = Partial<Record<"settings" | "members" | "audit" | "events" | "overlays" | "legacyTokens", RequestGate>>;
+type ChannelGates = Partial<Record<"settings" | "members" | "audit" | "events" | "overlays" | "legacyTokens" | "variables", RequestGate>>;
 
 interface ChannelMockData {
   settings?: Record<string, unknown>;
   members?: { members: readonly Record<string, unknown>[]; nextCursor: string | null };
+  audit?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
+  events?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
+  variables?: { variables: readonly Record<string, unknown>[]; count: number; maximum: number };
+  overlays?: { overlays: readonly Record<string, unknown>[]; maximum: number; elementMaximum: number };
+  legacyTokens?: { tokens: readonly Record<string, unknown>[]; nextOffset: number | null };
   modules?: readonly Record<string, unknown>[];
   moduleStatus?: number;
   moduleToggleStatus?: number;
+  locationSearchStatus?: number;
+  shoutoutStatus?: number;
 }
 
 const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: ChannelMockData = {}): Promise<void> => {
@@ -78,25 +86,36 @@ const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: C
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...(data.members ?? { members: [], nextCursor: null }), broadcasterCount: 1, viewerUserId: "viewer" }) });
       return;
     }
+    if (pathname === `/api/channels/${channelId}/variables`) {
+      const gate = gates.variables;
+      gate?.started();
+      if (gate !== undefined) await gate.wait;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data.variables ?? { variables: [], count: 0, maximum: 25 }) });
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/settings/location/geocode`) {
+      await route.fulfill({ status: data.locationSearchStatus ?? 200, contentType: "application/json", body: JSON.stringify(data.locationSearchStatus === undefined ? { results: [] } : { error: "location_search_failed" }) });
+      return;
+    }
     if (pathname === `/api/channels/${channelId}/overlays`) {
       const gate = gates.overlays;
       gate?.started();
       if (gate !== undefined) await gate.wait;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ overlays: [], maximum: 20, elementMaximum: 20 }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data.overlays ?? { overlays: [], maximum: 20, elementMaximum: 20 }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/overlay-tokens`) {
       const gate = gates.legacyTokens;
       gate?.started();
       if (gate !== undefined) await gate.wait;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ tokens: [], nextOffset: null }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data.legacyTokens ?? { tokens: [], nextOffset: null }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/audit-log`) {
       const gate = gates.audit;
       gate?.started();
       if (gate !== undefined) await gate.wait;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], nextCursor: null }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data.audit ?? { entries: [], nextCursor: null }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/modules` && route.request().method() === "GET") {
@@ -111,7 +130,11 @@ const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: C
       const gate = gates.events;
       gate?.started();
       if (gate !== undefined) await gate.wait;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], nextCursor: null }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data.events ?? { entries: [], nextCursor: null }) });
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/shoutout` && route.request().method() === "POST") {
+      await route.fulfill({ status: data.shoutoutStatus ?? 500, contentType: "application/json", body: JSON.stringify({ error: "shoutout_send_failed", reason: "rate_limited" }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/controls/mute`) {
@@ -135,6 +158,143 @@ const fullMemberPage = Array.from({ length: 100 }, (_, index) => ({
   joinedAt: "2026-09-20T08:00:00.000Z",
 }));
 
+const fullAuditPage = {
+  entries: Array.from({ length: 50 }, (_, index) => ({
+    auditId: `audit-${String(index + 1)}`,
+    actorUserId: "operator",
+    actorLogin: "operator",
+    actorDisplayName: "Operator",
+    actorKind: "member",
+    createdAt: `2026-09-${String(20 - Math.floor(index / 24)).padStart(2, "0")}T${String(23 - (index % 24)).padStart(2, "0")}:00:00.000Z`,
+    moduleId: null,
+    action: "channel.member_role_changed",
+    before: "{}",
+    after: "{}",
+  })),
+  nextCursor: "audit-next",
+};
+
+const fullEventPage = {
+  entries: Array.from({ length: 50 }, (_, index) => ({
+    eventId: `event-${String(index + 1)}`,
+    createdAt: `2026-09-20T${String(23 - Math.floor(index / 2)).padStart(2, "0")}:${String(59 - index % 60).padStart(2, "0")}:00.000Z`,
+    moduleId: "channel_events",
+    triggerId: `trigger-${String(index + 1)}`,
+    code: "channel_events.message_removed",
+    detail: "{}",
+    actorUserId: "operator",
+    actorLogin: "operator",
+    actorDisplayName: "Operator",
+  })),
+  nextCursor: "events-next",
+};
+
+const fullOverlays = {
+  overlays: Array.from({ length: 20 }, (_, index) => ({
+    id: `overlay-${String(index + 1)}`,
+    name: `Overlay ${String(index + 1)}`,
+    elementCount: index,
+    accessCount: 1,
+    lastUsedAt: null,
+  })),
+  maximum: 20,
+  elementMaximum: 20,
+};
+
+const fullLegacyTokens = {
+  tokens: Array.from({ length: 50 }, (_, index) => ({
+    id: `legacy-token-${String(index + 1)}`,
+    name: "Legacy overlay",
+    channelId,
+    overlayId: `overlay-${String(index + 1)}`,
+    createdAt: "2026-09-20T08:00:00.000Z",
+    createdBy: "operator",
+    lastUsedAt: null,
+    expiresAt: null,
+  })),
+  nextOffset: 50,
+};
+
+const fullVariablePage = {
+  variables: Array.from({ length: 25 }, (_, index) => ({
+    channelId,
+    name: `variable_${String(index + 1)}`,
+    value: index,
+    description: `Variable ${String(index + 1)}`,
+    resetOnStreamStart: false,
+    createdAt: "2026-09-20T08:00:00.000Z",
+    updatedAt: "2026-09-20T08:00:00.000Z",
+    usages: [],
+  })),
+  count: 25,
+  maximum: 25,
+};
+
+const platformChannelId = "stable-platform-channel";
+const platformChannel = {
+  channelId: platformChannelId,
+  login: "stable-platform-channel",
+  displayName: "Stable Platform Channel",
+  fullConsent: true,
+  memberCounts: { broadcaster: 1, manager: 1, operator: 100 },
+  broadcasterConnected: true,
+};
+const fullPlatformAuditPage = {
+  entries: Array.from({ length: 50 }, (_, index) => ({
+    auditId: `platform-audit-${String(index + 1)}`,
+    actorUserId: "admin",
+    actorLogin: "admin",
+    actorDisplayName: "Admin",
+    actorKind: "platform_admin",
+    createdAt: "2026-09-20T08:00:00.000Z",
+    channelId: platformChannelId,
+    moduleId: null,
+    action: "channel.released",
+    before: "{}",
+    after: "{}",
+  })),
+  nextCursor: "platform-audit-next",
+};
+const fullPlatformMembers = {
+  members: fullMemberPage,
+  nextCursor: "platform-members-next",
+  broadcasterCount: 1,
+  viewerUserId: "viewer",
+};
+
+const installPlatformMocks = async (page: Page, gates: Partial<Record<"audit" | "members", RequestGate>>): Promise<void> => {
+  await page.route("**/api/**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/channels") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [], bot: null, platformAdmin: true, viewerIsBot: false }) });
+      return;
+    }
+    if (pathname === "/api/platform") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [platformChannel] }) });
+      return;
+    }
+    if (pathname === "/api/platform/audit") {
+      const gate = gates.audit;
+      gate?.started();
+      if (gate !== undefined) await gate.wait;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fullPlatformAuditPage) });
+      return;
+    }
+    if (pathname === `/api/platform/channels/${platformChannelId}/members`) {
+      const gate = gates.members;
+      gate?.started();
+      if (gate !== undefined) await gate.wait;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fullPlatformMembers) });
+      return;
+    }
+    if (pathname === "/api/csrf") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ token: "layout-test-token" }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+};
+
 test("the overview location region is present and keeps its box while settings load", async ({ page }) => {
   let releaseSettings!: () => void;
   let markSettingsStarted!: () => void;
@@ -156,28 +316,73 @@ test("the overview location region is present and keeps its box while settings l
   expect(before).toEqual(after);
 });
 
-test("activity page load states keep their boxes as channel responses arrive", async ({ page }) => {
-  for (const [section, gateName] of [["members", "members"], ["audit", "audit"], ["events", "events"]] as const) {
+test("activity controls stay above growing lists as channel responses arrive", async ({ page }) => {
+  for (const [section, gateName, controlSelector] of [
+    ["members", "members", ".members-page__pagination-slot"],
+    ["audit", "audit", ".audit-page__pagination-slot"],
+    ["events", "events", ".events-page__pagination-slot"],
+  ] as const) {
     let releaseResponse!: () => void;
     let markResponseStarted!: () => void;
     const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
     const responseStarted = new Promise<void>((resolve) => { markResponseStarted = resolve; });
-    await installChannelMocks(page, { [gateName]: { wait: responseGate, started: markResponseStarted } });
+    const responseData: ChannelMockData = section === "members"
+      ? { members: { members: fullMemberPage, nextCursor: "members-next" } }
+      : section === "audit" ? { audit: fullAuditPage } : { events: fullEventPage };
+    await installChannelMocks(page, { [gateName]: { wait: responseGate, started: markResponseStarted } }, responseData);
     await page.goto(`/channels/${channelId}/${section}`);
     await responseStarted;
     const loadState = page.locator(".ui-load-state");
     await expect(loadState).toHaveAttribute("data-status", "loading");
-    const before = await measureBox(page, ".ui-load-state");
+    const beforeControl = await measureBox(page, controlSelector);
     releaseResponse();
     await expect(loadState).not.toHaveAttribute("data-status", "loading");
-    const after = await measureBox(page, ".ui-load-state");
-    expect(after[2]).toBe(before[2]);
-    expect(after[3]).toBeLessThanOrEqual(before[3]);
+    const afterControl = await measureBox(page, controlSelector);
+    expect(afterControl).toEqual(beforeControl);
+    const listBox = await measureBox(page, ".ui-load-state");
+    expect(beforeControl[1] + beforeControl[3]).toBeLessThanOrEqual(listBox[1]);
     await page.unrouteAll();
   }
 });
 
-test("a full member page keeps its loading and pagination positions at desktop and 390px", async ({ page }) => {
+test("platform audit and member controls stay above their growing lists", async ({ page }) => {
+  let releaseAudit!: () => void;
+  let markAuditStarted!: () => void;
+  let releaseMembers!: () => void;
+  let markMembersStarted!: () => void;
+  const auditGate = new Promise<void>((resolve) => { releaseAudit = resolve; });
+  const auditStarted = new Promise<void>((resolve) => { markAuditStarted = resolve; });
+  const membersGate = new Promise<void>((resolve) => { releaseMembers = resolve; });
+  const membersStarted = new Promise<void>((resolve) => { markMembersStarted = resolve; });
+  await installPlatformMocks(page, {
+    audit: { wait: auditGate, started: markAuditStarted },
+    members: { wait: membersGate, started: markMembersStarted },
+  });
+
+  await page.goto("/platform");
+  await auditStarted;
+  const auditControlBefore = await measureBox(page, ".platform-audit__pagination-slot");
+  releaseAudit();
+  await expect(page.locator(".platform-audit__pagination-slot button")).toBeVisible();
+  await expect(page.locator(".platform-audit__pagination-slot")).toHaveCount(1);
+  const platformAuditList = page.locator(".platform-audit__pagination-slot + .ui-load-state");
+  await expect(platformAuditList).toHaveAttribute("data-status", "success");
+  expect(await measureBox(page, ".platform-audit__pagination-slot")).toEqual(auditControlBefore);
+  expect(auditControlBefore[1] + auditControlBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".platform-audit__pagination-slot + .ui-load-state"))[1]);
+
+  await page.locator(".platform-channel-table tbody tr").click();
+  await membersStarted;
+  const grantEditor = page.locator('.platform-inspector-section[aria-label="Add member"]');
+  await expect(grantEditor).toBeVisible();
+  const grantBefore = await measureBox(page, '.platform-inspector-section[aria-label="Add member"]');
+  expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".platform-members-table"))[1]);
+  releaseMembers();
+  await expect(page.locator(".platform-members-table tbody tr")).toHaveCount(100);
+  expect(await measureBox(page, '.platform-inspector-section[aria-label="Add member"]')).toEqual(grantBefore);
+  expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".platform-members-table"))[1]);
+});
+
+test("a full member page keeps pagination above the growing list at desktop and 390px", async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     let releaseMembers!: () => void;
@@ -192,13 +397,12 @@ test("a full member page keeps its loading and pagination positions at desktop a
     await membersStarted;
     const loadState = page.locator(".ui-load-state");
     await expect(loadState).toHaveAttribute("data-status", "loading");
-    const beforeList = await measureBox(page, ".ui-load-state");
     const beforeFooter = await measureBox(page, ".members-page__pagination-slot");
     releaseMembers();
     await expect(page.locator(".members-table tbody tr")).toHaveCount(100);
     await expect(loadState).toHaveAttribute("data-status", "success");
-    expect(await measureBox(page, ".ui-load-state")).toEqual(beforeList);
     expect(await measureBox(page, ".members-page__pagination-slot")).toEqual(beforeFooter);
+    expect(beforeFooter[1] + beforeFooter[3]).toBeLessThanOrEqual((await measureBox(page, ".ui-load-state"))[1]);
     await page.unrouteAll();
   }
 });
@@ -225,6 +429,24 @@ test("a saved location with a time-zone suggestion keeps the action strip fixed 
   await expect(page.getByText("Set channel time zone to Pacific/Honolulu?")).toBeVisible();
   expect(await measureBox(page, ".channel-location-field__actions")).toEqual(before);
   await page.unrouteAll();
+});
+
+test("the channel-variable limit and create controls stay above a full list", async ({ page }) => {
+  let releaseVariables!: () => void;
+  let markVariablesStarted!: () => void;
+  const variablesGate = new Promise<void>((resolve) => { releaseVariables = resolve; });
+  const variablesStarted = new Promise<void>((resolve) => { markVariablesStarted = resolve; });
+  await installChannelMocks(page, { variables: { wait: variablesGate, started: markVariablesStarted } }, { variables: fullVariablePage });
+
+  await page.goto(`/channels/${channelId}/variables`);
+  await variablesStarted;
+  const limitSlotBefore = await measureBox(page, ".channel-variables-limit-slot");
+  const createActionBefore = await measureBox(page, ".page-header__actions");
+  releaseVariables();
+  await expect(page.locator(".channel-variables-table tbody tr")).toHaveCount(25);
+  expect(await measureBox(page, ".channel-variables-limit-slot")).toEqual(limitSlotBefore);
+  expect(await measureBox(page, ".page-header__actions")).toEqual(createActionBefore);
+  expect(limitSlotBefore[1] + limitSlotBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".ui-load-state"))[1]);
 });
 
 test("a failed realtime variable refresh keeps rows visible and offers retry", async ({ page }) => {
@@ -284,6 +506,8 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
 
   await page.goto(`/channels/${channelId}/variables`);
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
+  const retrySlot = page.locator(".channel-variables-limit-slot");
+  const slotBeforeRefreshFailure = await retrySlot.boundingBox();
   await page.evaluate(() => {
     const sockets = (window as Window & { __layoutSockets?: Array<{ open: () => void }> }).__layoutSockets ?? [];
     sockets.forEach((socket) => { socket.open(); });
@@ -293,11 +517,69 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
   await expect(page.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  expect(await retrySlot.boundingBox()).toEqual(slotBeforeRefreshFailure);
 
   await page.getByRole("button", { name: "Retry" }).click();
   await expect.poll(() => variableRequestCount).toBe(4);
   await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
+});
+
+test("the new-events notice stays visible while reading older events", async ({ page }) => {
+  await page.addInitScript(() => {
+    type EventSocket = EventTarget & { open: () => void; close: () => void; receive: (data: string) => void; readyState: number };
+    const sockets: EventSocket[] = [];
+    class MockWebSocket extends EventTarget {
+      readyState = 0;
+      constructor(url: string, protocols?: string | string[]) { super(); void url; void protocols; sockets.push(this); }
+      open(): void { this.readyState = 1; this.dispatchEvent(new Event("open")); }
+      close(): void { this.readyState = 3; this.dispatchEvent(new CloseEvent("close", { code: 1000 })); }
+      receive(data: string): void { this.dispatchEvent(new MessageEvent("message", { data })); }
+    }
+    Object.defineProperty(window, "__layoutEventSockets", { value: sockets, configurable: true });
+    Object.defineProperty(window, "WebSocket", { value: MockWebSocket, writable: true, configurable: true });
+  });
+  await installChannelMocks(page, {}, { events: fullEventPage });
+  await page.goto(`/channels/${channelId}/events`);
+  await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
+  await expect.poll(() => page.evaluate(() => (window as Window & { __layoutEventSockets?: Array<{ open: () => void }> }).__layoutEventSockets?.length ?? 0)).toBeGreaterThan(0);
+  await page.evaluate(() => { window.scrollTo(0, 1200); });
+  await page.evaluate(() => {
+    const sockets = (window as Window & { __layoutEventSockets?: Array<{ open: () => void; receive: (data: string) => void }> }).__layoutEventSockets ?? [];
+    sockets.forEach((socket) => { socket.open(); });
+    const now = new Date().toISOString();
+    const envelope = JSON.stringify({ version: 1, id: "layout-new-event", createdAt: now, channelId: "stable-host-layout", type: "event_log.new", payload: { entries: [{ eventId: "new-event", createdAt: now, moduleId: "channel_events", code: "channel_events.message_removed", actorUserId: null }] } });
+    sockets.forEach((socket) => { socket.receive(envelope); });
+  });
+  const notice = page.locator(".realtime-feed__notice");
+  await expect(notice).toBeVisible();
+  await expect(notice).toBeInViewport();
+  const noticeBox = await notice.boundingBox();
+  expect(noticeBox?.y).toBeGreaterThanOrEqual(0);
+  expect(noticeBox?.y).toBeLessThan(120);
+});
+
+test("immediate-action cards keep their reserved strip height after a shoutout failure", async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installChannelMocks(page, {}, {
+      modules: ["ads", "clips", "raid"].map((id) => ({ id, enabled: true, settings: "{}" })),
+      shoutoutStatus: 429,
+    });
+    await page.goto(`/channels/${channelId}/overview`);
+    const strip = page.locator(".stream-manager-actions");
+    await expect(strip.locator(":scope > .stream-manager-action")).toHaveCount(3);
+    await expect(page.getByRole("textbox", { name: "Twitch login" })).toBeVisible();
+    const before = await measureDocumentBox(page, ".stream-manager-actions");
+    const cardsBefore = await Promise.all(Array.from({ length: 3 }, (_, index) => measureBox(page, `.stream-manager-action:nth-child(${String(index + 1)})`)));
+    expect(cardsBefore.map((box) => box[3])).toEqual([192, 192, 192]);
+
+    await page.getByRole("textbox", { name: "Twitch login" }).fill("someone");
+    await page.getByRole("button", { name: "Send shoutout" }).click();
+    await expect(page.locator(".ui-toast--error")).toBeVisible();
+    expect(await measureDocumentBox(page, ".stream-manager-actions")).toEqual(before);
+    await page.unrouteAll();
+  }
 });
 
 test("module toggle and workspace failures use toasts without inserting error rows", async ({ page }) => {
@@ -374,7 +656,7 @@ test("the overlay style lock strip keeps its height as locked content is cleared
   }
 });
 
-test("overlay list and legacy-link regions keep their boxes while data loads", async ({ page }) => {
+test("overlay controls stay above their growing lists as data loads", async ({ page }) => {
   let releaseOverlays!: () => void;
   let markOverlaysStarted!: () => void;
   let releaseLegacyTokens!: () => void;
@@ -386,20 +668,48 @@ test("overlay list and legacy-link regions keep their boxes while data loads", a
   await installChannelMocks(page, {
     overlays: { wait: overlaysGate, started: markOverlaysStarted },
     legacyTokens: { wait: legacyTokensGate, started: markLegacyTokensStarted },
-  });
+  }, { overlays: fullOverlays, legacyTokens: fullLegacyTokens });
 
   await page.goto(`/channels/${channelId}/overlays`);
   await Promise.all([overlaysStarted, legacyTokensStarted]);
   const overlayList = page.locator(".overlays-page > .ui-load-state");
   const legacyList = page.locator(".overlay-legacy-links .ui-load-state");
-  const beforeOverlayList = await measureBox(page, ".overlays-page > .ui-load-state");
-  const beforeLegacyList = await measureBox(page, ".overlay-legacy-links .ui-load-state");
+  const beforeCreateAction = await measureBox(page, ".overlays-page__create-action");
+  const beforeLegacyHeading = await measureBox(page, ".overlay-legacy-links__heading");
+  const beforeLegacyPagination = await measureBox(page, ".overlay-legacy-links__pagination-slot");
   releaseOverlays();
   releaseLegacyTokens();
-  await expect(overlayList).toHaveAttribute("data-status", "empty");
-  await expect(legacyList).toHaveAttribute("data-status", "empty");
-  expect(await measureBox(page, ".overlays-page > .ui-load-state")).toEqual(beforeOverlayList);
-  expect(await measureBox(page, ".overlay-legacy-links .ui-load-state")).toEqual(beforeLegacyList);
+  await expect(overlayList).toHaveAttribute("data-status", "success");
+  await expect(legacyList).toHaveAttribute("data-status", "success");
+  await expect(page.locator(".overlays-table tbody tr")).toHaveCount(20);
+  await expect(page.locator(".overlay-access-list__item--legacy")).toHaveCount(50);
+  expect(await measureBox(page, ".overlays-page__create-action")).toEqual(beforeCreateAction);
+  expect(await measureBox(page, ".overlay-legacy-links__heading")).toEqual(beforeLegacyHeading);
+  expect(await measureBox(page, ".overlay-legacy-links__pagination-slot")).toEqual(beforeLegacyPagination);
+  const legacyListBox = await measureBox(page, ".overlay-legacy-links .ui-load-state");
+  expect(beforeLegacyPagination[1] + beforeLegacyPagination[3]).toBeLessThanOrEqual(legacyListBox[1]);
+});
+
+test("a location-search error toast can be dismissed above its dialog backdrop", async ({ page }) => {
+  await installChannelMocks(page, {}, { locationSearchStatus: 503 });
+  await page.goto(`/channels/${channelId}/overview`);
+  await page.getByRole("button", { name: "Change location" }).click();
+  const dialog = page.getByRole("dialog", { name: "Change location" });
+  await expect(dialog).toBeVisible();
+  await page.getByRole("textbox", { name: "Search for a place" }).fill("Reykjavik");
+  await page.getByRole("button", { name: "Search" }).click();
+
+  const toast = page.locator(".ui-toast--error");
+  await expect(toast).toBeVisible();
+  const toastHost = page.locator(".ui-toast-host");
+  const [toastZIndex, modalBaseZIndex] = await Promise.all([
+    toastHost.evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10)),
+    toastHost.evaluate((element) => Number.parseInt(getComputedStyle(element).getPropertyValue("--mantine-z-index-modal"), 10)),
+  ]);
+  expect(toastZIndex).toBeGreaterThan(modalBaseZIndex);
+  await toast.getByRole("button", { name: "Dismiss notification" }).click();
+  await expect(toast).toHaveCount(0);
+  await expect(dialog).toBeVisible();
 });
 
 test("a channel control error appears as a toast without changing header boxes", async ({ page }) => {

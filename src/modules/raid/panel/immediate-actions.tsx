@@ -3,7 +3,7 @@ import { useState, type ReactElement } from "react";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { SHOUTOUT_FAILURE_REASONS, type ShoutoutFailureReason } from "../../../contracts/values";
 import { apiErrorText } from "../../../dashboard/locale";
-import { Button, Field, Icon } from "../../../dashboard/ui";
+import { Button, Field, Icon, notify } from "../../../dashboard/ui";
 import type { ModuleImmediateActionProperties } from "../contract";
 import { sendManualShoutout } from "./immediate-action-service";
 import { raidActionTexts } from "./immediate-action-locale";
@@ -34,9 +34,9 @@ const ShoutoutAction = ({ channelId, availabilityReason }: ModuleImmediateAction
         ? error.details as Record<string, unknown>
         : null;
       const reason = details?.reason;
-      setMessage(isShoutoutFailureReason(reason)
+      notify({ tone: "error", message: isShoutoutFailureReason(reason)
         ? labels.failureReasons[reason]
-        : error instanceof PanelApiError ? apiErrorText(error.code, labels.failed, language) : labels.failed);
+        : error instanceof PanelApiError ? apiErrorText(error.code, labels.failed, language) : labels.failed });
     } finally {
       setPending(false);
     }

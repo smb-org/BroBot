@@ -718,6 +718,40 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     ? labels.legacyTokenName
     : `${labels.legacyTokenName} (${legacyRevokeTarget.id.slice(0, 8)})`;
   const list = <section className="overlays-page config-section" aria-label={labels.list}>
+    <section className="overlay-legacy-links" aria-label={labels.legacyTitle}>
+      <div className="overlay-legacy-links__heading">
+        <h2>{labels.legacyTitle}</h2>
+        <Button variant="neutral" disabled={!canManage || pending} onClick={() => {
+          setLegacyImportLink("");
+          setLegacyImportError(null);
+          setLegacyImportOpen(true);
+        }}>{labels.legacyImport}</Button>
+      </div>
+      <p className="muted">{labels.legacyDescription}</p>
+      <div className="overlay-legacy-links__reason-slot">{manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}</div>
+      <div className="overlay-legacy-links__pagination-slot">{legacyNextOffset === null ? null : <Button variant="subtle" disabled={pending}
+        onClick={() => { void loadLegacyTokens(legacyNextOffset, true); }}>{labels.loadMore}</Button>}</div>
+      <LoadState
+        status={legacyLoading && legacyTokens.length === 0 ? "loading" : legacyLoadFailed && legacyTokens.length === 0 ? "error" : legacyTokens.length === 0 ? "empty" : "success"}
+        minHeight={260}
+        loading={<Skeleton rows={4} height={58} />}
+        empty={<p className="empty-state">{labels.legacyEmpty}</p>}
+        error={<Skeleton rows={4} height={58} />}
+      >
+        <ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item overlay-access-list__item--legacy">
+          <div className="overlay-access-list__summary">
+            <strong>{labels.legacyTokenName}</strong>
+            <span className="mono muted">{labels.legacyTokenId}: {token.id.slice(0, 8)}</span>
+            <span className="muted">{labels.legacyCreatedAt}: {formatTimestamp(token.createdAt)}</span>
+            <span className="muted">{token.createdBy ?? labels.legacyCreatedByUnknown}</span>
+            <span className="muted">{token.lastUsedAt === null ? labels.never : `${labels.lastUsedAt}: ${formatTimestamp(token.lastUsedAt)}`}</span>
+          </div>
+          <div className="overlay-access-list__actions"><ActionMenu label={labels.accessActions(`${labels.legacyTokenName} ${token.id.slice(0, 8)}`)} items={[
+            { label: `${labels.revoke} …`, disabled: !canManage || pending, danger: true, onSelect: () => { setLegacyRevokeTarget(token); } },
+          ]} /></div>
+        </li>)}</ul>
+      </LoadState>
+    </section>
     <LoadState
       status={loading && overlays.length === 0 ? "loading" : loadFailed && overlays.length === 0 ? "error" : overlays.length === 0 ? "empty" : "success"}
       minHeight={360}
@@ -739,40 +773,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         </table>
       </div>
     </LoadState>
-    <section className="overlay-legacy-links" aria-label={labels.legacyTitle}>
-      <div className="overlay-legacy-links__heading">
-        <h2>{labels.legacyTitle}</h2>
-        <Button variant="neutral" disabled={!canManage || pending} onClick={() => {
-          setLegacyImportLink("");
-          setLegacyImportError(null);
-          setLegacyImportOpen(true);
-        }}>{labels.legacyImport}</Button>
-      </div>
-      <p className="muted">{labels.legacyDescription}</p>
-      <div className="overlay-legacy-links__reason-slot">{manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}</div>
-      <LoadState
-        status={legacyLoading && legacyTokens.length === 0 ? "loading" : legacyLoadFailed && legacyTokens.length === 0 ? "error" : legacyTokens.length === 0 ? "empty" : "success"}
-        minHeight={260}
-        loading={<Skeleton rows={4} height={58} />}
-        empty={<p className="empty-state">{labels.legacyEmpty}</p>}
-        error={<Skeleton rows={4} height={58} />}
-      >
-        <ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item overlay-access-list__item--legacy">
-          <div className="overlay-access-list__summary">
-            <strong>{labels.legacyTokenName}</strong>
-            <span className="mono muted">{labels.legacyTokenId}: {token.id.slice(0, 8)}</span>
-            <span className="muted">{labels.legacyCreatedAt}: {formatTimestamp(token.createdAt)}</span>
-            <span className="muted">{token.createdBy ?? labels.legacyCreatedByUnknown}</span>
-            <span className="muted">{token.lastUsedAt === null ? labels.never : `${labels.lastUsedAt}: ${formatTimestamp(token.lastUsedAt)}`}</span>
-          </div>
-          <div className="overlay-access-list__actions"><ActionMenu label={labels.accessActions(`${labels.legacyTokenName} ${token.id.slice(0, 8)}`)} items={[
-            { label: `${labels.revoke} …`, disabled: !canManage || pending, danger: true, onSelect: () => { setLegacyRevokeTarget(token); } },
-          ]} /></div>
-        </li>)}</ul>
-      </LoadState>
-      <div className="overlay-legacy-links__pagination-slot">{legacyNextOffset === null ? null : <Button variant="subtle" disabled={pending}
-        onClick={() => { void loadLegacyTokens(legacyNextOffset, true); }}>{labels.loadMore}</Button>}</div>
-    </section>
   </section>;
 
   const inspector = creating ? <SubInspector ariaLabel={labels.createTitle} title={labels.createTitle} closeLabel={labels.close} onClose={closeInspector}>

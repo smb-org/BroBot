@@ -375,6 +375,9 @@ export const MembersPage = ({
         <div className="section-heading">
           <h2>{texts.membersWithAccess}</h2>
         </div>
+        <div className="members-page__pagination-slot">
+          {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
+        </div>
         <div className={loading ? "stale" : undefined}>
           <ListDetail
             list={<LoadState
@@ -429,9 +432,6 @@ export const MembersPage = ({
             ) : null}
             onCloseInspector={closeFloating}
           />
-        </div>
-        <div className="members-page__pagination-slot">
-          {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
         </div>
       </section>
       <ConfirmDialog

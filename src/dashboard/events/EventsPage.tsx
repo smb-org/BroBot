@@ -171,8 +171,7 @@ const EventFeedEnd = ({
   loadingNextPage: boolean;
   onNextPage: () => void;
 }): ReactElement => {
-  const texts = dashboardTexts();
-  const feedEndRef = useRef<HTMLDivElement | null>(null);
+  const feedEndRef = useRef<HTMLSpanElement | null>(null);
   const loadNextPage = useCallback((): void => {
     if (nextCursor !== null && !loadingNextPage) onNextPage();
   }, [loadingNextPage, nextCursor, onNextPage]);
@@ -192,21 +191,11 @@ const EventFeedEnd = ({
     }
     return () => { window.removeEventListener("scroll", onScroll); };
   }, [loadNextPage, nextCursor]);
-  return <div
+  return <span
     ref={feedEndRef}
     className="event-feed__end"
-    tabIndex={nextCursor === null ? -1 : 0}
-    aria-label={nextCursor === null ? undefined : texts.events.loadMoreAtEnd}
-    onFocus={loadNextPage}
-    onKeyDown={(event) => {
-      if (event.key === "End" || event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        loadNextPage();
-      }
-    }}
-  >
-    {loadingNextPage ? <p className="loading-line" role="status">{texts.events.loadingOlder}</p> : nextCursor === null ? <p className="empty-state">{texts.events.feedEnd}</p> : <p className="muted">{texts.events.loadMoreAtEnd}</p>}
-  </div>;
+    aria-hidden="true"
+  />;
 };
 
 const realtimeLedStatus = (status: RealtimeFeedStatusValue): LedStatus =>
@@ -292,8 +281,13 @@ export const EventsPage = ({
           <section className="content-section" aria-label={texts.events.log}>
             <div className="section-heading"><h2>{texts.events.log}</h2></div>
             <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
-            <div className="realtime-feed__notice-slot">
+            <div className="realtime-feed__notice-slot" data-pending={realtime.pendingCount > 0}>
               {realtime.pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
+            </div>
+            <div className="events-page__pagination-slot">
+              {eventsState.data === null ? null : eventsState.data.nextCursor === null
+                ? <p className="empty-state">{texts.events.feedEnd}</p>
+                : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
             </div>
             <UiLoadState
               status={eventsState.data === null
@@ -369,12 +363,10 @@ export const EventsPage = ({
                     </section>
                   ))}
                 </div>
+                <EventFeedEnd nextCursor={eventsState.data?.nextCursor ?? null} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
               </div>
               </>
             </UiLoadState>
-            <div className="events-page__pagination-slot">
-              {eventsState.data === null ? null : <EventFeedEnd nextCursor={eventsState.data.nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />}
-            </div>
           </section>
         }
         inspector={selectedGroup === null ? null : (

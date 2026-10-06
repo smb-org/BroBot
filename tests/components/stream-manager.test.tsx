@@ -4,10 +4,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { ImmediateActions, WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
 import { jsonResponse } from "../unit/fixtures";
 
-const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
+const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider><ToastHost />{element}</UiProvider>);
 
 const ADS_ENABLED = [{ id: "ads", enabled: true }] as const;
 const RAID_ENABLED = [{ id: "raid", enabled: true }] as const;
@@ -52,6 +54,7 @@ class FeedWebSocket {
 describe("Stream Manager immediate actions", () => {
   afterEach(() => {
     cleanup();
+    toastsSnapshot().forEach(({ id }) => { dismissToast(id); });
     vi.unstubAllGlobals();
   });
 
@@ -270,7 +273,7 @@ describe("Stream Manager immediate actions", () => {
     expect(await screen.findByText("Shoutout an streamerin gesendet")).toBeInTheDocument();
   });
 
-  it("shows the catalogue reason when a manual shoutout fails", async () => {
+  it("shows the catalogue reason in a toast when a manual shoutout fails", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
@@ -284,13 +287,15 @@ describe("Stream Manager immediate actions", () => {
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
     fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
 
-    expect(await screen.findByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+    const failure = await screen.findByText("Twitch-Abklingzeit aktiv");
+    expect(failure.closest(".ui-toast--error")).toBeInTheDocument();
+    expect(failure.closest(".stream-manager-action")).not.toBeInTheDocument();
   });
 
   it.each([
     ["twitch_user_not_found", "Twitch-Nutzer nicht gefunden."],
     ["twitch_user_search_failed", "Twitch-Nutzersuche ist fehlgeschlagen."],
-  ])("localizes a top-level %s error when a manual shoutout fails", async (code, message) => {
+  ])("shows localized top-level %s errors in a toast when a manual shoutout fails", async (code, message) => {
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
@@ -305,7 +310,9 @@ describe("Stream Manager immediate actions", () => {
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
     fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
 
-    expect(await screen.findByText(message)).toBeInTheDocument();
+    const failure = await screen.findByText(message);
+    expect(failure.closest(".ui-toast--error")).toBeInTheDocument();
+    expect(failure.closest(".stream-manager-action")).not.toBeInTheDocument();
   });
 
   it("creates a clip and offers a link to it", async () => {

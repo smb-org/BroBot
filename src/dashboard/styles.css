@@ -132,7 +132,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 
 .stream-manager-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s4); min-height: 192px; }
 .stream-manager-action {
-  display: flex; flex-direction: column; gap: var(--s3); min-width: 0; min-height: 192px;
+  display: flex; flex-direction: column; gap: var(--s3); min-width: 0; width: 100%; height: 192px; min-height: 192px; overflow-y: auto;
   padding: var(--s4); border: 1px solid var(--line-strong); border-radius: var(--r-container);
 }
 .stream-manager-action--loading { justify-content: flex-start; }
@@ -659,7 +659,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .table__answer { min-width: 0; color: var(--text-2); white-space: normal; overflow-wrap: anywhere; }
 .table__answer--placeholder { color: var(--text-3); font-style: italic; }
 .channel-variables-limit-note { margin: -8px 0 0; }
-.channel-variables-limit-slot, .channel-variable-legacy-slot { min-height: 18px; }
+.channel-variable-legacy-slot { min-height: 18px; }
+.channel-variables-limit-slot { display: flex; height: 44px; min-height: 44px; align-items: center; }
 .channel-variable-legacy-slot { overflow: hidden; }
 .channel-variable-legacy-slot > p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .channel-variables-table-wrap { width: 100%; }
@@ -744,7 +745,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-legacy-links__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .overlay-legacy-links__reason-slot { height: 20px; min-height: 20px; overflow: hidden; }
 .overlay-legacy-links__reason-slot p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.overlay-legacy-links__pagination-slot { display: flex; min-height: 40px; align-items: flex-start; }
+.overlay-legacy-links__pagination-slot { display: flex; height: 44px; min-height: 44px; align-items: flex-start; }
 .overlay-legacy-links .ui-load-state { min-height: 260px; }
 .overlay-legacy-import-form { display: grid; gap: 12px; }
 .overlay-legacy-import-form ul { margin: 0; padding-left: 20px; }
@@ -1238,7 +1239,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .ui-save-bar__status { grid-column: 1; }
   .ui-save-bar__actions { grid-row: 1; grid-column: 2; justify-content: flex-end; }
 }
-.ui-toast-host { position: fixed; z-index: var(--mantine-z-index-modal); top: var(--s4); right: var(--s4); display: grid; width: min(40rem, calc(100vw - var(--s4) - var(--s4))); max-height: calc(100vh - var(--s4) - var(--s4)); align-content: start; gap: var(--s2); overflow: auto; pointer-events: none; }
+.ui-toast-host { position: fixed; z-index: calc(var(--mantine-z-index-modal) + 2); top: var(--s4); right: var(--s4); display: grid; width: min(40rem, calc(100vw - var(--s4) - var(--s4))); max-height: calc(100vh - var(--s4) - var(--s4)); align-content: start; gap: var(--s2); overflow: auto; pointer-events: none; }
 .ui-toast-host > * { pointer-events: auto; }
 .ui-toast { margin: 0; background: var(--surface); }
 .belabox-polling-retry-slot { display: flex; min-height: 44px; align-items: center; }
@@ -1276,7 +1277,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .platform-channel-release__search { align-items: end; }
 .platform-channel-release__search-button { min-width: 120px; }
 .platform-channel-release__result-slot { min-height: 180px; }
-.platform-audit__pagination-slot { min-height: 60px; }
+.platform-audit__pagination-slot { display: flex; height: 60px; min-height: 60px; align-items: flex-start; }
 .platform-members-table { width: 100%; min-width: 0; table-layout: auto; }
 .platform-members-table .login-hint { overflow-wrap: anywhere; white-space: normal; }
 .platform-members__skeleton-heading,
@@ -1296,8 +1297,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .event-label .event-table__text { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .realtime-status { display: inline-flex; align-items: center; gap: var(--s2); color: var(--text-3); font-size: 12px; font-weight: 400; }
 .realtime-feed__notice-slot { display: flex; height: 44px; min-height: 44px; align-items: center; justify-content: center; }
+.realtime-feed__notice-slot[data-pending="true"] { position: sticky; z-index: 2; top: var(--s4); }
 .realtime-feed__notice { position: static; }
-.event-feed { min-width: 0; }
+.event-feed { position: relative; min-width: 0; }
 .dashboard-filter-bar { width: 100%; min-width: 0; margin-bottom: var(--s4); }
 .dashboard-filter-bar__controls { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--s2); min-height: 44px; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; }
 .dashboard-filter-bar .event-filter__chips { flex: 0 0 auto; max-width: 100%; overflow-x: auto; }
@@ -1310,12 +1312,10 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .dashboard-filter-bar__summary { margin-top: var(--s2); }
 .dashboard-filter-bar__summary .form-actions { margin: 0; }
 .event-filter .form-actions p { margin: 0; }
-.event-feed__end { display: flex; min-height: 44px; align-items: center; }
-.event-feed__end > * { margin: 0; }
-.events-page__pagination-slot { min-height: 44px; }
-.audit-page__pagination-slot { min-height: 60px; }
-.members-page__pagination-slot { min-height: 60px; }
-.members-page__pagination-slot { display: flex; align-items: flex-start; }
+.event-feed__end { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; pointer-events: none; }
+.events-page__pagination-slot { display: flex; height: 60px; min-height: 60px; align-items: flex-start; }
+.audit-page__pagination-slot { display: flex; height: 60px; min-height: 60px; align-items: flex-start; }
+.members-page__pagination-slot { display: flex; height: 60px; min-height: 60px; align-items: flex-start; }
 .event-table__primary { width: 100%; }
 .event-table__text { min-width: 0; }
 .event-table__mobile-meta { display: none; }

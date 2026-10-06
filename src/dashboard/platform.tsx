@@ -237,35 +237,6 @@ const ChannelInspector = ({
         />
       </section>
       <InvitationLink channel={channel} />
-      <InspectorSection title={texts.members}>
-        <LoadStateView
-          status={members.data === null ? members.status === "error" ? "error" : "loading" : members.data.members.length === 0 ? "empty" : "success"}
-          minHeight={220}
-          loading={<PlatformMembersSkeleton />}
-          empty={<MembersTable members={[]} selectedUserId={selectedMemberId} onSelect={(member) => { setSelectedMemberId(member.userId); }} />}
-          error={<PlatformMembersSkeleton />}
-        >{members.data === null || members.data.members.length === 0 ? null : <MembersTable
-            members={members.data.members}
-            selectedUserId={selectedMemberId}
-            onSelect={(member) => { setSelectedMemberId(member.userId); }}
-          />}</LoadStateView>
-      </InspectorSection>
-        {selectedMember === null ? null : <>
-          <InspectorSection title={roleLabel(selectedMember.role)}>
-            {selectedMember.role === "broadcaster" ? <p className="muted" id={`platform-remove-broadcaster-reason-${selectedMember.userId}`}>{texts.removeBroadcasterHint}</p> : <InspectorFieldRow label={texts.role}>
-              <Select ariaLabel={texts.role + ": " + memberName(selectedMember)} value={selectedMember.role}
-                disabled={busyUserId === selectedMember.userId}
-                onChange={(role) => { if (role !== null) void changeRole(selectedMember, role as "manager" | "operator"); }}
-                options={roleSelectOptions()} />
-            </InspectorFieldRow>}
-          </InspectorSection>
-          <InspectorActions destructive={
-            <Button danger="subtle" disabled={selectedMember.role === "broadcaster" || busyUserId === selectedMember.userId}
-              {...(selectedMember.role === "broadcaster" ? { title: texts.removeBroadcasterHint } : {})}
-              {...(selectedMember.role === "broadcaster" ? { describedBy: `platform-remove-broadcaster-reason-${selectedMember.userId}` } : {})}
-              onClick={() => { setPendingRemoval(selectedMember); }}>{texts.remove}</Button>
-          } />
-        </>}
       <section className="config-section platform-inspector-section" aria-label={texts.addMember}>
         <div className="section-heading"><h3>{texts.addMember}</h3></div>
         <MemberGrantEditor
@@ -292,6 +263,35 @@ const ChannelInspector = ({
           onAuthenticationRequired={onAuthenticationRequired}
         />
       </section>
+      {selectedMember === null ? null : <>
+        <InspectorSection title={roleLabel(selectedMember.role)}>
+          {selectedMember.role === "broadcaster" ? <p className="muted" id={`platform-remove-broadcaster-reason-${selectedMember.userId}`}>{texts.removeBroadcasterHint}</p> : <InspectorFieldRow label={texts.role}>
+            <Select ariaLabel={texts.role + ": " + memberName(selectedMember)} value={selectedMember.role}
+              disabled={busyUserId === selectedMember.userId}
+              onChange={(role) => { if (role !== null) void changeRole(selectedMember, role as "manager" | "operator"); }}
+              options={roleSelectOptions()} />
+          </InspectorFieldRow>}
+        </InspectorSection>
+        <InspectorActions destructive={
+          <Button danger="subtle" disabled={selectedMember.role === "broadcaster" || busyUserId === selectedMember.userId}
+            {...(selectedMember.role === "broadcaster" ? { title: texts.removeBroadcasterHint } : {})}
+            {...(selectedMember.role === "broadcaster" ? { describedBy: `platform-remove-broadcaster-reason-${selectedMember.userId}` } : {})}
+            onClick={() => { setPendingRemoval(selectedMember); }}>{texts.remove}</Button>
+        } />
+      </>}
+      <InspectorSection title={texts.members}>
+        <LoadStateView
+          status={members.data === null ? members.status === "error" ? "error" : "loading" : members.data.members.length === 0 ? "empty" : "success"}
+          minHeight={220}
+          loading={<PlatformMembersSkeleton />}
+          empty={<MembersTable members={[]} selectedUserId={selectedMemberId} onSelect={(member) => { setSelectedMemberId(member.userId); }} />}
+          error={<PlatformMembersSkeleton />}
+      >{members.data === null || members.data.members.length === 0 ? null : <MembersTable
+            members={members.data.members}
+            selectedUserId={selectedMemberId}
+            onSelect={(member) => { setSelectedMemberId(member.userId); }}
+          />}</LoadStateView>
+      </InspectorSection>
       <ConfirmDialog
         opened={pendingRemoval !== null}
         title={texts.removeConfirmTitle(pendingRemoval === null ? "" : memberName(pendingRemoval))}
@@ -466,6 +466,9 @@ const PlatformAudit = ({
   return (
     <section className="config-section" aria-label={texts.audit}>
       <div className="section-heading"><h2>{texts.audit}</h2></div>
+      <div className="platform-audit__pagination-slot">
+        {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? texts.loadingMore : texts.loadMore}</button>}
+      </div>
       <LoadStateView
         status={status}
         minHeight={280}
@@ -480,9 +483,6 @@ const PlatformAudit = ({
           </table>
         </div>
       )}</LoadStateView>
-      <div className="platform-audit__pagination-slot">
-        {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? texts.loadingMore : texts.loadMore}</button>}
-      </div>
     </section>
   );
 };

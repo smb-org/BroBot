@@ -771,7 +771,7 @@ describe("Dashboard skeleton", () => {
     expect(eventRequests).toBe(2);
   });
 
-  it("loads only once when the feed end is reached and shows the end explicitly", async () => {
+  it("loads older events from the control above the feed and shows the end explicitly", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let releaseSecondPage: ((response: Response) => void) | undefined;
     const firstPage = {
@@ -799,9 +799,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByText("neu")).toBeInTheDocument();
-    const feedEnd = screen.getByLabelText("Am Ende werden ältere Ereignisse nachgeladen.");
-    fireEvent.focus(feedEnd);
-    fireEvent.keyDown(feedEnd, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
     const eventRequests = fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/events"));
     expect(eventRequests).toHaveLength(2);
     expect(await screen.findByText("Ältere Ereignisse werden geladen …")).toBeInTheDocument();

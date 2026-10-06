@@ -166,6 +166,9 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
         list={
           <section className="content-section" aria-label={texts.audit.title}>
             <AuditFilterBar filters={filters} onChange={onFiltersChange} />
+            <div className="audit-page__pagination-slot">
+              {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
+            </div>
             <UiLoadState
               status={auditState.data === null
                 ? auditState.status === "error" ? "error" : "loading"
@@ -214,9 +217,6 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
               </div>
             </> : null}
             </UiLoadState>
-            <div className="audit-page__pagination-slot">
-              {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
-            </div>
           </section>
         }
         inspector={selectedAudit === null ? null : (
