@@ -9,6 +9,16 @@ export type VoteCommand =
 
 export type VoteLabelSetting = "yesNoLabels" | "scaleLabels" | "optionLabels" | "zeroOneLabels" | "oneTwoLabels";
 
+export const CHAT_VOTING_LABEL_MAX_LENGTH = 32;
+
+export const voteLabelLength = (label: string): number => Array.from(label).length;
+
+export const isValidVoteLabel = (label: string): boolean => {
+  const trimmed = label.trim();
+  const length = voteLabelLength(trimmed);
+  return length > 0 && length <= CHAT_VOTING_LABEL_MAX_LENGTH;
+};
+
 export const isValidVoteLabelSetting = (value: string, setting: VoteLabelSetting): boolean => {
   if (value.trim().length === 0) return true;
   const labels = value.split("|").map((label) => label.trim());
@@ -16,7 +26,7 @@ export const isValidVoteLabelSetting = (value: string, setting: VoteLabelSetting
     : setting === "scaleLabels" ? [5, 5]
       : [2, 9];
   return labels.length >= minimum && labels.length <= maximum &&
-    labels.every((label) => label.length > 0 && label.length <= 32);
+    labels.every(isValidVoteLabel);
 };
 
 export const parseVoteCommand = (text: string): VoteCommand | null => {
@@ -56,7 +66,7 @@ export const voteChoiceFromMessage = (text: string, preset: ChatVotingPreset, op
 export const configuredLabels = (labels: readonly string[], count: number, allowAdditional = false): string[] | null => {
   const normalized = labels.map((label) => label.trim());
   const acceptedLength = allowAdditional ? normalized.length >= count : normalized.length === count;
-  return acceptedLength && normalized.slice(0, count).every((label) => label.length > 0 && label.length <= 32)
+  return acceptedLength && normalized.slice(0, count).every(isValidVoteLabel)
     ? normalized.slice(0, count)
     : null;
 };

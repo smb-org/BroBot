@@ -6,7 +6,7 @@ import type { SelectOption } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import { CHAT_VOTING_MAX_TEXT_TERMS, CHAT_VOTING_PRESETS } from "../contracts";
 import type { ChatVotePreset, ChatVotingTextMode } from "../contracts";
-import { rankVoteTerms } from "../domain";
+import { CHAT_VOTING_LABEL_MAX_LENGTH, isValidVoteLabel, rankVoteTerms, voteLabelLength } from "../domain";
 import { chatVotingPanelTexts } from "./locale-panel";
 import type { ChatVotingPanelState } from "./service";
 import { approveChatVotingTerm, closeChatVoting, loadChatVotingState, startChatVoting } from "./service";
@@ -20,6 +20,17 @@ const timeText = (value: string, language: DashboardLanguage): string =>
   Number.isFinite(Date.parse(value))
     ? new Intl.DateTimeFormat(language, { timeStyle: "short" }).format(new Date(value))
     : "—";
+
+const compactDateRange = (from: string, to: string, language: DashboardLanguage): [string, string] => {
+  const start = new Date(from);
+  const end = new Date(to);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return ["—", "—"];
+  const locale = language === "de" ? "de-DE" : "en-US";
+  const dateFormatter = new Intl.DateTimeFormat(locale, { dateStyle: "short" });
+  return dateFormatter.format(start) === dateFormatter.format(end)
+    ? [timeText(from, language), timeText(to, language)]
+    : [dateText(from, language), dateText(to, language)];
+};
 
 type DurationPreset = "open" | "one" | "two" | "five" | "custom";
 
@@ -97,18 +108,32 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
     try {
       const next = await loadChatVotingState(channelId);
       const closedSinceLastRead = next.vote?.status === "closed" && lastVote.current?.id === next.vote.id && lastVote.current.status === "open";
-      if (closedSinceLastRead) labelDraftTouched.current = emptyTouched();
+      const justClosedVote = closedSinceLastRead ? next.vote : null;
+      if (justClosedVote !== null) {
+        labelDraftTouched.current = emptyTouched();
+        labelDraftTouched.current[justClosedVote.preset] = true;
+      }
       const defaults = next.defaultLabels;
       setDraftLabels((current) => {
         const updated = { ...current };
         for (const preset of CHAT_VOTING_PRESETS) {
-          if (closedSinceLastRead || !labelDraftTouched.current[preset]) updated[preset] = [...defaults[preset]];
+          if (!labelDraftTouched.current[preset]) updated[preset] = [...defaults[preset]];
         }
+        if (justClosedVote !== null) updated[justClosedVote.preset] = [...justClosedVote.labels];
         return updated;
       });
       setState(next);
       lastVote.current = next.vote;
-      if (!configurationInitialized.current || next.vote?.status !== "open" && !durationDraftTouched.current) {
+      if (justClosedVote !== null) {
+        setDraftPreset(justClosedVote.preset);
+        setDraftOptionCount(justClosedVote.optionCount);
+        setDraftTextMode(justClosedVote.textMode ?? "first_word");
+        const voteDurationPreset = durationPresetFor(justClosedVote.requestedDurationSeconds ?? 0);
+        setDraftDurationPreset(voteDurationPreset);
+        if (voteDurationPreset === "custom") setDraftCustomDurationSeconds(justClosedVote.requestedDurationSeconds ?? "");
+        durationDraftTouched.current = true;
+        configurationInitialized.current = true;
+      } else if (!configurationInitialized.current || next.vote?.status !== "open" && !durationDraftTouched.current) {
         const defaultDurationSeconds = next.defaultDurationSeconds;
         const defaultDurationPreset = durationPresetFor(defaultDurationSeconds);
         setDraftDurationPreset(defaultDurationPreset);
@@ -146,13 +171,14 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
     const entered = draftLabels[draftPreset][index]?.trim() ?? "";
     return entered || selectedDefaults[index] || key;
   });
-  const validLabels = effectiveDraftLabels.every((label) => Array.from(label).length > 0 && Array.from(label).length <= 32);
+  const validLabels = effectiveDraftLabels.every(isValidVoteLabel);
 
   const start = async (): Promise<void> => {
     if (draftDurationPreset === null) return;
     const durationSeconds = secondsForDurationPreset(draftDurationPreset, draftCustomDurationSeconds);
     const validOptionCount = typeof draftOptionCount === "number" && Number.isInteger(draftOptionCount) && draftOptionCount >= 2 && draftOptionCount <= 9;
-    if (durationSeconds === "" || !Number.isSafeInteger(durationSeconds) || durationSeconds < 0 || durationSeconds > 14_400 ||
+    const minimumDurationSeconds = draftDurationPreset === "open" ? 0 : 1;
+    if (durationSeconds === "" || !Number.isSafeInteger(durationSeconds) || durationSeconds < minimumDurationSeconds || durationSeconds > 14_400 ||
         draftPreset === "options_n" && !validOptionCount || !validLabels) return;
     setBusy(true);
     try {
@@ -235,9 +261,12 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
     : draftCustomDurationSeconds;
   const validOptionCount = typeof draftOptionCount === "number" && Number.isInteger(draftOptionCount) && draftOptionCount >= 2 && draftOptionCount <= 9;
   const durationSeconds = draftDurationPreset === null ? "" : secondsForDurationPreset(draftDurationPreset, draftCustomDurationSeconds);
-  const validDuration = typeof durationSeconds === "number" && Number.isSafeInteger(durationSeconds) && durationSeconds >= 0 && durationSeconds <= 14_400;
+  const minimumDurationSeconds = draftDurationPreset === "open" ? 0 : 1;
+  const validDuration = typeof durationSeconds === "number" && Number.isSafeInteger(durationSeconds) && durationSeconds >= minimumDurationSeconds && durationSeconds <= 14_400;
   const validConfiguration = (draftPreset !== "options_n" || validOptionCount) && validDuration && validLabels;
-  const actionHint = !canOperate ? labels.roleDisabledReason : activeBallot ? labels.startDisabledReason : null;
+  const actionHint = !canOperate ? labels.roleDisabledReason : activeBallot ? labels.startDisabledReason
+    : !validDuration ? labels.invalidDuration
+      : draftPreset === "options_n" && !validOptionCount ? labels.invalidOptionCount : null;
   const loadStateProps = {
     minHeight: "calc(var(--s10) * 8)",
     loading: <Skeleton rows={8} height={34} />,
@@ -249,14 +278,14 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   const displayedDefaults = state.defaultLabels[displayedPreset];
   const resultCount = vote === null ? 0 : closed ? vote.voterCount ?? (vote.preset === "free_text" ? textTotal : total)
     : vote.preset === "free_text" ? textTotal : total;
-  const resultFrom = vote === null ? "" : dateText(vote.openedAt, language);
-  const resultTo = closed ? dateText(vote.closedAt ?? vote.closesAt, language) : null;
+  const resultRange = closed ? compactDateRange(vote.openedAt, vote.closedAt ?? vote.closesAt, language) : null;
+  const resultFrom = vote === null ? "" : resultRange?.[0] ?? dateText(vote.openedAt, language);
+  const resultTo = closed ? resultRange?.[1] ?? dateText(vote.closedAt ?? vote.closesAt, language) : null;
   const resultMetadata = vote === null ? null : labels.resultMeta(resultCount, resultFrom, resultTo, vote.preset === "free_text" ? moreTerms : undefined);
   const leaderIndex = total === 0 ? -1 : counts.findIndex((count) => count === Math.max(...counts));
   const rankedTerms = rankVoteTerms(terms, CHAT_VOTING_MAX_TEXT_TERMS);
   const termLeader = rankedTerms[0];
   const headerStatus = vote === null ? labels.readyStatus : running ? labels.runningStatus : labels.closedStatus;
-  const actionReason = !canOperate ? labels.roleDisabledReason : activeBallot ? labels.startDisabledReason : "";
 
   return <section className="module-stack chat-voting-panel" aria-label={labels.title}>
     <LoadState status="success" {...loadStateProps}>
@@ -294,6 +323,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
               min={2}
               max={9}
               step={1}
+              {...(!running && !validOptionCount ? { error: labels.invalidOptionCount } : {})}
               increaseLabel={labels.increaseOptionCount}
               decreaseLabel={labels.decreaseOptionCount}
               disabled={configurationDisabled}
@@ -322,8 +352,9 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
                   leftLabel={key}
                   value={displayedLabels[index] ?? ""}
                   placeholder={displayedDefaults[index] ?? key}
-                  maxLength={32}
+                  maxLength={CHAT_VOTING_LABEL_MAX_LENGTH}
                   countLabel={labels.labelCount}
+                  countLength={voteLabelLength}
                   disabled={configurationDisabled}
                   onChange={(value) => {
                     labelDraftTouched.current[draftPreset] = true;
@@ -366,6 +397,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
                 max={14_400}
                 step={30}
                 unit="s"
+                {...(!running && !validDuration ? { error: labels.invalidDuration } : {})}
                 increaseLabel={labels.increaseDuration}
                 decreaseLabel={labels.decreaseDuration}
                 disabled={configurationDisabled}
@@ -385,7 +417,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
               onClick={() => { void (running ? close() : start()); }}>
               {running ? labels.stop : labels.start}
             </Button>
-            <p className="chat-voting-hint" data-testid="chat-voting-hint-slot" title={actionReason} aria-live="polite">{actionHint}</p>
+            <p className="chat-voting-hint" data-testid="chat-voting-hint-slot" title={actionHint ?? ""} aria-live="polite">{actionHint}</p>
           </div>
 
           <div className="chat-voting-result">
@@ -407,7 +439,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
                   const percent = textTotal === 0 ? 0 : Math.round(entry.count * 100 / textTotal);
                   const leading = entry.term === termLeader?.term;
                   return <div className="chat-voting-results__row chat-voting-results__term-row" data-leading={leading || undefined} key={`${vote.id}-${entry.term}`} role="group" aria-label={labels.resultBar(entry.term, entry.count, percent)}>
-                    <span className="chat-voting-results__label" title={entry.approved ? entry.term : `${entry.term} · ${labels.termHidden}`}>{entry.term}</span>
+                    <span className="chat-voting-results__label" title={entry.term}>{entry.term}</span>
                     <span className="chat-voting-results__track" aria-hidden="true"><span style={{ width: `${String(percent)}%` }} /></span>
                     <span className="number">{String(entry.count)}</span>
                     <span className="number">{String(percent)}%</span>

@@ -169,6 +169,44 @@ describe("chat voting live panel", () => {
     await waitFor(() => expect(startPayload).toEqual({ preset: "digit_01", durationSeconds: 120, labels: ["Nope", "Yes"] }));
   });
 
+  it("counts emoji labels in code points in the field and start validation", async () => {
+    let startPayload: unknown;
+    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
+      startPayload = body;
+      return { vote: openVote };
+    }));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const emojiLabel = "😀".repeat(17);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Label for option 1" }), { target: { value: emojiLabel } });
+    expect(screen.getByText("17/32")).toBeInTheDocument();
+    const start = screen.getByRole("button", { name: "Start vote" });
+    expect(start).toBeEnabled();
+    fireEvent.click(start);
+    await waitFor(() => expect(startPayload).toMatchObject({ labels: [emojiLabel, "No"] }));
+  });
+
+  it("shows invalid duration and option-count reasons in the fixed hint and field", async () => {
+    vi.stubGlobal("fetch", fetchFor());
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    await screen.findByRole("button", { name: "Start vote" });
+    await selectOption("Vote type", "Options 2–9");
+    const optionCount = screen.getByRole("spinbutton", { name: "Number of options" });
+    fireEvent.change(optionCount, { target: { value: "" } });
+    const hint = screen.getByTestId("chat-voting-hint-slot");
+    expect(hint).toHaveTextContent("Enter a number from 2 to 9.");
+    expect(optionCount.closest(".ui-number-field__stepper")).toHaveTextContent("Enter a number from 2 to 9.");
+    expect(screen.getByRole("button", { name: "Start vote" })).toBeDisabled();
+
+    await selectOption("Duration", "Custom …");
+    const duration = screen.getByRole("spinbutton", { name: "Seconds" });
+    fireEvent.change(duration, { target: { value: "" } });
+    expect(hint).toHaveTextContent("Enter a duration from 1 to 14,400 seconds.");
+    expect(duration.closest(".ui-number-field__stepper")).toHaveTextContent("Enter a duration from 1 to 14,400 seconds.");
+    expect(screen.getByRole("button", { name: "Start vote" })).toBeDisabled();
+  });
+
   it("locks the configuration to the running vote and keeps the stop action available", async () => {
     vi.stubGlobal("fetch", fetchFor(() => currentState({ vote: openVote, counts: [4, 2], hasOpenBallot: true })));
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);

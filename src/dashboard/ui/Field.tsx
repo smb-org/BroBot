@@ -25,6 +25,8 @@ interface FieldBaseProps {
   spellCheck?: boolean;
   /** Monospace value, for a field whose exact characters matter (the invitation link). */
   mono?: boolean;
+  /** Counts Unicode code points when a field's limit does not use UTF-16 units. */
+  countLength?: (value: string) => number;
   name?: string;
   id?: string;
   normalize?: (value: string) => string;
@@ -51,9 +53,9 @@ export type FieldProps = FieldBaseProps & (
  * `×` and the border stays strong (wired in the theme's `Input`
  * override, not here).
  */
-export function Field({ label, ariaLabel, labelHidden = false, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, name, id, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, onKeyDown }: FieldProps) {
+export function Field({ label, ariaLabel, labelHidden = false, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, countLength, name, id, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, onKeyDown }: FieldProps) {
   const disabledReason = useDisabledFieldReason();
-  const count = value.length;
+  const count = countLength?.(value) ?? value.length;
   const overLimit = maxLength !== undefined && count > maxLength;
   const nearLimit = maxLength !== undefined && count >= maxLength * 0.9;
   const effectiveError = error ?? (overLimit ? countLabel(count, maxLength) : undefined);
@@ -75,8 +77,8 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
   return (
     <TextInput
       className={["ui-field", className, leadingLabel === undefined ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ")}
-      label={labelHidden ? <span className="sr-only">{label}</span> : label}
-      aria-label={ariaLabel}
+      label={labelHidden ? undefined : label}
+      aria-label={ariaLabel ?? (labelHidden ? label : undefined)}
       description={description}
       error={errorNode}
       inputWrapperOrder={["label", "input", "description", "error"]}

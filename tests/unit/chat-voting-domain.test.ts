@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
 import {
+  CHAT_VOTING_LABEL_MAX_LENGTH,
   formatFreeTextVoteResult,
   formatVoteResult,
   configuredLabels,
   isBlockedFreeTextVote,
+  isValidVoteLabel,
   isValidVoteLabelSetting,
   labelsForVote,
   normalizeBlockedVoteTerm,
@@ -14,6 +16,7 @@ import {
   rankVoteTerms,
   voteChoiceFromMessage,
   voteCloseDeadline,
+  voteLabelLength,
 } from "../../src/modules/chat_voting/domain";
 
 describe("chat voting command and result domain", () => {
@@ -55,6 +58,15 @@ describe("chat voting command and result domain", () => {
     expect(configuredLabels(["Yes", " "], 2)).toBeNull();
     expect(configuredLabels(["x".repeat(33), "No"], 2)).toBeNull();
     expect(configuredLabels(["one", "two", "three"], 2)).toBeNull();
+  });
+
+  it("counts vote-label limits in Unicode code points", () => {
+    const seventeenEmoji = "😀".repeat(17);
+    expect(CHAT_VOTING_LABEL_MAX_LENGTH).toBe(32);
+    expect(voteLabelLength(seventeenEmoji)).toBe(17);
+    expect(isValidVoteLabel(seventeenEmoji)).toBe(true);
+    expect(configuredLabels([seventeenEmoji, "No"], 2)).toEqual([seventeenEmoji, "No"]);
+    expect(configuredLabels(["😀".repeat(33), "No"], 2)).toBeNull();
   });
 
   it("accepts empty labels as defaults and rejects malformed custom labels", () => {

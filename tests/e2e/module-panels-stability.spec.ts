@@ -29,6 +29,11 @@ const gotoPanel = async (page: Page, panel: string): Promise<void> => {
   await page.goto(`/tests/e2e/module-panels-stability-fixture.html?panel=${panel}`);
 };
 
+const chooseOption = async (page: Page, label: string, option: string): Promise<void> => {
+  await page.getByRole("combobox", { name: label }).click();
+  await page.getByRole("option", { name: option }).click();
+};
+
 test("API source editor and expression hint keep their boxes stable", async ({ page }) => {
   const sources = Array.from({ length: 8 }, (_, index) => ({
     name: `source_${String(index)}`,
@@ -287,9 +292,112 @@ test("chat voting keeps configuration and action stable when results become live
   expect(mobileAction.y).toBeLessThan(mobileResult.y);
 });
 
+test("custom duration fits with its controls and unit at desktop and mobile widths", async ({ page }) => {
+  const defaults = {
+    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
+    scale_5: ["1", "2", "3", "4", "5"], options_n: ["1", "2"], free_text: [],
+  };
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false,
+    defaultDurationSeconds: 120, defaultLabels: defaults,
+  });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await gotoPanel(page, "chat_voting");
+    await chooseOption(page, "Duration", "Custom …");
+    const seconds = page.getByRole("spinbutton", { name: "Seconds" });
+    await seconds.fill("14400");
+    const geometry = await seconds.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const stepper = element.closest(".ui-number-field__stepper") as HTMLElement;
+      const unit = stepper.querySelector(".mantine-Input-section") as HTMLElement;
+      const style = getComputedStyle(element);
+      return {
+        inputWidth: rect.width,
+        contentWidth: rect.width - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight),
+        stepperWidth: stepper.getBoundingClientRect().width,
+        unitFits: unit.getBoundingClientRect().right <= stepper.getBoundingClientRect().right,
+        value: (element as HTMLInputElement).value,
+      };
+    });
+    expect(geometry.value).toBe("14400");
+    expect(geometry.inputWidth).toBeGreaterThanOrEqual(128);
+    expect(geometry.contentWidth).toBeGreaterThanOrEqual(50);
+    expect(geometry.stepperWidth).toBeGreaterThanOrEqual(220);
+    expect(geometry.unitFits).toBe(true);
+    const label = page.getByRole("textbox", { name: "Label for option 1" });
+    await expect(label).toHaveAttribute("aria-label", "Label for option 1");
+    await expect(page.locator(".chat-voting-labels .mantine-InputWrapper-label")).toHaveCount(0);
+  }
+});
+
+test("a timer-closed vote becomes the next draft without changing its configuration", async ({ page }) => {
+  const defaults = {
+    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
+    scale_5: ["1", "2", "3", "4", "5"], options_n: Array.from({ length: 9 }, (_, index) => String(index + 1)), free_text: [],
+  };
+  let vote: Record<string, unknown> | null = null;
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    const counts = vote?.preset === "options_n" ? Array<number>(9).fill(0) : null;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts, revision: vote?.status === "open" ? 2 : 1, terms: null, moreTerms: null,
+      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 120, defaultLabels: defaults,
+    }) });
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
+    const body = await route.request().postDataJSON() as { preset: string; optionCount: number; durationSeconds: number; labels: string[] };
+    expect(body).toMatchObject({ preset: "options_n", optionCount: 9, durationSeconds: 90 });
+    vote = {
+      id: "timer-vote", channelId: "channel-a", preset: body.preset, optionCount: body.optionCount, labels: body.labels,
+      status: "open", openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:01:30.000Z",
+      requestedDurationSeconds: body.durationSeconds, closedAt: null, closeReason: null, counts: Array<number>(9).fill(0), voterCount: 0,
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
+  });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "chat_voting");
+
+  await chooseOption(page, "Vote type", "Options 2–9");
+  await page.getByRole("spinbutton", { name: "Number of options" }).fill("9");
+  await chooseOption(page, "Duration", "Custom …");
+  await page.getByRole("spinbutton", { name: "Seconds" }).fill("90");
+  const setup = page.locator(".chat-voting-setup");
+  const action = page.locator(".chat-voting-action");
+
+  await page.getByRole("button", { name: "Start vote" }).click();
+  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+  await expect(page.getByRole("spinbutton", { name: "Number of options" })).toHaveValue("9");
+  await expect(page.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("90");
+  const setupWhileRunningBefore = await box(setup);
+  const actionWhileRunningBefore = await box(action);
+  vote = { ...(vote as unknown as Record<string, unknown>), status: "closed", closedAt: "2030-01-01T12:01:30.000Z" };
+
+  await expect(page.getByTestId("chat-voting-header-status")).toContainText("Closed", { timeout: 5_000 });
+  await expect(page.getByRole("combobox", { name: "Vote type" })).toHaveValue("Options 2–9");
+  await expect(page.getByRole("spinbutton", { name: "Number of options" })).toHaveValue("9");
+  await expect(page.getByRole("combobox", { name: "Duration" })).toHaveValue("Custom …");
+  await expect(page.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("90");
+  await expect(page.getByRole("button", { name: "Start vote" })).toBeEnabled();
+  expect(await box(setup)).toEqual(setupWhileRunningBefore);
+  expect(await box(action)).toEqual(actionWhileRunningBefore);
+  const metadata = page.locator(".chat-voting-result__meta");
+  const [startTime, endTime] = await page.evaluate(() => [
+    new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(new Date("2030-01-01T12:00:00.000Z")),
+    new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(new Date("2030-01-01T12:01:30.000Z")),
+  ]);
+  await expect(metadata).toContainText(startTime);
+  await expect(metadata).toContainText(endTime);
+  await expect(metadata).not.toContainText("/");
+  expect(await metadata.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
 test("free-text voting always renders five fixed result rows at desktop and mobile widths", async ({ page }) => {
+  const longTerm = "0123456789012345678901234";
   const terms = [
-    { term: "first", count: 2, approved: false },
+    { term: longTerm, count: 2, approved: false },
     { term: "second", count: 1, approved: false },
   ];
   let approvedTerm: string | null = null;
@@ -322,6 +430,11 @@ test("free-text voting always renders five fixed result rows at desktop and mobi
     await gotoPanel(page, "chat_voting");
     const rows = page.locator(".chat-voting-results__term-row");
     await expect(rows).toHaveCount(5);
+    expect(await rows.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height))).toEqual(Array<number>(5).fill(34));
+    const fullLabel = rows.first().locator(".chat-voting-results__label");
+    await expect(fullLabel).toHaveAttribute("title", longTerm);
+    expect(await fullLabel.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("nowrap");
+    if (width === 390) expect(await fullLabel.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     const setup = page.locator(".chat-voting-setup");
     const result = page.locator(".chat-voting-result");
     const action = page.getByRole("button", { name: "End vote" });
