@@ -53,13 +53,16 @@ export const voteChoiceFromMessage = (text: string, preset: ChatVotingPreset, op
   return choice <= optionCount ? choice : null;
 };
 
-const configuredLabels = (value: string, count: number, allowAdditional = false): string[] | null => {
-  const labels = value.split("|").map((label) => label.trim());
-  const acceptedLength = allowAdditional ? labels.length >= count : labels.length === count;
-  return acceptedLength && labels.slice(0, count).every((label) => label.length > 0 && label.length <= 32)
-    ? labels.slice(0, count)
+export const configuredLabels = (labels: readonly string[], count: number, allowAdditional = false): string[] | null => {
+  const normalized = labels.map((label) => label.trim());
+  const acceptedLength = allowAdditional ? normalized.length >= count : normalized.length === count;
+  return acceptedLength && normalized.slice(0, count).every((label) => label.length > 0 && label.length <= 32)
+    ? normalized.slice(0, count)
     : null;
 };
+
+const labelsFromSetting = (value: string, count: number, allowAdditional = false): string[] | null =>
+  configuredLabels(value.split("|").map((label) => label.trim()), count, allowAdditional);
 
 export const labelsForVote = (
   settings: ChatVotingSettings,
@@ -71,8 +74,12 @@ export const labelsForVote = (
   const setting = preset === "yes_no" ? settings.yesNoLabels
     : preset === "scale_5" ? settings.scaleLabels
       : preset === "options_n" ? settings.optionLabels
-        : preset === "digit_01" ? settings.zeroOneLabels : settings.oneTwoLabels;
-  const configured = configuredLabels(
+      : preset === "digit_01" ? settings.zeroOneLabels : settings.oneTwoLabels;
+  if (preset === "options_n" && isValidVoteLabelSetting(setting, "optionLabels") && setting.trim().length > 0) {
+    const configured = setting.split("|").map((label) => label.trim());
+    return Array.from({ length: optionCount }, (_, index) => configured[index] ?? String(index + 1));
+  }
+  const configured = labelsFromSetting(
     setting,
     optionCount,
     preset === "options_n",

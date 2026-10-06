@@ -4,6 +4,7 @@ import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/cont
 import {
   formatFreeTextVoteResult,
   formatVoteResult,
+  configuredLabels,
   isBlockedFreeTextVote,
   isValidVoteLabelSetting,
   labelsForVote,
@@ -44,6 +45,16 @@ describe("chat voting command and result domain", () => {
       .toEqual(["Low", "Medium", "High", "Great", "Perfect"]);
     expect(labelsForVote({ ...DEFAULT_CHAT_VOTING_SETTINGS, optionLabels: "Red|Blue|Green" }, "options_n", 2, "en"))
       .toEqual(["Red", "Blue"]);
+    expect(labelsForVote({ ...DEFAULT_CHAT_VOTING_SETTINGS, optionLabels: "Red|Blue|Green" }, "options_n", 4, "en"))
+      .toEqual(["Red", "Blue", "Green", "4"]);
+  });
+
+  it("validates per-vote labels against the selected option count", () => {
+    expect(configuredLabels([" Pizza ", "Burger"], 2)).toEqual(["Pizza", "Burger"]);
+    expect(configuredLabels(["Yes"], 2)).toBeNull();
+    expect(configuredLabels(["Yes", " "], 2)).toBeNull();
+    expect(configuredLabels(["x".repeat(33), "No"], 2)).toBeNull();
+    expect(configuredLabels(["one", "two", "three"], 2)).toBeNull();
   });
 
   it("accepts empty labels as defaults and rejects malformed custom labels", () => {

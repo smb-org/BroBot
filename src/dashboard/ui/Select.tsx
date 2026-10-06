@@ -1,5 +1,5 @@
 import { Select as MantineSelect } from "@mantine/core";
-import type { ComboboxItem, ComboboxLikeRenderOptionInput } from "@mantine/core";
+import type { ComboboxData, ComboboxItem, ComboboxLikeRenderOptionInput } from "@mantine/core";
 import type { ReactNode } from "react";
 
 import { useDisabledFieldReason } from "./DisabledFieldReason";
@@ -11,6 +11,8 @@ export interface SelectOption {
   label: string;
   /** One-line explanation rendered under the label in the dropdown. */
   description?: string;
+  /** Options with the same group are presented under a shared heading. */
+  group?: string;
 }
 
 /** Renders `label` alone, or `label` + a one-line `description` underneath
@@ -82,6 +84,17 @@ export function Select({
   describedBy,
 }: SelectProps) {
   const disabledReason = useDisabledFieldReason();
+  const groupedOptions = options.some((option) => option.group !== undefined);
+  const groupNames = [...new Set(options.flatMap((option) => option.group === undefined ? [] : [option.group]))];
+  const toComboboxOption = ({ value: optionValue, label, description }: SelectOption): SelectOption =>
+    description === undefined ? { value: optionValue, label } : { value: optionValue, label, description };
+  const data: ComboboxData = groupedOptions ? [
+    ...options.filter((option) => option.group === undefined).map(toComboboxOption),
+    ...groupNames.map((group) => ({
+      group,
+      items: options.filter((option) => option.group === group).map(toComboboxOption),
+    })),
+  ] : options;
   const contextualDescriptionId = describedBy !== undefined && disabledReason !== null && id !== undefined
     ? `${describedBy}-select-${id}`
     : undefined;
@@ -106,7 +119,7 @@ export function Select({
       error={compact || !error ? undefined : <span><span aria-hidden="true">× </span><TruncatedText text={error} /></span>}
       value={value}
       onChange={onChange}
-      data={options}
+      data={data}
       placeholder={placeholder}
       disabled={disabled}
       searchable={searchable}

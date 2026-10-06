@@ -2,11 +2,11 @@ import { Hono } from "hono";
 
 import type { AuditAction } from "../../contracts/values";
 import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, chatVotingSettingsSchema } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
 import type { ChatVotePreset } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, startChatVote } from "./service";
-import { isBlockedFreeTextVote, normalizeBlockedVoteTerm } from "./domain";
+import { configuredLabels, isBlockedFreeTextVote, labelsForVote, normalizeBlockedVoteTerm } from "./domain";
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -34,14 +34,24 @@ export const chatVotingRoutes = new Hono<ModuleRouteEnvironment>();
 chatVotingRoutes.get("/current", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const repository = createChatVotingRepository(context.env.DB);
-  const [vote, settings] = await Promise.all([
+  const [vote, settings, language] = await Promise.all([
     repository.latest(channelId),
     getEnabledSettings(context.env.DB, channelId),
+    channelLanguage(context.env.DB, channelId),
   ]);
+  const effectiveSettings = settings ?? DEFAULT_CHAT_VOTING_SETTINGS;
+  const defaultLabels: Record<ChatVotePreset, string[]> = {
+    yes_no: labelsForVote(effectiveSettings, "yes_no", 2, language),
+    digit_01: labelsForVote(effectiveSettings, "digit_01", 2, language),
+    digit_12: labelsForVote(effectiveSettings, "digit_12", 2, language),
+    scale_5: labelsForVote(effectiveSettings, "scale_5", 5, language),
+    options_n: labelsForVote(effectiveSettings, "options_n", 9, language),
+    free_text: [],
+  };
   const ballots = context.get("ballots")(channelId);
   if (vote === null) {
     const hasOpenBallot = await ballots.hasOpenBallot?.() ?? false;
-    return context.json({ vote: null, counts: null, revision: 0, terms: null, moreTerms: null, hasOpenBallot, defaultDurationSeconds: settings?.autoCloseSeconds ?? 0 });
+    return context.json({ vote: null, counts: null, revision: 0, terms: null, moreTerms: null, hasOpenBallot, defaultDurationSeconds: effectiveSettings.autoCloseSeconds, defaultLabels });
   }
   const [snapshot, hasOpenBallot] = await Promise.all([
     vote.status === "open" ? ballots.read(vote.id) : Promise.resolve(null),
@@ -55,7 +65,8 @@ chatVotingRoutes.get("/current", async (context) => {
     moreTerms: snapshot?.more ?? vote.moreTerms,
     termFilterReady: snapshot?.termFilterReady ?? vote.termFilterReady ?? false,
     hasOpenBallot,
-    defaultDurationSeconds: settings?.autoCloseSeconds ?? 0,
+    defaultDurationSeconds: effectiveSettings.autoCloseSeconds,
+    defaultLabels,
   });
 });
 
@@ -83,6 +94,14 @@ chatVotingRoutes.post("/start", async (context) => {
       (durationSeconds as number) > CHAT_VOTING_HARD_LIMIT_MS / 1_000) {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
+  let voteLabels: string[] | undefined;
+  if (body.labels !== undefined) {
+    if (preset === "free_text" || !Array.isArray(body.labels) || body.labels.some((label) => typeof label !== "string")) {
+      return context.json({ error: "chat_voting_request_invalid" }, 400);
+    }
+    voteLabels = configuredLabels(body.labels as string[], optionCount as number) ?? undefined;
+    if (voteLabels === undefined) return context.json({ error: "chat_voting_request_invalid" }, 400);
+  }
 
   const settings = await getEnabledSettings(context.env.DB, channelId);
   if (settings === null) return context.json({ error: "chat_voting_unavailable" }, 409);
@@ -102,6 +121,7 @@ chatVotingRoutes.post("/start", async (context) => {
       channelId,
       preset,
       optionCount: optionCount as number,
+      ...(voteLabels === undefined ? {} : { labels: voteLabels }),
       ...(preset === "free_text" ? { textMode: textMode ?? "first_word", blockedTerms } : {}),
       settings: { ...settings, autoCloseSeconds: durationSeconds as number },
       language: await channelLanguage(context.env.DB, channelId),
@@ -124,6 +144,7 @@ chatVotingRoutes.post("/start", async (context) => {
       pollId: result.vote.id,
       preset: result.vote.preset,
       optionCount: result.vote.optionCount,
+      labels: result.vote.labels,
       closesAt: result.vote.closesAt,
     },
   }, new Date().toISOString());

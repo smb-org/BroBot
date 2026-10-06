@@ -2,7 +2,7 @@ import type { BallotTermCount, ModuleEvent, ModuleExecutionContext, ModuleMutati
 import type { ModuleLanguage, ModuleAlarmContext } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
 import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
-import { formatFreeTextVoteResult, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, parseVoteCommand, voteChoiceFromMessage, voteCloseDeadline } from "./domain";
+import { configuredLabels, formatFreeTextVoteResult, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, parseVoteCommand, voteChoiceFromMessage, voteCloseDeadline } from "./domain";
 import type { ChatVotingRepository } from "./repository";
 import { chatVotingChatText } from "./contracts/chat-defaults";
 import { createChatVotingRepository } from "./repository";
@@ -11,6 +11,7 @@ export interface StartChatVoteInput {
   channelId: string;
   preset: ChatVotePreset;
   optionCount: number;
+  labels?: readonly string[];
   textMode?: ChatVotingTextMode;
   blockedTerms?: readonly string[] | null;
   settings: ChatVotingSettings;
@@ -41,6 +42,10 @@ export const startChatVote = async (
       input.preset === "scale_5" && input.optionCount !== 5) {
     throw new RangeError("The selected voting preset has an invalid option count.");
   }
+  const voteLabels = input.labels === undefined
+    ? labelsForVote(input.settings, input.preset, input.optionCount, input.language)
+    : input.preset === "free_text" ? null : configuredLabels(input.labels, input.optionCount);
+  if (voteLabels === null) throw new RangeError("The selected voting preset has invalid labels.");
   const requestedOpenedAt = input.openedAt ?? Date.now();
   const latestVote = await repository.latest(input.channelId);
   const latestOpenedAt = latestVote === null ? Number.NaN : Date.parse(latestVote.openedAt);
@@ -53,7 +58,7 @@ export const startChatVote = async (
     channelId: input.channelId,
     preset: input.preset,
     optionCount: input.optionCount,
-    labels: labelsForVote(input.settings, input.preset, input.optionCount, input.language),
+    labels: voteLabels,
     textMode: input.preset === "free_text" ? input.textMode ?? "first_word" : null,
     termFilterReady: input.preset === "free_text" ? input.blockedTerms != null : null,
     openedAt: new Date(openedAt).toISOString(),

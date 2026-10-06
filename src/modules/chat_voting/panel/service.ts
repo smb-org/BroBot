@@ -9,6 +9,7 @@ export interface ChatVotingPanelState {
   moreTerms: number | null;
   hasOpenBallot: boolean;
   defaultDurationSeconds: number;
+  defaultLabels: Record<ChatVotePreset, string[]>;
 }
 
 const readJson = async <Value>(response: Response): Promise<Value> => {
@@ -34,22 +35,21 @@ const csrfHeader = async (): Promise<string> => {
   return token.token;
 };
 
-export const startChatVoting = async (
-  channelId: string,
-  preset: ChatVotePreset,
-  optionCount?: number,
-  durationSeconds?: number,
-  textMode?: ChatVotingTextMode,
-): Promise<ChatVote> => {
+export interface StartChatVotingOptions {
+  preset: ChatVotePreset;
+  optionCount?: number;
+  durationSeconds: number;
+  textMode?: ChatVotingTextMode;
+  labels?: readonly string[];
+}
+
+export const startChatVoting = async (channelId: string, options: StartChatVotingOptions): Promise<ChatVote> => {
   const token = await csrfHeader();
   return (await readJson<{ vote: ChatVote }>(await fetch(route(channelId, "/start"), {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
     body: JSON.stringify({
-      preset,
-      ...(optionCount === undefined ? {} : { optionCount }),
-      ...(durationSeconds === undefined ? {} : { durationSeconds }),
-      ...(textMode === undefined ? {} : { textMode }),
+      ...options,
     }),
 }))).vote;
 };

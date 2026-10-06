@@ -40,7 +40,7 @@ describe("chat voting settings editor", () => {
     expect(screen.getByRole("textbox", { name: "Scale labels" })).toHaveAttribute("placeholder", "1|2|3|4|5");
     expect(screen.getByRole("textbox", { name: "Labels for 2–9 options" })).toHaveAttribute("placeholder", "1|2|3|…|9");
     expect(screen.getByRole("textbox", { name: "Yes/no labels" })).not.toBeRequired();
-    const timer = screen.getByRole("spinbutton", { name: "Auto close" });
+    const timer = screen.getByRole("spinbutton", { name: "Default duration" });
     expect(timer).toHaveValue("0");
     expect(timer.parentElement).toHaveTextContent("Off");
     expect(timer.parentElement).not.toHaveTextContent("s");
@@ -60,9 +60,9 @@ describe("chat voting settings editor", () => {
       readOnly
     /></UiProvider>);
 
-    expect(screen.getByText("Automatisch schließen")).toBeInTheDocument();
+    expect(screen.getByText("Standarddauer")).toBeInTheDocument();
     expect(screen.getByText("Aus")).toBeInTheDocument();
     expect(screen.queryByText("0 s")).not.toBeInTheDocument();
-    expect(screen.queryByRole("spinbutton", { name: "Automatisch schließen" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: "Standarddauer" })).not.toBeInTheDocument();
   });
 });

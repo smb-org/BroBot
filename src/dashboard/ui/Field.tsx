@@ -7,6 +7,10 @@ import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 
 interface FieldBaseProps {
   label: string;
+  /** Accessible name for controls whose visible context is carried by an inline marker. */
+  ariaLabel?: string;
+  /** Keeps the associated label accessible while omitting its visible row. */
+  labelHidden?: boolean;
   hint?: string;
   error?: string;
   value: string;
@@ -34,9 +38,10 @@ export type FieldProps = FieldBaseProps & (
   | { maxLength: number; countLabel: (count: number, maxLength: number) => ReactNode }
   | { maxLength?: undefined; countLabel?: never }
 ) & (
-  | { icon: IconName; prefix?: never }
-  | { prefix: string; icon?: never }
-  | { icon?: undefined; prefix?: undefined }
+  | { icon: IconName; prefix?: never; leftLabel?: never }
+  | { prefix: string; icon?: never; leftLabel?: never }
+  | { leftLabel: string; icon?: never; prefix?: never }
+  | { icon?: undefined; prefix?: undefined; leftLabel?: undefined }
 );
 
 /**
@@ -46,7 +51,7 @@ export type FieldProps = FieldBaseProps & (
  * `×` and the border stays strong (wired in the theme's `Input`
  * override, not here).
  */
-export function Field({ label, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, name, id, icon, prefix, normalize, maxLength, countLabel, className, onKeyDown }: FieldProps) {
+export function Field({ label, ariaLabel, labelHidden = false, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, name, id, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, onKeyDown }: FieldProps) {
   const disabledReason = useDisabledFieldReason();
   const count = value.length;
   const overLimit = maxLength !== undefined && count > maxLength;
@@ -55,8 +60,9 @@ export function Field({ label, hint, error, value, onChange, placeholder, disabl
   const errorNode = effectiveError === undefined || effectiveError === "" ? undefined : (
     <span><span aria-hidden="true">× </span>{typeof effectiveError === "string" ? <TruncatedText text={effectiveError} /> : effectiveError}</span>
   );
-  const leading = prefix === undefined ? (icon === undefined ? undefined : <Icon name={icon} size={16} />) : (
-    <span className="ui-field__prefix" aria-hidden="true">{prefix}</span>
+  const leadingLabel = prefix ?? leftLabel;
+  const leading = leadingLabel === undefined ? (icon === undefined ? undefined : <Icon name={icon} size={16} />) : (
+    <span className="ui-field__prefix" aria-hidden="true">{leadingLabel}</span>
   );
   const description: ReactNode = (
     <span className="ui-field__description">
@@ -68,8 +74,9 @@ export function Field({ label, hint, error, value, onChange, placeholder, disabl
 
   return (
     <TextInput
-      className={["ui-field", className, prefix === undefined ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ")}
-      label={label}
+      className={["ui-field", className, leadingLabel === undefined ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ")}
+      label={labelHidden ? <span className="sr-only">{label}</span> : label}
+      aria-label={ariaLabel}
       description={description}
       error={errorNode}
       inputWrapperOrder={["label", "input", "description", "error"]}
@@ -90,10 +97,10 @@ export function Field({ label, hint, error, value, onChange, placeholder, disabl
       name={name}
       id={id}
       leftSection={leading}
-      leftSectionWidth={prefix === undefined ? undefined : 36}
+      leftSectionWidth={leadingLabel === undefined ? undefined : 36}
       leftSectionPointerEvents="none"
       styles={{
-        ...(prefix === undefined ? {} : { section: { color: "var(--text-3)", fontFamily: "var(--mantine-font-family-monospace)", borderRight: "1px solid var(--line)" } }),
+        ...(leadingLabel === undefined ? {} : { section: { color: "var(--text-3)", fontFamily: "var(--mantine-font-family-monospace)", borderRight: "1px solid var(--line)" } }),
         ...(mono ? { input: { fontFamily: "var(--mantine-font-family-monospace)" } } : {}),
       }}
     />
