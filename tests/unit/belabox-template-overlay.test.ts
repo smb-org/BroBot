@@ -263,9 +263,20 @@ describe("BELABOX template variables and overlay metadata", () => {
     await insertModule("interval", 15, 2_000);
     await insertStatus(sample("2026-10-06T12:00:20.000Z", {
       bitrateKbps: 1_500,
-      phase: undefined,
-      alertStartedAt: "2026-10-06T12:00:00.000Z",
+      phase: "healthy",
+      alertStartedAt: null,
     }));
+    await database.prepare("UPDATE belabox_status SET alert_json = ? WHERE channel_id = ?")
+      .bind(JSON.stringify({
+        phase: "pending",
+        kind: "low",
+        since: "2026-10-06T12:00:00.000Z",
+        episodeStartedAt: null,
+        completedEpisodeAt: null,
+        lastChatSentAt: null,
+        chatSentInEpisode: false,
+        pendingChat: null,
+      }), CHANNEL_ID).run();
 
     await expect(belaboxModule.resolveTemplateValues?.(["belabox.status", "belabox.down_for"], templateContext("en")))
       .resolves.toEqual({ "belabox.status": "low bitrate", "belabox.down_for": "30 seconds" });
@@ -381,6 +392,34 @@ describe("BELABOX template variables and overlay metadata", () => {
       phase: "disconnected",
       streamSessionKey: "stream:stream-s1",
     })).toEqual(current);
+  });
+
+  it("rejects a delayed previous-session sample after a new-session bootstrap clears its sample", () => {
+    const bootstrapped = {
+      intervalSeconds: 15,
+      mode: "interval",
+      streamSessionKey: "stream:stream-s2",
+      sample: null,
+    };
+    expect(mergeModuleOverlayElementState("belabox.status", bootstrapped, {
+      at: "2026-10-06T12:00:29.000Z",
+      connected: true,
+      bitrateKbps: 4_520,
+      rttMs: 38,
+      phase: "healthy",
+      streamSessionKey: "stream:stream-s1",
+    })).toEqual(bootstrapped);
+    expect(mergeModuleOverlayElementState("belabox.status", {
+      intervalSeconds: 15,
+      sample: null,
+    }, {
+      at: "2026-10-06T12:00:29.000Z",
+      connected: true,
+      bitrateKbps: 4_520,
+      rttMs: 38,
+      phase: "healthy",
+      streamSessionKey: "stream:stream-s1",
+    })).toEqual({ intervalSeconds: 15, sample: null });
   });
 
   it("keeps overlay refresh times in the future and schedules the availability boundary first", async () => {

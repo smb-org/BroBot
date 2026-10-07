@@ -12,7 +12,6 @@ import {
 } from "./contracts";
 import {
   getBelaboxStatus,
-  prepareBelaboxSampleClear,
   getBelaboxLiveHistory,
   getBelaboxStreamHistory,
   listBelaboxStreams,
@@ -62,6 +61,33 @@ const ensurePollingBestEffort = async (
       );
     } catch {
       // Ensure diagnostics never change the committed mutation response.
+    }
+  }
+};
+
+const resetSampleAfterStatsUrlChangeBestEffort = async (
+  runModuleAlarm: ModuleRouteEnvironment["Variables"]["runModuleAlarm"],
+  writeModuleDiagnostics: ModuleRouteEnvironment["Variables"]["writeModuleDiagnostics"],
+  db: D1Database,
+  channelId: string,
+): Promise<void> => {
+  try {
+    await runModuleAlarm(channelId, BELABOX_MODULE_ID, BELABOX_POLL_ALARM_KEY, BELABOX_POLL_ALARM_KEY, {
+      reason: "configuration_changed",
+    });
+  } catch {
+    try {
+      await writeModuleDiagnostics(
+        db,
+        channelId,
+        BELABOX_MODULE_ID,
+        "belabox:poll:configuration_changed",
+        null,
+        [{ code: "belabox.polling_ensure_failed" }],
+        new Date().toISOString(),
+      );
+    } catch {
+      // Diagnostics never change a successful configuration response.
     }
   }
 };
@@ -175,7 +201,6 @@ belaboxRoutes.put("/stats-url", async (context) => {
   const channelId = channelIdOf(context);
   const now = new Date().toISOString();
   const actor = context.get("actor");
-  const authorization = context.get("authorizeManagementMutation")(channelId, actor, now);
   try {
     const write = await context.get("secrets")(channelId).prepareWrite(
       BELABOX_STATS_URL_SECRET,
@@ -183,7 +208,6 @@ belaboxRoutes.put("/stats-url", async (context) => {
       actor,
       now,
     );
-    const clearSample = prepareBelaboxSampleClear(context.env.DB, channelId, authorization);
     const audit = context.get("prepareModuleAudit")({
       channelId,
       moduleId: BELABOX_MODULE_ID,
@@ -191,11 +215,17 @@ belaboxRoutes.put("/stats-url", async (context) => {
       before: null,
       after: { statsUrl: "replaced" },
     }, now);
-    const result = await context.env.DB.batch([write, audit, clearSample]);
+    const result = await context.env.DB.batch([write, audit]);
     if ((result[0]?.meta.changes ?? 0) === 0) return managementDenied(context);
   } catch {
     return context.json({ error: "belabox_stats_url_save_failed" }, 500);
   }
+  await resetSampleAfterStatsUrlChangeBestEffort(
+    context.get("runModuleAlarm"),
+    context.get("writeModuleDiagnostics"),
+    context.env.DB,
+    channelId,
+  );
   await ensurePollingBestEffort(
     context.get("runModuleAlarm"),
     context.get("writeModuleDiagnostics"),
@@ -214,10 +244,8 @@ belaboxRoutes.delete("/stats-url", async (context) => {
 
   const now = new Date().toISOString();
   const actor = context.get("actor");
-  const authorization = context.get("authorizeManagementMutation")(channelId, actor, now);
   try {
     const remove = secretAccess.prepareDelete(BELABOX_STATS_URL_SECRET, actor, now);
-    const clearSample = prepareBelaboxSampleClear(context.env.DB, channelId, authorization);
     const audit = context.get("prepareModuleAudit")({
       channelId,
       moduleId: BELABOX_MODULE_ID,
@@ -225,11 +253,17 @@ belaboxRoutes.delete("/stats-url", async (context) => {
       before: { statsUrl: "configured" },
       after: { statsUrl: "removed" },
     }, now);
-    const result = await context.env.DB.batch([remove, audit, clearSample]);
+    const result = await context.env.DB.batch([remove, audit]);
     if ((result[0]?.meta.changes ?? 0) === 0) return managementDenied(context);
   } catch {
     return context.json({ error: "belabox_stats_url_remove_failed" }, 500);
   }
+  await resetSampleAfterStatsUrlChangeBestEffort(
+    context.get("runModuleAlarm"),
+    context.get("writeModuleDiagnostics"),
+    context.env.DB,
+    channelId,
+  );
   await ensurePollingBestEffort(
     context.get("runModuleAlarm"),
     context.get("writeModuleDiagnostics"),

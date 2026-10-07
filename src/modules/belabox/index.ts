@@ -1,4 +1,5 @@
 import type { BotModule, ModuleLanguage, ModuleTemplateValueContext } from "../contract";
+import type { BelaboxAlertState } from "./domain/alert";
 import { belaboxRoutes } from "./routes";
 import {
   BELABOX_DEFAULT_SETTINGS,
@@ -11,7 +12,11 @@ import {
 } from "./contracts";
 import { BELABOX_TEMPLATE_VARIABLES, belaboxCatalog } from "./contracts/catalog";
 import { belaboxStatusMatchesSession, belaboxStreamSessionKey, getBelaboxStatus, getBelaboxStreamSession, purgeExpiredBelaboxMinutes } from "./adapters/d1";
-import { belaboxDownMilliseconds, resolvedBelaboxPhase } from "./domain/presentation";
+import {
+  belaboxDownMilliseconds,
+  belaboxPresentationAlertStartedAt,
+  resolvedBelaboxPhase,
+} from "./domain/presentation";
 import {
   belaboxAlertDefaultsOnEnable,
   belaboxSettingsForChannel,
@@ -53,11 +58,13 @@ const formatTemplateValues = (
   now: number,
   classified: boolean,
   lowBitrateKbps: number,
+  alertState?: BelaboxAlertState,
 ): Readonly<Record<string, string>> => {
   const requested = new Set(names);
   const integer = numberFormatter(language);
   const decimal = numberFormatter(language, 1);
-  const phase = resolvedBelaboxPhase(sample, classified, lowBitrateKbps);
+  const phase = resolvedBelaboxPhase(sample, classified, lowBitrateKbps, alertState);
+  const alertStartedAt = belaboxPresentationAlertStartedAt(sample, phase, alertState);
   const catalog = belaboxCatalog[language];
   const values: Readonly<Record<string, string>> = {
     "belabox.bitrate": `${integer.format(sample.bitrateKbps)} kbps`,
@@ -68,7 +75,8 @@ const formatTemplateValues = (
     "belabox.dropped": integer.format(sample.droppedTotal ?? 0),
     "belabox.connected": sample.connected ? catalog.connected : catalog.disconnected,
     "belabox.status": catalog.phases[phase],
-    "belabox.down_for": formatDuration(belaboxDownMilliseconds({ ...sample, phase }, now), language),
+    "belabox.down_for": formatDuration(belaboxDownMilliseconds({ ...sample, phase, alertStartedAt }, now,
+      lowBitrateKbps, classified, alertState), language),
   };
   return Object.fromEntries(Object.entries(values).filter(([name]) => requested.has(name)));
 };
@@ -111,6 +119,7 @@ const resolveValues = async (
         context.now,
         status.belaboxStreamId !== null,
         moduleState.settings.lowBitrateKbps,
+        status.alertState,
       );
     }
     if (context.runModuleAlarm === undefined) throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
@@ -201,6 +210,12 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
       ]);
       if (moduleState === null) return null;
       const sample = status !== null && belaboxStatusMatchesSession(status, session) ? status.sample : null;
+      const phase = sample === null ? null : resolvedBelaboxPhase(
+        sample,
+        status?.belaboxStreamId !== null,
+        moduleState.settings.lowBitrateKbps,
+        status?.alertState,
+      );
       return {
         sample: sample === null ? null : {
           at: sample.at,
@@ -211,12 +226,8 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
           network: sample.network,
           droppedPackets: sample.droppedPackets,
           droppedTotal: sample.droppedTotal ?? 0,
-          phase: sample.phase ?? resolvedBelaboxPhase(
-            sample,
-            status?.belaboxStreamId !== null,
-            moduleState.settings.lowBitrateKbps,
-          ),
-          alertStartedAt: sample.alertStartedAt ?? null,
+          phase: phase ?? "inactive",
+          alertStartedAt: belaboxPresentationAlertStartedAt(sample, phase ?? "inactive", status?.alertState),
         },
         intervalSeconds: moduleState.settings.intervalSeconds,
         mode: moduleState.settings.mode,

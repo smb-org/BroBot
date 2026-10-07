@@ -1,4 +1,3 @@
-import type { ModuleMutationAuthorization } from "../../contract";
 import {
   BELABOX_MODULE_ID,
   BELABOX_SECRET_UNAVAILABLE_STATUS_CODE,
@@ -441,6 +440,7 @@ export const prepareBelaboxHistoryFinalizers = async (
   options: {
     maxBaselineAgeMs?: number;
     lowBitrateKbps?: number;
+    excludeStreamId?: string | null;
     expectedStatusRevision: number | null;
     expectedStatusStreamId: string | null;
     expectedStatusSessionKey: string | null;
@@ -451,8 +451,10 @@ export const prepareBelaboxHistoryFinalizers = async (
   const [openStreams, status] = await Promise.all([
     db.prepare(
       `SELECT stream_id, started_at FROM belabox_streams
-        WHERE channel_id = ? AND ended_at IS NULL`,
-    ).bind(channelId).all<{ stream_id: string; started_at: string }>(),
+        WHERE channel_id = ? AND ended_at IS NULL
+          AND (? IS NULL OR stream_id IS NOT ?)`,
+    ).bind(channelId, options.excludeStreamId ?? null, options.excludeStreamId ?? null)
+      .all<{ stream_id: string; started_at: string }>(),
     getBelaboxStatus(db, channelId),
   ]);
   const ending = Date.parse(endedAt);
@@ -986,11 +988,13 @@ export const writeBelaboxAlertState = async (
   return row?.revision ?? null;
 };
 
-export const prepareBelaboxSampleClear = (
+export const clearBelaboxSampleForPoll = async (
   db: D1Database,
   channelId: string,
-  authorization: ModuleMutationAuthorization,
-): D1PreparedStatement => db.prepare(
+  expectedStatusRevision: number,
+  expectedStreamSnapshot: BelaboxStreamStateSnapshot | null,
+): Promise<boolean> => {
+  const result = await db.prepare(
   `UPDATE belabox_status
       SET sampled_at = NULL,
           sample_json = NULL,
@@ -1001,5 +1005,12 @@ export const prepareBelaboxSampleClear = (
           recent_json = '[]',
           alert_json = '{}',
           revision = revision + 1
-    WHERE channel_id = ? ${authorization.sql}`,
-).bind(encodedPhase(EMPTY_FETCH_PHASE), channelId, ...authorization.values);
+    WHERE channel_id = ? AND revision = ? AND ${belaboxStreamStateSnapshotGuard}`,
+  ).bind(
+    encodedPhase(EMPTY_FETCH_PHASE),
+    channelId,
+    expectedStatusRevision,
+    ...streamSnapshotBindings(channelId, expectedStreamSnapshot),
+  ).run();
+  return result.meta.changes > 0;
+};

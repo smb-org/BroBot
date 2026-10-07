@@ -11,11 +11,12 @@ export const mergeBelaboxRealtimeState = (
   if (sample === null || typeof sample.at !== "string" || typeof sample.connected !== "boolean" ||
       typeof sample.bitrateKbps !== "number" || typeof sample.rttMs !== "number" ||
       !["healthy", "low", "disconnected", "inactive"].includes(String(sample.phase)) ||
-      !(sample.streamSessionKey === null || typeof sample.streamSessionKey === "string")) return current ?? incoming;
-  if (current !== null && sample.streamSessionKey !== current.streamSessionKey) return current;
-  const currentSample = record(current?.sample);
+      !(sample.streamSessionKey === null || typeof sample.streamSessionKey === "string")) return current ?? {};
+  if (current === null || !(current.streamSessionKey === null || typeof current.streamSessionKey === "string") ||
+      sample.streamSessionKey !== current.streamSessionKey) return current ?? {};
+  const currentSample = record(current.sample);
   const incomingAt = Date.parse(sample.at);
   const currentAt = typeof currentSample?.at === "string" ? Date.parse(currentSample.at) : Number.NaN;
-  if (Number.isFinite(incomingAt) && Number.isFinite(currentAt) && incomingAt < currentAt) return current ?? incoming;
-  return { ...(current ?? {}), sample: { ...sample } };
+  if (Number.isFinite(incomingAt) && Number.isFinite(currentAt) && incomingAt < currentAt) return current;
+  return { ...current, sample: { ...sample } };
 };

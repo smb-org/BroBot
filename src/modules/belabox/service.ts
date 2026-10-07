@@ -22,6 +22,7 @@ import {
   belaboxStreamExists,
   belaboxStatusMatchesSession,
   belaboxStreamSessionKey,
+  clearBelaboxSampleForPoll,
   clearBelaboxHistoryBaseline,
   finalizeAndResetBelaboxHistory,
   getBelaboxStreamStateSnapshot,
@@ -51,9 +52,10 @@ import {
   settleAlertChat,
   type BelaboxAlertChatOutput,
   type BelaboxAlertDiagnostic,
+  type BelaboxAlertState,
 } from "./domain/alert";
 import { validateBelaboxStatsUrl } from "./domain/stats-url";
-import { enrichBelaboxSample } from "./domain/presentation";
+import { enrichBelaboxSample, resolvedBelaboxPhase } from "./domain/presentation";
 
 const LIVE_BUFFER_MS = 10 * 60_000;
 const LIVE_BUFFER_MAX_POINTS = 120;
@@ -337,6 +339,7 @@ type StoredPollOutcome =
       classified: boolean;
       streamId: string;
       sample: BelaboxSample | null;
+      alertState: BelaboxAlertState;
       alertChat: BelaboxAlertChatOutput | null;
       realtimeSample: BelaboxSample | null;
     }
@@ -347,7 +350,7 @@ type StoredPollOutcome =
   | { kind: "conflict" };
 
 export type BelaboxPollInvocation = {
-  reason: "check_now" | "on_demand" | "connection_test";
+  reason: "check_now" | "on_demand" | "connection_test" | "configuration_changed";
   statsUrl?: string;
 };
 
@@ -359,7 +362,8 @@ export type BelaboxPollRoutineResult = BelaboxFetchResult | {
 const pollInvocation = (value: unknown): BelaboxPollInvocation | null => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const record = value as Readonly<Record<string, unknown>>;
-  if (record.reason !== "check_now" && record.reason !== "on_demand" && record.reason !== "connection_test") return null;
+  if (record.reason !== "check_now" && record.reason !== "on_demand" &&
+      record.reason !== "connection_test" && record.reason !== "configuration_changed") return null;
   return {
     reason: record.reason,
     ...(typeof record.statsUrl === "string" ? { statsUrl: record.statsUrl } : {}),
@@ -460,8 +464,7 @@ const storePollResult = async (
         state: mode === "on_demand" && sameStream ? previousAlert : createInitialAlertState(),
         outputs: { phaseChange: null, chat: null },
       };
-    const previousStreamFinalizers = !sameStream && currentStatus !== null &&
-      (currentStatus.streamId !== null || currentStatus.streamSessionKey !== null)
+    const previousStreamFinalizers = mode === "interval" && streamId !== null
       ? await prepareBelaboxHistoryFinalizers(
         context.DB,
         context.channelId,
@@ -471,9 +474,10 @@ const storePollResult = async (
         {
           maxBaselineAgeMs: prerequisites.settings.intervalSeconds * 2_000,
           lowBitrateKbps: prerequisites.settings.lowBitrateKbps,
-          expectedStatusRevision: currentStatus.revision,
-          expectedStatusStreamId: currentStatus.streamId,
-          expectedStatusSessionKey: currentStatus.streamSessionKey,
+          excludeStreamId: streamId,
+          expectedStatusRevision: currentStatus?.revision ?? null,
+          expectedStatusStreamId: currentStatus?.streamId ?? null,
+          expectedStatusSessionKey: currentStatus?.streamSessionKey ?? null,
           expectedSecretVersion: secretVersion,
           expectedModuleMode: mode,
         },
@@ -527,6 +531,7 @@ const storePollResult = async (
         classified,
         streamId: streamId ?? "",
         sample: written.sample,
+        alertState: alert.state,
         alertChat: alert.outputs.chat,
         realtimeSample,
       };
@@ -646,6 +651,22 @@ export const handleBelaboxPollAlarm = async (
   let delay = INFRASTRUCTURE_RETRY_MAX_MS;
   let pollMode: BelaboxSettings["mode"] = "interval";
   try {
+    if (reason === "configuration_changed") {
+      const [prerequisites, currentStatus] = await Promise.all([
+        alarmPrerequisites(context, null),
+        getBelaboxStatus(context.DB, context.channelId),
+      ]);
+      if (currentStatus !== null) {
+        const cleared = await clearBelaboxSampleForPoll(
+          context.DB,
+          context.channelId,
+          currentStatus.revision,
+          prerequisites.streamSnapshot,
+        );
+        if (!cleared) await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
+      }
+      return;
+    }
     const prerequisites = await alarmPrerequisites(context, requiredMode);
     delay = retryDelay(prerequisites.settings);
     if (prerequisites.secretReadFailed) {
@@ -775,7 +796,12 @@ export const handleBelaboxPollAlarm = async (
         connected: sample.connected,
         bitrateKbps: sample.bitrateKbps,
         rttMs: sample.rttMs,
-        phase: sample.phase ?? "healthy",
+        phase: resolvedBelaboxPhase(
+          sample,
+          stored.classified,
+          latest.settings.lowBitrateKbps,
+          stored.alertState,
+        ),
         streamSessionKey: belaboxStreamSessionKey(originSession),
       });
     }

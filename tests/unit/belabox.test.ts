@@ -460,20 +460,47 @@ describe("BELABOX secret and route redaction", () => {
     expectConsoleCallsRedacted(consoleSpies.flatMap((spy) => spy.mock.calls));
   });
 
-  it("ensures the poll alarm after the stats URL changes", async () => {
+  it("resets samples through the poll routine and then ensures the alarm after stats URL changes", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { runModuleAlarm, send } = await createBelaboxRouteHarness(testDatabase);
+    await testDatabase.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
+    ).bind(CHANNEL_ID, JSON.stringify({ mode: "on_demand", intervalSeconds: 15 })).run();
+    const sampledAt = new Date().toISOString();
+    await testDatabase.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, sampled_at, sample_json, stream_id, stream_session_key, belabox_stream_id,
+         fetch_phase_json, recent_json, revision)
+       VALUES (?, ?, ?, 'stream-s1', 'stream:stream-s1', 'stream-s1', '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, sampledAt, JSON.stringify({
+      at: sampledAt,
+      connected: true,
+      bitrateKbps: 3_200,
+      rttMs: 40,
+      latencyMs: 100,
+      network: 2,
+      droppedPackets: 0,
+    })).run();
 
     expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
-    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "ensure", "poll");
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "poll", "poll", {
+      reason: "configuration_changed",
+    });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
+    await expect(testDatabase.prepare(
+      "SELECT sample_json, stream_session_key FROM belabox_status WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ sample_json: null, stream_session_key: null });
 
     expect((await send("/stats-url", "DELETE")).status).toBe(200);
-    expect(runModuleAlarm).toHaveBeenCalledTimes(2);
-    expect(runModuleAlarm).toHaveBeenLastCalledWith(CHANNEL_ID, "belabox", "ensure", "poll");
+    expect(runModuleAlarm).toHaveBeenCalledTimes(4);
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(3, CHANNEL_ID, "belabox", "poll", "poll", {
+      reason: "configuration_changed",
+    });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(4, CHANNEL_ID, "belabox", "ensure", "poll");
   });
 
-  it("returns success after URL mutations commit when ensure fails", async () => {
+  it("returns success after URL mutations commit when poll maintenance fails", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { runModuleAlarm, send, secrets } = await createBelaboxRouteHarness(testDatabase);
@@ -489,14 +516,22 @@ describe("BELABOX secret and route redaction", () => {
     expect(removed.status).toBe(200);
     await expect(removed.json()).resolves.toEqual({ configured: false });
     await expect(secrets.status(BELABOX_STATS_URL_SECRET)).resolves.toMatchObject({ configured: false });
-    expect(runModuleAlarm).toHaveBeenCalledTimes(2);
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "ensure", "poll");
+    expect(runModuleAlarm).toHaveBeenCalledTimes(4);
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "poll", "poll", {
+      reason: "configuration_changed",
+    });
     expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(3, CHANNEL_ID, "belabox", "poll", "poll", {
+      reason: "configuration_changed",
+    });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(4, CHANNEL_ID, "belabox", "ensure", "poll");
     expect(warning).not.toHaveBeenCalled();
     const diagnostics = await testDatabase.prepare(
       "SELECT code FROM event_log WHERE channel_id = ? ORDER BY rowid",
     ).bind(CHANNEL_ID).all<{ code: string }>();
     expect(diagnostics.results).toEqual([
+      { code: "belabox.polling_ensure_failed" },
+      { code: "belabox.polling_ensure_failed" },
       { code: "belabox.polling_ensure_failed" },
       { code: "belabox.polling_ensure_failed" },
     ]);
@@ -527,8 +562,11 @@ describe("BELABOX secret and route redaction", () => {
     const retried = await send("/polling/retry", "POST");
     expect(retried.status).toBe(200);
     await expect(retried.json()).resolves.toEqual({ ensured: true });
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "ensure", "poll");
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "poll", "poll", { reason: "check_now" });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "poll", "poll", {
+      reason: "configuration_changed",
+    });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(3, CHANNEL_ID, "belabox", "poll", "poll", { reason: "check_now" });
     const diagnostics = await testDatabase.prepare(
       "SELECT code FROM event_log WHERE channel_id = ? ORDER BY rowid",
     ).bind(CHANNEL_ID).all<{ code: string }>();
