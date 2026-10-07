@@ -44,7 +44,7 @@ import {
   setChannelModuleEnabled,
   type PanelChannelSettings,
 } from "./api";
-import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleToggleList, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
+import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
 import { ImmediateActions, WarningsAndErrorsFeed } from "./stream-manager";
 import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
@@ -292,10 +292,12 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
   };
   const platformPage = pages.find((page) => page.group === "platform");
 
-  const sidebarPageOrder = ["overview", "overlays", "audit", "system", "members", "variables", "events"];
+  const sidebarPageOrder = ["overview", "overlays", "audit", "system", "members", "variables", "events", "modules"];
   const sidebarChannelPages = sidebarPageOrder.flatMap((id) => {
     const page = pages.find((candidate) => candidate.id === id);
-    return page === undefined ? [] : [pageEntry(page)];
+    if (page === undefined) return [];
+    const entry = pageEntry(page);
+    return [id === "modules" ? { ...entry, label: texts.navigation.manageModules } : entry];
   });
   const channelGroup: SidebarGroup = {
     id: "channel",
@@ -325,13 +327,6 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
       led: { status: "green" as const, word: statusWord(true) },
     })),
   }));
-  const modulePage = pages.find((page) => page.id === "modules");
-  if (modulePage === undefined) throw new Error("The module navigation page must be registered.");
-  const moduleManagementGroup: SidebarGroup = {
-    id: "module-management",
-    entries: [{ ...pageEntry(modulePage), label: texts.navigation.manageModules }],
-  };
-
   const platformGroup: SidebarGroup | undefined = platformPage === undefined ? undefined : {
     id: "platform",
     heading: navPageGroupHeading("platform", texts),
@@ -340,7 +335,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
 
   return (
     <Sidebar
-      groups={[channelGroup, ...moduleGroups, moduleManagementGroup, ...(platformGroup === undefined ? [] : [platformGroup])]}
+      groups={[channelGroup, ...moduleGroups, ...(platformGroup === undefined ? [] : [platformGroup])]}
       collapsed={collapsed}
       onToggleCollapsed={onToggleCollapsed}
       onEntryNavigate={onEntryNavigate}
@@ -976,7 +971,6 @@ interface ChannelOverviewPageProperties {
   /** Stream Manager: every module, switchable without a page change. */
   modules: PanelModuleState[];
   modulesLoaded: boolean;
-  onModulesChanged: () => Promise<void>;
   onLocationChanged: (channelId: string, location: NonNullable<PanelChannelOverview["location"]> | null) => void;
 }
 
@@ -1002,7 +996,7 @@ const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; chi
   );
 };
 
-const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, modulesLoaded, onModulesChanged, onLocationChanged }: ChannelOverviewPageProperties): ReactElement => {
+const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, modulesLoaded, onLocationChanged }: ChannelOverviewPageProperties): ReactElement => {
   const settingsTexts = channelSettingsTexts(dashboardLanguage());
   const [channelSettings, setChannelSettings] = useState<PanelChannelSettings | null>(null);
   const [timeZoneDraft, setTimeZoneDraft] = useState("");
@@ -1097,10 +1091,6 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
       </section>
       <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} canManage={canManage(overview.role)} modules={modules} modulesLoaded={modulesLoaded} />
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
-      <section className="content-section" aria-label={dashboardTexts().navigation.module}>
-        <div className="section-heading"><h2>{dashboardTexts().navigation.module}</h2><span className="muted number">{formatNumber(overview.activeModules.length)}</span></div>
-        <ModuleToggleList channelId={overview.channelId} ownRole={overview.role} modules={modules} onNavigate={onNavigate} onChanged={onModulesChanged} />
-      </section>
       <ChannelStateChecks entries={entries}>
         <BotPermissionsInspector permissions={overview.botPermissions} />
         <BroadcasterPermissionsInspector permissions={overview.broadcasterPermissions} />
@@ -2085,7 +2075,7 @@ export const DashboardApp = (): ReactElement => {
           loading={<Skeleton rows={12} height={58} />}
           empty={<Skeleton rows={12} height={58} />}
           error={<Skeleton rows={12} height={58} />}
-        >{overviewMatchesRoute && overview.data !== null ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} modulesLoaded={selectedChannel.modules !== undefined || overview.data.modules !== undefined || modules.data !== null} onModulesChanged={reloadModules} onLocationChanged={(channelId, location) => {
+        >{overviewMatchesRoute && overview.data !== null ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} modulesLoaded={selectedChannel.modules !== undefined || overview.data.modules !== undefined || modules.data !== null} onLocationChanged={(channelId, location) => {
           setChannels((current) => current.data === null ? current : {
             ...current,
             data: current.data.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),
