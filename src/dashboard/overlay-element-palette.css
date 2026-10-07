@@ -1,0 +1,2 @@
+.overlay-element-palette__value { color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; white-space: nowrap; }
+.overlay-element-palette__limit { margin: 0; padding: var(--s2) var(--s3) 0; color: var(--text-3); font-size: 12px; }

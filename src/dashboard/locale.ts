@@ -329,12 +329,15 @@ export interface OverlaysTexts {
   editorStyleReset: string; editorStyleLocked: string; editorStyleRewrite: string; editorStyleOwnCssHint: string;
   editorStyleReadOnlyReason: string;
   editorStyleCodeHint: string; editorCssReadOnlyReason: string; editorStyleCopy: string; editorStyleCopied: string; editorStyleCopyError: string; editorStyleCssLimit: string;
-  editorNoElements: string; editorNoSelection: string; editorReadOnly: string; editorChooseVariable: string;
-  editorModuleElements: string; editorNoEnabledModuleElements: string;
+  editorNoElements: string; editorNoSelection: string; editorReadOnly: string;
+  editorAddElement: string; editorPaletteSearch: string; editorPaletteVariables: string;
+  editorPaletteNoResults: (query: string) => string; editorPaletteModuleOff: (moduleName: string) => string;
+  editorRemoveElement: (name: string) => string; editorLockedReason: string;
+  editorPaletteNavigate: string; editorPaletteChoose: string; editorPaletteClose: string;
   editorModuleElement: string; editorModuleDisabled: (moduleName: string) => string;
-  editorAddVariable: string; editorAdd: string; editorLabel: string; editorDisplayText: string;
+  editorLabel: string; editorDisplayText: string;
   editorVariable: string; editorX: string; editorY: string; editorScale: string; editorZ: string;
-  editorMoveForward: string; editorMoveBackward: string; editorRemove: string; editorInComposition: string;
+  editorMoveForward: string; editorMoveBackward: string; editorInComposition: string;
   editorZoom: string; editorReference: (width: number, height: number) => string; editorTextHint: string;
   editorElementLimit: string; editorMissingPrefill: (name: string) => string; editorSave: string;
   editorDiscard: string; editorSaved: string; editorClean: string; editorUnsaved: string; editorSaving: string;
@@ -407,12 +410,15 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorCssReadOnlyReason: "Bediener können das Overlay-CSS kopieren, aber nicht ändern.",
     editorStyleCopy: "CSS kopieren", editorStyleCopied: "CSS kopiert", editorStyleCopyError: "CSS konnte nicht kopiert werden.",
     editorStyleCssLimit: "Overlay-CSS darf höchstens 16.000 Zeichen enthalten.",
-    editorNoElements: "Noch keine Elemente. Füge eine Kanalvariable oder ein Modul-Element hinzu.", editorNoSelection: "Wähle ein Element aus.", editorReadOnly: "Bediener können die Komposition ansehen, aber nicht ändern.",
-    editorModuleElements: "Modul-Elemente", editorNoEnabledModuleElements: "Aktiviere ein Modul, um dessen Elemente hinzuzufügen.",
+    editorNoElements: "Noch keine Elemente. Füge über „Element hinzufügen“ eine Kanalvariable oder ein Modul-Element hinzu.", editorNoSelection: "Wähle ein Element aus.", editorReadOnly: "Bediener können die Komposition ansehen, aber nicht ändern.",
+    editorAddElement: "Element hinzufügen", editorPaletteSearch: "Elemente suchen", editorPaletteVariables: "Kanalvariablen",
+    editorPaletteNoResults: (query) => `Kein Element passt zu „${query}“.`, editorPaletteModuleOff: (moduleName) => `Modul aus · ${moduleName}`,
+    editorRemoveElement: (name) => `Entfernen: ${name}`, editorLockedReason: "Nur Verwalter und Broadcaster können die Komposition ändern.",
+    editorPaletteNavigate: "Navigieren", editorPaletteChoose: "Hinzufügen", editorPaletteClose: "Schließen",
     editorModuleElement: "Modul-Element", editorModuleDisabled: (moduleName) => `Modul ${moduleName} ist deaktiviert.`,
-    editorChooseVariable: "Kanalvariable auswählen", editorAddVariable: "Variable anzeigen", editorAdd: "Hinzufügen", editorLabel: "Elementname", editorDisplayText: "Anzeigetext",
+    editorLabel: "Elementname", editorDisplayText: "Anzeigetext",
     editorVariable: "Kanalvariable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Skalierung (%)", editorZ: "Ebene (z)",
-    editorMoveForward: "Eine Ebene nach vorn", editorMoveBackward: "Eine Ebene nach hinten", editorRemove: "Element entfernen", editorInComposition: "In der Komposition anzeigen",
+    editorMoveForward: "Eine Ebene nach vorn", editorMoveBackward: "Eine Ebene nach hinten", editorInComposition: "In der Komposition anzeigen",
     editorZoom: "Vorschau-Zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} Referenz`, editorTextHint: "Genau ein {value}-Platzhalter ist erforderlich.",
     editorElementLimit: "Pro Overlay sind höchstens 20 Elemente möglich.", editorMissingPrefill: (name) => `Die Variable ${name} ist nicht mehr verfügbar.`, editorSave: "Speichern",
     editorDiscard: "Entwurf verwerfen", editorSaved: "Gespeichert — verbundene Quellen übernehmen die Änderungen sofort.", editorClean: "Gespeicherte Komposition. Änderungen werden erst nach dem Speichern live.",
@@ -512,12 +518,15 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorCssReadOnlyReason: "Operators can copy overlay CSS, but cannot change it.",
     editorStyleCopy: "Copy CSS", editorStyleCopied: "CSS copied", editorStyleCopyError: "CSS could not be copied.",
     editorStyleCssLimit: "Overlay CSS can contain at most 16,000 characters.",
-    editorNoElements: "No elements yet. Add a channel variable or module element.", editorNoSelection: "Select an element.", editorReadOnly: "Operators can view the composition, but cannot edit it.",
-    editorModuleElements: "Module elements", editorNoEnabledModuleElements: "Enable a module to add its elements.",
+    editorNoElements: "No elements yet. Add a channel variable or module element with “Add element”.", editorNoSelection: "Select an element.", editorReadOnly: "Operators can view the composition, but cannot edit it.",
+    editorAddElement: "Add element", editorPaletteSearch: "Search elements", editorPaletteVariables: "Channel variables",
+    editorPaletteNoResults: (query) => `No element matches “${query}”.`, editorPaletteModuleOff: (moduleName) => `Module off · ${moduleName}`,
+    editorRemoveElement: (name) => `Remove: ${name}`, editorLockedReason: "Only managers and broadcasters can edit the composition.",
+    editorPaletteNavigate: "Navigate", editorPaletteChoose: "Add", editorPaletteClose: "Close",
     editorModuleElement: "Module element", editorModuleDisabled: (moduleName) => `${moduleName} module is disabled.`,
-    editorChooseVariable: "Choose a channel variable", editorAddVariable: "Show variable", editorAdd: "Add", editorLabel: "Element label", editorDisplayText: "Display text",
+    editorLabel: "Element label", editorDisplayText: "Display text",
     editorVariable: "Channel variable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Scale (%)", editorZ: "Layer (z)",
-    editorMoveForward: "Move one layer forward", editorMoveBackward: "Move one layer backward", editorRemove: "Remove element", editorInComposition: "Show in composition",
+    editorMoveForward: "Move one layer forward", editorMoveBackward: "Move one layer backward", editorInComposition: "Show in composition",
     editorZoom: "Preview zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} reference`, editorTextHint: "Exactly one {value} placeholder is required.",
     editorElementLimit: "An overlay can contain at most 20 elements.", editorMissingPrefill: (name) => `Variable ${name} is no longer available.`, editorSave: "Save",
     editorDiscard: "Discard draft", editorSaved: "Saved — connected sources use the changes immediately.", editorClean: "Saved composition. Changes go live after you save.",
