@@ -15,8 +15,10 @@ import {
   BELABOX_STATS_URL_SECRET,
   type BelaboxSettings,
 } from "../../src/modules/belabox/contracts";
+import { BELABOX_TEMPLATE_VARIABLES } from "../../src/modules/belabox/contracts/catalog";
 import { getBelaboxStatus, listBelaboxStreams } from "../../src/modules/belabox/adapters/d1";
 import { ensureBelaboxPoll, handleBelaboxPollAlarm, type BelaboxPollRoutineResult } from "../../src/modules/belabox/service";
+import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
 import { writeModuleDiagnostics } from "../../src/worker/event-log";
 import { insertChannel, jsonResponse } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -603,7 +605,7 @@ describe("BELABOX polling", () => {
     await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
 
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
-      sample: { phase: "disconnected", alertStartedAt: lowStartedAt, droppedTotal: 9 },
+      sample: { phase: "disconnected", alertStartedAt: lowStartedAt, droppedTotal: 2 },
     });
     expect(overlayMessages.map(({ type, elementKind, payload: message }) => ({ type, elementKind, phase: message.phase })))
       .toEqual([
@@ -613,6 +615,24 @@ describe("BELABOX polling", () => {
         { type: "sample", elementKind: "belabox.status", phase: "low" },
         { type: "sample", elementKind: "belabox.status", phase: "disconnected" },
       ]);
+  });
+
+  it("keeps dropped totals across a missing publisher and uses the next connection as a baseline", async () => {
+    await insertModule(database, { mode: "interval", intervalSeconds: 15 });
+    const { context } = alarmContext(database);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 80)))
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 100)))
+      .mockResolvedValueOnce(jsonResponse({ publishers: {} }))
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 100)))
+      .mockResolvedValueOnce(jsonResponse(relayPayload(true, 3_200, 105)));
+
+    for (let index = 0; index < 5; index += 1) {
+      await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
+      vi.setSystemTime(Date.now() + 15_000);
+    }
+
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({ sample: { droppedTotal: 25 } });
   });
 
   it("sends a held low-bitrate alert through the shared idempotent chat gate", async () => {
@@ -640,6 +660,137 @@ describe("BELABOX polling", () => {
     expect(sendChat).toHaveBeenCalledOnce();
     expect(sendChat.mock.calls[0]?.[1]).toBe(`belabox:${STREAM_ID}:${String(status?.alertState.episodeStartedAt)}:alert`);
     expect(diagnostics.map(({ code }) => code)).toEqual(["belabox.alert_started"]);
+  });
+
+  it("does not re-enter the serialized poll when a template switches to on-demand", async () => {
+    const settings = {
+      ...BELABOX_DEFAULT_SETTINGS,
+      mode: "interval" as const,
+      intervalSeconds: 5,
+      holdSeconds: 5,
+      chatEnabled: true,
+      lowText: "{belabox.bitrate}",
+    };
+    await insertModule(database, settings);
+    const { context, sendChat } = alarmContext(database);
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(relayPayload(true, 900))));
+    let pollQueue = Promise.resolve();
+    const queuePoll = (invocation?: unknown): Promise<BelaboxPollRoutineResult | undefined> => {
+      const previous = pollQueue;
+      let release!: () => void;
+      pollQueue = new Promise<void>((resolve) => { release = resolve; });
+      return (async () => {
+        await previous;
+        try {
+          return await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher, invocation);
+        } finally {
+          release();
+        }
+      })();
+    };
+    const event: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.chat.message",
+      triggerId: "belabox-alert-render",
+      payload: {},
+      settings,
+      receivedAt: new Date(Date.now()).toISOString(),
+      actor: { userId: "viewer", login: "viewer", role: null },
+      chatStatus: ["viewer"],
+    };
+    const renderer = createTemplateRenderer(event, "event", [], {
+      DB: context.DB,
+      runModuleAlarm: (_moduleId: string, _handlerKey: string, _alarmKey: string, invocation?: unknown) => queuePoll(invocation),
+      channelInfo: () => Promise.resolve(null),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve(null),
+      templateValueProviders: [{
+        moduleId: belaboxModule.id,
+        variables: BELABOX_TEMPLATE_VARIABLES,
+        resolveTemplateValues: belaboxModule.resolveTemplateValues,
+      }],
+      streamState: () => Promise.resolve("online"),
+      channelDetails: () => Promise.resolve(null),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve(null),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve("en"),
+      readChannelVariables: () => Promise.resolve({}),
+    } as unknown as TemplateResolverSources);
+    let switchedToOnDemand = false;
+    context.renderTemplate = async (text, moduleValuesOrNow, nowOrModuleValues) => {
+      if (!switchedToOnDemand) {
+        switchedToOnDemand = true;
+        await database.prepare(
+          "UPDATE channel_modules SET settings = ?, revision = revision + 1 WHERE channel_id = ? AND module_id = 'belabox'",
+        ).bind(JSON.stringify({ ...settings, mode: "on_demand" }), CHANNEL_ID).run();
+      }
+      const values = typeof moduleValuesOrNow === "number"
+        ? typeof nowOrModuleValues === "object" ? nowOrModuleValues : {}
+        : moduleValuesOrNow ?? {};
+      const rendered = await renderer(text, values);
+      return {
+        text: rendered.text,
+        ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
+      };
+    };
+
+    await queuePoll();
+    vi.setSystemTime(Date.now() + 5_000);
+    vi.useRealTimers();
+    const queuedPoll = queuePoll();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        reject(new Error("The serialized poll queue did not complete."));
+      }, 2_000);
+    });
+    try {
+      await expect(Promise.race([queuedPoll, timeoutPromise])).resolves.toBeUndefined();
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+
+    expect(switchedToOnDemand).toBe(true);
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      alertState: { phase: "alarm", kind: "low" },
+    });
+  });
+
+  it("clears interval alert state in the same on-demand sample write", async () => {
+    const settings = {
+      ...BELABOX_DEFAULT_SETTINGS,
+      mode: "interval" as const,
+      intervalSeconds: 5,
+      lowBitrateKbps: 2_000,
+      recoverBitrateKbps: 3_000,
+      holdSeconds: 5,
+    };
+    await insertModule(database, settings);
+    const { context } = alarmContext(database);
+    const lowRelay = () => Promise.resolve(jsonResponse(relayPayload(true, 1_500, 80)));
+
+    await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, lowRelay);
+    vi.setSystemTime(Date.now() + 5_000);
+    await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, lowRelay);
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({ alertState: { phase: "alarm", kind: "low" } });
+
+    await database.prepare(
+      "UPDATE channel_modules SET settings = ?, revision = revision + 1 WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(JSON.stringify({ ...settings, mode: "on_demand" }), CHANNEL_ID).run();
+    vi.setSystemTime(Date.now() + 10_001);
+    await pollOnDemand(context, () => Promise.resolve(jsonResponse(relayPayload(true, 4_000, 100))));
+
+    const status = await getBelaboxStatus(context.DB, CHANNEL_ID);
+    expect(status).toMatchObject({ alertState: { phase: "ok", kind: null }, sample: { bitrateKbps: 4_000, phase: "healthy" } });
+    const overlay = belaboxModule.overlayElements?.find(({ kind }) => kind === "belabox.status");
+    if (overlay === undefined) throw new Error("BELABOX status overlay is not registered.");
+    await expect(overlay.initialState?.(context.DB, CHANNEL_ID, overlay.defaultConfig)).resolves.toMatchObject({
+      sample: { phase: "healthy" },
+    });
   });
 
   it("does not use S1's hold timestamp for S2's first poll after Check now", async () => {

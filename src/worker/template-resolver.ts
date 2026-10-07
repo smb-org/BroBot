@@ -419,8 +419,8 @@ export const createTemplateRenderer = (
       .filter((variable) => variable.contexts?.includes(context) ?? true)
       .map((variable) => variable.name));
     const requestedNames = provider.templateVariableNamespace === "text_blocks"
-      ? renderNames.filter((name) => TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name) && !knownVariableNames.has(name))
-      : renderNames.filter((name) => declaredNames.has(name));
+      ? renderNames.filter((name) => TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name) && !knownVariableNames.has(name) && !Object.hasOwn(moduleValues, name))
+      : renderNames.filter((name) => declaredNames.has(name) && !Object.hasOwn(moduleValues, name));
     if (requestedNames.length === 0) continue;
     if (provider.resolveTemplateValues === undefined) continue;
     let resolved: Readonly<Record<string, string>>;

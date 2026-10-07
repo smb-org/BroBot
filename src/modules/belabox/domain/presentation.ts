@@ -4,6 +4,7 @@ import {
   type BelaboxSample,
 } from "../contracts";
 import type { BelaboxAlertState } from "./alert";
+import { droppedPacketDelta } from "./history";
 
 const unhealthy = (phase: BelaboxPhase): boolean => phase === "low" || phase === "disconnected";
 
@@ -27,10 +28,9 @@ export const enrichBelaboxSample = (
 ): BelaboxSample => {
   const phase = resolvedBelaboxPhase(sample, classified, lowBitrateKbps, alertState);
   const previousTotal = sameStream ? previous?.droppedTotal ?? 0 : 0;
-  const previousCounter = sameStream ? previous?.droppedPackets : undefined;
-  const droppedDelta = previousCounter === undefined || sample.droppedPackets < previousCounter
-    ? 0
-    : sample.droppedPackets - previousCounter;
+  const droppedDelta = sameStream && previous?.connected === true && sample.connected
+    ? droppedPacketDelta(sample, previous)
+    : 0;
   const previousPhase = previous === null || previous.phase === "inactive"
     ? "healthy"
     : belaboxPhase(previous, true, lowBitrateKbps);

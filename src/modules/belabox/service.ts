@@ -412,7 +412,7 @@ const storePollResult = async (
         reason: result.reason,
       }, prerequisites.settings, now)
       : {
-        state: mode === "on_demand" && sameStream ? previousAlert : createInitialAlertState(),
+        state: createInitialAlertState(),
         outputs: { phaseChange: null, chat: null },
       };
     const storedSample = result.ok
@@ -566,7 +566,8 @@ const sendPendingAlert = async (
 ): Promise<void> => {
   if (output === null || !sample.ok || sample.sample.at.length === 0) return;
   const moduleState = await belaboxSettingsForChannel(context.DB, context.channelId);
-  if (moduleState?.enabled !== true || !moduleState.settings.alertsEnabled || !moduleState.settings.chatEnabled) return;
+  if (moduleState?.enabled !== true || moduleState.settings.mode !== "interval" ||
+      !moduleState.settings.alertsEnabled || !moduleState.settings.chatEnabled) return;
   const [status, currentSnapshot] = await Promise.all([
     getBelaboxStatus(context.DB, context.channelId),
     getBelaboxStreamStateSnapshot(context.DB, context.channelId),
@@ -574,6 +575,9 @@ const sendPendingAlert = async (
   if (status === null || status.streamId !== streamId || status.belaboxStreamId !== streamId ||
       status.streamSessionKey !== belaboxStreamSessionKey(expectedSession) ||
       !sameBelaboxStreamStateSnapshot(currentSnapshot, expectedSnapshot)) return;
+  const beforeRender = await belaboxSettingsForChannel(context.DB, context.channelId);
+  if (beforeRender?.enabled !== true || beforeRender.settings.mode !== "interval" ||
+      !beforeRender.settings.alertsEnabled || !beforeRender.settings.chatEnabled) return;
   const settings = moduleState.settings;
   const message = alertTextFor(settings, output);
   const startedAt = Date.parse(output.episodeStartedAt);
@@ -582,6 +586,9 @@ const sendPendingAlert = async (
     "belabox.bitrate": `${Math.round(sample.sample.bitrateKbps).toLocaleString("en-US")} kbps`,
     "belabox.down_for": `${String(downForSeconds)} s`,
   }, Date.parse(sample.sample.at));
+  const beforeSend = await belaboxSettingsForChannel(context.DB, context.channelId);
+  if (beforeSend?.enabled !== true || beforeSend.settings.mode !== "interval" ||
+      !beforeSend.settings.alertsEnabled || !beforeSend.settings.chatEnabled) return;
   const idempotencyKey = `belabox:${streamId}:${output.episodeStartedAt}:${output.idempotencyKind}`;
   const result = await context.sendChat(rendered.text, idempotencyKey, rendered.attributions, async () => {
     const [currentModule, currentStatus, live, currentSession, currentSnapshot] = await Promise.all([
@@ -591,7 +598,8 @@ const sendPendingAlert = async (
       getBelaboxStreamSession(context.DB, context.channelId),
       getBelaboxStreamStateSnapshot(context.DB, context.channelId),
     ]);
-    if (currentModule?.enabled !== true || !currentModule.settings.alertsEnabled || !currentModule.settings.chatEnabled ||
+    if (currentModule?.enabled !== true || currentModule.settings.mode !== "interval" ||
+        !currentModule.settings.alertsEnabled || !currentModule.settings.chatEnabled ||
         live.streamId !== streamId || currentStatus?.streamId !== streamId || currentStatus.belaboxStreamId !== streamId ||
         currentStatus.streamSessionKey !== belaboxStreamSessionKey(expectedSession) ||
         !sameBelaboxStreamSession(expectedSession, currentSession) ||

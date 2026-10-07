@@ -51,6 +51,30 @@ describe("template value providers", () => {
     expect(resolveWeather).not.toHaveBeenCalled();
   });
 
+  it("uses caller-supplied module values without re-entering their provider", async () => {
+    const resolveSun = vi.fn(() => Promise.resolve({ "sun.set": "resolved later" }));
+    const sources = {
+      streamState: () => Promise.resolve("offline" as const),
+      channelDetails: () => Promise.resolve(null),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve(null),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve("en" as const),
+      channelTimeZone: () => Promise.resolve("Europe/Paris"),
+      readChannelVariables: () => Promise.resolve({}),
+      templateValueProviders: [
+        { moduleId: "sun", variables: [variable("sun.set")], resolveTemplateValues: resolveSun },
+      ],
+    } as unknown as TemplateResolverSources;
+
+    const result = await createTemplateRenderer(event, "event", [], sources)("{sun.set}", { "sun.set": "captured sample" });
+
+    expect(result.text).toBe("captured sample");
+    expect(resolveSun).not.toHaveBeenCalled();
+  });
+
   it("asks the text-block provider only for bare names requested by the current template", async () => {
     const resolveBlocks = vi.fn((names: readonly string[]) => Promise.resolve(
       names.includes("welcome") ? { welcome: "Hello from the library" } : {},
