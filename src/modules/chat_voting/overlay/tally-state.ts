@@ -6,9 +6,6 @@ export interface TallyState {
   openedAt?: string;
   closesAt?: string;
   requestedDurationSeconds?: number | null;
-  serverNow?: string;
-  serverTimeOffsetMs?: number;
-  serverTimeLocalNowMs?: number;
   title?: string | null;
   status?: "open" | "closed";
   labels?: readonly string[];
@@ -34,9 +31,6 @@ const isTallyState = (value: unknown): value is TallyState => {
     (state.closesAt === undefined || typeof state.closesAt === "string" && Number.isFinite(Date.parse(state.closesAt))) &&
     (state.requestedDurationSeconds === undefined || state.requestedDurationSeconds === null ||
       typeof state.requestedDurationSeconds === "number" && Number.isSafeInteger(state.requestedDurationSeconds) && state.requestedDurationSeconds > 0) &&
-    (state.serverNow === undefined || typeof state.serverNow === "string" && Number.isFinite(Date.parse(state.serverNow))) &&
-    (state.serverTimeOffsetMs === undefined || typeof state.serverTimeOffsetMs === "number" && Number.isFinite(state.serverTimeOffsetMs)) &&
-    (state.serverTimeLocalNowMs === undefined || typeof state.serverTimeLocalNowMs === "number" && Number.isFinite(state.serverTimeLocalNowMs)) &&
     (state.title === undefined || state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80) &&
     (state.labels === undefined || Array.isArray(state.labels) && state.labels.every((label) => typeof label === "string")) &&
     (state.preset === undefined || state.preset === "yes_no" || state.preset === "scale_5" || state.preset === "options_n" ||

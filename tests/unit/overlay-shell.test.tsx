@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RealtimeEnvelope } from "../../src/realtime-contract";
 import type { OverlayRealtimeCallbacks } from "../../src/overlay/realtime";
-import type { OverlayBootstrapData } from "../../src/overlay/model";
 
 const realtimeMocks = vi.hoisted(() => ({ connectOverlayRealtime: vi.fn() }));
 
@@ -16,7 +15,6 @@ vi.mock("../../src/text", () => ({
 }));
 
 import { OverlayShell } from "../../src/overlay/shell";
-import { estimateOverlayStateTransit } from "../../src/overlay/server-time";
 
 const element = (
   id: string,
@@ -124,6 +122,7 @@ describe("OverlayShell and OverlayCanvas", () => {
   });
 
   it("merges voting tallies in the shell and keeps closed overlay state after delayed messages", async () => {
+    const localNow = Date.now();
     const bootstrap = {
       language: "en",
       overlay: {
@@ -141,10 +140,9 @@ describe("OverlayShell and OverlayCanvas", () => {
           config: { layout: "bars", showPercent: true, showCountdown: true, hideAfterCloseSeconds: 15 },
           state: {
             pollId: "poll-a",
-            openedAt: "2030-01-01T00:00:00.000Z",
-            closesAt: "2030-01-01T00:01:30.000Z",
+            openedAt: new Date(localNow).toISOString(),
+            closesAt: new Date(localNow + 90_000).toISOString(),
             requestedDurationSeconds: 90,
-            serverNow: "2030-01-01T00:00:00.000Z",
             status: "open",
             labels: ["Yes", "No"],
             counts: [0, 0],
@@ -181,7 +179,7 @@ describe("OverlayShell and OverlayCanvas", () => {
 
     send("modul.chat_voting.tally", { pollId: "poll-a", openedAt: "2030-01-01T00:00:00.000Z", counts: [5, 2], revision: 5 });
     await waitFor(() => expect(container.textContent).toContain("5 · 71%"));
-    expect(container.querySelector(".chat-voting-tally__countdown")).toHaveTextContent("1:00");
+    expect(container.querySelector(".chat-voting-tally__countdown")).toHaveTextContent("1:30");
     send("modul.chat_voting.tally", { pollId: "poll-a", counts: [3, 1], revision: 3 });
     await waitFor(() => expect(container.textContent).toContain("5 · 71%"));
     expect(container.textContent).not.toContain("3 · 75%");
@@ -226,8 +224,8 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the bootstrap countdown sync sample when replaying a buffered tally message", async () => {
-    let localNow = Date.parse("2030-01-01T00:00:09.000Z");
+  it("applies buffered tally data without changing the bootstrap close time", async () => {
+    const localNow = Date.parse("2030-01-01T00:00:10.000Z");
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => localNow);
     const bootstrapResponse = (revision: number): Response => new Response(JSON.stringify({
       language: "en",
@@ -249,7 +247,6 @@ describe("OverlayShell and OverlayCanvas", () => {
             openedAt: "2030-01-01T00:00:00.000Z",
             closesAt: "2030-01-01T00:01:30.000Z",
             requestedDurationSeconds: 90,
-            serverNow: "2030-01-01T00:00:10.000Z",
             status: "open",
             preset: "yes_no",
             optionCount: 2,
@@ -289,7 +286,6 @@ describe("OverlayShell and OverlayCanvas", () => {
         payload: { pollId: "poll-sync", counts: [1, 0], revision: 1 },
       }));
 
-      localNow = Date.parse("2030-01-01T00:00:10.000Z");
       await act(async () => {
         finishRefresh?.(bootstrapResponse(0));
         await Promise.resolve();
@@ -370,36 +366,6 @@ describe("OverlayShell and OverlayCanvas", () => {
     await waitFor(() => expect(container.querySelector('[aria-label="Results"]')).not.toBeNull());
     await waitFor(() => expect(container.querySelector(".chat-voting-tally")).toBeNull(), { timeout: 2_500 });
     expect(fetcher).toHaveBeenCalledTimes(4);
-  });
-
-  it("adds half the bootstrap round trip to server state timestamps", () => {
-    const now = "2026-09-27T12:00:00.000Z";
-    const bootstrap: OverlayBootstrapData = {
-      language: "en",
-      overlay: {
-        id: "overlay-fixture", revision: 1, width: 1920, height: 1080, css: "",
-        elements: [{ ...element("text-block", 0, 0, 100, 0), state: { serverNow: now } }],
-      },
-      variables: {},
-    };
-
-    expect(estimateOverlayStateTransit(bootstrap, 100).overlay?.elements[0]?.state?.serverNow)
-      .toBe("2026-09-27T12:00:00.050Z");
-  });
-
-  it("does not let a slow server response push state timestamps ahead", () => {
-    const now = "2026-09-27T12:00:00.000Z";
-    const bootstrap: OverlayBootstrapData = {
-      language: "en",
-      overlay: {
-        id: "overlay-fixture", revision: 1, width: 1920, height: 1080, css: "",
-        elements: [{ ...element("text-block", 0, 0, 100, 0), state: { serverNow: now } }],
-      },
-      variables: {},
-    };
-
-    expect(estimateOverlayStateTransit(bootstrap, 4_000).overlay?.elements[0]?.state?.serverNow)
-      .toBe("2026-09-27T12:00:00.050Z");
   });
 
   it("refreshes a connected source before a supplied state timeline expires", async () => {

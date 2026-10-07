@@ -156,20 +156,17 @@ describe("chat voting overlay tally", () => {
     expect(options?.querySelectorAll(".chat-voting-tally__option")).toHaveLength(5);
   });
 
-  it("counts down from the server time, ticks to zero, and stays at zero until the closed state arrives", () => {
-    const serverNow = "2030-01-01T00:00:00.000Z";
+  it("counts down from the local clock, ticks to zero, and stays at zero until the closed state arrives", () => {
+    const localNow = "2030-01-01T00:00:00.000Z";
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2040-01-01T00:00:00.000Z"));
+    vi.setSystemTime(new Date(localNow));
     try {
       const config = { layout: "bars", showPercent: true, showCountdown: true };
       const state = {
         pollId: "timed-poll",
-        openedAt: serverNow,
+        openedAt: localNow,
         closesAt: "2030-01-01T00:01:30.000Z",
         requestedDurationSeconds: 90,
-        serverNow,
-        serverTimeOffsetMs: Date.parse(serverNow) - Date.now(),
-        serverTimeLocalNowMs: Date.now(),
         status: "open",
         preset: "yes_no",
         optionCount: 2,
@@ -188,14 +185,6 @@ describe("chat voting overlay tally", () => {
       act(() => { vi.advanceTimersByTime(5_000); });
       expect(countdown).toHaveTextContent("0:00");
 
-      const delayedSampleLocalNow = Date.now();
-      rerender(<Tally config={config} state={{
-        ...state,
-        serverTimeOffsetMs: Date.parse(serverNow) - delayedSampleLocalNow - 1_000,
-        serverTimeLocalNowMs: delayedSampleLocalNow,
-      }} now={delayedSampleLocalNow} language="en" />);
-      expect(countdown).toHaveTextContent("0:00");
-
       rerender(<Tally config={config} state={{
         ...state,
         status: "closed",
@@ -207,61 +196,21 @@ describe("chat voting overlay tally", () => {
     }
   });
 
-  it("does not let a delayed synchronization sample revive a zero countdown", () => {
-    const serverNow = "2030-01-01T00:00:00.000Z";
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2040-01-01T00:00:00.000Z"));
-    try {
-      const config = { layout: "bars", showPercent: true, showCountdown: true };
-      const state = {
-        pollId: "delayed-sync-poll",
-        openedAt: "2029-12-31T23:58:30.000Z",
-        closesAt: serverNow,
-        requestedDurationSeconds: 90,
-        serverNow,
-        serverTimeOffsetMs: Date.parse(serverNow) - Date.now(),
-        serverTimeLocalNowMs: Date.now(),
-        status: "open" as const,
-        preset: "yes_no" as const,
-        optionCount: 2,
-        labels: ["Yes", "No"],
-        counts: [0, 0],
-        revision: 0,
-      };
-      const { container, rerender } = render(<Tally config={config} state={state} now={Date.now()} language="en" />);
-      const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
-      expect(countdown).toHaveTextContent("0:00");
-
-      const delayedSampleLocalNow = Date.now();
-      rerender(<Tally config={config} state={{
-        ...state,
-        serverTimeOffsetMs: Date.parse(serverNow) - delayedSampleLocalNow - 1_000,
-        serverTimeLocalNowMs: delayedSampleLocalNow,
-      }} now={delayedSampleLocalNow} language="en" />);
-      expect(countdown).toHaveTextContent("0:00");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it.each([
     ["open-ended", { requestedDurationSeconds: null, status: "open" }],
     ["closed", { requestedDurationSeconds: 90, status: "closed", closedAt: "2030-01-01T00:00:00.000Z" }],
   ] as const)("clears the visible countdown for %s votes while keeping its slot", (_name, extraState) => {
-    const serverNow = "2030-01-01T00:00:00.000Z";
+    const localNow = "2030-01-01T00:00:00.000Z";
     vi.useFakeTimers();
-    vi.setSystemTime(new Date(serverNow));
+    vi.setSystemTime(new Date(localNow));
     const clearIntervalSpy = vi.spyOn(window, "clearInterval");
     try {
       const config = { layout: "bars", showPercent: true, showCountdown: true };
       const state = {
         pollId: "changing-countdown-poll",
-        openedAt: serverNow,
+        openedAt: localNow,
         closesAt: "2030-01-01T00:01:30.000Z",
         requestedDurationSeconds: 90,
-        serverNow,
-        serverTimeOffsetMs: 0,
-        serverTimeLocalNowMs: Date.now(),
         status: "open" as const,
         preset: "yes_no" as const,
         optionCount: 2,
@@ -293,19 +242,16 @@ describe("chat voting overlay tally", () => {
   });
 
   it("keeps the countdown slot when the overlay option is disabled", () => {
-    const serverNow = "2030-01-01T00:00:00.000Z";
+    const localNow = "2030-01-01T00:00:00.000Z";
     vi.useFakeTimers();
-    vi.setSystemTime(new Date(serverNow));
+    vi.setSystemTime(new Date(localNow));
     const clearIntervalSpy = vi.spyOn(window, "clearInterval");
     try {
       const state = {
         pollId: "disabled-countdown-poll",
-        openedAt: serverNow,
+        openedAt: localNow,
         closesAt: "2030-01-01T00:01:30.000Z",
         requestedDurationSeconds: 90,
-        serverNow,
-        serverTimeOffsetMs: 0,
-        serverTimeLocalNowMs: Date.now(),
         status: "open" as const,
         preset: "yes_no" as const,
         optionCount: 2,

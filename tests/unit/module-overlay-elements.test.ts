@@ -75,7 +75,6 @@ describe("module overlay element declarations", () => {
       title: "What should we eat today?",
       closesAt: "2030-01-01T00:02:00.000Z",
       requestedDurationSeconds: 120,
-      serverNow: "2030-01-01T00:00:00.000Z",
     });
     expect(tally?.mergeRealtimeState).toBeTypeOf("function");
   });

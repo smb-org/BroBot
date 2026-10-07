@@ -68,6 +68,10 @@ bewahrt das Ergebnis als aggregierte Zeile ohne personenbezogene Stimmen auf.
 Eine optionale, auf 80 Unicode-Codepunkte begrenzte Frage wird je Abstimmung
 zusammen mit dem Ergebnis gespeichert und bleibt auch in der Abstimmungshistorie
 erhalten. Chatbefehle übernehmen den Rest der Zeile nach dem Typ als Frage.
+Ein Countdown für zeitbegrenzte Abstimmungen berechnet closesAt - Date.now()
+mit der lokalen Overlay-Uhr und bleibt bei 0:00, bis der geschlossene Zustand
+eintrifft. Für offene Abstimmungen ohne Zeitlimit, geschlossene Abstimmungen
+oder deaktivierte Countdown-Option bleibt der Headerplatz leer.
 
 Module können über `ModuleAction` auch Timeout und Bann beschreiben. Der Host
 führt beides über `src/worker/moderation.ts` und Twitch Helix mit dem Bot-

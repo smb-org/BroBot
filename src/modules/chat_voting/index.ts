@@ -81,7 +81,6 @@ const initialTallyState = async (
     openedAt: vote.openedAt,
     closesAt: vote.closesAt,
     requestedDurationSeconds: vote.requestedDurationSeconds,
-    serverNow: new Date(context?.now ?? Date.now()).toISOString(),
     closedAt: vote.closedAt,
     closeReason: vote.closeReason,
     voterCount: vote.voterCount,

@@ -30,11 +30,6 @@ const parseState = (value: unknown): TallyState | null => {
     ...(state.requestedDurationSeconds === null || typeof state.requestedDurationSeconds === "number" &&
       Number.isSafeInteger(state.requestedDurationSeconds) && state.requestedDurationSeconds > 0
       ? { requestedDurationSeconds: state.requestedDurationSeconds } : {}),
-    ...(typeof state.serverNow === "string" && Number.isFinite(Date.parse(state.serverNow)) ? { serverNow: state.serverNow } : {}),
-    ...(typeof state.serverTimeOffsetMs === "number" && Number.isFinite(state.serverTimeOffsetMs)
-      ? { serverTimeOffsetMs: state.serverTimeOffsetMs } : {}),
-    ...(typeof state.serverTimeLocalNowMs === "number" && Number.isFinite(state.serverTimeLocalNowMs)
-      ? { serverTimeLocalNowMs: state.serverTimeLocalNowMs } : {}),
     ...(state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80 ? { title: state.title } : {}),
     ...(state.status === "open" || state.status === "closed" ? { status: state.status } : {}),
     ...(labels === undefined ? {} : { labels }),
@@ -64,13 +59,11 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
   const labels = chatVotingOverlayLabels(language);
   const countdownEnabled = config.showCountdown !== false;
   const closesAt = current?.closesAt === undefined ? Number.NaN : Date.parse(current.closesAt);
-  const serverTimeOffset = current?.serverTimeOffsetMs;
-  const serverTimeLocalNow = current?.serverTimeLocalNowMs ?? clock;
   const timeLimitedOpenVote = countdownEnabled && current?.status === "open" &&
     typeof current.requestedDurationSeconds === "number" && current.requestedDurationSeconds > 0 &&
-    Number.isFinite(closesAt) && typeof serverTimeOffset === "number" && Number.isFinite(serverTimeOffset);
+    Number.isFinite(closesAt);
   const remainingMilliseconds = timeLimitedOpenVote
-    ? closesAt - (Math.max(clock, serverTimeLocalNow) + serverTimeOffset)
+    ? closesAt - clock
     : Number.NaN;
   const rawCountdownSeconds = Number.isFinite(remainingMilliseconds)
     ? Math.max(0, Math.ceil(remainingMilliseconds / 1_000))

@@ -10,7 +10,6 @@ import {
   moduleOverlayElementKindForMessage,
   moduleOverlayMessageRequiresStateReload,
 } from "../modules/overlay-element-registry";
-import { estimateOverlayStateTransit } from "./server-time";
 
 const LazyLegacyOverlayEntry = lazy(async () => {
   const module = await import("./legacy");
@@ -55,7 +54,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 interface ReceivedModuleMessage {
   message: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>;
   serverNow: string | null;
-  localNow: number;
 }
 
 const receiveModuleMessage = (
@@ -65,38 +63,7 @@ const receiveModuleMessage = (
   serverNow: typeof message.payload.serverNow === "string" && Number.isFinite(Date.parse(message.payload.serverNow))
     ? message.payload.serverNow
     : Number.isFinite(Date.parse(message.createdAt)) ? message.createdAt : null,
-  localNow: Date.now(),
 });
-
-const readServerTimeSample = (state: Readonly<Record<string, unknown>> | null): {
-  serverNow: string;
-  serverTimeOffsetMs: number;
-  serverTimeLocalNowMs: number;
-} | null => {
-  if (state === null || typeof state.serverNow !== "string" || !Number.isFinite(Date.parse(state.serverNow)) ||
-      typeof state.serverTimeOffsetMs !== "number" || !Number.isFinite(state.serverTimeOffsetMs) ||
-      typeof state.serverTimeLocalNowMs !== "number" || !Number.isFinite(state.serverTimeLocalNowMs)) return null;
-  return {
-    serverNow: state.serverNow,
-    serverTimeOffsetMs: state.serverTimeOffsetMs,
-    serverTimeLocalNowMs: state.serverTimeLocalNowMs,
-  };
-};
-
-const preserveNewerServerTimeSample = (
-  previous: Readonly<Record<string, unknown>> | null,
-  merged: Readonly<Record<string, unknown>>,
-): Readonly<Record<string, unknown>> => {
-  const previousSample = readServerTimeSample(previous);
-  const mergedSample = readServerTimeSample(merged);
-  const mergedIsNewer = previousSample !== null && mergedSample !== null && (
-    mergedSample.serverTimeLocalNowMs > previousSample.serverTimeLocalNowMs ||
-    mergedSample.serverTimeLocalNowMs === previousSample.serverTimeLocalNowMs &&
-      Date.parse(mergedSample.serverNow) >= Date.parse(previousSample.serverNow)
-  );
-  if (previousSample === null || mergedIsNewer) return merged;
-  return { ...merged, ...previousSample };
-};
 
 const isInteger = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value);
 
@@ -165,16 +132,12 @@ const applyModuleMessage = (
   received: ReceivedModuleMessage,
 ): OverlayBootstrapData => {
   if (bootstrap.overlay === null) return bootstrap;
-  const { message, serverNow, localNow } = received;
+  const { message, serverNow } = received;
   const kind = moduleOverlayElementKindForMessage(message.type);
-  const payload = serverNow === null
+  const isChatVotingTally = message.type === "modul.chat_voting.tally";
+  const payload = serverNow === null || isChatVotingTally
     ? message.payload
-    : {
-      ...message.payload,
-      serverNow,
-      serverTimeOffsetMs: Date.parse(serverNow) - localNow,
-      serverTimeLocalNowMs: localNow,
-    };
+    : { ...message.payload, serverNow };
   return {
     ...bootstrap,
     overlay: {
@@ -182,8 +145,7 @@ const applyModuleMessage = (
       elements: bootstrap.overlay.elements.map((element) => {
         if (element.kind !== kind || element.moduleEnabled !== true) return element;
         const previousState = element.state ?? null;
-        const mergedState = mergeModuleOverlayElementState(kind, previousState, payload);
-        return { ...element, state: preserveNewerServerTimeSample(previousState, mergedState) };
+        return { ...element, state: mergeModuleOverlayElementState(kind, previousState, payload) };
       }),
     },
   };
@@ -313,7 +275,6 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
       const controller = new AbortController();
       activeController = controller;
       loadInFlight = true;
-      const requestStartedAt = performance.now();
       try {
         const response = await fetch("/api/overlay/bootstrap", {
           headers: { Authorization: `Bearer ${token}` },
@@ -337,10 +298,9 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
         }
         const parsedBootstrap = parseBootstrap(payload);
         if (parsedBootstrap === null) throw new Error("Overlay bootstrap response had an invalid shape.");
-        const parsed = estimateOverlayStateTransit(parsedBootstrap, performance.now() - requestStartedAt);
         const next = pendingModuleMessages.reduce(
           (current, received) => applyModuleMessage(current, received),
-          applyPendingVariableChanges(parsed, pendingVariableChanges),
+          applyPendingVariableChanges(parsedBootstrap, pendingVariableChanges),
         );
         pendingModuleMessages.length = 0;
         pendingVariableChanges.clear();
