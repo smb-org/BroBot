@@ -2507,7 +2507,10 @@ describe("Dashboard skeleton", () => {
 
     // Warnings/errors feed needs no interaction to show.
     expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
-  });
+    // Warm runs take ~0.5 s, but on a cold CI transform cache the lazy
+    // module imports above are slow; the test timeout must exceed the
+    // 5 s findBy waits it contains (the 5 s default did not).
+  }, 20_000);
 
   it("uses the overview stream state for Spotlight actions", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), streamState: "offline" as const };
@@ -4300,6 +4303,9 @@ describe("Dashboard skeleton", () => {
     replaceState.mockRestore();
   });
 
+  // This full DashboardApp integration exercises overlapping saves through
+  // async dialogs; CI measured 5.1 s on PR #351, so give this case room beyond
+  // Vitest's default without raising the suite-wide timeout.
   it("keeps a newly saved location when an unrelated, slower time zone save resolves after it", async () => {
     // #268 review: the time zone save's response used to spread a channelSettings
     // snapshot captured before the call, wiping out a location save that finished
@@ -4381,5 +4387,5 @@ describe("Dashboard skeleton", () => {
     const secondLocationSave = fetcher.mock.calls.filter(([callInput, callInit]) =>
       requestUrl(callInput).pathname === locationPath && callInit?.method === "PATCH")[1];
     expect(JSON.parse(secondLocationSave?.[1]?.body as string)).toEqual({ revision: 2, location: null });
-  });
+  }, 15_000);
 });
