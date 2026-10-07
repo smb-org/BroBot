@@ -190,7 +190,8 @@ export function TemplateVariablePicker({
       disabled={disabled}
       onSelect={choose}
       onDismissFocus={restoreEditorFocus}
-      renderEntryContent={(entry, active) => {
+      renderActiveDetail={(entry) => entry.value?.description}
+      renderEntryContent={(entry) => {
         const option = entry.value;
         return (
           <span className="ui-variable-picker__option-copy">
@@ -203,7 +204,6 @@ export function TemplateVariablePicker({
                 </span>
               </span>
             )}
-            {active && option !== undefined ? <span className="ui-variable-picker__description">{option.description}</span> : null}
           </span>
         );
       }}

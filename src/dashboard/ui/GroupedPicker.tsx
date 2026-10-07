@@ -56,6 +56,8 @@ export interface GroupedPickerProps<T = unknown> {
   transformGroups?: (groups: readonly GroupedPickerGroup<T>[], query: string) => readonly GroupedPickerGroup<T>[];
   showNoResults?: boolean;
   footer?: ReactNode;
+  /** When supplied, the active entry's detail renders in one fixed-height slot above the key hints, so rows keep a constant height. */
+  renderActiveDetail?: (entry: GroupedPickerEntry<T>) => ReactNode;
   width?: number | string;
 }
 
@@ -103,6 +105,7 @@ export function GroupedPicker<T = unknown>({
   transformGroups,
   showNoResults = true,
   footer,
+  renderActiveDetail,
   width = 400,
 }: GroupedPickerProps<T>): ReactElement {
   const generatedId = useId();
@@ -264,6 +267,7 @@ export function GroupedPicker<T = unknown>({
           aria-expanded="true"
           aria-controls={surfaceListId}
           aria-activedescendant={activeOptionId}
+          aria-describedby={renderActiveDetail === undefined ? undefined : `${surfacePanelId}-detail`}
           leftSection={<Icon name="search" size={16} />}
           value={query}
           onChange={(event) => { setQuery(event.currentTarget.value); setActiveKey(null); }}
@@ -322,6 +326,11 @@ export function GroupedPicker<T = unknown>({
           {entries.length === 0 && showNoResults ? <p className="ui-grouped-picker__empty" role="status">{noResults}</p> : null}
         </div>
         {footer === undefined ? null : <div className="ui-grouped-picker__footer">{footer}</div>}
+        {renderActiveDetail === undefined ? null : (
+          <div id={`${surfacePanelId}-detail`} className="ui-grouped-picker__detail" aria-live="polite">
+            {activeEntry === undefined ? null : renderActiveDetail(activeEntry.entry)}
+          </div>
+        )}
         <div className="ui-grouped-picker__key-hints">
           <span className="ui-grouped-picker__key-hint"><kbd>↑↓</kbd>{messages.keyHints.navigate}</span>
           <span className="ui-grouped-picker__key-hint"><kbd>Enter</kbd>{messages.keyHints.choose}</span>

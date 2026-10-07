@@ -119,15 +119,35 @@ test("the template variable suggestion dropdown is wide enough on desktop and fi
 
 test("variable picker rows show readable sample values and align info icons", async ({ page }) => {
   await routeApi(page);
-  for (const width of [1280, 390]) {
+  for (const width of [1280, 600, 390]) {
     await page.setViewportSize({ width, height: 844 });
     await page.goto(`/channels/${channel.channelId}/modules/text_commands`);
     await page.getByRole("row", { name: /!hallo/ }).click();
     await page.getByRole("button", { name: "Variable einfügen" }).click();
     const samples = page.getByTestId("variable-sample");
     await expect(samples.first()).toBeVisible();
-    const widths = await samples.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().width));
-    expect(Math.min(...widths)).toBeGreaterThan(24);
+    // Representative values must fit completely (no ellipsis), also at the narrowest popover (600px viewport).
+    const clipped = await samples.evaluateAll((nodes) => nodes
+      .filter((node) => ["Minecraft", "42", "12.345"].includes(node.textContent.trim()))
+      .map((node) => [node.textContent, node.scrollWidth <= node.clientWidth]));
+    expect(clipped.length).toBeGreaterThanOrEqual(3);
+    for (const [, fits] of clipped) expect(fits).toBe(true);
+    // Moving the active option must not change row heights or list scroll.
+    const measure = (): Promise<{ heights: number[]; top: number }> => page.locator(".ui-grouped-picker__list").evaluate((list) => ({
+      heights: [...list.querySelectorAll('[role="option"]')].map((node) => Math.round(node.getBoundingClientRect().height)),
+      top: Math.round(list.scrollTop),
+    }));
+    // Let fonts and popover positioning settle before taking the baseline.
+    let before = await measure();
+    await expect.poll(async () => {
+      const next = await measure();
+      const settled = JSON.stringify(next) === JSON.stringify(before);
+      before = next;
+      return settled;
+    }).toBe(true);
+    await page.keyboard.press("ArrowDown");
+    await expect(page.locator(".ui-grouped-picker__detail")).not.toBeEmpty();
+    expect(await measure()).toEqual(before);
     const infoX = await page.locator(".ui-variable-picker__info").evaluateAll((nodes) => [...new Set(nodes.map((node) => Math.round(node.getBoundingClientRect().x)))]);
     expect(infoX).toHaveLength(1);
     const box = await page.locator(".ui-grouped-picker").boundingBox();

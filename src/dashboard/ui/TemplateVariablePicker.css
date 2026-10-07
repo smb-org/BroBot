@@ -30,7 +30,6 @@
 .ui-variable-picker__label { overflow: hidden; color: var(--text); font-size: 14px; font-weight: 500; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
 .ui-variable-picker__token-line { display: flex; align-items: baseline; gap: var(--s2); min-width: 0; font-size: 12px; white-space: nowrap; }
 .ui-variable-picker__token { flex: none; max-width: 60%; overflow: hidden; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; text-overflow: ellipsis; }
-.ui-variable-picker__description { overflow: hidden; color: var(--text-2); font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
 .ui-variable-picker__sample { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-3); text-overflow: ellipsis; }
 .ui-variable-picker__sample::before { content: "· "; }
 .ui-variable-picker__sample--tag { font-family: Archivo, ui-sans-serif, system-ui, sans-serif; }
