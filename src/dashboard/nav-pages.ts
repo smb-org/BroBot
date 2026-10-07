@@ -1,6 +1,7 @@
 import { platformTexts } from "./labels";
 import type { DashboardTexts } from "./locale";
 import type { DashboardRoute } from "./router";
+import { modulePermissionsAreMissing } from "./channel-health";
 import { MODULE_NAVIGATION_CATEGORIES, type BotModule, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 
 export type NavPageGroup = "operation" | "channel" | "platform";
@@ -88,7 +89,7 @@ export const enabledModuleNavigationGroups = (
   fallbackLabel: (moduleId: string) => string,
 ): readonly ModuleSidebarGroup[] => {
   const enabledModuleIds = new Set(moduleStates
-    .filter((state) => state.enabled && (state.missingBroadcasterScopes?.length ?? 0) === 0)
+    .filter((state) => state.enabled && !modulePermissionsAreMissing(state))
     .map((state) => state.id));
   const registeredEntries = registeredModuleNavEntries(modules, channelId, language);
 

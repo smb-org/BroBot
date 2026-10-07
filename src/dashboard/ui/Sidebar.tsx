@@ -1,4 +1,6 @@
 import { NavLink } from "@mantine/core";
+import { useOs } from "@mantine/hooks";
+import { spotlight } from "@mantine/spotlight";
 import { type MouseEvent, type ReactNode } from "react";
 
 import { Led, type LedStatus } from "./Led";
@@ -30,6 +32,7 @@ export interface SidebarProps {
   onEntryNavigate: () => void;
   collapseLabel: string;
   expandLabel: string;
+  spotlightLabel: string;
 }
 
 const stopAndNavigate = (onNavigate: () => void, onEntryNavigate: () => void) =>
@@ -50,7 +53,9 @@ const stopAndNavigate = (onNavigate: () => void, onEntryNavigate: () => void) =>
  * navigation groups share one scroll region; the collapse control stays
  * outside it so it remains reachable when the module list is long.
  */
-export function Sidebar({ groups, collapsed, onToggleCollapsed, onEntryNavigate, collapseLabel, expandLabel }: SidebarProps) {
+export function Sidebar({ groups, collapsed, onToggleCollapsed, onEntryNavigate, collapseLabel, expandLabel, spotlightLabel }: SidebarProps) {
+  const os = useOs();
+  const shortcut = os === "macos" ? "⌘K" : "Ctrl+K";
   const renderEntry = (entry: SidebarEntry, moduleChild = false): ReactNode => {
     const accessibleName = moduleChild && entry.led !== undefined
       ? `${entry.label} · ${entry.led.word}`
@@ -75,17 +80,32 @@ export function Sidebar({ groups, collapsed, onToggleCollapsed, onEntryNavigate,
 
   return (
     <div className="sidebar" data-collapsed={collapsed ? "true" : undefined}>
-      <div className="sidebar__scroll">
-        {groups.map((group) => (
-          <div
-            className={`sidebar__group${group.id === "platform" ? " sidebar__group--platform" : ""}`}
-            key={group.id}
-            {...(group.heading === undefined ? {} : { role: "group", "aria-labelledby": `sidebar-heading-${group.id}` })}
-          >
-            {group.heading === undefined ? null : <h2 id={`sidebar-heading-${group.id}`} className={`sidebar__heading${collapsed ? " sr-only" : ""}`}>{group.heading}</h2>}
-            {group.entries.map((entry) => renderEntry(entry, group.nestedEntries === true))}
-          </div>
-        ))}
+      <div className="sidebar__main">
+        <button
+          type="button"
+          className="sidebar__spotlight-trigger"
+          aria-label={spotlightLabel}
+          title={collapsed ? `${spotlightLabel} · ${shortcut}` : undefined}
+          onClick={() => { onEntryNavigate(); spotlight.open(); }}
+        >
+          <Icon name="search" size={16} className="sidebar__spotlight-icon" />
+          {collapsed ? null : <>
+            <span className="sidebar__spotlight-label">{spotlightLabel}</span>
+            <kbd className="sidebar__spotlight-shortcut">{shortcut}</kbd>
+          </>}
+        </button>
+        <div className="sidebar__scroll">
+          {groups.map((group) => (
+            <div
+              className={`sidebar__group${group.id === "platform" ? " sidebar__group--platform" : ""}`}
+              key={group.id}
+              {...(group.heading === undefined ? {} : { role: "group", "aria-labelledby": `sidebar-heading-${group.id}` })}
+            >
+              {group.heading === undefined ? null : <h2 id={`sidebar-heading-${group.id}`} className={`sidebar__heading${collapsed ? " sr-only" : ""}`}>{group.heading}</h2>}
+              {group.entries.map((entry) => renderEntry(entry, group.nestedEntries === true))}
+            </div>
+          ))}
+        </div>
       </div>
       <button
         type="button"

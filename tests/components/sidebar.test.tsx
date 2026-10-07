@@ -25,6 +25,7 @@ describe("Sidebar", () => {
         onEntryNavigate={vi.fn()}
         collapseLabel="Collapse sidebar"
         expandLabel="Expand sidebar"
+        spotlightLabel="Search or run an action …"
       /></UiProvider>,
     );
 

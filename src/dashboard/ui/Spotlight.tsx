@@ -11,6 +11,8 @@ type SpotlightActions = SpotlightActionData | SpotlightActionGroupData;
 export interface SpotlightItem {
   id: string;
   label: string;
+  /** Canonical page/module route; used to resolve browser-local recent targets. */
+  recentTargetPath?: string;
   /** Shown under the label; a disabled item's reason replaces this. */
   description?: string;
   /** Result group heading ("Module", "Textbefehle", "Mitglieder", "Aktionen" -- caller decides). */

@@ -24,10 +24,6 @@ import type {
   PanelTokenStatus,
 } from "../panel-contract";
 import {
-  BOT_MAINTENANCE_INTERVAL_MS,
-  BOT_MAINTENANCE_STALE_AFTER_MS,
-} from "../maintenance-policy";
-import {
   fetchAuditLog,
   fetchChannelOverview,
   fetchChannelSettings,
@@ -45,7 +41,7 @@ import {
   type PanelChannelSettings,
 } from "./api";
 import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
-import { ImmediateActions, WarningsAndErrorsFeed } from "./stream-manager";
+import { BroadcasterConsentAction, ChannelNotices, ImmediateActions, ModeratorCheckAction, WarningsAndErrorsFeed } from "./stream-manager";
 import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
@@ -69,6 +65,7 @@ import { useRealtimePanelMessages } from "./realtime";
 import { channelSettingsTexts } from "./channel-settings-locale";
 import { ChannelTimeZoneField } from "./ChannelTimeZoneField";
 import { ChannelLocationField } from "./ChannelLocationField";
+import { botPermissionsAreMissing, broadcasterPermissionsAreMissing, moderatorIsMissing, parseDashboardDate, tokenHealth } from "./channel-health";
 import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
 import "./styles.css";
 
@@ -118,77 +115,19 @@ const subscriptionStatusLabel = (status: PanelEventSubSubscription["status"], re
   return texts.status.error;
 };
 
-const parseDate = (value: string | null): number | null => {
-  if (value === null) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-type TokenView = {
-  tone: "healthy" | "warning" | "error" | "neutral";
-  label: string;
-};
-
-/**
- * A token that's routinely about to expire is not a problem — the cron
- * renews it on its next run. It's only a problem once the renewal fails to happen.
- *
- * That's why remaining lifetime alone is not a sufficient threshold: with four-hour
- * Twitch tokens and an hourly cron, every token regularly spends up to an hour
- * inside the renewal window without anything being broken. It's only overdue
- * once a maintenance run has already taken place since the point at which the
- * cron should have renewed it, and the token is still inside the window anyway.
- */
-const renewalOverdue = (
-  expiresAt: number,
-  lastMaintenanceAt: number,
-  now: number,
-): boolean => expiresAt <= now + BOT_MAINTENANCE_INTERVAL_MS &&
-  lastMaintenanceAt >= expiresAt - BOT_MAINTENANCE_INTERVAL_MS;
-
-const tokenView = (tokens: PanelTokenStatus, bot: PanelBotStatus | null, loadedAt?: number, now = Date.now()): TokenView => {
-  const texts = dashboardTexts();
-  if (bot?.status === "error" || bot?.status === "revoked") {
-    return { tone: "error", label: statusLabel(bot.status) };
-  }
-  if (tokens.loginStatus === "error" || tokens.loginStatus === "revoked") {
-    return { tone: "error", label: statusLabel(tokens.loginStatus) };
-  }
-  if (tokens.loginStatus === null) return { tone: "neutral", label: texts.status.loginIdentityMissing };
-  const botExpiresAt = parseDate(tokens.botExpiresAt);
-  const loginExpiresAt = parseDate(tokens.loginExpiresAt);
-  if (botExpiresAt === null || loginExpiresAt === null) return { tone: "neutral", label: texts.status.notChecked };
-  const expiredAtLoad = loadedAt !== undefined && (botExpiresAt <= loadedAt || loginExpiresAt <= loadedAt);
-  if (expiredAtLoad) return { tone: "error", label: texts.status.expired };
-  if (botExpiresAt <= now || loginExpiresAt <= now) return { tone: "neutral", label: texts.status.refreshing };
-  if (bot?.status !== "connected") return { tone: "neutral", label: texts.status.notChecked };
-  const lastMaintenanceAt = parseDate(bot.updatedAt);
-  if (lastMaintenanceAt === null || lastMaintenanceAt <= now - BOT_MAINTENANCE_STALE_AFTER_MS) {
-    return { tone: "warning", label: texts.status.maintenanceOverdue };
-  }
-  if (renewalOverdue(botExpiresAt, lastMaintenanceAt, now) ||
-      renewalOverdue(loginExpiresAt, lastMaintenanceAt, now)) {
-    return { tone: "warning", label: texts.status.renewalOverdue };
-  }
-  return { tone: "healthy", label: texts.status.valid };
-};
-
 const channelBotConsentMissing = (channel: PanelChannelState): boolean =>
   channel.channelBotConsent === "missing";
 
-const broadcasterConsentMissing = (permissions: PanelBroadcasterPermissions | null | undefined): permissions is PanelBroadcasterPermissions =>
-  permissions !== null && permissions !== undefined && permissions.missingScopes.length > 0;
-
 const channelStatus = (channel: PanelChannelState, loadedAt?: number, now = Date.now()): StateTone => {
-  if (channel.moderator?.isModerator === false) return "error";
+  if (moderatorIsMissing(channel.moderator)) return "error";
   if (channel.chatSubscriptionNeeded === true &&
       (channel.chatSubscription?.status === "error" || channel.chatSubscription?.status === "revoked")) return "error";
   if (channel.lastError?.source === "eventsub") return "error";
   if (channel.bot?.status === "error" || channel.bot?.status === "revoked") return "error";
-  if (channel.botPermissions?.missingScopes.length) return "warning";
-  if (broadcasterConsentMissing(channel.broadcasterPermissions)) return "warning";
+  if (botPermissionsAreMissing(channel.botPermissions)) return "warning";
+  if (broadcasterPermissionsAreMissing(channel.broadcasterPermissions)) return "warning";
   if (channel.tokens.loginStatus === "error" || channel.tokens.loginStatus === "revoked") return "error";
-  const tokenStatus = tokenView(channel.tokens, channel.bot, loadedAt, now);
+  const tokenStatus = tokenHealth(channel.tokens, channel.bot, loadedAt, now);
   if (tokenStatus.tone === "error") return "error";
   if (channelBotConsentMissing(channel)) return "warning";
   if (channel.chatSubscriptionNeeded === true && channel.chatSubscription == null) return "warning";
@@ -204,15 +143,15 @@ const channelStatus = (channel: PanelChannelState, loadedAt?: number, now = Date
 
 const statusText = (channel: PanelChannelState, loadedAt?: number, now = Date.now()): string => {
   const texts = dashboardTexts();
-  if (channel.moderator?.isModerator === false) return texts.status.moderatorRoleMissing;
+  if (moderatorIsMissing(channel.moderator)) return texts.status.moderatorRoleMissing;
   if (channel.chatSubscriptionNeeded === true && channel.chatSubscription?.status === "error") return texts.status.chatSubscriptionError;
   if (channel.chatSubscriptionNeeded === true && channel.chatSubscription?.status === "revoked") return texts.status.chatSubscriptionRevoked;
   if (channel.lastError?.source === "eventsub") return texts.errors.last;
   if (channel.bot?.status === "error") return texts.status.botError;
   if (channel.bot?.status === "revoked") return texts.status.botTokenRevoked;
-  if (channel.botPermissions?.missingScopes.length) return texts.status.botPermissionsMissing(formatNumber(channel.botPermissions.missingScopes.length));
-  if (broadcasterConsentMissing(channel.broadcasterPermissions)) return channelPanelTexts().fullConsentMissing;
-  const tokenStatus = tokenView(channel.tokens, channel.bot, loadedAt, now);
+  if (botPermissionsAreMissing(channel.botPermissions)) return texts.status.botPermissionsMissing(formatNumber(channel.botPermissions.missingScopes.length));
+  if (broadcasterPermissionsAreMissing(channel.broadcasterPermissions)) return channelPanelTexts().fullConsentMissing;
+  const tokenStatus = tokenHealth(channel.tokens, channel.bot, loadedAt, now);
   if (channelBotConsentMissing(channel) && tokenStatus.tone === "healthy") return texts.status.broadcasterConsentMissing;
   if (channel.chatSubscriptionNeeded === true && channel.chatSubscription == null) return texts.status.chatSubscriptionMissing;
   if (channel.chatSubscriptionNeeded === true && channel.chatSubscription?.status === "missing" &&
@@ -341,6 +280,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
       onEntryNavigate={onEntryNavigate}
       collapseLabel={texts.navigation.collapseSidebar}
       expandLabel={texts.navigation.expandSidebar}
+      spotlightLabel={texts.spotlight.placeholder}
     />
   );
 };
@@ -676,42 +616,6 @@ const DataAge = ({ since, format, className }: {
   return <span className={`data-age${className === undefined ? "" : ` ${className}`}`}>{format === undefined ? dashboardTexts().time.updated(age) : format(age)}</span>;
 };
 
-const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, urgent, onCheck }: {
-  canCheck: boolean; checking: boolean; checkError: string | null;
-  nextAllowedAt: string | null; urgent: boolean; onCheck: () => void;
-}): ReactElement => {
-  const texts = dashboardTexts();
-  const [now, setNow] = useState(() => Date.now());
-  const notifiedError = useRef<string | null>(null);
-  const nextAllowedAtMs = nextAllowedAt === null ? null : Date.parse(nextAllowedAt);
-  useEffect(() => {
-    if (checkError === null) {
-      notifiedError.current = null;
-      return;
-    }
-    if (notifiedError.current === checkError) return;
-    notifiedError.current = checkError;
-    notify({ tone: "error", message: checkError });
-  }, [checkError]);
-  useEffect(() => {
-    if (nextAllowedAtMs === null || !Number.isFinite(nextAllowedAtMs)) return;
-    const timeoutId = window.setTimeout(() => { setNow(Date.now()); }, Math.max(0, nextAllowedAtMs - Date.now()));
-    return () => { window.clearTimeout(timeoutId); };
-  }, [nextAllowedAtMs]);
-  const cooldownActive = nextAllowedAtMs !== null && Number.isFinite(nextAllowedAtMs) && nextAllowedAtMs > now;
-  return (
-    <div className="header-action">
-      <button className={`button moderator-check-button${urgent ? " button--primary" : ""}`} type="button" onClick={onCheck} disabled={!canCheck || checking || cooldownActive} aria-busy={checking}>
-        {checking ? texts.moderation.checkRunning : texts.moderation.checkModeratorStatus}
-      </button>
-      <div className="header-action__reason-slot" aria-live="polite">
-        {nextAllowedAt === null ? null : <span className="muted moderator-check-time">{texts.moderation.nextCheckFrom(formatTimestamp(nextAllowedAt))}</span>}
-        {!canCheck ? <span className="lock-reason">{texts.moderation.checkLocked}</span> : null}
-      </div>
-    </div>
-  );
-};
-
 const ChannelBotConsentAction = ({ channelId, needed, canRequest }: {
   channelId: string;
   needed: boolean;
@@ -723,21 +627,6 @@ const ChannelBotConsentAction = ({ channelId, needed, canRequest }: {
     <div className="header-action">
       {canRequest ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/channel-bot`}>{texts.moderation.requestBroadcasterConsent}</a> : <button className="button" type="button" disabled>{texts.moderation.requestBroadcasterConsent}</button>}
       <div className="header-action__reason-slot">{!canRequest ? <span className="lock-reason">{texts.moderation.broadcasterReauthorize}</span> : null}</div>
-    </div>
-  );
-};
-
-const BroadcasterConsentAction = ({ login, needed, canRequest }: {
-  login: string;
-  needed: boolean;
-  canRequest: boolean;
-}): ReactElement | null => {
-  if (!needed) return null;
-  const texts = channelPanelTexts();
-  return (
-    <div className="header-action">
-      {canRequest ? <a className="button button--primary" href={`/auth/login?channel=${encodeURIComponent(login)}`}>{texts.requestFullConsent}</a> : <button className="button" type="button" disabled>{texts.requestFullConsent}</button>}
-      <div className="header-action__reason-slot">{!canRequest ? <span className="lock-reason">{texts.fullConsentLocked}</span> : null}</div>
     </div>
   );
 };
@@ -810,7 +699,7 @@ const botPermissionsRow = (permissions: PanelBotPermissions | null | undefined):
 
 const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | null | undefined, login?: string, canRequest = false): StatusEntry | null => {
   const texts = channelPanelTexts();
-  if (!broadcasterConsentMissing(permissions)) return null;
+  if (!broadcasterPermissionsAreMissing(permissions)) return null;
   return {
     key: "broadcaster-permissions",
     tone: "warning",
@@ -826,7 +715,7 @@ const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | nu
 
 const tokenRow = (tokens: PanelTokenStatus, bot: PanelBotStatus | null, loadedAt?: number): StatusEntry => {
   const texts = dashboardTexts();
-  const token = tokenView(tokens, bot, loadedAt);
+  const token = tokenHealth(tokens, bot, loadedAt);
   return { key: "token", tone: token.tone, node: <StateRow label={texts.statusCard.tokenStatus} tone={token.tone} word={token.label} detail={maintenanceReasonText(tokens.loginReason) ?? undefined} /> };
 };
 
@@ -844,7 +733,7 @@ const channelBotConsentRow = (status: PanelChannelState["channelBotConsent"], ch
 
 const moderatorRow = (moderator: PanelModeratorStatus | null, overview: PanelChannelOverview, check: ModeratorCheckState, onCheck: () => void): StatusEntry => {
   const texts = dashboardTexts();
-  const tone: StateTone = moderator === null ? "neutral" : moderator.isModerator ? "healthy" : "error";
+  const tone: StateTone = moderator === null ? "neutral" : moderatorIsMissing(moderator) ? "error" : "healthy";
   const word = moderator === null ? texts.status.notChecked : moderator.isModerator ? texts.status.moderator : texts.status.moderatorRoleMissing;
   const detail = moderator === null
     ? texts.moderation.noCheckForChannel
@@ -880,7 +769,7 @@ const lastErrorRow = (error: PanelLastError | null): StatusEntry => {
 
 const BotPermissionsInspector = ({ permissions }: { permissions: PanelBotPermissions | null | undefined }): ReactElement | null => {
   const texts = dashboardTexts();
-  if (permissions === null || permissions === undefined || permissions.missingScopes.length === 0) return null;
+  if (!botPermissionsAreMissing(permissions)) return null;
   return (
     <section className="content-section" aria-label={texts.system.missingBotPermissions}>
       <div className="section-heading"><h2>{texts.system.missingBotPermissions}</h2><span className="mono muted">{formatNumber(permissions.missingScopes.length)}</span></div>
@@ -892,7 +781,7 @@ const BotPermissionsInspector = ({ permissions }: { permissions: PanelBotPermiss
 
 const BroadcasterPermissionsInspector = ({ permissions }: { permissions: PanelBroadcasterPermissions | null | undefined }): ReactElement | null => {
   const texts = channelPanelTexts();
-  if (!broadcasterConsentMissing(permissions)) return null;
+  if (!broadcasterPermissionsAreMissing(permissions)) return null;
   return (
     <section className="content-section" aria-label={texts.missingBroadcasterPermissions}>
       <div className="section-heading"><h2>{texts.missingBroadcasterPermissions}</h2><span className="mono muted">{formatNumber(permissions.missingScopes.length)}</span></div>
@@ -1057,6 +946,15 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
 
   return (
     <>
+      <ChannelNotices
+        channel={overview}
+        modules={modules}
+        modulesLoaded={modulesLoaded}
+        {...(loadedAt === undefined ? {} : { loadedAt })}
+        moderatorCheck={moderatorCheck}
+        onCheckModeratorStatus={onCheckModeratorStatus}
+        onNavigate={onNavigate}
+      />
       <ModuleHeading
         kind="channel"
         title={overview.displayName}
@@ -1173,6 +1071,7 @@ export const DashboardApp = (): ReactElement => {
     (route.section === "overview" || route.section === "events" || route.section === "variables");
   useRealtimePanelMessages(realtimeChannelId, realtimeChannelId !== null && !routeHasOwnRealtimeFeed);
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
+  const [viewerUserId, setViewerUserId] = useState<string | null>(null);
   const latestStreamByChannel = useRef(new Map<string, ChannelStreamVersion>());
   const [, setFreshnessTick] = useState(0);
   const [isPlatform, setIsPlatform] = useState(false);
@@ -1299,6 +1198,7 @@ export const DashboardApp = (): ReactElement => {
         mergeAndRememberChannelStreamVersion(channel, latestStreamByChannel.current),
       );
       setChannels(loadedState(orderedChannels));
+      setViewerUserId(response.viewerUserId ?? null);
       setIsPlatform(response.platformAdmin);
       setViewerIsBot(response.viewerIsBot);
       setBotLogin(response.botLogin ?? null);
@@ -1388,6 +1288,7 @@ export const DashboardApp = (): ReactElement => {
     cancelMembersRequest();
     setChannels({ status: "success", data: [], error: null });
     setIsPlatform(false);
+    setViewerUserId(null);
     setViewerIsBot(false);
     setBotLogin(null);
     setInstallationBot(null);
@@ -1709,10 +1610,12 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const refreshChannelState = async (): Promise<void> => {
+    const refreshFallbackModules = selectedChannel?.modules === undefined ? reloadModules() : Promise.resolve();
     await Promise.all([
       reloadChannels(),
       reloadOverview(),
       reloadSystem(),
+      refreshFallbackModules,
     ]);
   };
   const refreshChannelStateRef = useRef(refreshChannelState);
@@ -1732,21 +1635,21 @@ export const DashboardApp = (): ReactElement => {
   const expiryCandidates = [
     ...(channels.data ?? []).flatMap((channel) => [channel.tokens.botExpiresAt, channel.tokens.loginExpiresAt]
       .flatMap((value) => {
-        const expiresAt = parseDate(value);
+        const expiresAt = parseDashboardDate(value);
         return channels.loadedAt !== undefined && expiresAt !== null && expiresAt > channels.loadedAt
           ? [{ expiresAt, loadedAt: channels.loadedAt, channelId: channel.channelId }]
           : [];
       })),
     ...(overview.data === null ? [] : [overview.data.tokens.botExpiresAt, overview.data.tokens.loginExpiresAt]
       .flatMap((value) => {
-        const expiresAt = parseDate(value);
+        const expiresAt = parseDashboardDate(value);
         return overview.loadedAt !== undefined && expiresAt !== null && expiresAt > overview.loadedAt
           ? [{ expiresAt, loadedAt: overview.loadedAt, channelId: overview.data?.channelId ?? "" }]
           : [];
       })),
     ...(system.data === null ? [] : [system.data.tokens.botExpiresAt, system.data.tokens.loginExpiresAt]
       .flatMap((value) => {
-        const expiresAt = parseDate(value);
+        const expiresAt = parseDashboardDate(value);
         return system.loadedAt !== undefined && expiresAt !== null && expiresAt > system.loadedAt
           ? [{ expiresAt, loadedAt: system.loadedAt, channelId: systemChannelId ?? "" }]
           : [];
@@ -1839,17 +1742,22 @@ export const DashboardApp = (): ReactElement => {
     if ((route.kind !== "channel" && route.kind !== "module") || channels.data === null) return null;
     return channels.data.find((channel) => channel.channelId === route.channelId) ?? null;
   }, [channels.data, route]);
+  const selectedChannelIdForModules = selectedChannel?.channelId ?? null;
+  const selectedModulesForChannel = selectedChannel?.modules;
+  const spotlightChannel = route.kind === "channel" || route.kind === "module"
+    ? selectedChannel
+    : channels.data?.[0] ?? null;
 
   // Current workers include module state in GET /api/channels. Keep a
   // compatibility fallback for an older worker response that omits it.
   // Current page loads therefore need one request, including the sidebar.
   useEffect(() => {
-    if ((route.kind !== "channel" && route.kind !== "module") || selectedChannel === null) {
+    if ((route.kind !== "channel" && route.kind !== "module") || selectedChannelIdForModules === null || selectedChannelIdForModules !== route.channelId) {
       setModules(idleState());
       return;
     }
-    if (selectedChannel.modules !== undefined) {
-      setModules(loadedState({ modules: selectedChannel.modules }));
+    if (selectedModulesForChannel !== undefined) {
+      setModules(loadedState({ modules: selectedModulesForChannel }));
       return;
     }
     const controller = new AbortController();
@@ -1865,7 +1773,7 @@ export const DashboardApp = (): ReactElement => {
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     });
     return () => controller.abort();
-  }, [route, selectedChannel]);
+  }, [route, selectedChannelIdForModules, selectedModulesForChannel]);
 
   const overviewForHeader = overview.data !== null && selectedChannel !== null &&
     overview.data.channelId === selectedChannel.channelId &&
@@ -1874,6 +1782,14 @@ export const DashboardApp = (): ReactElement => {
     : null;
   const activeHeaderChannel = overviewForHeader ?? selectedChannel ?? undefined;
   const activeHeaderLoadedAt = overviewForHeader === null ? channels.loadedAt : overview.loadedAt;
+  const spotlightModules = spotlightChannel?.modules ?? (
+    (route.kind === "channel" || route.kind === "module") && spotlightChannel?.channelId === route.channelId
+      ? modules.data?.modules ?? []
+      : []
+  );
+  const spotlightStreamState = overviewForHeader !== null && overviewForHeader.channelId === spotlightChannel?.channelId
+    ? overviewForHeader.streamState
+    : spotlightChannel?.streamState;
 
   const handleLogout = async (): Promise<void> => {
     setLoggingOut(true);
@@ -2027,7 +1943,11 @@ export const DashboardApp = (): ReactElement => {
   const showChannelNotReleased = !showBotBlocking && isChannelOrModuleRoute && selectedChannel === null && channels.status === "success";
   const overviewMatchesRoute = isChannelOrModuleRoute && overviewRoutePath === dashboardRoutePath(route) &&
     overview.data !== null && overview.data.channelId === route.channelId;
-  const overviewPageStatus = overviewMatchesRoute ? "success" : overview.status === "error" ? "error" : "loading";
+  const overviewModulesLoaded = selectedChannel?.modules !== undefined || overview.data?.modules !== undefined ||
+    modules.data !== null || modules.status === "error";
+  const overviewPageStatus = overviewMatchesRoute && overviewModulesLoaded
+    ? "success"
+    : overview.status === "error" ? "error" : "loading";
 
   return (
     <UiProvider>
@@ -2078,7 +1998,7 @@ export const DashboardApp = (): ReactElement => {
           loading={<Skeleton rows={12} height={58} />}
           empty={<Skeleton rows={12} height={58} />}
           error={<Skeleton rows={12} height={58} />}
-        >{overviewMatchesRoute && overview.data !== null ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} modulesLoaded={selectedChannel.modules !== undefined || overview.data.modules !== undefined || modules.data !== null} onLocationChanged={(channelId, location) => {
+        >{overviewMatchesRoute && overview.data !== null && overviewModulesLoaded ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} modulesLoaded={overviewModulesLoaded} onLocationChanged={(channelId, location) => {
           setChannels((current) => current.data === null ? current : {
             ...current,
             data: current.data.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),
@@ -2109,7 +2029,20 @@ export const DashboardApp = (): ReactElement => {
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} filters={auditFilters} onFiltersChange={updateAuditFilters} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={eventsChannelId === route.channelId ? events : idleState<PanelEventsResponse>()} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
-        {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} isPlatformAdmin={isPlatform} {...(channels.status === "success" ? { botSignedIn } : {})} streamState={overviewForHeader === null ? selectedChannel.streamState : overviewForHeader.streamState} modules={selectedChannel.modules ?? modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} onOpenVariable={(channelId, name) => { setPendingVariableSelection({ channelId, name }); }} /> : null}
+        <ChannelSpotlight
+          key={`spotlight-${spotlightChannel?.channelId ?? "none"}`}
+          channelId={spotlightChannel?.channelId ?? null}
+          ownRole={spotlightChannel?.role ?? null}
+          viewerUserId={viewerUserId}
+          route={route}
+          isPlatformAdmin={isPlatform}
+          {...(channels.status === "success" ? { botSignedIn } : {})}
+          streamState={spotlightStreamState}
+          modules={spotlightModules}
+          onNavigate={navigate}
+          onOpenCommand={setPendingModuleSelection}
+          onOpenVariable={(channelId, name) => { setPendingVariableSelection({ channelId, name }); }}
+        />
         </div>
       </Shell>
     </UiProvider>

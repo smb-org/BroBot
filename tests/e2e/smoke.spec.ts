@@ -143,28 +143,35 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
   await expect(sidebar).toBeInViewport();
   await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeVisible();
 
-  // The compact header leaves a useful, independently scrollable drawer at
-  // short phone heights; the collapse control remains a full-size target.
+  // At 240px the Spotlight trigger and channel links share a scroll region,
+  // while every interactive target keeps its 44px minimum height.
   await page.setViewportSize({ width: 390, height: 240 });
   // Mantine transitions the open drawer's top and height when the viewport
   // changes; wait for the compact layout before measuring its scroll region.
   await expect(sidebar).toHaveCSS("top", "96px");
   await expect(sidebar).toHaveCSS("height", "144px");
   await expect(sidebar).toBeInViewport();
-  const sidebarScroll = sidebar.locator(".sidebar__scroll");
-  const sidebarScrollHeight = await sidebarScroll.evaluate((element) => element.clientHeight);
-  const sidebarContentHeight = await sidebarScroll.evaluate((element) => element.scrollHeight);
-  expect(sidebarScrollHeight).toBeGreaterThan(44);
-  expect(sidebarContentHeight).toBeGreaterThan(sidebarScrollHeight);
-  await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeInViewport();
-  await sidebarScroll.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  const sidebarMain = sidebar.locator(".sidebar__main");
+  const sidebarMainHeight = await sidebarMain.evaluate((element) => element.clientHeight);
+  const sidebarContentHeight = await sidebarMain.evaluate((element) => element.scrollHeight);
+  expect(sidebarMainHeight).toBeGreaterThan(0);
+  expect(sidebarContentHeight).toBeGreaterThan(sidebarMainHeight);
+  const spotlightTrigger = sidebar.getByRole("button", { name: "Suchen oder Aktion ausführen …" });
+  await expect(spotlightTrigger).toBeInViewport();
+  expect((await spotlightTrigger.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  const channelLink = sidebar.getByRole("link", { name: "Kanal" });
+  await channelLink.scrollIntoViewIfNeeded();
+  await expect(channelLink).toBeInViewport();
+  expect((await channelLink.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
   // The last entry (the enabled module) is reachable once scrolled to the end.
-  await expect(sidebar.getByRole("link", { name: /Textbefehle/ })).toBeInViewport();
+  const lastEntry = sidebar.getByRole("link", { name: /Textbefehle/ });
+  await lastEntry.scrollIntoViewIfNeeded();
+  await expect(lastEntry).toBeInViewport();
   const collapseToggleRect = await sidebar.locator(".sidebar__collapse-toggle").evaluate((element) => {
     const { height, bottom } = element.getBoundingClientRect();
     return { height, bottom };
   });
-  expect(collapseToggleRect.height).toBeGreaterThanOrEqual(40);
+  expect(collapseToggleRect.height).toBeGreaterThanOrEqual(44);
   expect(collapseToggleRect.bottom).toBeLessThanOrEqual(240);
 
   // The channel select drops to its own full-width row alongside the burger.

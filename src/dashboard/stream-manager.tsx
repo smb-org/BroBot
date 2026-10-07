@@ -1,17 +1,187 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type LazyExoticComponent, type ReactElement } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ComponentType, type LazyExoticComponent, type ReactElement } from "react";
 
 import type { ChannelStreamState } from "../contracts/values";
-import type { PanelEventEntry, PanelModuleState } from "../panel-contract";
+import { canManage } from "../contracts/values";
+import type { PanelChannelOverview, PanelEventEntry, PanelModuleState } from "../panel-contract";
 import type { ModuleImmediateActionProperties } from "../modules/contract";
 import { MODULES } from "../modules/registry";
 import { fetchEvents } from "./api";
-import { dashboardLanguage, dashboardTexts, eventText, formatStreamManagerFeedTime, immediateActionUnavailableReasonText } from "./locale";
+import { dashboardLanguage, dashboardTexts, eventText, formatNumber, formatStreamManagerFeedTime, formatTimestamp, immediateActionUnavailableReasonText } from "./locale";
+import { channelPanelTexts } from "./labels";
 import { eventCause, eventDetail, eventMetadata } from "./events/model";
 import { emptyEventFilter } from "./events/model";
 import { useRealtimeEventFeed } from "./realtime";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
-import { LoadState, notify, Popover, Skeleton } from "./ui";
+import { Button, LoadState, notify, Popover, Skeleton } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
+import { collectChannelNoticeFacts, type ChannelNoticeFact } from "./channel-health";
+import { moduleName } from "./module-labels";
+import { StateRow } from "./module-panels";
+
+export const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, urgent, onCheck, notifyFailure = true, actionLabel, checkingLabel, lockedReason }: {
+  canCheck: boolean;
+  checking: boolean;
+  checkError: string | null;
+  nextAllowedAt: string | null;
+  urgent: boolean;
+  onCheck: () => void;
+  notifyFailure?: boolean;
+  actionLabel?: string;
+  checkingLabel?: string;
+  lockedReason?: string;
+}): ReactElement => {
+  const texts = dashboardTexts();
+  const [now, setNow] = useState(() => Date.now());
+  const notifiedError = useRef<string | null>(null);
+  const nextAllowedAtMs = nextAllowedAt === null ? null : Date.parse(nextAllowedAt);
+  useEffect(() => {
+    if (!notifyFailure || checkError === null) {
+      notifiedError.current = null;
+      return;
+    }
+    if (notifiedError.current === checkError) return;
+    notifiedError.current = checkError;
+    notify({ tone: "error", message: checkError });
+  }, [checkError, notifyFailure]);
+  useEffect(() => {
+    if (nextAllowedAtMs === null || !Number.isFinite(nextAllowedAtMs)) return;
+    const timeoutId = window.setTimeout(() => { setNow(Date.now()); }, Math.max(0, nextAllowedAtMs - Date.now()));
+    return () => { window.clearTimeout(timeoutId); };
+  }, [nextAllowedAtMs]);
+  const cooldownActive = nextAllowedAtMs !== null && Number.isFinite(nextAllowedAtMs) && nextAllowedAtMs > now;
+  return (
+    <div className="header-action">
+      <button className={`button moderator-check-button${urgent ? " button--primary" : ""}`} type="button" onClick={onCheck} disabled={!canCheck || checking || cooldownActive} aria-busy={checking}>
+        {checking ? checkingLabel ?? texts.moderation.checkRunning : actionLabel ?? texts.moderation.checkModeratorStatus}
+      </button>
+      <div className="header-action__reason-slot" aria-live="polite">
+        {nextAllowedAt === null ? null : <span className="muted moderator-check-time">{texts.moderation.nextCheckFrom(formatTimestamp(nextAllowedAt))}</span>}
+        {!canCheck ? <span className="lock-reason">{lockedReason ?? texts.moderation.checkLocked}</span> : null}
+      </div>
+    </div>
+  );
+};
+
+export const BroadcasterConsentAction = ({ login, needed, canRequest, reasonId = "broadcaster-consent-action-reason", actionLabel }: {
+  login: string;
+  needed: boolean;
+  canRequest: boolean;
+  reasonId?: string;
+  actionLabel?: string;
+}): ReactElement | null => {
+  if (!needed) return null;
+  const texts = channelPanelTexts();
+  return (
+    <div className="header-action">
+      {canRequest
+        ? <a className="button button--primary" href={`/auth/login?channel=${encodeURIComponent(login)}`}>{actionLabel ?? texts.requestFullConsent}</a>
+        : <button className="button" type="button" disabled aria-describedby={reasonId}>{actionLabel ?? texts.requestFullConsent}</button>}
+      <div className="header-action__reason-slot">{!canRequest ? <span className="lock-reason" id={reasonId}>{texts.fullConsentLocked}</span> : null}</div>
+    </div>
+  );
+};
+
+interface ChannelNoticeCopy {
+  sentence: string;
+  consequence: string;
+}
+
+const noticeCopy = (fact: ChannelNoticeFact): ChannelNoticeCopy => {
+  const texts = dashboardTexts().streamManager.notices;
+  switch (fact.kind) {
+    case "moderator-missing": return { sentence: texts.moderatorMissingSentence, consequence: texts.moderatorMissingConsequence };
+    case "bot-permissions-missing": return { sentence: texts.botPermissionsSentence, consequence: texts.botPermissionsConsequence };
+    case "broadcaster-permissions-missing": return { sentence: texts.broadcasterPermissionsSentence, consequence: texts.broadcasterPermissionsConsequence };
+    case "module-permissions-missing": return { sentence: texts.modulePermissionsSentence(moduleName(fact.moduleId ?? "")), consequence: texts.modulePermissionsConsequence };
+    case "token-expired": return { sentence: texts.tokenExpiredSentence, consequence: texts.tokenExpiredConsequence };
+    case "token-renewal-overdue": return { sentence: texts.tokenRenewalSentence, consequence: texts.tokenRenewalConsequence };
+  }
+};
+
+const noticeAction = (
+  fact: ChannelNoticeFact,
+  channel: PanelChannelOverview,
+  moderatorCheck: { status: "idle" | "loading" | "error"; error: string | null; nextAllowedAt: string | null },
+  onCheckModeratorStatus: () => void,
+  onNavigate: (route: DashboardRoute) => void,
+): ReactElement => {
+  const texts = dashboardTexts();
+  const noticeTexts = texts.streamManager.notices;
+  const systemRoute: DashboardRoute = { kind: "channel", channelId: channel.channelId, section: "system" };
+  if (fact.kind === "moderator-missing") {
+    return <ModeratorCheckAction canCheck={canManage(channel.role)} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} urgent onCheck={onCheckModeratorStatus} notifyFailure={false} actionLabel={noticeTexts.checkModerator} checkingLabel={noticeTexts.checkModeratorRunning} lockedReason={noticeTexts.checkModeratorLocked} />;
+  }
+  if (fact.kind === "broadcaster-permissions-missing") {
+    return <BroadcasterConsentAction login={channel.login} needed canRequest={channel.role === "broadcaster"} reasonId="notice-broadcaster-consent-reason" actionLabel={noticeTexts.grantPermission} />;
+  }
+  if (fact.kind === "module-permissions-missing") {
+    const moduleId = fact.moduleId ?? "";
+    const reasonId = `stream-manager-notice-permission-reason-${moduleId}`;
+    return (
+      <div className="header-action">
+        {channel.role === "broadcaster"
+          ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channel.channelId)}/broadcaster-scopes/${encodeURIComponent(moduleId)}`}>{noticeTexts.grantPermission}</a>
+          : <Button variant="primary" disabled describedBy={reasonId}>{noticeTexts.grantPermission}</Button>}
+        {channel.role === "broadcaster" ? null : <span className="lock-reason" id={reasonId}>{texts.module.scopeConsentLocked}</span>}
+      </div>
+    );
+  }
+  return <Button onClick={() => { onNavigate(systemRoute); }}>{noticeTexts.reviewPermissions}</Button>;
+};
+
+export const ChannelNotices = ({
+  channel,
+  modules,
+  modulesLoaded,
+  loadedAt,
+  moderatorCheck,
+  onCheckModeratorStatus,
+  onNavigate,
+}: {
+  channel: PanelChannelOverview;
+  modules: readonly PanelModuleState[];
+  modulesLoaded: boolean;
+  loadedAt?: number;
+  moderatorCheck: { status: "idle" | "loading" | "error"; error: string | null; nextAllowedAt: string | null };
+  onCheckModeratorStatus: () => void;
+  onNavigate: (route: DashboardRoute) => void;
+}): ReactElement | null => {
+  const texts = dashboardTexts();
+  const [expanded, setExpanded] = useState(false);
+  if (!modulesLoaded) return null;
+  const facts = collectChannelNoticeFacts({ ...channel, modules, ...(loadedAt === undefined ? {} : { loadedAt }) });
+  if (facts.length === 0) return null;
+  const visible = expanded ? facts : facts.slice(0, 2);
+  const status = facts.some((fact) => fact.tone === "error") ? "error" : "warning";
+  const noticeTexts = texts.streamManager.notices;
+  return (
+    <section className="stream-manager-notices" data-status={status} aria-label={noticeTexts.title}>
+      <div className="stream-manager-notices__heading">
+        <h2>{noticeTexts.title} <span className="mono">{formatNumber(facts.length)}</span></h2>
+        {facts.length <= 2 ? null : <Button
+          variant="subtle"
+          className="stream-manager-notices__toggle"
+          ariaExpanded={expanded}
+          ariaControls="stream-manager-notices-list"
+          onClick={() => { setExpanded((current) => !current); }}
+        >{expanded ? noticeTexts.showFewer : noticeTexts.showAll(formatNumber(facts.length))}</Button>}
+      </div>
+      <div className="stream-manager-notices__items" id="stream-manager-notices-list">
+        {visible.map((fact) => {
+          const copy = noticeCopy(fact);
+          return <StateRow
+            key={fact.id}
+            label={copy.sentence}
+            tone={fact.tone}
+            word={fact.tone === "error" ? texts.errors.title : texts.errors.warning}
+            detail={copy.consequence}
+            action={noticeAction(fact, channel, moderatorCheck, onCheckModeratorStatus, onNavigate)}
+          />;
+        })}
+      </div>
+    </section>
+  );
+};
 
 const lazyActions = new Map<string, LazyExoticComponent<ComponentType<ModuleImmediateActionProperties>>>();
 const immediateActionModules = MODULES.filter((module) => module.immediateActions !== undefined);
