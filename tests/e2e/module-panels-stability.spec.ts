@@ -257,7 +257,7 @@ test("BELABOX immediate action keeps manual results separate from live notices",
 
 test("Belabox test results stay inside the reserved result box", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/belabox/status", {
-    configured: false, updatedAt: null, sample: null, errorCode: null, polling: false,
+    configured: false, updatedAt: null, mode: "on_demand", sample: null, errorCode: null, polling: false,
     pollingDesired: false, streamId: null, belaboxStreamId: null, alertNotice: null,
     fetchFailureNotice: false, intervalSeconds: 15,
   });
@@ -274,6 +274,36 @@ test("Belabox test results stay inside the reserved result box", async ({ page }
   await expect(resultSlot).toContainText("Connected");
   expect(await box(button)).toEqual(buttonBefore);
   expect(await box(resultSlot)).toEqual(resultBefore);
+});
+
+test("Belabox history keeps its latest twenty streams inside a bounded list", async ({ page }) => {
+  const streams = Array.from({ length: 25 }, (_, index) => ({
+    streamId: `stream-${String(index)}`,
+    startedAt: new Date(Date.parse("2026-10-01T00:00:00.000Z") + index * 60_000).toISOString(),
+    endedAt: null,
+    samples: 1,
+    bitrateAvg: 2_400,
+    bitrateP10: 2_100,
+    lowSeconds: 0,
+    disconnectedSeconds: 0,
+    disconnectCount: 0,
+    droppedTotal: 0,
+  }));
+  await routeJson(page, "/api/channels/channel-a/modules/belabox/status", {
+    configured: true, updatedAt: null, mode: "interval", sample: null, errorCode: null, polling: true,
+    pollingDesired: true, streamId: "stream-24", belaboxStreamId: "stream-24",
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/belabox/streams", streams);
+  await routeJson(page, "/api/channels/channel-a/modules/belabox/history*", []);
+  await gotoPanel(page, "belabox");
+
+  const list = page.getByTestId("belabox-stream-history-list");
+  await expect(list.locator("li")).toHaveCount(20);
+  await expect.poll(() => list.evaluate((element) => ({
+    maxHeight: getComputedStyle(element).maxHeight,
+    overflowY: getComputedStyle(element).overflowY,
+    scrolls: element.scrollHeight > element.clientHeight,
+  }))).toEqual({ maxHeight: "320px", overflowY: "auto", scrolls: true });
 });
 
 test("chat voting keeps configuration and action stable when results become live", async ({ page }) => {

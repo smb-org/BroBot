@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../../src/modules/contract";
 import { belaboxModule } from "../../src/modules/belabox";
-import { BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
+import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { channelEventsModule } from "../../src/modules/channel_events";
 import { dispatchEventSubNotification, needsActiveChatterTracking, selectModulesForEvent } from "../../src/worker/dispatch";
 import {
@@ -13,6 +13,7 @@ import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 import { readChannelControls, readDispatchChannelState, setChannelControl } from "../../src/worker/db/channel-controls";
+import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
 
 const CHAT_TYPE = "channel.chat.message";
 const NOW = "2026-09-19T12:00:00.000Z";
@@ -1178,6 +1179,47 @@ describe("dispatch and execution", () => {
       await expect(database.prepare(
         "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
       ).first()).resolves.toEqual({ state: "offline", started_at: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("passes the captured session to BELABOX when an offline transition is accepted", async () => {
+    const database = new TestD1Database();
+    try {
+      const channelId = "kanal-a";
+      const startedAt = "2026-09-19T11:55:00.000Z";
+      const endedAt = "2026-09-19T12:05:00.000Z";
+      await insertChannel(database, channelId);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
+      ).bind(channelId, JSON.stringify(BELABOX_DEFAULT_SETTINGS)).run();
+      await writeEventSubStreamState(
+        database as unknown as D1Database,
+        channelId,
+        "online",
+        startedAt,
+        startedAt,
+        "captured-stream",
+      );
+      await database.prepare(
+        `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+         VALUES (?, 'captured-stream', ?, 1, 3200)`,
+      ).bind(channelId, startedAt).run();
+
+      const environmentValue = environment(database);
+      await dispatchEventSubNotification(environmentValue, {
+        channelId,
+        subscriptionType: "stream.offline",
+        triggerId: "offline-captured-stream",
+        payload: {},
+        receivedAt: endedAt,
+        eventSubTimestamp: endedAt,
+      }, sent(), [belaboxModule]);
+
+      await expect(database.prepare(
+        "SELECT ended_at FROM belabox_streams WHERE channel_id = ? AND stream_id = 'captured-stream'",
+      ).bind(channelId).first<{ ended_at: string | null }>()).resolves.toEqual({ ended_at: null });
     } finally {
       database.close();
     }

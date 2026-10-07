@@ -14,6 +14,20 @@ export interface BelaboxPanelTexts {
   connected: string;
   disconnected: string;
   bitrate: string;
+  history: string;
+  liveRange: string;
+  streamRange: string;
+  onDemandHistory: string;
+  noHistory: string;
+  streams: string;
+  noStreams: string;
+  lowThreshold: string;
+  recoverThreshold: string;
+  streamStarted: string;
+  averageBitrate: string;
+  p10Bitrate: string;
+  disconnects: string;
+  droppedPackets: string;
   replace: string;
   statsUrl: string;
   save: string;
@@ -71,6 +85,20 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     connected: "Verbunden",
     disconnected: "Getrennt",
     bitrate: "Bitrate",
+    history: "Bitrate-Verlauf",
+    liveRange: "Live · 10 Min.",
+    streamRange: "Stream",
+    onDemandHistory: "Im Modus „Bei Bedarf“ wird kein Verlauf gespeichert. Die aktuelle Messung steht oben.",
+    noHistory: "Für diesen Zeitraum liegen noch keine Messwerte vor.",
+    streams: "Streams",
+    noStreams: "Noch keine BELABOX-Streams aufgezeichnet.",
+    lowThreshold: "Niedrige Schwelle",
+    recoverThreshold: "Erholungsschwelle",
+    streamStarted: "Gestartet",
+    averageBitrate: "Mittel",
+    p10Bitrate: "P10",
+    disconnects: "Trennungen",
+    droppedPackets: "Verlorene Pakete",
     replace: "URL ersetzen",
     statsUrl: "Statistik-URL",
     save: "Ersetzen",
@@ -126,6 +154,20 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     connected: "Connected",
     disconnected: "Disconnected",
     bitrate: "Bitrate",
+    history: "Bitrate history",
+    liveRange: "Live · 10 min",
+    streamRange: "Stream",
+    onDemandHistory: "On-demand mode does not store history. The current sample is shown above.",
+    noHistory: "No measurements are available for this range yet.",
+    streams: "Streams",
+    noStreams: "No BELABOX streams recorded yet.",
+    lowThreshold: "Low threshold",
+    recoverThreshold: "Recovery threshold",
+    streamStarted: "Started",
+    averageBitrate: "Average",
+    p10Bitrate: "P10",
+    disconnects: "Disconnects",
+    droppedPackets: "Dropped packets",
     replace: "Replace URL",
     statsUrl: "Stats URL",
     save: "Replace",

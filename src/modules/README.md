@@ -479,6 +479,24 @@ if ((result[0]?.meta.changes ?? 0) === 0) return managementDenied(context);
 - Overlay-`initialState` hat keinen Secret-Zugriff. Die Host-Verschlüsselung
   bindet Hülle an Kanal, Modul und Name; kopierte Zeilen lassen sich nicht lesen.
 
+### BELABOX-Verlauf
+
+Nur ein verbundener Relay-Poll im Intervallmodus bestätigt den aktuellen
+Twitch-Stream als BELABOX-Stream. Ab dieser Messung schreibt das Modul
+`belabox_minutes` und hält `belabox_streams` laufend aktuell. Vorherige
+Erkennungsproben, Deskstreams und Messungen im Modus „bei Bedarf“ erzeugen keine
+Verlaufsdaten. Der kumulative Paketverlustzähler wird als Delta summiert; sinkt
+er, zählt der neue Stand als Reset.
+
+Die Live-Panelreihe kommt aus dem begrenzten Zehn-Minuten-Puffer in
+`belabox_status`; die Streamreihe kommt aus Minutenmittelwerten. Ein
+angenommener `stream.offline`-Übergang finalisiert die Zusammenfassung und
+berechnet P10 aus den Minutenmittelwerten. Stundenwartung löscht nur
+Minutenzeilen nach 30 Tagen. Streamzusammenfassungen bleiben unbegrenzt, weil
+sie aggregiert sind und keine Personendaten enthalten (Entscheidung 0003).
+Routenabfragen binden `channel_id`; `/history` liefert pro Messpunkt nur
+numerische Werte.
+
 ### Sofortaktionen (`immediateActions`)
 
 **Zweck:** Eine Karte in der Sofortaktionsleiste des Kanals (Werbung, Raid,

@@ -8,6 +8,7 @@ import {
   BELABOX_POLL_ALARM_KEY,
   belaboxSettingsSchema,
 } from "./contracts";
+import { purgeExpiredBelaboxMinutes } from "./adapters/d1";
 import { belaboxAlertDefaultsOnEnable, ensureBelaboxPoll, ensureBelaboxPollSchedule, handleBelaboxPollAlarm } from "./service";
 
 const belaboxPanelIcon = { paths: ["M4 7h16v10H4z", "M8 11h3", "M14 11h2", "M8 14h8"] } as const;
@@ -37,6 +38,8 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
     onScheduleInputsChanged: ensureBelaboxPollSchedule,
   }],
   routes: belaboxRoutes,
+  scheduledMaintenance: purgeExpiredBelaboxMinutes,
+  settingsEditorPlacement: "before-panel",
   panel: () => import("./panel/index"),
   settingsEditor: () => import("./panel/settings-editor"),
   immediateActions: { requires: ["streamLive"], load: () => import("./panel/immediate-actions") },

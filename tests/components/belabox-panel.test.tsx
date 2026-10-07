@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   removeBelaboxStatsUrl: vi.fn(),
   replaceBelaboxStatsUrl: vi.fn(),
   testBelaboxConnection: vi.fn(),
+  loadBelaboxHistory: vi.fn(),
+  loadBelaboxStreams: vi.fn(),
 }));
 
 vi.mock("../../src/modules/belabox/panel/service", () => mocks);
@@ -21,6 +23,7 @@ describe("BELABOX panel", () => {
     mocks.loadBelaboxStatus.mockReset().mockResolvedValue({
       configured: true,
       updatedAt: null,
+      mode: "interval",
       sample: null,
       polling: false,
       pollingDesired: false,
@@ -31,6 +34,8 @@ describe("BELABOX panel", () => {
     mocks.removeBelaboxStatsUrl.mockReset();
     mocks.replaceBelaboxStatsUrl.mockReset();
     mocks.testBelaboxConnection.mockReset();
+    mocks.loadBelaboxHistory.mockReset().mockResolvedValue([]);
+    mocks.loadBelaboxStreams.mockReset().mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -74,6 +79,7 @@ describe("BELABOX panel", () => {
     mocks.loadBelaboxStatus.mockResolvedValue({
       configured: true,
       updatedAt: null,
+      mode: "interval",
       sample: null,
       polling: false,
       pollingDesired: true,
@@ -99,5 +105,114 @@ describe("BELABOX panel", () => {
     expect(screen.getByTestId("belabox-updated-at-slot")).toBeInTheDocument();
     expect(screen.getByTestId("belabox-sample-slot")).toBeInTheDocument();
     expect(screen.getByTestId("belabox-test-result-slot")).toBeInTheDocument();
+  });
+
+  it("explains that on-demand mode keeps the current sample without history", async () => {
+    mocks.loadBelaboxStatus.mockResolvedValue({
+      configured: true,
+      updatedAt: null,
+      mode: "on_demand",
+      sample: { at: "2026-10-05T12:00:00.000Z", connected: true, bitrateKbps: 2_400, rttMs: 41,
+        latencyMs: 115, network: 2, droppedPackets: 4 },
+      errorCode: null,
+      polling: false,
+      pollingDesired: false,
+      streamId: "stream-s2",
+      belaboxStreamId: null,
+    });
+
+    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
+
+    expect(await screen.findByText(/On-demand mode does not store history/)).toBeInTheDocument();
+    expect(screen.getByTestId("belabox-sample-slot")).toHaveTextContent("2400 kbps");
+    expect(mocks.loadBelaboxHistory).not.toHaveBeenCalled();
+    expect(mocks.loadBelaboxStreams).not.toHaveBeenCalled();
+  });
+
+  it("reloads status after settings save and starts history requests when interval mode is enabled", async () => {
+    mocks.loadBelaboxStatus
+      .mockResolvedValueOnce({
+        configured: true, updatedAt: null, mode: "on_demand", sample: null, errorCode: null,
+        polling: false, pollingDesired: false, streamId: "stream-42", belaboxStreamId: null,
+      })
+      .mockResolvedValue({
+        configured: true, updatedAt: null, mode: "interval", sample: null, errorCode: null,
+        polling: true, pollingDesired: true, streamId: "stream-42", belaboxStreamId: "stream-42",
+      });
+    const view = render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRefreshToken={0} /></></UiProvider>);
+
+    await waitFor(() => { expect(mocks.loadBelaboxStatus).toHaveBeenCalledOnce(); });
+    expect(mocks.loadBelaboxHistory).not.toHaveBeenCalled();
+    view.rerender(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRefreshToken={1} /></></UiProvider>);
+
+    await waitFor(() => {
+      expect(mocks.loadBelaboxStatus).toHaveBeenCalledTimes(2);
+      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "live", undefined);
+    });
+    expect(mocks.loadBelaboxStreams).toHaveBeenCalledOnce();
+  });
+
+  it("draws the history thresholds and disconnect gaps and can select a stream", async () => {
+    mocks.loadBelaboxStatus.mockResolvedValue({
+      configured: true,
+      updatedAt: null,
+      mode: "interval",
+      sample: null,
+      errorCode: null,
+      polling: true,
+      pollingDesired: true,
+      streamId: "stream-42",
+      belaboxStreamId: "stream-42",
+    });
+    mocks.loadBelaboxHistory.mockResolvedValue([
+      [Date.parse("2026-10-05T12:00:00.000Z"), 2_400, 1],
+      [Date.parse("2026-10-05T12:00:15.000Z"), 0, 0],
+    ]);
+    mocks.loadBelaboxStreams.mockResolvedValue([{
+      streamId: "stream-42",
+      startedAt: "2026-10-05T12:00:00.000Z",
+      endedAt: null,
+      samples: 2,
+      bitrateAvg: 1_200,
+      bitrateP10: 0,
+      lowSeconds: 0,
+      disconnectedSeconds: 0,
+      disconnectCount: 1,
+      droppedTotal: 3,
+    }]);
+
+    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
+
+    const chart = await screen.findByRole("img", { name: "Bitrate history" });
+    await waitFor(() => {
+      expect(chart.querySelectorAll('line[stroke-dasharray]')).toHaveLength(2);
+      expect(chart.querySelectorAll("rect")).toHaveLength(1);
+    });
+    expect(await screen.findByText(/Average 1200/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stream" }));
+    await waitFor(() => {
+      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "stream", "stream-42");
+    });
+  });
+
+  it("caps the stream history at twenty rows inside a bounded scroll region", async () => {
+    mocks.loadBelaboxStreams.mockResolvedValue(Array.from({ length: 25 }, (_, index) => ({
+      streamId: `stream-${String(index)}`,
+      startedAt: new Date(Date.parse("2026-10-01T00:00:00.000Z") + index * 60_000).toISOString(),
+      endedAt: null,
+      samples: 1,
+      bitrateAvg: 2_400,
+      bitrateP10: 2_100,
+      lowSeconds: 0,
+      disconnectedSeconds: 0,
+      disconnectCount: 0,
+      droppedTotal: 0,
+    })));
+
+    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
+
+    const list = await screen.findByTestId("belabox-stream-history-list");
+    await waitFor(() => { expect(within(list).getAllByRole("button")).toHaveLength(20); });
+    expect(list).toHaveStyle({ maxHeight: "320px", overflowY: "auto" });
   });
 });

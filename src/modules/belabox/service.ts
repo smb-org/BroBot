@@ -18,14 +18,27 @@ import {
 } from "./contracts";
 import type { ModuleLanguage } from "../contract";
 import {
+  belaboxStreamExists,
+  clearBelaboxHistoryBaseline,
+  finalizeAndResetBelaboxHistory,
+  getBelaboxStreamStateSnapshot,
   getBelaboxStatus,
-  setBelaboxPollingState,
+  reopenCurrentBelaboxStream,
+  markBelaboxPollingStarted,
   writeBelaboxAlertState,
   writeBelaboxFetch,
   type BelaboxFetchPhase,
   type BelaboxRecentPoint,
+  type BelaboxStreamStateSnapshot,
+  sameBelaboxStreamStateSnapshot,
 } from "./adapters/d1";
 import { fetchRelaySample } from "./adapters/stats-client";
+import {
+  BELABOX_LOW_BITRATE_KBPS,
+  droppedPacketDelta,
+  elapsedSampleSeconds,
+  minuteAtForSample,
+} from "./domain/history";
 import {
   advanceAlert,
   createInitialAlertState,
@@ -61,6 +74,7 @@ export const belaboxAlertDefaultsOnEnable = async (
 interface StoredModuleSettings {
   enabled: number;
   settings: string;
+  revision: number;
 }
 
 interface BelaboxPollScheduleContext {
@@ -69,22 +83,28 @@ interface BelaboxPollScheduleContext {
 
 interface PollingPrerequisites {
   settings: BelaboxSettings | null;
+  enabled: boolean;
+  mode: BelaboxSettings["mode"] | null;
+  moduleRevision: number | null;
   streamState: "online" | "offline" | "unknown";
+  streamId: string | null;
+  startedAt: string | null;
+  streamSnapshot: BelaboxStreamStateSnapshot | null;
+  historyIntervalSeconds: number | null;
   secretStored: boolean;
 }
 
 export const belaboxSettingsForChannel = async (
   db: D1Database,
   channelId: string,
-): Promise<{ enabled: boolean; settings: BelaboxSettings } | null> => {
+): Promise<{ enabled: boolean; settings: BelaboxSettings; revision: number } | null> => {
   const row = await db.prepare(
-    "SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
+    "SELECT enabled, settings, revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
   ).bind(channelId).first<StoredModuleSettings>();
   if (row === null) return null;
   try {
-    const stored: unknown = JSON.parse(row.settings);
-    const settings = belaboxSettingsSchema.safeParse(stored);
-    return settings.success ? { enabled: row.enabled === 1, settings: settings.data } : null;
+    const settings = belaboxSettingsSchema.safeParse(JSON.parse(row.settings) as unknown);
+    return settings.success ? { enabled: row.enabled === 1, settings: settings.data, revision: row.revision } : null;
   } catch {
     return null;
   }
@@ -170,45 +190,98 @@ const usableSecret = async (secrets: ModuleSecretAccess): Promise<{
 interface AlarmPrerequisites extends PollingPrerequisites {
   secret: Awaited<ReturnType<typeof usableSecret>>;
   secretUnavailable: boolean;
+  secretReadFailed: boolean;
 }
 
 const alarmPrerequisites = async (context: ModuleAlarmContext): Promise<AlarmPrerequisites> => {
-  const [moduleState, streamState] = await Promise.all([
+  const [moduleState, streamSnapshot] = await Promise.all([
     belaboxSettingsForChannel(context.DB, context.channelId),
-    context.streamState(),
+    getBelaboxStreamStateSnapshot(context.DB, context.channelId),
   ]);
+  const streamState: PollingPrerequisites["streamState"] = streamSnapshot?.state === "online" || streamSnapshot?.state === "offline"
+    ? streamSnapshot.state
+    : "unknown";
   const settings = moduleState?.enabled === true && moduleState.settings.mode === "interval"
     ? moduleState.settings
     : null;
+  const moduleRevision: number | null = moduleState?.revision ?? await context.DB.prepare(
+    "SELECT revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
+  ).bind(context.channelId).first<{ revision: number }>().then((row) => row?.revision ?? null);
+  const state = {
+    settings,
+    enabled: moduleState?.enabled === true,
+    mode: moduleState?.settings.mode ?? null,
+    moduleRevision,
+    streamState,
+    streamId: streamSnapshot?.streamId ?? null,
+    startedAt: streamSnapshot?.startedAt ?? null,
+    streamSnapshot,
+    historyIntervalSeconds: moduleState?.settings.intervalSeconds ?? null,
+  };
   if (settings === null || streamState !== "online") {
-    return { settings, streamState, secretStored: false, secret: null, secretUnavailable: false };
+    return { ...state, secretStored: false, secret: null, secretUnavailable: false, secretReadFailed: false };
   }
   let secret: Awaited<ReturnType<typeof usableSecret>>;
   try {
     secret = await usableSecret(context.secrets);
   } catch {
-    // Storage failure, not a missing/undecryptable secret (those return null): let the host retry.
-    throw new Error("BELABOX_SECRET_READ_FAILED");
+    return { ...state, secretStored: false, secret: null, secretUnavailable: false, secretReadFailed: true };
   }
   return {
-    settings,
-    streamState,
+    ...state,
     secretStored: secret !== null,
     secret,
     secretUnavailable: secret === null,
+    secretReadFailed: false,
   };
 };
+
+const streamChanged = (status: Awaited<ReturnType<typeof getBelaboxStatus>>, prerequisites: AlarmPrerequisites): boolean =>
+  status !== null && (
+    status.streamId !== null && status.streamId !== prerequisites.streamId ||
+    status.belaboxStreamId !== null && status.belaboxStreamId !== prerequisites.streamId
+  );
 
 const stopPolling = async (
   context: ModuleAlarmContext,
   prerequisites: AlarmPrerequisites,
-): Promise<void> => {
-  await setBelaboxPollingState(
+  status: Awaited<ReturnType<typeof getBelaboxStatus>>,
+): Promise<boolean> => finalizeAndResetBelaboxHistory(
     context.DB,
     context.channelId,
-    false,
-    prerequisites.streamState === "offline",
-    prerequisites.secretUnavailable ? BELABOX_SECRET_UNAVAILABLE_STATUS_CODE : undefined,
+    // An offline stream ended when it went offline, not when this (possibly delayed) alarm runs.
+    prerequisites.streamState === "offline" && prerequisites.streamSnapshot !== null &&
+      Number.isFinite(Date.parse(prerequisites.streamSnapshot.changedAt))
+      ? prerequisites.streamSnapshot.changedAt
+      : new Date().toISOString(),
+    prerequisites.moduleRevision,
+    prerequisites.streamSnapshot,
+    {
+      finalizeOpen: !prerequisites.enabled || prerequisites.mode !== "interval" ||
+        prerequisites.streamState === "offline" || streamChanged(status, prerequisites),
+      resetStream: prerequisites.streamState === "offline" || streamChanged(status, prerequisites),
+      stopPolling: true,
+      maxBaselineAgeMs: (prerequisites.historyIntervalSeconds ?? 0) * 2_000,
+      ...(prerequisites.secretUnavailable ? { errorCode: BELABOX_SECRET_UNAVAILABLE_STATUS_CODE } : {}),
+    },
+  );
+
+const ensureLifecycleRevision = async (context: ModuleAlarmContext, current: boolean): Promise<void> => {
+  if (!current) await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
+};
+
+const clearHistoryBaselineForAlarm = async (
+  context: ModuleAlarmContext,
+  prerequisites: AlarmPrerequisites,
+  status: Awaited<ReturnType<typeof getBelaboxStatus>>,
+): Promise<void> => {
+  if (status === null) return;
+  await clearBelaboxHistoryBaseline(
+    context.DB,
+    context.channelId,
+    status.revision,
+    prerequisites.moduleRevision,
+    prerequisites.streamSnapshot,
   );
 };
 
@@ -236,22 +309,23 @@ const storePollResult = async (
   context: ModuleAlarmContext,
   result: BelaboxFetchResult,
   secretVersion: string,
-  originStreamId: string | null,
+  originStreamSnapshot: BelaboxStreamStateSnapshot | null,
 ): Promise<StoredPollOutcome> => {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const [prerequisites, currentStatus, live] = await Promise.all([
+    const [prerequisites, currentStatus] = await Promise.all([
       alarmPrerequisites(context),
       getBelaboxStatus(context.DB, context.channelId),
-      context.streamStartedAt(),
     ]);
     if (prerequisites.secretUnavailable) return { kind: "secret_unavailable" };
-    if (live.streamId !== originStreamId) return { kind: "stream_changed" };
+    if (!sameBelaboxStreamStateSnapshot(prerequisites.streamSnapshot, originStreamSnapshot)) {
+      return { kind: "stream_changed" };
+    }
     if (!isDesired(prerequisites) || prerequisites.settings === null || prerequisites.secret === null) {
       return { kind: "not_desired" };
     }
     if (prerequisites.secret.version !== secretVersion) return { kind: "secret_changed" };
 
-    const streamId = live.streamId;
+    const streamId = prerequisites.streamId;
     const sameStream = currentStatus?.streamId === streamId;
     const alreadyClassified = sameStream && streamId !== null && currentStatus.belaboxStreamId === streamId;
     const previousPhase = sameStream ? currentStatus.fetchPhase
@@ -260,7 +334,42 @@ const storePollResult = async (
     const classified = alreadyClassified || result.ok && result.sample.connected && streamId !== null;
     const now = Date.now();
     const recent = sameStream ? pruneRecent(currentStatus.recent, now) : [];
-    const nextRecent = result.ok && alreadyClassified ? appendRecent(recent, result.sample, now) : recent;
+    const nextRecent = result.ok && classified ? appendRecent(recent, result.sample, now) : recent;
+    const priorSample = alreadyClassified && currentStatus.historyModuleRevision === prerequisites.moduleRevision
+      ? currentStatus.historySample
+      : null;
+    const priorSampleAt = priorSample === null ? Number.NaN : Date.parse(priorSample.at);
+    const historyAge = Date.now() - priorSampleAt;
+    const historyGap = priorSample === null || !Number.isFinite(priorSampleAt) || historyAge < 0 ||
+      historyAge > prerequisites.settings.intervalSeconds * 2_000;
+    const previousSample = historyGap ? null : priorSample;
+    const minuteAt = result.ok && classified ? minuteAtForSample(result.sample.at) : null;
+    const elapsedSeconds = result.ok ? elapsedSampleSeconds(previousSample, result.sample) : 0;
+    let droppedDelta = 0;
+    if (result.ok && result.sample.connected && streamId !== null) {
+      if (previousSample?.connected === true) {
+        droppedDelta = droppedPacketDelta(result.sample, previousSample);
+      } else if (previousSample === null) {
+        const summaryExists = await belaboxStreamExists(context.DB, context.channelId, streamId);
+        if (!summaryExists) {
+          droppedDelta = result.sample.droppedPackets;
+        }
+      }
+    }
+    const history = result.ok && classified && minuteAt !== null
+      ? {
+        streamId,
+        startedAt: prerequisites.startedAt ?? result.sample.at,
+        minuteAt,
+        droppedDelta,
+        lowSeconds: previousSample?.connected === true && previousSample.bitrateKbps < BELABOX_LOW_BITRATE_KBPS
+          ? elapsedSeconds
+          : 0,
+        disconnectedSeconds: previousSample?.connected === false ? elapsedSeconds : 0,
+        disconnectCount: previousSample?.connected === true && !result.sample.connected ? 1 : 0,
+      }
+      : undefined;
+    const historySample = result.ok ? result.sample : null;
     const previousAlert = sameStream ? currentStatus.alertState : createInitialAlertState();
     const alert = classified && prerequisites.settings.alertsEnabled
       ? advanceAlert(previousAlert, result.ok ? result.sample : {
@@ -281,6 +390,11 @@ const storePollResult = async (
       recent: nextRecent,
       expectedSecretVersion: secretVersion,
       expectedStatusRevision: currentStatus?.revision ?? null,
+      expectedModuleRevision: prerequisites.moduleRevision,
+      expectedStreamSnapshot: prerequisites.streamSnapshot,
+      resetHistoryBaseline: history === undefined,
+      historyModuleRevision: prerequisites.moduleRevision,
+      ...(history === undefined ? {} : { history, historySample }),
     });
     if (written !== null) {
       await writePollDiagnostics(
@@ -365,12 +479,48 @@ export const handleBelaboxPollAlarm = async (
   try {
     const prerequisites = await alarmPrerequisites(context);
     delay = retryDelay(prerequisites.settings);
-    if (!isDesired(prerequisites) || prerequisites.settings === null || prerequisites.secret === null) {
-      await stopPolling(context, prerequisites);
+    if (prerequisites.secretReadFailed) {
+      await finalizeAndResetBelaboxHistory(
+        context.DB,
+        context.channelId,
+        new Date().toISOString(),
+        prerequisites.moduleRevision,
+        prerequisites.streamSnapshot,
+        {
+          finalizeOpen: false,
+          stopPolling: false,
+          maxBaselineAgeMs: (prerequisites.historyIntervalSeconds ?? 0) * 2_000,
+        },
+      );
+      await reschedulePollAfterFailure(context, deadline, delay);
       return;
     }
-    await setBelaboxPollingState(context.DB, context.channelId, true);
-    const originStreamId = (await context.streamStartedAt()).streamId;
+    const status = await getBelaboxStatus(context.DB, context.channelId);
+    if (!isDesired(prerequisites) || prerequisites.settings === null || prerequisites.secret === null) {
+      await ensureLifecycleRevision(context, await stopPolling(context, prerequisites, status));
+      return;
+    }
+    if (streamChanged(status, prerequisites)) {
+      const current = await finalizeAndResetBelaboxHistory(
+        context.DB,
+        context.channelId,
+        new Date().toISOString(),
+        prerequisites.moduleRevision,
+        prerequisites.streamSnapshot,
+        {
+          resetStream: true,
+          maxBaselineAgeMs: (prerequisites.historyIntervalSeconds ?? 0) * 2_000,
+        },
+      );
+      if (!current) {
+        await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
+        return;
+      }
+    }
+    if (prerequisites.moduleRevision !== null) {
+      await reopenCurrentBelaboxStream(context.DB, context.channelId, prerequisites.moduleRevision);
+    }
+    await markBelaboxPollingStarted(context.DB, context.channelId);
 
     const result = await fetchRelaySample(
       prerequisites.secret.url,
@@ -378,37 +528,76 @@ export const handleBelaboxPollAlarm = async (
       context.externalFetchBudget ?? { claim: () => true },
       fetcher,
     );
-    const stored = await storePollResult(context, result, prerequisites.secret.version, originStreamId);
+    const stored = await storePollResult(context, result, prerequisites.secret.version, prerequisites.streamSnapshot);
 
     const latest = await alarmPrerequisites(context);
+    if (latest.secretReadFailed) {
+      await finalizeAndResetBelaboxHistory(
+        context.DB,
+        context.channelId,
+        new Date().toISOString(),
+        latest.moduleRevision,
+        latest.streamSnapshot,
+        {
+          finalizeOpen: false,
+          stopPolling: false,
+          maxBaselineAgeMs: (latest.historyIntervalSeconds ?? 0) * 2_000,
+        },
+      );
+      await reschedulePollAfterFailure(context, deadline, retryDelay(latest.settings));
+      return;
+    }
+    const latestStatus = await getBelaboxStatus(context.DB, context.channelId);
     if (!isDesired(latest) || latest.settings === null || latest.secret === null) {
-      await stopPolling(context, latest);
+      await ensureLifecycleRevision(context, await stopPolling(context, latest, latestStatus));
       return;
     }
     delay = retryDelay(latest.settings);
-    if (stored.kind === "secret_unavailable") {
-      await setBelaboxPollingState(
+    if (stored.kind === "stream_changed" || streamChanged(latestStatus, latest)) {
+      const current = await finalizeAndResetBelaboxHistory(
         context.DB,
         context.channelId,
-        false,
-        false,
-        BELABOX_SECRET_UNAVAILABLE_STATUS_CODE,
+        new Date().toISOString(),
+        latest.moduleRevision,
+        latest.streamSnapshot,
+        {
+          resetStream: true,
+          maxBaselineAgeMs: (latest.historyIntervalSeconds ?? 0) * 2_000,
+        },
       );
+      await ensureLifecycleRevision(context, current);
+      if (current) await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
+      return;
+    }
+    if (stored.kind === "secret_unavailable") {
+      const current = await finalizeAndResetBelaboxHistory(
+        context.DB,
+        context.channelId,
+        new Date().toISOString(),
+        latest.moduleRevision,
+        latest.streamSnapshot,
+        {
+          finalizeOpen: false,
+          stopPolling: false,
+          maxBaselineAgeMs: (latest.historyIntervalSeconds ?? 0) * 2_000,
+        },
+      );
+      await ensureLifecycleRevision(context, current);
+      if (current) await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
       return;
     }
     if (stored.kind === "not_desired") {
-      await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
-      return;
-    }
-    if (stored.kind === "stream_changed") {
+      await clearHistoryBaselineForAlarm(context, latest, latestStatus);
       await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
       return;
     }
     if (stored.kind === "conflict") {
+      await clearHistoryBaselineForAlarm(context, latest, latestStatus);
       await context.schedule(BELABOX_POLL_ALARM_KEY, Math.max(Date.now(), deadline) + delay);
       return;
     }
     if (stored.kind === "secret_changed" || latest.secret.version !== prerequisites.secret.version) {
+      await clearHistoryBaselineForAlarm(context, latest, latestStatus);
       await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
       return;
     }
@@ -418,6 +607,15 @@ export const handleBelaboxPollAlarm = async (
       : BELABOX_PROBE_INTERVAL_MS;
     await context.schedule(BELABOX_POLL_ALARM_KEY, Math.max(Date.now(), deadline) + interval);
   } catch {
+    try {
+      const [current, currentStatus] = await Promise.all([
+        alarmPrerequisites(context),
+        getBelaboxStatus(context.DB, context.channelId),
+      ]);
+      await clearHistoryBaselineForAlarm(context, current, currentStatus);
+    } catch {
+      // Keep retrying if the status store itself is temporarily unavailable.
+    }
     await reschedulePollAfterFailure(context, deadline, delay);
   }
 };

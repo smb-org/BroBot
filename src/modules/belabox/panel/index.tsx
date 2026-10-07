@@ -3,9 +3,10 @@ import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { Button, ConfirmDialog, Field, InspectorActions, InspectorFieldRow, InspectorSection, LoadState, notify, Skeleton } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
-import type { BelaboxStatusResponse } from "../contracts";
+import type { BelaboxHistoryPoint, BelaboxStatusResponse, BelaboxStreamSummary } from "../contracts";
 import { belaboxReasonText, belaboxPanelTexts } from "./locale";
-import { loadBelaboxStatus, removeBelaboxStatsUrl, replaceBelaboxStatsUrl, retryBelaboxPolling, testBelaboxConnection } from "./service";
+import { BelaboxHistorySection } from "./history-chart";
+import { loadBelaboxHistory, loadBelaboxStatus, loadBelaboxStreams, removeBelaboxStatsUrl, replaceBelaboxStatsUrl, retryBelaboxPolling, testBelaboxConnection } from "./service";
 
 const errorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;
 const IDLE_STATUS_REFRESH_MS = 60_000;
@@ -15,7 +16,7 @@ const statusTimestamp = (value: string, locale: string): string => {
   return Number.isNaN(date.valueOf()) ? "" : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
 
-export default function BelaboxPanel({ channelId, language = "de", canManage = false }: ModulePanelProperties): ReactElement {
+export default function BelaboxPanel({ channelId, language = "de", canManage = false, settingsRefreshToken = 0 }: ModulePanelProperties): ReactElement {
   const labels = belaboxPanelTexts(language);
   const [status, setStatus] = useState<BelaboxStatusResponse | null>(null);
   const [url, setUrl] = useState("");
@@ -24,6 +25,10 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const [busy, setBusy] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [testOutcome, setTestOutcome] = useState<string | null>(null);
+  const [history, setHistory] = useState<BelaboxHistoryPoint[]>([]);
+  const [streams, setStreams] = useState<BelaboxStreamSummary[]>([]);
+  const [historyRange, setHistoryRange] = useState<"live" | "stream">("live");
+  const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
   const pollingInactive = status?.pollingDesired === true && !status.polling;
   const statusRefreshInterval = status === null
     ? null
@@ -47,7 +52,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       }
     });
     return () => { active = false; };
-  }, [channelId, labels.testFailed]);
+  }, [channelId, labels.testFailed, settingsRefreshToken]);
 
   useEffect(() => {
     if (statusRefreshInterval === null) return;
@@ -60,6 +65,48 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   useEffect(() => {
     if (pollingInactive) notify({ tone: "error", message: labels.pollingInactive });
   }, [labels.pollingInactive, pollingInactive]);
+
+  useEffect(() => {
+    if (status?.mode !== "interval") return;
+    let active = true;
+    const refresh = async (): Promise<void> => {
+      try {
+        const next = await loadBelaboxStreams(channelId);
+        if (active) {
+          setStreams(next);
+          setSelectedStreamId((current) => {
+            if (current !== null && next.some((stream) => stream.streamId === current)) return current;
+            if (status.belaboxStreamId !== null && next.some((stream) => stream.streamId === status.belaboxStreamId)) {
+              return status.belaboxStreamId;
+            }
+            return next[0]?.streamId ?? null;
+          });
+        }
+      } catch {
+        // Keep the last known list if a background refresh fails.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 60_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [channelId, status?.belaboxStreamId, status?.mode]);
+
+  useEffect(() => {
+    if (status?.mode !== "interval") return;
+    let active = true;
+    const refresh = async (): Promise<void> => {
+      try {
+        const streamId = historyRange === "stream" ? selectedStreamId ?? status.belaboxStreamId ?? undefined : undefined;
+        const next = await loadBelaboxHistory(channelId, historyRange, streamId);
+        if (active) setHistory(next);
+      } catch {
+        // Preserve existing points while the next scheduled refresh retries.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 15_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [channelId, historyRange, selectedStreamId, status?.belaboxStreamId, status?.mode]);
 
   const save = async (): Promise<void> => {
     if (!canManage || busy || url.length === 0) return;
@@ -159,6 +206,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     setStatus({
       configured: false,
       updatedAt: null,
+      mode: status.mode,
       sample: null,
       errorCode: null,
       polling: false,
@@ -248,5 +296,9 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     <ConfirmDialog opened={removeConfirmOpen} title={labels.removeTitle} description={labels.removeConsequence}
       confirmLabel={labels.confirmRemove} cancelLabel={labels.cancel} onCancel={() => { setRemoveConfirmOpen(false); setRemoveError(null); }}
       onConfirm={() => { void remove(); }} pending={busy} danger {...(removeError === null ? {} : { error: removeError })} />
+    <BelaboxHistorySection labels={labels} locale={language === "de" ? "de-DE" : "en-US"}
+      points={status?.mode === "interval" ? history : []} streams={status?.mode === "interval" ? streams : []}
+      selectedStreamId={selectedStreamId} range={historyRange}
+      onRangeChange={setHistoryRange} onStreamSelect={setSelectedStreamId} onDemand={status?.mode === "on_demand"} />
   </section>;
 }

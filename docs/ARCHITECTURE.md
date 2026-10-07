@@ -192,6 +192,22 @@ Erholung erzeugen je einen Ereignisprotokolleintrag mit festem Grundcode.
 Künftige Haltezeiten werden gegen die Sample-Zeitstempel berechnet, weil
 Durable-Object-Alarme verzögert eintreffen können.
 
+Nach der ersten verbundenen Encoder-Messung schreibt jeder weitere Intervallabruf
+eine Minutenaggregation in `belabox_minutes` und aktualisiert die laufende
+Zusammenfassung in `belabox_streams`. Beide Tabellen sind mit `channel_id`
+mandantengebunden. Sinkt der kumulative Zähler `dropped_pkts`, zählt der neue
+Wert als Delta nach einem Encoder-Reset. `stream.offline` setzt Endzeit und
+P10 aus den Minutenmittelwerten; die Zusammenfassung bleibt dauerhaft erhalten,
+weil sie keine Personendaten enthält (Entscheidung 0003). Die stündliche
+Modulwartung löscht Minutenzeilen älter als 30 Tage.
+
+Das Panel liest für „Live“ den Zehn-Minuten-Ringpuffer und für „Stream“ die
+Minutenmittelwerte. Die `/history`-Route gibt je Messpunkt ausschließlich die
+Zahlen `[Zeitstempel in Millisekunden, Bitrate in kbps, Verbindungsanteil]`
+zurück. Sie liefert im Modus „bei Bedarf“ eine leere Reihe; dort bleibt nur die
+aktuelle Messung sichtbar. Deskstreams ohne verbundene Relay-Messung erzeugen
+weder Minutenzeilen noch Zusammenfassungen.
+
 Migration `0016_text_library.sql` führte Textblöcke und zunächst eine
 Bibliothekszeitzone ein. `0017_text_library_variant_choices.sql` ergänzte den
 Zufallswahlindex je Variante. Migration `0018_template_value_providers.sql`

@@ -1,5 +1,10 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { BelaboxStatusResponse, BelaboxTestResult } from "../contracts";
+import type {
+  BelaboxHistoryPoint,
+  BelaboxStatusResponse,
+  BelaboxStreamSummary,
+  BelaboxTestResult,
+} from "../contracts";
 
 const modulePath = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/belabox`;
@@ -27,6 +32,19 @@ const mutate = async <Value,>(channelId: string, path: string, method: "PUT" | "
 
 export const loadBelaboxStatus = async (channelId: string): Promise<BelaboxStatusResponse> =>
   readJson<BelaboxStatusResponse>(await fetch(`${modulePath(channelId)}/status`));
+
+export const loadBelaboxHistory = async (
+  channelId: string,
+  range: "live" | "stream",
+  streamId?: string,
+): Promise<BelaboxHistoryPoint[]> => {
+  const query = new URLSearchParams({ range });
+  if (streamId !== undefined) query.set("streamId", streamId);
+  return readJson<BelaboxHistoryPoint[]>(await fetch(`${modulePath(channelId)}/history?${query.toString()}`));
+};
+
+export const loadBelaboxStreams = async (channelId: string): Promise<BelaboxStreamSummary[]> =>
+  readJson<BelaboxStreamSummary[]>(await fetch(`${modulePath(channelId)}/streams`));
 
 export const replaceBelaboxStatsUrl = async (channelId: string, url: string): Promise<void> => {
   await mutate<{ configured: true }>(channelId, "/stats-url", "PUT", { url });

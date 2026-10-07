@@ -11,6 +11,7 @@ import { UiProvider } from "../../src/dashboard/ui";
 const status: BelaboxStatusResponse = {
   configured: true,
   updatedAt: null,
+  mode: "on_demand",
   sample: { at: "2026-10-05T12:00:00.000Z", connected: false, bitrateKbps: 0, rttMs: 0, latencyMs: 0, network: 0, droppedPackets: 0 },
   errorCode: null,
   polling: true,
