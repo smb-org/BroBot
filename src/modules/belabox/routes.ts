@@ -11,21 +11,14 @@ import {
   type BelaboxTestResult,
 } from "./contracts";
 import {
-  belaboxStatusMatchesSession,
-  belaboxStreamSessionKey,
   getBelaboxStatus,
-  getBelaboxStreamSession,
   prepareBelaboxSampleClear,
-  prepareBelaboxSampleWrite,
-  sameBelaboxStreamSession,
   getBelaboxLiveHistory,
   getBelaboxStreamHistory,
   listBelaboxStreams,
 } from "./adapters/d1";
-import { fetchRelaySample } from "./adapters/stats-client";
-import { enrichBelaboxSample } from "./domain/presentation";
 import { validateBelaboxStatsUrl } from "./domain/stats-url";
-import { belaboxSettingsForChannel, currentBelaboxSample } from "./service";
+import { belaboxSettingsForChannel, type BelaboxPollRoutineResult } from "./service";
 
 const statsUrlSchema = z.object({ url: z.string() });
 const testSchema = z.object({ url: z.string().optional() });
@@ -73,6 +66,33 @@ const ensurePollingBestEffort = async (
   }
 };
 
+const checkNowBestEffort = async (
+  runModuleAlarm: ModuleRouteEnvironment["Variables"]["runModuleAlarm"],
+  writeModuleDiagnostics: ModuleRouteEnvironment["Variables"]["writeModuleDiagnostics"],
+  db: D1Database,
+  channelId: string,
+): Promise<void> => {
+  try {
+    await runModuleAlarm(channelId, BELABOX_MODULE_ID, BELABOX_POLL_ALARM_KEY, BELABOX_POLL_ALARM_KEY, {
+      reason: "check_now",
+    });
+  } catch {
+    try {
+      await writeModuleDiagnostics(
+        db,
+        channelId,
+        BELABOX_MODULE_ID,
+        "belabox:poll:check_now",
+        null,
+        [{ code: "belabox.polling_ensure_failed" }],
+        new Date().toISOString(),
+      );
+    } catch {
+      // Diagnostics never change a successful control response.
+    }
+  }
+};
+
 export const belaboxRoutes = new Hono<ModuleRouteEnvironment>();
 
 belaboxRoutes.get("/status", async (context) => {
@@ -86,21 +106,17 @@ belaboxRoutes.get("/status", async (context) => {
     ).bind(channelId).first<{ state: string; stream_id: string | null }>(),
   ]);
   if (moduleState?.enabled === true && moduleState.settings.mode === "on_demand" && secretStatus.configured) {
-    await currentBelaboxSample({
-      DB: context.env.DB,
-      channelId,
-      secrets,
-      externalFetchBudget: context.get("externalFetchBudget"),
-      writeDiagnostics: (triggerId, diagnostics, now) => context.get("writeModuleDiagnostics")(
-        context.env.DB,
+    try {
+      await context.get("runModuleAlarm")(
         channelId,
         BELABOX_MODULE_ID,
-        triggerId,
-        null,
-        diagnostics,
-        now,
-      ),
-    });
+        BELABOX_POLL_ALARM_KEY,
+        BELABOX_POLL_ALARM_KEY,
+        { reason: "on_demand" },
+      );
+    } catch {
+      // The status response still reports the last persisted sample.
+    }
   }
   const status = await getBelaboxStatus(context.env.DB, channelId);
   const pollingDesired = moduleState?.enabled === true && moduleState.settings.mode === "interval" &&
@@ -225,7 +241,7 @@ belaboxRoutes.delete("/stats-url", async (context) => {
 
 belaboxRoutes.post("/polling/retry", async (context) => {
   if (!canManage(context.get("channelRole"))) return managementDenied(context);
-  await ensurePollingBestEffort(
+  await checkNowBestEffort(
     context.get("runModuleAlarm"),
     context.get("writeModuleDiagnostics"),
     context.env.DB,
@@ -263,41 +279,30 @@ belaboxRoutes.post("/test", async (context) => {
     return managementDenied(context);
   }
 
-  const originSession = usesStoredUrl ? await getBelaboxStreamSession(context.env.DB, channelId) : null;
-  const result = await fetchRelaySample(
-    validation.url,
-    validation.publisherKey,
-    context.get("externalFetchBudget"),
-  );
-  if (!result.ok) return context.json({ ok: false, reason: result.reason } satisfies BelaboxTestResult);
-
-  if (usesStoredUrl) {
-    const now = new Date().toISOString();
-    const authorization = authorizeManagementMutation(channelId, actor, now);
-    try {
-      if (storedSecret !== null) {
-        const currentSession = await getBelaboxStreamSession(context.env.DB, channelId);
-        if (sameBelaboxStreamSession(originSession, currentSession)) {
-          const status = await getBelaboxStatus(context.env.DB, channelId);
-          const sameStream = belaboxStatusMatchesSession(status, originSession);
-          const sample = enrichBelaboxSample(result.sample, sameStream ? status?.sample ?? null : null, sameStream, true);
-          await prepareBelaboxSampleWrite(context.env.DB, channelId, sample, storedSecret.version, authorization, {
-            streamId: originSession?.state === "online" ? originSession.streamId : null,
-            streamSessionKey: belaboxStreamSessionKey(originSession),
-            belaboxStreamId: sameStream ? status?.belaboxStreamId ?? null : null,
-            expectedStatusRevision: status?.revision ?? null,
-            expectedStreamSession: originSession,
-          }).run();
-        }
-      }
-    } catch {
-      // The test result remains useful when the optional latest-sample write fails.
-    }
+  let result: unknown;
+  try {
+    result = await context.get("runModuleAlarm")(
+      channelId,
+      BELABOX_MODULE_ID,
+      BELABOX_POLL_ALARM_KEY,
+      BELABOX_POLL_ALARM_KEY,
+      { reason: "connection_test", statsUrl: input },
+    );
+  } catch {
+    return context.json({ ok: false, reason: "network" } satisfies BelaboxTestResult);
+  }
+  if (typeof result !== "object" || result === null || !("ok" in result)) {
+    return context.json({ ok: false, reason: "network" } satisfies BelaboxTestResult);
+  }
+  const pollResult = result as BelaboxPollRoutineResult;
+  if (!pollResult.ok) {
+    const reason = pollResult.reason === "stream_changed" ? "network" : pollResult.reason;
+    return context.json({ ok: false, reason } satisfies BelaboxTestResult);
   }
 
   return context.json({
     ok: true,
-    connected: result.sample.connected,
-    bitrateKbps: result.sample.bitrateKbps,
+    connected: pollResult.sample.connected,
+    bitrateKbps: pollResult.sample.bitrateKbps,
   } satisfies BelaboxTestResult);
 });

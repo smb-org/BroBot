@@ -195,14 +195,16 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     }
     return createModuleSecretAccess(context.env, channelId, moduleId);
   });
-  context.set("runModuleAlarm", async (channelId, moduleId, handlerKey, alarmKey) => {
+  context.set("runModuleAlarm", (channelId, moduleId, handlerKey, alarmKey, invocation) => {
     if (channelId !== context.req.param("channelId")) throw new Error("Module alarm access must use the authorized route channel.");
     const marker = "/modules/";
     const suffix = new URL(context.req.url).pathname.split(marker, 2)[1];
     const routedModuleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
     if (routedModuleId !== moduleId) throw new Error("Module alarm access must use the mounted module route.");
     const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-    await object.runModuleAlarm(moduleId, handlerKey, alarmKey);
+    return invocation === undefined
+      ? object.runModuleAlarm(moduleId, handlerKey, alarmKey)
+      : object.runModuleAlarm(moduleId, handlerKey, alarmKey, invocation);
   });
   context.set("writeModuleDiagnostics", writeModuleDiagnostics);
   context.set("broadcasterHasScope", broadcasterHasScope);
@@ -470,6 +472,12 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
     DB: context.env.DB,
     moduleSecrets: (moduleId) => createModuleSecretReadAccess(context.env, channelId, moduleId),
     externalFetchBudget: context.get("externalFetchBudget"),
+    runModuleAlarm: (moduleId, handlerKey, alarmKey, invocation) => {
+      const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+      return invocation === undefined
+        ? object.runModuleAlarm(moduleId, handlerKey, alarmKey)
+        : object.runModuleAlarm(moduleId, handlerKey, alarmKey, invocation);
+    },
     publicOrigin: context.env.PUBLIC_ORIGIN,
     channelInfo: () => Promise.resolve(channelInfo),
     channelGameId: () => Promise.resolve(game?.id ?? null),

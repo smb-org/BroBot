@@ -927,6 +927,15 @@ export const dispatchEventSubNotification = async (
         DB: environment.DB,
         moduleSecrets: (providerModuleId) => createModuleSecretReadAccess(environment, event.channelId, providerModuleId),
         externalFetchBudget,
+        ...(environment.CHANNEL === undefined ? {} : {
+          runModuleAlarm: (moduleId: string, handlerKey: string, alarmKey: string, invocation?: unknown) => {
+            const object = environment.CHANNEL?.get(environment.CHANNEL.idFromName(event.channelId));
+            if (object === undefined) throw new Error("The channel Durable Object is unavailable.");
+            return invocation === undefined
+              ? object.runModuleAlarm(moduleId, handlerKey, alarmKey)
+              : object.runModuleAlarm(moduleId, handlerKey, alarmKey, invocation);
+          },
+        }),
         ...(environment.PUBLIC_ORIGIN === undefined ? {} : { publicOrigin: environment.PUBLIC_ORIGIN }),
         channelInfo,
         channelGameId,

@@ -21,6 +21,7 @@ export const belaboxStatusOverlayElement: ModuleOverlayElementDefinition = {
     },
     intervalSeconds: 15,
     mode: "interval",
+    streamSessionKey: null,
   }),
   editorLabel: { de: german.editorLabel, en: english.editorLabel },
   editorAddLabel: { de: german.editorAddLabel, en: english.editorAddLabel },

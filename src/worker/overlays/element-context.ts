@@ -206,6 +206,12 @@ export const createOverlayElementContext = async (
     moduleSecrets: (providerModuleId) => createModuleSecretReadAccess(env, channelId, providerModuleId),
     publicOrigin: env.PUBLIC_ORIGIN,
     externalFetchBudget,
+    runModuleAlarm: (moduleId, handlerKey, alarmKey, invocation) => {
+      const object = env.CHANNEL.get(env.CHANNEL.idFromName(channelId));
+      return invocation === undefined
+        ? object.runModuleAlarm(moduleId, handlerKey, alarmKey)
+        : object.runModuleAlarm(moduleId, handlerKey, alarmKey, invocation);
+    },
     channelInfo,
     channelGameId: async () => (await channelDetails())?.gameId || null,
     channelTimeZone,

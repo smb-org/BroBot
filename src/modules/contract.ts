@@ -713,7 +713,8 @@ export interface ModuleAlarmDefinition {
     alarmKey: string,
     deadline: number,
     ownerRevision?: number,
-  ) => Promise<void>;
+    invocation?: unknown,
+  ) => Promise<unknown>;
   /** Replans durable schedules after an input owned by the host or another module changes. */
   onScheduleInputsChanged?: (
     context: ModuleAlarmContext,
@@ -890,6 +891,8 @@ export interface ModuleTemplateValueContext {
   publicOrigin?: string;
   /** Shared across the providers involved in a single template render. */
   externalFetchBudget?: ModuleExternalFetchBudget;
+  /** Runs a registered module alarm through its channel Durable Object. */
+  runModuleAlarm?: (moduleId: string, handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>;
   /** Renders a module-owned nested fragment with the same host values and channel context. */
   renderTemplate: (text: string, mode?: ModuleTemplateRenderMode) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
   addDiagnostic: (diagnostic: ModuleDiagnostic) => void;
@@ -1139,7 +1142,13 @@ export interface ModuleRouteVariables {
   /** Reads blocked terms only for the authorized route channel. */
   readChannelBlockedTerms?: (channelId: string) => Promise<readonly string[] | null>;
   /** Runs a registered module alarm immediately for a route that must reconcile module-owned state. */
-  runModuleAlarm: (channelId: string, moduleId: string, handlerKey: string, alarmKey: string) => Promise<void>;
+  runModuleAlarm: (
+    channelId: string,
+    moduleId: string,
+    handlerKey: string,
+    alarmKey: string,
+    invocation?: unknown,
+  ) => Promise<unknown>;
   prepareModuleAudit: PrepareModuleAudit;
   writeModuleAudit: WriteModuleAudit;
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];

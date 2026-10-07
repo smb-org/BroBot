@@ -2,10 +2,11 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { format } from "node:util";
 
-import type { ModuleExternalFetchBudget, ModuleRouteEnvironment } from "../../src/modules/contract";
+import type { ModuleAlarmContext, ModuleExternalFetchBudget, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { belaboxModule } from "../../src/modules/belabox";
 import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_TIMEOUT_MS, BELABOX_STATS_URL_SECRET, type BelaboxFetchFailureReason } from "../../src/modules/belabox/contracts";
 import { fetchRelaySample } from "../../src/modules/belabox/adapters/stats-client";
+import { handleBelaboxPollAlarm } from "../../src/modules/belabox/service";
 import { belaboxRoutes } from "../../src/modules/belabox/routes";
 import { parseRelayStats } from "../../src/modules/belabox/domain/stats";
 import { publisherKeyFromUrl, validateBelaboxStatsUrl } from "../../src/modules/belabox/domain/stats-url";
@@ -47,7 +48,40 @@ const createBelaboxRouteHarness = async (testDatabase: TestD1Database) => {
   await insertMember(testDatabase, CHANNEL_ID, MANAGER_ID, "manager");
   const db = testDatabase as unknown as D1Database;
   const secrets = createModuleSecretAccess({ DB: db, TOKEN_ENCRYPTION_KEYS }, CHANNEL_ID, "belabox");
-  const runModuleAlarm = vi.fn(() => Promise.resolve());
+  const runModuleAlarm = vi.fn(async (
+    channelId: string,
+    moduleId: string,
+    handlerKey: string,
+    alarmKey: string,
+    invocation?: unknown,
+  ) => {
+    if (moduleId !== "belabox" || handlerKey !== "poll") return undefined;
+    const context = {
+      DB: db,
+      channelId,
+      secrets,
+      externalFetchBudget: sharedBudget(),
+      streamState: async () => {
+        const row = await db.prepare("SELECT state FROM channel_stream_state WHERE channel_id = ?")
+          .bind(channelId).first<{ state: string }>();
+        return row?.state === "online" || row?.state === "offline" ? row.state : "unknown";
+      },
+      streamStartedAt: async () => {
+        const row = await db.prepare("SELECT stream_id, started_at FROM channel_stream_state WHERE channel_id = ?")
+          .bind(channelId).first<{ stream_id: string | null; started_at: string | null }>();
+        return { streamId: row?.stream_id ?? null, startedAt: row?.started_at ?? null };
+      },
+      schedule: () => Promise.resolve(),
+      clear: () => Promise.resolve(),
+      getAlarmDeadline: () => Promise.resolve(null),
+      renderTemplate: (text: string) => Promise.resolve({ text, attributions: [] }),
+      sendChat: () => Promise.resolve({ sent: true, reason: null, retryable: false }),
+      writeDiagnostics: (triggerId: string, entries: Parameters<typeof writeModuleDiagnostics>[5], now: string) =>
+        writeModuleDiagnostics(db, channelId, "belabox", triggerId, null, entries, now),
+      publishModuleOverlayMessage: () => Promise.resolve(),
+    } as unknown as ModuleAlarmContext;
+    return handleBelaboxPollAlarm(context, alarmKey, Date.now(), undefined, fetch, invocation);
+  });
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", "manager");
@@ -408,7 +442,7 @@ describe("BELABOX secret and route redaction", () => {
     const status = await send("/status", "GET");
     const statusBody = await status.text();
     expect(statusBody).not.toContain(SENTINEL_KEY);
-    expect(statusBody).toContain("bitrateKbps");
+    expect(statusBody).toContain('"sample":null');
     await assertDatabaseRedacted();
 
     const removed = await send("/stats-url", "DELETE");
@@ -494,7 +528,7 @@ describe("BELABOX secret and route redaction", () => {
     expect(retried.status).toBe(200);
     await expect(retried.json()).resolves.toEqual({ ensured: true });
     expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "ensure", "poll");
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "poll", "poll", { reason: "check_now" });
     const diagnostics = await testDatabase.prepare(
       "SELECT code FROM event_log WHERE channel_id = ? ORDER BY rowid",
     ).bind(CHANNEL_ID).all<{ code: string }>();
@@ -522,6 +556,31 @@ describe("BELABOX secret and route redaction", () => {
     await expect(history.json()).resolves.toEqual([]);
     await expect(testDatabase.prepare("SELECT COUNT(*) AS count FROM belabox_minutes WHERE channel_id = ?")
       .bind(CHANNEL_ID).first<{ count: number }>()).resolves.toEqual({ count: 0 });
+  });
+
+  it("routes on-demand status, Check now, and connection tests through the poll alarm handler", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { runModuleAlarm, send } = await createBelaboxRouteHarness(testDatabase);
+    await testDatabase.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
+    ).bind(CHANNEL_ID, JSON.stringify({ mode: "on_demand", intervalSeconds: 15 })).run();
+    await testDatabase.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source, stream_id) VALUES (?, 'online', ?, 'eventsub', 'stream-routine')",
+    ).bind(CHANNEL_ID, new Date().toISOString()).run();
+    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(relayPayload(SENTINEL_KEY)))));
+
+    expect((await send("/status", "GET")).status).toBe(200);
+    expect((await send("/polling/retry", "POST")).status).toBe(200);
+    expect((await send("/test", "POST", {})).status).toBe(200);
+
+    expect(runModuleAlarm).toHaveBeenCalledWith(CHANNEL_ID, "belabox", "poll", "poll", { reason: "on_demand" });
+    expect(runModuleAlarm).toHaveBeenCalledWith(CHANNEL_ID, "belabox", "poll", "poll", { reason: "check_now" });
+    expect(runModuleAlarm).toHaveBeenCalledWith(CHANNEL_ID, "belabox", "poll", "poll", {
+      reason: "connection_test",
+      statsUrl: STATS_URL,
+    });
   });
 
   it("returns only numeric history points and keeps stream reads channel-scoped", async () => {
@@ -572,7 +631,7 @@ describe("BELABOX secret and route redaction", () => {
     await expect(foreign.json()).resolves.toEqual([[Date.parse(minuteAt), 4_100, 1]]);
   });
 
-  it.each(["interval", "on_demand"] as const)("preserves accumulated enrichment when POST /test stores a sample in %s mode", async (mode) => {
+  it.each(["interval", "on_demand"] as const)("routes POST /test through the poll routine without changing stored samples in %s mode", async (mode) => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { send } = await createBelaboxRouteHarness(testDatabase);
@@ -626,7 +685,7 @@ describe("BELABOX secret and route redaction", () => {
       "SELECT sample_json FROM belabox_status WHERE channel_id = ?",
     ).bind(CHANNEL_ID).first<{ sample_json: string }>();
     expect(JSON.parse(stored?.sample_json ?? "null") as unknown).toMatchObject({
-      droppedTotal: 9,
+      droppedTotal: 5,
       phase: "low",
       alertStartedAt,
     });
@@ -706,7 +765,7 @@ describe("BELABOX secret and route redaction", () => {
     });
   });
 
-  it("starts connection-test enrichment fresh when the current session is newer than the stored sample", async () => {
+  it("does not adopt a new stream session while validating the connection test URL", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { send } = await createBelaboxRouteHarness(testDatabase);
@@ -752,12 +811,12 @@ describe("BELABOX secret and route redaction", () => {
 
     const tested = await send("/test", "POST", {});
     expect(tested.status).toBe(200);
+    await expect(tested.json()).resolves.toMatchObject({ ok: true, connected: true, bitrateKbps: 400 });
     const stored = await testDatabase.prepare(
       "SELECT sample_json, stream_id, stream_session_key FROM belabox_status WHERE channel_id = ?",
     ).bind(CHANNEL_ID).first<{ sample_json: string; stream_id: string; stream_session_key: string }>();
-    const sample = JSON.parse(stored?.sample_json ?? "null") as { at: string; droppedTotal: number; alertStartedAt: string };
-    expect(sample).toMatchObject({ droppedTotal: 0, phase: "low", alertStartedAt: sample.at });
-    expect(stored).toMatchObject({ stream_id: "stream-s2", stream_session_key: "stream:stream-s2" });
+    expect(JSON.parse(stored?.sample_json ?? "null") as unknown).toMatchObject({ droppedTotal: 8, phase: "low" });
+    expect(stored).toMatchObject({ stream_id: "stream-s1", stream_session_key: "stream:stream-s1" });
   });
 
   it("rechecks management membership after the POST /test body finishes before reading the stored secret", async () => {

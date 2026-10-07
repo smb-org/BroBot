@@ -29,7 +29,7 @@ export const enrichBelaboxSample = (
   const droppedDelta = previousCounter === undefined || sample.droppedPackets < previousCounter
     ? 0
     : sample.droppedPackets - previousCounter;
-  const previousPhase = previous?.phase ?? (previous === null ? "healthy" : belaboxPhase(previous));
+  const previousPhase = previous?.phase ?? (previous === null ? "healthy" : belaboxPhase(previous, true, lowBitrateKbps));
   const alertStartedAt = unhealthy(phase)
     ? sameStream && unhealthy(previousPhase) ? previous?.alertStartedAt ?? previous?.at ?? sample.at : sample.at
     : null;
@@ -44,7 +44,8 @@ export const enrichBelaboxSample = (
 export const resolvedBelaboxPhase = (
   sample: BelaboxSample,
   classified = true,
-): BelaboxPhase => sample.phase ?? belaboxPhase(sample, classified);
+  lowBitrateKbps = BELABOX_DEFAULT_LOW_BITRATE_KBPS,
+): BelaboxPhase => sample.phase ?? belaboxPhase(sample, classified, lowBitrateKbps);
 
 export const belaboxDownMilliseconds = (sample: BelaboxSample, now: number): number => {
   const phase = resolvedBelaboxPhase(sample);

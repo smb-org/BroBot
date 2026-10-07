@@ -10,15 +10,15 @@ import {
   type BelaboxSample,
 } from "./contracts";
 import { BELABOX_TEMPLATE_VARIABLES, belaboxCatalog } from "./contracts/catalog";
-import { belaboxStatusMatchesSession, getBelaboxStatus, getBelaboxStreamSession, purgeExpiredBelaboxMinutes } from "./adapters/d1";
+import { belaboxStatusMatchesSession, belaboxStreamSessionKey, getBelaboxStatus, getBelaboxStreamSession, purgeExpiredBelaboxMinutes } from "./adapters/d1";
 import { belaboxDownMilliseconds, resolvedBelaboxPhase } from "./domain/presentation";
 import {
   belaboxAlertDefaultsOnEnable,
   belaboxSettingsForChannel,
-  currentBelaboxSample,
   ensureBelaboxPoll,
   ensureBelaboxPollSchedule,
   handleBelaboxPollAlarm,
+  type BelaboxPollRoutineResult,
 } from "./service";
 import { belaboxOverlayElements } from "./overlay/element";
 
@@ -52,11 +52,12 @@ const formatTemplateValues = (
   language: ModuleLanguage,
   now: number,
   classified: boolean,
+  lowBitrateKbps: number,
 ): Readonly<Record<string, string>> => {
   const requested = new Set(names);
   const integer = numberFormatter(language);
   const decimal = numberFormatter(language, 1);
-  const phase = resolvedBelaboxPhase(sample, classified);
+  const phase = resolvedBelaboxPhase(sample, classified, lowBitrateKbps);
   const catalog = belaboxCatalog[language];
   const values: Readonly<Record<string, string>> = {
     "belabox.bitrate": `${integer.format(sample.bitrateKbps)} kbps`,
@@ -103,19 +104,31 @@ const resolveValues = async (
         context.now,
         moduleState.settings.intervalSeconds * 3_000,
       )) throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
-      return formatTemplateValues(status.sample, names, language, context.now, status.belaboxStreamId !== null);
+      return formatTemplateValues(
+        status.sample,
+        names,
+        language,
+        context.now,
+        status.belaboxStreamId !== null,
+        moduleState.settings.lowBitrateKbps,
+      );
     }
-    const current = await currentBelaboxSample({
-      DB: context.DB,
-      channelId: context.channelId,
-      secrets: context.secrets,
-      externalFetchBudget: context.externalFetchBudget ?? { claim: () => true },
-    }, context.now);
+    if (context.runModuleAlarm === undefined) throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
+    const result: unknown = await context.runModuleAlarm(
+      BELABOX_MODULE_ID,
+      BELABOX_POLL_ALARM_KEY,
+      BELABOX_POLL_ALARM_KEY,
+      { reason: "on_demand" },
+    );
+    if (typeof result !== "object" || result === null || !("ok" in result)) {
+      throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
+    }
+    const current = result as BelaboxPollRoutineResult;
     const freshAt = Date.now();
     if (!current.ok || !freshSample(current.sample, null, freshAt, 30_000)) {
       throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
     }
-    return formatTemplateValues(current.sample, names, language, freshAt, true);
+    return formatTemplateValues(current.sample, names, language, freshAt, true, moduleState.settings.lowBitrateKbps);
   } catch {
     throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
   }
@@ -198,11 +211,16 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
           network: sample.network,
           droppedPackets: sample.droppedPackets,
           droppedTotal: sample.droppedTotal ?? 0,
-          phase: sample.phase ?? resolvedBelaboxPhase(sample, status?.belaboxStreamId !== null),
+          phase: sample.phase ?? resolvedBelaboxPhase(
+            sample,
+            status?.belaboxStreamId !== null,
+            moduleState.settings.lowBitrateKbps,
+          ),
           alertStartedAt: sample.alertStartedAt ?? null,
         },
         intervalSeconds: moduleState.settings.intervalSeconds,
         mode: moduleState.settings.mode,
+        streamSessionKey: belaboxStreamSessionKey(session),
       };
     },
   })),
@@ -211,7 +229,8 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   settingsChangedAlarm: { handlerKey: BELABOX_ENSURE_POLL_HANDLER, alarmKey: BELABOX_POLL_ALARM_KEY },
   alarms: [{
     key: BELABOX_POLL_ALARM_KEY,
-    handle: handleBelaboxPollAlarm,
+    handle: (context, alarmKey, deadline, ownerRevision, invocation) =>
+      handleBelaboxPollAlarm(context, alarmKey, deadline, ownerRevision, undefined, invocation),
   }, {
     key: BELABOX_ENSURE_POLL_HANDLER,
     handle: async (context, alarmKey) => {

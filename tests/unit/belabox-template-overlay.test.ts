@@ -7,7 +7,7 @@ import { belaboxModule } from "../../src/modules/belabox";
 import { mergeModuleOverlayElementState, moduleOverlayElementKindForMessage } from "../../src/modules/overlay-element-registry";
 import BelaboxStatus from "../../src/modules/belabox/overlay/status";
 import BelaboxEditor from "../../src/modules/belabox/overlay/editor";
-import { insertChannel, jsonResponse } from "./fixtures";
+import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "belabox-template-channel";
@@ -28,20 +28,6 @@ const sample = (at: string, overrides: Readonly<Record<string, unknown>> = {}) =
   ...overrides,
 });
 
-const relayPayload = (overrides: Readonly<Record<string, unknown>> = {}) => ({
-  publishers: {
-    [SECRET_KEY]: {
-      connected: true,
-      bitrate: 4_520,
-      rtt: 38,
-      latency: 2_000,
-      network: 2,
-      dropped_pkts: 17,
-      ...overrides,
-    },
-  },
-});
-
 describe("BELABOX template variables and overlay metadata", () => {
   let database: TestD1Database;
 
@@ -59,10 +45,19 @@ describe("BELABOX template variables and overlay metadata", () => {
     database.close();
   });
 
-  const insertModule = async (mode: "interval" | "on_demand" = "interval", intervalSeconds = 15): Promise<void> => {
+  const insertModule = async (
+    mode: "interval" | "on_demand" = "interval",
+    intervalSeconds = 15,
+    lowBitrateKbps = 1_000,
+  ): Promise<void> => {
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
-    ).bind(CHANNEL_ID, JSON.stringify({ mode, intervalSeconds })).run();
+    ).bind(CHANNEL_ID, JSON.stringify({
+      mode,
+      intervalSeconds,
+      lowBitrateKbps,
+      recoverBitrateKbps: Math.max(lowBitrateKbps + 1, 2_000),
+    })).run();
     await database.prepare(
       `INSERT INTO module_secrets
         (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
@@ -81,13 +76,19 @@ describe("BELABOX template variables and overlay metadata", () => {
     ).bind(CHANNEL_ID).run();
     await database.prepare(
       `INSERT INTO belabox_status
-        (channel_id, sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
+         (channel_id, sampled_at, sample_json, error_code, polling, stream_id, stream_session_key, belabox_stream_id,
          fetch_phase_json, recent_json, revision)
-       VALUES (?, ?, ?, ?, 1, 'stream-322', ?, '{}', '[]', 1)`,
+       VALUES (?, ?, ?, ?, 1, 'stream-322', 'stream:stream-322', ?, '{}', '[]', 1)`,
     ).bind(CHANNEL_ID, String(value.at), JSON.stringify(value), errorCode, belaboxStreamId).run();
   };
 
-  const templateContext = (language: "de" | "en" = "en"): ModuleTemplateValueContext => ({
+  const templateContext = (
+    language: "de" | "en" = "en",
+    runModuleAlarm: ModuleTemplateValueContext["runModuleAlarm"] = vi.fn(() => Promise.resolve({
+      ok: true,
+      sample: sample(new Date().toISOString()),
+    })),
+  ): ModuleTemplateValueContext => ({
     DB: database as unknown as D1Database,
     channelId: CHANNEL_ID,
     secrets: {
@@ -105,6 +106,7 @@ describe("BELABOX template variables and overlay metadata", () => {
     channelTimeZone: () => Promise.resolve("Europe/Berlin"),
     channelLocation: () => Promise.resolve(null),
     externalFetchBudget: { claim: () => true },
+    runModuleAlarm,
     renderTemplate: () => Promise.resolve({ text: "", diagnostics: [] }),
     addDiagnostic: () => undefined,
     now: Date.now(),
@@ -176,63 +178,56 @@ describe("BELABOX template variables and overlay metadata", () => {
 
   it("uses a fresh relay sample in on-demand mode and applies the 30-second age", async () => {
     await insertModule("on_demand", 60);
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(relayPayload()))));
+    const runModuleAlarm = vi.fn(() => Promise.resolve({ ok: true, sample: sample(new Date().toISOString()) }));
 
-    await expect(belaboxModule.resolveTemplateValues?.(["belabox.bitrate", "belabox.status"], templateContext("en")))
+    await expect(belaboxModule.resolveTemplateValues?.(["belabox.bitrate", "belabox.status"], templateContext("en", runModuleAlarm)))
       .resolves.toEqual({ "belabox.bitrate": "4,520 kbps", "belabox.status": "healthy" });
+    expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "poll", "poll", { reason: "on_demand" });
   });
 
   it("checks an on-demand sample against real time after a delayed fetch", async () => {
     await insertModule("on_demand", 60);
     vi.useRealTimers();
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => {
+    const runModuleAlarm = vi.fn(async () => {
       await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 20));
-      return jsonResponse(relayPayload());
-    }));
+      return { ok: true, sample: sample(new Date().toISOString()) };
+    });
 
-    await expect(belaboxModule.resolveTemplateValues?.(["belabox.bitrate", "belabox.status"], templateContext("en")))
+    await expect(belaboxModule.resolveTemplateValues?.(["belabox.bitrate", "belabox.status"], templateContext("en", runModuleAlarm)))
       .resolves.toEqual({ "belabox.bitrate": "4,520 kbps", "belabox.status": "healthy" });
-    expect(await database.prepare("SELECT sample_json FROM belabox_status WHERE channel_id = ?")
-      .bind(CHANNEL_ID).first()).not.toBeNull();
+    expect(runModuleAlarm).toHaveBeenCalledTimes(1);
   });
 
-  it("persists enriched on-demand samples so dropped totals and alert duration accumulate", async () => {
+  it("uses the enriched on-demand samples returned by the serialized poll routine", async () => {
     await insertModule("on_demand", 60);
-    const fetcher = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse(relayPayload({ bitrate: 900, dropped_pkts: 10 })))
-      .mockResolvedValueOnce(jsonResponse(relayPayload({ bitrate: 900, dropped_pkts: 15 })));
-    vi.stubGlobal("fetch", fetcher);
+    const startedAt = new Date(Date.now()).toISOString();
+    const nextSampleAt = new Date(Date.now() + 60_000).toISOString();
+    const runModuleAlarm = vi.fn()
+      .mockResolvedValueOnce({ ok: true, sample: sample(startedAt, { bitrateKbps: 900, droppedTotal: 0, phase: "low" }) })
+      .mockResolvedValueOnce({ ok: true, sample: sample(nextSampleAt, {
+        bitrateKbps: 900,
+        droppedTotal: 5,
+        phase: "low",
+        alertStartedAt: startedAt,
+      }) });
 
-    await expect(belaboxModule.resolveTemplateValues?.(["belabox.dropped", "belabox.down_for"], templateContext("en")))
+    await expect(belaboxModule.resolveTemplateValues?.(["belabox.dropped", "belabox.down_for"], templateContext("en", runModuleAlarm)))
       .resolves.toEqual({ "belabox.dropped": "0", "belabox.down_for": "0 seconds" });
     vi.setSystemTime(Date.now() + 60_000);
-    await expect(belaboxModule.resolveTemplateValues?.(["belabox.dropped", "belabox.down_for"], templateContext("en")))
+    await expect(belaboxModule.resolveTemplateValues?.(["belabox.dropped", "belabox.down_for"], templateContext("en", runModuleAlarm)))
       .resolves.toEqual({ "belabox.dropped": "5", "belabox.down_for": "1 minute" });
-
-    const status = await database.prepare("SELECT sample_json FROM belabox_status WHERE channel_id = ?")
-      .bind(CHANNEL_ID).first<{ sample_json: string }>();
-    expect(status === null ? null : JSON.parse(status.sample_json) as unknown).toMatchObject({
-      droppedTotal: 5,
-      alertStartedAt: new Date(Date.now() - 60_000).toISOString(),
-    });
+    expect(runModuleAlarm).toHaveBeenCalledTimes(2);
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, "belabox", "poll", "poll", { reason: "on_demand" });
   });
 
   it("sanitizes on-demand secret and fetch failures", async () => {
     await insertModule("on_demand", 15);
-    const readFailureContext = templateContext();
-    readFailureContext.secrets.read = () => Promise.reject(new Error(STATS_URL));
-    const readFailure = await belaboxModule.resolveTemplateValues?.(["belabox.status"], readFailureContext)
-      .catch((error: unknown) => error);
-    expect(String(readFailure)).toContain("BELABOX_SAMPLE_UNAVAILABLE");
-    expect(String(readFailure)).not.toContain(SECRET_KEY);
-
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.reject(new Error(STATS_URL))));
-    const fetchFailure = await belaboxModule.resolveTemplateValues?.(["belabox.status"], templateContext())
+    const failureRoutine = vi.fn(() => Promise.reject(new Error(STATS_URL)));
+    const fetchFailure = await belaboxModule.resolveTemplateValues?.(["belabox.status"], templateContext("en", failureRoutine))
       .catch((error: unknown) => error);
     expect(String(fetchFailure)).toContain("BELABOX_SAMPLE_UNAVAILABLE");
     expect(String(fetchFailure)).not.toContain(SECRET_KEY);
-    expect(await database.prepare("SELECT sample_json, error_code FROM belabox_status WHERE channel_id = ?")
-      .bind(CHANNEL_ID).first()).toEqual({ sample_json: null, error_code: "network" });
+    expect(failureRoutine).toHaveBeenCalledWith("belabox", "poll", "poll", { reason: "on_demand" });
   });
 
   it("returns inactive for an unclassified probe before the first connection", async () => {
@@ -262,6 +257,24 @@ describe("BELABOX template variables and overlay metadata", () => {
 
     await expect(belaboxModule.resolveTemplateValues?.(["belabox.status", "belabox.down_for"], templateContext("en")))
       .resolves.toEqual({ "belabox.status": "low bitrate", "belabox.down_for": "1 minute" });
+  });
+
+  it("uses the configured low threshold for template health, duration, and overlay bootstrap", async () => {
+    await insertModule("interval", 15, 2_000);
+    await insertStatus(sample("2026-10-06T12:00:20.000Z", {
+      bitrateKbps: 1_500,
+      phase: undefined,
+      alertStartedAt: "2026-10-06T12:00:00.000Z",
+    }));
+
+    await expect(belaboxModule.resolveTemplateValues?.(["belabox.status", "belabox.down_for"], templateContext("en")))
+      .resolves.toEqual({ "belabox.status": "low bitrate", "belabox.down_for": "30 seconds" });
+    const element = belaboxModule.overlayElements?.find(({ kind }) => kind === "belabox.status");
+    const initial = await element?.initialState?.(database as unknown as D1Database, CHANNEL_ID, element.defaultConfig);
+    expect(initial).toMatchObject({
+      streamSessionKey: "stream:stream-322",
+      sample: { bitrateKbps: 1_500, phase: "low", alertStartedAt: "2026-10-06T12:00:00.000Z" },
+    });
   });
 
   it("exposes overlay availability until sampledAt plus max(interval, 30 seconds)", async () => {
@@ -328,6 +341,7 @@ describe("BELABOX template variables and overlay metadata", () => {
     expect(initial).toMatchObject({
       intervalSeconds: 15,
       mode: "interval",
+      streamSessionKey: "stream:stream-322",
       sample: { bitrateKbps: 4_520, phase: "healthy" },
     });
     expect(fetcher).not.toHaveBeenCalled();
@@ -338,23 +352,34 @@ describe("BELABOX template variables and overlay metadata", () => {
       bitrateKbps: 0,
       rttMs: 0,
       phase: "disconnected",
+      streamSessionKey: "stream:stream-322",
     })).toMatchObject({
       intervalSeconds: 15,
       sample: { at: "2026-10-06T12:00:29.000Z", phase: "disconnected" },
     });
   });
 
-  it("does not regress the element state when an older sample message arrives", () => {
+  it("rejects another session and older realtime sample messages", () => {
     const current = {
       intervalSeconds: 15,
+      streamSessionKey: "stream:stream-s1",
       sample: { at: "2026-10-06T12:00:29.000Z", connected: true, bitrateKbps: 4_520, rttMs: 38, phase: "healthy" },
     };
+    expect(mergeModuleOverlayElementState("belabox.status", current, {
+      at: "2026-10-06T12:00:30.000Z",
+      connected: false,
+      bitrateKbps: 0,
+      rttMs: 0,
+      phase: "disconnected",
+      streamSessionKey: "stream:stream-s2",
+    })).toEqual(current);
     expect(mergeModuleOverlayElementState("belabox.status", current, {
       at: "2026-10-06T12:00:20.000Z",
       connected: false,
       bitrateKbps: 0,
       rttMs: 0,
       phase: "disconnected",
+      streamSessionKey: "stream:stream-s1",
     })).toEqual(current);
   });
 
