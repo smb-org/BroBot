@@ -129,6 +129,29 @@ describe("BELABOX panel", () => {
     expect(mocks.loadBelaboxStreams).not.toHaveBeenCalled();
   });
 
+  it("reloads status after settings save and starts history requests when interval mode is enabled", async () => {
+    mocks.loadBelaboxStatus
+      .mockResolvedValueOnce({
+        configured: true, updatedAt: null, mode: "on_demand", sample: null, errorCode: null,
+        polling: false, pollingDesired: false, streamId: "stream-42", belaboxStreamId: null,
+      })
+      .mockResolvedValue({
+        configured: true, updatedAt: null, mode: "interval", sample: null, errorCode: null,
+        polling: true, pollingDesired: true, streamId: "stream-42", belaboxStreamId: "stream-42",
+      });
+    const view = render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRefreshToken={0} /></></UiProvider>);
+
+    await waitFor(() => { expect(mocks.loadBelaboxStatus).toHaveBeenCalledOnce(); });
+    expect(mocks.loadBelaboxHistory).not.toHaveBeenCalled();
+    view.rerender(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRefreshToken={1} /></></UiProvider>);
+
+    await waitFor(() => {
+      expect(mocks.loadBelaboxStatus).toHaveBeenCalledTimes(2);
+      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "live", undefined);
+    });
+    expect(mocks.loadBelaboxStreams).toHaveBeenCalledOnce();
+  });
+
   it("draws the history thresholds and disconnect gaps and can select a stream", async () => {
     mocks.loadBelaboxStatus.mockResolvedValue({
       configured: true,

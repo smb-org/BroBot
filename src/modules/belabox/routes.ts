@@ -15,7 +15,6 @@ import {
   getBelaboxStatus,
   getBelaboxStreamHistory,
   listBelaboxStreams,
-  prepareBelaboxHistorySampleReset,
   prepareBelaboxSampleClear,
   prepareBelaboxSampleWrite,
 } from "./adapters/d1";
@@ -249,12 +248,6 @@ belaboxRoutes.post("/test", async (context) => {
   if (!await hasManagementAuthorization(context.env.DB, channelId, actor, authorizeManagementMutation)) {
     return managementDenied(context);
   }
-
-  await prepareBelaboxHistorySampleReset(
-    context.env.DB,
-    channelId,
-    authorizeManagementMutation(channelId, actor, new Date().toISOString()),
-  ).run();
 
   const result = await fetchRelaySample(
     validation.url,

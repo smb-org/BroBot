@@ -1034,6 +1034,8 @@ export interface ModulePanelProperties {
    *  mount (e.g. text_commands selects the command by name); most modules
    *  ignore it. */
   initialSelection?: string;
+  /** Incremented after a sibling settings editor saves, so panels can reload dependent data. */
+  settingsRefreshToken?: number;
 }
 
 /** Props for one lazily loaded card in the channel's immediate-action row. */

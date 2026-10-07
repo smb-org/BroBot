@@ -1219,7 +1219,7 @@ describe("dispatch and execution", () => {
 
       await expect(database.prepare(
         "SELECT ended_at FROM belabox_streams WHERE channel_id = ? AND stream_id = 'captured-stream'",
-      ).bind(channelId).first<{ ended_at: string | null }>()).resolves.toEqual({ ended_at: endedAt });
+      ).bind(channelId).first<{ ended_at: string | null }>()).resolves.toEqual({ ended_at: null });
     } finally {
       database.close();
     }

@@ -58,7 +58,7 @@ const editorFixture = vi.hoisted(() => {
   return { definition, loader: vi.fn(() => Promise.resolve({ default: definition })) };
 });
 
-const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
+const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: ({ settingsRefreshToken }: { settingsRefreshToken?: number }) => <><p>Panel geladen</p><output data-testid="panel-settings-refresh">{String(settingsRefreshToken ?? 0)}</output></> })));
 
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
@@ -616,6 +616,34 @@ describe("Module panel loader", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Konto" }), { target: { value: "unsaved-again" } });
     fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
     expect(screen.getByRole("textbox", { name: "Konto" })).toHaveValue("server-canonical");
+  });
+
+  it("notifies a mounted module panel after its sibling settings save succeeds", async () => {
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
+      if (path.endsWith("/modules/editor-before-fixture/settings") && init?.method === "PATCH") {
+        return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 2, warnings: [] }));
+      }
+      if (path.endsWith("/modules/editor-before-fixture/settings")) return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }));
+      return Promise.resolve(Response.json({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ModulePage
+      channelId="kanal-a"
+      moduleId="editor-before-fixture"
+      ownRole="manager"
+      modules={[{ id: "editor-before-fixture", enabled: true, settings: "{}" }]}
+      activeModules={[{ moduleId: "editor-before-fixture", settings: "{}" }]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+
+    expect(await screen.findByTestId("panel-settings-refresh")).toHaveTextContent("0");
+    fireEvent.change(await screen.findByRole("textbox", { name: "Konto" }), { target: { value: "saved-handle" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+
+    await waitFor(() => { expect(screen.getByTestId("panel-settings-refresh")).toHaveTextContent("1"); });
   });
 
   it("disables switch cards while a settings save is pending", async () => {

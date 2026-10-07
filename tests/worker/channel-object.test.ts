@@ -1471,6 +1471,7 @@ describe("ChannelObject realtime path", () => {
     await database.prepare(
       `CREATE TABLE IF NOT EXISTS channel_modules (
         channel_id TEXT NOT NULL, module_id TEXT NOT NULL, enabled INTEGER NOT NULL, settings TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
         PRIMARY KEY (channel_id, module_id)
       )`,
     ).run();
@@ -1492,7 +1493,7 @@ describe("ChannelObject realtime path", () => {
         channel_id TEXT PRIMARY KEY, sampled_at TEXT, sample_json TEXT, error_code TEXT,
         polling INTEGER NOT NULL DEFAULT 0, stream_id TEXT, belabox_stream_id TEXT,
         fetch_phase_json TEXT NOT NULL DEFAULT '{}', recent_json TEXT NOT NULL DEFAULT '[]',
-        history_sample_json TEXT,
+        history_sample_json TEXT, history_module_revision INTEGER,
         revision INTEGER NOT NULL DEFAULT 1
       )`,
     ).run();
@@ -1558,6 +1559,7 @@ describe("ChannelObject realtime path", () => {
                 }
                 return row;
               },
+              run: () => bound.run(),
             };
           },
         } as unknown as D1PreparedStatement;
@@ -1630,6 +1632,8 @@ describe("ChannelObject realtime path", () => {
     await object.alarm();
 
     expect(alarmErrors).not.toHaveBeenCalled();
+    expect(pollAlarmHandler).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledOnce();
     expect(await getBelaboxStatus(databaseBinding, channelId)).toMatchObject({
       polling: true,
       streamId: "stream-321",

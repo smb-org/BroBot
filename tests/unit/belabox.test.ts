@@ -258,7 +258,7 @@ describe("BELABOX secret and route redaction", () => {
     vi.restoreAllMocks();
   });
 
-  it("resets history continuity for connection tests using an ad hoc URL", async () => {
+  it("keeps connection tests using an ad hoc URL out of history lifecycle state", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { send, db } = await createBelaboxRouteHarness(testDatabase);
@@ -282,7 +282,7 @@ describe("BELABOX secret and route redaction", () => {
     expect(response.status).toBe(200);
     await expect(db.prepare(
       "SELECT history_sample_json FROM belabox_status WHERE channel_id = ?",
-    ).bind(CHANNEL_ID).first()).resolves.toEqual({ history_sample_json: null });
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ history_sample_json: JSON.stringify(sample) });
   });
 
   it("keeps a sentinel URL out of logs, route results, audits, events, and module rows for every fetch outcome", async () => {

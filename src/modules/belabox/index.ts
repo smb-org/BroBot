@@ -7,7 +7,7 @@ import {
   BELABOX_POLL_ALARM_KEY,
   belaboxSettingsSchema,
 } from "./contracts";
-import { finalizeBelaboxStream, purgeExpiredBelaboxMinutes } from "./adapters/d1";
+import { purgeExpiredBelaboxMinutes } from "./adapters/d1";
 import { ensureBelaboxPoll, ensureBelaboxPollSchedule, handleBelaboxPollAlarm } from "./service";
 
 export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
@@ -40,22 +40,6 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
     if (context.streamStateTransitionAccepted !== true ||
         (event.subscriptionType !== "stream.online" && event.subscriptionType !== "stream.offline")) {
       return { actions: [], diagnostics: [] };
-    }
-    if (event.subscriptionType === "stream.offline") {
-      const session = context.streamSession;
-      if (session !== undefined && session.streamId !== null && session.startedAt !== null) {
-        try {
-          await finalizeBelaboxStream(
-            context.DB,
-            event.channelId,
-            session.streamId,
-            session.startedAt,
-            event.eventSubTimestamp ?? event.receivedAt,
-          );
-        } catch {
-          // The offline alarm retries finalization from open summary rows.
-        }
-      }
     }
     try {
       await ensureBelaboxPoll({

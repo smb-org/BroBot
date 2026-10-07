@@ -126,7 +126,7 @@ describe("BELABOX settings route", () => {
     ).bind(CHANNEL_ID).first()).resolves.toEqual({ enabled: 0 });
   });
 
-  it("finalizes the open stream when BELABOX is disabled while online", async () => {
+  it("finalizes the open stream in the poll alarm after BELABOX is disabled", async () => {
     const streamId = "belabox-disabled-online-stream";
     const startedAt = "2026-10-07T09:00:00.000Z";
     const sample = {
@@ -169,6 +169,16 @@ describe("BELABOX settings route", () => {
 
     expect(response.status).toBe(200);
     expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "ensure", "poll");
+    await expect(database.prepare(
+      "SELECT ended_at FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
+    ).bind(CHANNEL_ID, streamId).first()).resolves.toEqual({ ended_at: null });
+    await handleBelaboxPollAlarm({
+      DB: database as unknown as D1Database,
+      channelId: CHANNEL_ID,
+      streamState: () => Promise.resolve("online"),
+      streamStartedAt: () => Promise.resolve({ streamId, startedAt }),
+      schedule: () => Promise.resolve(),
+    } as unknown as Parameters<typeof handleBelaboxPollAlarm>[0], BELABOX_POLL_ALARM_KEY, Date.now());
     const summary = await database.prepare(
       "SELECT ended_at, bitrate_p10 FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
     ).bind(CHANNEL_ID, streamId).first<{ ended_at: string | null; bitrate_p10: number | null }>();
@@ -176,7 +186,7 @@ describe("BELABOX settings route", () => {
     expect(summary?.bitrate_p10).toBe(3_200);
   });
 
-  it("resumes the current stream summary after re-enabling and finalizes it offline", async () => {
+  it("reopens and finalizes a stream summary only when the poll alarm sees current state", async () => {
     const streamId = "belabox-resumed-online-stream";
     const startedAt = "2026-10-07T09:00:00.000Z";
     const sample = {
@@ -209,6 +219,11 @@ describe("BELABOX settings route", () => {
          belabox_stream_id, fetch_phase_json, recent_json, revision)
        VALUES (?, ?, ?, ?, 0, ?, ?, '{}', '[]', 1)`,
     ).bind(CHANNEL_ID, sample.at, JSON.stringify(sample), JSON.stringify(sample), streamId, streamId).run();
+    await database.prepare(
+      `INSERT INTO module_secrets
+        (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
+       VALUES (?, 'belabox', 'stats_url', 'ciphertext-version', 'test', 1, ?, 'tester')`,
+    ).bind(CHANNEL_ID, startedAt).run();
 
     const runModuleAlarm = vi.fn(() => Promise.resolve());
     const environment = {
@@ -227,15 +242,41 @@ describe("BELABOX settings route", () => {
 
     await expect(database.prepare(
       "SELECT ended_at, bitrate_p10 FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
-    ).bind(CHANNEL_ID, streamId).first()).resolves.toEqual({ ended_at: null, bitrate_p10: null });
+    ).bind(CHANNEL_ID, streamId).first()).resolves.toEqual({ ended_at: "2026-10-07T09:20:00.000Z", bitrate_p10: 3_200 });
     await expect(database.prepare(
       "SELECT history_sample_json FROM belabox_status WHERE channel_id = ?",
-    ).bind(CHANNEL_ID).first()).resolves.toEqual({ history_sample_json: null });
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ history_sample_json: JSON.stringify(sample) });
+
+    const pollContext = {
+      DB: database as unknown as D1Database,
+      channelId: CHANNEL_ID,
+      streamState: () => Promise.resolve("online"),
+      streamStartedAt: () => Promise.resolve({ streamId, startedAt }),
+      secrets: {
+        readWithVersion: () => Promise.resolve({ value: "http://relay.belabox.net:8080/publisher", version: "ciphertext-version" }),
+      },
+      schedule: () => Promise.resolve(),
+    } as unknown as Parameters<typeof handleBelaboxPollAlarm>[0];
+    await handleBelaboxPollAlarm(
+      pollContext,
+      BELABOX_POLL_ALARM_KEY,
+      Date.now(),
+      undefined,
+      () => Promise.resolve(Response.json({ publishers: { publisher: {
+        connected: true, bitrate: 3_200, rtt: 41, latency: 115, network: 2, dropped_pkts: 10,
+      } } })),
+    );
+    await expect(database.prepare(
+      "SELECT ended_at, bitrate_p10 FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
+    ).bind(CHANNEL_ID, streamId).first()).resolves.toEqual({ ended_at: null, bitrate_p10: null });
 
     await handleBelaboxPollAlarm({
       DB: database as unknown as D1Database,
       channelId: CHANNEL_ID,
       streamState: () => Promise.resolve("offline"),
+      streamStartedAt: () => Promise.resolve({ streamId: null, startedAt: null }),
+      secrets: pollContext.secrets,
+      schedule: () => Promise.resolve(),
     } as unknown as Parameters<typeof handleBelaboxPollAlarm>[0], BELABOX_POLL_ALARM_KEY, Date.now());
 
     const finalized = await database.prepare(

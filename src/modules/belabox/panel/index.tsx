@@ -15,7 +15,7 @@ const statusTimestamp = (value: string, locale: string): string => {
   return Number.isNaN(date.valueOf()) ? "" : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
 
-export default function BelaboxPanel({ channelId, language = "de", canManage = false }: ModulePanelProperties): ReactElement {
+export default function BelaboxPanel({ channelId, language = "de", canManage = false, settingsRefreshToken = 0 }: ModulePanelProperties): ReactElement {
   const labels = belaboxPanelTexts(language);
   const [status, setStatus] = useState<BelaboxStatusResponse | null>(null);
   const [url, setUrl] = useState("");
@@ -48,7 +48,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       }
     });
     return () => { active = false; };
-  }, [channelId, labels.testFailed]);
+  }, [channelId, labels.testFailed, settingsRefreshToken]);
 
   useEffect(() => {
     if (pollingInactive) notify({ tone: "error", message: labels.pollingInactive });
