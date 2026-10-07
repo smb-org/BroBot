@@ -103,6 +103,7 @@ export default defineConfig(
   globalIgnores([
     ".claude/**",
     ".wrangler/**",
+    ".worktrees/**",
     "dist/**",
     "coverage/**",
     "node_modules/**",

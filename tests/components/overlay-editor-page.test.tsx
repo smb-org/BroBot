@@ -82,7 +82,7 @@ describe("Overlay composition editor", () => {
         savedOverlay = { ...savedOverlay, revision: savedOverlay.revision + 1, elements: body.elements };
         return Promise.resolve(jsonResponse({ overlay: savedOverlay }));
       }
-      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [{ ...variable, description: "", value: 123456789 }], count: 1, maximum: 25 }));
       if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
       return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
     });
@@ -91,7 +91,11 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Add ad countdown" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add element" }));
+    const variableEntry = await screen.findByRole("option", { name: /score/u, hidden: true });
+    expect(variableEntry).toHaveTextContent("No description");
+    expect(variableEntry.querySelector(".overlay-element-palette__value")).toHaveTextContent("123,456,789");
+    fireEvent.click(await screen.findByRole("option", { name: /Ad countdown/u, hidden: true }));
     const snoozeInfo = await screen.findByRole("checkbox", { name: "Show snooze info" });
     expect(snoozeInfo).not.toBeChecked();
     const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
@@ -136,6 +140,10 @@ describe("Overlay composition editor", () => {
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     expect(await screen.findAllByText("Ads module is disabled.")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Add element" }));
+    const disabledPaletteEntry = await screen.findByRole("option", { name: /Ad countdown/u });
+    expect(disabledPaletteEntry).toHaveAttribute("aria-disabled", "true");
+    expect(disabledPaletteEntry).toHaveTextContent("Module off · Ads");
   });
 
   it("formats preview values with the channel language instead of the browser locale", async () => {
@@ -875,7 +883,7 @@ describe("Overlay composition editor", () => {
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays/overlay-new" && init?.method === "PUT")).toHaveLength(0);
   });
 
-  it("shows operator add, remove and Save actions disabled with the read-only reason", async () => {
+  it("shows operator add, row-remove and Save actions disabled with the read-only reason", async () => {
     const operatorChannel = { ...channel, role: "operator" };
     const operatorOverlay = {
       ...initialOverlay,
@@ -897,17 +905,13 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    const reason = screen.getByText("Bediener können die Komposition ansehen, aber nicht ändern.", { selector: "p" });
-    expect(reason).toHaveTextContent("Bediener können die Komposition ansehen, aber nicht ändern.");
+    const reason = screen.getByText("Nur Verwalter und Broadcaster können die Komposition ändern.", { selector: "p" });
     expect(reason).toHaveAttribute("id", "overlay-editor-readonly-reason");
-    const addVariableSelect = screen.getByRole("combobox", { name: "Kanalvariable auswählen" });
-    expect(addVariableSelect).toBeDisabled();
-    const addVariableReasonId = addVariableSelect.getAttribute("aria-describedby");
-    expect(addVariableReasonId).toBe(`overlay-editor-readonly-reason-select-${addVariableSelect.id}`);
-    expect(addVariableReasonId === null ? null : document.getElementById(addVariableReasonId)).toHaveTextContent("Bediener können die Komposition ansehen, aber nicht ändern.");
+    const addElement = screen.getByRole("button", { name: "Element hinzufügen" });
+    const removeElement = screen.getByRole("button", { name: "Entfernen: Score" });
     const actions = [
-      screen.getByRole("button", { name: "Variable anzeigen" }),
-      screen.getByRole("button", { name: "Element entfernen" }),
+      addElement,
+      removeElement,
       screen.getByRole("button", { name: "Speichern" }),
     ];
     for (const action of actions) {
@@ -1129,10 +1133,21 @@ describe("Overlay composition editor", () => {
     const baseStyle = previewFrame?.contentDocument?.head.querySelector("style");
     expect(baseStyle?.textContent).not.toContain("[data-element]");
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove element" }));
-    await waitFor(() => expect(bounds?.querySelector('[data-brobot-editor-bound="element-b"]')).toHaveAttribute("data-selected", "true"));
-    fireEvent.click(screen.getByRole("button", { name: "Remove element" }));
+    const secondElementButton = [...document.querySelectorAll<HTMLButtonElement>(".overlay-editor__element-select")]
+      .find((button) => button.textContent.includes("Second"));
+    if (secondElementButton === undefined) throw new Error("Second overlay element row is missing.");
+    fireEvent.click(secondElementButton);
+    await waitFor(() => {
+      expect(bounds?.querySelector('[data-brobot-editor-bound="element-b"]')).toHaveAttribute("data-selected", "true");
+      expect(bounds?.querySelector('[data-brobot-editor-bound="element-a"]')).toHaveAttribute("data-selected", "false");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Remove: Score" }));
+    await waitFor(() => expect(bounds?.querySelector('[data-brobot-editor-bound="element-a"]')).not.toBeInTheDocument());
+    expect(bounds?.querySelector('[data-brobot-editor-bound="element-b"]')).toHaveAttribute("data-selected", "true");
+    await waitFor(() => expect(document.activeElement?.closest("[data-element-row]")).toHaveAttribute("data-element-row", "element-b"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove: Second" }));
     await waitFor(() => expect(bounds?.querySelectorAll("[data-brobot-editor-bound]")).toHaveLength(0));
+    await waitFor(() => expect(document.activeElement).toHaveClass("overlay-editor__add-trigger"));
   });
 
   it("shows the unsaved-changes status only once on the save bar", async () => {

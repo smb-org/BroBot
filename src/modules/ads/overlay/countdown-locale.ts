@@ -1,7 +1,7 @@
 export const adsCountdownLabels = (language: "de" | "en") => language === "de"
   ? {
     editorLabel: "Werbe-Countdown",
-    editorAddLabel: "Werbe-Countdown hinzufügen",
+    editorDescription: "Zeit bis zur nächsten Werbepause.",
     editorModuleLabel: "Werbung",
     adIn: "Werbung in",
     adRunning: "Werbung läuft",
@@ -13,7 +13,7 @@ export const adsCountdownLabels = (language: "de" | "en") => language === "de"
   }
   : {
     editorLabel: "Ad countdown",
-    editorAddLabel: "Add ad countdown",
+    editorDescription: "Time until the next ad break.",
     editorModuleLabel: "Ads",
     adIn: "Ad in",
     adRunning: "Ad running",

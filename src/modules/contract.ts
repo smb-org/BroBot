@@ -284,7 +284,8 @@ export interface ModuleOverlayElementDefinition {
   /** Editor-only sample state used when no live module state is available. */
   previewState?: (config: JsonObject, language: ModuleLanguage, now: number) => JsonObject;
   editorLabel?: Readonly<Record<ModuleLanguage, string>>;
-  editorAddLabel?: Readonly<Record<ModuleLanguage, string>>;
+  /** Localized one-line description shown in the overlay element palette. */
+  editorDescription?: Readonly<Record<ModuleLanguage, string>>;
   editorModuleLabel?: Readonly<Record<ModuleLanguage, string>>;
   parseConfig: (raw: unknown) => JsonObject | null;
   /** The module initial state uses host template, condition, or channel context. */

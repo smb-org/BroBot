@@ -34,6 +34,7 @@
 3. Änderungen klein halten, lokal prüfen und einen Pull Request gegen `main` öffnen.
 4. Review-Kommentare einarbeiten; gemergt wird erst nach grüner CI.
 5. Keine Commits direkt auf `main` und keine fachfremden Änderungen im selben Pull Request.
+6. Parallele Arbeit läuft in Git-Worktrees unter `.worktrees/<issue-oder-branch>` innerhalb des Repos (`git worktree add .worktrees/<name> -b <branch>`). Das Verzeichnis ist per `.gitignore` ausgeschlossen, ESLint überspringt es; Vitest, `tsc`, Playwright und `jscpd` erfassen es nicht, weil ihre Eingaben auf `src`, `tests` und `scripts` begrenzt sind.
 
 Vor dem Push muss `pnpm run check` lokal grün durchlaufen. CI prüft zusätzlich dieselbe Installations- und Browser-Teststrecke.
 

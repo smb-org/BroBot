@@ -1,6 +1,6 @@
 export interface TextBlockOverlayEditorTexts {
   label: string;
-  addLabel: string;
+  description: string;
   moduleLabel: string;
   previewPlaceholder: string;
   loading: string;
@@ -12,7 +12,7 @@ export interface TextBlockOverlayEditorTexts {
 export const textBlockOverlayEditorTexts: Record<"de" | "en", TextBlockOverlayEditorTexts> = {
   de: {
     label: "Textbaustein",
-    addLabel: "Textbaustein hinzufügen",
+    description: "Zeigt einen Baustein aus der Textbibliothek, zeitgesteuert.",
     moduleLabel: "Textbibliothek",
     previewPlaceholder: "Textbaustein wählen",
     loading: "Textbausteine werden geladen …",
@@ -26,7 +26,7 @@ export const textBlockOverlayEditorTexts: Record<"de" | "en", TextBlockOverlayEd
   },
   en: {
     label: "Text block",
-    addLabel: "Add text block",
+    description: "Shows a text library block on a schedule.",
     moduleLabel: "Text library",
     previewPlaceholder: "Choose a text block",
     loading: "Loading text blocks …",

@@ -18,7 +18,7 @@ export const adsCountdownElement = {
     isSample: true,
   }),
   editorLabel: { de: editorLabels.de.editorLabel, en: editorLabels.en.editorLabel },
-  editorAddLabel: { de: editorLabels.de.editorAddLabel, en: editorLabels.en.editorAddLabel },
+  editorDescription: { de: editorLabels.de.editorDescription, en: editorLabels.en.editorDescription },
   editorModuleLabel: { de: editorLabels.de.editorModuleLabel, en: editorLabels.en.editorModuleLabel },
   parseConfig: (raw: unknown) => {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;

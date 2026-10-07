@@ -44,6 +44,9 @@ export type { CodeFieldProps } from "./CodeField";
 
 export { ReadOnlyTextArea } from "./ReadOnlyTextArea";
 
+export { GroupedPicker } from "./GroupedPicker";
+export type { GroupedPickerEntry, GroupedPickerGroup, GroupedPickerMessages, GroupedPickerProps } from "./GroupedPicker";
+
 export { FieldPair } from "./FieldPair";
 export type { FieldPairProps } from "./FieldPair";
 export { TimeoutDurationRangeFields } from "./TimeoutDurationRangeFields";
