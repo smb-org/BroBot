@@ -760,6 +760,7 @@ describe("BELABOX polling", () => {
           SET changed_at = ?, started_at = ?, stream_id = 'stream-s2'
         WHERE channel_id = ?`,
     ).bind("2026-10-05T12:00:00.000Z", "2026-10-05T12:00:00.000Z", CHANNEL_ID).run();
+    vi.setSystemTime("2026-10-05T12:05:00.000Z");
 
     await handleBelaboxPollAlarm(
       context,
@@ -770,18 +771,19 @@ describe("BELABOX polling", () => {
       { reason: "check_now" },
     );
 
-    const adoptedAt = (await getBelaboxStatus(context.DB, CHANNEL_ID))?.sample?.at;
-    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+    const adoptedStatus = await getBelaboxStatus(context.DB, CHANNEL_ID);
+    expect(adoptedStatus).toMatchObject({
       streamId: "stream-s2",
       streamSessionKey: "stream:stream-s2",
       belaboxStreamId: "stream-s2",
+      sample: { at: "2026-10-05T12:05:00.000Z" },
       fetchPhase: { consecutiveFailures: 0, failing: false },
       alertState: { phase: "ok", kind: null, episodeStartedAt: null, chatSentInEpisode: false },
     });
     const summaries = await listBelaboxStreams(context.DB, CHANNEL_ID);
     expect(summaries).toEqual(expect.arrayContaining([
-      expect.objectContaining({ streamId: "stream-s0", endedAt: adoptedAt }),
-      expect.objectContaining({ streamId: "stream-s1", endedAt: adoptedAt, lowSeconds: 10 }),
+      expect.objectContaining({ streamId: "stream-s0", endedAt: "2026-10-05T12:00:00.000Z" }),
+      expect.objectContaining({ streamId: "stream-s1", endedAt: "2026-10-05T12:00:00.000Z", lowSeconds: 10 }),
       expect.objectContaining({ streamId: "stream-s2", endedAt: null, samples: 1 }),
     ]));
   });
@@ -866,6 +868,7 @@ describe("BELABOX polling", () => {
   it("uses configured low-bitrate thresholds for alert state and session-tags realtime samples", async () => {
     await insertModule(database, {
       ...BELABOX_DEFAULT_SETTINGS,
+      intervalSeconds: 5,
       lowBitrateKbps: 2_000,
       recoverBitrateKbps: 3_000,
     });
@@ -888,6 +891,45 @@ describe("BELABOX polling", () => {
     expect(overlayMessages[0]?.payload).toMatchObject({
       streamSessionKey: `stream:${STREAM_ID}`,
       phase: "low",
+    });
+  });
+
+  it("keeps enriched samples and realtime health aligned with an alert through recovery", async () => {
+    await insertModule(database, {
+      ...BELABOX_DEFAULT_SETTINGS,
+      intervalSeconds: 5,
+      lowBitrateKbps: 2_000,
+      recoverBitrateKbps: 3_000,
+      holdSeconds: 5,
+      recoverHoldSeconds: 30,
+    });
+    const { context, overlayMessages } = alarmContext(database);
+    const fetchSample = (bitrateKbps: number) => handleBelaboxPollAlarm(
+      context,
+      BELABOX_POLL_ALARM_KEY,
+      Date.now(),
+      undefined,
+      () => Promise.resolve(jsonResponse(relayPayload(true, bitrateKbps))),
+    );
+
+    await fetchSample(1_500);
+    vi.setSystemTime("2026-10-05T12:00:05.000Z");
+    await fetchSample(1_500);
+    const alarmStatus = await getBelaboxStatus(context.DB, CHANNEL_ID);
+    expect(alarmStatus).not.toBeNull();
+    expect(alarmStatus?.alertState).toMatchObject({ phase: "alarm", kind: "low" });
+    const alarmAt = alarmStatus?.alertState.episodeStartedAt;
+
+    vi.setSystemTime("2026-10-05T12:00:10.000Z");
+    await fetchSample(3_100);
+
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      sample: { bitrateKbps: 3_100, phase: "low", alertStartedAt: alarmAt },
+      alertState: { phase: "recovering", kind: "low", episodeStartedAt: alarmAt },
+    });
+    expect(overlayMessages.at(-1)?.payload).toMatchObject({
+      phase: "low",
+      streamSessionKey: `stream:${STREAM_ID}`,
     });
   });
 

@@ -49,6 +49,7 @@ describe("BELABOX template variables and overlay metadata", () => {
     mode: "interval" | "on_demand" = "interval",
     intervalSeconds = 15,
     lowBitrateKbps = 1_000,
+    recoverBitrateKbps = Math.max(lowBitrateKbps + 1, 2_000),
   ): Promise<void> => {
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
@@ -56,7 +57,7 @@ describe("BELABOX template variables and overlay metadata", () => {
       mode,
       intervalSeconds,
       lowBitrateKbps,
-      recoverBitrateKbps: Math.max(lowBitrateKbps + 1, 2_000),
+      recoverBitrateKbps,
     })).run();
     await database.prepare(
       `INSERT INTO module_secrets
@@ -288,6 +289,35 @@ describe("BELABOX template variables and overlay metadata", () => {
     });
   });
 
+  it("keeps template and overlay health unhealthy until the alert recovery episode completes", async () => {
+    await insertModule("interval", 15, 2_000, 3_000);
+    await insertStatus(sample("2026-10-06T12:00:20.000Z", {
+      bitrateKbps: 2_500,
+      phase: "healthy",
+      alertStartedAt: null,
+    }));
+    await database.prepare("UPDATE belabox_status SET alert_json = ? WHERE channel_id = ?")
+      .bind(JSON.stringify({
+        phase: "recovering",
+        kind: "low",
+        since: "2026-10-06T12:00:10.000Z",
+        episodeStartedAt: "2026-10-06T11:59:00.000Z",
+        completedEpisodeAt: null,
+        lastChatSentAt: null,
+        chatSentInEpisode: false,
+        pendingChat: null,
+      }), CHANNEL_ID).run();
+
+    await expect(belaboxModule.resolveTemplateValues?.(["belabox.status", "belabox.down_for"], templateContext("en")))
+      .resolves.toEqual({ "belabox.status": "low bitrate", "belabox.down_for": "1 minute" });
+    const element = belaboxModule.overlayElements?.find(({ kind }) => kind === "belabox.status");
+    const initial = await element?.initialState?.(database as unknown as D1Database, CHANNEL_ID, element.defaultConfig);
+    expect(initial).toMatchObject({
+      streamSessionKey: "stream:stream-322",
+      sample: { bitrateKbps: 2_500, phase: "low", alertStartedAt: "2026-10-06T11:59:00.000Z" },
+    });
+  });
+
   it("exposes overlay availability until sampledAt plus max(interval, 30 seconds)", async () => {
     await insertModule("interval", 15);
     await insertStatus(sample("2026-10-06T12:00:20.000Z"));
@@ -394,7 +424,7 @@ describe("BELABOX template variables and overlay metadata", () => {
     })).toEqual(current);
   });
 
-  it("rejects a delayed previous-session sample after a new-session bootstrap clears its sample", () => {
+  it("uses the bootstrap session key to reject delayed samples from the previous stream", () => {
     const bootstrapped = {
       intervalSeconds: 15,
       mode: "interval",
@@ -409,6 +439,17 @@ describe("BELABOX template variables and overlay metadata", () => {
       phase: "healthy",
       streamSessionKey: "stream:stream-s1",
     })).toEqual(bootstrapped);
+    expect(mergeModuleOverlayElementState("belabox.status", bootstrapped, {
+      at: "2026-10-06T12:00:30.000Z",
+      connected: true,
+      bitrateKbps: 3_200,
+      rttMs: 38,
+      phase: "healthy",
+      streamSessionKey: "stream:stream-s2",
+    })).toMatchObject({
+      streamSessionKey: "stream:stream-s2",
+      sample: { at: "2026-10-06T12:00:30.000Z", bitrateKbps: 3_200 },
+    });
     expect(mergeModuleOverlayElementState("belabox.status", {
       intervalSeconds: 15,
       sample: null,

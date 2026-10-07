@@ -400,9 +400,21 @@ const storePollResult = async (
       : belaboxStatusMatchesSession(currentStatus, originSession);
     const previousPhase = sameStream ? currentStatus?.fetchPhase ?? { consecutiveFailures: 0, failing: false }
       : { consecutiveFailures: 0, failing: false };
+    const now = Date.now();
     const phase = result.ok ? { consecutiveFailures: 0, failing: false } : failedPhase(previousPhase);
     const alreadyClassified = sameStream && streamId !== null && currentStatus?.belaboxStreamId === streamId;
     const classified = mode === "on_demand" || alreadyClassified || result.ok && result.sample.connected && streamId !== null;
+    const previousAlert = sameStream ? currentStatus?.alertState ?? createInitialAlertState() : createInitialAlertState();
+    const alert = mode === "interval" && classified && prerequisites.settings.alertsEnabled
+      ? advanceAlert(previousAlert, result.ok ? result.sample : {
+        kind: "fetch_error",
+        at: new Date(now).toISOString(),
+        reason: result.reason,
+      }, prerequisites.settings, now)
+      : {
+        state: mode === "on_demand" && sameStream ? previousAlert : createInitialAlertState(),
+        outputs: { phaseChange: null, chat: null },
+      };
     const storedSample = result.ok
       ? enrichBelaboxSample(
         result.sample,
@@ -410,9 +422,9 @@ const storePollResult = async (
         sameStream,
         classified,
         prerequisites.settings.lowBitrateKbps,
+        alert.state,
       )
       : null;
-    const now = Date.now();
     const recent = sameStream ? pruneRecent(currentStatus?.recent ?? [], now) : [];
     const nextRecent = mode === "interval" && result.ok && classified
       ? appendRecent(recent, result.sample, now)
@@ -453,22 +465,13 @@ const storePollResult = async (
       }
       : undefined;
     const historySample = result.ok ? result.sample : null;
-    const previousAlert = sameStream ? currentStatus?.alertState ?? createInitialAlertState() : createInitialAlertState();
-    const alert = mode === "interval" && classified && prerequisites.settings.alertsEnabled
-      ? advanceAlert(previousAlert, result.ok ? result.sample : {
-        kind: "fetch_error",
-        at: new Date(now).toISOString(),
-        reason: result.reason,
-      }, prerequisites.settings, now)
-      : {
-        state: mode === "on_demand" && sameStream ? previousAlert : createInitialAlertState(),
-        outputs: { phaseChange: null, chat: null },
-      };
     const previousStreamFinalizers = mode === "interval" && streamId !== null
       ? await prepareBelaboxHistoryFinalizers(
         context.DB,
         context.channelId,
-        result.ok ? result.sample.at : new Date(now).toISOString(),
+        originSession?.state === "online"
+          ? originSession.startedAt ?? originSession.changedAt
+          : result.ok ? result.sample.at : new Date(now).toISOString(),
         prerequisites.moduleRevision,
         prerequisites.streamSnapshot,
         {
