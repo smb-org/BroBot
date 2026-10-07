@@ -11,6 +11,7 @@ export const BELABOX_POLL_ALARM_KEY = "poll";
 export const BELABOX_ENSURE_POLL_HANDLER = "ensure";
 export const BELABOX_PROBE_INTERVAL_MS = 60_000;
 export const BELABOX_ON_DEMAND_CACHE_MS = 10_000;
+export const BELABOX_STREAM_HISTORY_LIMIT = 20;
 export const BELABOX_SECRET_UNAVAILABLE_STATUS_CODE = "not_configured";
 export const BELABOX_DEFAULT_LOW_BITRATE_KBPS = 1_000;
 
@@ -117,6 +118,7 @@ export interface BelaboxSample extends BelaboxStats {
 export interface BelaboxStatusResponse {
   configured: boolean;
   updatedAt: string | null;
+  mode: BelaboxSettings["mode"] | null;
   sample: BelaboxSample | null;
   errorCode: BelaboxStatusErrorCode | null;
   polling: boolean;
@@ -132,6 +134,21 @@ export interface BelaboxAlertNotice {
   phase: "pending" | "alarm" | "recovering";
   kind: "low" | "disconnect";
   bitrateKbps: number | null;
+}
+
+export type BelaboxHistoryPoint = readonly [at: number, bitrateKbps: number, connected: number];
+
+export interface BelaboxStreamSummary {
+  streamId: string;
+  startedAt: string;
+  endedAt: string | null;
+  samples: number;
+  bitrateAvg: number;
+  bitrateP10: number | null;
+  lowSeconds: number;
+  disconnectedSeconds: number;
+  disconnectCount: number;
+  droppedTotal: number;
 }
 
 export type BelaboxFetchResult =

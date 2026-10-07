@@ -960,6 +960,9 @@ export const dispatchEventSubNotification = async (
             isRecentBotMessage,
             streamState,
             streamStateTransitionAccepted,
+            ...(streamStateTransitionAccepted && event.subscriptionType === "stream.offline" && endingStreamDispatchState !== null
+              ? { streamSession: { streamId: endingStreamDispatchState.streamId, startedAt: endingStreamDispatchState.streamStartedAt } }
+              : {}),
             chatActivityCount: async () => {
               if (environment.CHANNEL === undefined) return 0;
               return await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).getChatActivityCount();

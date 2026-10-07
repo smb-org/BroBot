@@ -10,7 +10,7 @@ import {
   type BelaboxSample,
 } from "./contracts";
 import { BELABOX_TEMPLATE_VARIABLES, belaboxCatalog } from "./contracts/catalog";
-import { belaboxStatusMatchesSession, getBelaboxStatus, getBelaboxStreamSession } from "./adapters/d1";
+import { belaboxStatusMatchesSession, getBelaboxStatus, getBelaboxStreamSession, purgeExpiredBelaboxMinutes } from "./adapters/d1";
 import { belaboxDownMilliseconds, resolvedBelaboxPhase } from "./domain/presentation";
 import {
   belaboxAlertDefaultsOnEnable,
@@ -220,6 +220,8 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
     onScheduleInputsChanged: ensureBelaboxPollSchedule,
   }],
   routes: belaboxRoutes,
+  scheduledMaintenance: purgeExpiredBelaboxMinutes,
+  settingsEditorPlacement: "before-panel",
   panel: () => import("./panel/index"),
   settingsEditor: () => import("./panel/settings-editor"),
   immediateActions: { requires: ["streamLive"], load: () => import("./panel/immediate-actions") },

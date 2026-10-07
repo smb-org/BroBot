@@ -29,6 +29,11 @@ const gotoPanel = async (page: Page, panel: string): Promise<void> => {
   await page.goto(`/tests/e2e/module-panels-stability-fixture.html?panel=${panel}`);
 };
 
+const chooseOption = async (page: Page, label: string, option: string): Promise<void> => {
+  await page.getByRole("combobox", { name: label }).click();
+  await page.getByRole("option", { name: option }).click();
+};
+
 test("API source editor and expression hint keep their boxes stable", async ({ page }) => {
   const sources = Array.from({ length: 8 }, (_, index) => ({
     name: `source_${String(index)}`,
@@ -252,7 +257,7 @@ test("BELABOX immediate action keeps manual results separate from live notices",
 
 test("Belabox test results stay inside the reserved result box", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/belabox/status", {
-    configured: false, updatedAt: null, sample: null, errorCode: null, polling: false,
+    configured: false, updatedAt: null, mode: "on_demand", sample: null, errorCode: null, polling: false,
     pollingDesired: false, streamId: null, belaboxStreamId: null, alertNotice: null,
     fetchFailureNotice: false, intervalSeconds: 15,
   });
@@ -271,54 +276,199 @@ test("Belabox test results stay inside the reserved result box", async ({ page }
   expect(await box(resultSlot)).toEqual(resultBefore);
 });
 
-test("chat voting header status keeps its box when a live end time appears", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  let vote: unknown = null;
+test("Belabox history keeps its latest twenty streams inside a bounded list", async ({ page }) => {
+  const streams = Array.from({ length: 25 }, (_, index) => ({
+    streamId: `stream-${String(index)}`,
+    startedAt: new Date(Date.parse("2026-10-01T00:00:00.000Z") + index * 60_000).toISOString(),
+    endedAt: null,
+    samples: 1,
+    bitrateAvg: 2_400,
+    bitrateP10: 2_100,
+    lowSeconds: 0,
+    disconnectedSeconds: 0,
+    disconnectCount: 0,
+    droppedTotal: 0,
+  }));
+  await routeJson(page, "/api/channels/channel-a/modules/belabox/status", {
+    configured: true, updatedAt: null, mode: "interval", sample: null, errorCode: null, polling: true,
+    pollingDesired: true, streamId: "stream-24", belaboxStreamId: "stream-24",
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/belabox/streams", streams);
+  await routeJson(page, "/api/channels/channel-a/modules/belabox/history*", []);
+  await gotoPanel(page, "belabox");
+
+  const list = page.getByTestId("belabox-stream-history-list");
+  await expect(list.locator("li")).toHaveCount(20);
+  await expect.poll(() => list.evaluate((element) => ({
+    maxHeight: getComputedStyle(element).maxHeight,
+    overflowY: getComputedStyle(element).overflowY,
+    scrolls: element.scrollHeight > element.clientHeight,
+  }))).toEqual({ maxHeight: "320px", overflowY: "auto", scrolls: true });
+});
+
+test("chat voting keeps configuration and action stable when results become live", async ({ page }) => {
+  let vote: Record<string, unknown> | null = null;
+  const defaults = {
+    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
+    scale_5: ["1", "2", "3", "4", "5"], options_n: ["1", "2"], free_text: [],
+  };
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts: vote === null ? null : [0, 0], revision: 1, hasOpenBallot: false, defaultDurationSeconds: 60,
+      vote, counts: vote === null ? null : [3, 1], revision: vote === null ? 1 : 2,
+      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 60, defaultLabels: defaults,
     }) });
   });
   await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
+    const requestBody = await route.request().postDataJSON() as { labels: string[] };
+    expect(requestBody.labels).toEqual(["Yes", "No"]);
     vote = {
-      id: "vote-a", channelId: "channel-a", preset: "yes_no", optionCount: 2, labels: ["Yes", "No"],
+      id: "vote-a", channelId: "channel-a", preset: "yes_no", optionCount: 2, labels: requestBody.labels,
       status: "open", openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:01:00.000Z",
-      requestedDurationSeconds: 60, closedAt: null, closeReason: "manual", counts: [0, 0], voterCount: 0,
+      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [3, 1], voterCount: 4,
     };
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
   });
   await routeJson(page, "/api/csrf", { token: "csrf" });
-  await gotoPanel(page, "chat_voting");
-  const status = page.getByTestId("chat-voting-header-status");
-  const detail = page.getByTestId("chat-voting-header-detail");
-  const resultArea = page.locator(".chat-voting-result-area");
-  const hintSlot = page.getByTestId("chat-voting-hint-slot");
-  const actions = page.locator(".chat-voting-actions");
-  await expect(page.getByRole("button", { name: "Start" })).toBeEnabled();
-  const statusBefore = await box(status);
-  const headingBefore = await box(page.locator(".chat-voting-panel .section-heading"));
-  const resultAreaBefore = await box(resultArea);
-  const hintSlotBefore = await box(hintSlot);
-  const actionsBefore = await box(actions);
-  expect(statusBefore.width).toBeLessThanOrEqual(240);
 
-  await page.getByRole("button", { name: "Start" }).click();
-  await expect(detail).toContainText("ends");
-  await expect(actions.locator("button")).toBeVisible();
-  await page.evaluate(() => { window.scrollTo(0, 0); });
-  expect(await box(status)).toEqual(statusBefore);
-  expect(await box(page.locator(".chat-voting-panel .section-heading"))).toEqual(headingBefore);
-  expect(await box(resultArea)).toEqual(resultAreaBefore);
-  expect(await box(hintSlot)).toEqual(hintSlotBefore);
-  expect(await box(actions)).toEqual(actionsBefore);
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await gotoPanel(page, "chat_voting");
+  const setup = page.locator(".chat-voting-setup");
+  const result = page.locator(".chat-voting-result");
+  const action = page.locator(".chat-voting-action");
+  const hint = page.getByTestId("chat-voting-hint-slot");
+  await expect(action).toBeEnabled();
+  const setupBefore = await box(setup);
+  const resultBefore = await box(result);
+  const actionBefore = await box(action);
+  const hintBefore = await box(hint);
+  expect(setupBefore.x).toBeLessThan(resultBefore.x);
+  expect(setupBefore.y).toBe(resultBefore.y);
+
+  await action.click();
+  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+  await expect(page.locator(".chat-voting-results__row")).toHaveCount(2);
+  expect(await box(setup)).toEqual(setupBefore);
+  expect(await box(action)).toEqual(actionBefore);
+  expect(await box(hint)).toEqual(hintBefore);
+  expect((await box(result)).x).toBe(resultBefore.x);
+  expect((await box(result)).y).toBe(resultBefore.y);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileSetup = await box(setup);
+  const mobileResult = await box(result);
+  const mobileAction = await box(action);
+  expect(mobileSetup.y).toBeLessThan(mobileResult.y);
+  expect(mobileAction.y).toBeLessThan(mobileResult.y);
 });
 
-test("free-text voting results and approval keep the panel layout fixed", async ({ page }) => {
-  const terms = Array.from({ length: 200 }, (_, index) => ({
-    term: `term-${String(index).padStart(3, "0")}`,
-    count: index % 10 + 1,
-    approved: false,
-  }));
+test("custom duration fits with its controls and unit at desktop and mobile widths", async ({ page }) => {
+  const defaults = {
+    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
+    scale_5: ["1", "2", "3", "4", "5"], options_n: ["1", "2"], free_text: [],
+  };
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false,
+    defaultDurationSeconds: 120, defaultLabels: defaults,
+  });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await gotoPanel(page, "chat_voting");
+    await chooseOption(page, "Duration", "Custom …");
+    const seconds = page.getByRole("spinbutton", { name: "Seconds" });
+    await seconds.fill("14400");
+    const geometry = await seconds.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const stepper = element.closest(".ui-number-field__stepper") as HTMLElement;
+      const unit = stepper.querySelector(".mantine-Input-section") as HTMLElement;
+      const style = getComputedStyle(element);
+      return {
+        inputWidth: rect.width,
+        contentWidth: rect.width - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight),
+        stepperWidth: stepper.getBoundingClientRect().width,
+        unitFits: unit.getBoundingClientRect().right <= stepper.getBoundingClientRect().right,
+        value: (element as HTMLInputElement).value,
+      };
+    });
+    expect(geometry.value).toBe("14400");
+    expect(geometry.inputWidth).toBeGreaterThanOrEqual(128);
+    expect(geometry.contentWidth).toBeGreaterThanOrEqual(50);
+    expect(geometry.stepperWidth).toBeGreaterThanOrEqual(220);
+    expect(geometry.unitFits).toBe(true);
+    const label = page.getByRole("textbox", { name: "Label for option 1" });
+    await expect(label).toHaveAttribute("aria-label", "Label for option 1");
+    await expect(page.locator(".chat-voting-labels .mantine-InputWrapper-label")).toHaveCount(0);
+  }
+});
+
+test("a timer-closed vote becomes the next draft without changing its configuration", async ({ page }) => {
+  const defaults = {
+    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
+    scale_5: ["1", "2", "3", "4", "5"], options_n: Array.from({ length: 9 }, (_, index) => String(index + 1)), free_text: [],
+  };
+  let vote: Record<string, unknown> | null = null;
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    const counts = vote?.preset === "options_n" ? Array<number>(9).fill(0) : null;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts, revision: vote?.status === "open" ? 2 : 1, terms: null, moreTerms: null,
+      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 120, defaultLabels: defaults,
+    }) });
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
+    const body = await route.request().postDataJSON() as { preset: string; optionCount: number; durationSeconds: number; labels: string[] };
+    expect(body).toMatchObject({ preset: "options_n", optionCount: 9, durationSeconds: 90 });
+    vote = {
+      id: "timer-vote", channelId: "channel-a", preset: body.preset, optionCount: body.optionCount, labels: body.labels,
+      status: "open", openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:01:30.000Z",
+      requestedDurationSeconds: body.durationSeconds, closedAt: null, closeReason: null, counts: Array<number>(9).fill(0), voterCount: 0,
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
+  });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "chat_voting");
+
+  await chooseOption(page, "Vote type", "Options 2–9");
+  await page.getByRole("spinbutton", { name: "Number of options" }).fill("9");
+  await chooseOption(page, "Duration", "Custom …");
+  await page.getByRole("spinbutton", { name: "Seconds" }).fill("90");
+  const setup = page.locator(".chat-voting-setup");
+  const action = page.locator(".chat-voting-action");
+
+  await page.getByRole("button", { name: "Start vote" }).click();
+  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+  await expect(page.getByRole("spinbutton", { name: "Number of options" })).toHaveValue("9");
+  await expect(page.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("90");
+  const setupWhileRunningBefore = await box(setup);
+  const actionWhileRunningBefore = await box(action);
+  vote = { ...(vote as unknown as Record<string, unknown>), status: "closed", closedAt: "2030-01-01T12:01:30.000Z" };
+
+  await expect(page.getByTestId("chat-voting-header-status")).toContainText("Closed", { timeout: 5_000 });
+  await expect(page.getByRole("combobox", { name: "Vote type" })).toHaveValue("Options 2–9");
+  await expect(page.getByRole("spinbutton", { name: "Number of options" })).toHaveValue("9");
+  await expect(page.getByRole("combobox", { name: "Duration" })).toHaveValue("Custom …");
+  await expect(page.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("90");
+  await expect(page.getByRole("button", { name: "Start vote" })).toBeEnabled();
+  expect(await box(setup)).toEqual(setupWhileRunningBefore);
+  expect(await box(action)).toEqual(actionWhileRunningBefore);
+  const metadata = page.locator(".chat-voting-result__meta");
+  const [startTime, endTime] = await page.evaluate(() => [
+    new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(new Date("2030-01-01T12:00:00.000Z")),
+    new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(new Date("2030-01-01T12:01:30.000Z")),
+  ]);
+  await expect(metadata).toContainText(startTime);
+  await expect(metadata).toContainText(endTime);
+  await expect(metadata).not.toContainText("/");
+  expect(await metadata.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
+test("free-text voting always renders five fixed result rows at desktop and mobile widths", async ({ page }) => {
+  const longTerm = "0123456789012345678901234";
+  const terms = [
+    { term: longTerm, count: 2, approved: false },
+    { term: "second", count: 1, approved: false },
+  ];
   let approvedTerm: string | null = null;
   const vote = {
     id: "text-vote-a", channelId: "channel-a", preset: "free_text", optionCount: 0, labels: [],
@@ -331,43 +481,51 @@ test("free-text voting results and approval keep the panel layout fixed", async 
     const currentTerms = terms.map((entry) => ({ ...entry, approved: entry.term === approvedTerm }));
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
       vote, counts: [], revision: approvedTerm === null ? 1 : 2, terms: currentTerms,
-      moreTerms: 3, termFilterReady: true, hasOpenBallot: true, defaultDurationSeconds: 60,
+      moreTerms: 0, termFilterReady: true, hasOpenBallot: true, defaultDurationSeconds: 60,
+      defaultLabels: { yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"], scale_5: ["1", "2", "3", "4", "5"], options_n: ["1", "2"], free_text: [] },
     }) });
   });
   await page.route("**/api/channels/channel-a/modules/chat_voting/approve-term", async (route) => {
     const requestBody = await route.request().postDataJSON() as { pollId: string; term: string };
     expect(requestBody.pollId).toBe(vote.id);
     approvedTerm = requestBody.term;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ terms, moreTerms: 3, revision: 2 }) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ terms, moreTerms: 0, revision: 2 }) });
   });
   await routeJson(page, "/api/csrf", { token: "csrf" });
 
-  const boxesAtWidth = async (): Promise<Record<string, { x: number; y: number; width: number; height: number }>> => ({
-    panel: await box(page.locator(".chat-voting-panel")),
-    result: await box(page.locator(".chat-voting-result-area")),
-    configuration: await box(page.locator(".chat-voting-configuration")),
-    modeSlot: await box(page.getByTestId("chat-voting-text-mode-slot")),
-    hint: await box(page.getByTestId("chat-voting-hint-slot")),
-    actions: await box(page.locator(".chat-voting-actions")),
-  });
-
-  await page.setViewportSize({ width: 1280, height: 844 });
-  await gotoPanel(page, "chat_voting");
-  const rows = page.locator(".chat-voting-results__term-row");
-  await expect(rows).toHaveCount(200);
-  const scrollable = await page.locator(".chat-voting-result-area").evaluate((element) => element.scrollHeight > element.clientHeight);
-  expect(scrollable).toBe(true);
-  const desktopBefore = await boxesAtWidth();
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  const mobileBefore = await boxesAtWidth();
-  await page.locator(".chat-voting-results__term-row button").first().click();
-  await expect(page.locator(".chat-voting-results__term-row button")).toHaveCount(199);
-
-  await page.setViewportSize({ width: 1280, height: 844 });
-  expect(await boxesAtWidth()).toEqual(desktopBefore);
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(await boxesAtWidth()).toEqual(mobileBefore);
+  for (const width of [1280, 390]) {
+    approvedTerm = null;
+    await page.setViewportSize({ width, height: 844 });
+    await gotoPanel(page, "chat_voting");
+    const rows = page.locator(".chat-voting-results__term-row");
+    await expect(rows).toHaveCount(5);
+    expect(await rows.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height))).toEqual(Array<number>(5).fill(34));
+    const fullLabel = rows.first().locator(".chat-voting-results__label");
+    await expect(fullLabel).toHaveAttribute("title", longTerm);
+    expect(await fullLabel.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("nowrap");
+    if (width === 390) expect(await fullLabel.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    const setup = page.locator(".chat-voting-setup");
+    const result = page.locator(".chat-voting-result");
+    const action = page.getByRole("button", { name: "End vote" });
+    const setupBefore = await box(setup);
+    const resultBefore = await box(result);
+    const actionBefore = await box(action);
+    if (width === 1280) {
+      expect(setupBefore.x).toBeLessThan(resultBefore.x);
+      expect(setupBefore.y).toBe(resultBefore.y);
+    } else {
+      expect(setupBefore.y).toBeLessThan(resultBefore.y);
+      expect(actionBefore.y).toBeLessThan(resultBefore.y);
+    }
+    await expect(rows.filter({ hasText: "—" })).toHaveCount(3);
+    await page.locator(".chat-voting-results__term-row button").first().click();
+    await expect(rows).toHaveCount(5);
+    await expect(page.getByText("Approved", { exact: true })).toBeVisible();
+    expect(await box(setup)).toEqual(setupBefore);
+    expect(await box(action)).toEqual(actionBefore);
+    if (width === 1280) expect(await box(result)).toEqual(resultBefore);
+    else expect((await box(result)).y).toBeGreaterThan((await box(action)).y);
+  }
 });
 
 test("text command slash help and variable action keep editor boxes stable", async ({ page }) => {
@@ -396,4 +554,27 @@ test("text command slash help and variable action keep editor boxes stable", asy
   await expect(actionSlot.locator("#command-variable-name")).toBeVisible();
   expect(await box(actionSlot)).toEqual(actionBefore);
   expect(await box(editor)).toEqual(editorBeforeAction);
+});
+
+test("an overnight chat voting result keeps its closing time fully visible at 390px", async ({ page }) => {
+  const defaults = {
+    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
+    scale_5: ["1", "2", "3", "4", "5"], options_n: ["1", "2"], free_text: [],
+  };
+  const vote = {
+    id: "night-vote", channelId: "channel-a", preset: "yes_no", optionCount: 2, labels: ["Yes", "No"],
+    status: "closed", openedAt: new Date(2030, 9, 6, 23, 50).toISOString(), closesAt: new Date(2030, 9, 7, 0, 10).toISOString(),
+    requestedDurationSeconds: 1200, closedAt: new Date(2030, 9, 7, 0, 10).toISOString(), closeReason: "timer", counts: [3, 1], voterCount: 4,
+  };
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote, counts: [3, 1], revision: 2, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60, defaultLabels: defaults,
+  });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "chat_voting");
+
+  const meta = page.locator(".chat-voting-result__meta");
+  await expect(meta).toContainText("(+1)");
+  const clipped = await meta.evaluate((element) => element.scrollWidth > element.clientWidth);
+  expect(clipped).toBe(false);
 });

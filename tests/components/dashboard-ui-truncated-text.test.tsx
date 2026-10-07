@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { Field, Select, UiProvider } from "../../src/dashboard/ui";
@@ -47,5 +47,30 @@ describe("truncated field copy", () => {
     expect(compact?.querySelector(".mantine-InputWrapper-error")).not.toBeInTheDocument();
     expect(container.querySelector("#form-channel")?.closest(".ui-select")).toHaveTextContent("Form hint");
     expect(container.querySelector("#form-channel")?.closest(".ui-select")).toHaveTextContent("Form error");
+  });
+
+  it("renders grouped Select options with their one-line descriptions", () => {
+    render(<UiProvider><Select
+      label="Vote type"
+      value="one"
+      onChange={() => {}}
+      options={[
+        { value: "one", label: "One", group: "Two options", description: "Chat types 1 or 2" },
+        { value: "zero", label: "Zero / One", group: "Two options", description: "Chat types 0 or 1" },
+        { value: "text", label: "Free text", group: "Text", description: "Chat types a word" },
+      ]}
+    /></UiProvider>);
+
+    const combobox = screen.getByRole("combobox", { name: "Vote type" });
+    fireEvent.click(combobox);
+    const listboxId = combobox.getAttribute("aria-controls");
+    const listbox = listboxId === null ? null : document.getElementById(listboxId);
+    expect(listbox).not.toBeNull();
+    if (listbox === null) throw new Error("The type listbox has not mounted.");
+    expect(listbox).toHaveTextContent("Two options");
+    expect(listbox).toHaveTextContent("OneChat types 1 or 2");
+    expect(listbox).toHaveTextContent("Zero / OneChat types 0 or 1");
+    expect(listbox).toHaveTextContent("Text");
+    expect(listbox).toHaveTextContent("Free textChat types a word");
   });
 });

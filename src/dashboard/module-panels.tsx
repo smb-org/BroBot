@@ -9,7 +9,7 @@ import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type Das
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -173,11 +173,12 @@ interface ModulePanelMountProperties {
   initialSelection?: string;
 }
 
-const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }: {
+const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, onSaved }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
+  onSaved?: () => void;
 }): ReactElement | null => {
   const [loaded, setLoaded] = useState<{ definition: SettingsEditorDefinition<Record<string, unknown>>; settings: Record<string, unknown>; revision: number; variables: PanelChannelVariable[] } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -212,11 +213,12 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }:
     channelVariables={loaded.variables}
     initial={loaded.settings}
     initialRevision={loaded.revision}
+    {...(onSaved === undefined ? {} : { onSaved })}
     onReload={() => { setLoaded(null); setLoadError(null); setGeneration((current) => current + 1); }}
   />;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, channelVariables, initial, initialRevision, onReload }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, channelVariables, initial, initialRevision, onSaved, onReload }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
@@ -225,6 +227,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   channelVariables: readonly PanelChannelVariable[];
   initial: Record<string, unknown>;
   initialRevision: number;
+  onSaved?: () => void;
   onReload: () => void;
 }): ReactElement => {
   const [value, setValue] = useState(initial);
@@ -310,7 +313,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
         } else if (field.kind === "text" || field.kind === "template") {
           if (typeof current !== "string" || (!field.optional && current.trim().length === 0)) {
             errors[field.key] = copy.fields[field.key]?.requiredError ?? copy.invalidMessage;
-          } else if (field.kind === "text" && field.maxLength !== undefined && current.length > field.maxLength) {
+          } else if (field.kind === "text" && field.maxLength !== undefined && textFieldLength(field, current) > field.maxLength) {
             errors[field.key] = copy.invalidMessage;
           } else if (field.kind === "text" && field.validate !== undefined &&
               (includeUntouched || validationAttempted || touchedFields.has(field.key)) && !field.validate(current)) {
@@ -394,6 +397,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       setSaved(true);
       setValidationAttempted(false);
       setServerWarnings(response.warnings);
+      onSaved?.();
       return null;
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "module_settings_changed_concurrently") {
@@ -480,13 +484,55 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true, c
   return (
     <section className="module-stack" aria-label={dashboardTexts().module.views}>
       <Suspense fallback={<p className="muted">{dashboardTexts().module.loadingViews}</p>}>
-        {registeredViews.map(({ id, Panel, module }) => <div className="module-view" key={id}>
-          {Panel === null ? null : <Panel channelId={channelId} language={dashboardLanguage()} canManage={canManage} canOperate={canOperate} botIsModerator={botIsModerator} textBlockConditions={MODULES.flatMap((candidate) => candidate.textBlockConditions ?? [])} {...(initialSelection === undefined ? {} : { initialSelection })} />}
-          <ModuleSettingsEditor module={module} channelId={channelId} canManageContent={canManage} language={dashboardLanguage()} />
-        </div>)}
+        {registeredViews.map(({ id, Panel, module }) => <MountedModuleView
+          key={id}
+          module={module}
+          Panel={Panel}
+          channelId={channelId}
+          canManage={canManage}
+          canOperate={canOperate}
+          botIsModerator={botIsModerator}
+          {...(initialSelection === undefined ? {} : { initialSelection })}
+        />)}
       </Suspense>
     </section>
   );
+};
+
+const MountedModuleView = ({ module, Panel, channelId, canManage, canOperate, botIsModerator, initialSelection }: {
+  module: (typeof MODULES)[number];
+  Panel: LazyExoticComponent<ComponentType<ModulePanelProperties>> | null;
+  channelId: string;
+  canManage: boolean;
+  canOperate: boolean;
+  botIsModerator: boolean | null;
+  initialSelection?: string;
+}): ReactElement => {
+  const [settingsRefreshToken, setSettingsRefreshToken] = useState(0);
+  const onSettingsSaved = useCallback((): void => {
+    setSettingsRefreshToken((current) => current + 1);
+  }, []);
+  const settingsEditor = <ModuleSettingsEditor
+    module={module}
+    channelId={channelId}
+    canManageContent={canManage}
+    language={dashboardLanguage()}
+    onSaved={onSettingsSaved}
+  />;
+  return <div className="module-view">
+    {module.settingsEditorPlacement === "before-panel" ? settingsEditor : null}
+    {Panel === null ? null : <Panel
+      channelId={channelId}
+      language={dashboardLanguage()}
+      canManage={canManage}
+      canOperate={canOperate}
+      botIsModerator={botIsModerator}
+      textBlockConditions={MODULES.flatMap((candidate) => candidate.textBlockConditions ?? [])}
+      settingsRefreshToken={settingsRefreshToken}
+      {...(initialSelection === undefined ? {} : { initialSelection })}
+    />}
+    {module.settingsEditorPlacement === "before-panel" ? null : settingsEditor}
+  </div>;
 };
 
 const canManageModules = canManage;

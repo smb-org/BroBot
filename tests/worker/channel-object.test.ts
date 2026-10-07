@@ -1472,6 +1472,7 @@ describe("ChannelObject realtime path", () => {
     await database.prepare(
       `CREATE TABLE IF NOT EXISTS channel_modules (
         channel_id TEXT NOT NULL, module_id TEXT NOT NULL, enabled INTEGER NOT NULL, settings TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
         PRIMARY KEY (channel_id, module_id)
       )`,
     ).run();
@@ -1491,9 +1492,28 @@ describe("ChannelObject realtime path", () => {
     await database.prepare(
       `CREATE TABLE IF NOT EXISTS belabox_status (
         channel_id TEXT PRIMARY KEY, sampled_at TEXT, sample_json TEXT, error_code TEXT,
-        polling INTEGER NOT NULL DEFAULT 0, stream_id TEXT, stream_session_key TEXT, belabox_stream_id TEXT,
-        fetch_phase_json TEXT NOT NULL DEFAULT '{}', recent_json TEXT NOT NULL DEFAULT '[]', alert_json TEXT NOT NULL DEFAULT '{}',
+        polling INTEGER NOT NULL DEFAULT 0, stream_id TEXT, belabox_stream_id TEXT,
+        fetch_phase_json TEXT NOT NULL DEFAULT '{}', recent_json TEXT NOT NULL DEFAULT '[]',
+        history_sample_json TEXT, history_module_revision INTEGER,
+        alert_json TEXT NOT NULL DEFAULT '{}',
+        stream_session_key TEXT,
         revision INTEGER NOT NULL DEFAULT 1
+      )`,
+    ).run();
+    await database.prepare(
+      `CREATE TABLE IF NOT EXISTS belabox_minutes (
+        channel_id TEXT NOT NULL, minute_at TEXT NOT NULL, stream_id TEXT NOT NULL, samples INTEGER NOT NULL,
+        connected_samples INTEGER NOT NULL, bitrate_min REAL NOT NULL, bitrate_max REAL NOT NULL,
+        bitrate_sum REAL NOT NULL, rtt_max REAL NOT NULL, rtt_sum REAL NOT NULL, dropped_delta REAL NOT NULL,
+        PRIMARY KEY (channel_id, minute_at, stream_id)
+      )`,
+    ).run();
+    await database.prepare(
+      `CREATE TABLE IF NOT EXISTS belabox_streams (
+        channel_id TEXT NOT NULL, stream_id TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT,
+        samples INTEGER NOT NULL, bitrate_avg REAL NOT NULL, bitrate_p10 REAL, low_seconds REAL NOT NULL,
+        disconnected_seconds REAL NOT NULL, disconnect_count INTEGER NOT NULL, dropped_total REAL NOT NULL,
+        PRIMARY KEY (channel_id, stream_id)
       )`,
     ).run();
     await database.prepare(
@@ -1527,7 +1547,7 @@ describe("ChannelObject realtime path", () => {
     const databaseBinding = {
       prepare: (sql: string) => {
         const statement = database.prepare(sql);
-        if (!sql.includes("FROM channel_stream_state")) return statement;
+        if (!sql.includes("SELECT state, changed_at, started_at, stream_id") || !sql.includes("FROM channel_stream_state")) return statement;
         return {
           bind: (...values: unknown[]) => {
             const bound = statement.bind(...values);
@@ -1542,6 +1562,7 @@ describe("ChannelObject realtime path", () => {
                 }
                 return row;
               },
+              run: () => bound.run(),
             };
           },
         } as unknown as D1PreparedStatement;
@@ -1594,8 +1615,8 @@ describe("ChannelObject realtime path", () => {
     });
     expect(storageOf(object).values.get("channel:alarm_schedule")).not.toHaveProperty("module:belabox:poll.nextAttemptAt");
     expect(await getBelaboxStatus(databaseBinding, channelId)).toMatchObject({
-      polling: false,
-      streamId: null,
+      polling: true,
+      streamId: "old-stream",
     });
 
     const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
@@ -1614,6 +1635,8 @@ describe("ChannelObject realtime path", () => {
     await object.alarm();
 
     expect(alarmErrors).not.toHaveBeenCalled();
+    expect(pollAlarmHandler).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledOnce();
     expect(await getBelaboxStatus(databaseBinding, channelId)).toMatchObject({
       polling: true,
       streamId: "stream-321",
