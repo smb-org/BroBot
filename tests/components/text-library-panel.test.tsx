@@ -31,8 +31,9 @@ describe("Text library panel layout slots", () => {
 
     const addButton = await screen.findByRole("button", { name: "Add text block" });
     expect(addButton).toBeDisabled();
-    expect(addButton).toHaveAttribute("aria-describedby", "text-library-create-reason");
-    const reason = document.getElementById("text-library-create-reason");
+    const reasonId = addButton.getAttribute("aria-describedby");
+    expect(reasonId).not.toBeNull();
+    const reason = document.getElementById(reasonId as string);
     expect(reason).toBeVisible();
     expect(reason).toHaveTextContent("Only broadcasters and managers may add text blocks.");
     expect(reason).not.toHaveAttribute("aria-hidden");
@@ -50,8 +51,9 @@ describe("Text library panel layout slots", () => {
 
     const addButton = await screen.findByRole("button", { name: "Add text block" });
     expect(addButton).toBeDisabled();
-    expect(addButton).toHaveAttribute("aria-describedby", "text-library-create-reason");
-    const reason = document.getElementById("text-library-create-reason");
+    const reasonId = addButton.getAttribute("aria-describedby");
+    expect(reasonId).not.toBeNull();
+    const reason = document.getElementById(reasonId as string);
     expect(reason).toBeVisible();
     expect(reason).toHaveTextContent("200 of 200 used: limit reached.");
     expect(reason).not.toHaveAttribute("aria-hidden");

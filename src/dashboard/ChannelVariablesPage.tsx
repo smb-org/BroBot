@@ -14,9 +14,9 @@ import {
   type PanelChannelVariable,
   type PanelOverlayElement,
 } from "./api";
-import { apiErrorText, channelVariablesTexts, dashboardLanguage } from "./locale";
+import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage } from "./locale";
 import { useRealtimeVariableUpdates } from "./realtime";
-import { Button, ConfirmDialog, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector, Switch } from "./ui";
+import { Button, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 
 interface ChannelVariablesPageProperties {
@@ -50,6 +50,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const language = dashboardLanguage();
   const labels = channelVariablesTexts(language);
   const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
+  const [search, setSearch] = useState("");
   const [maximum, setMaximum] = useState(CHANNEL_VARIABLE_MAXIMUM_COUNT);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -300,22 +301,32 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     }
   };
 
+  const query = search.trim().toLocaleLowerCase();
+  const visibleVariables = query.length === 0 ? variables : variables.filter((variable) => `${variable.name} ${variable.description}`.toLocaleLowerCase().includes(query));
   const listStatus = loading && variables.length === 0 ? "loading"
     : variables.length === 0 ? loadFailed ? "error" : "empty"
-      : "success";
+      : visibleVariables.length === 0 ? "empty" : "success";
   const list = <section className="channel-variables-page config-section" aria-label={labels.list}>
-    <p className="muted channel-variables-limit-note" role="note">{labels.limitNote(maximum)}</p>
     <div className="channel-variables-limit-slot" aria-live="polite">
-      {canManageContent && variables.length >= maximum ? <p className="muted" role="note">{labels.limitReached}</p> : null}
       {loadFailed && variables.length > 0 ? <Button variant="subtle" onClick={() => { void refresh(); }}>{labels.retry}</Button> : null}
     </div>
+    <ListToolbar
+      searchLabel={labels.search}
+      searchPlaceholder={labels.search}
+      searchClearLabel={dashboardCommonTexts().clearSearch}
+      searchValue={search}
+      onSearchChange={setSearch}
+      create={{ label: labels.create, onClick: beginCreate, disabled: createDisabled, ...(createReason === undefined ? {} : { reason: createReason }) }}
+      usage={{ count: variables.length, maximum, ...(query.length === 0 ? {} : { filteredCount: visibleVariables.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: labels.limitSuffix, loadedSuffix: dashboardCommonTexts().loaded } }}
+      {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
+    />
     <LoadState
       status={listStatus}
       minHeight={360}
       loading={<Skeleton rows={8} height={34} />}
-      empty={<p className="empty-state">{labels.empty}</p>}
+      empty={<p className="empty-state">{variables.length === 0 ? labels.empty : dashboardCommonTexts().noMatches}</p>}
       error={<div className="empty-state"><Button variant="neutral" onClick={() => { void refresh(); }}>{labels.retry}</Button></div>}
-    >{variables.length === 0 ? null : <div className="table-wrap channel-variables-table-wrap">
+    >{visibleVariables.length === 0 ? null : <div className="table-wrap channel-variables-table-wrap">
       <table className="table channel-variables-table">
         <thead><tr>
           <th scope="col">{labels.name}</th>
@@ -323,15 +334,15 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           <th scope="col" className="channel-variables-table__value-heading">{labels.value}</th>
           <th scope="col" className="channel-variables-table__reset-heading"><span className="sr-only">{labels.resetOnStreamStart}</span><Icon name="reload" size={16} /></th>
         </tr></thead>
-        <tbody>{variables.map((variable) => (
+        <tbody>{visibleVariables.map((variable) => (
           <tr key={variable.name} tabIndex={0} aria-selected={variable.name === selectedName} onClick={() => { selectVariable(variable); }} onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectVariable(variable); }
           }}>
             <th scope="row" className="mono">{`{var.${variable.name}}`}</th>
-            <td className="channel-variables-table__description" title={variable.description || labels.noDescription}>{variable.description || labels.noDescription}</td>
+            <td className="channel-variables-table__description" title={variable.description || labels.noDescription}>{variable.description || <EmptyCellValue />}</td>
             <td className="number channel-variables-table__value">{new Intl.NumberFormat(language).format(variable.value)}</td>
             <td className="channel-variables-table__reset">
-              {variable.resetOnStreamStart ? <span role="img" aria-label={labels.resetOnStreamStart} title={labels.resetOnStreamStart}><Icon name="reload" size={16} /></span> : <span className="muted" aria-hidden="true">—</span>}
+              {variable.resetOnStreamStart ? <span role="img" aria-label={labels.resetOnStreamStart} title={labels.resetOnStreamStart}><Icon name="reload" size={16} /></span> : <EmptyCellValue />}
             </td>
           </tr>
         ))}</tbody>
@@ -466,11 +477,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   ) : null;
 
   return <>
-    <PageHeader kind="variable" title={labels.title} subtitle={labels.count(variables.length, maximum)} actions={<div className="list-create-action">
-      <Button icon="add" iconOnly ariaLabel={labels.create} disabled={createDisabled}
-        {...(createReason === undefined ? {} : { describedBy: "channel-variable-create-reason" })} onClick={beginCreate} />
-      <p id="channel-variable-create-reason" className="list-create-action__reason" role={createReason === undefined ? undefined : "note"} aria-hidden={createReason === undefined}>{createReason ?? ""}</p>
-    </div>} />
+    <PageHeader kind="variable" title={labels.title} subtitle="" />
     <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
     <ConfirmDialog opened={confirmDelete} title={labels.deleteTitle(selected?.name ?? "")} description={labels.deleteDescription(selected?.name ?? "", usageNames.join(", "), selectedUsages.filter((usage) => usage.moduleId === "overlays" && usage.reconnect !== true).length)} confirmLabel={labels.deleteConfirm(selected?.name ?? "")} cancelLabel={labels.deleteCancel} onCancel={() => { setConfirmDelete(false); }} onConfirm={() => { void remove(); }} pending={pending} danger />
   </>;

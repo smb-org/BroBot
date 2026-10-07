@@ -8,6 +8,11 @@ import type { GamePickerMessages } from "../../../dashboard/ui";
 
 export interface TextCommandsTexts {
   title: string;
+  search: string;
+  activeFilters: string;
+  resetFilters: string;
+  countSuffix: string;
+  filteredSuffix: string;
   tabs: { settings: string; advanced: string };
   list: string;
   details: (name: string) => string;
@@ -192,7 +197,7 @@ const templateMessages: LocaleCatalog<TextAreaMessages> = {
 
 const catalog: LocaleCatalog<TextCommandsTexts> = {
   de: {
-    title: "Textbefehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
+    title: "Textbefehle", search: "Befehle suchen", activeFilters: "Aktive Filter:", resetFilters: "Zurücksetzen", countSuffix: "Befehle", filteredSuffix: "Befehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
     load: "Textbefehle werden geladen …", loadError: "Die Textbefehle konnten nicht geladen werden.",
     saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
     name: "Name", aliases: "Aliase", templateFieldLabels: { usageText: "Antwort bei fehlenden oder ungültigen Argumenten" }, usageAdvanced: "Erweitert", usageTextHint: "Wird gesendet, wenn erforderliche Argumente fehlen oder ungültig sind.", createVariable: "Variable anlegen",
@@ -297,7 +302,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     argsEveryoneWarning: "Mit {args} kann jede Person im Chat Text an den Bot übergeben.",
   },
   en: {
-    title: "Text commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
+    title: "Text commands", search: "Search commands", activeFilters: "Active filters:", resetFilters: "Reset", countSuffix: "commands", filteredSuffix: "commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
     load: "Loading text commands …", loadError: "The text commands could not be loaded.",
     saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
     name: "Name", aliases: "Aliases", templateFieldLabels: { usageText: "Reply when arguments are missing or invalid" }, usageAdvanced: "Advanced", usageTextHint: "Sent when required arguments are missing or invalid.", createVariable: "Create variable",

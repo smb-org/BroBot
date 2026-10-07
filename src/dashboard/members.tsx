@@ -4,10 +4,10 @@ import { CHANNEL_ROLES, canManage, type ChannelRole } from "../contracts/values"
 import type { PanelMember } from "../panel-contract";
 import { membersTexts, roleDescription, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatDate } from "./locale";
-import { ModuleCount, ModuleHeading } from "./module-panels";
+import { ModuleHeading } from "./module-panels";
 import { MemberAvatar } from "./member-avatar";
 import { MemberGrantEditor } from "./member-grant-editor";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, ListDetail, ListPaginationFooter, LoadState, notify, useDraftGuard, useInspectorSelection } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, useDraftGuard, useInspectorSelection } from "./ui";
 import {
   addChannelMember,
   PanelApiError,
@@ -84,11 +84,13 @@ const memberLabel = (member: PanelMember): string =>
 
 const MemberList = ({
   members,
+  broadcasterCount,
   selectedUserId,
   onSelect,
   rowRef,
 }: {
   members: PanelMember[];
+  broadcasterCount: number;
   selectedUserId: string | null;
   onSelect: (userId: string) => void;
   rowRef: (userId: string) => (row: HTMLTableRowElement | null) => void;
@@ -128,6 +130,7 @@ const MemberList = ({
                       ) : null}
                       {member.displayName === null && member.login === null ? <span className="login-hint">{texts.twitchId(member.userId)}</span> : null}
                     </div>
+                    {isLastBroadcaster(member, broadcasterCount) ? <span className="table-lock" role="img" aria-label={texts.lastBroadcaster} title={texts.lastBroadcaster}><Icon name="lock" size={16} /></span> : null}
                   </div>
                 </th>
                 <td role="cell">{roleLabel(member.role)}</td>
@@ -297,6 +300,7 @@ export const MembersPage = ({
   const texts = membersTexts();
   const canManageMembers = canManage(ownRole);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const [grantOpen, setGrantOpen] = useState(false);
   const grantButtonRef = useRef<HTMLButtonElement | null>(null);
   const [roleDraft, setRoleDraft] = useState<{ userId: string; role: ChannelRole } | null>(null);
@@ -307,6 +311,12 @@ export const MembersPage = ({
   }, [members, selectedUserId, closeSelection]);
 
   const selectedMember = members.find((member) => member.userId === selectedUserId) ?? null;
+  const query = search.trim().toLocaleLowerCase();
+  const visibleMembers = query.length === 0 ? members : members.filter((member) => [
+    member.displayName,
+    member.login,
+    roleLabel(member.role),
+  ].some((value) => value?.toLocaleLowerCase().includes(query) === true));
   const draftRole = selectedMember !== null && roleDraft?.userId === selectedMember.userId ? roleDraft.role : selectedMember?.role ?? "operator";
   const roleDirty = selectedMember !== null && roleDraft !== null && roleDraft.userId === selectedMember.userId && roleDraft.role !== selectedMember.role;
 
@@ -368,12 +378,7 @@ export const MembersPage = ({
 
   return (
     <>
-      <ModuleHeading kind="members" title={texts.title} subtitle={<ModuleCount count={members.length} label={texts.count} />} actions={<div className="list-create-action">
-        <Button ref={grantButtonRef} variant="subtle" iconOnly icon="add" ariaLabel={texts.grantAccessTitle}
-          {...(!canManageMembers ? { describedBy: "members-create-reason" } : {})}
-          disabled={!canManageMembers} onClick={openGrant} />
-        <p id="members-create-reason" className="list-create-action__reason" role={canManageMembers ? undefined : "note"} aria-hidden={canManageMembers ? true : undefined}>{canManageMembers ? "" : texts.managementLocked}</p>
-      </div>} />
+      <ModuleHeading kind="members" title={texts.title} subtitle="" />
       <section className="content-section" aria-label={texts.membersWithAccess}>
         <div className="section-heading">
           <h2>{texts.membersWithAccess}</h2>
@@ -381,13 +386,27 @@ export const MembersPage = ({
         <div className={loading ? "stale" : undefined}>
           <ListDetail
             list={<div className="members-page__list-column">
+              <ListToolbar
+                searchLabel={texts.searchMembers}
+                searchPlaceholder={texts.searchMembers}
+                searchClearLabel={dashboardCommonTexts().clearSearch}
+                searchValue={search}
+                onSearchChange={setSearch}
+                create={{ label: texts.grantAccessTitle, ref: grantButtonRef, onClick: openGrant, disabled: !canManageMembers, ...(!canManageMembers ? { reason: texts.managementLocked } : {}) }}
+                usage={{
+                  count: members.length,
+                  ...(query.length > 0 ? { filteredCount: visibleMembers.length } : { loaded: true }),
+                  copy: { countSuffix: texts.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: texts.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: "", loadedSuffix: dashboardCommonTexts().loaded },
+                }}
+                {...(query.length === 0 ? {} : { activeFilters: `${texts.searchMembers}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
+              />
               <LoadState
-                status={members.length > 0 ? "success" : error !== null ? "error" : loading ? "loading" : "empty"}
+                status={members.length > 0 ? visibleMembers.length === 0 ? "empty" : "success" : error !== null ? "error" : loading ? "loading" : "empty"}
                 minHeight={320}
                 loading={<MemberListSkeleton />}
-                empty={<MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
+                empty={members.length > 0 ? <p className="empty-state">{dashboardCommonTexts().noMatches}</p> : <MemberList members={members} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
                 error={<MemberListSkeleton />}
-              >{members.length === 0 ? null : <MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>
+              >{members.length === 0 ? null : <MemberList members={visibleMembers} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>
               {members.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={members.length} loadedLabel={texts.loaded}>
                 {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
               </ListPaginationFooter>}

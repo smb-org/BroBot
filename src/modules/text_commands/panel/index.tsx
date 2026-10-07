@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
-import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
+import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
-  Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
+  Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, EmptyCellValue, Field, FieldPair, ListDetail, ListToolbar, NumberField, Select,
   GamePicker, InspectorFieldRow, InspectorSection, LoadState, Skeleton, TimeoutDurationRangeFields,
   registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection, notify,
   type EditorInvalidField,
@@ -171,7 +171,7 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, toggleB
       <th scope="row" className="mono">!{initial.name}</th>
       <td>{labels.kindLabels[initial.kind]}</td>
       <td className={`table__answer${initial.text.length === 0 && initial.variableAction !== null ? " table__answer--placeholder" : ""}`} title={initial.kind === "list" ? undefined : initial.text}>
-        {initial.kind === "list" ? "—" : initial.text.length > 0 ? initial.text : initial.variableAction === null ? "—" : labels.actionResponse(initial.variableAction.name, initial.variableAction.operation, initial.variableAction.amount)}
+        {initial.kind === "list" ? <EmptyCellValue /> : initial.text.length > 0 ? initial.text : initial.variableAction === null ? <EmptyCellValue /> : labels.actionResponse(initial.variableAction.name, initial.variableAction.operation, initial.variableAction.amount)}
       </td>
       <td><Badge tone={initial.minimumTier === "everyone" ? "neutral" : "brand"}>{labels.tierLabels[initial.minimumTier]}</Badge></td>
       <td><div onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
@@ -1023,6 +1023,7 @@ export const TextCommandsPanel = ({
 }): ReactElement => {
   const labels = textCommandsTexts(language);
   const [commands, setCommands] = useState<TextCommand[]>([]);
+  const [search, setSearch] = useState("");
   const [channelVariables, setChannelVariables] = useState<TextCommandChannelVariable[]>([]);
   const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useInspectorSelection<string>();
   const [createOpen, setCreateOpen] = useState(false);
@@ -1102,24 +1103,41 @@ export const TextCommandsPanel = ({
     closeSelection();
   };
 
-  const listStatus = loading ? "loading" : loadFailed ? "error" : commands.length === 0 ? "empty" : "success";
-  const createReason = canManageContent ? "" : labels.managementLocked;
+  const query = search.trim().toLocaleLowerCase();
+  const visibleCommands = useMemo(() => query.length === 0 ? commands : commands.filter((command) => [
+    command.name,
+    ...command.aliases,
+    command.text,
+    command.usageText ?? "",
+    labels.kindLabels[command.kind],
+  ].some((value) => value.toLocaleLowerCase().includes(query))), [commands, labels.kindLabels, query]);
+  const listStatus = loading ? "loading" : loadFailed ? "error" : visibleCommands.length === 0 ? "empty" : "success";
+  const createReason = canManageContent ? undefined : labels.managementLocked;
   const list = <section className="command-list config-section" aria-label={labels.list}>
     <div className="section-heading">
       <h2>{labels.list}</h2>
-      <div className="list-create-action">
-        <Button icon="add" iconOnly ariaLabel={labels.add} disabled={!canManageContent}
-          {...(!canManageContent ? { describedBy: "text-command-create-reason" } : {})} onClick={openCreate} />
-        <p id="text-command-create-reason" className="list-create-action__reason" role={canManageContent ? undefined : "note"} aria-hidden={canManageContent ? true : undefined}>{createReason}</p>
-      </div>
     </div>
+    <ListToolbar
+      searchLabel={labels.search}
+      searchPlaceholder={labels.search}
+      searchClearLabel={dashboardCommonTexts().clearSearch}
+      searchValue={search}
+      onSearchChange={setSearch}
+      create={{ label: labels.add, onClick: openCreate, disabled: !canManageContent, ...(createReason === undefined ? {} : { reason: createReason }) }}
+      usage={{
+        count: commands.length,
+        ...(query.length === 0 ? {} : { filteredCount: visibleCommands.length }),
+        copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: "", loadedSuffix: dashboardCommonTexts().loaded },
+      }}
+      {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); } })}
+    />
     <LoadState status={listStatus} minHeight="calc(var(--s10) * 15)"
       loading={<Skeleton rows={8} height={34} />}
-      empty={<p className="empty-state">{labels.empty}</p>}
+      empty={<p className="empty-state">{commands.length > 0 ? dashboardCommonTexts().noMatches : labels.empty}</p>}
       error={<div aria-hidden="true" />}>
       <div className="table-wrap" style={{ maxHeight: "calc(var(--s10) * 15)", overflowY: "auto" }}><table className="table"><thead><tr>
         <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>
-      </tr></thead><tbody>{commands.map((command) => <TextCommandRow
+      </tr></thead><tbody>{visibleCommands.map((command) => <TextCommandRow
         key={command.name}
         initial={command}
         language={language}

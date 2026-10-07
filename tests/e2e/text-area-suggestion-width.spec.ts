@@ -87,9 +87,8 @@ test("the template variable suggestion dropdown is wide enough on desktop and fi
     await commandRow.click();
     const responseField = page.getByRole("textbox", { name: "Antwort" });
     await expect(responseField).toBeVisible();
-    await responseField.click();
-    await page.keyboard.press("End");
-    await page.keyboard.type("{");
+    await responseField.fill("Hallo {");
+    await responseField.press("End");
     await expect(dropdown).toBeVisible();
   };
 

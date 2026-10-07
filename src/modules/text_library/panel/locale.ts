@@ -8,6 +8,9 @@ export interface TextLibraryTexts {
   search: string;
   activeFilters: string;
   resetFilters: string;
+  countSuffix: string;
+  limitSuffix: string;
+  filteredSuffix: string;
   categoryFilter: string;
   gameFilter: string;
   allCategories: string;
@@ -119,6 +122,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     search: "Textbausteine suchen",
     activeFilters: "Aktive Filter:",
     resetFilters: "Zurücksetzen",
+    countSuffix: "Textbausteine",
+    limitSuffix: "Textbausteine belegt",
+    filteredSuffix: "Textbausteine",
     categoryFilter: "Kategorie",
     allCategories: "Alle Kategorien",
     gameFilter: "Spiel",
@@ -259,6 +265,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     search: "Search text blocks",
     activeFilters: "Active filters:",
     resetFilters: "Reset",
+    countSuffix: "text blocks",
+    limitSuffix: "text blocks used",
+    filteredSuffix: "text blocks",
     categoryFilter: "Category",
     allCategories: "All categories",
     gameFilter: "Game",

@@ -99,12 +99,27 @@ describe("Text command editor", () => {
 
     const addButton = await screen.findByRole("button", { name: "Befehl anlegen" });
     expect(addButton).toBeDisabled();
-    expect(addButton).toHaveAttribute("aria-describedby", "text-command-create-reason");
-    const reason = document.getElementById("text-command-create-reason");
+    const reasonId = addButton.getAttribute("aria-describedby");
+    expect(reasonId).not.toBeNull();
+    const reason = document.getElementById(reasonId as string);
     expect(reason).toBeVisible();
     expect(reason).toHaveTextContent(textCommandsTexts("de").managementLocked);
     expect(reason).not.toHaveAttribute("aria-hidden");
     expect(document.querySelector(".command-list .form-error")).toBeNull();
+  });
+
+  it("filters commands immediately and reports the filtered count", async () => {
+    renderPanel(panelFetch({ commands: () => [
+      makeCommand(),
+      makeCommand({ name: "discord", aliases: ["community"], text: "Join the Discord" }),
+    ] }));
+
+    const search = await screen.findByRole("textbox", { name: "Befehle suchen" });
+    fireEvent.change(search, { target: { value: "discord" } });
+
+    expect(screen.getByText("!discord")).toBeVisible();
+    expect(screen.queryByText("!hallo")).not.toBeInTheDocument();
+    expect(document.querySelector(".list-toolbar__usage")).toHaveTextContent("1 von 2 Befehle");
   });
 
   it("reports a command-list load failure in the persistent toast host", async () => {

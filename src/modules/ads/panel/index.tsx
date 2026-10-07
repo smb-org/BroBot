@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
-import { Button, Icon, LoadState, Skeleton, notify } from "../../../dashboard/ui";
+import { Button, EmptyCellValue, Icon, LoadState, Skeleton, notify } from "../../../dashboard/ui";
 import type { AdsScheduleResponse } from "../contracts";
 import { loadAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
@@ -121,7 +121,7 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
               <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody><tr>
                 <td className="number">{formatTimestamp(schedule.schedule.nextAdAt, language)}</td>
-                <td className="number">{schedule.schedule.duration === null ? "—" : `${String(schedule.schedule.duration)} s`}</td>
+                <td className="number">{schedule.schedule.duration === null ? <EmptyCellValue /> : `${String(schedule.schedule.duration)} s`}</td>
               </tr></tbody>
             </table>
           </div>

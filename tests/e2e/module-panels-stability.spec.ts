@@ -596,7 +596,7 @@ test("text-library game filter keeps the list position when games are selected a
     await gotoPanel(page, "text_library");
     const list = page.getByTestId("text-library-list-slot");
     await expect(list).toBeVisible();
-    const slot = page.locator(".text-library__filters .ui-game-picker__selected");
+    const slot = page.locator(".text-library__list-toolbar .list-toolbar__filters .ui-game-picker__selected");
     const before = { list: await box(list), slot: await box(slot) };
     const search = page.getByPlaceholder("Search games");
     for (const name of ["Just Chatting", "Software and Game Development", "Retro Adventure Collection Deluxe"]) {

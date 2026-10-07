@@ -5,9 +5,9 @@ import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
 import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Badge, Button, ChatPreview, ConfirmDialog, Field, FilterBar, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, LoadState, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, Skeleton, SubInspector, TextArea, notify, useDraftGuard } from "../../../dashboard/ui";
+import { Badge, Button, ChatPreview, ConfirmDialog, Field, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, Skeleton, SubInspector, TextArea, notify, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
-import { systemTemplateVariableLocale } from "../../../dashboard/locale";
+import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { textLibraryTexts } from "./locale";
 import { estimateEmbeddedBlockOverflow } from "./embedded-block-overflow";
 import {
@@ -407,7 +407,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   ].filter((message): message is string => message !== null);
   const atBlockLimit = data.blocks.length >= TEXT_BLOCK_MAXIMUMS.blocksPerChannel;
   const createReason = !canManage ? labels.managementLocked
-    : atBlockLimit ? labels.blockLimitReached(data.blocks.length, TEXT_BLOCK_MAXIMUMS.blocksPerChannel) : "";
+    : atBlockLimit ? labels.blockLimitReached(data.blocks.length, TEXT_BLOCK_MAXIMUMS.blocksPerChannel) : undefined;
 
   return (
     <section className="module-stack text-library" aria-label={labels.library} style={{ minHeight: "calc(var(--s10) * 30)" }}>
@@ -416,18 +416,23 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
         list={<section className="config-section text-library__list-panel" aria-label={labels.library}>
           <div className="section-heading">
             <h2>{labels.library}</h2>
-            <div className="list-create-action">
-              <Button icon="add" iconOnly ariaLabel={labels.addBlock} disabled={pending || createReason.length > 0}
-                {...(createReason.length === 0 ? {} : { describedBy: "text-library-create-reason" })} onClick={openCreate} />
-              <p id="text-library-create-reason" className="list-create-action__reason" aria-hidden={createReason.length === 0 ? true : undefined}>{createReason}</p>
-            </div>
           </div>
-          <FilterBar label={labels.library} className="text-library__filters" summary={activeFilters.length === 0 ? undefined : <div className="form-actions"><p className="muted" aria-live="polite">{labels.activeFilters} {activeFilters.join(" · ")}</p><Button variant="subtle" onClick={() => { setSearch(""); setCategoryFilter(""); setGameFilter([]); }}>{labels.resetFilters}</Button></div>}>
-            <Field label={labels.search} placeholder={labels.search} value={search} onChange={setSearch} />
-            <Select label={labels.categoryFilter} value={categoryFilter} onChange={(value) => setCategoryFilter(value ?? "")} options={[{ value: "", label: labels.allCategories }, ...categories]} />
-            <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter} messages={{ ...labels.gamePicker, label: labels.gameFilter }} visuallyHiddenLabel />
-          </FilterBar>
-          <p className="muted">{labels.blockLimit(TEXT_BLOCK_MAXIMUMS.blocksPerChannel)}</p>
+          <ListToolbar
+            className="text-library__list-toolbar"
+            searchLabel={labels.search}
+            searchPlaceholder={labels.search}
+            searchClearLabel={dashboardCommonTexts().clearSearch}
+            searchValue={search}
+            onSearchChange={setSearch}
+            filtersLabel={labels.library}
+            filters={<>
+              <Select label={labels.categoryFilter} value={categoryFilter} onChange={(value) => setCategoryFilter(value ?? "")} options={[{ value: "", label: labels.allCategories }, ...categories]} />
+              <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter} messages={{ ...labels.gamePicker, label: labels.gameFilter }} visuallyHiddenLabel />
+            </>}
+            create={{ label: labels.addBlock, onClick: openCreate, disabled: pending || createReason !== undefined, ...(createReason === undefined ? {} : { reason: createReason }) }}
+            usage={{ count: data.blocks.length, maximum: TEXT_BLOCK_MAXIMUMS.blocksPerChannel, ...(activeFilters.length === 0 ? {} : { filteredCount: visibleBlocks.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: labels.limitSuffix, loadedSuffix: dashboardCommonTexts().loaded } }}
+            {...(activeFilters.length === 0 ? {} : { activeFilters: activeFilters.join(" · "), activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); setCategoryFilter(""); setGameFilter([]); } })}
+          />
           <div data-testid="text-library-list-slot" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>
           {visibleBlocks.length === 0 ? <p className="empty-state" style={{ minHeight: "calc(var(--s10) * 18)" }}>{labels.empty}</p> : (
             <div className="table-wrap">
