@@ -493,6 +493,18 @@ export const prepareBelaboxSampleWrite = (
        belabox_stream_id = CASE
          WHEN belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at
          THEN excluded.belabox_stream_id ELSE belabox_status.belabox_stream_id END,
+       fetch_phase_json = CASE
+         WHEN (belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at)
+          AND belabox_status.stream_session_key IS NOT excluded.stream_session_key
+         THEN excluded.fetch_phase_json ELSE belabox_status.fetch_phase_json END,
+       recent_json = CASE
+         WHEN (belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at)
+          AND belabox_status.stream_session_key IS NOT excluded.stream_session_key
+         THEN '[]' ELSE belabox_status.recent_json END,
+       alert_json = CASE
+         WHEN (belabox_status.sampled_at IS NULL OR excluded.sampled_at > belabox_status.sampled_at)
+          AND belabox_status.stream_session_key IS NOT excluded.stream_session_key
+         THEN '{}' ELSE belabox_status.alert_json END,
        error_code = NULL,
        revision = belabox_status.revision + 1
      WHERE (? = 0 OR belabox_status.revision = ?)`,

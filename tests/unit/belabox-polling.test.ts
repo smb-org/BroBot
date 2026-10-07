@@ -349,6 +349,112 @@ describe("BELABOX polling", () => {
     expect(diagnostics.map(({ code }) => code)).toEqual(["belabox.alert_started"]);
   });
 
+  it("does not use S1's hold timestamp for S2's first poll after Check now", async () => {
+    await insertModule(database, {
+      ...BELABOX_DEFAULT_SETTINGS,
+      mode: "interval",
+      intervalSeconds: 5,
+      holdSeconds: 5,
+      recoverHoldSeconds: 5,
+      chatEnabled: true,
+    });
+    const { context, sendChat } = alarmContext(database);
+    const s1StartedAt = new Date(Date.now()).toISOString();
+    const s1Session = {
+      state: "online" as const,
+      changedAt: s1StartedAt,
+      startedAt: s1StartedAt,
+      streamId: "stream-s1",
+    };
+    let liveStreamId = "stream-s1";
+    context.streamStartedAt = () => Promise.resolve({ streamId: liveStreamId, startedAt: null });
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-s1')`,
+    ).bind(CHANNEL_ID, s1StartedAt, s1StartedAt).run();
+
+    const lowRelay = () => Promise.resolve(jsonResponse(relayPayload(true, 900)));
+    await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, lowRelay);
+    const s1HoldStartedAt = (await getBelaboxStatus(context.DB, CHANNEL_ID))?.alertState.since;
+    expect(s1HoldStartedAt).toBe(new Date(Date.now()).toISOString());
+    expect(sendChat).not.toHaveBeenCalled();
+
+    vi.setSystemTime(Date.now() + 1_000);
+    await prepareBelaboxSampleWrite(
+      context.DB,
+      CHANNEL_ID,
+      normalizedSample(new Date(Date.now()).toISOString(), 900),
+      "ciphertext-version",
+      { sql: "", values: [] },
+      {
+        streamId: "stream-s1",
+        streamSessionKey: "stream:stream-s1",
+        belaboxStreamId: "stream-s1",
+        expectedStreamSession: s1Session,
+      },
+    ).run();
+    expect((await getBelaboxStatus(context.DB, CHANNEL_ID))?.alertState.since).toBe(s1HoldStartedAt);
+
+    vi.setSystemTime(Date.now() + 59_000);
+    const s2StartedAt = new Date(Date.now()).toISOString();
+    const s2Session = {
+      state: "online" as const,
+      changedAt: s2StartedAt,
+      startedAt: s2StartedAt,
+      streamId: "stream-s2",
+    };
+    await database.prepare(
+      `UPDATE channel_stream_state
+          SET changed_at = ?, started_at = ?, stream_id = ?
+        WHERE channel_id = ?`,
+    ).bind(s2StartedAt, s2StartedAt, "stream-s2", CHANNEL_ID).run();
+    liveStreamId = "stream-s2";
+    await database.prepare(
+      "UPDATE belabox_status SET fetch_phase_json = ?, recent_json = ? WHERE channel_id = ?",
+    ).bind(
+      JSON.stringify({ consecutiveFailures: 3, fetchFailing: true }),
+      JSON.stringify([[new Date(Date.now() - 5_000).toISOString(), 900, 41, true]]),
+      CHANNEL_ID,
+    ).run();
+
+    const s2CheckAt = new Date(Date.now()).toISOString();
+    await prepareBelaboxSampleWrite(
+      context.DB,
+      CHANNEL_ID,
+      normalizedSample(s2CheckAt, 900),
+      "ciphertext-version",
+      { sql: "", values: [] },
+      {
+        streamId: "stream-s2",
+        streamSessionKey: "stream:stream-s2",
+        belaboxStreamId: "stream-s2",
+        expectedStreamSession: s2Session,
+      },
+    ).run();
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      streamSessionKey: "stream:stream-s2",
+      fetchPhase: { consecutiveFailures: 0, failing: false },
+      recent: [],
+      alertState: {
+        phase: "ok",
+        kind: null,
+        since: null,
+        episodeStartedAt: null,
+        completedEpisodeAt: null,
+        lastChatSentAt: null,
+        chatSentInEpisode: false,
+        pendingChat: null,
+      },
+    });
+
+    await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, lowRelay);
+
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      alertState: { phase: "pending", kind: "low", since: s2CheckAt },
+    });
+  });
+
   it("retries a retryable alert send on the next successful poll with the same key", async () => {
     await insertModule(database, {
       ...BELABOX_DEFAULT_SETTINGS,
