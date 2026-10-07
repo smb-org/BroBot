@@ -62,16 +62,20 @@ describe("module overlay element declarations", () => {
       kind: "chat_voting.tally",
       configVersion: 1,
       defaultSize: { width: 480, height: 240 },
-      defaultConfig: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15, width: 480 },
+      defaultConfig: { layout: "bars", showPercent: true, showCountdown: true, hideAfterCloseSeconds: 15, width: 480 },
     });
     expect(tally?.parseConfig({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0 }))
-      .toEqual({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0, width: 480 });
+      .toEqual({ layout: "strip", showPercent: false, showCountdown: true, hideAfterCloseSeconds: 0, width: 480 });
+    expect(tally?.parseConfig({ showCountdown: false })).toMatchObject({ showCountdown: false });
     expect(tally?.parseConfig({ width: 199 })).toBeNull();
     expect(tally?.parseConfig({ width: 1921 })).toBeNull();
     expect(tally?.parseConfig({ hideAfterCloseSeconds: 121 })).toBeNull();
     expect(tally?.parseConfig({ html: "unsafe" })).toBeNull();
     expect(tally?.previewState?.({}, "en", Date.parse("2030-01-01T00:00:00.000Z"))).toMatchObject({
       title: "What should we eat today?",
+      closesAt: "2030-01-01T00:02:00.000Z",
+      requestedDurationSeconds: 120,
+      serverNow: "2030-01-01T00:00:00.000Z",
     });
     expect(tally?.mergeRealtimeState).toBeTypeOf("function");
   });

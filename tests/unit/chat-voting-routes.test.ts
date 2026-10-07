@@ -279,6 +279,8 @@ describe("chat voting routes", () => {
     expect(publish).toHaveBeenCalledOnce();
     expect(publish).toHaveBeenCalledWith(CHANNEL_ID, "chat_voting", "tally", "chat_voting.tally", expect.objectContaining({
       pollId: openTextVote.id,
+      closesAt: openTextVote.closesAt,
+      requestedDurationSeconds: openTextVote.requestedDurationSeconds,
       revision: 2,
       terms: [{ term: "alpha", count: 1, approved: false }],
     }));

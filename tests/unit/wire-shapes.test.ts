@@ -381,7 +381,7 @@ const expectedModuleSettings = {
     zeroOneLabels: "",
     oneTwoLabels: "",
     autoCloseSeconds: 0,
-    startText: "Abstimmung gestartet: {vote.title} – {vote.options}",
+    startText: "Abstimmung gestartet: {vote.title} – {vote.options} – läuft {vote.duration}",
     announceResult: true,
     resultText: "{vote.result}",
     resultTarget: "source_only",

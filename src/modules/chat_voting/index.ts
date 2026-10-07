@@ -1,7 +1,7 @@
 import { settingsVariableReferences } from "../contract";
 import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../contract";
 import { createChatVotingRepository } from "./repository";
-import { chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
+import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
 import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage } from "./service";
 import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
 import { chatVotingOverlayElements } from "./overlay/element";
@@ -29,6 +29,13 @@ const optionsVariable = {
   maxLength: 500,
   sample: "1 = Pizza, 2 = Burger, 3 = Kebab",
   picker: chatVotingOptionsVariableCatalog,
+} as const;
+
+const durationVariable = {
+  name: "vote.duration",
+  maxLength: 16,
+  sample: "2 minutes",
+  picker: chatVotingDurationVariableCatalog,
 } as const;
 
 const initialTallyState = async (
@@ -73,6 +80,8 @@ const initialTallyState = async (
     revision,
     openedAt: vote.openedAt,
     closesAt: vote.closesAt,
+    requestedDurationSeconds: vote.requestedDurationSeconds,
+    serverNow: new Date(context?.now ?? Date.now()).toISOString(),
     closedAt: vote.closedAt,
     closeReason: vote.closeReason,
     voterCount: vote.voterCount,
@@ -88,8 +97,8 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   defaultSettings: DEFAULT_CHAT_VOTING_SETTINGS,
   templateContext: "event",
   templateFields: {
-    startText: [titleVariable, optionsVariable],
-    resultText: [resultVariable, titleVariable, optionsVariable],
+    startText: [titleVariable, optionsVariable, durationVariable],
+    resultText: [resultVariable, titleVariable, optionsVariable, durationVariable],
   },
   variableReferences: settingsVariableReferences(CHAT_VOTING_MODULE_ID, ["startText", "resultText"]),
   templateVariableGroup: {

@@ -72,15 +72,21 @@ describe("chat voting settings editor", () => {
       expect(screen.getByText(copy.templateMessages.countLabel(DEFAULT_CHAT_VOTING_SETTINGS.startText.length, 500))).toBeInTheDocument();
       expect(screen.getByText(startTextCopy.previewLabel)).toBeInTheDocument();
       expect(screen.getByRole("button", { name: pickerMessages.triggerLabel })).toBeInTheDocument();
-      expect(startTextCopy.variables.map(({ name }) => name)).toEqual(["vote.title", "vote.options"]);
+      expect(startTextCopy.variables.map(({ name }) => name)).toEqual(["vote.title", "vote.options", "vote.duration"]);
       expect(startTextCopy.variables[0]?.description).toContain(language === "de" ? "Frage" : "question");
+      expect(startTextCopy.variables[2]?.description).toContain(language === "de" ? "zeitbegrenzte" : "time-limited");
       const section = settingsEditor.spec.sections.find(({ id }) => id === "start");
       const startField = section?.fields.find((field) => field.kind === "template" && field.key === "startText");
       if (startField?.kind !== "template") throw new Error("The start text template field is missing.");
       const samples = Object.fromEntries(startTextCopy.variables.map(({ name, sample }) => [name, sample]));
-      expect(startField.preview(DEFAULT_CHAT_VOTING_SETTINGS.startText, samples)).toContain(
+      const preview = startField.preview(DEFAULT_CHAT_VOTING_SETTINGS.startText, samples);
+      expect(preview).toContain(
         language === "de" ? "1 = Pizza, 2 = Burger, 3 = Döner" : "1 = Pizza, 2 = Burger, 3 = Kebab",
       );
+      expect(preview).toContain(language === "de" ? "2 Minuten" : "2 minutes");
+
+      const resultTextCopy = copy.fields.resultText;
+      expect(resultTextCopy?.variables?.map(({ name }) => name)).toContain("vote.duration");
     },
   );
 

@@ -70,7 +70,7 @@ test("vote question header stays fixed and clamps long text at 390px in the over
         headerHeight: element.getBoundingClientRect().height,
         tallyHeight: tally?.getBoundingClientRect().height ?? 0,
         resultsTop: results?.getBoundingClientRect().top ?? 0,
-        lineClamp: getComputedStyle(element).webkitLineClamp,
+        lineClamp: getComputedStyle(element.querySelector(".chat-voting-tally__header-title") as Element).webkitLineClamp,
       };
     }));
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -81,4 +81,54 @@ test("vote question header stays fixed and clamps long text at 390px in the over
   expect(new Set(measurements.map(({ tallyHeight }) => tallyHeight)).size).toBe(1);
   expect(new Set(measurements.map(({ resultsTop }) => resultsTop)).size).toBe(1);
   expect(measurements.map(({ lineClamp }) => lineClamp)).toEqual(["2", "2", "2"]);
+});
+
+test("countdown appearance and absence keep the header slot fixed at the canvas size", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const measurements: Array<{
+    header: { x: number; y: number; width: number; height: number };
+    title: { x: number; y: number; width: number; height: number };
+    countdown: { x: number; y: number; width: number; height: number };
+    resultsTop: number;
+    countdownText: string;
+  }> = [];
+
+  for (const mode of ["timed", "open-ended", "off", "closed"]) {
+    await page.goto(`/tests/e2e/chat-voting-overlay-fixture.html?countdown=${mode}`);
+    const header = page.locator(".chat-voting-tally__header");
+    const countdown = page.locator(".chat-voting-tally__countdown");
+    await expect(header).toBeVisible();
+    await expect(countdown).toHaveText(mode === "timed" ? "1:30" : "");
+    measurements.push(await header.evaluate((element) => {
+      const rect = (node: Element): { x: number; y: number; width: number; height: number } => {
+        const box = node.getBoundingClientRect();
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+      };
+      const tally = element.closest(".chat-voting-tally");
+      const results = tally?.querySelector(".chat-voting-tally__options");
+      const titleElement = element.querySelector(".chat-voting-tally__header-title");
+      const countdownElement = element.querySelector(".chat-voting-tally__countdown");
+      if (titleElement === null || countdownElement === null || results === null || results === undefined) {
+        throw new Error("The voting header layout is incomplete.");
+      }
+      return {
+        header: rect(element),
+        title: rect(titleElement),
+        countdown: rect(countdownElement),
+        resultsTop: results.getBoundingClientRect().top,
+        countdownText: countdownElement.textContent,
+      };
+    }));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1920);
+  }
+
+  expect(new Set(measurements.map(({ header }) => JSON.stringify(header))).size).toBe(1);
+  expect(new Set(measurements.map(({ title }) => JSON.stringify(title))).size).toBe(1);
+  expect(new Set(measurements.map(({ countdown }) => JSON.stringify(countdown))).size).toBe(1);
+  expect(new Set(measurements.map(({ resultsTop }) => resultsTop)).size).toBe(1);
+  expect(measurements.map(({ countdownText }) => countdownText)).toEqual(["1:30", "", "", ""]);
+  expect(measurements[0]?.countdown.width).toBeGreaterThan(0);
+  expect(measurements[0]?.countdown.width).toBe(measurements[1]?.countdown.width);
+  expect(measurements[0]?.countdown.width).toBe(measurements[2]?.countdown.width);
+  expect(measurements[0]?.countdown.width).toBe(measurements[3]?.countdown.width);
 });

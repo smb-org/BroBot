@@ -138,8 +138,18 @@ describe("OverlayShell and OverlayCanvas", () => {
           label: "Voting",
           variableName: null,
           text: "",
-          config: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 },
-          state: { pollId: "poll-a", openedAt: "2030-01-01T00:00:00.000Z", status: "open", labels: ["Yes", "No"], counts: [0, 0], revision: 0 },
+          config: { layout: "bars", showPercent: true, showCountdown: true, hideAfterCloseSeconds: 15 },
+          state: {
+            pollId: "poll-a",
+            openedAt: "2030-01-01T00:00:00.000Z",
+            closesAt: "2030-01-01T00:01:30.000Z",
+            requestedDurationSeconds: 90,
+            serverNow: "2030-01-01T00:00:00.000Z",
+            status: "open",
+            labels: ["Yes", "No"],
+            counts: [0, 0],
+            revision: 0,
+          },
           moduleEnabled: true,
           x: 0,
           y: 0,
@@ -155,13 +165,14 @@ describe("OverlayShell and OverlayCanvas", () => {
     const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
 
     await waitFor(() => expect(container.textContent).toContain("Yes"));
+    expect(container.querySelector(".chat-voting-tally__countdown")).toHaveTextContent("1:30");
     const send = (type: `modul.${string}.${string}`, payload: Readonly<Record<string, unknown>>): void => {
       const revision = payload.revision;
       const messageId = typeof revision === "number" ? String(revision) : "closed";
       act(() => realtimeCallbacks?.onModuleMessage?.({
         version: 1,
         id: `message-${type}-${messageId}`,
-        createdAt: "2026-10-04T10:00:00.000Z",
+        createdAt: "2030-01-01T00:00:30.000Z",
         channelId: "fictional-channel",
         type,
         payload,
@@ -170,6 +181,7 @@ describe("OverlayShell and OverlayCanvas", () => {
 
     send("modul.chat_voting.tally", { pollId: "poll-a", openedAt: "2030-01-01T00:00:00.000Z", counts: [5, 2], revision: 5 });
     await waitFor(() => expect(container.textContent).toContain("5 · 71%"));
+    expect(container.querySelector(".chat-voting-tally__countdown")).toHaveTextContent("1:00");
     send("modul.chat_voting.tally", { pollId: "poll-a", counts: [3, 1], revision: 3 });
     await waitFor(() => expect(container.textContent).toContain("5 · 71%"));
     expect(container.textContent).not.toContain("3 · 75%");

@@ -120,12 +120,24 @@ const applyModuleMessage = (
 ): OverlayBootstrapData => {
   if (bootstrap.overlay === null) return bootstrap;
   const kind = moduleOverlayElementKindForMessage(message.type);
+  const serverNow = typeof message.payload.serverNow === "string" && Number.isFinite(Date.parse(message.payload.serverNow))
+    ? message.payload.serverNow
+    : Number.isFinite(Date.parse(message.createdAt)) ? message.createdAt : null;
+  const localNow = Date.now();
+  const payload = serverNow === null
+    ? message.payload
+    : {
+      ...message.payload,
+      serverNow,
+      serverTimeOffsetMs: Date.parse(serverNow) - localNow,
+      serverTimeLocalNowMs: localNow,
+    };
   return {
     ...bootstrap,
     overlay: {
       ...bootstrap.overlay,
       elements: bootstrap.overlay.elements.map((element) => element.kind === kind && element.moduleEnabled === true
-        ? { ...element, state: mergeModuleOverlayElementState(kind, element.state ?? null, message.payload) }
+        ? { ...element, state: mergeModuleOverlayElementState(kind, element.state ?? null, payload) }
         : element),
     },
   };

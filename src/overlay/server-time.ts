@@ -14,8 +14,11 @@ export const estimateOverlayStateTransit = (
   bootstrap: OverlayBootstrapData,
   roundTripMs: number,
 ): OverlayBootstrapData => {
-  if (bootstrap.overlay === null || !Number.isFinite(roundTripMs)) return bootstrap;
-  const estimatedTransitMs = Math.min(Math.max(0, roundTripMs) / 2, MAX_ESTIMATED_TRANSIT_MS);
+  if (bootstrap.overlay === null) return bootstrap;
+  const estimatedTransitMs = Number.isFinite(roundTripMs)
+    ? Math.min(Math.max(0, roundTripMs) / 2, MAX_ESTIMATED_TRANSIT_MS)
+    : 0;
+  const localNow = Date.now();
   return {
     ...bootstrap,
     overlay: {
@@ -24,7 +27,16 @@ export const estimateOverlayStateTransit = (
         const state = element.state;
         const serverNow = state?.serverNow;
         if (typeof serverNow !== "string" || !Number.isFinite(Date.parse(serverNow))) return element;
-        return { ...element, state: { ...state, serverNow: new Date(Date.parse(serverNow) + estimatedTransitMs).toISOString() } };
+        const adjustedServerNow = Date.parse(serverNow) + estimatedTransitMs;
+        return {
+          ...element,
+          state: {
+            ...state,
+            serverNow: new Date(adjustedServerNow).toISOString(),
+            serverTimeOffsetMs: adjustedServerNow - localNow,
+            serverTimeLocalNowMs: localNow,
+          },
+        };
       }),
     },
   };

@@ -38,3 +38,16 @@ export const chatVotingOptionsVariableCatalog = {
     sample: "1 = Pizza, 2 = Burger, 3 = Kebab",
   },
 } as const satisfies Readonly<Record<ModuleLanguage, { label: string; description: string; sample: string }>>;
+
+export const chatVotingDurationVariableCatalog = {
+  de: {
+    label: "Abstimmungsdauer",
+    description: "Die konfigurierte Dauer einer zeitbegrenzten Abstimmung; bei offenen Abstimmungen leer",
+    sample: "2 Minuten",
+  },
+  en: {
+    label: "Vote duration",
+    description: "The configured duration of a time-limited vote; empty for open-ended votes",
+    sample: "2 minutes",
+  },
+} as const satisfies Readonly<Record<ModuleLanguage, { label: string; description: string; sample: string }>>;

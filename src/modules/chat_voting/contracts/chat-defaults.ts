@@ -1,8 +1,29 @@
 import type { ModuleLanguage } from "../../contract";
 import type { ChatVotePreset, ChatVotingTextMode } from "./index";
 
-export const DEFAULT_CHAT_VOTING_START_TEXT = "Abstimmung gestartet: {vote.title} – {vote.options}";
-export const DEFAULT_CHAT_VOTING_START_TEXT_EN = "Vote started: {vote.title} – {vote.options}";
+export const DEFAULT_CHAT_VOTING_START_TEXT = "Abstimmung gestartet: {vote.title} – {vote.options} – läuft {vote.duration}";
+export const DEFAULT_CHAT_VOTING_START_TEXT_EN = "Vote started: {vote.title} – {vote.options} – runs for {vote.duration}";
+export const LEGACY_CHAT_VOTING_START_TEXT = "Abstimmung gestartet: {vote.title} – {vote.options}";
+export const LEGACY_CHAT_VOTING_START_TEXT_EN = "Vote started: {vote.title} – {vote.options}";
+export const DEFAULT_CHAT_VOTING_START_DURATION_SUFFIX = {
+  de: " – läuft {vote.duration}",
+  en: " – runs for {vote.duration}",
+} as const satisfies Readonly<Record<ModuleLanguage, string>>;
+
+const durationCatalog = {
+  de: { second: "Sekunde", seconds: "Sekunden", minute: "Minute", minutes: "Minuten" },
+  en: { second: "second", seconds: "seconds", minute: "minute", minutes: "minutes" },
+} as const satisfies Readonly<Record<ModuleLanguage, { second: string; seconds: string; minute: string; minutes: string }>>;
+
+export const chatVotingDurationText = (language: ModuleLanguage, seconds: number | null): string => {
+  if (seconds === null || !Number.isSafeInteger(seconds) || seconds <= 0) return "";
+  const useMinutes = seconds % 60 === 0;
+  const amount = useMinutes ? seconds / 60 : seconds;
+  const unit = useMinutes
+    ? amount === 1 ? durationCatalog[language].minute : durationCatalog[language].minutes
+    : amount === 1 ? durationCatalog[language].second : durationCatalog[language].seconds;
+  return `${String(amount)} ${unit}`;
+};
 
 const freeTextOptionCatalog = {
   de: { firstWord: "schreib ein Wort", wholeMessage: "schreib deine Antwort" },

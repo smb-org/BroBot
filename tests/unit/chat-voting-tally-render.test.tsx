@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Tally from "../../src/modules/chat_voting/overlay/tally";
 
@@ -22,7 +22,7 @@ describe("chat voting overlay tally", () => {
     const header = screen.getByRole("heading", { name: longTitle });
     expect(header).toHaveAttribute("title", longTitle);
     expect(header.style.height).toBe("2.4em");
-    expect(header.style.webkitLineClamp).toBe("2");
+    expect((header.querySelector(".chat-voting-tally__header-title") as HTMLElement).style.webkitLineClamp).toBe("2");
 
     rerender(<Tally config={{ layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 }} state={{
       pollId: "untitled-poll",
@@ -154,5 +154,82 @@ describe("chat voting overlay tally", () => {
     options = strip.container.querySelector(".chat-voting-tally__options");
     expect((options as HTMLElement | null)?.style.height).toBe("14.1em");
     expect(options?.querySelectorAll(".chat-voting-tally__option")).toHaveLength(5);
+  });
+
+  it("counts down from the server time, ticks to zero, and stays at zero until the closed state arrives", () => {
+    const serverNow = "2030-01-01T00:00:00.000Z";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2040-01-01T00:00:00.000Z"));
+    try {
+      const { container } = render(<Tally config={{ layout: "bars", showPercent: true, showCountdown: true }} state={{
+        pollId: "timed-poll",
+        openedAt: serverNow,
+        closesAt: "2030-01-01T00:01:30.000Z",
+        requestedDurationSeconds: 90,
+        serverNow,
+        serverTimeOffsetMs: Date.parse(serverNow) - Date.now(),
+        serverTimeLocalNowMs: Date.now(),
+        status: "open",
+        preset: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        counts: [0, 0],
+        revision: 0,
+      }} now={Date.now()} language="en" />);
+
+      const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
+      expect(countdown).toHaveTextContent("1:30");
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(countdown).toHaveTextContent("1:29");
+      act(() => { vi.advanceTimersByTime(89_000); });
+      expect(countdown).toHaveTextContent("0:00");
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(countdown).toHaveTextContent("0:00");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["open-ended", { requestedDurationSeconds: null, status: "open" }],
+    ["closed", { requestedDurationSeconds: 90, status: "closed", closedAt: "2030-01-01T00:00:00.000Z" }],
+  ] as const)("keeps the countdown slot empty for %s votes", (_name, extraState) => {
+    const { container } = render(<Tally config={{ layout: "bars", showPercent: true, showCountdown: true }} state={{
+      pollId: "empty-countdown-poll",
+      closesAt: "2030-01-01T00:01:30.000Z",
+      serverNow: "2030-01-01T00:00:00.000Z",
+      preset: "yes_no",
+      optionCount: 2,
+      labels: ["Yes", "No"],
+      counts: [0, 0],
+      revision: 0,
+      ...extraState,
+    }} now={Date.parse("2030-01-01T00:00:00.000Z")} language="en" />);
+
+    const header = container.querySelector<HTMLElement>(".chat-voting-tally__header");
+    const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
+    expect(countdown).toBeEmptyDOMElement();
+    expect(countdown?.style.width).toBe("6ch");
+    expect(countdown?.style.minWidth).toBe("6ch");
+    expect(header?.style.gridTemplateColumns).toContain("6ch");
+  });
+
+  it("keeps the countdown slot when the overlay option is disabled", () => {
+    const { container } = render(<Tally config={{ layout: "bars", showPercent: true, showCountdown: false }} state={{
+      pollId: "disabled-countdown-poll",
+      closesAt: "2030-01-01T00:01:30.000Z",
+      requestedDurationSeconds: 90,
+      serverNow: "2030-01-01T00:00:00.000Z",
+      status: "open",
+      preset: "yes_no",
+      optionCount: 2,
+      labels: ["Yes", "No"],
+      counts: [0, 0],
+      revision: 0,
+    }} now={Date.parse("2030-01-01T00:00:00.000Z")} language="en" />);
+
+    const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
+    expect(countdown).toBeEmptyDOMElement();
+    expect(countdown?.style.width).toBe("6ch");
   });
 });

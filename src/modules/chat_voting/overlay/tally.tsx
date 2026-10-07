@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
 import { rankVoteTerms } from "../domain";
@@ -26,6 +26,15 @@ const parseState = (value: unknown): TallyState | null => {
   return {
     pollId: state.pollId,
     ...(typeof state.openedAt === "string" ? { openedAt: state.openedAt } : {}),
+    ...(typeof state.closesAt === "string" && Number.isFinite(Date.parse(state.closesAt)) ? { closesAt: state.closesAt } : {}),
+    ...(state.requestedDurationSeconds === null || typeof state.requestedDurationSeconds === "number" &&
+      Number.isSafeInteger(state.requestedDurationSeconds) && state.requestedDurationSeconds > 0
+      ? { requestedDurationSeconds: state.requestedDurationSeconds } : {}),
+    ...(typeof state.serverNow === "string" && Number.isFinite(Date.parse(state.serverNow)) ? { serverNow: state.serverNow } : {}),
+    ...(typeof state.serverTimeOffsetMs === "number" && Number.isFinite(state.serverTimeOffsetMs)
+      ? { serverTimeOffsetMs: state.serverTimeOffsetMs } : {}),
+    ...(typeof state.serverTimeLocalNowMs === "number" && Number.isFinite(state.serverTimeLocalNowMs)
+      ? { serverTimeLocalNowMs: state.serverTimeLocalNowMs } : {}),
     ...(state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80 ? { title: state.title } : {}),
     ...(state.status === "open" || state.status === "closed" ? { status: state.status } : {}),
     ...(labels === undefined ? {} : { labels }),
@@ -44,11 +53,34 @@ const parseState = (value: unknown): TallyState | null => {
   };
 };
 
+const formatCountdown = (seconds: number): string =>
+  `${String(Math.floor(seconds / 60))}:${String(seconds % 60).padStart(2, "0")}`;
+
 const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
   const incoming = useMemo(() => parseState(state), [state]);
   const current = incoming;
   const [clock, setClock] = useState(() => Date.now());
   const labels = chatVotingOverlayLabels(language);
+  const countdownEnabled = config.showCountdown !== false;
+  const closesAt = current?.closesAt === undefined ? Number.NaN : Date.parse(current.closesAt);
+  const serverTimeOffset = current?.serverTimeOffsetMs;
+  const serverTimeLocalNow = current?.serverTimeLocalNowMs ?? clock;
+  const timeLimitedOpenVote = countdownEnabled && current?.status === "open" &&
+    typeof current.requestedDurationSeconds === "number" && current.requestedDurationSeconds > 0 &&
+    Number.isFinite(closesAt) && typeof serverTimeOffset === "number" && Number.isFinite(serverTimeOffset);
+  const remainingMilliseconds = timeLimitedOpenVote
+    ? closesAt - (Math.max(clock, serverTimeLocalNow) + serverTimeOffset)
+    : Number.NaN;
+  const countdownSeconds = Number.isFinite(remainingMilliseconds)
+    ? Math.max(0, Math.ceil(remainingMilliseconds / 1_000))
+    : null;
+  const countdownText = countdownSeconds === null ? "" : formatCountdown(countdownSeconds);
+
+  useEffect(() => {
+    if (countdownSeconds === null || countdownSeconds === 0) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [countdownSeconds, current?.pollId]);
 
   useEffect(() => {
     if (current?.status !== "closed") return;
@@ -79,6 +111,19 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
   const textTerms = current.preset === "free_text" ? rankVoteTerms(visibleTextTerms) : [];
   const textTotal = visibleTextTerms.reduce((sum, entry) => sum + entry.count, 0);
   const headerText = current.title?.trim() || (current.status === "closed" ? labels.closed : labels.title);
+  const headerTitleStyle: CSSProperties = {
+    display: "-webkit-box",
+    height: "2.4em",
+    minHeight: "2.4em",
+    minWidth: 0,
+    overflow: "hidden",
+    overflowWrap: "anywhere",
+    lineHeight: 1.2,
+    fontWeight: 700,
+    textOverflow: "ellipsis",
+    WebkitBoxOrient: "vertical" as const,
+    WebkitLineClamp: 2,
+  };
   const textRowStyle = {
     flex: layout === "strip" ? "1 1 8em" : undefined,
     minHeight: "2.3em",
@@ -123,20 +168,38 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
       className="chat-voting-tally__header"
       role="heading"
       aria-level={2}
+      aria-label={headerText}
       title={headerText}
       style={{
-        display: "-webkit-box",
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) 6ch",
+        alignItems: "start",
+        minWidth: 0,
         height: "2.4em",
         minHeight: "2.4em",
-        overflow: "hidden",
-        overflowWrap: "anywhere",
-        lineHeight: 1.2,
-        fontWeight: 700,
-        textOverflow: "ellipsis",
-        WebkitBoxOrient: "vertical",
-        WebkitLineClamp: 2,
       }}
-    >{headerText}</div>
+    >
+      <span className="chat-voting-tally__header-title" style={headerTitleStyle}>{headerText}</span>
+      <span
+        className="chat-voting-tally__countdown"
+        role="timer"
+        aria-hidden={countdownText.length === 0}
+        aria-label={countdownText.length === 0 ? undefined : labels.countdownRemaining(countdownText)}
+        style={{
+          display: "flex",
+          width: "6ch",
+          minWidth: "6ch",
+          height: "2.4em",
+          minHeight: "2.4em",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          textAlign: "right",
+          whiteSpace: "nowrap",
+          fontFamily: "\"IBM Plex Mono\", ui-monospace, monospace",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >{countdownText}</span>
+    </div>
     <div className="chat-voting-tally__options" style={{
       display: "flex",
       flexDirection: layout === "strip" ? "row" : "column",
