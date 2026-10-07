@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand } from "../../src/modules/text_commands/contracts";
 import { TEXT_COMMAND_DEFAULT_TEXTS } from "../../src/modules/text_commands/contracts/chat-defaults";
 import { statusForTier, renderCommandText } from "../../src/modules/text_commands/domain";
@@ -88,7 +90,38 @@ describe("Text command editor", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    toastsSnapshot().forEach((toast) => dismissToast(toast.id));
     if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
+  });
+
+  it("keeps command creation visible and explains why an operator cannot use it", async () => {
+    renderPanel(panelFetch(), { canManage: false });
+
+    const addButton = await screen.findByRole("button", { name: "Befehl anlegen" });
+    expect(addButton).toBeDisabled();
+    expect(addButton).toHaveAttribute("aria-describedby", "text-command-create-reason");
+    const reason = document.getElementById("text-command-create-reason");
+    expect(reason).toBeVisible();
+    expect(reason).toHaveTextContent(textCommandsTexts("de").managementLocked);
+    expect(reason).not.toHaveAttribute("aria-hidden");
+    expect(document.querySelector(".command-list .form-error")).toBeNull();
+  });
+
+  it("reports a command-list load failure in the persistent toast host", async () => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/commands")) return Promise.resolve(jsonResponse({ error: "command_load_failed" }, 500));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<UiProvider><ToastHost /><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(textCommandsTexts("de").loadError);
+    expect(document.querySelector(".command-list .form-error")).toBeNull();
+    expect(screen.getByRole("button", { name: "Befehl anlegen" })).toBeEnabled();
   });
 
   it("opens in the ListDetail inspector with icon tabs, prefixes, counters, preview, and tier descriptions", async () => {

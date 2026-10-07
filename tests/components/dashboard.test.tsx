@@ -1260,7 +1260,8 @@ describe("Dashboard skeleton", () => {
     const reason = "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.";
     const grantAccess = screen.getByRole("button", { name: "Zugriff vergeben" });
     expect(grantAccess).toBeDisabled();
-    expect(grantAccess.closest("span")).toHaveAttribute("title", reason);
+    expect(grantAccess).toHaveAttribute("aria-describedby", "members-create-reason");
+    expect(document.getElementById("members-create-reason")).toHaveTextContent(reason);
     // A locked whole form is read as a properties list (ADR 0006 addendum),
     // not a form with disabled fields -- there is no role choice and no
     // remove action to disable, only the one reason line above the values.

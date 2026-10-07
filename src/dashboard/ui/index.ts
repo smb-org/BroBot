@@ -163,6 +163,7 @@ export type { DashboardNavigationGuard } from "./navigation-guard";
 
 export { ListDetail } from "./ListDetail";
 export type { ListDetailProps } from "./ListDetail";
+export { ListPaginationFooter } from "./ListPaginationFooter";
 
 export { ListRow } from "./ListRow";
 export type { ListRowProps } from "./ListRow";

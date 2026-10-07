@@ -749,6 +749,10 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         : null;
   const stateTone = registered === undefined || permissionsMissing ? "notice" : "neutral";
 
+  useEffect(() => {
+    if (error !== null) notify({ tone: "error", message: error });
+  }, [error]);
+
   return (
     <>
       <section className="module-detail" aria-label={details.name}>
@@ -791,7 +795,6 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           {ownRole === "broadcaster" ? null : <p className="lock-reason">{texts.module.scopeConsentLocked}</p>}
         </section>}
         {viewLoading ? <p className="muted">{texts.module.load}</p> : null}
-        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {stateMessage === null ? (
           registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>

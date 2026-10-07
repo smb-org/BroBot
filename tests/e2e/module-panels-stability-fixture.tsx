@@ -7,6 +7,7 @@ import BelaboxStatusAction from "../../src/modules/belabox/panel/immediate-actio
 import { ChatVotingPanel } from "../../src/modules/chat_voting/panel";
 import FaqPanel from "../../src/modules/faq/panel";
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
+import TextLibraryPanel from "../../src/modules/text_library/panel";
 import TimersPanel from "../../src/modules/timers/panel";
 import VotekickPanel from "../../src/modules/votekick/panel";
 import "../../src/dashboard/styles.css";
@@ -21,6 +22,7 @@ const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId}
     : panelName === "chat_voting" ? <ChatVotingPanel channelId={channelId} language={language} canOperate />
       : panelName === "faq" ? <FaqPanel channelId={channelId} language={language} />
         : panelName === "text_commands" ? <TextCommandsPanel channelId={channelId} language={language} />
+          : panelName === "text_library" ? <TextLibraryPanel channelId={channelId} language={language} canManage />
           : panelName === "timers" ? <TimersPanel channelId={channelId} language={language} />
             : panelName === "votekick" ? <VotekickPanel channelId={channelId} language={language} />
               : <p>Choose a module panel.</p>;

@@ -6,7 +6,7 @@ import { MODULES } from "../../modules/registry";
 import { auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
 import { ModuleHeading } from "../module-panels";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, LoadState as UiLoadState, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import type { LoadState } from "../load-state";
 import {
   auditActorLabel,
@@ -166,9 +166,6 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
         list={
           <section className="content-section" aria-label={texts.audit.title}>
             <AuditFilterBar filters={filters} onChange={onFiltersChange} />
-            <div className="audit-page__pagination-slot">
-              {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
-            </div>
             <UiLoadState
               status={auditState.data === null
                 ? auditState.status === "error" ? "error" : "loading"
@@ -217,6 +214,9 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
               </div>
             </> : null}
             </UiLoadState>
+            {entries.length === 0 && auditState.data?.nextCursor == null ? null : <ListPaginationFooter loadedCount={entries.length} loadedLabel={texts.audit.loaded}>
+              {auditState.data?.nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
+            </ListPaginationFooter>}
           </section>
         }
         inspector={selectedAudit === null ? null : (

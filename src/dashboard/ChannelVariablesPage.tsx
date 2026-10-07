@@ -126,7 +126,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     : labels.usageLine(usage.moduleId, usage.itemName, usage.kind));
   const nameInvalid = !variableNamePattern.test(normalizedVariableName(draftName));
   const createDisabled = !canManageContent || variables.length >= maximum;
-  const createReason = !canManageContent ? labels.managementLocked : variables.length >= maximum ? labels.count(maximum, maximum) : undefined;
+  const createReason = !canManageContent ? labels.managementLocked : variables.length >= maximum ? labels.limitReached : undefined;
   const beginCreate = (): void => {
     setCreating(true);
     setSelectedName(null);
@@ -314,7 +314,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       minHeight={360}
       loading={<Skeleton rows={8} height={34} />}
       empty={<p className="empty-state">{labels.empty}</p>}
-      error={<div className="empty-state"><p>{labels.loadError}</p><Button variant="neutral" onClick={() => { void refresh(); }}>{labels.retry}</Button></div>}
+      error={<div className="empty-state"><Button variant="neutral" onClick={() => { void refresh(); }}>{labels.retry}</Button></div>}
     >{variables.length === 0 ? null : <div className="table-wrap channel-variables-table-wrap">
       <table className="table channel-variables-table">
         <thead><tr>
@@ -466,9 +466,11 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   ) : null;
 
   return <>
-    <PageHeader kind="variable" title={labels.title} subtitle={labels.count(variables.length, maximum)} actions={<span title={createReason}>
-      <Button icon="add" iconOnly ariaLabel={labels.create} disabled={createDisabled} onClick={beginCreate} />
-    </span>} />
+    <PageHeader kind="variable" title={labels.title} subtitle={labels.count(variables.length, maximum)} actions={<div className="list-create-action">
+      <Button icon="add" iconOnly ariaLabel={labels.create} disabled={createDisabled}
+        {...(createReason === undefined ? {} : { describedBy: "channel-variable-create-reason" })} onClick={beginCreate} />
+      <p id="channel-variable-create-reason" className="list-create-action__reason" role={createReason === undefined ? undefined : "note"} aria-hidden={createReason === undefined}>{createReason ?? ""}</p>
+    </div>} />
     <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
     <ConfirmDialog opened={confirmDelete} title={labels.deleteTitle(selected?.name ?? "")} description={labels.deleteDescription(selected?.name ?? "", usageNames.join(", "), selectedUsages.filter((usage) => usage.moduleId === "overlays" && usage.reconnect !== true).length)} confirmLabel={labels.deleteConfirm(selected?.name ?? "")} cancelLabel={labels.deleteCancel} onCancel={() => { setConfirmDelete(false); }} onConfirm={() => { void remove(); }} pending={pending} danger />
   </>;
