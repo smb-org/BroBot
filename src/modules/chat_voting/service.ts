@@ -405,7 +405,7 @@ export const closeChatVoteFromAlarm = async (
     const rendered = await context.renderTemplate(
       settings.resultText,
       Date.parse(closedVote.closedAt ?? new Date().toISOString()),
-      { "vote.result": result, title: closedVote.title ?? "" },
+      { "vote.result": result, "vote.title": closedVote.title ?? "" },
     );
     const announcement = settings.resultText === DEFAULT_CHAT_VOTING_SETTINGS.resultText
       ? closedVote.title === null ? result

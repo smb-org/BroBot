@@ -863,7 +863,7 @@ Codepunkten haben. Das Panel bietet sie neben dem Typ an; Chatbefehle wie
 ein direkt folgendes `word` oder `message` weiterhin für den Zählmodus, der
 danach folgende Text für die Frage. Frage und Ergebnis bleiben gemeinsam in der
 Historie erhalten. Standardmeldungen nennen die Frage; eigene Ergebnistexte
-können sie mit `{title}` einfügen. Das Overlay ersetzt mit der Frage seine
+können sie mit `{vote.title}` einfügen (`{title}` bleibt der Stream-Titel). Das Overlay ersetzt mit der Frage seine
 allgemeine Überschrift und reserviert dafür immer dieselbe, auf zwei Zeilen
 begrenzte Höhe.
 

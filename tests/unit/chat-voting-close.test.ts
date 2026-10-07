@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleAlarmContext } from "../../src/modules/contract";
+import type { ModuleAlarmContext, ModuleEvent } from "../../src/modules/contract";
+import { chatVotingModule } from "../../src/modules/chat_voting";
+import { createTemplateRenderer } from "../../src/worker/template-resolver";
 import type { ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { closeChatVoteFromAlarm, requestChatVoteClose } from "../../src/modules/chat_voting/service";
@@ -232,16 +234,52 @@ describe("chat voting close service", () => {
   });
 
   it("provides the question variable to custom result templates", async () => {
-    const repository = await seedOpenVote(true, "Pizza today?", "{title}: {vote.result}");
+    const repository = await seedOpenVote(true, "Pizza today?", "{vote.title}: {vote.result}");
     const order: string[] = [];
     const { context } = createAlarmContext(order);
 
     await closeChatVoteFromAlarm(context, repository, "fictional-poll");
 
     expect(context.renderTemplate).toHaveBeenCalledWith(
-      "{title}: {vote.result}",
+      "{vote.title}: {vote.result}",
       expect.any(Number),
-      { "vote.result": "Yes: 7 (70%) · No: 3 (30%)", title: "Pizza today?" },
+      { "vote.result": "Yes: 7 (70%) · No: 3 (30%)", "vote.title": "Pizza today?" },
+    );
+  });
+
+  it("renders vote.title as the question while the system title stays the stream title", async () => {
+    const text = "{title} | {vote.title}: {vote.result}";
+    const repository = await seedOpenVote(true, "Pizza today?", text);
+    const { context } = createAlarmContext([]);
+    const event: ModuleEvent = {
+      channelId: "fictional-channel", subscriptionType: "channel.chat.message", triggerId: "t", payload: {},
+      settings: {}, receivedAt: "2026-10-04T14:00:00.000Z", actor: null, chatStatus: null,
+    };
+    const renderer = createTemplateRenderer(event, "chat_command", chatVotingModule.templateFields?.resultText ?? [], {
+      DB: {} as D1Database,
+      channelInfo: () => Promise.resolve(null),
+      channelTimeZone: () => Promise.resolve("UTC"),
+      channelLocation: () => Promise.resolve(null),
+      streamState: () => Promise.resolve("unknown"),
+      channelDetails: () => Promise.resolve({ title: "Fictional stream title", gameName: "g", gameId: "1" }),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve(null),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve("en"),
+      readChannelVariables: () => Promise.resolve({}),
+    });
+    (context as { renderTemplate: unknown }).renderTemplate = (t: string, _now: number, values: Record<string, string>) => renderer(t, values);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.sendChat).toHaveBeenCalledWith(
+      "Fictional stream title | Pizza today?: Yes: 7 (70%) · No: 3 (30%)",
+      "chat-voting:fictional-poll:result",
+      undefined,
+      expect.any(Function),
+      "source_only",
     );
   });
 });

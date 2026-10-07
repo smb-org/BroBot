@@ -18,7 +18,7 @@ const resultVariable = {
 } as const;
 
 const titleVariable = {
-  name: "title",
+  name: "vote.title",
   maxLength: 80,
   sample: "Pizza today?",
   picker: chatVotingTitleVariableCatalog,
