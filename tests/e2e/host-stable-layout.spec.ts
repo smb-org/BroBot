@@ -849,7 +849,7 @@ test("a location-search error toast can be dismissed above its dialog backdrop",
   const dialog = page.getByRole("dialog", { name: "Change location" });
   await expect(dialog).toBeVisible();
   await page.getByRole("textbox", { name: "Search for a place" }).fill("Reykjavik");
-  await page.getByRole("button", { name: "Search" }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
 
   const toast = page.locator(".ui-toast--error");
   await expect(toast).toBeVisible();

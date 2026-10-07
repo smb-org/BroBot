@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { Spotlight } from "../../src/dashboard/ui/Spotlight";
+import { Sidebar } from "../../src/dashboard/ui/Sidebar";
 import { ChannelSpotlight } from "../../src/dashboard/spotlight";
 import { ModuleIcon } from "../../src/dashboard/module-panels";
-import type { DashboardRoute } from "../../src/dashboard/router";
+import { dashboardRoutePath, type DashboardRoute } from "../../src/dashboard/router";
+import { rememberRecentTarget } from "../../src/dashboard/spotlight-recents";
 import { jsonResponse } from "../unit/fixtures";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
@@ -65,6 +67,58 @@ describe("Channel Spotlight", () => {
     fireEvent.click(action);
 
     expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "raid" });
+  });
+
+  it("opens from the sidebar Spotlight trigger", async () => {
+    stubFetch();
+    renderWithMantine(<>
+      <Sidebar
+        groups={[]}
+        collapsed={false}
+        onToggleCollapsed={vi.fn()}
+        onEntryNavigate={vi.fn()}
+        collapseLabel="Collapse sidebar"
+        expandLabel="Expand sidebar"
+        spotlightLabel="Search or run action …"
+      />
+      <ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()} />
+    </>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search or run action …" }));
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("lists current-channel recent pages in stored order at the top of empty Spotlight", async () => {
+    stubFetch();
+    const eventsRoute: DashboardRoute = { kind: "channel", channelId: "kanal-a", section: "events" };
+    const variablesRoute: DashboardRoute = { kind: "channel", channelId: "kanal-a", section: "variables" };
+    const key = "brobot-dashboard-spotlight-recent-v1:";
+    for (const storageKey of Object.keys(window.localStorage)) {
+      if (storageKey.startsWith(key)) window.localStorage.removeItem(storageKey);
+    }
+    rememberRecentTarget("viewer-a", "kanal-a", dashboardRoutePath(eventsRoute));
+    rememberRecentTarget("viewer-a", "kanal-a", dashboardRoutePath(variablesRoute));
+    rememberRecentTarget("viewer-b", "kanal-a", dashboardRoutePath(eventsRoute));
+
+    renderWithMantine(<ChannelSpotlight
+      channelId="kanal-a"
+      ownRole="manager"
+      viewerUserId="viewer-a"
+      modules={[]}
+      onNavigate={vi.fn()}
+      onOpenCommand={vi.fn()}
+      onOpenVariable={vi.fn()}
+    />);
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => {
+      expect(Array.from(dialog.querySelectorAll<HTMLElement>('[data-spotlight-item-id^="recent:"]'))
+        .map((item) => item.textContent)).toEqual(["Variablen", "Ereignisse"]);
+    });
+    const firstGroup = dialog.querySelector<HTMLElement>(".mantine-Spotlight-actionsGroup");
+    expect(firstGroup?.style.getPropertyValue("--spotlight-label")).toBe("'Zuletzt besucht'");
   });
 
   it("shows registered action and entity groups in order when opened", async () => {

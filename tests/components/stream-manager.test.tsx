@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
-import { ImmediateActions, WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
+import type { PanelChannelOverview } from "../../src/panel-contract";
+import { ChannelNotices, ImmediateActions, WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
 import { jsonResponse } from "../unit/fixtures";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider><ToastHost />{element}</UiProvider>);
@@ -19,6 +20,33 @@ const ALL_ACTIONS_ENABLED = [
   { id: "raid", enabled: true },
   { id: "clips", enabled: true },
 ] as const;
+
+const makeNoticeChannel = (overrides: Partial<PanelChannelOverview> = {}): PanelChannelOverview => ({
+  channelId: "kanal-a",
+  login: "kanal-a",
+  displayName: "Kanal A",
+  language: "en",
+  role: "manager",
+  broadcasterConnection: "connected",
+  channelBotConsent: "granted",
+  bot: { status: "connected", reason: null, updatedAt: new Date().toISOString() },
+  botPermissions: { missingScopes: [] },
+  broadcasterPermissions: { missingScopes: [] },
+  moderator: { isModerator: true, checkedAt: new Date().toISOString(), reason: null },
+  chatSubscription: null,
+  chatSubscriptionNeeded: false,
+  tokens: {
+    botExpiresAt: "2099-09-20T08:00:00.000Z",
+    loginStatus: "connected",
+    loginReason: null,
+    loginExpiresAt: "2099-09-20T08:00:00.000Z",
+  },
+  lastError: null,
+  activeModules: [],
+  ...overrides,
+});
+
+const noticeModeratorCheck = { status: "idle" as const, error: null, nextAllowedAt: null };
 
 const requestUrl = (input: RequestInfo | URL): URL =>
   input instanceof Request ? new URL(input.url) : new URL(String(input), window.location.origin);
@@ -522,5 +550,77 @@ describe("Stream Manager warnings and errors feed", () => {
     const trigger = screen.getByRole("button", { name: "Ursache anzeigen: Clip fehlgeschlagen" });
     fireEvent.mouseEnter(trigger);
     expect(await screen.findByText("Berechtigung zum Erstellen von Clips fehlt")).toBeInTheDocument();
+  });
+});
+
+describe("Stream Manager notices", () => {
+  afterEach(() => { cleanup(); });
+
+  it("keeps a one-row placeholder until module state is loaded", () => {
+    const { container } = renderWithMantine(<ChannelNotices
+      channel={makeNoticeChannel()}
+      modules={[]}
+      modulesLoaded={false}
+      moderatorCheck={noticeModeratorCheck}
+      onCheckModeratorStatus={vi.fn()}
+      onNavigate={vi.fn()}
+    />);
+
+    expect(container.querySelector(".stream-manager-notices__loading")).toBeInTheDocument();
+    expect(container.querySelector(".stream-manager-notices")).not.toBeInTheDocument();
+  });
+
+  it("hides the area when there are no notices", () => {
+    const { container } = renderWithMantine(<ChannelNotices
+      channel={makeNoticeChannel()}
+      modules={[]}
+      modulesLoaded
+      moderatorCheck={noticeModeratorCheck}
+      onCheckModeratorStatus={vi.fn()}
+      onNavigate={vi.fn()}
+    />);
+
+    expect(container.querySelector(".stream-manager-notices")).not.toBeInTheDocument();
+    expect(container.querySelector(".stream-manager-notices__loading")).toBeInTheDocument();
+  });
+
+  it("shows two notice rows at first, each with one action, and expands to all three", () => {
+    const channel = makeNoticeChannel({
+      moderator: { isModerator: false, checkedAt: new Date().toISOString(), reason: null },
+      botPermissions: { missingScopes: ["moderator:manage:banned_users"] },
+    });
+    const modules = [{ id: "ads", enabled: false, settings: "{}", missingBroadcasterScopes: ["channel:manage:ads"] }];
+    const { container } = renderWithMantine(<ChannelNotices
+      channel={channel}
+      modules={modules}
+      modulesLoaded
+      moderatorCheck={noticeModeratorCheck}
+      onCheckModeratorStatus={vi.fn()}
+      onNavigate={vi.fn()}
+    />);
+
+    const area = screen.getByRole("region", { name: "Hinweise" });
+    expect(area.querySelector(".stream-manager-notices__heading h2")).toHaveTextContent("Hinweise 3");
+    expect(area).toHaveAttribute("data-status", "error");
+    let rows = Array.from(area.querySelectorAll<HTMLElement>(".state-row"));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveAttribute("aria-label", "Der Bot ist in diesem Kanal kein Moderator.");
+    expect(rows[1]).toHaveAttribute("aria-label", "Dem Bot fehlen benötigte Berechtigungen.");
+    expect(rows.every((row) => row.querySelectorAll(".state-row__action button, .state-row__action a").length === 1)).toBe(true);
+    expect(area).toHaveTextContent("Chataktionen mit Moderationsrechten können fehlschlagen.");
+    expect(area).toHaveTextContent("Chatbefehle und Moderationsaktionen können fehlschlagen.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Alle 3 Hinweise anzeigen" }));
+
+    rows = Array.from(area.querySelectorAll<HTMLElement>(".state-row"));
+    expect(rows).toHaveLength(3);
+    const moduleRow = rows[2];
+    expect(moduleRow).toHaveAttribute("aria-label", "Für das Modul „Werbung“ fehlen Berechtigungen.");
+    const permissionButton = within(moduleRow as HTMLElement).getByRole("button", { name: "Berechtigung erteilen" });
+    expect(permissionButton).toBeDisabled();
+    expect(permissionButton).toHaveAttribute("aria-describedby", "stream-manager-notice-permission-reason-ads");
+    expect(within(moduleRow as HTMLElement).getByText("Nur der Broadcaster dieses Kanals darf diese Zustimmung erteilen.")).toBeInTheDocument();
+    expect(within(moduleRow as HTMLElement).getAllByRole("button")).toHaveLength(1);
+    expect(container.querySelectorAll(".stream-manager-notices__items .state-row")).toHaveLength(3);
   });
 });

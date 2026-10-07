@@ -143,19 +143,20 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
   await expect(sidebar).toBeInViewport();
   await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeVisible();
 
-  // The compact header leaves a useful, independently scrollable drawer at
-  // short phone heights; the collapse control remains a full-size target.
-  await page.setViewportSize({ width: 390, height: 240 });
+  // The compact header leaves the trigger, scroll region, and collapse
+  // control reachable even at this short phone height.
+  await page.setViewportSize({ width: 390, height: 300 });
   // Mantine transitions the open drawer's top and height when the viewport
   // changes; wait for the compact layout before measuring its scroll region.
   await expect(sidebar).toHaveCSS("top", "96px");
-  await expect(sidebar).toHaveCSS("height", "144px");
+  await expect(sidebar).toHaveCSS("height", "204px");
   await expect(sidebar).toBeInViewport();
   const sidebarScroll = sidebar.locator(".sidebar__scroll");
   const sidebarScrollHeight = await sidebarScroll.evaluate((element) => element.clientHeight);
   const sidebarContentHeight = await sidebarScroll.evaluate((element) => element.scrollHeight);
   expect(sidebarScrollHeight).toBeGreaterThan(44);
   expect(sidebarContentHeight).toBeGreaterThan(sidebarScrollHeight);
+  await expect(sidebar.getByRole("button", { name: "Suchen oder Aktion ausführen …" })).toBeInViewport();
   await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeInViewport();
   await sidebarScroll.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   // The last entry (the enabled module) is reachable once scrolled to the end.
@@ -165,7 +166,7 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
     return { height, bottom };
   });
   expect(collapseToggleRect.height).toBeGreaterThanOrEqual(40);
-  expect(collapseToggleRect.bottom).toBeLessThanOrEqual(240);
+  expect(collapseToggleRect.bottom).toBeLessThanOrEqual(300);
 
   // The channel select drops to its own full-width row alongside the burger.
   await page.setViewportSize({ width: 600, height: 900 });

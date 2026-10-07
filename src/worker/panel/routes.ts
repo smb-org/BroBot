@@ -339,6 +339,7 @@ panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) 
   const viewerIsBot = canConnectBot(session, context.env, botIdentity);
   return context.json({
     channels,
+    viewerUserId: session.userId,
     // The installation's single bot identity (`bot_identity_status`, id=1),
     // independent of which channels this viewer can see -- a fresh
     // installation with zero released channels still needs to tell a

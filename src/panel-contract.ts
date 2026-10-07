@@ -166,6 +166,8 @@ export interface PanelModulesResponse {
 
 export interface PanelChannelsResponse {
   channels: PanelChannelState[];
+  /** The authenticated viewer's Twitch user ID; used only to scope browser-local UI preferences. */
+  viewerUserId?: string;
   /** The installation's single bot identity, independent of which channels
    *  this viewer can see -- present even with zero released channels. */
   bot: PanelBotStatus | null;
