@@ -93,5 +93,5 @@ export const createModuleSecretReadAccess = (
   moduleId: string,
 ): ModuleSecretReadAccess => {
   const access = createModuleSecretAccess(environment, channelId, moduleId);
-  return { status: access.status, read: access.read };
+  return { status: access.status, read: access.read, readWithVersion: access.readWithVersion };
 };

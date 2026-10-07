@@ -4,6 +4,7 @@ import type { ModuleSecretAccess, ModuleSecretReadAccess } from "../../src/modul
 export const unusedModuleSecretReadAccess: ModuleSecretReadAccess = {
   status: () => Promise.resolve({ configured: false, updatedAt: null }),
   read: () => Promise.resolve(null),
+  readWithVersion: () => Promise.resolve(null),
 };
 
 export const unusedModuleSecretAccess: ModuleSecretAccess = {

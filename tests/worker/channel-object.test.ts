@@ -26,6 +26,7 @@ vi.mock("../../src/worker/module-secrets", () => ({
   createModuleSecretReadAccess: vi.fn(() => ({
     status: () => Promise.resolve({ configured: true, updatedAt: "2026-10-05T00:00:00.000Z" }),
     read: () => Promise.resolve("http://relay.belabox.net:8080/relay-key"),
+    readWithVersion: () => Promise.resolve({ value: "http://relay.belabox.net:8080/relay-key", version: "belabox-secret-version" }),
   })),
 }));
 
@@ -354,6 +355,7 @@ const objectFor = (
   (object as unknown as { adScheduleRefreshStartedAt: number }).adScheduleRefreshStartedAt = 0;
   (object as unknown as { adScheduleRefreshGeneration: number }).adScheduleRefreshGeneration = 0;
   (object as unknown as { adScheduleOperationQueue: Promise<void> }).adScheduleOperationQueue = Promise.resolve();
+  (object as unknown as { belaboxPollQueue: Promise<void> }).belaboxPollQueue = Promise.resolve();
   (object as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
   return object;
 };
@@ -431,6 +433,7 @@ describe("ChannelObject realtime path", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     mocks.processAdPrewarning.mockReset().mockResolvedValue(undefined);
     mocks.refreshAdPrewarningAlarm.mockReset().mockResolvedValue(undefined);
     mocks.getAdSchedule.mockReset();
@@ -445,6 +448,73 @@ describe("ChannelObject realtime path", () => {
     prerollFreeTime: 120,
     snoozeCount: 1,
     snoozeRefreshAt: null,
+  });
+
+  it("serializes requested BELABOX polls through the registered alarm routine", async () => {
+    const registration = belaboxModule.alarms?.find(({ key }) => key === "poll");
+    if (registration === undefined) throw new Error("BELABOX poll alarm is not registered.");
+    let signalFirstStarted!: () => void;
+    let releaseFirst!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { signalFirstStarted = resolve; });
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const invocationReasons: unknown[] = [];
+    const handler = vi.spyOn(registration, "handle").mockImplementation(async (_context, _key, _deadline, _owner, invocation) => {
+      invocationReasons.push(invocation);
+      if (invocationReasons.length === 1) {
+        signalFirstStarted();
+        await firstGate;
+      }
+      return invocationReasons.length;
+    });
+    const object = objectFor([]);
+
+    const first = object.runModuleAlarm("belabox", "poll", "poll", { reason: "check_now" });
+    await firstStarted;
+    const second = object.runModuleAlarm("belabox", "poll", "poll", { reason: "on_demand" });
+    const third = object.runModuleAlarm("belabox", "poll", "poll", { reason: "connection_test", statsUrl: "https://relay.example/key" });
+    await Promise.resolve();
+    expect(handler).toHaveBeenCalledOnce();
+
+    releaseFirst();
+    await expect(first).resolves.toBe(1);
+    await expect(second).resolves.toBe(2);
+    await expect(third).resolves.toBe(3);
+    expect(invocationReasons).toEqual([
+      { reason: "check_now" },
+      { reason: "on_demand" },
+      { reason: "connection_test", statsUrl: "https://relay.example/key" },
+    ]);
+  });
+
+  it("serializes a scheduled BELABOX poll alarm with an explicit poll request", async () => {
+    const registration = belaboxModule.alarms?.find(({ key }) => key === "poll");
+    if (registration === undefined) throw new Error("BELABOX poll alarm is not registered.");
+    let signalFirstStarted!: () => void;
+    let releaseFirst!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { signalFirstStarted = resolve; });
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const invocationReasons: unknown[] = [];
+    const handler = vi.spyOn(registration, "handle").mockImplementation(async (_context, _key, _deadline, _owner, invocation) => {
+      invocationReasons.push(invocation);
+      if (invocationReasons.length === 1) {
+        signalFirstStarted();
+        await firstGate;
+      }
+      return invocationReasons.length;
+    });
+    const object = objectFor([]);
+
+    await object.scheduleModuleAlarm("belabox", "poll", "poll", Date.now());
+    const scheduledPoll = object.alarm();
+    await firstStarted;
+    const requestedPoll = object.runModuleAlarm("belabox", "poll", "poll", { reason: "check_now" });
+    await Promise.resolve();
+    expect(handler).toHaveBeenCalledOnce();
+
+    releaseFirst();
+    await scheduledPoll;
+    await expect(requestedPoll).resolves.toBe(2);
+    expect(invocationReasons).toEqual([undefined, { reason: "check_now" }]);
   });
 
   it("shares overlay stream lookups across requests for the channel cache TTL", async () => {
@@ -1495,6 +1565,7 @@ describe("ChannelObject realtime path", () => {
         fetch_phase_json TEXT NOT NULL DEFAULT '{}', recent_json TEXT NOT NULL DEFAULT '[]',
         history_sample_json TEXT, history_module_revision INTEGER,
         alert_json TEXT NOT NULL DEFAULT '{}',
+        stream_session_key TEXT,
         revision INTEGER NOT NULL DEFAULT 1
       )`,
     ).run();

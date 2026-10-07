@@ -246,6 +246,13 @@ resolveTemplateValues: async (names, context) => {
 - Host-Variablen (`src/template-variables.ts`) und Modulvariablen: Eine
   Modulvariable darf innerhalb der Felder des Moduls einen gleichnamigen
   Systemnamen überlagern; Kanalvariablen liegen immer im Namensraum `var.`.
+- BELABOX stellt seine Relay-Werte unter `belabox.*` bereit. Der Intervallmodus
+  liest ausschließlich den normalisierten D1-Status; der Modus „bei Bedarf“
+  darf über den lesenden Secret-Contract ein frisches Sample abrufen. Fehler
+  und überalterte Samples lösen den zweisprachigen Rückfalltext aus. Das
+  gespeicherte Sample enthält nur normalisierte Messwerte, die Summe der
+  Paketverlust-Deltas sowie Anzeigephase und Beginn der laufenden Störung;
+  Relay-Rohantwort und Stats-URL werden nie persistiert.
 
 Der Host stellt `/api/channels/:channelId/template-variables` für die
 Variablenpicker und `/api/channels/:channelId/games?q=...` für die
@@ -522,7 +529,7 @@ oder Twitch (etwa ein Clip nur bei laufendem Stream).
 ### Overlay-Elemente (`overlayElements`)
 
 **Zweck:** Ein Modul liefert Darstellungen für gespeicherte Overlays
-(Textblock, Abstimmungsstand, Werbe-Countdown).
+(Textblock, Abstimmungsstand, Werbe-Countdown, BELABOX-Status).
 
 **Einsatz:** Pro Element `kind` (`<moduleId>.<name>`, eindeutig), `configVersion`,
 `defaultSize`, `defaultConfig`, `parseConfig` und `load`; optional `editor`.
@@ -560,7 +567,9 @@ overlayElements: [{
   zu erreichen). `mergeRealtimeState` führt Teilzustände in den aktuellen Stand
   zusammen, ohne Lebenszyklusdaten zu ersetzen; Zähler tragen eine monotone
   Revision (`chat_voting.tally` nutzt sie, um veraltete Stände zu ignorieren).
-  `reloadStateOnModuleMessages` und `reloadStateOnHostEvents`
+  `mergeRealtimeStateOnModuleMessages` ordnet Nachrichtentypen einem Element
+  zu, dessen `kind` bewusst anders heißt. `reloadStateOnModuleMessages` und
+  `reloadStateOnHostEvents`
   (`channel.game.changed`, `stream.state.changed`, `template.data.changed`)
   veranlassen stattdessen ein Neuladen über `initialState`.
 - **`previewState(config, language, now)`** (optional) erzeugt einen

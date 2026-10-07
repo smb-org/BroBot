@@ -43,6 +43,7 @@ export interface TemplateResolverSources {
   moduleSecrets?: (moduleId: string) => ModuleSecretReadAccess;
   publicOrigin?: string;
   externalFetchBudget?: ModuleExternalFetchBudget;
+  runModuleAlarm?: ModuleTemplateValueContext["runModuleAlarm"];
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   channelGameId?: () => Promise<string | null>;
   channelTimeZone: () => Promise<string>;
@@ -70,6 +71,7 @@ const recordFrom = (value: unknown): Readonly<Record<string, unknown>> | null =>
 const unavailableModuleSecrets: ModuleSecretReadAccess = {
   status: () => Promise.resolve({ configured: false, updatedAt: null }),
   read: () => Promise.resolve(null),
+  readWithVersion: () => Promise.resolve(null),
 };
 
 const payloadString = (event: ModuleEvent, key: string): string | null => valueFrom(event.payload[key]);
@@ -368,6 +370,7 @@ export const createTemplateRenderer = (
     channelLocation: sources.channelLocation,
     ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
     externalFetchBudget,
+    ...(sources.runModuleAlarm === undefined ? {} : { runModuleAlarm: sources.runModuleAlarm }),
     renderTemplate: renderNestedTemplate,
     addDiagnostic,
     addTemplateValueAttribution: addAttribution,
@@ -416,8 +419,8 @@ export const createTemplateRenderer = (
       .filter((variable) => variable.contexts?.includes(context) ?? true)
       .map((variable) => variable.name));
     const requestedNames = provider.templateVariableNamespace === "text_blocks"
-      ? renderNames.filter((name) => TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name) && !knownVariableNames.has(name))
-      : renderNames.filter((name) => declaredNames.has(name));
+      ? renderNames.filter((name) => TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name) && !knownVariableNames.has(name) && !Object.hasOwn(moduleValues, name))
+      : renderNames.filter((name) => declaredNames.has(name) && !Object.hasOwn(moduleValues, name));
     if (requestedNames.length === 0) continue;
     if (provider.resolveTemplateValues === undefined) continue;
     let resolved: Readonly<Record<string, string>>;

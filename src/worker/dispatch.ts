@@ -10,7 +10,7 @@ import { sendChatAnnouncement } from "./announcement";
 import { fetchTwitchUserByLogin, sendShoutout } from "./shoutout";
 import { isTwitchChannelModerator, sendModerationBan } from "./moderation";
 import { publishRealtimeMessages, publishVariablesChanged } from "./realtime";
-import { prepareModuleOverlayRealtimeMessage } from "./module-overlay-realtime";
+import { prepareModuleOverlayHostEventMessages, prepareModuleOverlayRealtimeMessage } from "./module-overlay-realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
 import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
@@ -927,6 +927,15 @@ export const dispatchEventSubNotification = async (
         DB: environment.DB,
         moduleSecrets: (providerModuleId) => createModuleSecretReadAccess(environment, event.channelId, providerModuleId),
         externalFetchBudget,
+        ...(environment.CHANNEL === undefined ? {} : {
+          runModuleAlarm: (moduleId: string, handlerKey: string, alarmKey: string, invocation?: unknown) => {
+            const object = environment.CHANNEL?.get(environment.CHANNEL.idFromName(event.channelId));
+            if (object === undefined) throw new Error("The channel Durable Object is unavailable.");
+            return invocation === undefined
+              ? object.runModuleAlarm(moduleId, handlerKey, alarmKey)
+              : object.runModuleAlarm(moduleId, handlerKey, alarmKey, invocation);
+          },
+        }),
         ...(environment.PUBLIC_ORIGIN === undefined ? {} : { publicOrigin: environment.PUBLIC_ORIGIN }),
         channelInfo,
         channelGameId,
@@ -1066,7 +1075,18 @@ export const dispatchEventSubNotification = async (
       })),
     },
   }];
-  if (streamStateChanged !== null) realtimeMessages.push(streamStateChanged);
+  if (streamStateChanged !== null) {
+    realtimeMessages.push(streamStateChanged);
+    try {
+      realtimeMessages.push(...await prepareModuleOverlayHostEventMessages(
+        environment.DB,
+        event.channelId,
+        "stream.state.changed",
+      ));
+    } catch (error: unknown) {
+      console.warn("Module overlay stream refresh hint could not be prepared.", error);
+    }
+  }
   if (changedVariables.size > 0) {
     await publishVariablesChanged(
       environment.CHANNEL,

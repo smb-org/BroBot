@@ -1,4 +1,4 @@
-import type { ModuleChannelInfo, ModuleExternalFetchBudget, ModuleLanguage, ModuleStreamState } from "../modules/contract";
+import type { ModuleChannelInfo, ModuleExternalFetchBudget, ModuleLanguage, ModuleStreamState, ModuleTemplateValueContext } from "../modules/contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../modules/registry";
 import { createTemplateRenderer, type TemplateChannelDetails, type TemplateStreamDetails, type TemplateValueProvider } from "./template-resolver";
 import { readChannelLocation } from "./db/channel-settings";
@@ -31,6 +31,7 @@ export const renderScheduledTemplate = async (
   now: number,
   externalFetchBudget?: ModuleExternalFetchBudget,
   moduleValues: Readonly<Record<string, string | number>> = {},
+  runModuleAlarm?: ModuleTemplateValueContext["runModuleAlarm"],
 ): Promise<{ text: string; attributions?: readonly string[] }> => {
   const receivedAt = new Date(now).toISOString();
   const event = {
@@ -139,6 +140,7 @@ export const renderScheduledTemplate = async (
     DB: environment.DB,
     moduleSecrets: (moduleId) => createModuleSecretReadAccess(environment, channelId, moduleId),
     ...(externalFetchBudget === undefined ? {} : { externalFetchBudget }),
+    ...(runModuleAlarm === undefined ? {} : { runModuleAlarm }),
     publicOrigin: environment.PUBLIC_ORIGIN,
     channelInfo,
     channelGameId: async () => (await channelDetails())?.gameId ?? null,

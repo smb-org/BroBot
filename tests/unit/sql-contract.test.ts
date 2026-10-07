@@ -30,9 +30,11 @@ import { textCommandSelectColumns } from "../../src/modules/text_commands/adapte
 import { textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { chatVoteSelectColumns } from "../../src/modules/chat_voting/repository";
 import {
+  belaboxExpectedOpenStreamSetGuard,
   belaboxHistoryModuleRevisionGuard,
   belaboxHistoryStatusGuard,
   belaboxStreamStateSnapshotGuard,
+  belaboxStreamSessionGuard,
 } from "../../src/modules/belabox/adapters/d1";
 import { MANAGING_ROLES } from "../../src/contracts/values";
 import { ANY_MEMBER_ROLES } from "../../src/worker/db/guards";
@@ -72,6 +74,12 @@ const sourceFiles = (directory: string): string[] => readdirSync(directory, { wi
 // Only `placeholders` is built at runtime and has no production literal.
 const sqlGetFixtures = new Map<string, string>([
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
+  ["sessionGuard.sql", belaboxStreamSessionGuard("channel-id", {
+    state: "online",
+    changedAt: now,
+    startedAt: now,
+    streamId: "stream-id",
+  }).sql],
   ["minimumValue", "-999999999"],
   ["maximumValue", "999999999"],
   ["MINIMUM_VALUE_SQL", "-999999999"],
@@ -110,6 +118,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["belaboxHistoryStatusGuard", belaboxHistoryStatusGuard],
   ["belaboxHistoryModuleRevisionGuard", belaboxHistoryModuleRevisionGuard],
   ["belaboxStreamStateSnapshotGuard", belaboxStreamStateSnapshotGuard],
+  ["expectedOpenStreamSetGuard.sql", belaboxExpectedOpenStreamSetGuard("channel-id", null, []).sql],
   ["assignments.join(\",\\n            \")", "polling = 0, history_sample_json = NULL, history_module_revision = NULL, revision = revision + 1"],
   ["changes.join(\" OR \")", "polling != 0 OR history_sample_json IS NOT NULL OR history_module_revision IS NOT NULL"],
   ["guard", authorizeModuleMutation("channel-id", actor, now).sql],

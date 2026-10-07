@@ -439,6 +439,7 @@ export class ChannelObject extends DurableObject<Env> {
   private adScheduleRefreshStartedAt = 0;
   private adScheduleRefreshGeneration = 0;
   private adScheduleOperationQueue: Promise<void> = Promise.resolve();
+  private belaboxPollQueue: Promise<void> = Promise.resolve();
   private activeChatterSchemaReady = false;
   // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
   private recentlyBoundOverlayTokenIds = new Set<string>();
@@ -458,6 +459,30 @@ export class ChannelObject extends DurableObject<Env> {
   private ownChannelId(): string | null {
     const name = this.ctx.id.name;
     return typeof name === "string" && name.length > 0 ? name : null;
+  }
+
+  private async serializeBelaboxPoll<Result>(operation: () => Promise<Result>): Promise<Result> {
+    const previous = this.belaboxPollQueue;
+    let release!: () => void;
+    this.belaboxPollQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  private async runModuleAlarmHandler<Result>(
+    moduleId: string,
+    handlerKey: string,
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    // Both explicit poll requests and the alarm dispatcher enter through this
+    // gate, so every BELABOX reason shares the alarm's serialized routine.
+    return moduleId === "belabox" && handlerKey === "poll"
+      ? await this.serializeBelaboxPoll(operation)
+      : await operation();
   }
 
   private ensureActiveChatterTable(): void {
@@ -1285,7 +1310,17 @@ export class ChannelObject extends DurableObject<Env> {
         const moduleValues = typeof moduleValuesOrNow === "number"
           ? typeof nowOrModuleValues === "object" ? nowOrModuleValues : {}
           : moduleValuesOrNow;
-        return renderScheduledTemplate(this.env, channelId, text, now, externalFetchBudget, moduleValues);
+        return renderScheduledTemplate(
+          this.env,
+          channelId,
+          text,
+          now,
+          externalFetchBudget,
+          moduleValues,
+          (runModuleId, handlerKey, alarmKey, invocation) => invocation === undefined
+            ? this.runModuleAlarm(runModuleId, handlerKey, alarmKey)
+            : this.runModuleAlarm(runModuleId, handlerKey, alarmKey, invocation),
+        );
       },
       publishModuleOverlayMessage: async (type, elementKind, payload) => {
         const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, moduleId, {
@@ -1498,18 +1533,26 @@ export class ChannelObject extends DurableObject<Env> {
     return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
   }
 
-  /** Runs one registered module alarm from an authorized host route reconciliation. */
-  public async runModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string): Promise<void> {
+  /** Runs one registered module alarm from an authorized host request. */
+  public async runModuleAlarm(
+    moduleId: string,
+    handlerKey: string,
+    alarmKey: string,
+    invocation?: unknown,
+  ): Promise<unknown> {
     const module = MODULES.find((candidate) => candidate.id === moduleId);
     const registration = module?.alarms?.find((candidate) => candidate.key === handlerKey);
     if (registration === undefined || alarmKey.length === 0 || alarmKey.length > 256) {
       throw new Error("Module alarm is unavailable.");
     }
-    await registration.handle(
+    const execute = () => registration.handle(
       this.moduleAlarmContext(moduleId, registration, createModuleExternalFetchBudget()),
       alarmKey,
       Date.now(),
+      undefined,
+      invocation,
     );
+    return await this.runModuleAlarmHandler(moduleId, handlerKey, execute);
   }
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
@@ -1744,12 +1787,14 @@ export class ChannelObject extends DurableObject<Env> {
         handlers.set(handler, {
           ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
           handle: async (key, entry) => {
-            await registration.handle(
+            const execute = () => registration.handle(
               this.moduleAlarmContext(module.id, registration, externalFetchBudget),
               key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
               entry.deadline,
               entry.ownerRevision,
             );
+            await this.runModuleAlarmHandler(module.id, registration.key, execute);
+            return undefined;
           },
         });
       }
