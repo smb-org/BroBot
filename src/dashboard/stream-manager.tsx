@@ -148,9 +148,9 @@ export const ChannelNotices = ({
 }): ReactElement | null => {
   const texts = dashboardTexts();
   const [expanded, setExpanded] = useState(false);
-  if (!modulesLoaded) return <div className="stream-manager-notices__loading" aria-hidden="true" />;
+  if (!modulesLoaded) return null;
   const facts = collectChannelNoticeFacts({ ...channel, modules, ...(loadedAt === undefined ? {} : { loadedAt }) });
-  if (facts.length === 0) return <div className="stream-manager-notices__loading" aria-hidden="true" />;
+  if (facts.length === 0) return null;
   const visible = expanded ? facts : facts.slice(0, 2);
   const status = facts.some((fact) => fact.tone === "error") ? "error" : "warning";
   const noticeTexts = texts.streamManager.notices;

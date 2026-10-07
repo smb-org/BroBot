@@ -1610,10 +1610,12 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const refreshChannelState = async (): Promise<void> => {
+    const refreshFallbackModules = selectedChannel?.modules === undefined ? reloadModules() : Promise.resolve();
     await Promise.all([
       reloadChannels(),
       reloadOverview(),
       reloadSystem(),
+      refreshFallbackModules,
     ]);
   };
   const refreshChannelStateRef = useRef(refreshChannelState);
@@ -1737,6 +1739,8 @@ export const DashboardApp = (): ReactElement => {
     if ((route.kind !== "channel" && route.kind !== "module") || channels.data === null) return null;
     return channels.data.find((channel) => channel.channelId === route.channelId) ?? null;
   }, [channels.data, route]);
+  const selectedChannelIdForModules = selectedChannel?.channelId ?? null;
+  const selectedModulesForChannel = selectedChannel?.modules;
   const spotlightChannel = route.kind === "channel" || route.kind === "module"
     ? selectedChannel
     : channels.data?.[0] ?? null;
@@ -1745,12 +1749,12 @@ export const DashboardApp = (): ReactElement => {
   // compatibility fallback for an older worker response that omits it.
   // Current page loads therefore need one request, including the sidebar.
   useEffect(() => {
-    if ((route.kind !== "channel" && route.kind !== "module") || selectedChannel === null) {
+    if ((route.kind !== "channel" && route.kind !== "module") || selectedChannelIdForModules === null || selectedChannelIdForModules !== route.channelId) {
       setModules(idleState());
       return;
     }
-    if (selectedChannel.modules !== undefined) {
-      setModules(loadedState({ modules: selectedChannel.modules }));
+    if (selectedModulesForChannel !== undefined) {
+      setModules(loadedState({ modules: selectedModulesForChannel }));
       return;
     }
     const controller = new AbortController();
@@ -1766,7 +1770,7 @@ export const DashboardApp = (): ReactElement => {
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     });
     return () => controller.abort();
-  }, [route, selectedChannel]);
+  }, [route, selectedChannelIdForModules, selectedModulesForChannel]);
 
   const overviewForHeader = overview.data !== null && selectedChannel !== null &&
     overview.data.channelId === selectedChannel.channelId &&
@@ -1936,7 +1940,11 @@ export const DashboardApp = (): ReactElement => {
   const showChannelNotReleased = !showBotBlocking && isChannelOrModuleRoute && selectedChannel === null && channels.status === "success";
   const overviewMatchesRoute = isChannelOrModuleRoute && overviewRoutePath === dashboardRoutePath(route) &&
     overview.data !== null && overview.data.channelId === route.channelId;
-  const overviewPageStatus = overviewMatchesRoute ? "success" : overview.status === "error" ? "error" : "loading";
+  const overviewModulesLoaded = selectedChannel?.modules !== undefined || overview.data?.modules !== undefined ||
+    modules.data !== null || modules.status === "error";
+  const overviewPageStatus = overviewMatchesRoute && overviewModulesLoaded
+    ? "success"
+    : overview.status === "error" ? "error" : "loading";
 
   return (
     <UiProvider>
@@ -1987,7 +1995,7 @@ export const DashboardApp = (): ReactElement => {
           loading={<Skeleton rows={12} height={58} />}
           empty={<Skeleton rows={12} height={58} />}
           error={<Skeleton rows={12} height={58} />}
-        >{overviewMatchesRoute && overview.data !== null ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} modulesLoaded={selectedChannel.modules !== undefined || overview.data.modules !== undefined || modules.data !== null || modules.status === "error"} onLocationChanged={(channelId, location) => {
+        >{overviewMatchesRoute && overview.data !== null && overviewModulesLoaded ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} modulesLoaded={overviewModulesLoaded} onLocationChanged={(channelId, location) => {
           setChannels((current) => current.data === null ? current : {
             ...current,
             data: current.data.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),

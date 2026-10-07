@@ -3294,6 +3294,7 @@ describe("Dashboard skeleton", () => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
       if (url.pathname === "/api/channels/kanal-a/moderator-status") return check;
       return Promise.resolve(jsonResponse({}, 404));
@@ -3330,6 +3331,7 @@ describe("Dashboard skeleton", () => {
         const url = requestUrl(input);
         if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
         if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+        if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
         if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
         if (url.pathname === "/api/channels/kanal-a/moderator-status") return Promise.resolve(jsonResponse({
           moderator: { isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null },

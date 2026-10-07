@@ -1,6 +1,7 @@
 export const RECENT_TARGET_LIMIT = 5;
 const STORAGE_PREFIX = "brobot-dashboard-spotlight-recent-v1";
 const memoryFallback = new Map<string, string[]>();
+const memoryAuthoritative = new Set<string>();
 
 export interface RecentTargetStorage {
   getItem: (key: string) => string | null;
@@ -25,6 +26,7 @@ export const readRecentTargets = (
 ): string[] => {
   if (viewerUserId === null || viewerUserId.length === 0 || channelId.length === 0) return [];
   const key = storageKey(viewerUserId, channelId);
+  if (memoryAuthoritative.has(key)) return [...(memoryFallback.get(key) ?? [])];
   if (storage === null) return [...(memoryFallback.get(key) ?? [])];
   try {
     const stored = storage.getItem(key);
@@ -51,7 +53,9 @@ export const rememberRecentTarget = (
   if (storage === null) return next;
   try {
     storage.setItem(key, JSON.stringify(next));
+    memoryAuthoritative.delete(key);
   } catch {
+    memoryAuthoritative.add(key);
     return next;
   }
   return next;

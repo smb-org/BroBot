@@ -53,4 +53,19 @@ describe("Spotlight recent targets", () => {
     expect(rememberRecentTarget(viewer, "channel-throwing", "events", throwingStorage)).toEqual(["events"]);
     expect(readRecentTargets(viewer, "channel-throwing", throwingStorage)).toEqual(["events"]);
   });
+
+  it("keeps memory history authoritative when storage reads work but writes fail", () => {
+    const viewer = `viewer-write-failure-${String(Date.now())}`;
+    const values = new Map<string, string>();
+    const storage: RecentTargetStorage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: () => { throw new Error("storage is read-only"); },
+    };
+    const key = `brobot-dashboard-spotlight-recent-v1:${encodeURIComponent(viewer)}:channel-write-failure`;
+    values.set(key, JSON.stringify(["page-a"]));
+
+    expect(rememberRecentTarget(viewer, "channel-write-failure", "page-b", storage)).toEqual(["page-b", "page-a"]);
+    expect(rememberRecentTarget(viewer, "channel-write-failure", "page-c", storage)).toEqual(["page-c", "page-b", "page-a"]);
+    expect(readRecentTargets(viewer, "channel-write-failure", storage)).toEqual(["page-c", "page-b", "page-a"]);
+  });
 });

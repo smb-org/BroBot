@@ -556,7 +556,7 @@ describe("Stream Manager warnings and errors feed", () => {
 describe("Stream Manager notices", () => {
   afterEach(() => { cleanup(); });
 
-  it("keeps a one-row placeholder until module state is loaded", () => {
+  it("does not render notices before module state is loaded", () => {
     const { container } = renderWithMantine(<ChannelNotices
       channel={makeNoticeChannel()}
       modules={[]}
@@ -566,8 +566,8 @@ describe("Stream Manager notices", () => {
       onNavigate={vi.fn()}
     />);
 
-    expect(container.querySelector(".stream-manager-notices__loading")).toBeInTheDocument();
     expect(container.querySelector(".stream-manager-notices")).not.toBeInTheDocument();
+    expect(container.querySelector('[aria-hidden="true"]')).not.toBeInTheDocument();
   });
 
   it("hides the area when there are no notices", () => {
@@ -581,7 +581,7 @@ describe("Stream Manager notices", () => {
     />);
 
     expect(container.querySelector(".stream-manager-notices")).not.toBeInTheDocument();
-    expect(container.querySelector(".stream-manager-notices__loading")).toBeInTheDocument();
+    expect(container.querySelector('[aria-hidden="true"]')).not.toBeInTheDocument();
   });
 
   it("shows two notice rows at first, each with one action, and expands to all three", () => {
