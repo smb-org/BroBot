@@ -270,6 +270,9 @@ describe("BELABOX settings route", () => {
       "SELECT ended_at, bitrate_p10 FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
     ).bind(CHANNEL_ID, streamId).first()).resolves.toEqual({ ended_at: null, bitrate_p10: null });
 
+    await database.prepare(
+      "UPDATE channel_stream_state SET state = 'offline', changed_at = ?, stream_id = NULL WHERE channel_id = ?",
+    ).bind("2026-10-07T09:21:00.000Z", CHANNEL_ID).run();
     await handleBelaboxPollAlarm({
       DB: database as unknown as D1Database,
       channelId: CHANNEL_ID,

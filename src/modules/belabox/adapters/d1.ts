@@ -41,6 +41,63 @@ export interface BelaboxStatus {
   revision: number;
 }
 
+export interface BelaboxStreamStateSnapshot {
+  state: string;
+  changedAt: string;
+  startedAt: string | null;
+  streamId: string | null;
+}
+
+export const getBelaboxStreamStateSnapshot = async (
+  db: D1Database,
+  channelId: string,
+): Promise<BelaboxStreamStateSnapshot | null> => {
+  const row = await db.prepare(
+    `SELECT state, changed_at, started_at, stream_id
+       FROM channel_stream_state WHERE channel_id = ?`,
+  ).bind(channelId).first<{
+    state: string;
+    changed_at: string;
+    started_at: string | null;
+    stream_id: string | null;
+  }>();
+  return row === null ? null : {
+    state: row.state,
+    changedAt: row.changed_at,
+    startedAt: row.started_at,
+    streamId: row.stream_id,
+  };
+};
+
+export const sameBelaboxStreamStateSnapshot = (
+  left: BelaboxStreamStateSnapshot | null,
+  right: BelaboxStreamStateSnapshot | null,
+): boolean => left === null ? right === null : right !== null &&
+  left.state === right.state && left.changedAt === right.changedAt &&
+  left.startedAt === right.startedAt && left.streamId === right.streamId;
+
+export const belaboxStreamStateSnapshotGuard = `(
+  (? = 1 AND NOT EXISTS (
+    SELECT 1 FROM channel_stream_state WHERE channel_id = ?
+  )) OR (? = 0 AND EXISTS (
+    SELECT 1 FROM channel_stream_state
+     WHERE channel_id = ? AND state = ? AND changed_at = ?
+       AND started_at IS ? AND stream_id IS ?
+  ))
+)`;
+
+const streamSnapshotBindings = (
+  channelId: string,
+  snapshot: BelaboxStreamStateSnapshot | null,
+): unknown[] => [
+  Number(snapshot === null), channelId,
+  Number(snapshot === null), channelId,
+  snapshot?.state ?? null,
+  snapshot?.changedAt ?? null,
+  snapshot?.startedAt ?? null,
+  snapshot?.streamId ?? null,
+];
+
 interface BelaboxStatusRow {
   sampled_at: string | null;
   sample_json: string | null;
@@ -218,11 +275,13 @@ export const finalizeAndResetBelaboxHistory = async (
   channelId: string,
   endedAt: string,
   expectedModuleRevision: number | null,
+  expectedStreamSnapshot: BelaboxStreamStateSnapshot | null,
   options: {
     finalizeOpen?: boolean;
     resetStream?: boolean;
     stopPolling?: boolean;
     errorCode?: BelaboxStatusErrorCode;
+    maxBaselineAgeMs?: number;
   } = {},
 ): Promise<boolean> => {
   const [openStreams, status] = await Promise.all([
@@ -234,6 +293,7 @@ export const finalizeAndResetBelaboxHistory = async (
   ]);
   const ending = Date.parse(endedAt);
   const normalizedEndedAt = Number.isFinite(ending) ? new Date(ending).toISOString() : new Date().toISOString();
+  const normalizedEnding = Date.parse(normalizedEndedAt);
   const finalizers = options.finalizeOpen === false ? [] : await Promise.all(openStreams.results.map(async (stream) => {
     const minutes = await db.prepare(
       `SELECT samples, bitrate_sum FROM belabox_minutes
@@ -245,9 +305,12 @@ export const finalizeAndResetBelaboxHistory = async (
         ? [row.bitrate_sum / row.samples]
         : []));
     const sample = status?.streamId === stream.stream_id ? status.historySample : null;
-    const tailSeconds = sample === null
-      ? 0
-      : elapsedSampleSeconds(sample, { ...sample, at: normalizedEndedAt });
+    const sampleAgeMs = sample === null ? Number.POSITIVE_INFINITY : normalizedEnding - Date.parse(sample.at);
+    const tailIsCurrent = sample !== null && Number.isFinite(sampleAgeMs) && sampleAgeMs >= 0 &&
+      sampleAgeMs <= (options.maxBaselineAgeMs ?? 0);
+    const tailSeconds = tailIsCurrent
+      ? elapsedSampleSeconds(sample, { ...sample, at: normalizedEndedAt })
+      : 0;
     const lowTail = sample?.connected === true && sample.bitrateKbps < BELABOX_LOW_BITRATE_KBPS ? tailSeconds : 0;
     const disconnectedTail = sample?.connected === false ? tailSeconds : 0;
     return db.prepare(
@@ -257,7 +320,8 @@ export const finalizeAndResetBelaboxHistory = async (
               low_seconds = low_seconds + ?,
               disconnected_seconds = disconnected_seconds + ?
         WHERE channel_id = ? AND stream_id = ? AND started_at = ? AND ended_at IS NULL
-          AND ${belaboxHistoryModuleRevisionGuard}`,
+          AND ${belaboxHistoryModuleRevisionGuard}
+          AND ${belaboxStreamStateSnapshotGuard}`,
     ).bind(
       normalizedEndedAt,
       p10,
@@ -270,6 +334,7 @@ export const finalizeAndResetBelaboxHistory = async (
       channelId,
       channelId,
       expectedModuleRevision,
+      ...streamSnapshotBindings(channelId, expectedStreamSnapshot),
     );
   }));
   const assignments = [
@@ -304,19 +369,27 @@ export const finalizeAndResetBelaboxHistory = async (
   if (options.resetStream === true) bindings.push(encodedPhase(EMPTY_FETCH_PHASE));
   bindings.push(channelId);
   if (options.errorCode !== undefined && options.resetStream !== true) bindings.push(options.errorCode);
-  bindings.push(expectedModuleRevision, channelId, channelId, expectedModuleRevision);
+  bindings.push(
+    expectedModuleRevision,
+    channelId,
+    channelId,
+    expectedModuleRevision,
+    ...streamSnapshotBindings(channelId, expectedStreamSnapshot),
+  );
   const statusReset = db.prepare(
     `UPDATE belabox_status
         SET ${assignments.join(",\n            ")}
       WHERE channel_id = ? AND (${changes.join(" OR ")})
-        AND ${belaboxHistoryModuleRevisionGuard}`,
+        AND ${belaboxHistoryModuleRevisionGuard}
+        AND ${belaboxStreamStateSnapshotGuard}`,
   ).bind(...bindings);
   const statusSeed = options.errorCode === undefined ? [] : [db.prepare(
     `INSERT INTO belabox_status
       (channel_id, error_code, polling, fetch_phase_json, recent_json, revision)
      SELECT ?, ?, 0, ?, '[]', 1
       WHERE NOT EXISTS (SELECT 1 FROM belabox_status WHERE channel_id = ?)
-        AND ${belaboxHistoryModuleRevisionGuard}`,
+        AND ${belaboxHistoryModuleRevisionGuard}
+        AND ${belaboxStreamStateSnapshotGuard}`,
   ).bind(
     channelId,
     options.errorCode,
@@ -326,12 +399,17 @@ export const finalizeAndResetBelaboxHistory = async (
     channelId,
     channelId,
     expectedModuleRevision,
+    ...streamSnapshotBindings(channelId, expectedStreamSnapshot),
   )];
   await db.batch([...finalizers, ...statusSeed, statusReset]);
-  const currentModule = await db.prepare(
-    "SELECT revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
-  ).bind(channelId).first<{ revision: number }>();
-  return (currentModule?.revision ?? null) === expectedModuleRevision;
+  const [currentModule, currentStreamSnapshot] = await Promise.all([
+    db.prepare(
+      "SELECT revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(channelId).first<{ revision: number }>(),
+    getBelaboxStreamStateSnapshot(db, channelId),
+  ]);
+  return (currentModule?.revision ?? null) === expectedModuleRevision &&
+    sameBelaboxStreamStateSnapshot(currentStreamSnapshot, expectedStreamSnapshot);
 };
 
 /** Reopens a previously finalized row only after the serialized poll alarm sees the live stream. */
@@ -390,7 +468,23 @@ export const belaboxHistoryStatusGuard = `WHERE EXISTS (
     SELECT 1 FROM belabox_status
      WHERE channel_id = ? AND revision = ? AND history_sample_json = ?
        AND stream_id = ? AND belabox_stream_id = ?
-  )`;
+  ) AND EXISTS (
+    SELECT 1 FROM channel_modules
+     WHERE channel_id = ? AND module_id = 'belabox' AND enabled = 1
+       AND revision = ? AND json_extract(settings, '$.mode') = 'interval'
+  ) AND ${belaboxStreamStateSnapshotGuard}`;
+
+/** Clears an incomplete poll's baseline without making a lifecycle decision. */
+export const clearBelaboxHistoryBaseline = async (db: D1Database, channelId: string): Promise<void> => {
+  await db.batch([db.prepare(
+    `UPDATE belabox_status
+        SET history_sample_json = NULL,
+            history_module_revision = NULL,
+            revision = revision + 1
+      WHERE channel_id = ?
+        AND (history_sample_json IS NOT NULL OR history_module_revision IS NOT NULL)`,
+  ).bind(channelId)]);
+};
 
 export const markBelaboxPollingStarted = async (
   db: D1Database,
@@ -421,6 +515,7 @@ export const writeBelaboxFetch = async (
     expectedSecretVersion: string;
     expectedStatusRevision: number | null;
     expectedModuleRevision?: number | null;
+    expectedStreamSnapshot?: BelaboxStreamStateSnapshot | null;
     historySample?: BelaboxSample | null;
     resetHistoryBaseline?: boolean;
     historyModuleRevision?: number | null;
@@ -456,6 +551,7 @@ export const writeBelaboxFetch = async (
           WHERE channel_id = ? AND module_id = 'belabox' AND enabled = 1
             AND revision = ? AND json_extract(settings, '$.mode') = 'interval'
        ))
+       AND (? = 0 OR ${belaboxStreamStateSnapshotGuard})
      ON CONFLICT (channel_id) DO UPDATE SET
        sampled_at = CASE
          WHEN excluded.sampled_at IS NOT NULL AND
@@ -506,6 +602,8 @@ export const writeBelaboxFetch = async (
     input.expectedModuleRevision ?? null,
     input.channelId,
     input.expectedModuleRevision ?? null,
+    Number(input.expectedStreamSnapshot !== undefined),
+    ...streamSnapshotBindings(input.channelId, input.expectedStreamSnapshot ?? null),
     Number(input.history !== undefined),
     Number(input.resetHistoryBaseline === true),
     Number(input.history !== undefined),
@@ -551,6 +649,9 @@ export const writeBelaboxFetch = async (
     historySampleJson,
     history.streamId,
     history.streamId,
+    input.channelId,
+    input.expectedModuleRevision ?? null,
+    ...streamSnapshotBindings(input.channelId, input.expectedStreamSnapshot ?? null),
   );
   const streamWrite = db.prepare(
     `INSERT INTO belabox_streams
@@ -581,6 +682,9 @@ export const writeBelaboxFetch = async (
     historySampleJson,
     history.streamId,
     history.streamId,
+    input.channelId,
+    input.expectedModuleRevision ?? null,
+    ...streamSnapshotBindings(input.channelId, input.expectedStreamSnapshot ?? null),
   );
   const results = await db.batch([statusWrite, minuteWrite, streamWrite]);
   return (results[0]?.meta.changes ?? 0) > 0 ? nextRevision : null;

@@ -95,7 +95,26 @@ const insertModule = async (
       (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
      VALUES (?, 'belabox', ?, 'ciphertext-version', 'test', 1, ?, 'tester')`,
   ).bind(CHANNEL_ID, BELABOX_STATS_URL_SECRET, new Date().toISOString()).run();
+  await database.prepare(
+    `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, stream_id)
+     VALUES (?, 'online', ?, 'eventsub', ?)
+     ON CONFLICT (channel_id) DO UPDATE SET state = 'online', changed_at = excluded.changed_at,
+       source = 'eventsub', stream_id = excluded.stream_id`,
+  ).bind(CHANNEL_ID, "2026-10-05T12:00:00.000Z", STREAM_ID).run();
 };
+
+const setStoredStreamState = async (
+  database: TestD1Database,
+  state: "online" | "offline",
+  streamId: string | null,
+): Promise<void> => {
+  await database.prepare(
+    "UPDATE channel_stream_state SET state = ?, stream_id = ?, changed_at = ? WHERE channel_id = ?",
+  ).bind(state, streamId, new Date(Date.now()).toISOString(), CHANNEL_ID).run();
+};
+
+const setStoredStreamId = async (database: TestD1Database, streamId: string | null): Promise<void> =>
+  setStoredStreamState(database, "online", streamId);
 
 const alarmContext = (
   database: TestD1Database,
@@ -277,6 +296,7 @@ describe("BELABOX polling", () => {
        VALUES (?, 'open-a', '2026-10-05T09:00:00.000Z', 1, 1000),
               (?, 'open-b', '2026-10-05T10:00:00.000Z', 1, 2000)`,
     ).bind(CHANNEL_ID, CHANNEL_ID).run();
+    await setStoredStreamState(database, "offline", null);
     const { context } = alarmContext(database, { streamState: "offline", streamId: null });
 
     await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now());
@@ -293,6 +313,17 @@ describe("BELABOX polling", () => {
 
   it("ensures after every lifecycle signal and leaves mode decisions to the poll alarm", async () => {
     await insertModule(database, { mode: "on_demand", intervalSeconds: 15 });
+    const previous = normalizedSample("2026-10-05T11:59:45.000Z", 2_400, 7);
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, polling, stream_id, belabox_stream_id, history_sample_json,
+         history_module_revision, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, ?, ?, ?, 1, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, STREAM_ID, STREAM_ID, JSON.stringify(previous)).run();
+    await database.prepare(
+      `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+       VALUES (?, ?, '2026-10-05T11:50:00.000Z', 1, 2_400)`,
+    ).bind(CHANNEL_ID, STREAM_ID).run();
     const handleEvent = belaboxModule.handleEvent;
     const onInputsChanged = belaboxModule.alarms?.find(({ onScheduleInputsChanged }) => onScheduleInputsChanged !== undefined)
       ?.onScheduleInputsChanged;
@@ -328,7 +359,14 @@ describe("BELABOX polling", () => {
     const { context, scheduled } = alarmContext(database);
     await onInputsChanged(context, "activation");
     expect(scheduled).toEqual([{ key: "poll", deadline: Date.now() }]);
-    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toBeNull();
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      polling: true,
+      historySample: previous,
+      historyModuleRevision: 1,
+    });
+    await expect(database.prepare(
+      "SELECT ended_at FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
+    ).bind(CHANNEL_ID, STREAM_ID).first<{ ended_at: string | null }>()).resolves.toEqual({ ended_at: null });
   });
 
   it("keeps desk streams in 60-second probe mode and switches an IRL stream after the first connected probe", async () => {
@@ -417,6 +455,7 @@ describe("BELABOX polling", () => {
     });
 
     vi.setSystemTime("2026-10-05T12:01:00.000Z");
+    await setStoredStreamState(database, "offline", null);
     context.streamState = () => Promise.resolve("offline");
     context.streamStartedAt = () => Promise.resolve({ streamId: null, startedAt: null });
     await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now());
@@ -442,9 +481,11 @@ describe("BELABOX polling", () => {
       .mockResolvedValueOnce(jsonResponse(relayPayload(true, 1_000)))
       .mockResolvedValueOnce(jsonResponse(relayPayload(true, 2_000)));
     vi.setSystemTime("2026-10-05T12:00:05.000Z");
+    await setStoredStreamId(database, "stream-first");
     await handleBelaboxPollAlarm(alarmContext(database, { streamId: "stream-first" }).context,
       BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
     vi.setSystemTime("2026-10-05T12:00:20.000Z");
+    await setStoredStreamId(database, "stream-second");
     await handleBelaboxPollAlarm(alarmContext(database, { streamId: "stream-second" }).context,
       BELABOX_POLL_ALARM_KEY, Date.now(), undefined, fetcher);
 
@@ -544,6 +585,7 @@ describe("BELABOX polling", () => {
     const running = handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
     await started.promise;
     streamState = "offline";
+    await setStoredStreamState(database, "offline", null);
     const handleEvent = belaboxModule.handleEvent;
     if (handleEvent === undefined) throw new Error("BELABOX event handler missing.");
     await handleEvent({
@@ -621,6 +663,7 @@ describe("BELABOX polling", () => {
 
   it("discards a delayed S1 fetch and resets polling after the current stream changes to S2", async () => {
     await insertModule(database);
+    await setStoredStreamId(database, "stream-s1");
     const { context, scheduled } = alarmContext(database);
     let streamId: string | null = "stream-s1";
     context.streamStartedAt = () => Promise.resolve({ streamId, startedAt: null });
@@ -639,6 +682,7 @@ describe("BELABOX polling", () => {
     const running = handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
     await started.promise;
     streamId = "stream-s2";
+    await setStoredStreamId(database, "stream-s2");
     response.resolve(jsonResponse(relayPayload(true)));
     await running;
 
@@ -922,10 +966,16 @@ describe("BELABOX polling", () => {
   it("stops interval polling only when the poll alarm sees on-demand settings", async () => {
     await insertModule(database);
     const { context, scheduled, cleared } = alarmContext(database);
+    const previous = normalizedSample("2026-10-05T11:59:45.000Z", 2_400, 7);
     await database.prepare(
       `INSERT INTO belabox_status
-        (channel_id, polling, stream_id, fetch_phase_json, recent_json, revision)
-       VALUES (?, 1, ?, '{}', '[]', 1)`,
+        (channel_id, polling, stream_id, belabox_stream_id, history_sample_json,
+         history_module_revision, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, ?, ?, ?, 1, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, STREAM_ID, STREAM_ID, JSON.stringify(previous)).run();
+    await database.prepare(
+      `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+       VALUES (?, ?, '2026-10-05T11:50:00.000Z', 1, 2_400)`,
     ).bind(CHANNEL_ID, STREAM_ID).run();
     await database.prepare(
       "UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'belabox'",
@@ -941,7 +991,16 @@ describe("BELABOX polling", () => {
 
     expect(scheduled).toEqual([]);
     expect(cleared).toEqual([]);
-    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({ polling: false });
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      polling: false,
+      historySample: null,
+      historyModuleRevision: null,
+    });
+    await expect(database.prepare(
+      "SELECT ended_at FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
+    ).bind(CHANNEL_ID, STREAM_ID).first<{ ended_at: string | null }>()).resolves.toEqual({
+      ended_at: new Date().toISOString(),
+    });
   });
 
   it("does not carry history deltas across a fast interval to on-demand to interval save", async () => {
@@ -1023,6 +1082,193 @@ describe("BELABOX polling", () => {
     expect(scheduled).toEqual([{ key: "poll", deadline: Date.now() }]);
   });
 
+  it("rejects a poll batch if the module is disabled after its state snapshot", async () => {
+    await insertModule(database);
+    const previous = normalizedSample("2026-10-05T11:59:45.000Z", 3_200, 7);
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, polling, stream_id, belabox_stream_id, history_sample_json,
+         history_module_revision, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, ?, ?, ?, 1, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, STREAM_ID, STREAM_ID, JSON.stringify(previous)).run();
+    await database.prepare(
+      `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+       VALUES (?, ?, '2026-10-05T11:50:00.000Z', 1, 3_200)`,
+    ).bind(CHANNEL_ID, STREAM_ID).run();
+
+    let changed = false;
+    const delayedDatabase = {
+      prepare: (sql: string) => database.prepare(sql),
+      batch: async (statements: Parameters<TestD1Database["batch"]>[0]) => {
+        if (!changed && statements.length === 3) {
+          changed = true;
+          await database.prepare(
+            `UPDATE channel_modules SET enabled = 0, revision = revision + 1
+              WHERE channel_id = ? AND module_id = 'belabox'`,
+          ).bind(CHANNEL_ID).run();
+        }
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const { context } = alarmContext(database);
+    await handleBelaboxPollAlarm(
+      { ...context, DB: delayedDatabase },
+      BELABOX_POLL_ALARM_KEY,
+      Date.now(),
+      undefined,
+      () => Promise.resolve(jsonResponse(relayPayload(true, 3_200, 12))),
+    );
+
+    const summary = await database.prepare(
+      `SELECT samples, ended_at FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<{ samples: number; ended_at: string | null }>();
+    const minutes = await database.prepare(
+      "SELECT COUNT(*) AS count FROM belabox_minutes WHERE channel_id = ? AND stream_id = ?",
+    ).bind(CHANNEL_ID, STREAM_ID).first<{ count: number }>();
+    expect(summary).toEqual({ samples: 1, ended_at: new Date().toISOString() });
+    expect(minutes).toEqual({ count: 0 });
+    expect(await getBelaboxStatus(delayedDatabase, CHANNEL_ID)).toMatchObject({
+      polling: false,
+      historySample: null,
+      historyModuleRevision: null,
+    });
+  });
+
+  it("rejects history writes when the stored live stream changes after the poll snapshot", async () => {
+    await insertModule(database);
+    const previous = normalizedSample("2026-10-05T11:59:45.000Z", 3_200, 7);
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, polling, stream_id, belabox_stream_id, history_sample_json,
+         history_module_revision, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, ?, ?, ?, 1, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, STREAM_ID, STREAM_ID, JSON.stringify(previous)).run();
+
+    let changed = false;
+    const delayedDatabase = {
+      prepare: (sql: string) => database.prepare(sql),
+      batch: async (statements: Parameters<TestD1Database["batch"]>[0]) => {
+        if (!changed && statements.length === 3) {
+          changed = true;
+          await setStoredStreamId(database, "stream-after-snapshot");
+        }
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const { context, scheduled } = alarmContext(database);
+    await handleBelaboxPollAlarm(
+      { ...context, DB: delayedDatabase },
+      BELABOX_POLL_ALARM_KEY,
+      Date.now(),
+      undefined,
+      () => Promise.resolve(jsonResponse(relayPayload(true, 3_200, 12))),
+    );
+
+    expect(await getBelaboxStatus(delayedDatabase, CHANNEL_ID)).toMatchObject({
+      sample: null,
+      historySample: null,
+      historyModuleRevision: null,
+    });
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM belabox_minutes WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first<{ count: number }>()).resolves.toEqual({ count: 0 });
+    expect(scheduled).toHaveLength(1);
+  });
+
+  it.each([
+    ["low bitrate", normalizedSample("2026-10-05T11:59:00.000Z", 500), 6, 9],
+    ["disconnected", { ...normalizedSample("2026-10-05T11:59:00.000Z", 0), connected: false }, 6, 9],
+  ] as const)("does not add a stale %s baseline to a finalized summary", async (_name, sample, lowSeconds, disconnectedSeconds) => {
+    await insertModule(database);
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, polling, stream_id, belabox_stream_id, history_sample_json,
+         history_module_revision, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, ?, ?, ?, 1, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, STREAM_ID, STREAM_ID, JSON.stringify(sample)).run();
+    await database.prepare(
+      `INSERT INTO belabox_streams
+        (channel_id, stream_id, started_at, samples, bitrate_avg, low_seconds, disconnected_seconds)
+       VALUES (?, ?, '2026-10-05T11:50:00.000Z', 1, 2_400, ?, ?)`,
+    ).bind(CHANNEL_ID, STREAM_ID, lowSeconds, disconnectedSeconds).run();
+    await database.prepare(
+      `UPDATE channel_modules SET settings = ?, revision = revision + 1
+        WHERE channel_id = ? AND module_id = 'belabox'`,
+    ).bind(JSON.stringify({ mode: "on_demand", intervalSeconds: 15 }), CHANNEL_ID).run();
+    const { context } = alarmContext(database);
+
+    await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now());
+
+    await expect(database.prepare(
+      `SELECT ended_at, low_seconds, disconnected_seconds
+         FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({
+      ended_at: new Date().toISOString(),
+      low_seconds: lowSeconds,
+      disconnected_seconds: disconnectedSeconds,
+    });
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      polling: false,
+      historySample: null,
+      historyModuleRevision: null,
+    });
+  });
+
+  it("does not let a delayed finalizer commit after the stream snapshot changes", async () => {
+    await insertModule(database);
+    const previous = normalizedSample("2026-10-05T11:59:45.000Z", 500, 7);
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, polling, stream_id, belabox_stream_id, history_sample_json,
+         history_module_revision, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, ?, ?, ?, 1, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, STREAM_ID, STREAM_ID, JSON.stringify(previous)).run();
+    await database.prepare(
+      `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+       VALUES (?, ?, '2026-10-05T11:50:00.000Z', 1, 2_400)`,
+    ).bind(CHANNEL_ID, STREAM_ID).run();
+    await setStoredStreamState(database, "offline", null);
+
+    const batchStarted = deferred<undefined>();
+    const releaseBatch = deferred<undefined>();
+    let delayed = false;
+    const delayedDatabase = {
+      prepare: (sql: string) => database.prepare(sql),
+      batch: async (statements: Parameters<TestD1Database["batch"]>[0]) => {
+        if (!delayed) {
+          delayed = true;
+          batchStarted.resolve(undefined);
+          await releaseBatch.promise;
+        }
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const { context, scheduled } = alarmContext(database);
+    const running = handleBelaboxPollAlarm(
+      { ...context, DB: delayedDatabase },
+      BELABOX_POLL_ALARM_KEY,
+      Date.now(),
+    );
+
+    await batchStarted.promise;
+    await setStoredStreamState(database, "online", "stream-after-finalizer-snapshot");
+    releaseBatch.resolve(undefined);
+    await running;
+
+    await expect(database.prepare(
+      `SELECT ended_at, low_seconds FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({
+      ended_at: null,
+      low_seconds: 0,
+    });
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      polling: true,
+      historySample: previous,
+      historyModuleRevision: 1,
+    });
+    expect(scheduled).toEqual([{ key: "poll", deadline: Date.now() }]);
+  });
+
   it("clears the history baseline when a relay poll fails", async () => {
     await insertModule(database);
     const previous = normalizedSample("2026-10-05T11:59:50.000Z", 2_400, 7);
@@ -1066,6 +1312,7 @@ describe("BELABOX polling", () => {
     ["offline", { enabled: true, settings: BELABOX_DEFAULT_SETTINGS, state: "offline", configured: true }],
   ] as const)("does not reschedule when %s", async (_name, scenario) => {
     await insertModule(database, scenario.settings, scenario.enabled);
+    if (scenario.state === "offline") await setStoredStreamState(database, "offline", null);
     const { context, scheduled, cleared } = alarmContext(database, {
       streamState: scenario.state,
       secrets: secretAccess(scenario.configured),
@@ -1082,9 +1329,11 @@ describe("BELABOX polling", () => {
     await insertModule(database);
     await database.prepare(
       `INSERT INTO belabox_status
-        (channel_id, polling, stream_id, fetch_phase_json, recent_json, revision)
-       VALUES (?, 1, ?, '{}', '[]', 1)`,
-    ).bind(CHANNEL_ID, STREAM_ID).run();
+        (channel_id, polling, stream_id, belabox_stream_id, history_sample_json,
+         history_module_revision, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, ?, ?, ?, 1, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, STREAM_ID, STREAM_ID,
+      JSON.stringify(normalizedSample("2026-10-05T11:59:45.000Z", 3_200, 7))).run();
     const { context, scheduled, cleared } = alarmContext(database);
     const originalPrepare = context.DB.prepare.bind(context.DB);
     let failed = false;
@@ -1113,7 +1362,11 @@ describe("BELABOX polling", () => {
     expect(scheduled).toEqual([{ key: "poll", deadline: Date.now() + 60_000 }]);
     expect(cleared).toEqual([]);
     expect(fetcher).not.toHaveBeenCalled();
-    expect(await getBelaboxStatus(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({ polling: true });
+    expect(await getBelaboxStatus(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({
+      polling: true,
+      historySample: null,
+      historyModuleRevision: null,
+    });
   });
 
   it("stops with a fixed status code when the secret is missing or undecryptable", async () => {
@@ -1163,6 +1416,7 @@ describe("BELABOX polling", () => {
 
   it("checks disabled offline stop conditions before reading the secret", async () => {
     await insertModule(database, BELABOX_DEFAULT_SETTINGS, false);
+    await setStoredStreamState(database, "offline", null);
     await database.prepare(
       `INSERT INTO belabox_status
         (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision)
@@ -1219,6 +1473,7 @@ describe("BELABOX polling", () => {
 
   it("does not continue a poll while stream state is unknown", async () => {
     await insertModule(database);
+    await database.prepare("DELETE FROM channel_stream_state WHERE channel_id = ?").bind(CHANNEL_ID).run();
     const first = alarmContext(database, { streamState: "unknown" });
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(relayPayload(false)));
     await handleBelaboxPollAlarm(first.context, "poll", Date.now(), undefined, fetcher);

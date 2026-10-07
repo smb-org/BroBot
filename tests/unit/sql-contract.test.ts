@@ -29,7 +29,11 @@ import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { chatVoteSelectColumns } from "../../src/modules/chat_voting/repository";
-import { belaboxHistoryModuleRevisionGuard, belaboxHistoryStatusGuard } from "../../src/modules/belabox/adapters/d1";
+import {
+  belaboxHistoryModuleRevisionGuard,
+  belaboxHistoryStatusGuard,
+  belaboxStreamStateSnapshotGuard,
+} from "../../src/modules/belabox/adapters/d1";
 import { MANAGING_ROLES } from "../../src/contracts/values";
 import { ANY_MEMBER_ROLES } from "../../src/worker/db/guards";
 
@@ -105,6 +109,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["chatVoteSelectColumns", chatVoteSelectColumns],
   ["belaboxHistoryStatusGuard", belaboxHistoryStatusGuard],
   ["belaboxHistoryModuleRevisionGuard", belaboxHistoryModuleRevisionGuard],
+  ["belaboxStreamStateSnapshotGuard", belaboxStreamStateSnapshotGuard],
   ["assignments.join(\",\\n            \")", "polling = 0, history_sample_json = NULL, history_module_revision = NULL, revision = revision + 1"],
   ["changes.join(\" OR \")", "polling != 0 OR history_sample_json IS NOT NULL OR history_module_revision IS NOT NULL"],
   ["guard", authorizeModuleMutation("channel-id", actor, now).sql],

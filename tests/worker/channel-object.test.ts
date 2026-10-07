@@ -1544,7 +1544,7 @@ describe("ChannelObject realtime path", () => {
     const databaseBinding = {
       prepare: (sql: string) => {
         const statement = database.prepare(sql);
-        if (!sql.includes("FROM channel_stream_state")) return statement;
+        if (!sql.includes("SELECT state, changed_at, started_at, stream_id") || !sql.includes("FROM channel_stream_state")) return statement;
         return {
           bind: (...values: unknown[]) => {
             const bound = statement.bind(...values);
@@ -1612,8 +1612,8 @@ describe("ChannelObject realtime path", () => {
     });
     expect(storageOf(object).values.get("channel:alarm_schedule")).not.toHaveProperty("module:belabox:poll.nextAttemptAt");
     expect(await getBelaboxStatus(databaseBinding, channelId)).toMatchObject({
-      polling: false,
-      streamId: null,
+      polling: true,
+      streamId: "old-stream",
     });
 
     const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
