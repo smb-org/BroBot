@@ -34,19 +34,20 @@ afterEach(async () => {
 
 describe("raw-field ESLint guard (editor-konzept 15.5)", () => {
   // These probes run the real ESLint config and JSX parser against temporary
-  // files; a cold config load can exceed Vitest's default on CI.
+  // files; cold ESLint/TypeScript program creation on CI takes more than 10 s,
+  // so these probes keep an explicit 20 s timeout.
   it("flags a raw <input> under src/dashboard/, outside the seam", async () => {
     expect(await lintProbe("src/dashboard/__eslint_probe_input__.tsx", "export const Probe = () => <input />;\n")).toBe(true);
-  }, 10_000);
+  }, 20_000);
 
   it("flags <select> and <textarea> the same way", async () => {
     expect(await lintProbe("src/dashboard/__eslint_probe_select__.tsx", "export const Probe = () => <select></select>;\n")).toBe(true);
     expect(await lintProbe("src/dashboard/__eslint_probe_textarea__.tsx", "export const Probe = () => <textarea></textarea>;\n")).toBe(true);
-  }, 10_000);
+  }, 20_000);
 
   it("exempts src/dashboard/ui/ -- the seam is where raw fields live", async () => {
     expect(await lintProbe("src/dashboard/ui/__eslint_probe_input__.tsx", "export const Probe = () => <input />;\n")).toBe(false);
-  }, 10_000);
+  }, 20_000);
 
   it("does not flag a seam component or a string that merely looks like a tag", async () => {
     expect(await lintProbe(
@@ -54,9 +55,9 @@ describe("raw-field ESLint guard (editor-konzept 15.5)", () => {
       'import { Field } from "./ui";\nexport const Probe = () => <Field label="x" hint="y" value="" onChange={() => {}} />;\n',
     )).toBe(false);
     expect(await lintProbe("src/dashboard/__eslint_probe_string__.tsx", 'export const probe = "<input";\n')).toBe(false);
-  }, 10_000);
+  }, 20_000);
 
   it("covers the module panels too", async () => {
     expect(await lintProbe("src/modules/raid/panel/__eslint_probe_input__.tsx", "export const Probe = () => <input />;\n")).toBe(true);
-  }, 10_000);
+  }, 20_000);
 });
