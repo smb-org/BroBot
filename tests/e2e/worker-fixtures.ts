@@ -110,6 +110,6 @@ export const seedE2EOverlay = (): void => {
       throw new Error(`Wrangler e2e database setup failed.\n${result.stdout}\n${result.stderr}`);
     }
   };
-  wrangler(["d1", "migrations", "apply", "DB", "--local", "--persist-to", ".wrangler/e2e-worker"]);
-  wrangler(["d1", "execute", "DB", "--local", "--yes", "--persist-to", ".wrangler/e2e-worker", "--command", sql]);
+  wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "migrations", "apply", "DB", "--local", "--persist-to", "../../.wrangler/e2e-worker"]);
+  wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes", "--persist-to", "../../.wrangler/e2e-worker", "--command", sql]);
 };

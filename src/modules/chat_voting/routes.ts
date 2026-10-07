@@ -6,7 +6,7 @@ import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_L
 import type { ChatVotePreset } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, startChatVote } from "./service";
-import { configuredLabels, isBlockedFreeTextVote, labelsForVote, normalizeBlockedVoteTerm } from "./domain";
+import { configuredLabels, isBlockedFreeTextVote, isValidVoteTitle, labelsForVote, normalizeBlockedVoteTerm, normalizeVoteTitle } from "./domain";
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -77,6 +77,11 @@ chatVotingRoutes.post("/start", async (context) => {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
   const preset = body.preset as ChatVotePreset;
+  if (body.title !== undefined && body.title !== null && typeof body.title !== "string") {
+    return context.json({ error: "chat_voting_request_invalid" }, 400);
+  }
+  const title = normalizeVoteTitle(typeof body.title === "string" ? body.title : "");
+  if (!isValidVoteTitle(title ?? "")) return context.json({ error: "chat_voting_request_invalid" }, 400);
   const optionCount = preset === "free_text" ? 0
     : preset === "yes_no" || preset === "digit_01" || preset === "digit_12" ? 2
       : preset === "scale_5" ? 5 : body.optionCount;
@@ -121,6 +126,7 @@ chatVotingRoutes.post("/start", async (context) => {
       channelId,
       preset,
       optionCount: optionCount as number,
+      title,
       ...(voteLabels === undefined ? {} : { labels: voteLabels }),
       ...(preset === "free_text" ? { textMode: textMode ?? "first_word", blockedTerms } : {}),
       settings: { ...settings, autoCloseSeconds: durationSeconds as number },
@@ -145,6 +151,7 @@ chatVotingRoutes.post("/start", async (context) => {
       preset: result.vote.preset,
       optionCount: result.vote.optionCount,
       labels: result.vote.labels,
+      title: result.vote.title,
       closesAt: result.vote.closesAt,
     },
   }, new Date().toISOString());
@@ -202,6 +209,7 @@ chatVotingRoutes.post("/approve-term", async (context) => {
         preset: vote.preset,
         optionCount: vote.optionCount,
         textMode: vote.textMode,
+        title: vote.title,
         labels: [...vote.labels],
         counts: [...snapshot.counts],
         terms: (snapshot.terms ?? []).map((entry) => ({ ...entry })),

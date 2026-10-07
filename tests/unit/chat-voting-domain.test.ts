@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
+import { CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
+import { chatVotingChatText } from "../../src/modules/chat_voting/contracts/chat-defaults";
 import {
   CHAT_VOTING_LABEL_MAX_LENGTH,
   formatFreeTextVoteResult,
@@ -9,6 +10,7 @@ import {
   isBlockedFreeTextVote,
   isValidVoteLabel,
   isValidVoteLabelSetting,
+  isValidVoteTitle,
   labelsForVote,
   normalizeBlockedVoteTerm,
   normalizeFreeTextVote,
@@ -21,20 +23,40 @@ import {
 
 describe("chat voting command and result domain", () => {
   it("parses only the supported start and end commands", () => {
-    expect(parseVoteCommand("!vote yesno")).toEqual({ kind: "start", preset: "yes_no", optionCount: 2 });
-    expect(parseVoteCommand("!vote SCALE")).toEqual({ kind: "start", preset: "scale_5", optionCount: 5 });
-    expect(parseVoteCommand("!vote 9")).toEqual({ kind: "start", preset: "options_n", optionCount: 9 });
-    expect(parseVoteCommand("!vote 01")).toEqual({ kind: "start", preset: "digit_01", optionCount: 2 });
-    expect(parseVoteCommand("!vote 12")).toEqual({ kind: "start", preset: "digit_12", optionCount: 2 });
-    expect(parseVoteCommand("!vote text")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, textMode: "first_word" });
-    expect(parseVoteCommand("!vote text word")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, textMode: "first_word" });
-    expect(parseVoteCommand("!vote text message")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, textMode: "whole_message" });
-    expect(parseVoteCommand("!vote text both")).toEqual({ kind: "help" });
-    expect(parseVoteCommand("!vote text word extra")).toBeNull();
+    expect(parseVoteCommand("!vote yesno")).toEqual({ kind: "start", preset: "yes_no", optionCount: 2, title: null });
+    expect(parseVoteCommand("!vote SCALE")).toEqual({ kind: "start", preset: "scale_5", optionCount: 5, title: null });
+    expect(parseVoteCommand("!vote 9")).toEqual({ kind: "start", preset: "options_n", optionCount: 9, title: null });
+    expect(parseVoteCommand("!vote 01")).toEqual({ kind: "start", preset: "digit_01", optionCount: 2, title: null });
+    expect(parseVoteCommand("!vote 12")).toEqual({ kind: "start", preset: "digit_12", optionCount: 2, title: null });
+    expect(parseVoteCommand("!vote text")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: null, textMode: "first_word" });
+    expect(parseVoteCommand("!vote text word")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: null, textMode: "first_word" });
+    expect(parseVoteCommand("!vote text message")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: null, textMode: "whole_message" });
+    expect(parseVoteCommand("!vote text both")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: "both", textMode: "first_word" });
+    expect(parseVoteCommand("!vote text word extra")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: "extra", textMode: "first_word" });
+    expect(parseVoteCommand("!vote yesno  Pizza today?  ")).toEqual({ kind: "start", preset: "yes_no", optionCount: 2, title: "Pizza today?" });
+    expect(parseVoteCommand("!vote 3 Who wins?")).toEqual({ kind: "start", preset: "options_n", optionCount: 3, title: "Who wins?" });
+    expect(parseVoteCommand("!vote text message Which message wins?")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: "Which message wins?", textMode: "whole_message" });
+    expect(parseVoteCommand(`!vote yesno ${"😀".repeat(CHAT_VOTING_TITLE_MAX_LENGTH)}`)).toMatchObject({ kind: "start", title: "😀".repeat(CHAT_VOTING_TITLE_MAX_LENGTH) });
+    expect(parseVoteCommand(`!vote yesno ${"😀".repeat(CHAT_VOTING_TITLE_MAX_LENGTH + 1)}`)).toEqual({ kind: "help" });
     expect(parseVoteCommand("!vote end")).toEqual({ kind: "end" });
-    expect(parseVoteCommand("!vote anything")).toEqual({ kind: "help" });
-    expect(parseVoteCommand("!vote yesno extra")).toEqual({ kind: "help" });
+    expect(parseVoteCommand("!vote unknown")).toEqual({ kind: "help" });
+    expect(parseVoteCommand("!vote end extra")).toEqual({ kind: "help" });
     expect(parseVoteCommand("hello !vote yesno")).toBeNull();
+  });
+
+  it("counts optional questions in trimmed Unicode code points", () => {
+    expect(isValidVoteTitle("  " )).toBe(true);
+    expect(isValidVoteTitle("😀".repeat(CHAT_VOTING_TITLE_MAX_LENGTH))).toBe(true);
+    expect(isValidVoteTitle("😀".repeat(CHAT_VOTING_TITLE_MAX_LENGTH + 1))).toBe(false);
+  });
+
+  it("localizes title-aware start and result announcements while preserving untitled defaults", () => {
+    expect(chatVotingChatText("en", "started", 2, "yes_no", null)).toBe("Voting started. Type a number from 1 to 2 to vote.");
+    expect(chatVotingChatText("en", "started", 2, "yes_no", null, "Pizza today?")).toBe("Voting “Pizza today?” started. Type a number from 1 to 2 to vote.");
+    expect(chatVotingChatText("de", "started", 2, "free_text", "whole_message", "Was essen wir?")).toBe("Abstimmung „Was essen wir?“ gestartet. Stimme mit einer Nachricht ab.");
+    expect(chatVotingChatText("en", "result", undefined, undefined, undefined, null, "Yes: 8 · No: 4")).toBe("Yes: 8 · No: 4");
+    expect(chatVotingChatText("en", "result", undefined, undefined, undefined, "Pizza?", "Yes: 8 · No: 4"))
+      .toBe("Results for “Pizza?”: Yes: 8 · No: 4");
   });
 
   it("uses channel-language defaults and complete configured labels", () => {

@@ -3,6 +3,7 @@ import type { ModuleLanguage } from "../../contract";
 const catalog = {
   de: {
     title: "Abstimmung",
+    previewTitle: "Was essen wir heute?",
     closed: "Ergebnis",
     editorLabel: "Abstimmungsergebnis",
     editorDescription: "Live-Balken der laufenden Abstimmung.",
@@ -19,6 +20,7 @@ const catalog = {
   },
   en: {
     title: "Voting",
+    previewTitle: "What should we eat today?",
     closed: "Results",
     editorLabel: "Voting tally",
     editorDescription: "Live bars for the current vote.",

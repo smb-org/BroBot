@@ -7,6 +7,7 @@ interface ChatVoteRow {
   preset: ChatVotingPreset;
   option_count: number;
   labels_json: string;
+  title: string | null;
   text_mode: ChatVotingTextMode | null;
   term_filter_ready: number | null;
   status: "open" | "closed";
@@ -62,6 +63,7 @@ const mapRow = (row: ChatVoteRow): ChatVote => ({
   preset: row.preset,
   optionCount: row.option_count,
   labels: parseStringArray(row.labels_json) ?? [],
+  title: row.title,
   textMode: row.text_mode,
   termFilterReady: row.term_filter_ready === null ? null : row.term_filter_ready === 1,
   status: row.status,
@@ -77,7 +79,7 @@ const mapRow = (row: ChatVoteRow): ChatVote => ({
 });
 
 export const chatVoteSelectColumns = `channel_id, poll_id, preset, option_count, labels_json, status,
-                                      opened_at, closes_at, requested_duration_seconds, closed_at,
+                                      title, opened_at, closes_at, requested_duration_seconds, closed_at,
                                       close_reason, counts_json, voter_count, text_mode, text_results_json, more_terms,
                                       term_filter_ready`;
 
@@ -152,15 +154,16 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `INSERT INTO chat_votes
-         (channel_id, poll_id, preset, option_count, labels_json, text_mode, term_filter_ready, status, opened_at, closes_at,
+         (channel_id, poll_id, preset, option_count, labels_json, title, text_mode, term_filter_ready, status, opened_at, closes_at,
           requested_duration_seconds, close_reason)
-       SELECT ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
     ).bind(
       vote.channelId,
       vote.id,
       vote.preset,
       vote.optionCount,
       JSON.stringify(vote.labels),
+      vote.title,
       vote.textMode ?? null,
       vote.termFilterReady === null || vote.termFilterReady === undefined ? null : Number(vote.termFilterReady),
       vote.openedAt,

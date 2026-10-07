@@ -6,6 +6,7 @@ export const CHAT_VOTING_ALARM_HANDLER = "close";
 
 export const CHAT_VOTING_MAX_OPTIONS = 9;
 export const CHAT_VOTING_MAX_TEXT_TERMS = 200;
+export const CHAT_VOTING_TITLE_MAX_LENGTH = 80;
 export const CHAT_VOTING_HARD_LIMIT_MS = 4 * 60 * 60 * 1_000;
 export const CHAT_VOTING_BALLOT_RETENTION_MS = 24 * 60 * 60 * 1_000 - 60_000;
 
@@ -60,6 +61,7 @@ export interface ChatVote {
   preset: ChatVotingPreset;
   optionCount: number;
   labels: readonly string[];
+  title: string | null;
   textMode?: ChatVotingTextMode | null;
   termFilterReady?: boolean | null;
   status: "open" | "closed";

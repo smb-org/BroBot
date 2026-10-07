@@ -16,6 +16,7 @@ const openVote: ChatVote = {
   preset: "yes_no",
   optionCount: 2,
   labels: ["Yes", "No"],
+  title: null,
   status: "open",
   openedAt: "2026-10-04T10:00:00.000Z",
   closesAt: "2026-10-04T14:00:00.000Z",
@@ -31,6 +32,7 @@ const openTextVote: ChatVote = {
   preset: "free_text",
   optionCount: 0,
   labels: [],
+  title: null,
   textMode: "first_word",
   termFilterReady: true,
 };
@@ -119,7 +121,7 @@ describe("chat voting event service", () => {
       kind: "overlay",
       type: "tally",
       elementKind: "chat_voting.tally",
-      payload: { pollId: "fictional-poll", openedAt: openVote.openedAt, counts: [0, 1], revision: 1 },
+      payload: { pollId: "fictional-poll", openedAt: openVote.openedAt, title: null, counts: [0, 1], revision: 1 },
     }]);
   });
 
@@ -148,6 +150,7 @@ describe("chat voting event service", () => {
         preset: "free_text",
         optionCount: 0,
         textMode: "first_word",
+        title: null,
         labels: [],
         counts: [],
         terms: [{ term: "kappa", count: 2, approved: false }],
@@ -180,6 +183,35 @@ describe("chat voting event service", () => {
       textMode: "whole_message",
       termFilterReady: true,
     }), undefined);
+  });
+
+  it("starts titled chat commands and sends a localized title-aware announcement", async () => {
+    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryWith({ insertOpen });
+    const context = executionContext();
+
+    const result = await processChatVotingMessage(eventWithText("!vote yesno Pizza today?", ["moderator"]), repository, context);
+
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Pizza today?", preset: "yes_no" }), undefined);
+    expect(result.actions[0]).toEqual({
+      kind: "chat",
+      text: "Voting “Pizza today?” started. Type a number from 1 to 2 to vote.",
+      automated: false,
+    });
+  });
+
+  it("answers with help and does not start a vote when the chat question is too long", async () => {
+    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryWith({ insertOpen });
+    const context = executionContext();
+
+    const result = await processChatVotingMessage(eventWithText(`!vote yesno ${"😀".repeat(81)}`, ["moderator"]), repository, context);
+
+    expect(insertOpen).not.toHaveBeenCalled();
+    const action = result.actions[0];
+    expect(action?.kind).toBe("chat");
+    if (action?.kind !== "chat") throw new Error("An overlong question should receive the vote help reply.");
+    expect(action.text).toContain("!vote yesno [question]");
   });
 
   it("opens the shared ballot before writing the row and schedules the hard-limit alarm", async () => {

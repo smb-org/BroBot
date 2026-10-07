@@ -15,11 +15,11 @@ describe("chat voting close service", () => {
   beforeEach(() => { database = new TestD1Database(); });
   afterEach(() => { database.close(); });
 
-  const seedOpenVote = async (announceResult: boolean): Promise<ReturnType<typeof createChatVotingRepository>> => {
+  const seedOpenVote = async (announceResult: boolean, title: string | null = null, resultText?: string): Promise<ReturnType<typeof createChatVotingRepository>> => {
     await insertChannel(database, "fictional-channel");
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, ?)",
-    ).bind("fictional-channel", JSON.stringify({ announceResult })).run();
+    ).bind("fictional-channel", JSON.stringify({ announceResult, ...(resultText === undefined ? {} : { resultText }) })).run();
     const repository = createChatVotingRepository(database as unknown as D1Database);
     const vote: ChatVoteDraft = {
       id: "fictional-poll",
@@ -27,6 +27,7 @@ describe("chat voting close service", () => {
       preset: "yes_no",
       optionCount: 2,
       labels: ["Yes", "No"],
+      title,
       openedAt: "2026-10-04T10:00:00.000Z",
       closesAt: "2026-10-04T14:00:00.000Z",
       requestedDurationSeconds: null,
@@ -84,6 +85,7 @@ describe("chat voting close service", () => {
       resolveEventTimes: vi.fn(() => Promise.resolve([])),
       streamState: vi.fn(() => Promise.resolve("unknown" as const)),
       streamStartedAt: vi.fn(() => Promise.resolve({ streamId: null, startedAt: null })),
+      channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
     } as unknown as ModuleAlarmContext;
     return { context, values, close, read, publishModuleOverlayMessage, sendChat, storagePut };
   };
@@ -206,5 +208,40 @@ describe("chat voting close service", () => {
     expect(sendChat).toHaveBeenCalledTimes(2);
     await expect(repository.byId("fictional-channel", "fictional-poll"))
       .resolves.toMatchObject({ status: "closed", counts: [7, 3] });
+  });
+
+  it("includes a vote question in the default result announcement and closed overlay state", async () => {
+    const repository = await seedOpenVote(true, "Pizza today?");
+    const order: string[] = [];
+    const { context, publishModuleOverlayMessage } = createAlarmContext(order);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(publishModuleOverlayMessage).toHaveBeenCalledWith(
+      "tally",
+      "chat_voting.tally",
+      expect.objectContaining({ title: "Pizza today?", status: "closed" }),
+    );
+    expect(context.sendChat).toHaveBeenCalledWith(
+      "Results for “Pizza today?”: Yes: 7 (70%) · No: 3 (30%)",
+      "chat-voting:fictional-poll:result",
+      undefined,
+      expect.any(Function),
+      "source_only",
+    );
+  });
+
+  it("provides the question variable to custom result templates", async () => {
+    const repository = await seedOpenVote(true, "Pizza today?", "{title}: {vote.result}");
+    const order: string[] = [];
+    const { context } = createAlarmContext(order);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.renderTemplate).toHaveBeenCalledWith(
+      "{title}: {vote.result}",
+      expect.any(Number),
+      { "vote.result": "Yes: 7 (70%) · No: 3 (30%)", title: "Pizza today?" },
+    );
   });
 });
