@@ -24,6 +24,7 @@ export const belaboxStatusOverlayElement: ModuleOverlayElementDefinition = {
   }),
   editorLabel: { de: german.editorLabel, en: english.editorLabel },
   editorAddLabel: { de: german.editorAddLabel, en: english.editorAddLabel },
+  editorDescription: { de: german.editorDescription, en: english.editorDescription },
   editorModuleLabel: { de: german.editorModuleLabel, en: english.editorModuleLabel },
   mergeRealtimeStateOnModuleMessages: ["modul.belabox.sample"],
   mergeRealtimeState: mergeBelaboxRealtimeState,

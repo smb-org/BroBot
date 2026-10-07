@@ -1492,7 +1492,7 @@ describe("ChannelObject realtime path", () => {
       `CREATE TABLE IF NOT EXISTS belabox_status (
         channel_id TEXT PRIMARY KEY, sampled_at TEXT, sample_json TEXT, error_code TEXT,
         polling INTEGER NOT NULL DEFAULT 0, stream_id TEXT, stream_session_key TEXT, belabox_stream_id TEXT,
-        fetch_phase_json TEXT NOT NULL DEFAULT '{}', recent_json TEXT NOT NULL DEFAULT '[]',
+        fetch_phase_json TEXT NOT NULL DEFAULT '{}', recent_json TEXT NOT NULL DEFAULT '[]', alert_json TEXT NOT NULL DEFAULT '{}',
         revision INTEGER NOT NULL DEFAULT 1
       )`,
     ).run();

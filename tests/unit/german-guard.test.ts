@@ -62,6 +62,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/belabox/panel/settings-locale.ts": "Bilingual DE/EN BELABOX settings-editor text catalogue; only its `de` half is German.",
   "src/modules/belabox/contracts/catalog.ts": "Bilingual DE/EN BELABOX template and status catalogue; only its `de` half is German.",
   "src/modules/belabox/overlay/locale.ts": "Bilingual DE/EN BELABOX overlay text catalogue; only its `de` half is German.",
+  "src/modules/belabox/contracts/alert-texts.ts": "Bilingual DE/EN BELABOX chat templates and variable catalogue; only its `de` values are German.",
   "src/modules/ads/contracts/chat-defaults.ts": "Default chat text the bot posts in the channel; chat templates are channel content and stay in the channel language (umbau-plan.md, section on chat templates).",
   "src/modules/ads/contracts/template-variable-catalog.ts": "Bilingual DE/EN catalog for template variable labels and descriptions; only its `de` half is German.",
   "src/modules/ads/contracts/language.ts": "Bilingual DE/EN catalog for runtime ads wording; only its `de` half is German.",

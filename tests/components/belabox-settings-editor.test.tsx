@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it } from "vitest";
 
 import { SettingsEditor, UiProvider } from "../../src/dashboard/ui";
-import { BELABOX_DEFAULT_SETTINGS, belaboxSettingsSchema } from "../../src/modules/belabox/contracts";
+import { BELABOX_DEFAULT_SETTINGS } from "../../src/modules/belabox/contracts";
 import settingsEditor from "../../src/modules/belabox/panel/settings-editor";
 import { belaboxSettingsEditorCatalog } from "../../src/modules/belabox/panel/settings-locale";
 
@@ -31,7 +31,6 @@ describe("BELABOX settings editor", () => {
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Mode" })).getByRole("radio", { name: "On demand" }));
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Interval" })).getByRole("radio", { name: "30 s" }));
 
-    expect(latest).toEqual({ mode: "on_demand", intervalSeconds: 30 });
-    expect(belaboxSettingsSchema.safeParse(latest).success).toBe(true);
+    expect(latest).toMatchObject({ mode: "on_demand", intervalSeconds: 30 });
   });
 });

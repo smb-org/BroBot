@@ -76,6 +76,10 @@ describe("BELABOX template variables and overlay metadata", () => {
     belaboxStreamId: string | null = "stream-322",
   ): Promise<void> => {
     await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES (?, 'online', '2026-10-06T11:59:00.000Z', 'eventsub', '2026-10-06T11:59:00.000Z', 'stream-322')`,
+    ).bind(CHANNEL_ID).run();
+    await database.prepare(
       `INSERT INTO belabox_status
         (channel_id, sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
          fetch_phase_json, recent_json, revision)

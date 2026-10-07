@@ -2,6 +2,7 @@ import type { BotModule, ModuleLanguage, ModuleTemplateValueContext } from "../c
 import { belaboxRoutes } from "./routes";
 import {
   BELABOX_DEFAULT_SETTINGS,
+  BELABOX_ALERT_TEMPLATE_FIELDS,
   BELABOX_ENSURE_POLL_HANDLER,
   BELABOX_MODULE_ID,
   BELABOX_POLL_ALARM_KEY,
@@ -9,9 +10,10 @@ import {
   type BelaboxSample,
 } from "./contracts";
 import { BELABOX_TEMPLATE_VARIABLES, belaboxCatalog } from "./contracts/catalog";
-import { getBelaboxStatus } from "./adapters/d1";
+import { belaboxStatusMatchesSession, getBelaboxStatus, getBelaboxStreamSession } from "./adapters/d1";
 import { belaboxDownMilliseconds, resolvedBelaboxPhase } from "./domain/presentation";
 import {
+  belaboxAlertDefaultsOnEnable,
   belaboxSettingsForChannel,
   currentBelaboxSample,
   ensureBelaboxPoll,
@@ -91,8 +93,11 @@ const resolveValues = async (
     if (moduleState?.enabled !== true) throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
     const language = await context.channelLanguage();
     if (moduleState.settings.mode === "interval") {
-      const status = await getBelaboxStatus(context.DB, context.channelId);
-      if (status === null || !freshSample(
+      const [status, session] = await Promise.all([
+        getBelaboxStatus(context.DB, context.channelId),
+        getBelaboxStreamSession(context.DB, context.channelId),
+      ]);
+      if (status === null || !belaboxStatusMatchesSession(status, session) || !freshSample(
         status.sample,
         status.errorCode,
         context.now,
@@ -123,9 +128,10 @@ const resolveOverlayValues: NonNullable<BotModule<typeof belaboxSettingsSchema>[
   const requested = new Set(names);
   const known = BELABOX_TEMPLATE_VARIABLES.map(({ name }) => name).filter((name) => requested.has(name));
   if (known.length === 0) return {};
-  const [moduleState, status] = await Promise.all([
+  const [moduleState, status, session] = await Promise.all([
     belaboxSettingsForChannel(context.DB, context.channelId),
     getBelaboxStatus(context.DB, context.channelId),
+    getBelaboxStreamSession(context.DB, context.channelId),
   ]);
   if (moduleState?.enabled !== true) {
     return Object.fromEntries(known.map((name) => [name, { available: false }]));
@@ -135,12 +141,13 @@ const resolveOverlayValues: NonNullable<BotModule<typeof belaboxSettingsSchema>[
     ? 30_000
     : moduleState.settings.intervalSeconds * 3_000;
   const persistedSample = status?.sample ?? null;
-  const availablePersistedSample = persistedSample !== null && freshSample(
-    persistedSample,
-    status?.errorCode ?? null,
-    context.now,
-    maximumAgeMilliseconds,
-  );
+  const availablePersistedSample = persistedSample !== null && status !== null &&
+    belaboxStatusMatchesSession(status, session) && freshSample(
+      persistedSample,
+      status.errorCode,
+      context.now,
+      maximumAgeMilliseconds,
+    );
   const sampledAt = availablePersistedSample ? Date.parse(persistedSample.at) : context.now;
   const refreshAt = sampledAt + refreshMilliseconds;
   const refreshDeadline = refreshAt > context.now ? refreshAt : context.now + refreshMilliseconds;
@@ -150,35 +157,39 @@ const resolveOverlayValues: NonNullable<BotModule<typeof belaboxSettingsSchema>[
     : context.now + refreshMilliseconds).toISOString();
   return Object.fromEntries(known.map((name) => [name, { available: availablePersistedSample, nextChangeAt }]));
 };
+const belaboxPanelIcon = { paths: ["M4 7h16v10H4z", "M8 11h3", "M14 11h2", "M8 14h8"] } as const;
 
 export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   id: BELABOX_MODULE_ID,
   navigationCategory: "data",
-  panelIcon: { paths: ["M4 7h16v10H4z", "M8 11h3", "M14 11h2", "M8 14h8"] },
+  panelIcon: belaboxPanelIcon,
   mandatory: false,
   defaultEnabled: false,
   settingsSchema: belaboxSettingsSchema,
   defaultSettings: BELABOX_DEFAULT_SETTINGS,
   templateVariableGroup: {
     label: { de: "BELABOX", en: "BELABOX" },
-    icon: { paths: ["M4 7h16v10H4z", "M8 11h3", "M14 11h2", "M8 14h8"] },
+    icon: belaboxPanelIcon,
     order: 40,
   },
   templateVariableCatalog: BELABOX_TEMPLATE_VARIABLES,
+  templateFields: BELABOX_ALERT_TEMPLATE_FIELDS,
   templateUnavailableText: unavailableText,
   resolveTemplateValues: resolveValues,
   resolveOverlayTemplateValues: resolveOverlayValues,
+  onEnable: belaboxAlertDefaultsOnEnable,
   overlayElements: belaboxOverlayElements.map((element) => ({
     ...element,
     initialState: async (db, channelId) => {
-      const [moduleState, status] = await Promise.all([
+      const [moduleState, status, session] = await Promise.all([
         belaboxSettingsForChannel(db, channelId),
         getBelaboxStatus(db, channelId),
+        getBelaboxStreamSession(db, channelId),
       ]);
       if (moduleState === null) return null;
-      const sample = status?.sample;
+      const sample = status !== null && belaboxStatusMatchesSession(status, session) ? status.sample : null;
       return {
-        sample: sample === null || sample === undefined ? null : {
+        sample: sample === null ? null : {
           at: sample.at,
           connected: sample.connected,
           bitrateKbps: sample.bitrateKbps,
@@ -211,6 +222,7 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   routes: belaboxRoutes,
   panel: () => import("./panel/index"),
   settingsEditor: () => import("./panel/settings-editor"),
+  immediateActions: { requires: ["streamLive"], load: () => import("./panel/immediate-actions") },
   handleEvent: async (event, context) => {
     if (context.streamStateTransitionAccepted !== true ||
         (event.subscriptionType !== "stream.online" && event.subscriptionType !== "stream.offline")) {

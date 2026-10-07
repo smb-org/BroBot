@@ -2,6 +2,7 @@ export const belaboxOverlayLabels = (language: "de" | "en") => language === "de"
   ? {
     editorLabel: "BELABOX-Status",
     editorAddLabel: "BELABOX-Status hinzufügen",
+    editorDescription: "Zeigt Verbindung, Bitrate und Laufzeit des BELABOX-Relays.",
     editorModuleLabel: "BELABOX",
     noData: "keine Daten",
     healthy: "stabil",
@@ -20,6 +21,7 @@ export const belaboxOverlayLabels = (language: "de" | "en") => language === "de"
   : {
     editorLabel: "BELABOX status",
     editorAddLabel: "Add BELABOX status",
+    editorDescription: "Shows the BELABOX relay connection, bitrate, and uptime.",
     editorModuleLabel: "BELABOX",
     noData: "no data",
     healthy: "healthy",

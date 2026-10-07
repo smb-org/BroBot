@@ -8,6 +8,12 @@ import {
   type BelaboxStatusErrorCode,
   type BelaboxSample,
 } from "../contracts";
+import {
+  createInitialAlertState,
+  type BelaboxAlertIdempotencyKind,
+  type BelaboxAlertMessageKind,
+  type BelaboxAlertState,
+} from "../domain/alert";
 
 export interface BelaboxRecentPoint {
   at: string;
@@ -29,6 +35,7 @@ export interface BelaboxStatus {
   streamSessionKey: string | null;
   belaboxStreamId: string | null;
   fetchPhase: BelaboxFetchPhase;
+  alertState: BelaboxAlertState;
   recent: readonly BelaboxRecentPoint[];
   revision: number;
 }
@@ -50,6 +57,7 @@ interface BelaboxStatusRow {
   belabox_stream_id: string | null;
   fetch_phase_json: string;
   recent_json: string;
+  alert_json: string;
   revision: number;
 }
 
@@ -117,6 +125,58 @@ const parseRecent = (value: string): readonly BelaboxRecentPoint[] => {
   }
 };
 
+const isAlertPhase = (value: unknown): value is BelaboxAlertState["phase"] =>
+  value === "ok" || value === "pending" || value === "alarm" || value === "recovering";
+const isAlertKind = (value: unknown): value is NonNullable<BelaboxAlertState["kind"]> =>
+  value === "low" || value === "disconnect";
+
+const parseAlertState = (value: string): BelaboxAlertState => {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return createInitialAlertState();
+    const state = parsed as Readonly<Record<string, unknown>>;
+    if (!isAlertPhase(state.phase) || (state.kind !== null && !isAlertKind(state.kind)) ||
+        (state.since !== null && typeof state.since !== "string") ||
+        (state.episodeStartedAt !== null && typeof state.episodeStartedAt !== "string") ||
+        (state.completedEpisodeAt !== null && typeof state.completedEpisodeAt !== "string") ||
+        (state.lastChatSentAt !== null && typeof state.lastChatSentAt !== "string") ||
+        typeof state.chatSentInEpisode !== "boolean") return createInitialAlertState();
+
+    let pendingChat: BelaboxAlertState["pendingChat"] = null;
+    if (typeof state.pendingChat === "object" && state.pendingChat !== null && !Array.isArray(state.pendingChat)) {
+      const candidate = state.pendingChat as Readonly<Record<string, unknown>>;
+      const validMessageKind = candidate.kind === "low" || candidate.kind === "disconnect" || candidate.kind === "recovery";
+      const validIdempotencyKind = candidate.idempotencyKind === "alert" || candidate.idempotencyKind === "escalate" || candidate.idempotencyKind === "recovered";
+      const validPhase = candidate.validPhase === "alarm" || candidate.validPhase === "ok";
+      if (validMessageKind && validIdempotencyKind && typeof candidate.episodeStartedAt === "string" &&
+          isAlertKind(candidate.alertKind) && validPhase && finiteNonnegative(candidate.threshold) &&
+          Number.isSafeInteger(candidate.seconds) && Number(candidate.seconds) >= 0) {
+        pendingChat = {
+          kind: candidate.kind as BelaboxAlertMessageKind,
+          idempotencyKind: candidate.idempotencyKind as BelaboxAlertIdempotencyKind,
+          episodeStartedAt: candidate.episodeStartedAt,
+          alertKind: candidate.alertKind,
+          validPhase: candidate.validPhase as "alarm" | "ok",
+          threshold: candidate.threshold,
+          seconds: Number(candidate.seconds),
+        };
+      }
+    }
+    return {
+      phase: state.phase,
+      kind: state.kind,
+      since: state.since,
+      episodeStartedAt: state.episodeStartedAt,
+      completedEpisodeAt: state.completedEpisodeAt,
+      lastChatSentAt: state.lastChatSentAt,
+      chatSentInEpisode: state.chatSentInEpisode,
+      pendingChat,
+    };
+  } catch {
+    return createInitialAlertState();
+  }
+};
+
 const isStatusErrorCode = (value: string | null): value is BelaboxStatusErrorCode =>
   value !== null && [
     "timeout", "network", "http_4xx", "http_5xx", "redirect_rejected", "too_large", "malformed", "budget_exhausted",
@@ -126,7 +186,7 @@ const isStatusErrorCode = (value: string | null): value is BelaboxStatusErrorCod
 export const getBelaboxStatus = async (db: D1Database, channelId: string): Promise<BelaboxStatus | null> => {
   const row = await db.prepare(
     `SELECT sampled_at, sample_json, error_code, polling, stream_id, stream_session_key, belabox_stream_id,
-            fetch_phase_json, recent_json, revision
+            fetch_phase_json, recent_json, alert_json, revision
        FROM belabox_status WHERE channel_id = ?`,
   ).bind(channelId).first<BelaboxStatusRow>();
   if (row === null) return null;
@@ -139,6 +199,7 @@ export const getBelaboxStatus = async (db: D1Database, channelId: string): Promi
     belaboxStreamId: row.belabox_stream_id,
     fetchPhase: parseFetchPhase(row.fetch_phase_json),
     recent: parseRecent(row.recent_json),
+    alertState: parseAlertState(row.alert_json),
     revision: row.revision,
   };
 };
@@ -279,10 +340,11 @@ export const setBelaboxPollingState = async (
          belabox_stream_id = NULL,
          fetch_phase_json = ?,
          recent_json = '[]',
+         alert_json = '{}',
          revision = revision + 1
        WHERE channel_id = ? AND (
          polling != 0 OR stream_id IS NOT NULL OR belabox_stream_id IS NOT NULL OR
-         sampled_at IS NOT NULL OR sample_json IS NOT NULL OR fetch_phase_json != ? OR recent_json != '[]'
+         sampled_at IS NOT NULL OR sample_json IS NOT NULL OR fetch_phase_json != ? OR recent_json != '[]' OR alert_json != '{}'
        )`,
     ).bind(encodedPhase(EMPTY_FETCH_PHASE), channelId, encodedPhase(EMPTY_FETCH_PHASE)).run();
     return result.meta.changes > 0;
@@ -307,6 +369,7 @@ export const writeBelaboxFetch = async (
     streamSessionKey: string | null;
     belaboxStreamId: string | null;
     fetchPhase: BelaboxFetchPhase;
+    alertState: BelaboxAlertState;
     recent: readonly BelaboxRecentPoint[];
     expectedSecretVersion: string;
     expectedStatusRevision: number | null;
@@ -317,8 +380,8 @@ export const writeBelaboxFetch = async (
   const row = await db.prepare(
     `INSERT INTO belabox_status
       (channel_id, sampled_at, sample_json, error_code, polling, stream_id, stream_session_key, belabox_stream_id,
-       fetch_phase_json, recent_json, revision)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
+       fetch_phase_json, recent_json, alert_json, revision)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
      WHERE EXISTS (
        SELECT 1 FROM module_secrets
         WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?
@@ -348,6 +411,7 @@ export const writeBelaboxFetch = async (
        belabox_stream_id = excluded.belabox_stream_id,
        fetch_phase_json = excluded.fetch_phase_json,
        recent_json = excluded.recent_json,
+       alert_json = excluded.alert_json,
        revision = belabox_status.revision + 1
      WHERE belabox_status.revision = ?
      RETURNING revision, sample_json`,
@@ -362,6 +426,7 @@ export const writeBelaboxFetch = async (
     input.belaboxStreamId,
     encodedPhase(input.fetchPhase),
     encodedRecent(input.recent),
+    JSON.stringify(input.alertState),
     input.channelId,
     BELABOX_MODULE_ID,
     BELABOX_STATS_URL_SECRET,
@@ -455,6 +520,21 @@ export const prepareBelaboxSampleWrite = (
   );
 };
 
+export const writeBelaboxAlertState = async (
+  db: D1Database,
+  channelId: string,
+  alertState: BelaboxAlertState,
+  expectedRevision: number,
+): Promise<number | null> => {
+  const row = await db.prepare(
+    `UPDATE belabox_status
+        SET alert_json = ?, revision = revision + 1
+      WHERE channel_id = ? AND revision = ?
+      RETURNING revision`,
+  ).bind(JSON.stringify(alertState), channelId, expectedRevision).first<{ revision: number }>();
+  return row?.revision ?? null;
+};
+
 export const prepareBelaboxSampleClear = (
   db: D1Database,
   channelId: string,
@@ -468,6 +548,7 @@ export const prepareBelaboxSampleClear = (
           belabox_stream_id = NULL,
           fetch_phase_json = ?,
           recent_json = '[]',
+          alert_json = '{}',
           revision = revision + 1
     WHERE channel_id = ? ${authorization.sql}`,
 ).bind(encodedPhase(EMPTY_FETCH_PHASE), channelId, ...authorization.values);

@@ -329,12 +329,15 @@ export interface OverlaysTexts {
   editorStyleReset: string; editorStyleLocked: string; editorStyleRewrite: string; editorStyleOwnCssHint: string;
   editorStyleReadOnlyReason: string;
   editorStyleCodeHint: string; editorCssReadOnlyReason: string; editorStyleCopy: string; editorStyleCopied: string; editorStyleCopyError: string; editorStyleCssLimit: string;
-  editorNoElements: string; editorNoSelection: string; editorReadOnly: string; editorChooseVariable: string;
-  editorModuleElements: string; editorNoEnabledModuleElements: string;
+  editorNoElements: string; editorNoSelection: string; editorReadOnly: string;
+  editorAddElement: string; editorPaletteSearch: string; editorPaletteVariables: string;
+  editorPaletteNoResults: (query: string) => string; editorPaletteModuleOff: (moduleName: string) => string;
+  editorRemoveElement: (name: string) => string; editorLockedReason: string;
+  editorPaletteNavigate: string; editorPaletteChoose: string; editorPaletteClose: string;
   editorModuleElement: string; editorModuleDisabled: (moduleName: string) => string;
-  editorAddVariable: string; editorAdd: string; editorLabel: string; editorDisplayText: string;
+  editorLabel: string; editorDisplayText: string;
   editorVariable: string; editorX: string; editorY: string; editorScale: string; editorZ: string;
-  editorMoveForward: string; editorMoveBackward: string; editorRemove: string; editorInComposition: string;
+  editorMoveForward: string; editorMoveBackward: string; editorInComposition: string;
   editorZoom: string; editorReference: (width: number, height: number) => string; editorTextHint: string;
   editorElementLimit: string; editorMissingPrefill: (name: string) => string; editorSave: string;
   editorDiscard: string; editorSaved: string; editorClean: string; editorUnsaved: string; editorSaving: string;
@@ -407,12 +410,15 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorCssReadOnlyReason: "Bediener können das Overlay-CSS kopieren, aber nicht ändern.",
     editorStyleCopy: "CSS kopieren", editorStyleCopied: "CSS kopiert", editorStyleCopyError: "CSS konnte nicht kopiert werden.",
     editorStyleCssLimit: "Overlay-CSS darf höchstens 16.000 Zeichen enthalten.",
-    editorNoElements: "Noch keine Elemente. Füge eine Kanalvariable oder ein Modul-Element hinzu.", editorNoSelection: "Wähle ein Element aus.", editorReadOnly: "Bediener können die Komposition ansehen, aber nicht ändern.",
-    editorModuleElements: "Modul-Elemente", editorNoEnabledModuleElements: "Aktiviere ein Modul, um dessen Elemente hinzuzufügen.",
+    editorNoElements: "Noch keine Elemente. Füge über „Element hinzufügen“ eine Kanalvariable oder ein Modul-Element hinzu.", editorNoSelection: "Wähle ein Element aus.", editorReadOnly: "Bediener können die Komposition ansehen, aber nicht ändern.",
+    editorAddElement: "Element hinzufügen", editorPaletteSearch: "Elemente suchen", editorPaletteVariables: "Kanalvariablen",
+    editorPaletteNoResults: (query) => `Kein Element passt zu „${query}“.`, editorPaletteModuleOff: (moduleName) => `Modul aus · ${moduleName}`,
+    editorRemoveElement: (name) => `Entfernen: ${name}`, editorLockedReason: "Nur Verwalter und Broadcaster können die Komposition ändern.",
+    editorPaletteNavigate: "Navigieren", editorPaletteChoose: "Hinzufügen", editorPaletteClose: "Schließen",
     editorModuleElement: "Modul-Element", editorModuleDisabled: (moduleName) => `Modul ${moduleName} ist deaktiviert.`,
-    editorChooseVariable: "Kanalvariable auswählen", editorAddVariable: "Variable anzeigen", editorAdd: "Hinzufügen", editorLabel: "Elementname", editorDisplayText: "Anzeigetext",
+    editorLabel: "Elementname", editorDisplayText: "Anzeigetext",
     editorVariable: "Kanalvariable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Skalierung (%)", editorZ: "Ebene (z)",
-    editorMoveForward: "Eine Ebene nach vorn", editorMoveBackward: "Eine Ebene nach hinten", editorRemove: "Element entfernen", editorInComposition: "In der Komposition anzeigen",
+    editorMoveForward: "Eine Ebene nach vorn", editorMoveBackward: "Eine Ebene nach hinten", editorInComposition: "In der Komposition anzeigen",
     editorZoom: "Vorschau-Zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} Referenz`, editorTextHint: "Genau ein {value}-Platzhalter ist erforderlich.",
     editorElementLimit: "Pro Overlay sind höchstens 20 Elemente möglich.", editorMissingPrefill: (name) => `Die Variable ${name} ist nicht mehr verfügbar.`, editorSave: "Speichern",
     editorDiscard: "Entwurf verwerfen", editorSaved: "Gespeichert — verbundene Quellen übernehmen die Änderungen sofort.", editorClean: "Gespeicherte Komposition. Änderungen werden erst nach dem Speichern live.",
@@ -512,12 +518,15 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorCssReadOnlyReason: "Operators can copy overlay CSS, but cannot change it.",
     editorStyleCopy: "Copy CSS", editorStyleCopied: "CSS copied", editorStyleCopyError: "CSS could not be copied.",
     editorStyleCssLimit: "Overlay CSS can contain at most 16,000 characters.",
-    editorNoElements: "No elements yet. Add a channel variable or module element.", editorNoSelection: "Select an element.", editorReadOnly: "Operators can view the composition, but cannot edit it.",
-    editorModuleElements: "Module elements", editorNoEnabledModuleElements: "Enable a module to add its elements.",
+    editorNoElements: "No elements yet. Add a channel variable or module element with “Add element”.", editorNoSelection: "Select an element.", editorReadOnly: "Operators can view the composition, but cannot edit it.",
+    editorAddElement: "Add element", editorPaletteSearch: "Search elements", editorPaletteVariables: "Channel variables",
+    editorPaletteNoResults: (query) => `No element matches “${query}”.`, editorPaletteModuleOff: (moduleName) => `Module off · ${moduleName}`,
+    editorRemoveElement: (name) => `Remove: ${name}`, editorLockedReason: "Only managers and broadcasters can edit the composition.",
+    editorPaletteNavigate: "Navigate", editorPaletteChoose: "Add", editorPaletteClose: "Close",
     editorModuleElement: "Module element", editorModuleDisabled: (moduleName) => `${moduleName} module is disabled.`,
-    editorChooseVariable: "Choose a channel variable", editorAddVariable: "Show variable", editorAdd: "Add", editorLabel: "Element label", editorDisplayText: "Display text",
+    editorLabel: "Element label", editorDisplayText: "Display text",
     editorVariable: "Channel variable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Scale (%)", editorZ: "Layer (z)",
-    editorMoveForward: "Move one layer forward", editorMoveBackward: "Move one layer backward", editorRemove: "Remove element", editorInComposition: "Show in composition",
+    editorMoveForward: "Move one layer forward", editorMoveBackward: "Move one layer backward", editorInComposition: "Show in composition",
     editorZoom: "Preview zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} reference`, editorTextHint: "Exactly one {value} placeholder is required.",
     editorElementLimit: "An overlay can contain at most 20 elements.", editorMissingPrefill: (name) => `Variable ${name} is no longer available.`, editorSave: "Save",
     editorDiscard: "Discard draft", editorSaved: "Saved — connected sources use the changes immediately.", editorClean: "Saved composition. Changes go live after you save.",
@@ -2081,6 +2090,9 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.clip.failed": "Clip fehlgeschlagen",
     "belabox.fetch_failing": "BELABOX-Abruf fehlgeschlagen",
     "belabox.fetch_recovered": "BELABOX-Abruf wiederhergestellt",
+    "belabox.alert_started": (detail) => `BELABOX-Alarm: ${detail.kind === "disconnect" ? "Encoder getrennt" : "Bitrate niedrig"} (${detailNumber(detail, "threshold", "?")} kbps, ${detailNumber(detail, "seconds", "?")} s)`,
+    "belabox.alert_escalated": (detail) => `BELABOX-Alarm eskaliert: Encoder getrennt (${detailNumber(detail, "threshold", "?")} kbps)`,
+    "belabox.alert_recovered": (detail) => `BELABOX-Verbindung erholt (${detail.kind === "disconnect" ? "Encoder" : "Bitrate"}, ${detailNumber(detail, "seconds", "?")} s)`,
     "channel_events.raid.incoming": (detail) => `Raid von ${detailText(detail, "source", "unbekannt")} mit ${detailNumber(detail, "viewers", "unbekannter Anzahl")} Zuschauern`,
     "channel_events.raid.outgoing": (detail) => `Raid zu ${detailText(detail, "target", "unbekannt")} mit ${detailNumber(detail, "viewers", "unbekannter Anzahl")} Zuschauern`,
     "channel_events.shoutout.sent": (detail) => `Shoutout an ${detailText(detail, "target", "unbekannt")}`,
@@ -2194,6 +2206,9 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.clip.failed": "Clip failed",
     "belabox.fetch_failing": "BELABOX fetch failing",
     "belabox.fetch_recovered": "BELABOX fetch recovered",
+    "belabox.alert_started": (detail) => `BELABOX alert: ${detail.kind === "disconnect" ? "encoder disconnected" : "bitrate low"} (${detailNumber(detail, "threshold", "?")} kbps, ${detailNumber(detail, "seconds", "?")} s)`,
+    "belabox.alert_escalated": (detail) => `BELABOX alert escalated: encoder disconnected (${detailNumber(detail, "threshold", "?")} kbps)`,
+    "belabox.alert_recovered": (detail) => `BELABOX connection recovered (${detail.kind === "disconnect" ? "encoder" : "bitrate"}, ${detailNumber(detail, "seconds", "?")} s)`,
     "channel_events.raid.incoming": (detail) => `Raid from ${detailText(detail, "source", "unknown")} with ${detailNumber(detail, "viewers", "unknown number")} viewers`,
     "channel_events.raid.outgoing": (detail) => `Raid to ${detailText(detail, "target", "unknown")} with ${detailNumber(detail, "viewers", "unknown number")} viewers`,
     "channel_events.shoutout.sent": (detail) => `Shoutout sent to ${detailText(detail, "target", "unknown")}`,
@@ -2346,6 +2361,9 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.clip.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "belabox.fetch_failing": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "belabox.fetch_recovered": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "belabox.alert_started": { family: "operations", tier: "outlined", word: { de: "Warnung", en: "Warning" }, numberKey: null, tone: "warning" },
+  "belabox.alert_escalated": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "belabox.alert_recovered": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: "seconds", tone: "info" },
   "text_commands.cooldown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: "remainingSeconds", tone: "warning" },
   "text_commands.user_cooldown": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: "remainingSeconds", tone: "info" },
   "text_commands.stream_state": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
