@@ -267,7 +267,8 @@ export function GroupedPicker<T = unknown>({
           aria-expanded="true"
           aria-controls={surfaceListId}
           aria-activedescendant={activeOptionId}
-          aria-describedby={renderActiveDetail === undefined ? undefined : `${surfacePanelId}-detail`}
+          // Mantine overwrites a plain aria-describedby; the Styles API attributes reach the input element.
+          {...(renderActiveDetail === undefined ? {} : { attributes: { input: { "aria-describedby": `${surfacePanelId}-detail` } } })}
           leftSection={<Icon name="search" size={16} />}
           value={query}
           onChange={(event) => { setQuery(event.currentTarget.value); setActiveKey(null); }}
