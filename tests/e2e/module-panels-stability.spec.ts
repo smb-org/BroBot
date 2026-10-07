@@ -578,3 +578,37 @@ test("an overnight chat voting result keeps its closing time fully visible at 39
   const clipped = await meta.evaluate((element) => element.scrollWidth > element.clientWidth);
   expect(clipped).toBe(false);
 });
+
+test("text-library game filter keeps the list position when games are selected and removed at desktop and 390px", async ({ page }) => {
+  await routeJson(page, "/api/channels/channel-a/modules/text_library/library", {
+    blocks: [], categories: [], settings: { revision: 1, graphRevision: 1, updatedAt: "2026-09-20T08:00:00.000Z" }, usages: {},
+  });
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await routeJson(page, "/api/channels/channel-a/settings", { timeZone: "UTC", revision: 1 });
+  await page.route("**/api/channels/channel-a/games?*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ games: [
+      { id: "1", name: "Just Chatting" }, { id: "2", name: "Software and Game Development" }, { id: "3", name: "Retro Adventure Collection Deluxe" },
+    ] }) });
+  });
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await gotoPanel(page, "text_library");
+    const list = page.getByTestId("text-library-list-slot");
+    await expect(list).toBeVisible();
+    const slot = page.locator(".text-library__filters .ui-game-picker__selected");
+    const before = { list: await box(list), slot: await box(slot) };
+    const search = page.getByPlaceholder("Search games");
+    for (const name of ["Just Chatting", "Software and Game Development", "Retro Adventure Collection Deluxe"]) {
+      await search.fill("ga");
+      await page.getByRole("option", { name }).click();
+      expect(await box(list)).toEqual(before.list);
+      expect(await box(slot)).toEqual(before.slot);
+    }
+    for (const name of ["Just Chatting", "Software and Game Development", "Retro Adventure Collection Deluxe"]) {
+      await page.getByRole("button", { name: `Remove ${name}` }).click();
+      expect(await box(list)).toEqual(before.list);
+      expect(await box(slot)).toEqual(before.slot);
+    }
+  }
+});

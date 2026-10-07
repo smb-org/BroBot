@@ -775,6 +775,7 @@ export interface DashboardTexts {
     before: string;
     after: string;
     olderEntries: string;
+    loaded: string;
     loadingOlderEntries: string;
     yes: string;
     no: string;
@@ -1086,7 +1087,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     audit: {
       title: "Audit-Log", entries: "Einträge", who: "Wer", systemActor: "Automatisches System",
       load: "Audit-Log wird geladen …", loadError: "Der Audit-Log konnte nicht geladen werden.", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
-      before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loadingOlderEntries: "Ältere Einträge werden geladen …",
+      before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loaded: "geladen", loadingOlderEntries: "Ältere Einträge werden geladen …",
       yes: "Ja", no: "Nein", newValue: "neu", removedValue: "entfernt",
       changedTruncated: "geändert (Text länger als die Vorschau)", changesHeading: "Änderungen",
       sentenceTemplates: {
@@ -1373,7 +1374,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     audit: {
       title: "Audit log", entries: "entries", who: "Who", systemActor: "Automated system",
       load: "Loading audit log …", loadError: "The audit log could not be loaded.", empty: "No audit entries saved yet.", changeData: "Change data",
-      before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
+      before: "Before", after: "After", olderEntries: "Load older entries", loaded: "loaded", loadingOlderEntries: "Loading older entries …",
       yes: "Yes", no: "No", newValue: "new", removedValue: "removed",
       changedTruncated: "changed (text longer than preview)", changesHeading: "Changes",
       sentenceTemplates: {

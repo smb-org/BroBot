@@ -342,16 +342,15 @@ test("the overview location region is present and keeps its box while settings l
   expect(before).toEqual(after);
 });
 
-test("audit and event controls stay above growing lists as channel responses arrive", async ({ page }) => {
+test("event controls stay above growing lists as channel responses arrive", async ({ page }) => {
   for (const [section, gateName, controlSelector] of [
-    ["audit", "audit", ".audit-page__pagination-slot"],
     ["events", "events", ".events-page__pagination-slot"],
   ] as const) {
     let releaseResponse!: () => void;
     let markResponseStarted!: () => void;
     const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
     const responseStarted = new Promise<void>((resolve) => { markResponseStarted = resolve; });
-    const responseData: ChannelMockData = section === "audit" ? { audit: fullAuditPage } : { events: fullEventPage };
+    const responseData: ChannelMockData = { events: fullEventPage };
     await installChannelMocks(page, { [gateName]: { wait: responseGate, started: markResponseStarted } }, responseData);
     await page.goto(`/channels/${channelId}/${section}`);
     await responseStarted;
@@ -364,6 +363,32 @@ test("audit and event controls stay above growing lists as channel responses arr
     expect(afterControl).toEqual(beforeControl);
     const listBox = await measureBox(page, ".ui-load-state");
     expect(beforeControl[1] + beforeControl[3]).toBeLessThanOrEqual(listBox[1]);
+    await page.unrouteAll();
+  }
+});
+
+test("channel audit pagination stays in a sticky 44px footer and the list top fixed at desktop and 390px", async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installChannelMocks(page, {}, { audit: fullAuditPage });
+
+    await page.goto(`/channels/${channelId}/audit`);
+    const loadState = page.locator(".ui-load-state");
+    await expect(loadState).toHaveAttribute("data-status", "success");
+    await expect(page.locator(".audit-page__pagination-slot")).toHaveCount(0);
+    const listTop = await measureDocumentBox(page, ".ui-load-state");
+    const footer = page.locator(".list-pagination-footer");
+    const more = footer.getByRole("button", { name: "Load older entries" });
+    await expect(more).toBeVisible();
+    await expect(footer).toContainText("50 loaded");
+    await footer.scrollIntoViewIfNeeded();
+    const footerBox = await measureBox(page, ".list-pagination-footer");
+    expect(footerBox[3]).toBe(44);
+    expect(Math.abs(footerBox[1] + footerBox[3] - (width === 390 ? 844 : 900))).toBeLessThanOrEqual(1);
+    await more.click();
+    await expect(more).toBeEnabled();
+    expect((await measureDocumentBox(page, ".ui-load-state")).slice(0, 2)).toEqual(listTop.slice(0, 2));
+    expect((await measureBox(page, ".list-pagination-footer"))[3]).toBe(44);
     await page.unrouteAll();
   }
 });

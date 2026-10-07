@@ -399,7 +399,8 @@ form.content-section { display: grid; gap: var(--s4); }
 .text-library__filters .dashboard-filter-bar__controls { display: grid; grid-template-columns: minmax(12rem, 1.2fr) repeat(2, minmax(12rem, 1fr)); align-items: start; overflow: visible; }
 .text-library__filters .dashboard-filter-bar__controls > * { min-width: 0; }
 .text-library__filters .ui-game-picker__hint { display: none; }
-.text-library__filters .ui-game-picker__selected:empty { display: none; }
+.text-library__filters .ui-game-picker__selected { box-sizing: border-box; height: 48px; min-height: 48px; flex-wrap: nowrap; align-items: center; overflow: auto hidden; }
+.text-library__filters .ui-game-picker__chip { flex: none; white-space: nowrap; }
 .text-library__table { min-width: 560px; }
 .text-library__table tbody tr[aria-selected="true"] { background: var(--tint-1); }
 .text-library__table tbody tr:hover { background: var(--surface-hover); }
@@ -1396,7 +1397,6 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .event-filter .form-actions p { margin: 0; }
 .event-feed__end { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; pointer-events: none; }
 .events-page__pagination-slot { display: flex; height: 60px; min-height: 60px; align-items: flex-start; }
-.audit-page__pagination-slot { display: flex; height: 60px; min-height: 60px; align-items: flex-start; }
 .list-create-action { display: flex; width: 20rem; min-width: 44px; max-width: 100%; flex-direction: column; align-items: flex-end; }
 .members-page__list-column { min-width: 0; }
 .list-create-action__reason {
