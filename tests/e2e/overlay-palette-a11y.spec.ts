@@ -20,14 +20,15 @@ const channel = {
 };
 
 
-const routeApi = async (page: Page): Promise<void> => {
+const routeApi = async (page: Page, elementCount = 0): Promise<void> => {
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     const json = (body: unknown): Promise<void> => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     if (pathname === "/api/channels") return json({ channels: [channel], bot: channel.bot });
     if (pathname === `/api/channels/${channelId}/overlays/${overlayId}`) {
       return json({ overlay: { id: overlayId, channelId, name: "Palette test", width: 1920, height: 1080, css: "", revision: 1,
-        createdAt: "2026-09-27T20:15:00.000Z", updatedAt: "2026-09-27T20:15:00.000Z", elements: [] } });
+        createdAt: "2026-09-27T20:15:00.000Z", updatedAt: "2026-09-27T20:15:00.000Z",
+        elements: Array.from({ length: elementCount }, (_, i) => ({ id: `element-${String(i)}`, kind: "variable", label: `Score ${String(i)}`, variableName: `score${String(i)}`, text: "{value}", config: {}, x: 0, y: 0, scalePercent: 100, z: i, inComposition: true })) } });
     }
     if (pathname === `/api/channels/${channelId}/variables`) return json({ variables: [], count: 0, maximum: 20 });
     if (pathname === `/api/channels/${channelId}/modules`) return json({ modules: [{ id: "chat_voting", enabled: true, settings: "{}" }, { id: "ads", enabled: true, settings: "{}" }] });
@@ -87,3 +88,20 @@ test("desktop palette closes with Escape after Tab and removal moves focus to th
   await expect(remove).toHaveCount(0);
   await expect(add).toBeFocused();
 });
+
+for (const width of [1280, 390]) {
+  test(`the usage count stays visible inside the panel at the element limit (${String(width)}px)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await routeApi(page, 20);
+    const usage = page.locator(".overlay-editor__element-usage");
+    await expect(usage).toContainText("20 of 20");
+    const fits = await usage.evaluate((el) => {
+      const panel = (el.closest(".overlay-editor__elements") as HTMLElement).getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      const count = el.firstElementChild as HTMLElement;
+      return { countFits: count.scrollWidth <= count.clientWidth, usageFits: el.scrollWidth <= el.clientWidth,
+        inside: box.left >= panel.left && box.right <= panel.right };
+    });
+    expect(fits).toEqual({ countFits: true, usageFits: true, inside: true });
+  });
+}
