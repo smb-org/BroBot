@@ -12,3 +12,16 @@ export const chatVotingResultVariableCatalog = {
     sample: "Yes: 8 (67%) · No: 4 (33%)",
   },
 } as const satisfies Readonly<Record<ModuleLanguage, { label: string; description: string; sample: string }>>;
+
+export const chatVotingTitleVariableCatalog = {
+  de: {
+    label: "Abstimmungsfrage",
+    description: "Die optionale Frage dieser Abstimmung",
+    sample: "Was essen wir heute?",
+  },
+  en: {
+    label: "Vote question",
+    description: "The optional question for this vote",
+    sample: "What should we eat today?",
+  },
+} as const satisfies Readonly<Record<ModuleLanguage, { label: string; description: string; sample: string }>>;

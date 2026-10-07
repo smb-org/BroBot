@@ -158,7 +158,8 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
   expect(sidebarContentHeight).toBeGreaterThan(sidebarScrollHeight);
   await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeInViewport();
   await sidebarScroll.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect(sidebar.getByRole("link", { name: "Module verwalten", exact: true })).toBeInViewport();
+  // The last entry (the enabled module) is reachable once scrolled to the end.
+  await expect(sidebar.getByRole("link", { name: /Textbefehle/ })).toBeInViewport();
   const collapseToggleRect = await sidebar.locator(".sidebar__collapse-toggle").evaluate((element) => {
     const { height, bottom } = element.getBoundingClientRect();
     return { height, bottom };

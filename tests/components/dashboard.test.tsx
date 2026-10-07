@@ -1940,7 +1940,7 @@ describe("Dashboard skeleton", () => {
       if (url.pathname.endsWith("/audit-log")) return jsonResponse(audit);
       if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "clips", enabled: true, settings: "{}" }] });
     }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
+    window.history.replaceState({}, "", "/channels/kanal-a/modules");
 
     render(<DashboardApp />);
 
@@ -1962,7 +1962,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await within(screen.getByRole("main")).findByRole("link", { name: /Textbefehle/ })).toBeInTheDocument();
+    expect(await within(screen.getByRole("navigation", { name: "Hauptnavigation" })).findByRole("link", { name: /Textbefehle/ })).toBeInTheDocument();
     expect(requested).not.toContain("/api/channels/kanal-a/modules");
   });
 
@@ -1993,7 +1993,7 @@ describe("Dashboard skeleton", () => {
     expect(requested).not.toContain("/api/channels/kanal-a/system");
   });
 
-  it("puts Stream Manager actions and warnings before modules and the compact healthy state", async () => {
+  it("puts Stream Manager actions and warnings before the compact healthy state", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       chatSubscriptionNeeded: true,
@@ -2013,12 +2013,11 @@ describe("Dashboard skeleton", () => {
 
     const actions = await screen.findByRole("region", { name: "Sofortaktionen" });
     const warnings = await screen.findByRole("region", { name: "Warnungen und Fehler" });
-    const modules = await screen.findByRole("region", { name: "Module" });
+    expect(screen.queryByRole("region", { name: "Module" })).not.toBeInTheDocument();
     const state = document.querySelector("details.channel-state-checks");
     expect(state).not.toBeNull();
     expect(actions.compareDocumentPosition(warnings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(warnings.compareDocumentPosition(modules) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(modules.compareDocumentPosition(state as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(warnings.compareDocumentPosition(state as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(state).not.toHaveAttribute("open");
     expect(within(state as HTMLElement).getByText("Alles in Ordnung · 8 Prüfungen")).toBeInTheDocument();
   });
@@ -2049,20 +2048,21 @@ describe("Dashboard skeleton", () => {
     expect(within(moderatorRow).getByRole("button", { name: "Moderatorstatus prüfen" })).toBeInTheDocument();
   });
 
-  it("links to active modules in the channel overview instead of embedding their forms", async () => {
+  it("links to active modules from the sidebar instead of embedding their forms", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") return jsonResponse(activeModule);
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
       return jsonResponse({}, 404);
     }));
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
 
-    const link = await within(screen.getByRole("main")).findByRole("link", { name: /Textbefehle/ });
+    const link = await within(screen.getByRole("navigation", { name: "Hauptnavigation" })).findByRole("link", { name: /Textbefehle/ });
     expect(link).toHaveAttribute("href", "/channels/kanal-a/modules/text_commands");
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
   });
@@ -2459,7 +2459,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("switch", { name: "Shoutout" })).toBeChecked();
   });
 
-  it("is the Stream Manager after sign-in: module toggle, immediate actions, and the warnings feed together, no page change", async () => {
+  it("is the Stream Manager after sign-in: immediate actions, and the warnings feed together, no page change", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "manager" as const };
     let modulesCalls = 0;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -2491,11 +2491,8 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    // Module toggle, without navigating away from the overview.
-    const moduleSwitch = await screen.findByRole("switch", { name: "Textbefehle" });
-    fireEvent.click(moduleSwitch);
-    await waitFor(() => { expect(screen.getByRole("switch", { name: "Textbefehle" })).toBeChecked(); });
-    expect(window.location.pathname).toBe("/channels/kanal-a");
+    // The overview offers no module list; module management has its own page.
+    expect(screen.queryByRole("switch", { name: "Textbefehle" })).not.toBeInTheDocument();
 
     // Immediate actions section is present and reachable. Each button comes
     // from its own module's `lazy(() => import(...))` behind a `Suspense`
@@ -3031,12 +3028,13 @@ describe("Dashboard skeleton", () => {
         overviewAufrufe += 1;
         return overviewAufrufe === 1 ? jsonResponse(activeModule) : secondResponse;
       }
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
       return jsonResponse({}, 404);
     }));
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    const link = await within(screen.getByRole("main")).findByRole("link", { name: /Textbefehle/ });
+    const link = await within(screen.getByRole("navigation", { name: "Hauptnavigation" })).findByRole("link", { name: /Textbefehle/ });
     link.click();
 
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();

@@ -41,6 +41,7 @@ export interface StartChatVotingOptions {
   durationSeconds: number;
   textMode?: ChatVotingTextMode;
   labels?: readonly string[];
+  title?: string;
 }
 
 export const startChatVoting = async (channelId: string, options: StartChatVotingOptions): Promise<ChatVote> => {

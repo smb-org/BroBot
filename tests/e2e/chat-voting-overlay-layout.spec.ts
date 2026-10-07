@@ -51,3 +51,34 @@ test("free-text overlay rows keep fixed columns and tracks at a fixed 480px insi
   expect(measurements[1]?.trackWidths).toEqual(measurements[2]?.trackWidths);
   expect(measurements[1]?.labelWidths).toEqual(measurements[2]?.labelWidths);
 });
+
+test("vote question header stays fixed and clamps long text at 390px in the overlay canvas", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const measurements: Array<{ headerHeight: number; tallyHeight: number; resultsTop: number; lineClamp: string }> = [];
+  const longTitle = "😀".repeat(80);
+
+  for (const title of [null, "Pizza today?", longTitle]) {
+    const parameters = new URLSearchParams({ mobile: "1", title: title ?? "" });
+    await page.goto(`/tests/e2e/chat-voting-overlay-fixture.html?${parameters.toString()}`);
+    const header = page.locator(".chat-voting-tally__header");
+    await expect(header).toBeVisible();
+    await expect(header).toHaveText(title ?? "Voting");
+    measurements.push(await header.evaluate((element) => {
+      const tally = element.closest(".chat-voting-tally");
+      const results = tally?.querySelector(".chat-voting-tally__options");
+      return {
+        headerHeight: element.getBoundingClientRect().height,
+        tallyHeight: tally?.getBoundingClientRect().height ?? 0,
+        resultsTop: results?.getBoundingClientRect().top ?? 0,
+        lineClamp: getComputedStyle(element).webkitLineClamp,
+      };
+    }));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  }
+
+  expect(measurements[0]?.headerHeight).toBeGreaterThan(0);
+  expect(new Set(measurements.map(({ headerHeight }) => headerHeight)).size).toBe(1);
+  expect(new Set(measurements.map(({ tallyHeight }) => tallyHeight)).size).toBe(1);
+  expect(new Set(measurements.map(({ resultsTop }) => resultsTop)).size).toBe(1);
+  expect(measurements.map(({ lineClamp }) => lineClamp)).toEqual(["2", "2", "2"]);
+});

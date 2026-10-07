@@ -14,6 +14,8 @@ export interface ChatVotingPanelTexts {
   loading: string;
   loadError: string;
   voteType: string;
+  question: string;
+  questionCount: (count: number, maximum: number) => string;
   presetGroups: { twoOptions: string; scale: string; multipleOptions: string; freeText: string };
   presetDescriptions: Record<ChatVotePreset, string>;
   presetHints: Record<ChatVotePreset, string>;
@@ -84,18 +86,20 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     loading: "Abstimmung wird geladen …",
     loadError: "Die Abstimmung konnte nicht geladen werden.",
     voteType: "Abstimmungstyp",
+    question: "Frage",
+    questionCount: (count, maximum) => `${String(count)}/${String(maximum)}`,
     presetGroups: { twoOptions: "Zwei Optionen", scale: "Skala", multipleOptions: "Mehrere Optionen", freeText: "Freitext" },
     presetDescriptions: {
-      yes_no: "Chat tippt 1 oder 2",
-      digit_01: "Chat tippt 0 oder 1",
-      digit_12: "Chat tippt 1 oder 2 · eigene Namen",
+      yes_no: "Chat tippt 1 = Ja, 2 = Nein",
+      digit_01: "Chat tippt 0 = Nein, 1 = Ja",
+      digit_12: "Chat tippt 1 oder 2",
       scale_5: "Chat tippt eine Zahl von 1 bis 5",
       options_n: "Chat tippt die Nummer der Option",
       free_text: "Chat schreibt ein Wort · die Top 5 zählen",
     },
     presetHints: {
-      yes_no: "Chat tippt 1 oder 2. Pro Person zählt die letzte Stimme.",
-      digit_01: "Chat tippt 0 oder 1. Pro Person zählt die letzte Stimme.",
+      yes_no: "Chat tippt 1 = Ja, 2 = Nein. Pro Person zählt die letzte Stimme.",
+      digit_01: "Chat tippt 0 = Nein, 1 = Ja. Pro Person zählt die letzte Stimme.",
       digit_12: "Chat tippt 1 oder 2. Pro Person zählt die letzte Stimme.",
       scale_5: "Chat tippt eine Zahl von 1 bis 5.",
       options_n: "Chat tippt die Nummer der Option.",
@@ -166,18 +170,20 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     loading: "Loading the vote …",
     loadError: "The vote could not be loaded.",
     voteType: "Vote type",
+    question: "Question",
+    questionCount: (count, maximum) => `${String(count)}/${String(maximum)}`,
     presetGroups: { twoOptions: "Two options", scale: "Scale", multipleOptions: "Multiple options", freeText: "Free text" },
     presetDescriptions: {
-      yes_no: "Chat types 1 or 2",
-      digit_01: "Chat types 0 or 1",
-      digit_12: "Chat types 1 or 2 · custom labels",
+      yes_no: "Chat types 1 = yes, 2 = no",
+      digit_01: "Chat types 0 = no, 1 = yes",
+      digit_12: "Chat types 1 or 2",
       scale_5: "Chat types a number from 1 to 5",
       options_n: "Chat types the option number",
       free_text: "Chat types a word · top 5 are counted",
     },
     presetHints: {
-      yes_no: "Chat types 1 or 2. Each person’s latest vote counts.",
-      digit_01: "Chat types 0 or 1. Each person’s latest vote counts.",
+      yes_no: "Chat types 1 = yes, 2 = no. Each person’s latest vote counts.",
+      digit_01: "Chat types 0 = no, 1 = yes. Each person’s latest vote counts.",
       digit_12: "Chat types 1 or 2. Each person’s latest vote counts.",
       scale_5: "Chat types a number from 1 to 5.",
       options_n: "Chat types the option number.",

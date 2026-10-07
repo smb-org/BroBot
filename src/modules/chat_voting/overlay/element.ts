@@ -14,6 +14,7 @@ export const chatVotingOverlayElement = {
   previewState: (_config: JsonObject, language: ModuleLanguage, now: number): JsonObject => ({
     pollId: "overlay-editor-preview",
     openedAt: new Date(now).toISOString(),
+    title: chatVotingOverlayLabels(language).previewTitle,
     status: "open",
     preset: "free_text",
     optionCount: 0,

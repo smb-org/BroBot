@@ -70,6 +70,9 @@ describe("module overlay element declarations", () => {
     expect(tally?.parseConfig({ width: 1921 })).toBeNull();
     expect(tally?.parseConfig({ hideAfterCloseSeconds: 121 })).toBeNull();
     expect(tally?.parseConfig({ html: "unsafe" })).toBeNull();
+    expect(tally?.previewState?.({}, "en", Date.parse("2030-01-01T00:00:00.000Z"))).toMatchObject({
+      title: "What should we eat today?",
+    });
     expect(tally?.mergeRealtimeState).toBeTypeOf("function");
   });
 

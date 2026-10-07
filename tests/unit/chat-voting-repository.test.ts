@@ -7,6 +7,38 @@ import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fi
 import { TestD1Database } from "./test-d1";
 
 describe("chat voting repository mutation guards", () => {
+  it("round-trips a vote question through open state and closed history", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const vote: ChatVoteDraft = {
+        id: "question-poll",
+        channelId: "fictional-channel",
+        preset: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: "Pizza today?",
+        openedAt: "2026-10-04T10:00:00.000Z",
+        closesAt: "2026-10-04T14:00:00.000Z",
+        requestedDurationSeconds: null,
+        closeReason: "limit",
+      };
+
+      await repository.insertOpen(vote);
+      await expect(repository.open("fictional-channel")).resolves.toMatchObject({ title: "Pizza today?", status: "open" });
+      await repository.finish("fictional-channel", vote.id, "manual", "2026-10-04T11:00:00.000Z", [3, 1]);
+
+      await expect(repository.latest("fictional-channel")).resolves.toMatchObject({
+        title: "Pizza today?",
+        status: "closed",
+        counts: [3, 1],
+      });
+    } finally {
+      database.close();
+    }
+  });
+
   it("rechecks channel membership when a manual close is written", async () => {
     const database = new TestD1Database();
     try {
@@ -20,6 +52,7 @@ describe("chat voting repository mutation guards", () => {
         preset: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+        title: null,
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",
         requestedDurationSeconds: null,
@@ -54,6 +87,7 @@ describe("chat voting repository mutation guards", () => {
         preset: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+        title: null,
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",
         requestedDurationSeconds: 120,

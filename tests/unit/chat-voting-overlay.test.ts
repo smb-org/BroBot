@@ -60,10 +60,12 @@ describe("chat voting tally state", () => {
   });
 
   it("keeps prior module metadata when a partial tally omits labels", () => {
-    const current = tally("poll-a", 2);
+    const current = { ...tally("poll-a", 2), title: "Pizza today?" };
 
     expect(mergeTallyState(current, { pollId: "poll-a", revision: 3, counts: [2, 1] }))
-      .toMatchObject({ labels: ["Yes", "No"], counts: [2, 1], status: "open" });
+      .toMatchObject({ labels: ["Yes", "No"], title: "Pizza today?", counts: [2, 1], status: "open" });
+    expect(mergeTallyState(current, { ...tally("poll-a", 3), title: "Which pizza?" }))
+      .toMatchObject({ title: "Which pizza?", revision: 3 });
     expect(mergeTallyState(current, null)).toBeNull();
   });
 

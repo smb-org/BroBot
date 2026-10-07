@@ -89,16 +89,16 @@ describe("chat voting live panel", () => {
 
     const type = await screen.findByRole("combobox", { name: "Vote type" });
     expect(type).toHaveValue("Yes / No");
-    expect(type.closest(".ui-select")).toHaveTextContent("Chat types 1 or 2. Each person’s latest vote counts.");
+    expect(type.closest(".ui-select")).toHaveTextContent("Chat types 1 = yes, 2 = no. Each person’s latest vote counts.");
     fireEvent.click(type);
     const listboxId = type.getAttribute("aria-controls");
     const listbox = listboxId === null ? null : document.getElementById(listboxId);
     expect(listbox).not.toBeNull();
     if (listbox === null) throw new Error("The type listbox has not mounted.");
     expect(listbox).toHaveTextContent("Two options");
-    expect(listbox).toHaveTextContent("Yes / NoChat types 1 or 2");
-    expect(listbox).toHaveTextContent("0 / 1Chat types 0 or 1");
-    expect(listbox).toHaveTextContent("1 / 2Chat types 1 or 2 · custom labels");
+    expect(listbox).toHaveTextContent("Yes / NoChat types 1 = yes, 2 = no");
+    expect(listbox).toHaveTextContent("0 / 1Chat types 0 = no, 1 = yes");
+    expect(listbox).toHaveTextContent("1 / 2Chat types 1 or 2");
     expect(listbox).toHaveTextContent("Multiple options");
     expect(listbox).toHaveTextContent("Free textChat types a word · top 5 are counted");
   });
@@ -146,6 +146,45 @@ describe("chat voting live panel", () => {
     await waitFor(() => expect(startPayload).toEqual({ preset: "yes_no", durationSeconds: 120, labels: ["Pizza", "Burger"] }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("Pizza"));
     expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Burger");
+  });
+
+  it("sends a trimmed question and enforces its 80-code-point limit", async () => {
+    let startPayload: unknown;
+    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
+      startPayload = body;
+      return { vote: openVote };
+    }));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const question = await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.change(question, { target: { value: "  Pizza today?  " } });
+    expect(screen.getByRole("button", { name: "Start vote" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
+    await waitFor(() => expect(startPayload).toMatchObject({ title: "Pizza today?" }));
+
+    cleanup();
+    startPayload = undefined;
+    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
+      startPayload = body;
+      return { vote: openVote };
+    }));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+    const emojiQuestion = "😀".repeat(81);
+    const emojiField = await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.change(emojiField, { target: { value: emojiQuestion } });
+    expect(screen.getAllByText("81/80").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Start vote" })).toBeDisabled();
+    expect(startPayload).toBeUndefined();
+  });
+
+  it("shows the running question above its result", async () => {
+    const titledVote = { ...openVote, title: "Pizza today?" };
+    vi.stubGlobal("fetch", fetchFor(() => currentState({ vote: titledVote, counts: [4, 2], hasOpenBallot: true })));
+    const { container } = render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const question = await screen.findByText("Pizza today?", { selector: ".chat-voting-result__question" });
+    expect(question.compareDocumentPosition(container.querySelector(".chat-voting-results") as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Pizza today?");
   });
 
   it("uses inline key labels for 0/1 and submits the default for an untouched field", async () => {

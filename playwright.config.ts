@@ -27,13 +27,10 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      // `wrangler dev` folgt der vom Vite-Plugin geschriebenen Umleitung
-      // `.wrangler/deploy/config.json` auf `dist/brobot_local/wrangler.json`
-      // und serviert `dist/brobot_local/index.js`, nicht `src/worker/index.ts`.
-      // Deshalb muss vor dem E2E-Start ein Build laufen; `pretest:e2e` stellt
-      // das bei `pnpm run test:e2e` sicher, ein direkter Playwright-Aufruf
-      // setzt einen aktuellen Build voraus.
-      command: `./node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port ${e2eWorkerPort} --persist-to .wrangler/e2e-worker --show-interactive-dev-session=false ${workerBindings}`,
+      // Run from the built output so Wrangler serves index.js and resolves
+      // assets and migrations relative to dist/brobot_local. A build is
+      // required; `pretest:e2e` supplies it for pnpm run test:e2e.
+      command: `./node_modules/.bin/wrangler --cwd dist/brobot_local --config wrangler.json dev --local --ip 127.0.0.1 --port ${e2eWorkerPort} --persist-to ../../.wrangler/e2e-worker --show-interactive-dev-session=false ${workerBindings}`,
       // Port statt Adresse: /healthz meldet bewusst 503, solange Secrets oder
       // Schema fehlen. Playwright wartet auf 2xx und liefe sonst in die
       // Zeitüberschreitung, obwohl der Worker längst antwortet.

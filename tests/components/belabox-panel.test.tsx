@@ -83,6 +83,7 @@ describe("BELABOX panel", () => {
       sample: null,
       polling: false,
       pollingDesired: true,
+      intervalSeconds: 15,
       streamId: "stream-s2",
       belaboxStreamId: null,
     });
@@ -137,7 +138,7 @@ describe("BELABOX panel", () => {
       })
       .mockResolvedValue({
         configured: true, updatedAt: null, mode: "interval", sample: null, errorCode: null,
-        polling: true, pollingDesired: true, streamId: "stream-42", belaboxStreamId: "stream-42",
+        polling: true, pollingDesired: true, intervalSeconds: 15, streamId: "stream-42", belaboxStreamId: "stream-42",
       });
     const view = render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRefreshToken={0} /></></UiProvider>);
 
@@ -150,6 +151,8 @@ describe("BELABOX panel", () => {
       expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "live", undefined);
     });
     expect(mocks.loadBelaboxStreams).toHaveBeenCalledOnce();
+    // A status without a finite intervalSeconds makes the refresh timer fire continuously.
+    expect(mocks.loadBelaboxStatus).toHaveBeenCalledTimes(2);
   });
 
   it("draws the history thresholds and disconnect gaps and can select a stream", async () => {
@@ -161,6 +164,7 @@ describe("BELABOX panel", () => {
       errorCode: null,
       polling: true,
       pollingDesired: true,
+      intervalSeconds: 15,
       streamId: "stream-42",
       belaboxStreamId: "stream-42",
     });

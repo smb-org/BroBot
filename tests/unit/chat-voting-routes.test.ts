@@ -19,6 +19,7 @@ const openTextVote: ChatVoteDraft = {
   preset: "free_text",
   optionCount: 0,
   labels: [],
+  title: null,
   textMode: "whole_message",
   termFilterReady: true,
   openedAt: "2026-10-04T10:00:00.000Z",
@@ -87,6 +88,7 @@ describe("chat voting routes", () => {
     ["fractional", { preset: "yes_no", durationSeconds: 1.5 }],
     ["above four hours", { preset: "yes_no", durationSeconds: 14_401 }],
     ["wrong type", { preset: "yes_no", durationSeconds: "60" }],
+    ["overlong question", { preset: "yes_no", durationSeconds: 60, title: "😀".repeat(81) }],
   ])("rejects a %s per-vote duration before starting", async (_case, body) => {
     const response = await chatVotingRoutes.request("/start", {
       method: "POST",
@@ -136,7 +138,7 @@ describe("chat voting routes", () => {
     });
   });
 
-  it("starts a panel vote with Unicode labels counted in code points and records them in the audit", async () => {
+  it("starts a panel vote with a trimmed question and Unicode labels counted in code points", async () => {
     const database = await createDatabase();
     await createChatVotingRepository(database as unknown as D1Database).finish(
       CHANNEL_ID, openTextVote.id, "manual", "2026-10-04T10:01:00.000Z", [], [], 0, true,
@@ -148,21 +150,22 @@ describe("chat voting routes", () => {
       get: vi.fn(() => ({ scheduleModuleAlarm: vi.fn(() => Promise.resolve()) })),
     } as unknown as Env["CHANNEL"];
     const labels = ["😀".repeat(17), "Burger"];
+    const title = "Pizza today?";
     const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preset: "yes_no", durationSeconds: 60, labels }),
+      body: JSON.stringify({ preset: "yes_no", durationSeconds: 60, labels, title: `  ${title}  ` }),
     }), {
       DB: database as unknown as D1Database,
       CHANNEL: namespace,
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ vote: { labels } });
+    await expect(response.json()).resolves.toMatchObject({ vote: { labels, title } });
     const auditInput = (writeAudit.mock.calls[0] as unknown as readonly [Record<string, unknown>, string] | undefined)?.[0];
     expect(auditInput).toMatchObject({
       action: "chat_voting.started",
-      after: { labels },
+      after: { labels, title },
     });
   });
 
