@@ -185,7 +185,7 @@ describe("chat voting event service", () => {
     }), undefined);
   });
 
-  it("starts titled chat commands and sends a localized title-aware announcement", async () => {
+  it("starts titled chat commands and schedules one automated announcement per vote", async () => {
     const insertOpen = vi.fn(() => Promise.resolve(true));
     const repository = repositoryWith({ insertOpen });
     const context = executionContext();
@@ -193,11 +193,24 @@ describe("chat voting event service", () => {
     const result = await processChatVotingMessage(eventWithText("!vote yesno Pizza today?", ["moderator"]), repository, context);
 
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Pizza today?", preset: "yes_no" }), undefined);
-    expect(result.actions[0]).toEqual({
-      kind: "chat",
-      text: "Voting “Pizza today?” started. Type a number from 1 to 2 to vote.",
-      automated: false,
-    });
+    expect(result.actions).toHaveLength(1);
+    const [action] = result.actions;
+    if (action?.kind !== "overlay") throw new Error("A successful vote start should open the overlay.");
+    expect(action.type).toBe("opened");
+    expect(action.elementKind).toBe("chat_voting.tally");
+    expect(typeof action.payload.pollId).toBe("string");
+    expect(context.scheduleAlarm).toHaveBeenCalledWith("announce_start", expect.stringMatching(/^start:/u), Date.now(), 0);
+  });
+
+  it("does not schedule a start announcement when the optional template is empty", async () => {
+    const context = executionContext();
+    const event = { ...eventWithText("!vote yesno", ["moderator"]), settings: { ...DEFAULT_CHAT_VOTING_SETTINGS, startText: "" } };
+
+    const result = await processChatVotingMessage(event, repositoryWith(), context);
+
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions[0]?.kind).toBe("overlay");
+    expect(context.scheduleAlarm).not.toHaveBeenCalledWith("announce_start", expect.stringMatching(/^start:/u), expect.any(Number), expect.any(Number));
   });
 
   it("answers with help and does not start a vote when the chat question is too long", async () => {

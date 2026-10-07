@@ -1,8 +1,8 @@
 import type { BallotTermCount, ModuleEvent, ModuleExecutionContext, ModuleMutationAuthorization, ModuleResult } from "../contract";
 import type { ModuleLanguage, ModuleAlarmContext } from "../contract";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey, chatVotingStartAnnouncementPollId } from "./contracts";
 import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
-import { configuredLabels, formatFreeTextVoteResult, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, normalizeVoteTitle, parseVoteCommand, voteChoiceFromMessage, voteCloseDeadline, voteLabelLength } from "./domain";
+import { configuredLabels, formatFreeTextVoteResult, formatVoteOptions, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, normalizeVoteTitle, parseVoteCommand, voteChoiceFromMessage, voteCloseDeadline, voteLabelLength } from "./domain";
 import type { ChatVotingRepository } from "./repository";
 import { chatVotingChatText } from "./contracts/chat-defaults";
 import { createChatVotingRepository } from "./repository";
@@ -30,6 +30,7 @@ export const startChatVote = async (
   input: StartChatVoteInput,
   ballots: ModuleExecutionContext["ballots"],
   scheduleClose: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
+  scheduleStartAnnouncement?: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
 ): Promise<VoteStartResult> => {
   const expectedOptionCount = input.preset === "free_text" ? 0
     : input.preset === "yes_no" || input.preset === "digit_01" || input.preset === "digit_12" ? 2
@@ -94,6 +95,9 @@ export const startChatVote = async (
       return { status: "busy" };
     }
     await scheduleClose(vote.id, deadline.closesAt, 0);
+    if (input.settings.startText.trim().length > 0) {
+      await scheduleStartAnnouncement?.(vote.id, openedAt, 0);
+    }
   } catch (error: unknown) {
     const closedSnapshot = await ballots.close(vote.id).catch(() => null);
     if (inserted) {
@@ -154,6 +158,17 @@ const closeAlarmScheduler = (context: ModuleExecutionContext) => (
   ownerRevision: number,
 ): Promise<void> => context.scheduleAlarm(CHAT_VOTING_ALARM_HANDLER, pollId, deadline, ownerRevision);
 
+const startAnnouncementScheduler = (context: ModuleExecutionContext) => (
+  pollId: string,
+  deadline: number,
+  ownerRevision: number,
+): Promise<void> => context.scheduleAlarm(
+  CHAT_VOTING_START_ANNOUNCEMENT_HANDLER,
+  chatVotingStartAnnouncementAlarmKey(pollId),
+  deadline,
+  ownerRevision,
+);
+
 export const processChatVotingMessage = async (
   event: ModuleEvent<ChatVotingSettings>,
   repository: ChatVotingRepository,
@@ -203,13 +218,12 @@ export const processChatVotingMessage = async (
         ...(command.preset === "free_text" ? { blockedTerms } : {}),
         settings: event.settings,
         language,
-      }, context.ballots, closeAlarmScheduler(context));
+      }, context.ballots, closeAlarmScheduler(context), startAnnouncementScheduler(context));
       if (result.status === "busy") {
         return { actions: [directChat(chatVotingChatText(language, "busy"))], diagnostics: [] };
       }
       return {
         actions: [
-          directChat(chatVotingChatText(language, "started", result.vote.optionCount, result.vote.preset, result.vote.textMode, result.vote.title)),
           { kind: "overlay", type: "opened", elementKind: CHAT_VOTING_ELEMENT_KIND, payload: { pollId: result.vote.id } },
         ],
         diagnostics: [],
@@ -315,6 +329,40 @@ const alarmSettings = async (context: ModuleAlarmContext): Promise<ChatVotingSet
   } catch { return DEFAULT_CHAT_VOTING_SETTINGS; }
 };
 
+const startAnnouncementTemplate = (startText: string, title: string | null, language: ModuleLanguage): string => {
+  const usesDefault = startText === DEFAULT_CHAT_VOTING_START_TEXT || startText === DEFAULT_CHAT_VOTING_START_TEXT_EN;
+  if (!usesDefault) return startText;
+  const localized = language === "de" ? DEFAULT_CHAT_VOTING_START_TEXT : DEFAULT_CHAT_VOTING_START_TEXT_EN;
+  return title === null ? localized.replace("{vote.title} – ", "") : localized;
+};
+
+export const announceChatVoteStartFromAlarm = async (
+  context: ModuleAlarmContext,
+  repository: ChatVotingRepository,
+  pollId: string,
+): Promise<void> => {
+  const vote = await repository.byId(context.channelId, pollId);
+  if (vote === null || vote.status !== "open") return;
+  const settings = await alarmSettings(context);
+  if (settings.startText.trim().length === 0) return;
+  const language = await context.channelLanguage();
+  const template = startAnnouncementTemplate(settings.startText, vote.title, language);
+  const rendered = await context.renderTemplate(
+    template,
+    Date.parse(vote.openedAt),
+    { "vote.title": vote.title ?? "", "vote.options": formatVoteOptions(vote, language) },
+  );
+  if (rendered.text.trim().length === 0) return;
+  const delivery = await context.sendChat(
+    rendered.text,
+    `chat-voting:${pollId}:start`,
+    rendered.attributions,
+    async () => (await repository.byId(context.channelId, pollId))?.status === "open",
+    "source_only",
+  );
+  if (delivery.retryable) throw new Error("The chat vote start announcement is waiting for the automated output limit.");
+};
+
 export const closeChatVoteFromAlarm = async (
   context: ModuleAlarmContext,
   repository: ChatVotingRepository,
@@ -395,21 +443,26 @@ export const closeChatVoteFromAlarm = async (
 
   const settings = await alarmSettings(context);
   if (settings.announceResult) {
+    const language = await context.channelLanguage();
     const result = closedVote.preset === "free_text"
       ? formatFreeTextVoteResult(
         closedVote.textResults ?? snapshot.terms ?? [],
         closedVote.moreTerms ?? snapshot.more ?? 0,
-        await context.channelLanguage() === "de" ? "weitere" : "more",
+        language === "de" ? "weitere" : "more",
       )
       : formatVoteResult(closedVote.labels, closedVote.counts ?? snapshot.counts);
     const rendered = await context.renderTemplate(
       settings.resultText,
       Date.parse(closedVote.closedAt ?? new Date().toISOString()),
-      { "vote.result": result, "vote.title": closedVote.title ?? "" },
+      {
+        "vote.result": result,
+        "vote.title": closedVote.title ?? "",
+        "vote.options": formatVoteOptions(closedVote, language),
+      },
     );
     const announcement = settings.resultText === DEFAULT_CHAT_VOTING_SETTINGS.resultText
       ? closedVote.title === null ? result
-        : chatVotingChatText(await context.channelLanguage(), "result", undefined, undefined, undefined, closedVote.title, result)
+        : chatVotingChatText(language, "result", undefined, undefined, undefined, closedVote.title, result)
       : rendered.text;
     if (announcement.trim().length > 0) {
       const delivery = await context.sendChat(
@@ -432,5 +485,14 @@ export const chatVotingAlarmDefinition = {
   handle: async (context: ModuleAlarmContext, alarmKey: string) => {
     if (!/^[A-Za-z0-9_-]{1,128}$/u.test(alarmKey)) throw new RangeError("The chat vote id is invalid.");
     await closeChatVoteFromAlarm(context, createChatVotingRepository(context.DB), alarmKey);
+  },
+};
+
+export const chatVotingStartAnnouncementAlarmDefinition = {
+  key: CHAT_VOTING_START_ANNOUNCEMENT_HANDLER,
+  handle: async (context: ModuleAlarmContext, alarmKey: string) => {
+    const pollId = chatVotingStartAnnouncementPollId(alarmKey);
+    if (pollId === null) throw new RangeError("The chat vote id is invalid.");
+    await announceChatVoteStartFromAlarm(context, createChatVotingRepository(context.DB), pollId);
   },
 };

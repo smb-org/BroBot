@@ -1,8 +1,22 @@
 import { z } from "zod";
+import { DEFAULT_CHAT_VOTING_START_TEXT } from "./chat-defaults";
+
+export { DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN } from "./chat-defaults";
 
 export const CHAT_VOTING_MODULE_ID = "chat_voting";
 export const CHAT_VOTING_ELEMENT_KIND = "chat_voting.tally";
 export const CHAT_VOTING_ALARM_HANDLER = "close";
+export const CHAT_VOTING_START_ANNOUNCEMENT_HANDLER = "announce_start";
+export const CHAT_VOTING_START_ANNOUNCEMENT_ALARM_PREFIX = "start:";
+
+export const chatVotingStartAnnouncementAlarmKey = (pollId: string): string =>
+  `${CHAT_VOTING_START_ANNOUNCEMENT_ALARM_PREFIX}${pollId}`;
+
+export const chatVotingStartAnnouncementPollId = (alarmKey: string): string | null => {
+  if (!alarmKey.startsWith(CHAT_VOTING_START_ANNOUNCEMENT_ALARM_PREFIX)) return null;
+  const pollId = alarmKey.slice(CHAT_VOTING_START_ANNOUNCEMENT_ALARM_PREFIX.length);
+  return /^[A-Za-z0-9_-]{1,128}$/u.test(pollId) ? pollId : null;
+};
 
 export const CHAT_VOTING_MAX_OPTIONS = 9;
 export const CHAT_VOTING_MAX_TEXT_TERMS = 200;
@@ -21,6 +35,7 @@ export const chatVotingSettingsSchema = z.object({
   zeroOneLabels: labelList(70),
   oneTwoLabels: labelList(70),
   autoCloseSeconds: z.number().int().min(0).max(CHAT_VOTING_HARD_LIMIT_MS / 1_000).default(0),
+  startText: z.string().max(500).default(DEFAULT_CHAT_VOTING_START_TEXT),
   announceResult: z.boolean().default(true),
   resultText: z.string().max(500).default("{vote.result}"),
   resultTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
@@ -35,6 +50,7 @@ export const DEFAULT_CHAT_VOTING_SETTINGS: ChatVotingSettings = {
   zeroOneLabels: "",
   oneTwoLabels: "",
   autoCloseSeconds: 0,
+  startText: DEFAULT_CHAT_VOTING_START_TEXT,
   announceResult: true,
   resultText: "{vote.result}",
   resultTarget: "source_only",

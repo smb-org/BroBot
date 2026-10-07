@@ -25,3 +25,16 @@ export const chatVotingTitleVariableCatalog = {
     sample: "What should we eat today?",
   },
 } as const satisfies Readonly<Record<ModuleLanguage, { label: string; description: string; sample: string }>>;
+
+export const chatVotingOptionsVariableCatalog = {
+  de: {
+    label: "Abstimmungsoptionen",
+    description: "Eingaben, mit denen Zuschauer abstimmen können",
+    sample: "1 = Pizza, 2 = Burger, 3 = Döner",
+  },
+  en: {
+    label: "Voting options",
+    description: "The inputs viewers can use to vote",
+    sample: "1 = Pizza, 2 = Burger, 3 = Kebab",
+  },
+} as const satisfies Readonly<Record<ModuleLanguage, { label: string; description: string; sample: string }>>;

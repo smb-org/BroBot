@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import type { AuditAction } from "../../contracts/values";
 import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
 import type { ChatVotePreset } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, startChatVote } from "./service";
@@ -135,6 +135,9 @@ chatVotingRoutes.post("/start", async (context) => {
     }, context.get("ballots")(channelId), async (pollId, deadline, ownerRevision) => {
       const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
       await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, pollId, deadline, ownerRevision);
+    }, async (pollId, deadline, ownerRevision) => {
+      const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+      await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, chatVotingStartAnnouncementAlarmKey(pollId), deadline, ownerRevision);
     });
   } catch {
     return context.json({ error: "chat_voting_start_failed" }, 503);
