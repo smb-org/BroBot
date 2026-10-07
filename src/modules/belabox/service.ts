@@ -215,7 +215,11 @@ const stopPolling = async (
 ): Promise<boolean> => finalizeAndResetBelaboxHistory(
     context.DB,
     context.channelId,
-    new Date().toISOString(),
+    // An offline stream ended when it went offline, not when this (possibly delayed) alarm runs.
+    prerequisites.streamState === "offline" && prerequisites.streamSnapshot !== null &&
+      Number.isFinite(Date.parse(prerequisites.streamSnapshot.changedAt))
+      ? prerequisites.streamSnapshot.changedAt
+      : new Date().toISOString(),
     prerequisites.moduleRevision,
     prerequisites.streamSnapshot,
     {

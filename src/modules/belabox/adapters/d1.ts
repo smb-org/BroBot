@@ -305,11 +305,15 @@ export const finalizeAndResetBelaboxHistory = async (
         ? [row.bitrate_sum / row.samples]
         : []));
     const sample = status?.streamId === stream.stream_id ? status.historySample : null;
-    const sampleAgeMs = sample === null ? Number.POSITIVE_INFINITY : normalizedEnding - Date.parse(sample.at);
+    // Never end a stream before its last sample.
+    const sampleAt = sample === null ? Number.NaN : Date.parse(sample.at);
+    const streamEnding = Number.isFinite(sampleAt) ? Math.max(normalizedEnding, sampleAt) : normalizedEnding;
+    const streamEndedAt = new Date(streamEnding).toISOString();
+    const sampleAgeMs = sample === null ? Number.POSITIVE_INFINITY : streamEnding - sampleAt;
     const tailIsCurrent = sample !== null && Number.isFinite(sampleAgeMs) && sampleAgeMs >= 0 &&
       sampleAgeMs <= (options.maxBaselineAgeMs ?? 0);
     const tailSeconds = tailIsCurrent
-      ? elapsedSampleSeconds(sample, { ...sample, at: normalizedEndedAt })
+      ? elapsedSampleSeconds(sample, { ...sample, at: streamEndedAt })
       : 0;
     const lowTail = sample?.connected === true && sample.bitrateKbps < BELABOX_LOW_BITRATE_KBPS ? tailSeconds : 0;
     const disconnectedTail = sample?.connected === false ? tailSeconds : 0;
@@ -323,7 +327,7 @@ export const finalizeAndResetBelaboxHistory = async (
           AND ${belaboxHistoryModuleRevisionGuard}
           AND ${belaboxStreamStateSnapshotGuard}`,
     ).bind(
-      normalizedEndedAt,
+      streamEndedAt,
       p10,
       lowTail,
       disconnectedTail,

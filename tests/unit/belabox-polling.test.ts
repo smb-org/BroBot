@@ -1214,6 +1214,33 @@ describe("BELABOX polling", () => {
     });
   });
 
+  it("finalizes an offline summary at the offline time when the alarm runs late", async () => {
+    await insertModule(database);
+    await database.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, polling, stream_id, belabox_stream_id, history_sample_json,
+         history_module_revision, fetch_phase_json, recent_json, revision)
+       VALUES (?, 1, ?, ?, ?, 1, '{}', '[]', 1)`,
+    ).bind(CHANNEL_ID, STREAM_ID, STREAM_ID, JSON.stringify(normalizedSample("2026-10-05T12:00:00.000Z", 500))).run();
+    await database.prepare(
+      `INSERT INTO belabox_streams (channel_id, stream_id, started_at, samples, bitrate_avg)
+       VALUES (?, ?, '2026-10-05T11:50:00.000Z', 1, 500)`,
+    ).bind(CHANNEL_ID, STREAM_ID).run();
+    vi.setSystemTime(new Date("2026-10-05T12:00:10.000Z"));
+    await setStoredStreamState(database, "offline", null);
+    vi.setSystemTime(new Date("2026-10-05T12:00:25.000Z"));
+    const { context } = alarmContext(database);
+
+    await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now());
+
+    await expect(database.prepare(
+      `SELECT ended_at, low_seconds FROM belabox_streams WHERE channel_id = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, STREAM_ID).first<Record<string, unknown>>()).resolves.toEqual({
+      ended_at: "2026-10-05T12:00:10.000Z",
+      low_seconds: 10,
+    });
+  });
+
   it("does not let a delayed finalizer commit after the stream snapshot changes", async () => {
     await insertModule(database);
     const previous = normalizedSample("2026-10-05T11:59:45.000Z", 500, 7);
