@@ -97,12 +97,6 @@ typography:
     fontWeight: 600
     lineHeight: 1.5
     letterSpacing: "normal"
-  schienenetikett:
-    fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "11px"
-    fontWeight: 400
-    lineHeight: 1.1
-    letterSpacing: "normal"
   spaltenkopf:
     fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
     fontSize: "10px"
@@ -151,20 +145,6 @@ components:
     padding: "14px 10px 12px"
     width: "132px"
     height: "132px"
-  schienen-taste:
-    backgroundColor: "{colors.rail}"
-    textColor: "{colors.text-3}"
-    typography: "{typography.schienenetikett}"
-    rounded: "{rounded.container}"
-    padding: "7px 3px"
-    width: "64px"
-    height: "64px"
-  schienen-taste-hover:
-    backgroundColor: "{colors.surface-hover}"
-    textColor: "{colors.text}"
-  schienen-taste-aktiv:
-    backgroundColor: "{colors.tint-2}"
-    textColor: "{colors.brand-text}"
   button:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text}"
@@ -506,7 +486,7 @@ Das Gerüst ist ein Gerät mit festen Maßen:
 - **Abstandsrhythmus** 4-8-12-16-20-24-32-40-48. Bereiche trennt eine Haarlinie plus Abstand, nie ein Rahmen um alles.
 - **Formulare** stapeln ihre Felder (Lücke 14–16 px, max. 40 rem); Zahleneingaben max. 9 rem. Aktionen stehen in einer Zeile mit Hinweis rechts daneben. Der Mitglieder-Inspector setzt Suchfeld und Knopf in einer `form-row`.
 
-**Schmal (≤ 768 px):** Die Kopfleiste wird zweizeilig (40 px + 40 px; mit Hauptschalter dreizeilig): Marke, LED, Abmelden oben; Kanalwahl über die volle Breite darunter. Das Lebenszeichen verschwindet. Die Seitenleiste liegt hinter dem Drawer; die Burger-Taste öffnet sie als eigenständigen Scrollbereich. Das Raster wird zweispaltig, die Taste bleibt 132×132. Der Seitenkopf verliert seine dritte Spalte; Aktionen rutschen linksbündig in eine eigene Zeile. Die Eigenschaftenliste wird einspaltig; `form-row` und Ergebniskasten stapeln. Unter 420 px schrumpft nur die Rasterlücke auf 8 px.
+**Schmal (≤ 768 px):** Die Kopfleiste hat drei 44-px-Zeilen: Marke und Abmelden, danach Status und Hauptschalter, dann die volle Kanalwahl; das Lebenszeichen verschwindet. Bei sehr kurzen Viewports (≤ 360 px hoch) entfallen die eigene Kanalzeile und der Statuszugriff auf eine zweizeilige 44-px-Kopfleiste. Die Seitenleiste liegt hinter dem Drawer; die Burger-Taste öffnet sie als eigenständigen Scrollbereich. Das Raster wird zweispaltig, die Taste bleibt 132×132. Der Seitenkopf verliert seine dritte Spalte; Aktionen rutschen linksbündig in eine eigene Zeile. Die Eigenschaftenliste wird einspaltig; `form-row` und Ergebniskasten stapeln. Unter 420 px schrumpft nur die Rasterlücke auf 8 px.
 
 **Eng (≤ 639 px):** Die Zustandszeile bricht um: Etikett über die volle Breite, darunter LED und mehrzeiliges Detail, Aktion linksbündig in eigener Zeile. Der Sub-Inspector zeigt Vorher und Nachher untereinander. Tabellen geben ihre Mindestbreite von 600 px auf und verstecken die Ereignisspalte „Modul“. Audit-Zeilen halten Satz, Bereich und Uhrzeit sichtbar. Die ListToolbar reagiert auf die Breite ihres Containers: Unter 640 px stehen Suche in der ersten und Filter mit Anlegeknopf in der zweiten Zeile; die 20-px-Statuszeile bleibt darunter erhalten. Eng gilt je Block, nicht nur je Fenster: Der Inspektor ist ein benannter Container (`inspector`), und seine Inhalte — Vorher/Nachher, Zustandszeile, Tabelle, Eigenschaftenliste — wenden dieselben Eng-Regeln ab 639 px *Inspektorbreite* an. In der 592-px-Spalte sind sie deshalb immer eng: Vorher und Nachher stehen untereinander, eine Zustandszeile bricht um, eine Tabelle gibt ihr 600-px-Minimum auf.
 
@@ -529,7 +509,7 @@ Bewegung ist die einzige „Tiefe“ im System: Tastendruck skaliert auf 0,97 in
 
 Die **aufklappende Liste** (`topbar__channel-list`, `position: absolute`, `z-index: 20`, `role="listbox"`) öffnet am Kanal-Select in der Kopfleiste. Sie ist flüchtig: an das geöffnete Bedienelement gebunden, sie schließt bei Auswahl, Escape oder Klick daneben und gibt den Fokus an den Select zurück. Modulnavigation läuft über Seitenleiste und Spotlight.
 
-**Spotlight** öffnet Module und Aktionen über `⌘K` beziehungsweise `Ctrl+K`. Suchfeld und Ergebnisliste bleiben in einer festen Modalfläche; Suche ändert nur die Ergebniszeilen, nicht die Geometrie der Oberfläche. Escape schließt und gibt den Fokus an den Auslöser zurück. Gesperrte Treffer bleiben sichtbar und nennen den Grund.
+**Spotlight** öffnet Module und Aktionen über `⌘K` beziehungsweise `Ctrl+K`. Die Modalfläche wächst mit den Treffern; die Ergebnisliste scrollt innerhalb der verfügbaren Höhe, statt eine feste Gesamthöhe zu erzwingen. Escape schließt und gibt den Fokus an den Auslöser zurück. Gesperrte Treffer bleiben sichtbar und nennen den Grund.
 
 Der **meldende Hinweis** (Neue-Ereignisse-Hinweis, `position: fixed`, `z-index: 10` — unter der aufklappenden Liste, weil eine geöffnete Liste eine offene Handlung ist und Vorrang hat) meldet etwas und nimmt nichts entgegen außer der einen Handlung, die ihn zugleich ausführt und schließt (Klick springt an den Anfang und löscht ihn damit). Davon gibt es genau einen. Die Ausnahme hat einen Grund, keine Bequemlichkeit: Ein Hinweis, der nur im Fluss der Liste stünde, wäre unsichtbar genau dann, wenn er gebraucht wird — während jemand weiter unten liest, wohin nichts nachrückt.
 

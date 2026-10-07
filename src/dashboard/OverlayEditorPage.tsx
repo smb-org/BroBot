@@ -1077,7 +1077,7 @@ function OverlayEditorWorkspace({
           </div>
         </div>
         <div className={`overlay-editor__element-usage${draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT * 0.9 ? " overlay-editor__element-usage--warning" : ""}`} role="status">
-          <span><span className="mono">{formatNumber(draft.elements.length)}</span> {dashboardCommonTexts().of} <span className="mono">{formatNumber(OVERLAY_ELEMENT_MAXIMUM_COUNT)}</span> {labels.editorElementUsage}</span>
+          <span><span className="mono">{formatNumber(draft.elements.length, language)}</span> {dashboardCommonTexts(language).of} <span className="mono">{formatNumber(OVERLAY_ELEMENT_MAXIMUM_COUNT, language)}</span> {labels.editorElementUsage}</span>
           <span className="overlay-editor__element-limit">{draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT ? labels.editorElementLimit : ""}</span>
         </div>
         {!canManage ? <p className="overlay-editor__locked-reason" id="overlay-editor-readonly-reason">{labels.editorLockedReason}</p> : null}

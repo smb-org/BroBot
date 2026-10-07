@@ -142,7 +142,9 @@ describe("Ad settings editor declaration", () => {
       recentAdBreaks: [{ timestamp: "2026-09-23T11:00:00.000Z", durationSeconds: 90 }],
     }));
 
-    expect(await screen.findByText("Derzeit ist keine Werbung geplant.")).toBeInTheDocument();
+    expect(await screen.findByText(/Derzeit ist keine Werbung geplant\./u)).toBeInTheDocument();
+    expect(screen.getByText("kein Wert")).toHaveClass("sr-only");
+    expect(screen.getByText("—")).toHaveAttribute("aria-hidden", "true");
     expect(await screen.findByRole("cell", { name: "90 Sekunden" })).toBeInTheDocument();
     expect(screen.getByText(/11:00/)).toBeInTheDocument();
   });

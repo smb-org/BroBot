@@ -388,7 +388,15 @@ form.content-section { display: grid; gap: var(--s4); }
 }
 .config-section { display: grid; gap: var(--s4); }
 .config-section > .section-heading { margin-bottom: 0; }
-.ui-game-picker { display: grid; gap: var(--s2); }
+.ui-game-picker { display: grid; gap: var(--s2); min-width: 0; }
+.ui-game-picker--compact { position: relative; display: block; }
+.ui-game-picker--compact .ui-game-picker__hint { display: none; }
+.ui-game-picker--compact .ui-game-picker__selected { position: absolute; z-index: 1; top: 0; right: 0; display: flex; width: 44px; height: 44px; align-items: center; justify-content: center; }
+.ui-game-picker__compact-selection { display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: var(--r-control); color: var(--text-2); background: var(--surface-well); cursor: pointer; }
+.ui-game-picker__compact-selection:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.ui-game-picker__compact-selection:disabled { cursor: not-allowed; }
+.ui-game-picker--compact .ui-game-picker__search { min-width: 0; }
+.ui-game-picker--compact .ui-game-picker__search > input { box-sizing: border-box; height: 44px; min-width: 0; padding-right: calc(var(--s10) + var(--s3)); text-overflow: ellipsis; }
 .ui-game-picker__label { color: var(--text); font-size: 12px; font-weight: 500; }
 .ui-game-picker__hint, .ui-game-picker__status { margin: 0; color: var(--text-3); font-size: 12px; }
 .ui-game-picker__selected { display: flex; flex-wrap: wrap; gap: var(--s2); }
@@ -407,12 +415,10 @@ form.content-section { display: grid; gap: var(--s4); }
 .ui-game-picker__results button:disabled { color: var(--text-3); cursor: not-allowed; }
 .command-library-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--s2); min-width: 0; }
 .command-library-picker > .mantine-Button-root { flex: none; white-space: nowrap; }
-.text-library__list-toolbar .list-toolbar__filters { flex: 1 1 auto; overflow: visible; }
+.text-library__list-toolbar .list-toolbar__filters { flex: 1 1 auto; }
 .text-library__list-toolbar .ui-select { flex: 0 0 12rem; min-width: 8rem; }
 .text-library__list-toolbar .ui-game-picker { flex: 0 0 12rem; min-width: 8rem; }
-.text-library__list-toolbar .ui-game-picker__hint { display: none; }
-.text-library__list-toolbar .ui-game-picker__selected { box-sizing: border-box; height: 44px; min-height: 44px; flex-wrap: nowrap; align-items: center; overflow: auto hidden; }
-.text-library__list-toolbar .ui-game-picker__chip { flex: none; white-space: nowrap; }
+.text-library__list-toolbar .ui-game-picker--compact .ui-game-picker__selected { overflow: visible; }
 .text-library__table { min-width: 560px; }
 .text-library__table tbody tr[aria-selected="true"] { background: var(--tint-1); }
 .text-library__table tbody tr:hover { background: var(--surface-hover); }
@@ -968,7 +974,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .command-inspector__meta { display: inline; }
 }
 
-/* At narrow widths (≤768px), the header becomes two rows: brand, LED, and sign out above a full-width channel selector. The life-sign disappears. */
+/* At narrow widths (≤768px), the header uses three 44px rows for identity, status and controls, then the full-width channel selector. The life-sign disappears. */
 @media (min-width: 1400px) {
   .command-inspector__meta { display: none; }
 }
@@ -1422,7 +1428,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .dashboard-filter-bar__summary .form-actions .button { flex: none; }
 .event-filter .form-actions p { margin: 0; }
 .list-toolbar { container: list-toolbar / inline-size; width: 100%; min-width: 0; margin-bottom: var(--s4); }
-.list-toolbar__row { display: grid; grid-template-columns: minmax(12rem, 1fr) auto auto; align-items: center; gap: var(--s2); width: 100%; height: 44px; min-width: 0; }
+.list-toolbar__row { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 1fr) auto; align-items: center; gap: var(--s2); width: 100%; height: 44px; min-width: 0; }
+.list-toolbar__row:not(:has(.list-toolbar__filters)) { grid-template-columns: minmax(12rem, 1fr) auto; }
+.list-toolbar__row:not(:has(.list-toolbar__filters)) .list-toolbar__create { grid-column: 2; }
 .list-toolbar__search { min-width: 0; }
 .list-toolbar__search .mantine-InputWrapper-root { min-width: 0; height: 44px; }
 .list-toolbar .mantine-InputWrapper-root { margin-bottom: 0; }
@@ -1431,7 +1439,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .list-toolbar__search .mantine-InputWrapper-label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .list-toolbar__search .mantine-InputWrapper-description { display: none; }
 .list-toolbar__search .mantine-Input-input { box-sizing: border-box; height: 44px; min-height: 44px; padding-right: 44px; }
-.list-toolbar__filters { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.list-toolbar__filters { display: flex; align-items: center; gap: var(--s2); min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; }
+.list-toolbar__filters:has(.ui-game-picker__results-slot) { overflow: visible; }
 .list-toolbar__filters > * { flex: none; }
 .list-toolbar__filters .mantine-InputWrapper-label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .list-toolbar__filters .mantine-InputWrapper-description { display: none; }
@@ -1459,10 +1468,12 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 @container list-toolbar (max-width: 640px) {
   .list-toolbar__row { grid-template-columns: minmax(0, 1fr) auto; height: auto; }
   .list-toolbar__search { grid-column: 1 / -1; }
-  .list-toolbar__filters { grid-column: 1; overflow-x: auto; overscroll-behavior-inline: contain; }
+  .list-toolbar__filters { grid-column: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; }
   .text-library__list-toolbar .list-toolbar__filters { overflow: visible; }
   .text-library__list-toolbar .ui-select,
-  .text-library__list-toolbar .ui-game-picker { flex: 1 1 6.5rem; min-width: 6rem; }
+  .text-library__list-toolbar .ui-game-picker { flex: 1 1 5rem; min-width: 5rem; }
+  .text-library__list-toolbar .ui-game-picker--compact .ui-game-picker__selected { display: none; }
+  .text-library__list-toolbar .ui-game-picker--compact .ui-game-picker__search > input { padding-right: var(--s2); }
   .list-toolbar__create { grid-column: 2; }
 }
 .event-feed__end { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; pointer-events: none; }

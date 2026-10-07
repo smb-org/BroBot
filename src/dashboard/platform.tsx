@@ -610,7 +610,7 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
                             <th scope="row" title={inspectorOpen ? channel.channelId : channel.login}>{channel.login}</th>
                             {inspectorOpen ? null : <td className="mono" title={channel.channelId}>{channel.channelId}</td>}
                             <td>{channel.fullConsent ? texts.yes : texts.no}</td>
-                            <td className="number" title={roleCountsTitle}>{[channel.memberCounts.broadcaster, channel.memberCounts.manager, channel.memberCounts.operator].map(formatNumber).join(" · ")}</td>
+                            <td className="number" title={roleCountsTitle}>{[channel.memberCounts.broadcaster, channel.memberCounts.manager, channel.memberCounts.operator].map((count) => formatNumber(count)).join(" · ")}</td>
                             <td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel, inspectorOpen)}</span></span></td>
                           </tr>;
                         })}</tbody>

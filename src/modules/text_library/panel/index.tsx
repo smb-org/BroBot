@@ -112,6 +112,7 @@ const updateVariant = (variants: TextBlockVariant[], id: string, update: (varian
 export default function TextLibraryPanel({ channelId, language, canManage = true, textBlockConditions = [] }: ModulePanelProperties): ReactElement {
   const labels = useMemo(() => textLibraryTexts(language), [language]);
   const resolvedLanguage = language === "en" ? "en" : "de";
+  const common = dashboardCommonTexts(resolvedLanguage);
   const searchGames = useCallback((query: string) => searchTextLibraryGames(channelId, query), [channelId]);
   const [data, setData] = useState<Awaited<ReturnType<typeof loadTextLibrary>> | null>(null);
   const conditionDefinitions = data?.dataConditionDefinitions ?? textBlockConditions;
@@ -386,12 +387,32 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     finally { setPending(false); }
   };
 
-  if (data === null) return <section className="module-stack text-library" aria-label={labels.library}>
-    <LoadState status={loadFailed ? "error" : "loading"} minHeight="calc(var(--s10) * 30)"
-      loading={<Skeleton rows={8} height={34} />}
-      empty={<div />}
-      error={<div style={{ minHeight: "calc(var(--s10) * 30)" }} />}
-    >{null}</LoadState>
+  if (data === null) return <section className="module-stack text-library" aria-label={labels.library} style={{ minHeight: "calc(var(--s10) * 30)" }}>
+    <section className="config-section text-library__list-panel" aria-label={labels.library}>
+      <div className="section-heading"><h2>{labels.library}</h2></div>
+      <ListToolbar
+        className="text-library__list-toolbar"
+        language={resolvedLanguage}
+        searchLabel={labels.search}
+        searchPlaceholder={labels.search}
+        searchClearLabel={common.clearSearch}
+        searchValue={search}
+        onSearchChange={setSearch}
+        filtersLabel={labels.library}
+        filters={<>
+          <Select label={labels.categoryFilter} value="" onChange={() => undefined}
+            options={[{ value: "", label: labels.allCategories }]} disabled />
+          <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter}
+            messages={{ ...labels.gamePicker, label: labels.gameFilter }} visuallyHiddenLabel compact disabled />
+        </>}
+        create={{ label: labels.addBlock, onClick: openCreate, disabled: true, ...(!canManage ? { reason: labels.managementLocked } : {}) }}
+      />
+      <LoadState status={loadFailed ? "error" : "loading"} minHeight="calc(var(--s10) * 30)"
+        loading={<Skeleton rows={8} height={34} />}
+        empty={<div />}
+        error={<div style={{ minHeight: "calc(var(--s10) * 30)" }} />}
+      >{null}</LoadState>
+    </section>
   </section>;
   const categories = data.categories.map((category) => ({ value: category.id, label: categoryLabel(category, labels) }));
   const categoryBlockCounts = new Map(data.categories.map((category) => [category.id, data.blocks.filter((block) => block.categoryId === category.id).length]));
@@ -419,18 +440,20 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
           </div>
           <ListToolbar
             className="text-library__list-toolbar"
+            language={resolvedLanguage}
             searchLabel={labels.search}
             searchPlaceholder={labels.search}
-            searchClearLabel={dashboardCommonTexts().clearSearch}
+            searchClearLabel={common.clearSearch}
             searchValue={search}
             onSearchChange={setSearch}
             filtersLabel={labels.library}
             filters={<>
               <Select label={labels.categoryFilter} value={categoryFilter} onChange={(value) => setCategoryFilter(value ?? "")} options={[{ value: "", label: labels.allCategories }, ...categories]} />
-              <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter} messages={{ ...labels.gamePicker, label: labels.gameFilter }} visuallyHiddenLabel />
+              <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter}
+                messages={{ ...labels.gamePicker, label: labels.gameFilter }} visuallyHiddenLabel compact />
             </>}
             create={{ label: labels.addBlock, onClick: openCreate, disabled: pending || createReason !== undefined, ...(createReason === undefined ? {} : { reason: createReason }) }}
-            usage={{ count: data.blocks.length, maximum: TEXT_BLOCK_MAXIMUMS.blocksPerChannel, ...(activeFilters.length === 0 ? {} : { filteredCount: visibleBlocks.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: labels.limitSuffix, loadedSuffix: dashboardCommonTexts().loaded } }}
+            usage={{ count: data.blocks.length, maximum: TEXT_BLOCK_MAXIMUMS.blocksPerChannel, ...(activeFilters.length === 0 ? {} : { filteredCount: visibleBlocks.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: common.of, filteredSuffix: labels.filteredSuffix, limitInfix: common.of, limitSuffix: labels.limitSuffix, loadedSuffix: common.loaded } }}
             {...(activeFilters.length === 0 ? {} : { activeFilters: activeFilters.join(" · "), activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); setCategoryFilter(""); setGameFilter([]); } })}
           />
           <div data-testid="text-library-list-slot" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>

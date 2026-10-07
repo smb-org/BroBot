@@ -171,7 +171,7 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, toggleB
       <th scope="row" className="mono">!{initial.name}</th>
       <td>{labels.kindLabels[initial.kind]}</td>
       <td className={`table__answer${initial.text.length === 0 && initial.variableAction !== null ? " table__answer--placeholder" : ""}`} title={initial.kind === "list" ? undefined : initial.text}>
-        {initial.kind === "list" ? <EmptyCellValue /> : initial.text.length > 0 ? initial.text : initial.variableAction === null ? <EmptyCellValue /> : labels.actionResponse(initial.variableAction.name, initial.variableAction.operation, initial.variableAction.amount)}
+        {initial.kind === "list" ? <EmptyCellValue language={language} /> : initial.text.length > 0 ? initial.text : initial.variableAction === null ? <EmptyCellValue language={language} /> : labels.actionResponse(initial.variableAction.name, initial.variableAction.operation, initial.variableAction.amount)}
       </td>
       <td><Badge tone={initial.minimumTier === "everyone" ? "neutral" : "brand"}>{labels.tierLabels[initial.minimumTier]}</Badge></td>
       <td><div onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
@@ -1022,6 +1022,8 @@ export const TextCommandsPanel = ({
   initialSelection?: string;
 }): ReactElement => {
   const labels = textCommandsTexts(language);
+  const resolvedLanguage = language ?? dashboardLanguage();
+  const common = dashboardCommonTexts(resolvedLanguage);
   const [commands, setCommands] = useState<TextCommand[]>([]);
   const [search, setSearch] = useState("");
   const [channelVariables, setChannelVariables] = useState<TextCommandChannelVariable[]>([]);
@@ -1118,29 +1120,30 @@ export const TextCommandsPanel = ({
       <h2>{labels.list}</h2>
     </div>
     <ListToolbar
+      language={resolvedLanguage}
       searchLabel={labels.search}
       searchPlaceholder={labels.search}
-      searchClearLabel={dashboardCommonTexts().clearSearch}
+      searchClearLabel={common.clearSearch}
       searchValue={search}
       onSearchChange={setSearch}
       create={{ label: labels.add, onClick: openCreate, disabled: !canManageContent, ...(createReason === undefined ? {} : { reason: createReason }) }}
       usage={{
         count: commands.length,
         ...(query.length === 0 ? {} : { filteredCount: visibleCommands.length }),
-        copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: "", loadedSuffix: dashboardCommonTexts().loaded },
+        copy: { countSuffix: labels.countSuffix, filteredInfix: common.of, filteredSuffix: labels.filteredSuffix, limitInfix: common.of, limitSuffix: "", loadedSuffix: common.loaded },
       }}
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); } })}
     />
     <LoadState status={listStatus} minHeight="calc(var(--s10) * 15)"
       loading={<Skeleton rows={8} height={34} />}
-      empty={<p className="empty-state">{commands.length > 0 ? dashboardCommonTexts().noMatches : labels.empty}</p>}
+      empty={<p className="empty-state">{commands.length > 0 ? common.noMatches : labels.empty}</p>}
       error={<div aria-hidden="true" />}>
       <div className="table-wrap" style={{ maxHeight: "calc(var(--s10) * 15)", overflowY: "auto" }}><table className="table"><thead><tr>
         <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>
       </tr></thead><tbody>{visibleCommands.map((command) => <TextCommandRow
         key={command.name}
         initial={command}
-        language={language}
+        language={resolvedLanguage}
         selected={selectedName === command.name}
         onSelect={() => { selectCommand(command.name); }}
         rowRef={rowRef(command.name)}

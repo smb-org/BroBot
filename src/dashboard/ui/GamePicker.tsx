@@ -18,6 +18,8 @@ export interface GamePickerMessages {
   empty: string;
   error: string;
   remove: (name: string) => string;
+  selectedCount?: (count: number) => string;
+  clearSelection?: string;
 }
 
 const coverUrl = (game: GamePickerGame, width: number, height: number): string | null => {
@@ -54,13 +56,14 @@ interface GameSearchState {
   results: GamePickerGame[];
 }
 
-export function GamePicker({ searchGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false }: {
+export function GamePicker({ searchGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false, compact = false }: {
   searchGames: (query: string) => Promise<readonly GamePickerGame[]>;
   value: readonly GamePickerGame[];
   onChange: (games: GamePickerGame[]) => void;
   messages: GamePickerMessages;
   disabled?: boolean;
   visuallyHiddenLabel?: boolean;
+  compact?: boolean;
 }): ReactElement {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -106,21 +109,29 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
     setQuery("");
     setResultsOpen(false);
   };
+  const selectionSummary = messages.selectedCount?.(value.length) ?? `${String(value.length)} selected`;
 
   return (
-    <div className="ui-game-picker" ref={rootRef}
+    <div className={`ui-game-picker${compact ? " ui-game-picker--compact" : ""}`} ref={rootRef}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setResultsOpen(false); }}
       onKeyDown={(event) => { if (event.key === "Escape") setResultsOpen(false); }}>
       <label className={`ui-game-picker__label${visuallyHiddenLabel ? " sr-only" : ""}`} htmlFor={id}>{messages.label}</label>
       <p className="ui-game-picker__hint">{messages.hint}</p>
       <div className="ui-game-picker__selected" aria-live="polite">
-        {value.map((game) => (
+        {compact
+          ? value.length === 0 ? null : <button className="ui-game-picker__compact-selection" type="button" disabled={disabled}
+            aria-label={`${messages.clearSelection ?? messages.label} (${selectionSummary})`}
+            title={value.map((game) => game.name).join(", ")} onClick={() => onChange([])}>
+            <span className="mono">{String(value.length)}</span>
+            <span className="sr-only">{selectionSummary}</span>
+          </button>
+          : value.map((game) => (
           <span className="ui-game-picker__chip" key={game.id}>
             <GameCover game={game} width={20} height={27} />
             <span>{game.name}</span>
             <button type="button" disabled={disabled} aria-label={messages.remove(game.name)} onClick={() => onChange(value.filter((entry) => entry.id !== game.id))}>×</button>
           </span>
-        ))}
+          ))}
       </div>
       <div className="ui-game-picker__search">
         <input

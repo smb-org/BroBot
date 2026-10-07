@@ -26,7 +26,7 @@ import {
   type PanelOverlayToken,
 } from "./api";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
-import { ActionMenu, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
+import { ActionMenu, Button, ConfirmDialog, EmptyCellValue, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -748,7 +748,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
             <th scope="row">{overlay.name}</th>
             <td>{overlay.elementCount}</td>
             <td>{overlay.accessCount}</td>
-            <td>{overlay.lastUsedAt === null ? labels.never : <time dateTime={overlay.lastUsedAt}>{formatTimestamp(overlay.lastUsedAt)}</time>}</td>
+            <td>{overlay.lastUsedAt === null ? <EmptyCellValue language={language} /> : <time dateTime={overlay.lastUsedAt}>{formatTimestamp(overlay.lastUsedAt)}</time>}</td>
           </tr>)}</tbody>
         </table>
       </div>
@@ -778,7 +778,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
               <span className="mono muted">{labels.legacyTokenId}: {token.id.slice(0, 8)}</span>
               <span className="muted">{labels.legacyCreatedAt}: {formatTimestamp(token.createdAt)}</span>
               <span className="muted">{token.createdBy ?? labels.legacyCreatedByUnknown}</span>
-              <span className="muted">{token.lastUsedAt === null ? labels.never : `${labels.lastUsedAt}: ${formatTimestamp(token.lastUsedAt)}`}</span>
+              <span className="muted">{token.lastUsedAt === null ? <EmptyCellValue language={language} /> : `${labels.lastUsedAt}: ${formatTimestamp(token.lastUsedAt)}`}</span>
             </div>
             <div className="overlay-access-list__actions"><ActionMenu label={labels.accessActions(`${labels.legacyTokenName} ${token.id.slice(0, 8)}`)} items={[
               { label: `${labels.revoke} …`, disabled: !canManage || pending, danger: true, onSelect: () => { setLegacyRevokeTarget(token); } },
@@ -819,7 +819,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         <dl className="properties">
           <div><dt>{labels.size}</dt><dd>{selectedOverlay.width} × {selectedOverlay.height}</dd></div>
           <div><dt>{labels.elements}</dt><dd>{labels.elementsSummary(selectedOverlay.elements.length, selectedOverlay.elements.slice(0, 3).map((element) => element.label || element.id).join(", ") + (selectedOverlay.elements.length > 3 ? ", …" : ""))}</dd></div>
-          <div><dt>{labels.lastUsedAt}</dt><dd>{selected?.lastUsedAt === null || selected?.lastUsedAt === undefined ? labels.lastUsedNever : formatTimestamp(selected.lastUsedAt)}</dd></div>
+          <div><dt>{labels.lastUsedAt}</dt><dd>{selected?.lastUsedAt === null || selected?.lastUsedAt === undefined ? <EmptyCellValue language={language} /> : formatTimestamp(selected.lastUsedAt)}</dd></div>
         </dl>
         {onOpenEditor === undefined ? null : <Button variant="primary" disabled={!canManage}
           onClick={() => { onOpenEditor(selectedOverlay.id); }}>{labels.editComposition}</Button>}
@@ -841,7 +841,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
                   <div className="overlay-access-list__summary">
                     <strong>{access.label}</strong>
                     <Led status={active ? "green" : "off"} word={status} />
-                    <span className="overlay-access-list__last-used mono">{labels.lastUsedAt}: {access.lastUsedAt === null ? labels.lastUsedNever : formatTimestamp(access.lastUsedAt)}</span>
+                    <span className="overlay-access-list__last-used mono">{labels.lastUsedAt}: {access.lastUsedAt === null ? <EmptyCellValue language={language} /> : formatTimestamp(access.lastUsedAt)}</span>
                   </div>
                 <div className="overlay-access-list__actions">
                   <Button size="compact" variant="neutral" icon="copy" className="overlay-access-list__copy" ariaLabel={`${copiedAccessId === access.tokenId ? labels.copied : labels.copyLink}: ${access.label}`}

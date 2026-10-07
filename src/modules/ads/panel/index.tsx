@@ -115,13 +115,13 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
           {schedule.asOf === undefined ? "" : labels.asOf(formatTimestamp(schedule.asOf, language))}
         </p>
         <div data-testid="ads-next-schedule-slot" style={{ height: "calc(var(--s10) * 3)", overflowY: "auto" }}>
-          {schedule.schedule.nextAdAt === null ? <p className="empty-state" style={{ height: "calc(var(--s10) * 3)", margin: 0 }}>{labels.noAdBreak}</p> : (
+          {schedule.schedule.nextAdAt === null ? <p className="empty-state" style={{ height: "calc(var(--s10) * 3)", margin: 0 }}>{labels.noAdBreak} <EmptyCellValue language={language} /></p> : (
           <div className="table-wrap" style={{ height: "calc(var(--s10) * 3)", overflowY: "auto" }}>
             <table className="table" aria-label={labels.scheduleSection}>
               <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody><tr>
                 <td className="number">{formatTimestamp(schedule.schedule.nextAdAt, language)}</td>
-                <td className="number">{schedule.schedule.duration === null ? <EmptyCellValue /> : `${String(schedule.schedule.duration)} s`}</td>
+                <td className="number">{schedule.schedule.duration === null ? <EmptyCellValue language={language} /> : `${String(schedule.schedule.duration)} s`}</td>
               </tr></tbody>
             </table>
           </div>

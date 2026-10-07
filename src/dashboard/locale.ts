@@ -333,7 +333,7 @@ export interface OverlaysTexts {
   title: string; list: string; search: string; countSuffix: string; limitSuffix: string; filteredSuffix: string; limitReached: string; details: string; count: (count: number, maximum: number) => string; empty: string; loading: string;
   loadError: string; actionError: string; managementLocked: string; create: string; createTitle: string;
   name: string; size: string; width: string; height: string; standardSize: string; compactSize: string; customSize: string;
-  createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; lastUsedNever: string; never: string; statusLabel: string;
+  createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; statusLabel: string;
   openAccesses: string; issue: string; issueLabel: string; issueHint: string; copied: string;
   editComposition: string; editorBack: string; editorLoading: string; editorLoadError: string;
   editorElements: string; editorPreview: string; editorPreviewCanvas: string; editorProperties: string;
@@ -409,7 +409,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     actionError: "Die Änderung konnte nicht durchgeführt werden.", managementLocked: "Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.",
     create: "Neues Overlay", createTitle: "Neues Overlay anlegen", name: "Name", size: "Größe", width: "Breite", height: "Höhe",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Eigene Fläche", createSubmit: "Overlay anlegen", cancel: "Abbrechen",
-    elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", lastUsedNever: "nie", never: "Nie", statusLabel: "Status", openAccesses: "Zugänge verwalten", editComposition: "Komposition bearbeiten",
+    elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", statusLabel: "Status", openAccesses: "Zugänge verwalten", editComposition: "Komposition bearbeiten",
     editorBack: "Zurück zu Overlays", editorLoading: "Overlay wird geladen …", editorLoadError: "Das Overlay konnte nicht geladen werden.",
     editorElements: "Elemente", editorPreview: "Live-Vorschau", editorPreviewCanvas: "Overlay-Vorschau", editorProperties: "Eigenschaften",
     editorPropertiesTab: "Position", editorStyleTab: "Stil-Editor", editorCssTab: "CSS-Code",
@@ -517,7 +517,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     actionError: "The change could not be completed.", managementLocked: "Only broadcasters and managers may change overlays or accesses.",
     create: "New overlay", createTitle: "Create an overlay", name: "Name", size: "Size", width: "Width", height: "Height",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Custom size", createSubmit: "Create overlay", cancel: "Cancel",
-    elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", lastUsedNever: "never", never: "Never", statusLabel: "Status", openAccesses: "Manage accesses", editComposition: "Edit composition",
+    elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", statusLabel: "Status", openAccesses: "Manage accesses", editComposition: "Edit composition",
     editorBack: "Back to overlays", editorLoading: "Loading overlay …", editorLoadError: "The overlay could not be loaded.",
     editorElements: "Elements", editorPreview: "Live preview", editorPreviewCanvas: "Overlay preview", editorProperties: "Properties",
     editorPropertiesTab: "Layout", editorStyleTab: "Style editor", editorCssTab: "CSS code",
@@ -3058,5 +3058,5 @@ export const formatStreamManagerFeedTime = (value: string, now = new Date()): st
   return `${formatDate(value)} ${time}`;
 };
 
-export const formatNumber = (value: number): string =>
-  new Intl.NumberFormat(dashboardLanguage()).format(value);
+export const formatNumber = (value: number, language: DashboardLanguage = dashboardLanguage()): string =>
+  new Intl.NumberFormat(language).format(value);

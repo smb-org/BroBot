@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UiProvider } from "../../src/dashboard/ui";
 import { ListToolbar } from "../../src/dashboard/ui/ListToolbar";
 
-afterEach(cleanup);
+const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
+
+afterEach(() => {
+  cleanup();
+  if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
+});
 
 const usageCopy = {
   countSuffix: "commands",
@@ -101,5 +106,20 @@ describe("ListToolbar", () => {
     /></UiProvider>);
 
     expect(screen.getByText(hasText("3 of 12 commands"))).toBeVisible();
+  });
+
+  it("formats usage counts with the explicit panel language", () => {
+    Object.defineProperty(window.navigator, "language", { configurable: true, value: "de-DE" });
+    render(<UiProvider><ListToolbar
+      language="en"
+      searchLabel="Search commands"
+      searchPlaceholder="Search commands"
+      searchClearLabel="Clear search"
+      searchValue=""
+      onSearchChange={() => undefined}
+      usage={{ count: 1234, maximum: 1500, copy: { ...usageCopy, limitSuffix: "text blocks used" } }}
+    /></UiProvider>);
+
+    expect(document.querySelector(".list-toolbar__usage")).toHaveTextContent("1,234 of 1,500 text blocks used");
   });
 });

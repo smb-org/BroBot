@@ -1,6 +1,6 @@
 import { useId, type KeyboardEvent, type ReactNode, type Ref } from "react";
 
-import { formatNumber } from "../locale";
+import { formatNumber, type DashboardLanguage } from "../locale";
 import { Button } from "./Button";
 import { Field } from "./Field";
 
@@ -20,6 +20,7 @@ export interface ListToolbarUsage {
 }
 
 export interface ListToolbarProperties {
+  language?: DashboardLanguage;
   searchLabel: string;
   searchPlaceholder: string;
   searchClearLabel: string;
@@ -43,25 +44,26 @@ export interface ListToolbarProperties {
   className?: string;
 }
 
-const numberValue = (value: number) => <span className="mono">{formatNumber(value)}</span>;
+const numberValue = (value: number, language?: DashboardLanguage) => <span className="mono">{formatNumber(value, language)}</span>;
 
-const usageText = (usage: ListToolbarUsage): ReactNode => {
+const usageText = (usage: ListToolbarUsage, language?: DashboardLanguage): ReactNode => {
   const { copy } = usage;
   if (usage.maximum !== undefined) {
     return <>
-      {usage.filteredCount === undefined ? null : <>{numberValue(usage.filteredCount)} {copy.filteredInfix} {numberValue(usage.count)} {copy.filteredSuffix} · </>}
-      {numberValue(usage.count)} {copy.limitInfix} {numberValue(usage.maximum)} {copy.limitSuffix}
+      {usage.filteredCount === undefined ? null : <>{numberValue(usage.filteredCount, language)} {copy.filteredInfix} {numberValue(usage.count, language)} {copy.filteredSuffix} · </>}
+      {numberValue(usage.count, language)} {copy.limitInfix} {numberValue(usage.maximum, language)} {copy.limitSuffix}
     </>;
   }
   if (usage.filteredCount !== undefined) {
-    return <>{numberValue(usage.filteredCount)} {copy.filteredInfix} {numberValue(usage.count)} {copy.filteredSuffix}</>;
+    return <>{numberValue(usage.filteredCount, language)} {copy.filteredInfix} {numberValue(usage.count, language)} {copy.filteredSuffix}</>;
   }
-  if (usage.loaded === true) return <>{numberValue(usage.count)} {copy.loadedSuffix}</>;
-  return <>{numberValue(usage.count)} {copy.countSuffix}</>;
+  if (usage.loaded === true) return <>{numberValue(usage.count, language)} {copy.loadedSuffix}</>;
+  return <>{numberValue(usage.count, language)} {copy.countSuffix}</>;
 };
 
 /** A fixed-height search/filter/action row with a permanently reserved status line. */
 export function ListToolbar({
+  language,
   searchLabel,
   searchPlaceholder,
   searchClearLabel,
@@ -118,7 +120,7 @@ export function ListToolbar({
       </div>
       <div className="list-toolbar__status">
         <span className={`list-toolbar__usage${warning ? " list-toolbar__usage--warning" : ""}`} aria-live="polite">
-          {usage === undefined ? null : usageText(usage)}
+          {usage === undefined ? null : usageText(usage, language)}
         </span>
         <div className="list-toolbar__status-right">
           {hasActiveFilters ? (

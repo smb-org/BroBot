@@ -60,9 +60,10 @@ const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMut
     return Promise.resolve(jsonResponse({}, 404));
   });
 
-const renderPanel = (fetcher: typeof fetch, props: { canManage?: boolean; botIsModerator?: boolean | null } = {}): ReturnType<typeof render> => {
+const renderPanel = (fetcher: typeof fetch, props: { language?: "de" | "en"; canManage?: boolean; botIsModerator?: boolean | null } = {}): ReturnType<typeof render> => {
   vi.stubGlobal("fetch", fetcher);
-  return render(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" {...props} /></UiProvider>);
+  const { language = "de", ...panelProps } = props;
+  return render(<UiProvider><TextCommandsPanel channelId="kanal-a" language={language} {...panelProps} /></UiProvider>);
 };
 
 const selectCommand = async (name = "hallo"): Promise<HTMLElement> => {
@@ -120,6 +121,28 @@ describe("Text command editor", () => {
     expect(screen.getByText("!discord")).toBeVisible();
     expect(screen.queryByText("!hallo")).not.toBeInTheDocument();
     expect(document.querySelector(".list-toolbar__usage")).toHaveTextContent("1 von 2 Befehle");
+  });
+
+  it.each([
+    { browserLanguage: "de-DE", panelLanguage: "en" as const, search: "Search commands", clear: "Clear search", usage: "1 of 1 commands" },
+    { browserLanguage: "en-US", panelLanguage: "de" as const, search: "Befehle suchen", clear: "Suche leeren", usage: "1 von 1 Befehle" },
+  ])("uses $panelLanguage for common toolbar text when the browser is $browserLanguage", async ({ browserLanguage, panelLanguage, search, clear, usage }) => {
+    Object.defineProperty(window.navigator, "language", { configurable: true, value: browserLanguage });
+    renderPanel(panelFetch(), { language: panelLanguage });
+
+    await screen.findByText("!hallo");
+    const searchBox = await screen.findByRole("textbox", { name: search });
+    expect(document.querySelector(".list-toolbar__search .ui-field__clear")).toHaveAttribute("aria-label", clear);
+    fireEvent.change(searchBox, { target: { value: "hallo" } });
+    expect(document.querySelector(".list-toolbar__usage")).toHaveTextContent(usage);
+  });
+
+  it("uses the panel language for empty table value labels", async () => {
+    Object.defineProperty(window.navigator, "language", { configurable: true, value: "de-DE" });
+    renderPanel(panelFetch({ commands: () => [makeCommand({ kind: "list", text: "" })] }), { language: "en" });
+
+    expect(await screen.findByText("no value")).toHaveClass("sr-only");
+    expect(screen.getByText("—")).toHaveAttribute("aria-hidden", "true");
   });
 
   it("reports a command-list load failure in the persistent toast host", async () => {

@@ -847,6 +847,7 @@ describe("text library", () => {
     });
 
     render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage={false} /></MantineProvider>);
+    await screen.findByTestId("text-library-list-slot");
     expect(await screen.findByRole("heading", { name: "Text blocks" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Category" })).toHaveValue("All categories");
     const welcomeRow = screen.getByRole("button", { name: /\{welcome\}/u });
@@ -995,6 +996,7 @@ describe("text library", () => {
     });
 
     render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    await screen.findByTestId("text-library-list-slot");
     fireEvent.click(await screen.findByRole("button", { name: "Add text block" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "system" } });
 
