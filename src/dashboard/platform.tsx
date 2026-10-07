@@ -482,7 +482,7 @@ const PlatformAudit = ({
       <LoadStateView
         status={status}
         minHeight={280}
-        loading={<Skeleton rows={50} height={34} />}
+        loading={<Skeleton rows={6} height={34} />}
         empty={<p className="muted">{texts.auditEmpty}</p>}
         error={<PlatformLoadError message={auditState.error} onRetry={onRetry} />}
       >{auditState.data === null || auditState.data.entries.length === 0 ? null : (
@@ -537,64 +537,50 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
     if (selectedChannelId !== null) closeChannel();
   }, [selectedChannelId, closeChannel]);
 
+  // Every load (initial or retry) is guarded: a newer request or an unmount makes older results, including a 401, irrelevant.
+  const overviewGeneration = useRef(0);
+  const auditGeneration = useRef(0);
+  const unmounted = useRef(false);
+  useEffect(() => {
+    unmounted.current = false;
+    return () => { unmounted.current = true; };
+  }, []);
+
   const loadOverview = async (): Promise<void> => {
+    const generation = ++overviewGeneration.current;
+    const stale = (): boolean => unmounted.current || generation !== overviewGeneration.current;
     setOverview((current) => current.data === null ? loadState() : { ...current, status: "loading", error: null });
     try {
       const response = await getPlatformOverview();
+      if (stale()) return;
       setOverview(loadedState(response.channels));
       if (selectedChannelId !== null && !response.channels.some((channel) => channel.channelId === selectedChannelId)) closeChannel();
     } catch (error: unknown) {
+      if (stale()) return;
       setOverview({ status: "error", data: null, error: errorText(error, texts.error) });
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     }
   };
 
   const loadAudit = async (): Promise<void> => {
+    const generation = ++auditGeneration.current;
+    const stale = (): boolean => unmounted.current || generation !== auditGeneration.current;
     setAudit(loadState());
     try {
-      setAudit(loadedState(await getPlatformAudit()));
+      const response = await getPlatformAudit();
+      if (!stale()) setAudit(loadedState(response));
     } catch (error: unknown) {
+      if (stale()) return;
       setAudit({ status: "error", data: null, error: errorText(error, texts.error) });
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     }
   };
 
   // Overview and audit load independently so one failing request cannot block the other tab.
-  useEffect(() => {
-    let aborted = false;
-    const load = async (): Promise<void> => {
-      setOverview(loadState());
-      try {
-        const response = await getPlatformOverview();
-        if (aborted) return;
-        setOverview(loadedState(response.channels));
-        closeChannel();
-      } catch (error: unknown) {
-        if (aborted) return;
-        setOverview({ status: "error", data: null, error: errorText(error, texts.error) });
-        if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
-      }
-    };
-    void load();
-    return () => { aborted = true; };
-  }, [onAuthenticationRequired, closeChannel, texts.error]);
-
-  useEffect(() => {
-    let aborted = false;
-    const load = async (): Promise<void> => {
-      setAudit(loadState());
-      try {
-        const response = await getPlatformAudit();
-        if (!aborted) setAudit(loadedState(response));
-      } catch (error: unknown) {
-        if (aborted) return;
-        setAudit({ status: "error", data: null, error: errorText(error, texts.error) });
-        if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
-      }
-    };
-    void load();
-    return () => { aborted = true; };
-  }, [onAuthenticationRequired, texts.error]);
+  const loaders = useRef({ loadOverview, loadAudit });
+  loaders.current = { loadOverview, loadAudit };
+  useEffect(() => { void loaders.current.loadOverview(); }, [onAuthenticationRequired]);
+  useEffect(() => { void loaders.current.loadAudit(); }, [onAuthenticationRequired]);
 
   const selectedChannel = overview.data?.find((channel) => channel.channelId === selectedChannelId) ?? null;
   const inspectorOpen = selectedChannelId !== null;

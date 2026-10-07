@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
+import { PlatformPage } from "../../src/dashboard/platform";
+import { UiProvider } from "../../src/dashboard/ui";
 
 const response = (inhalt: unknown, status = 200): Response => new Response(JSON.stringify(inhalt), {
   status,
@@ -409,6 +411,39 @@ describe("Platform level", () => {
       fireEvent.click(await screen.findByRole("tab", { name: "Kanäle" }));
       fireEvent.click(within(await screen.findByRole("region", { name: "Kanalübersicht" })).getByRole("button", { name: "Erneut versuchen" }));
       expect(await screen.findByText("alpha_login")).toBeInTheDocument();
+    });
+    it("keeps the same reserved box for loading and error, and ignores a retry that resolves after unmount", async () => {
+      const inner = setUpPlatform(true);
+      let mode: "fail" | "hang" = "fail";
+      let release: () => void = () => {};
+      vi.stubGlobal("fetch", vi.fn<typeof fetch>((input, init) => {
+        if (requestUrl(input).pathname !== "/api/platform/audit") return inner(input, init);
+        if (mode === "fail") return Promise.resolve(response({ error: "backend down" }, 500));
+        return new Promise<Response>((resolve) => { release = () => { resolve(response({ error: "expired" }, 401)); }; });
+      }));
+      const onAuth = vi.fn();
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      window.history.replaceState({}, "", "/betreiber");
+      const view = render(<UiProvider><PlatformPage onAuthenticationRequired={onAuth} /></UiProvider>);
+
+      fireEvent.click(await screen.findByRole("tab", { name: "Audit" }));
+      const audit = await screen.findByRole("region", { name: "Betreiber-Audit" });
+      await within(audit).findByRole("alert");
+      const box = (): HTMLElement => audit.querySelector<HTMLElement>(".ui-load-state") ?? document.body;
+      expect(box().style.minHeight).toBe("280px");
+
+      mode = "hang";
+      fireEvent.click(within(audit).getByRole("button", { name: "Erneut versuchen" }));
+      await waitFor(() => expect(box().dataset.status).toBe("loading"));
+      expect(box().style.minHeight).toBe("280px");
+      expect(box().querySelectorAll(".mantine-Skeleton-root").length).toBeLessThanOrEqual(6);
+
+      view.unmount();
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(onAuth).not.toHaveBeenCalled();
+      expect(errors).not.toHaveBeenCalled();
+      errors.mockRestore();
     });
   });
 });
