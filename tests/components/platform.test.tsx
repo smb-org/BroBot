@@ -366,4 +366,49 @@ describe("Platform level", () => {
     await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => requestUrl(input).pathname === "/api/platform/channels" && init?.method === "POST")).toBe(true));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Kanal freigeben" })).not.toBeInTheDocument());
   });
+
+  describe("load errors", () => {
+    /** Fails the given platform endpoint until `state.fail` is cleared; everything else answers normally. */
+    const failing = (path: "/api/platform" | "/api/platform/audit"): { fail: boolean } => {
+      const state = { fail: true };
+      const inner = setUpPlatform(true);
+      vi.stubGlobal("fetch", vi.fn<typeof fetch>((input, init) =>
+        state.fail && requestUrl(input).pathname === path
+          ? Promise.resolve(response({ error: "backend down" }, 500))
+          : inner(input, init)));
+      return state;
+    };
+
+    it("shows the audit error with a retry instead of a skeleton and keeps the channel list usable", async () => {
+      const state = failing("/api/platform/audit");
+      window.history.replaceState({}, "", "/betreiber");
+      render(<DashboardApp />);
+
+      expect(await screen.findByText("alpha_login")).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("tab", { name: "Audit" }));
+      const audit = await screen.findByRole("region", { name: "Betreiber-Audit" });
+      expect(await within(audit).findByRole("alert")).toBeInTheDocument();
+
+      state.fail = false;
+      fireEvent.click(within(audit).getByRole("button", { name: "Erneut versuchen" }));
+      expect(await within(audit).findByText("Noch keine Betreiberhandlungen protokolliert.")).toBeInTheDocument();
+    });
+
+    it("shows the channel list error with a retry while the audit still loads", async () => {
+      const state = failing("/api/platform");
+      window.history.replaceState({}, "", "/betreiber");
+      render(<DashboardApp />);
+
+      const overview = await screen.findByRole("region", { name: "Kanalübersicht" });
+      expect(await within(overview).findByRole("alert")).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("tab", { name: "Audit" }));
+      const audit = await screen.findByRole("region", { name: "Betreiber-Audit" });
+      expect(within(audit).queryByRole("alert")).not.toBeInTheDocument();
+
+      state.fail = false;
+      fireEvent.click(await screen.findByRole("tab", { name: "Kanäle" }));
+      fireEvent.click(within(await screen.findByRole("region", { name: "Kanalübersicht" })).getByRole("button", { name: "Erneut versuchen" }));
+      expect(await screen.findByText("alpha_login")).toBeInTheDocument();
+    });
+  });
 });
