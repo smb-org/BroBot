@@ -34,11 +34,18 @@ export const isValidVoteLabelSetting = (value: string, setting: VoteLabelSetting
     labels.every(isValidVoteLabel);
 };
 
+/** Splits off the first whitespace-delimited token of trimmed text in linear time (no regex backtracking). */
+const splitFirstToken = (text: string): [token: string, rest: string] => {
+  let end = 0;
+  while (end < text.length && !/\s/u.test(text[end] as string)) end += 1;
+  return [text.slice(0, end), text.slice(end).trim()];
+};
+
 export const parseVoteCommand = (text: string): VoteCommand | null => {
-  const match = /^!vote(?:\s+([^\s]+))?(?:\s+([\s\S]*))?$/iu.exec(text.trim());
-  if (match === null) return null;
-  const argument = match[1]?.toLowerCase();
-  const remainder = match[2]?.trim() ?? "";
+  const [command, tail] = splitFirstToken(text.trim());
+  if (command.toLowerCase() !== "!vote") return null;
+  const [rawArgument, remainder] = splitFirstToken(tail);
+  const argument = rawArgument.length === 0 ? undefined : rawArgument.toLowerCase();
   if (argument === "end") return remainder.length === 0 ? { kind: "end" } : { kind: "help" };
   const start = (preset: ChatVotingPreset, optionCount: number, title = remainder): VoteCommand => {
     const normalizedTitle = normalizeVoteTitle(title);
@@ -50,9 +57,10 @@ export const parseVoteCommand = (text: string): VoteCommand | null => {
   if (argument === "01") return start("digit_01", 2);
   if (argument === "12") return start("digit_12", 2);
   if (argument === "text") {
-    const modeMatch = /^(word|message)(?:\s+([\s\S]*))?$/iu.exec(remainder);
-    const mode = modeMatch?.[1]?.toLowerCase();
-    const title = modeMatch === null ? remainder : modeMatch[2]?.trim() ?? "";
+    const [modeToken, modeRest] = splitFirstToken(remainder);
+    const mode = modeToken.toLowerCase();
+    const hasMode = mode === "word" || mode === "message";
+    const title = hasMode ? modeRest : remainder;
     const command = start("free_text", 0, title);
     if (command.kind !== "start") return command;
     return { ...command, textMode: mode === "message" ? "whole_message" : "first_word" };

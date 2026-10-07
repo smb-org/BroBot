@@ -180,4 +180,11 @@ describe("chat voting normalization performance", () => {
     }
     expect(performance.now() - started).toBeLessThan(100);
   });
+
+  it("parses vote commands with long whitespace runs in linear time", () => {
+    const inputs = ["!vote" + " ".repeat(50_000) + "x", "!vote text " + "\t ".repeat(50_000) + "y"];
+    const started = performance.now();
+    for (const input of inputs) parseVoteCommand(input);
+    expect(performance.now() - started).toBeLessThan(50);
+  });
 });
