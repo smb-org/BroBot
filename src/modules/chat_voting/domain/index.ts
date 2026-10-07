@@ -1,9 +1,9 @@
 import type { ModuleLanguage } from "../../contract";
-import { CHAT_VOTING_HARD_LIMIT_MS } from "../contracts";
+import { CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
 import type { ChatVoteTerm, ChatVotingPreset, ChatVotingSettings, ChatVotingTextMode } from "../contracts";
 
 export type VoteCommand =
-  | { kind: "start"; preset: ChatVotingPreset; optionCount: number; textMode?: ChatVotingTextMode }
+  | { kind: "start"; preset: ChatVotingPreset; optionCount: number; textMode?: ChatVotingTextMode; title: string | null }
   | { kind: "end" }
   | { kind: "help" };
 
@@ -12,6 +12,11 @@ export type VoteLabelSetting = "yesNoLabels" | "scaleLabels" | "optionLabels" | 
 export const CHAT_VOTING_LABEL_MAX_LENGTH = 32;
 
 export const voteLabelLength = (label: string): number => Array.from(label).length;
+
+export const normalizeVoteTitle = (title: string): string | null => title.trim() || null;
+
+export const isValidVoteTitle = (title: string): boolean =>
+  voteLabelLength(normalizeVoteTitle(title) ?? "") <= CHAT_VOTING_TITLE_MAX_LENGTH;
 
 export const isValidVoteLabel = (label: string): boolean => {
   const trimmed = label.trim();
@@ -29,29 +34,38 @@ export const isValidVoteLabelSetting = (value: string, setting: VoteLabelSetting
     labels.every(isValidVoteLabel);
 };
 
+/** Splits off the first whitespace-delimited token of trimmed text in linear time (no regex backtracking). */
+const splitFirstToken = (text: string): [token: string, rest: string] => {
+  let end = 0;
+  while (end < text.length && !/\s/u.test(text[end] as string)) end += 1;
+  return [text.slice(0, end), text.slice(end).trim()];
+};
+
 export const parseVoteCommand = (text: string): VoteCommand | null => {
-  const match = /^!vote(?:\s+([^\s]+))?(?:\s+([^\s]+))?\s*$/iu.exec(text.trim());
-  if (match === null) return null;
-  const argument = match[1]?.toLowerCase();
-  const subargument = match[2]?.toLowerCase();
-  if (argument === "end" && subargument === undefined) return { kind: "end" };
-  if (argument === "yesno" && subargument === undefined) return { kind: "start", preset: "yes_no", optionCount: 2 };
-  if (argument === "scale" && subargument === undefined) return { kind: "start", preset: "scale_5", optionCount: 5 };
-  if (argument === "01" && subargument === undefined) return { kind: "start", preset: "digit_01", optionCount: 2 };
-  if (argument === "12" && subargument === undefined) return { kind: "start", preset: "digit_12", optionCount: 2 };
-  if (argument === "text" && (subargument === undefined || subargument === "word" || subargument === "message")) {
-    return {
-      kind: "start",
-      preset: "free_text",
-      optionCount: 0,
-      textMode: subargument === "message" ? "whole_message" : "first_word",
-    };
+  const [command, tail] = splitFirstToken(text.trim());
+  if (command.toLowerCase() !== "!vote") return null;
+  const [rawArgument, remainder] = splitFirstToken(tail);
+  const argument = rawArgument.length === 0 ? undefined : rawArgument.toLowerCase();
+  if (argument === "end") return remainder.length === 0 ? { kind: "end" } : { kind: "help" };
+  const start = (preset: ChatVotingPreset, optionCount: number, title = remainder): VoteCommand => {
+    const normalizedTitle = normalizeVoteTitle(title);
+    if (normalizedTitle !== null && voteLabelLength(normalizedTitle) > CHAT_VOTING_TITLE_MAX_LENGTH) return { kind: "help" };
+    return { kind: "start", preset, optionCount, title: normalizedTitle };
+  };
+  if (argument === "yesno") return start("yes_no", 2);
+  if (argument === "scale") return start("scale_5", 5);
+  if (argument === "01") return start("digit_01", 2);
+  if (argument === "12") return start("digit_12", 2);
+  if (argument === "text") {
+    const [modeToken, modeRest] = splitFirstToken(remainder);
+    const mode = modeToken.toLowerCase();
+    const hasMode = mode === "word" || mode === "message";
+    const title = hasMode ? modeRest : remainder;
+    const command = start("free_text", 0, title);
+    if (command.kind !== "start") return command;
+    return { ...command, textMode: mode === "message" ? "whole_message" : "first_word" };
   }
-  if (argument === "text") return { kind: "help" };
-  if (subargument !== undefined) return { kind: "help" };
-  if (argument !== undefined && /^[2-9]$/u.test(argument)) {
-    return { kind: "start", preset: "options_n", optionCount: Number(argument) };
-  }
+  if (argument !== undefined && /^[2-9]$/u.test(argument)) return start("options_n", Number(argument));
   return { kind: "help" };
 };
 

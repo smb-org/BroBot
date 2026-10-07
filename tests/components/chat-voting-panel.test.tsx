@@ -148,6 +148,45 @@ describe("chat voting live panel", () => {
     expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Burger");
   });
 
+  it("sends a trimmed question and enforces its 80-code-point limit", async () => {
+    let startPayload: unknown;
+    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
+      startPayload = body;
+      return { vote: openVote };
+    }));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const question = await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.change(question, { target: { value: "  Pizza today?  " } });
+    expect(screen.getByRole("button", { name: "Start vote" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
+    await waitFor(() => expect(startPayload).toMatchObject({ title: "Pizza today?" }));
+
+    cleanup();
+    startPayload = undefined;
+    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
+      startPayload = body;
+      return { vote: openVote };
+    }));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+    const emojiQuestion = "😀".repeat(81);
+    const emojiField = await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.change(emojiField, { target: { value: emojiQuestion } });
+    expect(screen.getAllByText("81/80").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Start vote" })).toBeDisabled();
+    expect(startPayload).toBeUndefined();
+  });
+
+  it("shows the running question above its result", async () => {
+    const titledVote = { ...openVote, title: "Pizza today?" };
+    vi.stubGlobal("fetch", fetchFor(() => currentState({ vote: titledVote, counts: [4, 2], hasOpenBallot: true })));
+    const { container } = render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const question = await screen.findByText("Pizza today?", { selector: ".chat-voting-result__question" });
+    expect(question.compareDocumentPosition(container.querySelector(".chat-voting-results") as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Pizza today?");
+  });
+
   it("uses inline key labels for 0/1 and submits the default for an untouched field", async () => {
     let startPayload: unknown;
     vi.stubGlobal("fetch", fetchFor(undefined, (body) => {

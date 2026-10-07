@@ -14,6 +14,8 @@ export interface ChatVotingPanelTexts {
   loading: string;
   loadError: string;
   voteType: string;
+  question: string;
+  questionCount: (count: number, maximum: number) => string;
   presetGroups: { twoOptions: string; scale: string; multipleOptions: string; freeText: string };
   presetDescriptions: Record<ChatVotePreset, string>;
   presetHints: Record<ChatVotePreset, string>;
@@ -84,6 +86,8 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     loading: "Abstimmung wird geladen …",
     loadError: "Die Abstimmung konnte nicht geladen werden.",
     voteType: "Abstimmungstyp",
+    question: "Frage",
+    questionCount: (count, maximum) => `${String(count)}/${String(maximum)}`,
     presetGroups: { twoOptions: "Zwei Optionen", scale: "Skala", multipleOptions: "Mehrere Optionen", freeText: "Freitext" },
     presetDescriptions: {
       yes_no: "Chat tippt 1 = Ja, 2 = Nein",
@@ -166,6 +170,8 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     loading: "Loading the vote …",
     loadError: "The vote could not be loaded.",
     voteType: "Vote type",
+    question: "Question",
+    questionCount: (count, maximum) => `${String(count)}/${String(maximum)}`,
     presetGroups: { twoOptions: "Two options", scale: "Scale", multipleOptions: "Multiple options", freeText: "Free text" },
     presetDescriptions: {
       yes_no: "Chat types 1 = yes, 2 = no",

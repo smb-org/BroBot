@@ -6,6 +6,36 @@ import Tally from "../../src/modules/chat_voting/overlay/tally";
 describe("chat voting overlay tally", () => {
   afterEach(cleanup);
 
+  it("uses the question as a fixed two-line header and retains the generic heading without one", () => {
+    const longTitle = "😀".repeat(80);
+    const { rerender } = render(<Tally config={{ layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 }} state={{
+      pollId: "titled-poll",
+      title: longTitle,
+      status: "open",
+      preset: "yes_no",
+      optionCount: 2,
+      labels: ["Yes", "No"],
+      counts: [1, 0],
+      revision: 1,
+    }} now={Date.now()} language="en" />);
+
+    const header = screen.getByRole("heading", { name: longTitle });
+    expect(header).toHaveAttribute("title", longTitle);
+    expect(header.style.height).toBe("2.4em");
+    expect(header.style.webkitLineClamp).toBe("2");
+
+    rerender(<Tally config={{ layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 }} state={{
+      pollId: "untitled-poll",
+      status: "open",
+      preset: "yes_no",
+      optionCount: 2,
+      labels: ["Yes", "No"],
+      counts: [1, 0],
+      revision: 1,
+    }} now={Date.now()} language="en" />);
+    expect(screen.getByRole("heading", { name: "Voting" })).toBeInTheDocument();
+  });
+
   it("renders the top five text terms and masks terms before filter readiness", () => {
     const terms = [
       { term: "alpha", count: 6, approved: true },

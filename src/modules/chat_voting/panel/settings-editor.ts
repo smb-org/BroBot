@@ -16,7 +16,8 @@ const spec: SettingsEditorSpec<ChatVotingSettings> = {
     { id: "result", icon: "tabMessages", fields: [
       { kind: "switchCard", key: "announceResult", children: [
         { kind: "template", key: "resultText", minRows: 2, preview: (template, values) =>
-          template.replaceAll("{vote.result}", values["vote.result"] ?? "Yes: 8 (67%) · No: 4 (33%)") },
+          template.replaceAll("{vote.result}", values["vote.result"] ?? "Yes: 8 (67%) · No: 4 (33%)")
+            .replaceAll("{vote.title}", values["vote.title"] ?? "What should we eat today?") },
         { kind: "chatTarget", key: "resultTarget" },
       ] },
     ] },

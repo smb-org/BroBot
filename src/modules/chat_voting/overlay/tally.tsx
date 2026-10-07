@@ -26,6 +26,7 @@ const parseState = (value: unknown): TallyState | null => {
   return {
     pollId: state.pollId,
     ...(typeof state.openedAt === "string" ? { openedAt: state.openedAt } : {}),
+    ...(state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80 ? { title: state.title } : {}),
     ...(state.status === "open" || state.status === "closed" ? { status: state.status } : {}),
     ...(labels === undefined ? {} : { labels }),
     ...(state.preset === "yes_no" || state.preset === "scale_5" || state.preset === "options_n" ||
@@ -77,6 +78,7 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
     : (current.terms ?? []).filter((entry) => entry.approved);
   const textTerms = current.preset === "free_text" ? rankVoteTerms(visibleTextTerms) : [];
   const textTotal = visibleTextTerms.reduce((sum, entry) => sum + entry.count, 0);
+  const headerText = current.title?.trim() || (current.status === "closed" ? labels.closed : labels.title);
   const textRowStyle = {
     flex: layout === "strip" ? "1 1 8em" : undefined,
     minHeight: "2.3em",
@@ -114,10 +116,27 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
   };
   return <section
     className={`brobot-module-text chat-voting-tally chat-voting-tally--${layout}`}
-    aria-label={current.status === "closed" ? labels.closed : labels.title}
+    aria-label={headerText}
     style={{ display: "grid", gap: "0.6em", width: `${String(width)}px`, minWidth: 0, boxSizing: "border-box" }}
   >
-    {current.status === "closed" ? <strong>{labels.closed}</strong> : null}
+    <div
+      className="chat-voting-tally__header"
+      role="heading"
+      aria-level={2}
+      title={headerText}
+      style={{
+        display: "-webkit-box",
+        height: "2.4em",
+        minHeight: "2.4em",
+        overflow: "hidden",
+        overflowWrap: "anywhere",
+        lineHeight: 1.2,
+        fontWeight: 700,
+        textOverflow: "ellipsis",
+        WebkitBoxOrient: "vertical",
+        WebkitLineClamp: 2,
+      }}
+    >{headerText}</div>
     <div className="chat-voting-tally__options" style={{
       display: "flex",
       flexDirection: layout === "strip" ? "row" : "column",

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleAlarmContext } from "../../src/modules/contract";
+import type { ModuleAlarmContext, ModuleEvent } from "../../src/modules/contract";
+import { chatVotingModule } from "../../src/modules/chat_voting";
+import { createTemplateRenderer } from "../../src/worker/template-resolver";
 import type { ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { closeChatVoteFromAlarm, requestChatVoteClose } from "../../src/modules/chat_voting/service";
@@ -15,11 +17,11 @@ describe("chat voting close service", () => {
   beforeEach(() => { database = new TestD1Database(); });
   afterEach(() => { database.close(); });
 
-  const seedOpenVote = async (announceResult: boolean): Promise<ReturnType<typeof createChatVotingRepository>> => {
+  const seedOpenVote = async (announceResult: boolean, title: string | null = null, resultText?: string): Promise<ReturnType<typeof createChatVotingRepository>> => {
     await insertChannel(database, "fictional-channel");
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, ?)",
-    ).bind("fictional-channel", JSON.stringify({ announceResult })).run();
+    ).bind("fictional-channel", JSON.stringify({ announceResult, ...(resultText === undefined ? {} : { resultText }) })).run();
     const repository = createChatVotingRepository(database as unknown as D1Database);
     const vote: ChatVoteDraft = {
       id: "fictional-poll",
@@ -27,6 +29,7 @@ describe("chat voting close service", () => {
       preset: "yes_no",
       optionCount: 2,
       labels: ["Yes", "No"],
+      title,
       openedAt: "2026-10-04T10:00:00.000Z",
       closesAt: "2026-10-04T14:00:00.000Z",
       requestedDurationSeconds: null,
@@ -84,6 +87,7 @@ describe("chat voting close service", () => {
       resolveEventTimes: vi.fn(() => Promise.resolve([])),
       streamState: vi.fn(() => Promise.resolve("unknown" as const)),
       streamStartedAt: vi.fn(() => Promise.resolve({ streamId: null, startedAt: null })),
+      channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
     } as unknown as ModuleAlarmContext;
     return { context, values, close, read, publishModuleOverlayMessage, sendChat, storagePut };
   };
@@ -206,5 +210,76 @@ describe("chat voting close service", () => {
     expect(sendChat).toHaveBeenCalledTimes(2);
     await expect(repository.byId("fictional-channel", "fictional-poll"))
       .resolves.toMatchObject({ status: "closed", counts: [7, 3] });
+  });
+
+  it("includes a vote question in the default result announcement and closed overlay state", async () => {
+    const repository = await seedOpenVote(true, "Pizza today?");
+    const order: string[] = [];
+    const { context, publishModuleOverlayMessage } = createAlarmContext(order);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(publishModuleOverlayMessage).toHaveBeenCalledWith(
+      "tally",
+      "chat_voting.tally",
+      expect.objectContaining({ title: "Pizza today?", status: "closed" }),
+    );
+    expect(context.sendChat).toHaveBeenCalledWith(
+      "Results for “Pizza today?”: Yes: 7 (70%) · No: 3 (30%)",
+      "chat-voting:fictional-poll:result",
+      undefined,
+      expect.any(Function),
+      "source_only",
+    );
+  });
+
+  it("provides the question variable to custom result templates", async () => {
+    const repository = await seedOpenVote(true, "Pizza today?", "{vote.title}: {vote.result}");
+    const order: string[] = [];
+    const { context } = createAlarmContext(order);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.renderTemplate).toHaveBeenCalledWith(
+      "{vote.title}: {vote.result}",
+      expect.any(Number),
+      { "vote.result": "Yes: 7 (70%) · No: 3 (30%)", "vote.title": "Pizza today?" },
+    );
+  });
+
+  it("renders vote.title as the question while the system title stays the stream title", async () => {
+    const text = "{title} | {vote.title}: {vote.result}";
+    const repository = await seedOpenVote(true, "Pizza today?", text);
+    const { context } = createAlarmContext([]);
+    const event: ModuleEvent = {
+      channelId: "fictional-channel", subscriptionType: "channel.chat.message", triggerId: "t", payload: {},
+      settings: {}, receivedAt: "2026-10-04T14:00:00.000Z", actor: null, chatStatus: null,
+    };
+    const renderer = createTemplateRenderer(event, "chat_command", chatVotingModule.templateFields?.resultText ?? [], {
+      DB: {} as D1Database,
+      channelInfo: () => Promise.resolve(null),
+      channelTimeZone: () => Promise.resolve("UTC"),
+      channelLocation: () => Promise.resolve(null),
+      streamState: () => Promise.resolve("unknown"),
+      channelDetails: () => Promise.resolve({ title: "Fictional stream title", gameName: "g", gameId: "1" }),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve(null),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve("en"),
+      readChannelVariables: () => Promise.resolve({}),
+    });
+    (context as { renderTemplate: unknown }).renderTemplate = (t: string, _now: number, values: Record<string, string>) => renderer(t, values);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.sendChat).toHaveBeenCalledWith(
+      "Fictional stream title | Pizza today?: Yes: 7 (70%) · No: 3 (30%)",
+      "chat-voting:fictional-poll:result",
+      undefined,
+      expect.any(Function),
+      "source_only",
+    );
   });
 });

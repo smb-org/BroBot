@@ -1,7 +1,7 @@
 import { settingsVariableReferences } from "../contract";
 import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../contract";
 import { createChatVotingRepository } from "./repository";
-import { chatVotingResultVariableCatalog } from "./contracts/template-variable-catalog";
+import { chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
 import { chatVotingAlarmDefinition, processChatVotingMessage } from "./service";
 import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
 import { chatVotingOverlayElements } from "./overlay/element";
@@ -15,6 +15,13 @@ const resultVariable = {
   maxLength: 420,
   sample: "Yes: 8 (67%) · No: 4 (33%)",
   picker: chatVotingResultVariableCatalog,
+} as const;
+
+const titleVariable = {
+  name: "vote.title",
+  maxLength: 80,
+  sample: "Pizza today?",
+  picker: chatVotingTitleVariableCatalog,
 } as const;
 
 const initialTallyState = async (
@@ -47,6 +54,7 @@ const initialTallyState = async (
   return {
     pollId: vote.id,
     status: vote.status,
+    title: vote.title,
     preset: vote.preset,
     optionCount: vote.optionCount,
     textMode: vote.textMode ?? null,
@@ -72,7 +80,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   settingsSchema,
   defaultSettings: DEFAULT_CHAT_VOTING_SETTINGS,
   templateContext: "event",
-  templateFields: { resultText: [resultVariable] },
+  templateFields: { resultText: [resultVariable, titleVariable] },
   variableReferences: settingsVariableReferences(CHAT_VOTING_MODULE_ID, ["resultText"]),
   templateVariableGroup: {
     label: { de: "Abstimmung", en: "Voting" },

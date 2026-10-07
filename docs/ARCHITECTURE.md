@@ -65,6 +65,9 @@ ist erlaubt, und die letzte Wahl zählt. Ein einzelner Modul-Alarm schließt
 manuelle, zeitgesteuerte und spätestens nach vier Stunden endende Abstimmungen.
 Die Live-Zähler laufen über die Modul-Overlay-Echtzeitstrecke. `chat_votes`
 bewahrt das Ergebnis als aggregierte Zeile ohne personenbezogene Stimmen auf.
+Eine optionale, auf 80 Unicode-Codepunkte begrenzte Frage wird je Abstimmung
+zusammen mit dem Ergebnis gespeichert und bleibt auch in der Abstimmungshistorie
+erhalten. Chatbefehle übernehmen den Rest der Zeile nach dem Typ als Frage.
 
 Module können über `ModuleAction` auch Timeout und Bann beschreiben. Der Host
 führt beides über `src/worker/moderation.ts` und Twitch Helix mit dem Bot-

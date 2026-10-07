@@ -334,6 +334,8 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-panel__body { display: grid; grid-template-columns: 26rem minmax(0, 1fr); align-items: start; gap: var(--s8); }
 .chat-voting-setup, .chat-voting-result { display: grid; align-content: start; min-width: 0; }
 .chat-voting-setup { gap: var(--s4); }
+.chat-voting-type-question-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s2); min-width: 0; }
+.chat-voting-type-question-row > * { min-width: 0; }
 .chat-voting-column-heading { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; }
 .chat-voting-labels-group { display: grid; gap: var(--s2); min-width: 0; }
 .chat-voting-labels-group h3 { color: var(--text-2); font-size: 12px; font-weight: 500; }
@@ -351,6 +353,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-result__heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); min-width: 0; }
 .chat-voting-result__heading h3 { flex: none; color: var(--text); font-size: 13px; font-weight: 600; }
 .chat-voting-result__meta { min-width: 0; color: var(--text-2); text-align: right; overflow-wrap: anywhere; }
+.chat-voting-result__question { display: -webkit-box; box-sizing: border-box; height: 2.8em; min-height: 2.8em; margin: 0; overflow: hidden; color: var(--text); line-height: 1.4; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .chat-voting-result__empty { display: flex; box-sizing: border-box; min-height: 68px; align-items: center; margin: 0; padding: var(--s3); }
 .chat-voting-results { display: grid; gap: var(--s2); width: 100%; }
 .chat-voting-results__row { display: grid; grid-template-columns: 1.5rem minmax(4rem, 1fr) minmax(6rem, 2fr) 3rem 3.5rem; align-items: center; gap: var(--s2); min-width: 0; min-height: 34px; color: var(--text-2); }

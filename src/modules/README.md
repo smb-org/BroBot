@@ -857,6 +857,16 @@ verborgen. Der generische Ballot-Contract speichert Stimmen pro Abstimmung nur
 unter einem gehashten Zuschauerschlüssel und begrenzt die Zahl verschiedener
 Begriffe auf 200; weitere Stimmen fließen in den Zähler „weitere“.
 
+Jede Abstimmung kann eine optionale, getrimmte Frage mit bis zu 80 Unicode-
+Codepunkten haben. Das Panel bietet sie neben dem Typ an; Chatbefehle wie
+`!vote yesno Pizza heute?` übernehmen den Rest nach dem Typ. Bei Freitext steht
+ein direkt folgendes `word` oder `message` weiterhin für den Zählmodus, der
+danach folgende Text für die Frage. Frage und Ergebnis bleiben gemeinsam in der
+Historie erhalten. Standardmeldungen nennen die Frage; eigene Ergebnistexte
+können sie mit `{vote.title}` einfügen (`{title}` bleibt der Stream-Titel). Das Overlay ersetzt mit der Frage seine
+allgemeine Überschrift und reserviert dafür immer dieselbe, auf zwei Zeilen
+begrenzte Höhe.
+
 Das Panel zeigt auf breiten Ansichten Konfiguration und Ergebnis nebeneinander;
 auf schmalen Ansichten stehen alle Steuerelemente oberhalb des Ergebnisses.
 Typen stehen in einem gruppierten `Select` mit Chat-Eingabehinweisen. Die
