@@ -669,7 +669,7 @@ test("immediate-action strip keeps a fixed row through module loading and one en
     await page.goto(`/channels/${channelId}/overview`);
     await modulesStarted;
     const strip = page.locator(".stream-manager-actions");
-    await expect(strip.locator(":scope > .stream-manager-action--loading")).toHaveCount(3);
+    await expect(strip.locator(":scope > .stream-manager-action--loading")).toHaveCount(4);
     const before = await measureDocumentBox(page, ".stream-manager-actions");
     expect(before[3]).toBe(192);
 

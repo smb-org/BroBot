@@ -1039,6 +1039,8 @@ export interface ModulePanelProperties {
 export interface ModuleImmediateActionProperties {
   channelId: string;
   streamState?: ChannelStreamState | null;
+  /** Whether the channel member may use management-only actions. */
+  canManage?: boolean;
   /** Localized by the host from the action's declared requirements and current stream state. */
   availabilityReason: string | null;
 }
