@@ -2506,7 +2506,10 @@ describe("Dashboard skeleton", () => {
 
     // Warnings/errors feed needs no interaction to show.
     expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
-  });
+    // Warm runs take ~0.5 s, but on a cold CI transform cache the lazy
+    // module imports above are slow; the test timeout must exceed the
+    // 5 s findBy waits it contains (the 5 s default did not).
+  }, 20_000);
 
   it("uses the overview stream state for Spotlight actions", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), streamState: "offline" as const };
