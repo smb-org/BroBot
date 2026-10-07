@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.use({ locale: "de-DE" });
 
@@ -27,7 +27,7 @@ const channel = {
   lastError: null,
 };
 
-test("the template variable suggestion dropdown is wide enough on desktop and fits the viewport on phones", async ({ page }) => {
+const routeApi = async (page: Page): Promise<void> => {
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
@@ -77,7 +77,10 @@ test("the template variable suggestion dropdown is wide enough on desktop and fi
     }
     await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
   });
+};
 
+test("the template variable suggestion dropdown is wide enough on desktop and fits the viewport on phones", async ({ page }) => {
+  await routeApi(page);
   const dropdown = page.locator(".ui-textarea__suggestions-dropdown");
 
   const openSuggestions = async (): Promise<void> => {
@@ -112,4 +115,20 @@ test("the template variable suggestion dropdown is wide enough on desktop and fi
     if (box === null) return null;
     return box.x >= 0 && box.x + box.width <= 390;
   }).toBe(true);
+});
+
+test("variable picker rows show readable sample values and align info icons", async ({ page }) => {
+  await routeApi(page);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(`/channels/${channel.channelId}/modules/text_commands`);
+    await page.getByRole("row", { name: /!hallo/ }).click();
+    await page.getByRole("button", { name: "Variable einfügen" }).click();
+    const samples = page.getByTestId("variable-sample");
+    await expect(samples.first()).toBeVisible();
+    const widths = await samples.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().width));
+    expect(Math.min(...widths)).toBeGreaterThan(24);
+    const infoX = await page.locator(".ui-variable-picker__info").evaluateAll((nodes) => [...new Set(nodes.map((node) => Math.round(node.getBoundingClientRect().x)))]);
+    expect(infoX).toHaveLength(1);
+  }
 });
