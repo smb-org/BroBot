@@ -471,13 +471,50 @@ describe("ChannelObject realtime path", () => {
     const first = object.runModuleAlarm("belabox", "poll", "poll", { reason: "check_now" });
     await firstStarted;
     const second = object.runModuleAlarm("belabox", "poll", "poll", { reason: "on_demand" });
+    const third = object.runModuleAlarm("belabox", "poll", "poll", { reason: "connection_test", statsUrl: "https://relay.example/key" });
     await Promise.resolve();
     expect(handler).toHaveBeenCalledOnce();
 
     releaseFirst();
     await expect(first).resolves.toBe(1);
     await expect(second).resolves.toBe(2);
-    expect(invocationReasons).toEqual([{ reason: "check_now" }, { reason: "on_demand" }]);
+    await expect(third).resolves.toBe(3);
+    expect(invocationReasons).toEqual([
+      { reason: "check_now" },
+      { reason: "on_demand" },
+      { reason: "connection_test", statsUrl: "https://relay.example/key" },
+    ]);
+  });
+
+  it("serializes a scheduled BELABOX poll alarm with an explicit poll request", async () => {
+    const registration = belaboxModule.alarms?.find(({ key }) => key === "poll");
+    if (registration === undefined) throw new Error("BELABOX poll alarm is not registered.");
+    let signalFirstStarted!: () => void;
+    let releaseFirst!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { signalFirstStarted = resolve; });
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const invocationReasons: unknown[] = [];
+    const handler = vi.spyOn(registration, "handle").mockImplementation(async (_context, _key, _deadline, _owner, invocation) => {
+      invocationReasons.push(invocation);
+      if (invocationReasons.length === 1) {
+        signalFirstStarted();
+        await firstGate;
+      }
+      return invocationReasons.length;
+    });
+    const object = objectFor([]);
+
+    await object.scheduleModuleAlarm("belabox", "poll", "poll", Date.now());
+    const scheduledPoll = object.alarm();
+    await firstStarted;
+    const requestedPoll = object.runModuleAlarm("belabox", "poll", "poll", { reason: "check_now" });
+    await Promise.resolve();
+    expect(handler).toHaveBeenCalledOnce();
+
+    releaseFirst();
+    await scheduledPoll;
+    await expect(requestedPoll).resolves.toBe(2);
+    expect(invocationReasons).toEqual([undefined, { reason: "check_now" }]);
   });
 
   it("shares overlay stream lookups across requests for the channel cache TTL", async () => {

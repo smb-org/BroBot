@@ -480,6 +480,7 @@ const storePollResult = async (
           expectedStatusSessionKey: currentStatus?.streamSessionKey ?? null,
           expectedSecretVersion: secretVersion,
           expectedModuleMode: mode,
+          finalizeNoncurrentStreams: true,
         },
       )
       : [];
@@ -500,6 +501,9 @@ const storePollResult = async (
       expectedModuleRevision: prerequisites.moduleRevision,
       expectedModuleMode: mode,
       expectedStreamSnapshot: prerequisites.streamSnapshot,
+      // The status row must not adopt this session until every open summary
+      // for another stream has been finalized earlier in this same D1 batch.
+      finalizeNoncurrentStreams: mode === "interval" && streamId !== null,
       beforeSampleWrites: previousStreamFinalizers,
       resetHistoryBaseline: history === undefined,
       historyModuleRevision: prerequisites.moduleRevision,

@@ -473,6 +473,18 @@ export class ChannelObject extends DurableObject<Env> {
     }
   }
 
+  private async runModuleAlarmHandler<Result>(
+    moduleId: string,
+    handlerKey: string,
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    // Both explicit poll requests and the alarm dispatcher enter through this
+    // gate, so every BELABOX reason shares the alarm's serialized routine.
+    return moduleId === "belabox" && handlerKey === "poll"
+      ? await this.serializeBelaboxPoll(operation)
+      : await operation();
+  }
+
   private ensureActiveChatterTable(): void {
     if (this.activeChatterSchemaReady) return;
     this.ctx.storage.sql.exec(
@@ -1540,9 +1552,7 @@ export class ChannelObject extends DurableObject<Env> {
       undefined,
       invocation,
     );
-    return moduleId === "belabox" && handlerKey === "poll"
-      ? await this.serializeBelaboxPoll(execute)
-      : await execute();
+    return await this.runModuleAlarmHandler(moduleId, handlerKey, execute);
   }
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
@@ -1783,11 +1793,7 @@ export class ChannelObject extends DurableObject<Env> {
               entry.deadline,
               entry.ownerRevision,
             );
-            if (module.id === "belabox" && registration.key === "poll") {
-              await this.serializeBelaboxPoll(execute);
-              return undefined;
-            }
-            await execute();
+            await this.runModuleAlarmHandler(module.id, registration.key, execute);
             return undefined;
           },
         });

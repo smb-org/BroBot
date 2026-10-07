@@ -446,6 +446,7 @@ export const prepareBelaboxHistoryFinalizers = async (
     expectedStatusSessionKey: string | null;
     expectedSecretVersion?: string;
     expectedModuleMode?: "interval" | "on_demand";
+    finalizeNoncurrentStreams?: boolean;
   },
 ): Promise<D1PreparedStatement[]> => {
   const [openStreams, status] = await Promise.all([
@@ -457,6 +458,13 @@ export const prepareBelaboxHistoryFinalizers = async (
       .all<{ stream_id: string; started_at: string }>(),
     getBelaboxStatus(db, channelId),
   ]);
+  const expectedOpenStreamSetGuard = options.finalizeNoncurrentStreams === true
+    ? belaboxExpectedOpenStreamSetGuard(
+      channelId,
+      options.excludeStreamId ?? null,
+      openStreams.results,
+    )
+    : { sql: "", values: [] };
   const ending = Date.parse(endedAt);
   const normalizedEndedAt = Number.isFinite(ending) ? new Date(ending).toISOString() : new Date().toISOString();
   const normalizedEnding = Date.parse(normalizedEndedAt);
@@ -504,7 +512,8 @@ export const prepareBelaboxHistoryFinalizers = async (
             SELECT 1 FROM channel_modules
              WHERE channel_id = ? AND module_id = 'belabox' AND enabled = 1 AND revision = ?
                AND json_extract(settings, '$.mode') = ?
-          ))`,
+          ))
+          ${expectedOpenStreamSetGuard.sql}`,
     ).bind(
       streamEndedAt,
       p10,
@@ -531,9 +540,33 @@ export const prepareBelaboxHistoryFinalizers = async (
       channelId,
       expectedModuleRevision,
       options.expectedModuleMode ?? "interval",
+      ...expectedOpenStreamSetGuard.values,
     );
   }));
 };
+
+/** Guards an adoption batch against noncurrent summaries opened after its inventory read. */
+export const belaboxExpectedOpenStreamSetGuard = (
+  channelId: string,
+  excludedStreamId: string | null,
+  openStreams: readonly { stream_id: string; started_at: string }[],
+): { sql: string; values: unknown[] } => ({
+  sql: `AND NOT EXISTS (
+    SELECT 1 FROM belabox_streams AS pending_stream
+     WHERE pending_stream.channel_id = ? AND pending_stream.ended_at IS NULL
+       AND pending_stream.stream_id IS NOT ?
+       AND NOT EXISTS (
+         SELECT 1 FROM json_each(?) AS expected_stream
+          WHERE json_extract(expected_stream.value, '$[0]') = pending_stream.stream_id
+            AND json_extract(expected_stream.value, '$[1]') = pending_stream.started_at
+       )
+  )`,
+  values: [
+    channelId,
+    excludedStreamId,
+    JSON.stringify(openStreams.map(({ stream_id, started_at }) => [stream_id, started_at])),
+  ],
+});
 
 /** Finalizes summaries and resets their sample baseline in one revision-guarded D1 batch. */
 export const finalizeAndResetBelaboxHistory = async (
@@ -776,6 +809,7 @@ export const writeBelaboxFetch = async (
     expectedModuleRevision?: number | null;
     expectedModuleMode?: "interval" | "on_demand";
     expectedStreamSnapshot?: BelaboxStreamStateSnapshot | null;
+    finalizeNoncurrentStreams?: boolean;
     beforeSampleWrites?: readonly D1PreparedStatement[];
     historySample?: BelaboxSample | null;
     resetHistoryBaseline?: boolean;
@@ -814,6 +848,10 @@ export const writeBelaboxFetch = async (
             AND revision = ? AND json_extract(settings, '$.mode') = ?
        ))
        AND (? = 0 OR ${belaboxStreamStateSnapshotGuard})
+       AND (? = 0 OR NOT EXISTS (
+         SELECT 1 FROM belabox_streams
+          WHERE channel_id = ? AND ended_at IS NULL AND stream_id IS NOT ?
+       ))
        ${sessionGuard.sql}
      ON CONFLICT (channel_id) DO UPDATE SET
        sampled_at = CASE
@@ -876,6 +914,9 @@ export const writeBelaboxFetch = async (
     input.expectedModuleMode ?? "interval",
     Number(input.expectedStreamSnapshot !== undefined),
     ...streamSnapshotBindings(input.channelId, input.expectedStreamSnapshot ?? null),
+    Number(input.finalizeNoncurrentStreams === true),
+    input.channelId,
+    input.streamId,
     ...sessionGuard.values,
     Number(input.history !== undefined),
     Number(input.resetHistoryBaseline === true),
