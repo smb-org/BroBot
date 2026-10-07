@@ -70,8 +70,8 @@ belaboxRoutes.get("/status", async (context) => {
     secrets.status(BELABOX_STATS_URL_SECRET),
     belaboxSettingsForChannel(context.env.DB, channelId),
     context.env.DB.prepare(
-      "SELECT state FROM channel_stream_state WHERE channel_id = ?",
-    ).bind(channelId).first<{ state: string }>(),
+      "SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?",
+    ).bind(channelId).first<{ state: string; stream_id: string | null }>(),
   ]);
   if (moduleState?.enabled === true && moduleState.settings.mode === "on_demand" && secretStatus.configured) {
     await currentBelaboxSample({
@@ -93,6 +93,12 @@ belaboxRoutes.get("/status", async (context) => {
   const status = await getBelaboxStatus(context.env.DB, channelId);
   const pollingDesired = moduleState?.enabled === true && moduleState.settings.mode === "interval" &&
     secretStatus.configured && streamState?.state === "online";
+  const classifiedBelaboxStream = moduleState?.enabled === true && moduleState.settings.mode === "interval" &&
+    moduleState.settings.alertsEnabled && streamState?.state === "online" && streamState.stream_id !== null &&
+    status?.streamId === streamState.stream_id && status.belaboxStreamId === streamState.stream_id;
+  const alertPhase = classifiedBelaboxStream && status.alertState.phase !== "ok" && status.alertState.kind !== null
+    ? { phase: status.alertState.phase, kind: status.alertState.kind, bitrateKbps: status.sample?.bitrateKbps ?? null }
+    : null;
   return context.json({
     ...secretStatus,
     sample: status?.sample ?? null,
@@ -101,6 +107,9 @@ belaboxRoutes.get("/status", async (context) => {
     pollingDesired,
     streamId: status?.streamId ?? null,
     belaboxStreamId: status?.belaboxStreamId ?? null,
+    alertNotice: alertPhase,
+    fetchFailureNotice: classifiedBelaboxStream && status.fetchPhase.failing,
+    intervalSeconds: moduleState?.settings.intervalSeconds ?? 15,
   });
 });
 

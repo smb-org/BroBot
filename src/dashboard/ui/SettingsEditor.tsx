@@ -17,7 +17,7 @@ import { TextArea, type TemplateVariableOption, type TextAreaMessages } from "./
 import { TimeoutDurationRangeFields, type TimeoutDurationRangeValue } from "./TimeoutDurationRangeFields";
 
 export type SettingsFieldSpec<Settings> =
-  | { kind: "number"; key: keyof Settings & string; unit?: string; min: number; max: number; step: number }
+  | { kind: "number"; key: keyof Settings & string; unit?: string; min: number; max: number; step: number; validate?: (value: number, settings: Settings) => boolean }
   | { kind: "timeoutDurationRange"; key: keyof Settings & string; min: number; max: number }
   | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number; lengthUnit?: "utf16" | "codePoints"; optional?: boolean; validate?: (value: string) => boolean }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; optional?: boolean; preview: (template: string, samples: Readonly<Record<string, string>>) => string }

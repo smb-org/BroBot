@@ -35,6 +35,10 @@ Das unabhängige Review ersetzt nicht die Verantwortung des Hauptmodells: Es bew
 
 Besonders genau zu prüfen sind Migrationen und Datenzugriffe: Umfang jedes `UPDATE`/`DELETE` (fehlendes oder zu weites `WHERE`), Tabellen-Neuaufbauten (Indizes, Constraints, Fremdschlüssel), Mandantentrennung über `channelId`. Scanner-Befunde werden gelesen und entschieden, nicht übergangen.
 
+## Worktrees
+
+Jede Delegation arbeitet in einem eigenen Worktree unter `.worktrees/<issue-oder-branch>` im Repo, nicht in einem Geschwisterverzeichnis. Laufen mehrere `pnpm run check` parallel, bekommt jeder Lauf eigene Ports: `PLAYWRIGHT_PORT` (Vite, Standard 5174) und `WORKER_PORT` (e2e-Worker, Standard 8787), z. B. `PLAYWRIGHT_PORT=5238 WORKER_PORT=8838 pnpm run check`. `.worktrees/` ist ignoriert und für ESLint ausgenommen; werden neue Werkzeuge ergänzt, die ab Repo-Wurzel scannen, muss `.worktrees/**` dort ebenfalls ausgeschlossen werden.
+
 ## Parallelität
 
 Voneinander unabhängige Delegationen in einer Nachricht gemeinsam starten, statt sie zu serialisieren.

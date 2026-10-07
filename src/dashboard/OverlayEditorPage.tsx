@@ -7,8 +7,10 @@ import type { PanelModuleState } from "../panel-contract";
 import { OverlayCanvas } from "../overlay/canvas";
 import type { BoundOverlayData, OverlayLanguage } from "../overlay/model";
 import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
-import type { JsonObject, ModuleOverlayElementDefinition } from "../modules/contract";
+import { MODULE_NAVIGATION_CATEGORIES, type JsonObject, type ModuleNavigationCategory, type ModuleOverlayElementDefinition } from "../modules/contract";
+import { MODULES } from "../modules/registry";
 import { ModuleOverlayElementEditor } from "./ModuleOverlayElementEditor";
+import { ModuleIcon } from "./module-panels";
 import variableViewCss from "../overlay/variable.css?inline";
 import { clampOverlayEditorPosition, overlayEditorMeasuredSize, UNMEASURED_ELEMENT_FALLBACK_SIZE, type OverlayEditorSize } from "./overlay-editor-model";
 import {
@@ -31,7 +33,9 @@ import {
   type PanelOverlayDraft,
   type PanelOverlayElement,
 } from "./api";
-import { apiErrorText, dashboardLanguage, overlaysTexts } from "./locale";
+import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, formatNumber, overlaysTexts } from "./locale";
+import { moduleName } from "./module-labels";
+import { OverlayElementPalette, type OverlayElementPaletteOption } from "./OverlayElementPalette";
 import { useRealtimeVariableUpdates } from "./realtime";
 import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, NumberField, PageHeader, SaveBar, Select, Switch, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
@@ -227,26 +231,31 @@ type EditorJsonObject = Readonly<Record<string, EditorJsonValue>>;
 interface ModuleElementOption {
   kind: `${string}.${string}`;
   moduleId: string;
+  navigationCategory: ModuleNavigationCategory;
   defaultSize: { width: number; height: number };
   defaultConfig: EditorJsonObject;
   previewState?: ModuleOverlayElementDefinition["previewState"];
   parseConfig: (raw: unknown) => EditorJsonObject | null;
+  description: (language: "de" | "en") => string;
   label: (language: "de" | "en") => string;
-  addLabel: (language: "de" | "en", labels: ReturnType<typeof overlaysTexts>) => string;
   moduleName: (language: "de" | "en") => string;
 }
 
-const MODULE_ELEMENT_OPTIONS: readonly ModuleElementOption[] = MODULE_OVERLAY_ELEMENTS.map(({ moduleId, definition }) => ({
-  kind: definition.kind,
-  moduleId,
-  defaultSize: definition.defaultSize,
-  defaultConfig: definition.defaultConfig,
-  ...(definition.previewState === undefined ? {} : { previewState: definition.previewState }),
-  parseConfig: definition.parseConfig,
-  label: (language) => definition.editorLabel?.[language] ?? definition.kind,
-  addLabel: (language, labels) => definition.editorAddLabel?.[language] ?? `${labels.editorAdd} ${definition.editorLabel?.[language] ?? definition.kind}`,
-  moduleName: (language) => definition.editorModuleLabel?.[language] ?? moduleId,
-}));
+const MODULE_ELEMENT_OPTIONS: readonly ModuleElementOption[] = MODULE_OVERLAY_ELEMENTS.map(({ moduleId, definition }) => {
+  const module = MODULES.find((candidate) => candidate.id === moduleId);
+  return {
+    kind: definition.kind,
+    moduleId,
+    navigationCategory: module?.navigationCategory ?? MODULE_NAVIGATION_CATEGORIES[0],
+    defaultSize: definition.defaultSize,
+    defaultConfig: definition.defaultConfig,
+    ...(definition.previewState === undefined ? {} : { previewState: definition.previewState }),
+    parseConfig: definition.parseConfig,
+    description: (language) => definition.editorDescription?.[language] ?? "",
+    label: (language) => definition.editorLabel?.[language] ?? definition.kind,
+    moduleName: (language) => definition.editorModuleLabel?.[language] ?? moduleName(moduleId, language),
+  };
+});
 
 const moduleElementOption = (kind: string): ModuleElementOption | undefined =>
   MODULE_ELEMENT_OPTIONS.find((option) => option.kind === kind);
@@ -412,11 +421,9 @@ function OverlayEditorWorkspace({
     const module = moduleStates.find((candidate) => candidate.id === moduleId);
     return module?.mandatory === true || module?.enabled === true;
   };
-  const enabledModuleElementOptions = MODULE_ELEMENT_OPTIONS.filter((option) => moduleIsEnabled(option.moduleId));
   const [draft, setDraft] = useState(initialDraft);
   const [baseline, setBaseline] = useState<OverlayDraftBaseline>({ revision: overlay.revision, draft: baseDraft });
   const [selectedElementId, setSelectedElementId] = useState(initialElementId);
-  const [chosenVariableName, setChosenVariableName] = useState(variables[0]?.name ?? "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -467,8 +474,30 @@ function OverlayEditorWorkspace({
   }, [selectedElementId]);
   const selectedModuleOption = selectedElement === null ? undefined : moduleElementOption(selectedElement.kind);
   const orderedElements = useMemo(() => [...draft.elements].sort((left, right) => right.z - left.z), [draft.elements]);
-  const variablesByName = useMemo(() => new Set(variables.map(({ name }) => name)), [variables]);
-  const addVariableName = variablesByName.has(chosenVariableName) ? chosenVariableName : variables[0]?.name ?? "";
+  const paletteItems: OverlayElementPaletteOption[] = [
+    ...variables.map(({ name, description, value }) => ({
+      id: `variable:${name}`,
+      groupId: "variables" as const,
+      label: name,
+      description: description.trim().length > 0 ? description : channelVariablesTexts(dashboardLocale).noDescription,
+      variableName: name,
+      currentValue: formatNumber(liveVariables[name] ?? value),
+      icon: <Icon name="variable" size={20} />,
+    })),
+    ...MODULE_ELEMENT_OPTIONS.map((option) => {
+      const name = option.moduleName(language);
+      const enabled = moduleIsEnabled(option.moduleId);
+      return {
+        id: `module:${option.kind}`,
+        groupId: option.navigationCategory,
+        label: option.label(language),
+        description: option.description(language),
+        moduleName: name,
+        ...(enabled ? {} : { disabledReason: labels.editorPaletteModuleOff(name) }),
+        icon: <ModuleIcon moduleId={option.moduleId} className="overlay-element-palette__icon" />,
+      };
+    }),
+  ];
   const previewNow = Date.parse(new Date().toISOString());
   const rendererOverlay: BoundOverlayData = {
     id: overlayId,
@@ -828,9 +857,9 @@ function OverlayEditorWorkspace({
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
 
-  const insertVariable = (): void => {
-    if (!canEdit || addVariableName.length === 0 || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT) return;
-    const element = createVariableElement(addVariableName, draft.elements);
+  const insertVariable = (name: string): void => {
+    if (!canEdit || name.length === 0 || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT) return;
+    const element = createVariableElement(name, draft.elements);
     setDraft((current) => ({ ...current, elements: [...current.elements, element] }));
     setSelectedElementId(element.id);
     setSaved(false);
@@ -846,11 +875,22 @@ function OverlayEditorWorkspace({
     setError(undefined);
   };
 
-  const removeElement = (): void => {
-    if (!canEdit || selectedElement === null) return;
-    const remaining = draft.elements.filter(({ id }) => id !== selectedElement.id);
+  const removeElement = (elementId: string): void => {
+    if (!canEdit) return;
+    const remaining = draft.elements.filter(({ id }) => id !== elementId);
+    const rows = orderedElements.map(({ id }) => id);
+    const removedIndex = rows.indexOf(elementId);
+    const neighbourId = rows[removedIndex + 1] ?? rows[removedIndex - 1];
+    window.requestAnimationFrame(() => {
+      const target = neighbourId === undefined
+        ? document.querySelector<HTMLElement>(".overlay-editor__add-trigger")
+        : document.querySelector<HTMLElement>(`[data-element-row="${CSS.escape(neighbourId)}"] .overlay-editor__element-select`);
+      target?.focus();
+    });
     setDraft((current) => ({ ...current, elements: remaining }));
-    setSelectedElementId(remaining[0]?.id ?? null);
+    setSelectedElementId((currentSelectedId) => currentSelectedId === elementId
+      ? remaining[0]?.id ?? null
+      : currentSelectedId);
     setSaved(false);
     setError(undefined);
   };
@@ -1005,10 +1045,42 @@ function OverlayEditorWorkspace({
     <PageHeader kind="overlays" title={overlay.name} subtitle={labels.editorReference(draft.width, draft.height)} actions={<Button variant="neutral" disabled={saving} onClick={onBack}>{labels.editorBack}</Button>} />
     <div className="overlay-editor__workspace">
       <section className="overlay-editor__elements" aria-label={labels.editorElements}>
-        <div className="overlay-editor__section-heading"><h2>{labels.editorElements}</h2><span className="muted">{draft.elements.length} / {String(OVERLAY_ELEMENT_MAXIMUM_COUNT)}</span></div>
+        <div className="overlay-editor__section-heading">
+          <h2>{labels.editorElements}</h2>
+          <div className="overlay-editor__element-heading-actions">
+            <span className="muted">{draft.elements.length} / {String(OVERLAY_ELEMENT_MAXIMUM_COUNT)}</span>
+            <OverlayElementPalette
+              options={paletteItems}
+              messages={{
+                title: labels.editorAddElement,
+                searchLabel: labels.editorPaletteSearch,
+                closeLabel: labels.close,
+                noResults: labels.editorPaletteNoResults,
+                keyHints: { navigate: labels.editorPaletteNavigate, choose: labels.editorPaletteChoose, close: labels.editorPaletteClose },
+                variablesLabel: labels.editorPaletteVariables,
+                categoryLabels: dashboardTexts(dashboardLocale).navigation.moduleCategories,
+                ...(draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT ? { limitMessage: labels.editorElementLimit } : {}),
+              }}
+              trigger={<button type="button" className="overlay-editor__add-trigger" aria-label={labels.editorAddElement}
+                aria-describedby={!canManage ? "overlay-editor-readonly-reason" : undefined} disabled={!canEdit}>
+                <Icon name="plus" size={20} />
+              </button>}
+              disabled={!canEdit}
+              disableEntries={draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT}
+              onSelect={(option) => {
+                if (option.id.startsWith("variable:")) insertVariable(option.id.slice("variable:".length));
+                else if (option.id.startsWith("module:")) {
+                  const moduleOption = moduleElementOption(option.id.slice("module:".length));
+                  if (moduleOption !== undefined) insertModuleElement(moduleOption);
+                }
+              }}
+            />
+          </div>
+        </div>
+        {!canManage ? <p className="overlay-editor__locked-reason" id="overlay-editor-readonly-reason">{labels.editorLockedReason}</p> : null}
         {orderedElements.length === 0 ? <p className="muted">{labels.editorNoElements}</p> : <ul className="overlay-editor__element-list">
-          {orderedElements.map((element) => <li key={element.id}>
-            <button type="button" aria-pressed={element.id === selectedElementId} onClick={() => { setSelectedElementId(element.id); }}>
+          {orderedElements.map((element) => <li className="overlay-editor__element-row" data-element-row={element.id} key={element.id}>
+            <button className="overlay-editor__element-select" type="button" aria-pressed={element.id === selectedElementId} onClick={() => { setSelectedElementId(element.id); }}>
               <span>{element.kind === "variable"
                 ? element.label || element.variableName || labels.editorVariable
                 : moduleElementOption(element.kind)?.label(language) ?? (element.label || element.kind)}</span>
@@ -1018,29 +1090,12 @@ function OverlayEditorWorkspace({
                   ? labels.editorModuleDisabled(moduleElementOption(element.kind)?.moduleName(language) ?? element.kind)
                   : labels.editorModuleElement}</small>}
             </button>
+            <button type="button" className="overlay-editor__element-remove"
+              aria-label={labels.editorRemoveElement(element.label || element.variableName || element.kind)}
+              disabled={!canEdit} {...(canManage ? {} : { "aria-describedby": "overlay-editor-readonly-reason" })}
+              onClick={() => { removeElement(element.id); }}><Icon name="remove" size={16} /></button>
           </li>)}
         </ul>}
-        <div className="overlay-editor__add-element">
-          <DisabledFieldReasonContext.Provider value={canManage ? null : { id: "overlay-editor-readonly-reason", reason: labels.editorReadOnly }}>
-            <Select id="overlay-editor-variable" label={labels.editorChooseVariable} value={addVariableName || null}
-              disabled={!canEdit || variables.length === 0 || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT}
-              {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
-              options={variables.map(({ name }) => ({ value: name, label: name }))}
-              onChange={(value) => { if (value !== null) setChosenVariableName(value); }} />
-          </DisabledFieldReasonContext.Provider>
-          <Button variant="neutral" disabled={!canEdit || variables.length === 0 || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT}
-            {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
-            onClick={insertVariable}>{labels.editorAddVariable}</Button>
-          <div className="overlay-editor__module-elements">
-            <p className="form-hint">{labels.editorModuleElements}</p>
-            {enabledModuleElementOptions.map((option) => <Button key={option.kind} variant="neutral"
-              disabled={!canEdit || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT}
-              {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
-              onClick={() => { insertModuleElement(option); }}>{option.addLabel(language, labels)}</Button>)}
-            {enabledModuleElementOptions.length === 0 ? <p className="muted">{labels.editorNoEnabledModuleElements}</p> : null}
-          </div>
-          {draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT ? <p className="form-hint">{labels.editorElementLimit}</p> : null}
-        </div>
       </section>
 
       <section className="overlay-editor__preview-panel" aria-label={labels.editorPreview}>
@@ -1121,11 +1176,7 @@ function OverlayEditorWorkspace({
           </div>
           <Switch layout="inline" label={labels.editorInComposition} checked={selectedElement.inComposition} disabled={!canEdit}
             onChange={(inComposition) => { updateElement(selectedElement.id, { inComposition }); }} />
-          <Button variant="subtle" disabled={!canEdit}
-              {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
-              onClick={removeElement}>{labels.editorRemove}</Button>
         </div>}
-        {!canManage ? <p className="muted" id="overlay-editor-readonly-reason" role="note">{labels.editorReadOnly}</p> : null}
         </div>
         <div role="tabpanel" id="overlay-editor-panel-style" aria-labelledby="overlay-editor-tab-style" hidden={editorTab !== "style"}>
           <DisabledFieldReasonContext.Provider value={styleLockedReason.length === 0 ? null : { id: "overlay-style-disabled-reason", reason: styleLockedReason }}>

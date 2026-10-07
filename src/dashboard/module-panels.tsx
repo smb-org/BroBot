@@ -298,6 +298,10 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
         const current = value[field.key];
         if (field.kind === "number" && (typeof current !== "number" || !Number.isInteger(current) || current < field.min || current > field.max)) {
           errors[field.key] = typeof current !== "number" ? copy.numberMissing : copy.invalidMessage;
+        } else if (field.kind === "number" && field.validate !== undefined &&
+            (includeUntouched || validationAttempted || touchedFields.has(field.key)) &&
+            !field.validate(current as number, value)) {
+          errors[field.key] = copy.fields[field.key]?.invalidError ?? copy.invalidMessage;
         } else if (field.kind === "timeoutDurationRange") {
           const range = current !== null && typeof current === "object" ? current as { minSeconds?: unknown; maxSeconds?: unknown } : null;
           if (range === null || !Number.isInteger(range.minSeconds) || !Number.isInteger(range.maxSeconds) ||

@@ -31,7 +31,7 @@ const getLazyImmediateAction = (moduleId: string): LazyExoticComponent<Component
  * itself (inline, next to its own button), never a global toast, and each
  * guards its own in-flight request the same way `Switch`'s `pending` does.
  */
-export const ImmediateActions = ({ channelId, streamState, modules = [], modulesLoaded = true }: { channelId: string; streamState?: ChannelStreamState | null | undefined; modules?: readonly Pick<PanelModuleState, "id" | "enabled">[]; modulesLoaded?: boolean }): ReactElement => {
+export const ImmediateActions = ({ channelId, streamState, canManage = false, modules = [], modulesLoaded = true }: { channelId: string; streamState?: ChannelStreamState | null | undefined; canManage?: boolean; modules?: readonly Pick<PanelModuleState, "id" | "enabled">[]; modulesLoaded?: boolean }): ReactElement => {
   const texts = dashboardTexts();
   const modulesById = new Map(modules.map((state) => [state.id, state]));
   const moduleCards = MODULES.flatMap((module) => {
@@ -62,7 +62,7 @@ export const ImmediateActions = ({ channelId, streamState, modules = [], modules
       >
         {modulesLoaded ? moduleCards.map(({ id, ActionCard, availabilityReason }) => (
           <Suspense key={id} fallback={<div className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>}>
-            <ActionCard channelId={channelId} streamState={streamState ?? null} availabilityReason={availabilityReason} />
+            <ActionCard channelId={channelId} streamState={streamState ?? null} canManage={canManage} availabilityReason={availabilityReason} />
           </Suspense>
         )) : immediateActionModules.map((module) => (
           <div key={module.id} className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>

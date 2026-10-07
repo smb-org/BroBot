@@ -18,7 +18,7 @@ export const textBlockOverlayElement = {
     return previewStateFor(blockName.length === 0 ? labels.previewPlaceholder : blockName, labels.sampleValues, now);
   },
   editorLabel: { de: editorTexts.de.label, en: editorTexts.en.label },
-  editorAddLabel: { de: editorTexts.de.addLabel, en: editorTexts.en.addLabel },
+  editorDescription: { de: editorTexts.de.description, en: editorTexts.en.description },
   editorModuleLabel: { de: editorTexts.de.moduleLabel, en: editorTexts.en.moduleLabel },
   initialStateNeedsContext: true,
   reloadStateOnModuleMessages: ["modul.text_library.blocks_updated"] as const,

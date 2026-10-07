@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { e2eWorkerOrigin } from "./worker-fixtures";
 
 test.use({ locale: "de-DE" });
 
@@ -59,7 +60,7 @@ test("the real worker protects the dashboard and shows the login", async ({ page
     return new URL(response.url()).pathname === "/api/channels";
   });
 
-  await page.goto("http://127.0.0.1:8787/");
+  await page.goto(`${e2eWorkerOrigin}/`);
 
   const channelsResponse = await channelsResponsePromise;
   expect(channelsResponse.status()).toBe(401);

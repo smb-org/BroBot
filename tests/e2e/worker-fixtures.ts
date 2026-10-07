@@ -12,6 +12,9 @@ const keyRing = (id: string, byte: number): string => JSON.stringify({
   retired: [],
 });
 
+/** Port of the e2e wrangler worker; override with WORKER_PORT to run checks in parallel. */
+export const e2eWorkerPort = process.env.WORKER_PORT ?? "8787";
+export const e2eWorkerOrigin = `http://127.0.0.1:${e2eWorkerPort}`;
 export const e2eOverlayToken = testKey(7);
 export const e2eChannelId = "channel-e2e";
 export const e2eOverlayId = "overlay-e2e";
@@ -19,7 +22,7 @@ export const e2eWorkerEnvironment: Record<string, string> = {
   TWITCH_CLIENT_ID: "e2e-twitch-client-id",
   TWITCH_CLIENT_SECRET: "e2e-twitch-client-secret",
   TWITCH_EVENTSUB_SECRET: keyRing("e2e-eventsub", 3),
-  PUBLIC_ORIGIN: "http://127.0.0.1:8787",
+  PUBLIC_ORIGIN: e2eWorkerOrigin,
   SESSION_COOKIE_KEYS: keyRing("e2e-cookie", 1),
   TOKEN_ENCRYPTION_KEYS: keyRing("e2e-encryption", 2),
   OVERLAY_TOKEN_PEPPER: testKey(4),

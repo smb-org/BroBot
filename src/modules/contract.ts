@@ -284,7 +284,8 @@ export interface ModuleOverlayElementDefinition {
   /** Editor-only sample state used when no live module state is available. */
   previewState?: (config: JsonObject, language: ModuleLanguage, now: number) => JsonObject;
   editorLabel?: Readonly<Record<ModuleLanguage, string>>;
-  editorAddLabel?: Readonly<Record<ModuleLanguage, string>>;
+  /** Localized one-line description shown in the overlay element palette. */
+  editorDescription?: Readonly<Record<ModuleLanguage, string>>;
   editorModuleLabel?: Readonly<Record<ModuleLanguage, string>>;
   parseConfig: (raw: unknown) => JsonObject | null;
   /** The module initial state uses host template, condition, or channel context. */
@@ -1038,6 +1039,8 @@ export interface ModulePanelProperties {
 export interface ModuleImmediateActionProperties {
   channelId: string;
   streamState?: ChannelStreamState | null;
+  /** Whether the channel member may use management-only actions. */
+  canManage?: boolean;
   /** Localized by the host from the action's declared requirements and current stream state. */
   availabilityReason: string | null;
 }
