@@ -89,16 +89,16 @@ describe("chat voting live panel", () => {
 
     const type = await screen.findByRole("combobox", { name: "Vote type" });
     expect(type).toHaveValue("Yes / No");
-    expect(type.closest(".ui-select")).toHaveTextContent("Chat types 1 or 2. Each person’s latest vote counts.");
+    expect(type.closest(".ui-select")).toHaveTextContent("Chat types 1 = yes, 2 = no. Each person’s latest vote counts.");
     fireEvent.click(type);
     const listboxId = type.getAttribute("aria-controls");
     const listbox = listboxId === null ? null : document.getElementById(listboxId);
     expect(listbox).not.toBeNull();
     if (listbox === null) throw new Error("The type listbox has not mounted.");
     expect(listbox).toHaveTextContent("Two options");
-    expect(listbox).toHaveTextContent("Yes / NoChat types 1 or 2");
-    expect(listbox).toHaveTextContent("0 / 1Chat types 0 or 1");
-    expect(listbox).toHaveTextContent("1 / 2Chat types 1 or 2 · custom labels");
+    expect(listbox).toHaveTextContent("Yes / NoChat types 1 = yes, 2 = no");
+    expect(listbox).toHaveTextContent("0 / 1Chat types 0 = no, 1 = yes");
+    expect(listbox).toHaveTextContent("1 / 2Chat types 1 or 2");
     expect(listbox).toHaveTextContent("Multiple options");
     expect(listbox).toHaveTextContent("Free textChat types a word · top 5 are counted");
   });

@@ -3,7 +3,7 @@ import type { DashboardTexts } from "./locale";
 import type { DashboardRoute } from "./router";
 import { MODULE_NAVIGATION_CATEGORIES, type BotModule, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 
-export type NavPageGroup = "operation" | "channel" | "modules" | "platform";
+export type NavPageGroup = "operation" | "channel" | "platform";
 
 type ChannelSection = Extract<DashboardRoute, { kind: "channel" }>["section"];
 
@@ -182,7 +182,7 @@ export const NAV_PAGES: readonly NavPageDefinition[] = [
   },
   {
     id: "modules",
-    group: "modules",
+    group: "channel",
     iconKind: "modules",
     route: channelRoute("modules"),
     label: (texts) => texts.navigation.manageModules,
@@ -210,7 +210,6 @@ export const navPageGroupHeading = (group: NavPageGroup, texts: DashboardTexts):
   switch (group) {
     case "operation": return texts.navigation.operationSection;
     case "channel": return texts.navigation.channel;
-    case "modules": return texts.navigation.module;
     case "platform": return platformTexts().navigation;
   }
 };
