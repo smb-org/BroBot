@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { belaboxDefaultAlertTexts } from "./alert-texts";
+
+export { BELABOX_ALERT_TEMPLATE_FIELDS, belaboxDefaultAlertTexts } from "./alert-texts";
 
 export const BELABOX_MODULE_ID = "belabox";
 export const BELABOX_STATS_URL_SECRET = "stats_url";
@@ -11,12 +14,56 @@ export const BELABOX_ON_DEMAND_CACHE_MS = 10_000;
 export const BELABOX_STREAM_HISTORY_LIMIT = 20;
 export const BELABOX_SECRET_UNAVAILABLE_STATUS_CODE = "not_configured";
 
-export const belaboxSettingsSchema = z.object({
+const belaboxSettingsInputSchema = z.object({
   mode: z.enum(["interval", "on_demand"]).default("interval"),
   intervalSeconds: z.union([z.literal(5), z.literal(15), z.literal(30), z.literal(60)]).default(15),
+  alertsEnabled: z.boolean().default(true),
+  lowBitrateKbps: z.number().int().min(1).max(1_000_000).default(1_000),
+  recoverBitrateKbps: z.number().int().min(1).max(1_000_000).default(2_000),
+  holdSeconds: z.number().int().min(1).max(86_400).optional(),
+  recoverHoldSeconds: z.number().int().min(1).max(86_400).optional(),
+  chatCooldownSeconds: z.number().int().min(0).max(86_400).default(300),
+  chatEnabled: z.boolean().default(false),
+  lowText: z.string().max(500).default(belaboxDefaultAlertTexts("en").lowText),
+  disconnectText: z.string().max(500).default(belaboxDefaultAlertTexts("en").disconnectText),
+  recoveryText: z.string().max(500).default(belaboxDefaultAlertTexts("en").recoveryText),
+  lowTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
+  disconnectTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
+  recoveryTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
+});
+
+export const belaboxSettingsSchema = belaboxSettingsInputSchema.transform((settings) => ({
+  ...settings,
+  // Keep the requested 10/15-second defaults while respecting the selected poll interval.
+  holdSeconds: settings.holdSeconds ?? Math.max(10, settings.intervalSeconds),
+  recoverHoldSeconds: settings.recoverHoldSeconds ?? Math.max(15, settings.intervalSeconds),
+})).superRefine((settings, context) => {
+  if (settings.recoverBitrateKbps <= settings.lowBitrateKbps) {
+    context.addIssue({ code: "custom", path: ["recoverBitrateKbps"], message: "recover_must_exceed_low" });
+  }
+  if (settings.holdSeconds < settings.intervalSeconds) {
+    context.addIssue({ code: "custom", path: ["holdSeconds"], message: "hold_must_meet_interval" });
+  }
+  if (settings.recoverHoldSeconds < settings.intervalSeconds) {
+    context.addIssue({ code: "custom", path: ["recoverHoldSeconds"], message: "recover_hold_must_meet_interval" });
+  }
 });
 export type BelaboxSettings = z.output<typeof belaboxSettingsSchema>;
-export const BELABOX_DEFAULT_SETTINGS: BelaboxSettings = { mode: "interval", intervalSeconds: 15 };
+export const BELABOX_DEFAULT_SETTINGS: BelaboxSettings = {
+  mode: "interval",
+  intervalSeconds: 15,
+  alertsEnabled: true,
+  lowBitrateKbps: 1_000,
+  recoverBitrateKbps: 2_000,
+  holdSeconds: 15,
+  recoverHoldSeconds: 15,
+  chatCooldownSeconds: 300,
+  chatEnabled: false,
+  ...belaboxDefaultAlertTexts("en"),
+  lowTarget: "source_only",
+  disconnectTarget: "source_only",
+  recoveryTarget: "source_only",
+};
 
 export type BelaboxStatsUrlError =
   | "invalid_url"
@@ -69,6 +116,15 @@ export interface BelaboxStatusResponse {
   pollingDesired: boolean;
   streamId: string | null;
   belaboxStreamId: string | null;
+  alertNotice: BelaboxAlertNotice | null;
+  fetchFailureNotice: boolean;
+  intervalSeconds: number;
+}
+
+export interface BelaboxAlertNotice {
+  phase: "pending" | "alarm" | "recovering";
+  kind: "low" | "disconnect";
+  bitrateKbps: number | null;
 }
 
 export type BelaboxHistoryPoint = readonly [at: number, bitrateKbps: number, connected: number];

@@ -4,7 +4,7 @@ import { format } from "node:util";
 
 import type { ModuleExternalFetchBudget, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { belaboxModule } from "../../src/modules/belabox";
-import { BELABOX_STATS_TIMEOUT_MS, BELABOX_STATS_URL_SECRET, type BelaboxFetchFailureReason } from "../../src/modules/belabox/contracts";
+import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_TIMEOUT_MS, BELABOX_STATS_URL_SECRET, type BelaboxFetchFailureReason } from "../../src/modules/belabox/contracts";
 import { fetchRelaySample } from "../../src/modules/belabox/adapters/stats-client";
 import { belaboxRoutes } from "../../src/modules/belabox/routes";
 import { parseRelayStats } from "../../src/modules/belabox/domain/stats";
@@ -111,22 +111,36 @@ describe("BELABOX stats URL", () => {
       navigationCategory: "data",
       mandatory: false,
       defaultEnabled: false,
-      defaultSettings: { mode: "interval", intervalSeconds: 15 },
+      defaultSettings: BELABOX_DEFAULT_SETTINGS,
       eventSubTypes: ["stream.online", "stream.offline"],
       settingsChangedAlarm: { handlerKey: "ensure", alarmKey: "poll" },
     });
-    expect(belaboxModule.settingsSchema.parse({})).toEqual({ mode: "interval", intervalSeconds: 15 });
-    expect(belaboxModule.settingsSchema.safeParse({ mode: "on_demand", intervalSeconds: 60 }).success).toBe(true);
+    expect(belaboxModule.settingsSchema.parse({})).toEqual(BELABOX_DEFAULT_SETTINGS);
+    expect(belaboxModule.settingsSchema.safeParse({ ...BELABOX_DEFAULT_SETTINGS, mode: "on_demand", intervalSeconds: 60, holdSeconds: 60, recoverHoldSeconds: 60 }).success).toBe(true);
     expect(belaboxModule.settingsSchema.safeParse({ mode: "interval", intervalSeconds: 10 }).success).toBe(false);
     expect(belaboxModule.settingsEditor).toBeTypeOf("function");
     expect(belaboxModule.alarms?.map(({ key }) => key)).toEqual(["poll", "ensure"]);
     const editor = await belaboxModule.settingsEditor?.();
-    expect(editor?.default.spec.sections).toMatchObject([{ fields: [
+    expect(editor?.default.spec.sections[0]?.fields).toMatchObject([
       { kind: "segment", key: "mode", options: [{ value: "interval" }, { value: "on_demand" }] },
       { kind: "segment", key: "intervalSeconds", options: [
         { value: 5 }, { value: 15 }, { value: 30 }, { value: 60 },
       ] },
-    ] }]);
+    ]);
+    const alertCard = editor?.default.spec.sections[1]?.fields[0];
+    if (alertCard?.kind !== "switchCard") throw new Error("BELABOX alert settings card is missing.");
+    expect(alertCard.key).toBe("alertsEnabled");
+    expect(alertCard.children?.map(({ key }) => key)).toEqual([
+      "lowBitrateKbps", "recoverBitrateKbps", "holdSeconds", "recoverHoldSeconds", "chatEnabled",
+    ]);
+    const recoveryThreshold = alertCard.children?.find(({ key }) => key === "recoverBitrateKbps");
+    if (recoveryThreshold?.kind !== "number") throw new Error("BELABOX recovery threshold field is missing.");
+    expect(recoveryThreshold.validate?.(1_000, BELABOX_DEFAULT_SETTINGS)).toBe(false);
+    const chatCard = alertCard.children?.find(({ key }) => key === "chatEnabled");
+    if (chatCard?.kind !== "switchCard") throw new Error("BELABOX chat settings card is missing.");
+    expect(chatCard.children?.map(({ key }) => key)).toEqual([
+      "chatCooldownSeconds", "lowText", "lowTarget", "disconnectText", "disconnectTarget", "recoveryText", "recoveryTarget",
+    ]);
   });
 
   it("accepts the explicit HTTP port and HTTPS default port with one key segment", () => {
@@ -283,6 +297,49 @@ describe("BELABOX secret and route redaction", () => {
     await expect(db.prepare(
       "SELECT history_sample_json FROM belabox_status WHERE channel_id = ?",
     ).bind(CHANNEL_ID).first()).resolves.toEqual({ history_sample_json: JSON.stringify(sample) });
+  });
+
+  it("exposes notices only after three failures on the current classified BELABOX stream", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { send } = await createBelaboxRouteHarness(testDatabase);
+    const streamId = "stream-alert-323";
+    await testDatabase.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
+    ).bind(CHANNEL_ID, JSON.stringify(BELABOX_DEFAULT_SETTINGS)).run();
+    await testDatabase.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, stream_id)
+       VALUES (?, 'online', ?, 'eventsub', ?)`,
+    ).bind(CHANNEL_ID, new Date().toISOString(), streamId).run();
+    await testDatabase.prepare(
+      `INSERT INTO belabox_status
+        (channel_id, sampled_at, sample_json, error_code, polling, stream_id, belabox_stream_id,
+         fetch_phase_json, recent_json, alert_json, revision)
+       VALUES (?, ?, ?, 'network', 1, ?, ?, ?, '[]', ?, 1)`,
+    ).bind(
+      CHANNEL_ID,
+      new Date().toISOString(),
+      JSON.stringify({ at: new Date().toISOString(), connected: true, bitrateKbps: 800, rttMs: 20, latencyMs: 50, network: 1, droppedPackets: 0 }),
+      streamId,
+      streamId,
+      JSON.stringify({ consecutiveFailures: 2, fetchFailing: false }),
+      JSON.stringify({ phase: "alarm", kind: "low", since: null, episodeStartedAt: new Date().toISOString(), completedEpisodeAt: null, lastChatSentAt: null, chatSentInEpisode: false, pendingChat: null }),
+    ).run();
+
+    const twoFailures = await send("/status", "GET");
+    await expect(twoFailures.json()).resolves.toMatchObject({
+      alertNotice: { phase: "alarm", kind: "low", bitrateKbps: 800 },
+      fetchFailureNotice: false,
+    });
+    await testDatabase.prepare("UPDATE belabox_status SET fetch_phase_json = ? WHERE channel_id = ?")
+      .bind(JSON.stringify({ consecutiveFailures: 3, fetchFailing: true }), CHANNEL_ID).run();
+    const threeFailures = await send("/status", "GET");
+    await expect(threeFailures.json()).resolves.toMatchObject({ fetchFailureNotice: true });
+
+    await testDatabase.prepare("UPDATE belabox_status SET belabox_stream_id = NULL WHERE channel_id = ?")
+      .bind(CHANNEL_ID).run();
+    const unclassified = await send("/status", "GET");
+    await expect(unclassified.json()).resolves.toMatchObject({ alertNotice: null, fetchFailureNotice: false });
   });
 
   it("keeps a sentinel URL out of logs, route results, audits, events, and module rows for every fetch outcome", async () => {

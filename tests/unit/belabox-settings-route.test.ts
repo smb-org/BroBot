@@ -5,6 +5,7 @@ import { createSessionCookie } from "../../src/worker/auth/session";
 import { BELABOX_POLL_ALARM_KEY } from "../../src/modules/belabox/contracts";
 import { handleBelaboxPollAlarm } from "../../src/modules/belabox/service";
 import { panelRouter } from "../../src/worker/panel/routes";
+import { BELABOX_DEFAULT_SETTINGS } from "../../src/modules/belabox/contracts";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -12,6 +13,13 @@ const CHANNEL_ID = "belabox-settings-channel";
 const MANAGER_ID = "belabox-settings-manager";
 const SESSION_COOKIE_KEYS = JSON.stringify({ active: { id: "cookie", key: testKey(71) }, retired: [] });
 const TOKEN_ENCRYPTION_KEYS = JSON.stringify({ active: { id: "token", key: testKey(72) }, retired: [] });
+const UPDATED_SETTINGS = {
+  ...BELABOX_DEFAULT_SETTINGS,
+  mode: "on_demand" as const,
+  intervalSeconds: 30 as const,
+  holdSeconds: 30,
+  recoverHoldSeconds: 30,
+};
 
 const requestFor = async (body: unknown, path = "/settings"): Promise<Request> => {
   const sessionId = `session-${MANAGER_ID}`;
@@ -60,7 +68,7 @@ describe("BELABOX settings route", () => {
 
     const response = await panelRouter.fetch(await requestFor({
       revision: 1,
-      settings: { mode: "on_demand", intervalSeconds: 30 },
+      settings: UPDATED_SETTINGS,
     }), environment);
 
     expect(response.status).toBe(200);
@@ -86,7 +94,7 @@ describe("BELABOX settings route", () => {
 
     const response = await panelRouter.fetch(await requestFor({
       revision: 1,
-      settings: { mode: "on_demand", intervalSeconds: 30 },
+      settings: UPDATED_SETTINGS,
     }), environment);
 
     expect(response.status).toBe(200);
@@ -94,7 +102,7 @@ describe("BELABOX settings route", () => {
     await expect(database.prepare(
       "SELECT settings, revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
     ).bind(CHANNEL_ID).first()).resolves.toEqual({
-      settings: JSON.stringify({ mode: "on_demand", intervalSeconds: 30 }),
+      settings: JSON.stringify(UPDATED_SETTINGS),
       revision: 2,
     });
     expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "ensure", "poll");

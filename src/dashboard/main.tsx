@@ -1095,7 +1095,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
           disabled={settingsBusy || channelSettings === null}
         />
       </section>
-      <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} modules={modules} modulesLoaded={modulesLoaded} />
+      <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} canManage={canManage(overview.role)} modules={modules} modulesLoaded={modulesLoaded} />
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
       <section className="content-section" aria-label={dashboardTexts().navigation.module}>
         <div className="section-heading"><h2>{dashboardTexts().navigation.module}</h2><span className="muted number">{formatNumber(overview.activeModules.length)}</span></div>

@@ -32,7 +32,7 @@ const editorFixture = vi.hoisted(() => {
     warningLabel: () => language === "de" ? "Eine Vorlage enthält einen unbekannten Platzhalter." : "A template contains an unknown variable.",
     sections: { general: language === "de" ? "Allgemein" : "General", extra: language === "de" ? "Weitere" : "Extra" },
     fields: {
-      amount: { label: language === "de" ? "Menge" : "Amount", hint: language === "de" ? "Eine ganze Zahl." : "A whole number.", unit: "Stück", increaseLabel: "Increase amount", decreaseLabel: "Decrease amount" },
+      amount: { label: language === "de" ? "Menge" : "Amount", hint: language === "de" ? "Eine ganze Zahl." : "A whole number.", invalidError: language === "de" ? "Mindestens ein Stück." : "Use at least one item.", unit: "Stück", increaseLabel: "Increase amount", decreaseLabel: "Decrease amount" },
       handle: { label: language === "de" ? "Konto" : "Handle", hint: language === "de" ? "Twitch-Name." : "Twitch name." },
       labels: { label: language === "de" ? "Abstimmungslabels" : "Vote labels", hint: language === "de" ? "Leer lassen für Standardwerte." : "Leave blank to use defaults.", placeholder: "Yes|No", invalidError: language === "de" ? "Gib zwei gültige Labels ein." : "Enter two valid labels." },
       message: { label: language === "de" ? "Nachricht" : "Message", hint: language === "de" ? "Vorlage für die Nachricht." : "Message template.", previewLabel: "Preview", previewSpeaker: "Bot", variables: [{ name: "viewer", description: "Viewer name.", sample: "Ada" }] },
@@ -44,7 +44,7 @@ const editorFixture = vi.hoisted(() => {
   const definition = {
     spec: { sections: [
       { id: "general", icon: "tabSettings", fields: [
-        { kind: "number", key: "amount", min: 0, max: 10, step: 1 },
+        { kind: "number", key: "amount", min: 0, max: 10, step: 1, validate: (value: number) => value >= 1 },
         { kind: "text", key: "handle", prefix: "@", maxLength: 32 },
         { kind: "text", key: "labels", optional: true, validate: (value: string) => value.trim().length === 0 || value === "Yes|No" },
         { kind: "template", key: "message", preview: (template: string, samples: Readonly<Record<string, string>>) => template.replace("{viewer}", samples.viewer ?? "") },
@@ -358,6 +358,25 @@ describe("Module panel loader", () => {
     expect(within(invalidPopover).getAllByRole("button")).toHaveLength(2);
     expect(labels).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByRole("tab", { name: "Allgemein, Fehler" })).toBeInTheDocument();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+  });
+
+  it("shows the catalog error beside a number that fails cross-field validation", async () => {
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") return Promise.resolve(Response.json({}));
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
+        : Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    const amount = await screen.findByRole("spinbutton", { name: "Menge" });
+    fireEvent.change(amount, { target: { value: "0" } });
+
+    expect(amount).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Mindestens ein Stück.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
   });
 

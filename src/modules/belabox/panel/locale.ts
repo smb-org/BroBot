@@ -61,6 +61,14 @@ export interface BelaboxPanelTexts {
   malformed: string;
   budgetExhausted: string;
   readOnly: string;
+  alertLow: string;
+  alertDisconnect: string;
+  alertRecovering: string;
+  alertPending: string;
+  fetchFailureNotice: string;
+  checkNow: string;
+  checkNowDone: string;
+  statusUnavailable: string;
 }
 
 const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
@@ -124,6 +132,14 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     malformed: "Die Antwort des Relay-Dienstes ist ungültig.",
     budgetExhausted: "Das Abruflimit wurde erreicht. Bitte später erneut versuchen.",
     readOnly: "Nur Broadcaster und Manager können diese Verbindung ändern oder testen.",
+    alertLow: "Niedrige BELABOX-Bitrate",
+    alertDisconnect: "BELABOX-Encoder getrennt",
+    alertRecovering: "BELABOX-Verbindung erholt sich",
+    alertPending: "BELABOX-Alarm wird geprüft",
+    fetchFailureNotice: "BELABOX-Status konnte dreimal nicht abgerufen werden.",
+    checkNow: "Jetzt prüfen",
+    checkNowDone: "BELABOX-Status geprüft.",
+    statusUnavailable: "BELABOX-Status noch nicht verfügbar.",
   },
   en: {
     title: "BELABOX connection",
@@ -185,6 +201,14 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     malformed: "The relay response is invalid.",
     budgetExhausted: "The fetch limit was reached. Try again later.",
     readOnly: "Only broadcasters and managers can change or test this connection.",
+    alertLow: "BELABOX bitrate is low",
+    alertDisconnect: "BELABOX encoder disconnected",
+    alertRecovering: "BELABOX connection is recovering",
+    alertPending: "BELABOX alert is pending",
+    fetchFailureNotice: "BELABOX status could not be fetched three times.",
+    checkNow: "Check now",
+    checkNowDone: "BELABOX status checked.",
+    statusUnavailable: "BELABOX status is not available yet.",
   },
 };
 

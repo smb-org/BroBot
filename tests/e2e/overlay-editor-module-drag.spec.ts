@@ -77,13 +77,16 @@ test("module overlay elements have visible previews and drag by their measured b
   await expect(page.getByRole("heading", { name: "Drag test" })).toBeVisible();
   const frame = page.frameLocator('[data-testid="overlay-editor-renderer"]');
 
-  await page.getByRole("button", { name: "Add voting tally" }).click();
+  const addElement = page.getByRole("button", { name: "Add element" });
+  await addElement.click();
+  await page.getByRole("option", { name: "Voting tally" }).click();
   const tally = frame.locator('[data-kind="chat_voting.tally"]');
   await expect(tally).toBeVisible();
   await expect.poll(async () => (await tally.boundingBox())?.width ?? 0).toBeGreaterThan(0);
   await dragElement(page, tally);
 
-  await page.getByRole("button", { name: "Add text block" }).click();
+  await addElement.click();
+  await page.getByRole("option", { name: "Text block" }).click();
   const textBlock = frame.locator('[data-kind="text_library.block"]');
   await expect(textBlock).toBeVisible();
   await expect(textBlock).toContainText("Choose a text block");

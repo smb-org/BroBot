@@ -1494,6 +1494,7 @@ describe("ChannelObject realtime path", () => {
         polling INTEGER NOT NULL DEFAULT 0, stream_id TEXT, belabox_stream_id TEXT,
         fetch_phase_json TEXT NOT NULL DEFAULT '{}', recent_json TEXT NOT NULL DEFAULT '[]',
         history_sample_json TEXT, history_module_revision INTEGER,
+        alert_json TEXT NOT NULL DEFAULT '{}',
         revision INTEGER NOT NULL DEFAULT 1
       )`,
     ).run();

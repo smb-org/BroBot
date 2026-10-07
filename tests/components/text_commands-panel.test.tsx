@@ -559,9 +559,9 @@ describe("Text command editor", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
       fireEvent.click(within(templateEditorFor("text")).getByRole("button", { name: "Variable einfügen" }));
       const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
-      expect(picker.parentElement).toHaveClass("ui-variable-picker--sheet");
-      expect(picker.parentElement?.querySelector(".ui-variable-picker__mobile-header")).toBeInTheDocument();
-      expect(picker.parentElement?.querySelector(".ui-variable-picker__search")).toBeInTheDocument();
+      expect(picker.parentElement).toHaveClass("ui-grouped-picker--sheet");
+      expect(picker.parentElement?.querySelector(".ui-grouped-picker__mobile-header")).toBeInTheDocument();
+      expect(picker.parentElement?.querySelector(".ui-grouped-picker__search")).toBeInTheDocument();
       expect(picker.parentElement?.querySelector(".ui-variable-picker__option-copy")).toBeInTheDocument();
     } finally {
       window.matchMedia = originalMatchMedia;
