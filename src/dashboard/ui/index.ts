@@ -89,6 +89,7 @@ export { EditorShell } from "./EditorShell";
 export type { EditorInvalidField, EditorSection, EditorShellProps } from "./EditorShell";
 
 export { SettingsEditor } from "./SettingsEditor";
+export { textFieldLength } from "./text-length";
 export type { SettingsEditorCatalog, SettingsEditorDefinition, SettingsEditorProps, SettingsEditorSpec, SettingsEditorTexts, SettingsFieldSpec, SettingsFieldText } from "./SettingsEditor";
 
 export { NumberField } from "./NumberField";

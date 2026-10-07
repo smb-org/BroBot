@@ -857,16 +857,23 @@ verborgen. Der generische Ballot-Contract speichert Stimmen pro Abstimmung nur
 unter einem gehashten Zuschauerschlüssel und begrenzt die Zahl verschiedener
 Begriffe auf 200; weitere Stimmen fließen in den Zähler „weitere“.
 
-Das Panel hält Konfiguration, Ergebnis und die einzige Start-/Stop-Aktion in
-einer stabilen Abstimmungskarte. Typ- und Dauersegmente konfigurieren nur; erst
-„Starten“ öffnet die Abstimmung. Pro Start gelten „Offen“, 1, 2 oder 5 Minuten
-oder eine eigene Dauer bis vier Stunden. Die gespeicherte automatische
-Schließzeit liefert den Ausgangswert. Während eines Ballots bleibt die
-Konfiguration sichtbar und gesperrt; die Ergebnisfläche behält ihre feste Höhe.
-Stimmen erscheinen als horizontale Balken mit Zahl und Prozentwert, die Zahl
-für Optionen liegt zwischen 2 und 9. Scheitert das Einplanen eines manuellen Schlusses, stellt das
-Modul den vorherigen Schließgrund wieder her; Fehler im Alarmhandler werden vom
-Host mit Backoff erneut versucht. Der Host stellt `ModuleBallotAccess.hasOpenBallot()` als
+Das Panel zeigt auf breiten Ansichten Konfiguration und Ergebnis nebeneinander;
+auf schmalen Ansichten stehen alle Steuerelemente oberhalb des Ergebnisses.
+Typen stehen in einem gruppierten `Select` mit Chat-Eingabehinweisen. Die
+Beschriftungsfelder sind pro Taste und gelten nur für diese Abstimmung;
+`/current` liefert ihre vorbelegten Standardwerte, `/start` nimmt die
+verwendeten Beschriftungen an. Die Einstellungen bleiben die Quelle für
+Standardwerte und Chatbefehle. Während eines Ballots bleibt die gesperrte
+Konfiguration mit den Werten des laufenden Ballots sichtbar. Dauer ist eine
+Auswahl aus Offen, 1, 2 oder 5 Minuten und eigener Dauer bis vier Stunden; das
+Sekundenfeld erscheint nur für die eigene Dauer.
+
+Die Ergebniszeilen stehen beim Start fest: eine je gespeicherter Beschriftung,
+bei Freitext genau fünf. Stimmen erscheinen als 12-px-Balken mit Zahl und
+Prozent in festen Spalten; Ergebniszahl und Zeit stehen im Kopf. Scheitert das
+Einplanen eines manuellen Schlusses, stellt das Modul den vorherigen
+Schließgrund wieder her; Fehler im Alarmhandler werden vom Host mit Backoff
+erneut versucht. Der Host stellt `ModuleBallotAccess.hasOpenBallot()` als
 generische Abfrage der kanalweiten Sperre bereit, damit das Panel auch einen
 Votekick erklären und den Start deaktivieren kann, ohne ein anderes Modul zu
 importieren. Leere Beschriftungen verwenden Platzhalterwerte als Vorschau und

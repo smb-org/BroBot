@@ -9,12 +9,16 @@ export const CHAT_VOTING_MAX_TEXT_TERMS = 200;
 export const CHAT_VOTING_HARD_LIMIT_MS = 4 * 60 * 60 * 1_000;
 export const CHAT_VOTING_BALLOT_RETENTION_MS = 24 * 60 * 60 * 1_000 - 60_000;
 
+// Label lists are measured in Unicode code points, like the per-label rule (an emoji counts as one).
+const labelList = (maxCodePoints: number) =>
+  z.string().refine((value) => Array.from(value).length <= maxCodePoints).default("");
+
 export const chatVotingSettingsSchema = z.object({
-  yesNoLabels: z.string().max(70).default(""),
-  scaleLabels: z.string().max(175).default(""),
-  optionLabels: z.string().max(315).default(""),
-  zeroOneLabels: z.string().max(70).default(""),
-  oneTwoLabels: z.string().max(70).default(""),
+  yesNoLabels: labelList(70),
+  scaleLabels: labelList(175),
+  optionLabels: labelList(315),
+  zeroOneLabels: labelList(70),
+  oneTwoLabels: labelList(70),
   autoCloseSeconds: z.number().int().min(0).max(CHAT_VOTING_HARD_LIMIT_MS / 1_000).default(0),
   announceResult: z.boolean().default(true),
   resultText: z.string().max(500).default("{vote.result}"),

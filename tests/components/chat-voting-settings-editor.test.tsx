@@ -3,7 +3,7 @@ import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
+import { DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "../../src/modules/chat_voting/contracts";
 import settingsEditor from "../../src/modules/chat_voting/panel/settings-editor";
 import { chatVotingSettingsEditorCatalog } from "../../src/modules/chat_voting/panel/locale";
 import { SettingsEditor, UiProvider } from "../../src/dashboard/ui";
@@ -40,7 +40,7 @@ describe("chat voting settings editor", () => {
     expect(screen.getByRole("textbox", { name: "Scale labels" })).toHaveAttribute("placeholder", "1|2|3|4|5");
     expect(screen.getByRole("textbox", { name: "Labels for 2–9 options" })).toHaveAttribute("placeholder", "1|2|3|…|9");
     expect(screen.getByRole("textbox", { name: "Yes/no labels" })).not.toBeRequired();
-    const timer = screen.getByRole("spinbutton", { name: "Auto close" });
+    const timer = screen.getByRole("spinbutton", { name: "Default duration" });
     expect(timer).toHaveValue("0");
     expect(timer.parentElement).toHaveTextContent("Off");
     expect(timer.parentElement).not.toHaveTextContent("s");
@@ -60,9 +60,32 @@ describe("chat voting settings editor", () => {
       readOnly
     /></UiProvider>);
 
-    expect(screen.getByText("Automatisch schließen")).toBeInTheDocument();
+    expect(screen.getByText("Standarddauer")).toBeInTheDocument();
     expect(screen.getByText("Aus")).toBeInTheDocument();
     expect(screen.queryByText("0 s")).not.toBeInTheDocument();
-    expect(screen.queryByRole("spinbutton", { name: "Automatisch schließen" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: "Standarddauer" })).not.toBeInTheDocument();
+  });
+
+  it.each([["en", "Yes/no labels"], ["de", "Ja/Nein-Beschriftungen"]] as const)("counts emoji labels as code points in %s and rejects the same overflow as the server", (language, name) => {
+    const copy = chatVotingSettingsEditorCatalog(language);
+    const renderWith = (value: string) => render(<UiProvider><SettingsEditor
+      spec={settingsEditor.spec}
+      sectionId="labels"
+      settings={{ ...DEFAULT_CHAT_VOTING_SETTINGS, yesNoLabels: value }}
+      onChange={() => undefined}
+      texts={copy}
+      templateMessages={copy.templateMessages}
+    /></UiProvider>);
+    const valid = `${"😀".repeat(18)}|${"😀".repeat(18)}`;
+    expect(chatVotingSettingsSchema.safeParse({ yesNoLabels: valid }).success).toBe(true);
+    const view = renderWith(valid);
+    expect(screen.getByRole("textbox", { name })).not.toBeInvalid();
+    expect(view.container).toHaveTextContent("37 / 70");
+    view.unmount();
+    const tooLong = `${"😀".repeat(35)}|${"😀".repeat(35)}`;
+    expect(chatVotingSettingsSchema.safeParse({ yesNoLabels: tooLong }).success).toBe(false);
+    const over = renderWith(tooLong);
+    expect(screen.getByRole("textbox", { name })).toBeInvalid();
+    expect(over.container).toHaveTextContent("71 / 70");
   });
 });
