@@ -179,6 +179,7 @@ describe("Member management", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     database.close();
     vi.unstubAllGlobals();
   });
@@ -592,21 +593,27 @@ describe("Member management", () => {
   it("returns all names as unresolvable on a Helix timeout", async () => {
     await setupChannel(database);
     await insertBotIdentity(database);
-    vi.mocked(fetch).mockImplementationOnce((_input, init) => new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener("abort", () => { reject(new DOMException("Aborted", "AbortError")); }, { once: true });
-    }));
-
-    const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members"),
-      environment,
-    );
+    const request = await requestFor("user-1", "/api/channels/kanal-a/members");
+    let resolveFetchStarted!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => { resolveFetchStarted = resolve; });
+    vi.mocked(fetch).mockImplementationOnce((_input, init) => {
+      resolveFetchStarted();
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => { reject(new DOMException("Aborted", "AbortError")); }, { once: true });
+      });
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const responsePromise = panelRouter.fetch(request, environment);
+    await fetchStarted;
+    await vi.advanceTimersByTimeAsync(5_000);
+    const response = await responsePromise;
     const body = await response.json<{ members: Array<Record<string, unknown>> }>();
 
     expect(response.status).toBe(200);
     expect(body.members).toEqual([
       expect.objectContaining({ userId: "user-1", login: null, displayName: null }),
     ]);
-  }, 10_000);
+  });
 
   it("doesn't let a manager create a broadcaster", async () => {
     // Otherwise the manager makes their second account a broadcaster and then

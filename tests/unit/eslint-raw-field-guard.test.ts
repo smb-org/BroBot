@@ -33,6 +33,9 @@ afterEach(async () => {
 });
 
 describe("raw-field ESLint guard (editor-konzept 15.5)", () => {
+  // These probes run the real ESLint config and JSX parser against temporary
+  // files; cold ESLint/TypeScript program creation on CI takes more than 10 s,
+  // so these probes keep an explicit 20 s timeout.
   it("flags a raw <input> under src/dashboard/, outside the seam", async () => {
     expect(await lintProbe("src/dashboard/__eslint_probe_input__.tsx", "export const Probe = () => <input />;\n")).toBe(true);
   }, 20_000);
