@@ -369,7 +369,7 @@ export interface OverlaysTexts {
   missingVariable: (name: string) => string;
   legacyTitle: string; legacyDescription: string; legacyEmpty: string; legacyTokenName: string; legacyCreatedByUnknown: string;
   legacyCreatedAt: string; legacyTokenId: string; legacyRevokeTitle: (name: string) => string; legacyRevokeDescription: (name: string) => string;
-  legacyRevokeConfirm: (name: string) => string; legacyRevocationReason: string; loadMore: string;
+  legacyRevokeConfirm: (name: string) => string; legacyRevocationReason: string; loadMore: string; legacyLoaded: string;
   legacyImport: string; legacyImportTitle: string; legacyImportDescription: string; legacyImportLinkLabel: string;
   legacyImportPlaceholder: string; legacyImportCssWarning: string; legacyImportPositionWarning: string;
   legacyImportTokenWarning: string; legacyImportConfirm: string; legacyImportSuccess: (name: string) => string;
@@ -471,7 +471,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     legacyTokenName: "Unbenannter Alt-Link", legacyCreatedByUnknown: "Ersteller unbekannt", legacyCreatedAt: "Erstellt", legacyTokenId: "Link-ID",
     legacyRevokeTitle: (name) => `Alten Link „${name}“ widerrufen?`,
     legacyRevokeDescription: () => `Der alte Link wird ungültig und verbundene Quellen werden geschlossen.`,
-    legacyRevokeConfirm: (name) => `Alten Link widerrufen: ${name}`, legacyRevocationReason: "Über Alte Links im Dashboard widerrufen", loadMore: "Weitere laden",
+    legacyRevokeConfirm: (name) => `Alten Link widerrufen: ${name}`, legacyRevocationReason: "Über Alte Links im Dashboard widerrufen", loadMore: "Weitere laden", legacyLoaded: "geladen",
     legacyImport: "Importieren", legacyImportTitle: "Alten Link importieren",
     legacyImportDescription: "Füge einen alten Overlay-Link ein. Nur Token, Variable und Anzeigetext werden an den Server gesendet.",
     legacyImportLinkLabel: "Alter Overlay-Link",
@@ -579,7 +579,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     legacyTokenName: "Unnamed legacy link", legacyCreatedByUnknown: "Creator unknown", legacyCreatedAt: "Created", legacyTokenId: "Link ID",
     legacyRevokeTitle: (name) => `Revoke legacy link “${name}”?`,
     legacyRevokeDescription: () => `The legacy link will stop working and connected sources will close.`,
-    legacyRevokeConfirm: (name) => `Revoke legacy link: ${name}`, legacyRevocationReason: "Revoked from Legacy links in the dashboard", loadMore: "Load more",
+    legacyRevokeConfirm: (name) => `Revoke legacy link: ${name}`, legacyRevocationReason: "Revoked from Legacy links in the dashboard", loadMore: "Load more", legacyLoaded: "loaded",
     legacyImport: "Import", legacyImportTitle: "Import a legacy link",
     legacyImportDescription: "Paste an old overlay link. Only its token, variable, and display text are sent to the server.",
     legacyImportLinkLabel: "Legacy overlay link",
@@ -775,6 +775,7 @@ export interface DashboardTexts {
     before: string;
     after: string;
     olderEntries: string;
+    loaded: string;
     loadingOlderEntries: string;
     yes: string;
     no: string;
@@ -1086,7 +1087,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     audit: {
       title: "Audit-Log", entries: "Einträge", who: "Wer", systemActor: "Automatisches System",
       load: "Audit-Log wird geladen …", loadError: "Der Audit-Log konnte nicht geladen werden.", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
-      before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loadingOlderEntries: "Ältere Einträge werden geladen …",
+      before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loaded: "geladen", loadingOlderEntries: "Ältere Einträge werden geladen …",
       yes: "Ja", no: "Nein", newValue: "neu", removedValue: "entfernt",
       changedTruncated: "geändert (Text länger als die Vorschau)", changesHeading: "Änderungen",
       sentenceTemplates: {
@@ -1373,7 +1374,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     audit: {
       title: "Audit log", entries: "entries", who: "Who", systemActor: "Automated system",
       load: "Loading audit log …", loadError: "The audit log could not be loaded.", empty: "No audit entries saved yet.", changeData: "Change data",
-      before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
+      before: "Before", after: "After", olderEntries: "Load older entries", loaded: "loaded", loadingOlderEntries: "Loading older entries …",
       yes: "Yes", no: "No", newValue: "new", removedValue: "removed",
       changedTruncated: "changed (text longer than preview)", changesHeading: "Changes",
       sentenceTemplates: {

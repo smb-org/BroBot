@@ -44,12 +44,14 @@ interface RequestGate {
   started: () => void;
 }
 
-type ChannelGates = Partial<Record<"settings" | "members" | "audit" | "events" | "overlays" | "legacyTokens" | "variables" | "modules", RequestGate>>;
+type ChannelGates = Partial<Record<"settings" | "members" | "membersNext" | "audit" | "events" | "overlays" | "legacyTokens" | "variables" | "modules", RequestGate>>;
 
 interface ChannelMockData {
   channelList?: readonly Record<string, unknown>[];
   settings?: Record<string, unknown>;
   members?: { members: readonly Record<string, unknown>[]; nextCursor: string | null };
+  membersNext?: { members: readonly Record<string, unknown>[]; nextCursor: string | null };
+  membersNextStatus?: number;
   audit?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
   events?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
   variables?: { variables: readonly Record<string, unknown>[]; count: number; maximum: number };
@@ -81,10 +83,13 @@ const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: C
       return;
     }
     if (pathname === `/api/channels/${channelId}/members`) {
-      const gate = gates.members;
+      const isNextPage = new URL(route.request().url()).searchParams.has("cursor");
+      const gate = isNextPage ? gates.membersNext : gates.members;
       gate?.started();
       if (gate !== undefined) await gate.wait;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...(data.members ?? { members: [], nextCursor: null }), broadcasterCount: 1, viewerUserId: "viewer" }) });
+      const status = isNextPage ? data.membersNextStatus ?? 200 : 200;
+      const response = isNextPage ? data.membersNext ?? data.members ?? { members: [], nextCursor: null } : data.members ?? { members: [], nextCursor: null };
+      await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(status === 200 ? { ...response, broadcasterCount: 1, viewerUserId: "viewer" } : { error: "member_page_failed" }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/variables`) {
@@ -157,6 +162,14 @@ const fullMemberPage = Array.from({ length: 100 }, (_, index) => ({
   userId: `member-${String(index + 1)}`,
   login: `member-${String(index + 1)}`,
   displayName: `Member ${String(index + 1)}`,
+  profileImageUrl: null,
+  role: "operator",
+  joinedAt: "2026-09-20T08:00:00.000Z",
+}));
+const nextMemberPage = Array.from({ length: 50 }, (_, index) => ({
+  userId: `member-${String(index + 101)}`,
+  login: `member-${String(index + 101)}`,
+  displayName: `Member ${String(index + 101)}`,
   profileImageUrl: null,
   role: "operator",
   joinedAt: "2026-09-20T08:00:00.000Z",
@@ -329,19 +342,15 @@ test("the overview location region is present and keeps its box while settings l
   expect(before).toEqual(after);
 });
 
-test("activity controls stay above growing lists as channel responses arrive", async ({ page }) => {
+test("event controls stay above growing lists as channel responses arrive", async ({ page }) => {
   for (const [section, gateName, controlSelector] of [
-    ["members", "members", ".members-page__pagination-slot"],
-    ["audit", "audit", ".audit-page__pagination-slot"],
     ["events", "events", ".events-page__pagination-slot"],
   ] as const) {
     let releaseResponse!: () => void;
     let markResponseStarted!: () => void;
     const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
     const responseStarted = new Promise<void>((resolve) => { markResponseStarted = resolve; });
-    const responseData: ChannelMockData = section === "members"
-      ? { members: { members: fullMemberPage, nextCursor: "members-next" } }
-      : section === "audit" ? { audit: fullAuditPage } : { events: fullEventPage };
+    const responseData: ChannelMockData = { events: fullEventPage };
     await installChannelMocks(page, { [gateName]: { wait: responseGate, started: markResponseStarted } }, responseData);
     await page.goto(`/channels/${channelId}/${section}`);
     await responseStarted;
@@ -358,7 +367,33 @@ test("activity controls stay above growing lists as channel responses arrive", a
   }
 });
 
-test("platform audit and member controls stay above their growing lists", async ({ page }) => {
+test("channel audit pagination stays in a sticky 44px footer and the list top fixed at desktop and 390px", async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installChannelMocks(page, {}, { audit: fullAuditPage });
+
+    await page.goto(`/channels/${channelId}/audit`);
+    const loadState = page.locator(".ui-load-state");
+    await expect(loadState).toHaveAttribute("data-status", "success");
+    await expect(page.locator(".audit-page__pagination-slot")).toHaveCount(0);
+    const listTop = await measureDocumentBox(page, ".ui-load-state");
+    const footer = page.locator(".list-pagination-footer");
+    const more = footer.getByRole("button", { name: "Load older entries" });
+    await expect(more).toBeVisible();
+    await expect(footer).toContainText("50 loaded");
+    await footer.scrollIntoViewIfNeeded();
+    const footerBox = await measureBox(page, ".list-pagination-footer");
+    expect(footerBox[3]).toBe(44);
+    expect(Math.abs(footerBox[1] + footerBox[3] - (width === 390 ? 844 : 900))).toBeLessThanOrEqual(1);
+    await more.click();
+    await expect(more).toBeEnabled();
+    expect((await measureDocumentBox(page, ".ui-load-state")).slice(0, 2)).toEqual(listTop.slice(0, 2));
+    expect((await measureBox(page, ".list-pagination-footer"))[3]).toBe(44);
+    await page.unrouteAll();
+  }
+});
+
+test("platform audit keeps its footer in place as rows arrive", async ({ page }) => {
   let releaseAudit!: () => void;
   let markAuditStarted!: () => void;
   let releaseMembers!: () => void;
@@ -375,14 +410,13 @@ test("platform audit and member controls stay above their growing lists", async 
   await page.goto("/platform");
   await auditStarted;
   await page.getByRole("tab", { name: "Audit" }).click();
-  const auditControlBefore = await measureBox(page, ".platform-audit__pagination-slot");
+  const platformAuditList = page.locator(".platform-tabs__panel .ui-load-state");
+  const auditListBefore = await measureBox(page, ".platform-tabs__panel .ui-load-state");
   releaseAudit();
-  await expect(page.locator(".platform-audit__pagination-slot button")).toBeVisible();
-  await expect(page.locator(".platform-audit__pagination-slot")).toHaveCount(1);
-  const platformAuditList = page.locator(".platform-audit__pagination-slot + .ui-load-state");
+  await expect(page.locator(".platform-tabs__panel .list-pagination-footer button")).toBeVisible();
   await expect(platformAuditList).toHaveAttribute("data-status", "success");
-  expect(await measureBox(page, ".platform-audit__pagination-slot")).toEqual(auditControlBefore);
-  expect(auditControlBefore[1] + auditControlBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".platform-audit__pagination-slot + .ui-load-state"))[1]);
+  expect((await measureBox(page, ".platform-tabs__panel .ui-load-state")).slice(0, 2)).toEqual(auditListBefore.slice(0, 2));
+  expect((await measureBox(page, ".platform-tabs__panel .list-pagination-footer"))[3]).toBe(44);
 
   await page.getByRole("tab", { name: "Channels" }).click();
   await page.locator(".platform-channel-table tbody tr").click();
@@ -412,45 +446,89 @@ test("platform tabs isolate populated channel and audit lists at desktop and mob
     const channelControls = await measureDocumentBox(page, ".platform-tabs__list");
     const channelList = await measureDocumentBox(page, ".platform-channel-table");
     expect(channelControls[1] + channelControls[3]).toBeLessThanOrEqual(channelList[1]);
-    await expect(page.locator(".platform-tabs__panel .platform-audit__pagination-slot")).toHaveCount(0);
+    await expect(page.locator(".platform-tabs__panel .list-pagination-footer")).toHaveCount(0);
 
     await auditTab.click();
-    const auditControl = page.locator(".platform-audit__pagination-slot");
-    const auditList = page.locator(".platform-audit__pagination-slot + .ui-load-state");
+    const auditControl = page.locator(".platform-tabs__panel .list-pagination-footer");
+    const auditList = page.locator(".platform-tabs__panel .ui-load-state");
     await expect(auditTab).toHaveAttribute("aria-selected", "true");
     await expect(auditControl.getByRole("button", { name: "Load more" })).toBeVisible();
     await expect(auditList).toHaveAttribute("data-status", "success");
     await expect(auditList.locator(".table tbody tr")).toHaveCount(50);
     await expect(page.locator(".platform-tabs [role='tabpanel']:visible")).toHaveCount(1);
     await expect(page.locator(".platform-channel-table")).toHaveCount(0);
-    const auditControls = await measureDocumentBox(page, ".platform-audit__pagination-slot");
-    const auditRows = await measureDocumentBox(page, ".platform-audit__pagination-slot + .ui-load-state");
-    expect(auditControls[1] + auditControls[3]).toBeLessThanOrEqual(auditRows[1]);
+    const auditControls = await measureBox(page, ".platform-tabs__panel .list-pagination-footer");
+    expect(auditControls[3]).toBe(44);
+    expect(Math.abs(auditControls[1] + auditControls[3] - (width === 390 ? 844 : 900))).toBeLessThanOrEqual(1);
     await page.unrouteAll();
   }
 });
 
-test("a full member page keeps pagination above the growing list at desktop and 390px", async ({ page }) => {
+test("member pagination stays in a sticky 44px footer as more rows load at desktop and 390px", async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    let releaseMembers!: () => void;
-    let markMembersStarted!: () => void;
-    const membersGate = new Promise<void>((resolve) => { releaseMembers = resolve; });
-    const membersStarted = new Promise<void>((resolve) => { markMembersStarted = resolve; });
-    await installChannelMocks(page, { members: { wait: membersGate, started: markMembersStarted } }, {
+    let releaseNextPage!: () => void;
+    let markNextPageStarted!: () => void;
+    const nextPageGate = new Promise<void>((resolve) => { releaseNextPage = resolve; });
+    const nextPageStarted = new Promise<void>((resolve) => { markNextPageStarted = resolve; });
+    await installChannelMocks(page, { membersNext: { wait: nextPageGate, started: markNextPageStarted } }, {
       members: { members: fullMemberPage, nextCursor: "members-next" },
+      membersNext: { members: nextMemberPage, nextCursor: null },
     });
 
     await page.goto(`/channels/${channelId}/members`);
-    await membersStarted;
-    const loadState = page.locator(".ui-load-state");
-    await expect(loadState).toHaveAttribute("data-status", "loading");
-    const beforeFooter = await measureBox(page, ".members-page__pagination-slot");
-    releaseMembers();
     await expect(page.locator(".members-table tbody tr")).toHaveCount(100);
-    await expect(loadState).toHaveAttribute("data-status", "success");
-    expect(await measureBox(page, ".members-page__pagination-slot")).toEqual(beforeFooter);
-    expect(beforeFooter[1] + beforeFooter[3]).toBeLessThanOrEqual((await measureBox(page, ".ui-load-state"))[1]);
+    const listTop = await measureDocumentBox(page, ".members-table");
+    const footer = page.locator(".members-page__list-column .list-pagination-footer");
+    await expect(footer.getByRole("button", { name: "Load more members" })).toBeVisible();
+    expect((await measureBox(page, ".list-pagination-footer"))[3]).toBe(44);
+    await footer.getByRole("button", { name: "Load more members" }).click();
+    await nextPageStarted;
+    expect((await measureDocumentBox(page, ".members-table")).slice(0, 2)).toEqual(listTop.slice(0, 2));
+    releaseNextPage();
+    await expect(page.locator(".members-table tbody tr")).toHaveCount(150);
+    expect((await measureDocumentBox(page, ".members-table")).slice(0, 2)).toEqual(listTop.slice(0, 2));
+    await expect(footer).toContainText("150 loaded");
+    await expect(footer.getByRole("button", { name: "Load more members" })).toHaveCount(0);
+    await footer.scrollIntoViewIfNeeded();
+    const footerBox = await measureBox(page, ".list-pagination-footer");
+    expect(footerBox[3]).toBe(44);
+    expect(Math.abs(footerBox[1] + footerBox[3] - (width === 390 ? 844 : 900))).toBeLessThanOrEqual(1);
+    await page.unrouteAll();
+  }
+});
+
+test("member list errors use a toast and keep the table top fixed at desktop and 390px", async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installChannelMocks(page, {}, {
+      members: { members: fullMemberPage, nextCursor: "members-next" },
+      membersNextStatus: 500,
+    });
+
+    await page.goto(`/channels/${channelId}/members`);
+    await expect(page.locator(".members-table tbody tr")).toHaveCount(100);
+    const listTop = await measureDocumentBox(page, ".members-table");
+    await page.getByRole("button", { name: "Load more members" }).click();
+    await expect(page.locator(".ui-toast").filter({ hasText: "The data could not be loaded." })).toBeVisible();
+    expect((await measureDocumentBox(page, ".members-table")).slice(0, 2)).toEqual(listTop.slice(0, 2));
+    await expect(page.locator(".content-section .form-error")).toHaveCount(0);
+    await page.unrouteAll();
+  }
+});
+
+test("setting an event filter leaves the list top fixed at desktop and 390px", async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installChannelMocks(page, {}, { events: fullEventPage });
+
+    await page.goto(`/channels/${channelId}/events`);
+    await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
+    const listTop = await measureDocumentBox(page, ".ui-load-state");
+    await page.getByRole("textbox", { name: "Person" }).fill("Operator");
+    await expect(page.locator(".dashboard-filter-bar__summary")).toContainText("Operator");
+    await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
+    expect(await measureDocumentBox(page, ".ui-load-state")).toEqual(listTop);
     await page.unrouteAll();
   }
 });

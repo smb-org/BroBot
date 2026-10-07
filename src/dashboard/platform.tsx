@@ -23,7 +23,7 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, LoadState as LoadStateView, notify, PageHeader, Select, Skeleton, SubInspector, Switch, Tabs, useInspectorSelection, type SelectOption } from "./ui";
+import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, ListPaginationFooter, LoadState as LoadStateView, notify, PageHeader, Select, Skeleton, SubInspector, Switch, Tabs, useInspectorSelection, type SelectOption } from "./ui";
 import { MemberGrantEditor } from "./member-grant-editor";
 import { StateRow, type StateTone } from "./module-panels";
 
@@ -466,9 +466,6 @@ const PlatformAudit = ({
   return (
     <section className="config-section" aria-label={texts.audit}>
       <div className="section-heading"><h2>{texts.audit}</h2></div>
-      <div className="platform-audit__pagination-slot">
-        {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? texts.loadingMore : texts.loadMore}</button>}
-      </div>
       <LoadStateView
         status={status}
         minHeight={280}
@@ -483,6 +480,9 @@ const PlatformAudit = ({
           </table>
         </div>
       )}</LoadStateView>
+      {(auditState.data?.entries.length ?? 0) === 0 && auditState.data?.nextCursor == null ? null : <ListPaginationFooter loadedCount={auditState.data?.entries.length ?? 0} loadedLabel={texts.loaded}>
+        {auditState.data?.nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? texts.loadingMore : texts.loadMore}</button>}
+      </ListPaginationFooter>}
     </section>
   );
 };

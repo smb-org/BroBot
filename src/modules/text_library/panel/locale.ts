@@ -44,6 +44,8 @@ export interface TextLibraryTexts {
   categoryLimit: string;
   categoryDeleteBlocked: string;
   blockLimit: (maximum: number) => string;
+  blockLimitReached: (count: number, maximum: number) => string;
+  managementLocked: string;
   gameBound: string;
   variants: string;
   addVariant: string;
@@ -153,6 +155,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     categoryLimit: "Es können höchstens 25 Kategorien angelegt werden.",
     categoryDeleteBlocked: "Kategorie kann nur gelöscht werden, wenn sie leer ist.",
     blockLimit: (maximum) => `Höchstens ${String(maximum)} Textbausteine pro Kanal.`,
+    blockLimitReached: (count, maximum) => `${String(count)} von ${String(maximum)} genutzt: Grenze erreicht.`,
+    managementLocked: "Nur Broadcaster und Verwalter dürfen Textbausteine anlegen.",
     gameBound: "Nur für diese Spiele",
     variants: "Varianten",
     addVariant: "Variante hinzufügen",
@@ -291,6 +295,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     categoryLimit: "A channel can have up to 25 categories.",
     categoryDeleteBlocked: "A category can only be deleted when it is empty.",
     blockLimit: (maximum) => `A channel can have up to ${String(maximum)} text blocks.`,
+    blockLimitReached: (count, maximum) => `${String(count)} of ${String(maximum)} used: limit reached.`,
+    managementLocked: "Only broadcasters and managers may add text blocks.",
     gameBound: "Only for these games",
     variants: "Variants",
     addVariant: "Add variant",
