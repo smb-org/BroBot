@@ -403,7 +403,9 @@ const storePollResult = async (
     const now = Date.now();
     const phase = result.ok ? { consecutiveFailures: 0, failing: false } : failedPhase(previousPhase);
     const alreadyClassified = sameStream && streamId !== null && currentStatus?.belaboxStreamId === streamId;
-    const classified = mode === "on_demand" || alreadyClassified || result.ok && result.sample.connected && streamId !== null;
+    // Persisted classification comes only from a connected sample (or an existing one);
+    // the on-demand override below affects presentation only.
+    const classified = alreadyClassified || result.ok && result.sample.connected && streamId !== null;
     const previousAlert = sameStream ? currentStatus?.alertState ?? createInitialAlertState() : createInitialAlertState();
     const alert = mode === "interval" && classified && prerequisites.settings.alertsEnabled
       ? advanceAlert(previousAlert, result.ok ? result.sample : {
@@ -420,7 +422,7 @@ const storePollResult = async (
         result.sample,
         sameStream ? currentStatus?.sample ?? null : null,
         sameStream,
-        classified,
+        classified || mode === "on_demand",
         prerequisites.settings.lowBitrateKbps,
         alert.state,
       )
@@ -451,7 +453,7 @@ const storePollResult = async (
         }
       }
     }
-    const history = result.ok && classified && minuteAt !== null && streamId !== null
+    const history = result.ok && classified && minuteAt !== null
       ? {
         streamId,
         startedAt: prerequisites.startedAt ?? result.sample.at,

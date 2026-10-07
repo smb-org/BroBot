@@ -760,6 +760,38 @@ describe("BELABOX polling", () => {
     });
   });
 
+  it("classifies a stream only from a connected sample, never from an on-demand check", async () => {
+    const settings = { ...BELABOX_DEFAULT_SETTINGS, mode: "on_demand" as const, intervalSeconds: 5, holdSeconds: 5 };
+    await insertModule(database, settings);
+    const { context } = alarmContext(database);
+    const countMinutes = async () => (await database.prepare(
+      "SELECT COUNT(*) AS n FROM belabox_minutes WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first<{ n: number }>())?.n;
+
+    await pollOnDemand(context, () => Promise.resolve(jsonResponse(disconnectedRelayPayload(0))));
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({ belaboxStreamId: null });
+
+    await database.prepare(
+      "UPDATE channel_modules SET settings = ?, revision = revision + 1 WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(JSON.stringify({ ...settings, mode: "interval" }), CHANNEL_ID).run();
+    const offline = () => Promise.resolve(jsonResponse(disconnectedRelayPayload(0)));
+    for (let i = 0; i < 3; i += 1) {
+      vi.setSystemTime(Date.now() + 5_000);
+      await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, offline);
+    }
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      belaboxStreamId: null,
+      alertState: { phase: "ok", kind: null },
+    });
+    expect(await countMinutes()).toBe(0);
+
+    vi.setSystemTime(Date.now() + 5_000);
+    await handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined,
+      () => Promise.resolve(jsonResponse(relayPayload(true))));
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({ belaboxStreamId: STREAM_ID });
+    expect(await countMinutes()).toBe(1);
+  });
+
   it("clears interval alert state in the same on-demand sample write", async () => {
     const settings = {
       ...BELABOX_DEFAULT_SETTINGS,
