@@ -132,6 +132,31 @@ describe("worker skeleton", () => {
       expect(body.missingBindings).toEqual([]);
     });
 
+    it("checks the schema by highest migration number, not by application order", async () => {
+      const database = (env as unknown as { DB: D1Database }).DB;
+      const status = async () => (await exports.default.fetch(new Request("http://localhost/healthz"))).status;
+      const sentinel: string = "0045_chat_voting_title.sql";
+      const original = (await database.prepare("SELECT name FROM d1_migrations WHERE name LIKE '0040_%' OR name = ?")
+        .bind(sentinel).all<{ name: string }>()).results.map((row) => row.name);
+      const reinsert = async (names: string[]): Promise<void> => {
+        await database.prepare("DELETE FROM d1_migrations WHERE name LIKE '0040_%' OR name = ?").bind(sentinel).run();
+        for (const name of names) {
+          await database.prepare("INSERT INTO d1_migrations (name, applied_at) VALUES (?, ?)")
+            .bind(name, new Date().toISOString()).run();
+        }
+      };
+      try {
+        // 0040 applied last (highest id) but the highest number is still 0045.
+        await reinsert(original.filter((name) => name === sentinel).concat(original.filter((name) => name !== sentinel)));
+        expect(await status()).toBe(200);
+
+        await reinsert(original.filter((name) => name !== sentinel));
+        expect(await status()).toBe(503);
+      } finally {
+        await reinsert(original);
+      }
+    });
+
     it("moves a legacy sun location into the host channel row", async () => {
       const database = (env as unknown as { DB: D1Database }).DB;
       try {
