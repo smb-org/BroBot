@@ -86,4 +86,20 @@ test("list toolbar keeps its 44px control row and 20px status at desktop and 390
   expect(createBox?.y ?? 0).toBeGreaterThan(searchBox?.y ?? 0);
   expect(mobileStatus?.height).toBe(20);
   await expect(status).toContainText("1 of 2 members");
+
+  // Toolbar without filters must not overflow the list column at 320px.
+  await page.setViewportSize({ width: 320, height: 844 });
+  await expect(toolbar.locator(".list-toolbar__filters")).toHaveCount(0);
+  const fit = await toolbar.evaluate((el) => {
+    const column = el.closest(".members-page__list-column") as HTMLElement;
+    const row = el.querySelector(".list-toolbar__row") as HTMLElement;
+    const button = el.querySelector(".list-toolbar__create button") as HTMLElement;
+    const c = column.getBoundingClientRect();
+    const b = button.getBoundingClientRect();
+    return { rowOverflow: row.scrollWidth - row.clientWidth, columnOverflow: column.scrollWidth - column.clientWidth, left: b.left - c.left, right: c.right - b.right };
+  });
+  expect(fit.rowOverflow).toBeLessThanOrEqual(0);
+  expect(fit.columnOverflow).toBeLessThanOrEqual(0);
+  expect(fit.left).toBeGreaterThanOrEqual(0);
+  expect(fit.right).toBeGreaterThanOrEqual(0);
 });

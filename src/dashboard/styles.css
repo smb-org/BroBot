@@ -1466,7 +1466,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .table-lock { display: inline-flex; align-items: center; margin-left: var(--s2); color: var(--text-3); vertical-align: middle; }
 .table-lock .ui-icon { width: 16px; height: 16px; }
 @container list-toolbar (max-width: 640px) {
-  .list-toolbar__row { grid-template-columns: minmax(0, 1fr) auto; height: auto; }
+  .list-toolbar__row,
+  .list-toolbar__row:not(:has(.list-toolbar__filters)) { grid-template-columns: minmax(0, 1fr) auto; height: auto; }
   .list-toolbar__search { grid-column: 1 / -1; }
   .list-toolbar__filters { grid-column: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; }
   .text-library__list-toolbar .list-toolbar__filters { overflow: visible; }
