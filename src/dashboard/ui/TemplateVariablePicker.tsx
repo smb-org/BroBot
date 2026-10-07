@@ -209,7 +209,7 @@ export function TemplateVariablePicker({
       }}
       transformGroups={transformGroups}
       showNoResults={createVariableHref === undefined}
-      width={360}
+      width="min(440px, calc(100vw - 32px))"
     />
   );
 }

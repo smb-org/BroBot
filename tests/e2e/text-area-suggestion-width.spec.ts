@@ -130,5 +130,9 @@ test("variable picker rows show readable sample values and align info icons", as
     expect(Math.min(...widths)).toBeGreaterThan(24);
     const infoX = await page.locator(".ui-variable-picker__info").evaluateAll((nodes) => [...new Set(nodes.map((node) => Math.round(node.getBoundingClientRect().x)))]);
     expect(infoX).toHaveLength(1);
+    const box = await page.locator(".ui-grouped-picker").boundingBox();
+    if (width === 1280) expect(box?.width).toBeGreaterThanOrEqual(400);
+    expect(box !== null && box.x >= 0 && box.x + box.width <= width).toBe(true);
+    if (width === 1280) expect(Math.round((await page.locator(".ui-grouped-picker__popover").boundingBox())?.width ?? 0)).toBe(440);
   }
 });
