@@ -350,7 +350,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-result { gap: var(--s3); }
 .chat-voting-result__heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); min-width: 0; }
 .chat-voting-result__heading h3 { flex: none; color: var(--text); font-size: 13px; font-weight: 600; }
-.chat-voting-result__meta { min-width: 0; overflow: hidden; color: var(--text-2); text-overflow: ellipsis; text-align: right; white-space: nowrap; }
+.chat-voting-result__meta { min-width: 0; color: var(--text-2); text-align: right; overflow-wrap: anywhere; }
 .chat-voting-result__empty { display: flex; box-sizing: border-box; min-height: 68px; align-items: center; margin: 0; padding: var(--s3); }
 .chat-voting-results { display: grid; gap: var(--s2); width: 100%; }
 .chat-voting-results__row { display: grid; grid-template-columns: 1.5rem minmax(4rem, 1fr) minmax(6rem, 2fr) 3rem 3.5rem; align-items: center; gap: var(--s2); min-width: 0; min-height: 34px; color: var(--text-2); }
