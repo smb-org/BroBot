@@ -854,13 +854,15 @@ describe("text library", () => {
     expect(welcomeTableRow).toHaveTextContent("1 variant");
     expect(welcomeTableRow).toHaveTextContent("0 uses");
     fireEvent.click(screen.getByRole("button", { name: /\{welcome\}/u }));
-    expect(screen.getAllByRole("note")[0]).toHaveTextContent("Only broadcasters and managers can change text blocks and categories.");
+    expect(screen.getAllByText("Only broadcasters and managers can change text blocks and categories.")).toHaveLength(2);
     expect(document.querySelector(".text-library__read-only-properties")).toHaveTextContent("Hello");
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Categories"));
     expect(screen.getAllByRole("note")).toHaveLength(2);
     expect(document.querySelectorAll(".text-library__read-only-properties")).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: "Add text block" })).not.toBeInTheDocument();
+    const addButton = screen.getByRole("button", { name: "Add text block" });
+    expect(addButton).toBeDisabled();
+    expect(addButton).toHaveAttribute("aria-describedby", "text-library-create-reason");
   });
 
   it("guards close, Escape, backdrop, and row changes when a text draft is dirty", async () => {

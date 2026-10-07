@@ -124,6 +124,7 @@ export interface PlatformTexts {
   actor: string;
   loadMore: string;
   loadingMore: string;
+  loaded: string;
   platformAdmin: string;
   member: string;
   actionLabel: Record<PlatformAction, string>;
@@ -199,6 +200,7 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     actor: "Akteur",
     loadMore: "Weitere Audit-Einträge laden",
     loadingMore: "Weitere Audit-Einträge werden geladen …",
+    loaded: "geladen",
     platformAdmin: "Betreiber",
     member: "Mitglied",
     actionLabel: {
@@ -278,6 +280,7 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     actor: "Actor",
     loadMore: "Load more audit entries",
     loadingMore: "Loading more audit entries …",
+    loaded: "loaded",
     platformAdmin: "Operator",
     member: "Member",
     actionLabel: {
@@ -348,6 +351,7 @@ export interface MembersTexts {
   load: string;
   loadMore: string;
   loadingMore: string;
+  loaded: string;
   sessionInvalid: string;
   changeFailed: string;
   removeSelf: string;
@@ -372,7 +376,7 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
     newMemberRoleLabel: "Rolle für neue Mitgliedschaft", confirmationTitle: (name) => `Zugriff für ${name} freigeben?`,
     confirmationText: (role) => `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${role}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt.`,
     grantPermanently: "Zugriff endgültig freigeben", membersWithAccess: "Freigegebene Mitglieder",
-    load: "Mitglieder werden geladen …", loadMore: "Weitere Mitglieder laden", loadingMore: "Weitere Mitglieder werden geladen …",
+    load: "Mitglieder werden geladen …", loadMore: "Weitere Mitglieder laden", loadingMore: "Weitere Mitglieder werden geladen …", loaded: "geladen",
     sessionInvalid: "Deine Sitzung ist nicht mehr gültig.", changeFailed: "Die Mitgliederänderung ist fehlgeschlagen.",
     removeSelf: "Du verlierst deinen Zugang und kannst nur über eine andere berechtigte Person zurückkehren.",
     removeOther: (name) => `${name} verliert den Zugang zu diesem Kanal und seinen kanalbezogenen Panel-Daten und -Funktionen.`,
@@ -389,7 +393,7 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
     empty: "No one else has access to this channel yet.", grantAccess: "Grant access", newMemberRoleLabel: "Role for new membership",
     confirmationTitle: (name) => `Grant access for ${name}?`, confirmationText: (role) => `This person has no Twitch relationship proving access to this channel. The ${role} role grants access to the member list and the channel features allowed by that role.`,
     grantPermanently: "Grant access permanently", membersWithAccess: "Members with access",
-    load: "Loading members …", loadMore: "Load more members", loadingMore: "Loading more members …",
+    load: "Loading members …", loadMore: "Load more members", loadingMore: "Loading more members …", loaded: "loaded",
     sessionInvalid: "Your session is no longer valid.", changeFailed: "The member change failed.",
     removeSelf: "You will lose access to this channel and can return only through another authorized person.",
     removeOther: (name) => `${name} will lose access to this channel and its channel-specific panel data and features.`,

@@ -4,7 +4,7 @@ export function FilterBar({ label, children, className, summary }: { label: stri
   return (
     <div className={`dashboard-filter-bar${className === undefined ? "" : ` ${className}`}`}>
       <div className="dashboard-filter-bar__controls" role="group" aria-label={label}>{children}</div>
-      {summary === undefined ? null : <div className="dashboard-filter-bar__summary">{summary}</div>}
+      <div className="dashboard-filter-bar__summary">{summary}</div>
     </div>
   );
 }

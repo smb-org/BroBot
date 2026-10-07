@@ -26,7 +26,7 @@ import {
   type PanelOverlayToken,
 } from "./api";
 import { apiErrorText, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
-import { ActionMenu, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
+import { ActionMenu, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, ListPaginationFooter, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -751,8 +751,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         </div>
         <p className="muted">{labels.legacyDescription}</p>
         <div className="overlay-legacy-links__reason-slot">{manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}</div>
-        <div className="overlay-legacy-links__pagination-slot">{legacyNextOffset === null ? null : <Button variant="subtle" disabled={pending}
-          onClick={() => { void loadLegacyTokens(legacyNextOffset, true); }}>{labels.loadMore}</Button>}</div>
         <LoadState
           status={legacyLoading && legacyTokens.length === 0 ? "loading" : legacyLoadFailed && legacyTokens.length === 0 ? "error" : legacyTokens.length === 0 ? "empty" : "success"}
           minHeight={260}
@@ -773,6 +771,10 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
             ]} /></div>
           </li>)}</ul>
         </LoadState>
+        {legacyTokens.length === 0 && legacyNextOffset === null ? null : <ListPaginationFooter loadedCount={legacyTokens.length} loadedLabel={labels.legacyLoaded}>
+          {legacyNextOffset === null ? null : <Button variant="neutral" disabled={pending || legacyLoading}
+            onClick={() => { void loadLegacyTokens(legacyNextOffset, true); }}>{labels.loadMore}</Button>}
+        </ListPaginationFooter>}
       </details>
     </section>
   </section>;

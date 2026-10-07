@@ -405,6 +405,9 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     roleConditionUsedOutsideCommand ? labels.roleConditionHint : null,
     inputVariableUsedOutsideCommand ? labels.inputContextWarning : null,
   ].filter((message): message is string => message !== null);
+  const atBlockLimit = data.blocks.length >= TEXT_BLOCK_MAXIMUMS.blocksPerChannel;
+  const createReason = !canManage ? labels.managementLocked
+    : atBlockLimit ? labels.blockLimitReached(data.blocks.length, TEXT_BLOCK_MAXIMUMS.blocksPerChannel) : "";
 
   return (
     <section className="module-stack text-library" aria-label={labels.library} style={{ minHeight: "calc(var(--s10) * 30)" }}>
@@ -413,7 +416,11 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
         list={<section className="config-section text-library__list-panel" aria-label={labels.library}>
           <div className="section-heading">
             <h2>{labels.library}</h2>
-            {canManage ? <Button icon="add" iconOnly ariaLabel={labels.addBlock} disabled={pending || data.blocks.length >= TEXT_BLOCK_MAXIMUMS.blocksPerChannel} {...(data.blocks.length >= TEXT_BLOCK_MAXIMUMS.blocksPerChannel ? { title: labels.blockLimit(TEXT_BLOCK_MAXIMUMS.blocksPerChannel) } : {})} onClick={openCreate} /> : null}
+            <div className="list-create-action">
+              <Button icon="add" iconOnly ariaLabel={labels.addBlock} disabled={pending || createReason.length > 0}
+                {...(createReason.length === 0 ? {} : { describedBy: "text-library-create-reason" })} onClick={openCreate} />
+              <p id="text-library-create-reason" className="list-create-action__reason" aria-hidden={createReason.length === 0}>{createReason}</p>
+            </div>
           </div>
           <FilterBar label={labels.library} className="text-library__filters" summary={activeFilters.length === 0 ? undefined : <div className="form-actions"><p className="muted" aria-live="polite">{labels.activeFilters} {activeFilters.join(" · ")}</p><Button variant="subtle" onClick={() => { setSearch(""); setCategoryFilter(""); setGameFilter([]); }}>{labels.resetFilters}</Button></div>}>
             <Field label={labels.search} placeholder={labels.search} value={search} onChange={setSearch} />
@@ -625,10 +632,12 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
               </InspectorSection>
 
               <InspectorActions destructive={isCreate ? undefined : <Button danger="subtle" disabled={!canManage || pending} onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>}>
-                {canManage ? <Button variant="primary" disabled={pending || !valid} onClick={() => { void saveDraftWithToast(); }}>{isCreate ? labels.create : labels.save}</Button> : null}
+                {canManage ? <Button variant="primary" disabled={pending || !valid || (isCreate && atBlockLimit)} onClick={() => { void saveDraftWithToast(); }}>{isCreate ? labels.create : labels.save}</Button> : null}
                 {canManage ? <Button variant="subtle" disabled={pending} onClick={closeEditor}>{labels.discard}</Button> : null}
               </InspectorActions>
-              {isCreate && data.blocks.length >= TEXT_BLOCK_MAXIMUMS.blocksPerChannel ? <p className="form-error">{labels.blockLimit(TEXT_BLOCK_MAXIMUMS.blocksPerChannel)}</p> : null}
+              <p className="list-create-action__reason" role={isCreate && atBlockLimit ? "note" : undefined} aria-hidden={!isCreate || !atBlockLimit}>
+                {isCreate && atBlockLimit ? labels.blockLimitReached(data.blocks.length, TEXT_BLOCK_MAXIMUMS.blocksPerChannel) : ""}
+              </p>
             </div>
           </SubInspector>
         )}

@@ -1790,6 +1790,9 @@ export const DashboardApp = (): ReactElement => {
       await reloadModules();
       await reloadOverview();
     } catch (error) {
+      notify({ tone: "error", message: error instanceof PanelApiError
+        ? apiErrorText(error.code, dashboardTexts().errors.changeFailed)
+        : dashboardTexts().errors.changeFailed });
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {
       setHeaderModuleBusy(false);

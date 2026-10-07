@@ -7,7 +7,7 @@ import { apiErrorText, dashboardCommonTexts, formatDate } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
 import { MemberAvatar } from "./member-avatar";
 import { MemberGrantEditor } from "./member-grant-editor";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, ListDetail, LoadState, notify, useDraftGuard, useInspectorSelection } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, ListDetail, ListPaginationFooter, LoadState, notify, useDraftGuard, useInspectorSelection } from "./ui";
 import {
   addChannelMember,
   PanelApiError,
@@ -368,25 +368,30 @@ export const MembersPage = ({
 
   return (
     <>
-      <ModuleHeading kind="members" title={texts.title} subtitle={<ModuleCount count={members.length} label={texts.count} />} actions={<span title={canManageMembers ? undefined : texts.managementLocked}>
-        <Button ref={grantButtonRef} variant="subtle" iconOnly icon="add" ariaLabel={texts.grantAccessTitle} disabled={!canManageMembers} onClick={openGrant} />
-      </span>} />
+      <ModuleHeading kind="members" title={texts.title} subtitle={<ModuleCount count={members.length} label={texts.count} />} actions={<div className="list-create-action">
+        <Button ref={grantButtonRef} variant="subtle" iconOnly icon="add" ariaLabel={texts.grantAccessTitle}
+          {...(!canManageMembers ? { describedBy: "members-create-reason" } : {})}
+          disabled={!canManageMembers} onClick={openGrant} />
+        <p id="members-create-reason" className="list-create-action__reason" role={canManageMembers ? undefined : "note"} aria-hidden={canManageMembers}>{canManageMembers ? "" : texts.managementLocked}</p>
+      </div>} />
       <section className="content-section" aria-label={texts.membersWithAccess}>
         <div className="section-heading">
           <h2>{texts.membersWithAccess}</h2>
         </div>
-        <div className="members-page__pagination-slot">
-          {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
-        </div>
         <div className={loading ? "stale" : undefined}>
           <ListDetail
-            list={<LoadState
-              status={members.length > 0 ? "success" : error !== null ? "error" : loading ? "loading" : "empty"}
-              minHeight={320}
-              loading={<MemberListSkeleton />}
-              empty={<MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
-              error={<MemberListSkeleton />}
-            >{members.length === 0 ? null : <MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>}
+            list={<div className="members-page__list-column">
+              <LoadState
+                status={members.length > 0 ? "success" : error !== null ? "error" : loading ? "loading" : "empty"}
+                minHeight={320}
+                loading={<MemberListSkeleton />}
+                empty={<MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
+                error={<MemberListSkeleton />}
+              >{members.length === 0 ? null : <MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>
+              {members.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={members.length} loadedLabel={texts.loaded}>
+                {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
+              </ListPaginationFooter>}
+            </div>}
             inspector={selectedMember !== null ? (
               <MemberInspector
                 key={selectedMember.userId}

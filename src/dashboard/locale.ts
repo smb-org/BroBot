@@ -369,7 +369,7 @@ export interface OverlaysTexts {
   missingVariable: (name: string) => string;
   legacyTitle: string; legacyDescription: string; legacyEmpty: string; legacyTokenName: string; legacyCreatedByUnknown: string;
   legacyCreatedAt: string; legacyTokenId: string; legacyRevokeTitle: (name: string) => string; legacyRevokeDescription: (name: string) => string;
-  legacyRevokeConfirm: (name: string) => string; legacyRevocationReason: string; loadMore: string;
+  legacyRevokeConfirm: (name: string) => string; legacyRevocationReason: string; loadMore: string; legacyLoaded: string;
   legacyImport: string; legacyImportTitle: string; legacyImportDescription: string; legacyImportLinkLabel: string;
   legacyImportPlaceholder: string; legacyImportCssWarning: string; legacyImportPositionWarning: string;
   legacyImportTokenWarning: string; legacyImportConfirm: string; legacyImportSuccess: (name: string) => string;
@@ -471,7 +471,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     legacyTokenName: "Unbenannter Alt-Link", legacyCreatedByUnknown: "Ersteller unbekannt", legacyCreatedAt: "Erstellt", legacyTokenId: "Link-ID",
     legacyRevokeTitle: (name) => `Alten Link „${name}“ widerrufen?`,
     legacyRevokeDescription: () => `Der alte Link wird ungültig und verbundene Quellen werden geschlossen.`,
-    legacyRevokeConfirm: (name) => `Alten Link widerrufen: ${name}`, legacyRevocationReason: "Über Alte Links im Dashboard widerrufen", loadMore: "Weitere laden",
+    legacyRevokeConfirm: (name) => `Alten Link widerrufen: ${name}`, legacyRevocationReason: "Über Alte Links im Dashboard widerrufen", loadMore: "Weitere laden", legacyLoaded: "geladen",
     legacyImport: "Importieren", legacyImportTitle: "Alten Link importieren",
     legacyImportDescription: "Füge einen alten Overlay-Link ein. Nur Token, Variable und Anzeigetext werden an den Server gesendet.",
     legacyImportLinkLabel: "Alter Overlay-Link",
@@ -579,7 +579,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     legacyTokenName: "Unnamed legacy link", legacyCreatedByUnknown: "Creator unknown", legacyCreatedAt: "Created", legacyTokenId: "Link ID",
     legacyRevokeTitle: (name) => `Revoke legacy link “${name}”?`,
     legacyRevokeDescription: () => `The legacy link will stop working and connected sources will close.`,
-    legacyRevokeConfirm: (name) => `Revoke legacy link: ${name}`, legacyRevocationReason: "Revoked from Legacy links in the dashboard", loadMore: "Load more",
+    legacyRevokeConfirm: (name) => `Revoke legacy link: ${name}`, legacyRevocationReason: "Revoked from Legacy links in the dashboard", loadMore: "Load more", legacyLoaded: "loaded",
     legacyImport: "Import", legacyImportTitle: "Import a legacy link",
     legacyImportDescription: "Paste an old overlay link. Only its token, variable, and display text are sent to the server.",
     legacyImportLinkLabel: "Legacy overlay link",

@@ -1103,15 +1103,20 @@ export const TextCommandsPanel = ({
   };
 
   const listStatus = loading ? "loading" : loadFailed ? "error" : commands.length === 0 ? "empty" : "success";
+  const createReason = canManageContent ? "" : labels.managementLocked;
   const list = <section className="command-list config-section" aria-label={labels.list}>
     <div className="section-heading">
       <h2>{labels.list}</h2>
-      {canManageContent ? <Button icon="add" iconOnly ariaLabel={labels.add} onClick={openCreate} /> : null}
+      <div className="list-create-action">
+        <Button icon="add" iconOnly ariaLabel={labels.add} disabled={!canManageContent}
+          {...(!canManageContent ? { describedBy: "text-command-create-reason" } : {})} onClick={openCreate} />
+        <p id="text-command-create-reason" className="list-create-action__reason" role={canManageContent ? undefined : "note"} aria-hidden={canManageContent}>{createReason}</p>
+      </div>
     </div>
     <LoadState status={listStatus} minHeight="calc(var(--s10) * 15)"
       loading={<Skeleton rows={8} height={34} />}
       empty={<p className="empty-state">{labels.empty}</p>}
-      error={<p className="form-error" role="alert">{labels.loadError}</p>}>
+      error={<div aria-hidden="true" />}>
       <div className="table-wrap" style={{ maxHeight: "calc(var(--s10) * 15)", overflowY: "auto" }}><table className="table"><thead><tr>
         <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>
       </tr></thead><tbody>{commands.map((command) => <TextCommandRow
