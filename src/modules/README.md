@@ -871,10 +871,17 @@ Codepunkten haben. Das Panel bietet sie neben dem Typ an; Chatbefehle wie
 `!vote yesno Pizza heute?` übernehmen den Rest nach dem Typ. Bei Freitext steht
 ein direkt folgendes `word` oder `message` weiterhin für den Zählmodus, der
 danach folgende Text für die Frage. Frage und Ergebnis bleiben gemeinsam in der
-Historie erhalten. Standardmeldungen nennen die Frage; eigene Ergebnistexte
-können sie mit `{vote.title}` einfügen (`{title}` bleibt der Stream-Titel). Das Overlay ersetzt mit der Frage seine
-allgemeine Überschrift und reserviert dafür immer dieselbe, auf zwei Zeilen
-begrenzte Höhe.
+Historie erhalten. Der Starttext ist eine optionale Vorlage mit bis zu 500
+Zeichen und gilt für Panel- und Chatstarts. Der Standard nennt Frage und
+Abstimmungsoptionen; ohne Frage lässt er den Fragetitel samt Trennstrich weg.
+Ein leerer Starttext schaltet die Meldung aus. `{vote.title}` enthält die
+optionale Frage und `{vote.options}` die lokalisierten Eingaben, zum Beispiel
+`1 = Pizza, 2 = Burger, 3 = Döner`; bei Freitext erklärt die Variable die
+erwartete Nachricht. Beide Variablen stehen auch im Ergebnistexte-Template zur
+Verfügung (`{title}` bleibt der Stream-Titel). Start- und Ergebnismeldungen
+laufen über die gemeinsame automatisierte Chat-Ausgabe. Das Overlay ersetzt
+mit der Frage seine allgemeine Überschrift und reserviert dafür immer dieselbe,
+auf zwei Zeilen begrenzte Höhe.
 
 Das Panel zeigt auf breiten Ansichten Konfiguration und Ergebnis nebeneinander;
 auf schmalen Ansichten stehen alle Steuerelemente oberhalb des Ergebnisses.

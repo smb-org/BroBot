@@ -145,9 +145,10 @@ describe("chat voting routes", () => {
     );
     const writeAudit = vi.fn(() => Promise.resolve());
     const app = appFor(ballotAccess(), () => Promise.resolve([]), vi.fn(() => Promise.resolve()), authorizeModuleMutation, writeAudit);
+    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
     const namespace = {
       idFromName: vi.fn(() => ({})),
-      get: vi.fn(() => ({ scheduleModuleAlarm: vi.fn(() => Promise.resolve()) })),
+      get: vi.fn(() => ({ scheduleModuleAlarm })),
     } as unknown as Env["CHANNEL"];
     const labels = ["😀".repeat(17), "Burger"];
     const title = "Pizza today?";
@@ -167,6 +168,7 @@ describe("chat voting routes", () => {
       action: "chat_voting.started",
       after: { labels, title },
     });
+    expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "announce_start", expect.stringMatching(/^start:/u), expect.any(Number), 0);
   });
 
   it("rejects an approval from a stale displayed poll before refreshing or mutating ballots", async () => {
