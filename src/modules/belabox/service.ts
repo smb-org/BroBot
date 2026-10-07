@@ -56,6 +56,8 @@ import {
 } from "./domain/alert";
 import { validateBelaboxStatsUrl } from "./domain/stats-url";
 import { enrichBelaboxSample, resolvedBelaboxPhase } from "./domain/presentation";
+import { formatTemplateValues } from "./template-values";
+import { BELABOX_TEMPLATE_VARIABLES } from "./contracts/catalog";
 
 const LIVE_BUFFER_MS = 10 * 60_000;
 const LIVE_BUFFER_MAX_POINTS = 120;
@@ -564,9 +566,11 @@ const sendPendingAlert = async (
   expectedSession: BelaboxStreamSession | null,
   expectedSnapshot: BelaboxStreamStateSnapshot | null,
   output: BelaboxAlertChatOutput | null,
-  sample: BelaboxFetchResult,
+  enriched: BelaboxSample | null,
+  alertState: BelaboxAlertState,
 ): Promise<void> => {
-  if (output === null || !sample.ok || sample.sample.at.length === 0) return;
+  if (output === null || enriched === null || enriched.at.length === 0) return;
+  const sample = { sample: enriched };
   const moduleState = await belaboxSettingsForChannel(context.DB, context.channelId);
   if (moduleState?.enabled !== true || moduleState.settings.mode !== "interval" ||
       !moduleState.settings.alertsEnabled || !moduleState.settings.chatEnabled) return;
@@ -584,8 +588,20 @@ const sendPendingAlert = async (
   const message = alertTextFor(settings, output);
   const startedAt = Date.parse(output.episodeStartedAt);
   const downForSeconds = Math.max(0, Math.floor((Date.parse(sample.sample.at) - startedAt) / 1_000));
+  // All variables come from the sample captured by this run; the renderer must never
+  // resolve a belabox.* provider, which could queue behind this running poll.
+  const language = await context.channelLanguage();
+  const values = formatTemplateValues(
+    sample.sample,
+    BELABOX_TEMPLATE_VARIABLES.map(({ name }) => name),
+    language,
+    Date.parse(sample.sample.at),
+    true,
+    settings.lowBitrateKbps,
+    alertState,
+  );
   const rendered = await context.renderTemplate(message.text, {
-    "belabox.bitrate": `${Math.round(sample.sample.bitrateKbps).toLocaleString("en-US")} kbps`,
+    ...values,
     "belabox.down_for": `${String(downForSeconds)} s`,
   }, Date.parse(sample.sample.at));
   const beforeSend = await belaboxSettingsForChannel(context.DB, context.channelId);
@@ -623,8 +639,33 @@ const sendPendingAlert = async (
   }
 };
 
+const runningPolls = new Map<string, number>();
+
+/** True while a poll routine runs for this channel; providers must then read stored samples, never queue a poll. */
+export const isBelaboxPollRunning = (channelId: string): boolean => (runningPolls.get(channelId) ?? 0) > 0;
+
 /** The single serialized BELABOX fetch and sample-write routine used by alarms and requests. */
 export const handleBelaboxPollAlarm = async (
+  context: ModuleAlarmContext,
+  ...rest: [
+    alarmKey: string,
+    deadline: number,
+    ownerRevision?: number,
+    fetcher?: typeof fetch,
+    rawInvocation?: unknown,
+  ]
+): Promise<BelaboxPollRoutineResult | undefined> => {
+  runningPolls.set(context.channelId, (runningPolls.get(context.channelId) ?? 0) + 1);
+  try {
+    return await runBelaboxPoll(context, ...rest);
+  } finally {
+    const left = (runningPolls.get(context.channelId) ?? 1) - 1;
+    if (left <= 0) runningPolls.delete(context.channelId);
+    else runningPolls.set(context.channelId, left);
+  }
+};
+
+const runBelaboxPoll = async (
   context: ModuleAlarmContext,
   alarmKey: string,
   deadline: number,
@@ -829,7 +870,8 @@ export const handleBelaboxPollAlarm = async (
         originSession,
         prerequisites.streamSnapshot,
         stored.alertChat,
-        result,
+        stored.sample,
+        stored.alertState,
       );
     }
     if (pollMode === "interval") {

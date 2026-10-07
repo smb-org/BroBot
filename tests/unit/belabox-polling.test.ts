@@ -148,6 +148,7 @@ const alarmContext = (
     schedule: (key: string, deadline: number) => { scheduled.push({ key, deadline }); currentDeadline = deadline; return Promise.resolve(); },
     clear: (key: string) => { cleared.push(key); currentDeadline = null; return Promise.resolve(); },
     getAlarmDeadline: () => Promise.resolve(currentDeadline),
+    channelLanguage: () => Promise.resolve("en" as const),
     renderTemplate: (text: string) => Promise.resolve({ text }),
     sendChat,
     writeDiagnostics: options.writeDiagnostics ?? ((triggerId: string, entries: readonly { code: string; detail?: Readonly<Record<string, unknown>> }[], now: string) => {
@@ -669,7 +670,7 @@ describe("BELABOX polling", () => {
       intervalSeconds: 5,
       holdSeconds: 5,
       chatEnabled: true,
-      lowText: "{belabox.bitrate}",
+      lowText: "{belabox.bitrate} {belabox.rtt} {belabox.latency} {belabox.network}",
     };
     await insertModule(database, settings);
     const { context, sendChat } = alarmContext(database);
@@ -727,6 +728,15 @@ describe("BELABOX polling", () => {
           "UPDATE channel_modules SET settings = ?, revision = revision + 1 WHERE channel_id = ? AND module_id = 'belabox'",
         ).bind(JSON.stringify({ ...settings, mode: "on_demand" }), CHANNEL_ID).run();
       }
+      // The guard: a provider call during a running poll must read the stored sample, not queue.
+      await expect(belaboxModule.resolveTemplateValues?.(["belabox.rtt", "belabox.latency"], {
+        DB: context.DB,
+        channelId: CHANNEL_ID,
+        now: Date.now(),
+        channelLanguage: () => Promise.resolve("en"),
+        runModuleAlarm: (_m: string, _h: string, _a: string, invocation?: unknown) => queuePoll(invocation),
+      } as unknown as Parameters<NonNullable<typeof belaboxModule.resolveTemplateValues>>[1]))
+        .resolves.toMatchObject({ "belabox.rtt": expect.stringMatching(/ ms$/) as string });
       const values = typeof moduleValuesOrNow === "number"
         ? typeof nowOrModuleValues === "object" ? nowOrModuleValues : {}
         : moduleValuesOrNow ?? {};
@@ -754,6 +764,7 @@ describe("BELABOX polling", () => {
     }
 
     expect(switchedToOnDemand).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     expect(sendChat).not.toHaveBeenCalled();
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
       alertState: { phase: "alarm", kind: "low" },
