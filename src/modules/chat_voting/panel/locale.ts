@@ -49,7 +49,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
       : warning.code === "template_parameters_invalid"
         ? `Ungültige Variablenparameter: ${warning.invalidVariables.join(", ")}`
         : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
-    sections: { labels: "Standardwerte", result: "Ergebnis" },
+    sections: { labels: "Standardwerte", start: "Start", result: "Ergebnis" },
     fields: {
       yesNoLabels: { label: "Ja/Nein-Beschriftungen", hint: "Vorbelegung im Panel und für Chatbefehle. Zwei Texte mit | trennen. Leer lassen für Ja|Nein.", placeholder: "Ja|Nein", invalidError: "Gib genau zwei Texte mit jeweils höchstens 32 Zeichen ein." },
       zeroOneLabels: { label: "0/1-Beschriftungen", hint: "Vorbelegung im Panel und für Chatbefehle. Leer lassen für Nein|Ja.", placeholder: "Nein|Ja", invalidError: "Gib genau zwei Texte mit jeweils höchstens 32 Zeichen ein." },
@@ -57,8 +57,9 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
       scaleLabels: { label: "Skalen-Beschriftungen", hint: "Vorbelegung im Panel und für Chatbefehle. Leer lassen für die Zahlen 1 bis 5.", placeholder: "1|2|3|4|5", invalidError: "Gib genau fünf Texte mit jeweils höchstens 32 Zeichen ein." },
       optionLabels: { label: "Beschriftungen für 2–9 Optionen", hint: "Vorbelegung im Panel und für Chatbefehle. Leer lassen für die Optionsnummern.", placeholder: "1|2|3|…|9", invalidError: "Gib zwei bis neun Texte mit jeweils höchstens 32 Zeichen ein." },
       autoCloseSeconds: { label: "Standarddauer", hint: "Gilt als Vorbelegung für neue Abstimmungen. Ohne Timer endet die Abstimmung nach vier Stunden.", unit: "s", zeroValueLabel: "Aus", increaseLabel: "Schließzeit erhöhen", decreaseLabel: "Schließzeit verringern" },
+      startText: { label: "Starttext", hint: "Wird beim Start im Chat gesendet. Leer lassen, um die Meldung auszuschalten.", previewLabel: "Vorschau", previewSpeaker: "Bot", variables: [{ name: "vote.title", description: "Die optionale Frage der Abstimmung", sample: "Was essen wir heute?" }, { name: "vote.options", description: "Eingaben, mit denen Zuschauer abstimmen können", sample: "1 = Pizza, 2 = Burger, 3 = Döner" }] },
       announceResult: { label: "Ergebnis im Chat senden", hint: "Wird über die gemeinsame Chat-Ausgabebegrenzung gesendet.", description: "Sendet das Ergebnis nach dem Schließen im Chat." },
-      resultText: { label: "Ergebnistext", hint: "{vote.result} enthält Beschriftung, Stimmenzahl und Prozent je Option. {vote.title} enthält die Frage der Abstimmung.", requiredError: "Text eingeben", previewLabel: "Vorschau", previewSpeaker: "Bot", variables: [{ name: "vote.result", description: "Beschriftungen, Stimmen und Prozentwerte des Ergebnisses", sample: "Ja: 8 (67%) · Nein: 4 (33%)" }, { name: "vote.title", description: "Die Frage der Abstimmung", sample: "Was essen wir heute?" }] },
+      resultText: { label: "Ergebnistext", hint: "{vote.result} enthält Beschriftung, Stimmenzahl und Prozent je Option. {vote.title} enthält die Frage. {vote.options} erklärt, wie abgestimmt wird.", requiredError: "Text eingeben", previewLabel: "Vorschau", previewSpeaker: "Bot", variables: [{ name: "vote.result", description: "Beschriftungen, Stimmen und Prozentwerte des Ergebnisses", sample: "Ja: 8 (67%) · Nein: 4 (33%)" }, { name: "vote.title", description: "Die Frage der Abstimmung", sample: "Was essen wir heute?" }, { name: "vote.options", description: "Eingaben, mit denen Zuschauer abstimmen können", sample: "1 = Pizza, 2 = Burger, 3 = Döner" }] },
       resultTarget: { label: "Ziel des Ergebnisses", hint: "Wirkt nur während eines Shared Chats.", options: { all_chats: { label: "Alle Chats" }, source_only: { label: "Nur unser Chat" } } },
     },
   },
@@ -76,7 +77,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
       : warning.code === "template_parameters_invalid"
         ? `Invalid variable parameters: ${warning.invalidVariables.join(", ")}`
         : `Template can be ${String(warning.worstCaseLength)} characters long.`,
-    sections: { labels: "Defaults", result: "Results" },
+    sections: { labels: "Defaults", start: "Start", result: "Results" },
     fields: {
       yesNoLabels: { label: "Yes/no labels", hint: "Defaults in the panel and chat commands. Separate two labels with |. Leave blank to use Yes|No.", placeholder: "Yes|No", invalidError: "Enter exactly two labels of up to 32 characters each." },
       zeroOneLabels: { label: "0/1 labels", hint: "Defaults in the panel and chat commands. Leave blank to use No|Yes.", placeholder: "No|Yes", invalidError: "Enter exactly two labels of up to 32 characters each." },
@@ -84,8 +85,9 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
       scaleLabels: { label: "Scale labels", hint: "Defaults in the panel and chat commands. Leave blank to use 1 through 5.", placeholder: "1|2|3|4|5", invalidError: "Enter exactly five labels of up to 32 characters each." },
       optionLabels: { label: "Labels for 2–9 options", hint: "Defaults in the panel and chat commands. Leave blank to use option numbers.", placeholder: "1|2|3|…|9", invalidError: "Enter two to nine labels of up to 32 characters each." },
       autoCloseSeconds: { label: "Default duration", hint: "Prefills new votes. Without a timer, the vote ends after four hours.", unit: "s", zeroValueLabel: "Off", increaseLabel: "Increase close time", decreaseLabel: "Decrease close time" },
+      startText: { label: "Start text", hint: "Sent in chat when a vote starts. Leave blank to turn off the announcement.", previewLabel: "Preview", previewSpeaker: "Bot", variables: [{ name: "vote.title", description: "The optional vote question", sample: "What should we eat today?" }, { name: "vote.options", description: "The inputs viewers can use to vote", sample: "1 = Pizza, 2 = Burger, 3 = Kebab" }] },
       announceResult: { label: "Send the result in chat", hint: "Uses the shared automated chat output limit.", description: "Sends the result to chat after closing." },
-      resultText: { label: "Result text", hint: "{vote.result} contains each option label, vote count, and percentage. {vote.title} contains the vote question.", requiredError: "Enter text", previewLabel: "Preview", previewSpeaker: "Bot", variables: [{ name: "vote.result", description: "Labels, counts, and percentages from the result", sample: "Yes: 8 (67%) · No: 4 (33%)" }, { name: "vote.title", description: "The vote question", sample: "What should we eat today?" }] },
+      resultText: { label: "Result text", hint: "{vote.result} contains each option label, vote count, and percentage. {vote.title} contains the question. {vote.options} explains how to vote.", requiredError: "Enter text", previewLabel: "Preview", previewSpeaker: "Bot", variables: [{ name: "vote.result", description: "Labels, counts, and percentages from the result", sample: "Yes: 8 (67%) · No: 4 (33%)" }, { name: "vote.title", description: "The vote question", sample: "What should we eat today?" }, { name: "vote.options", description: "The inputs viewers can use to vote", sample: "1 = Pizza, 2 = Burger, 3 = Kebab" }] },
       resultTarget: { label: "Result target", hint: "Only affects output during Shared Chat.", options: { all_chats: { label: "All chats" }, source_only: { label: "Only our chat" } } },
     },
   },

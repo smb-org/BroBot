@@ -49,6 +49,7 @@ import { belaboxModule } from "../../src/modules/belabox";
 import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { getBelaboxStatus } from "../../src/modules/belabox/adapters/d1";
 import { votekickModule } from "../../src/modules/votekick";
+import { chatVotingStartAnnouncementAlarmKey } from "../../src/modules/chat_voting/contracts";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { ballotVoterHash } from "../../src/worker/durable/ballots";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
@@ -1769,6 +1770,26 @@ describe("ChannelObject realtime path", () => {
     });
     expect(Object.keys(storageOf(object).values.get("channel:alarm_schedule") as Record<string, unknown>)
       .filter((key) => key === alarmKey)).toHaveLength(1);
+  });
+
+  it("stores the vote close and start announcement under distinct module alarm keys", async () => {
+    const object = objectFor([]);
+    const pollId = "poll-a";
+
+    await object.scheduleModuleAlarm("chat_voting", "close", pollId, 14_410_000, 0);
+    await object.scheduleModuleAlarm(
+      "chat_voting",
+      "announce_start",
+      chatVotingStartAnnouncementAlarmKey(pollId),
+      10_000,
+      0,
+    );
+
+    const alarmTable = storageOf(object).values.get("channel:alarm_schedule") as Record<string, { deadline: number; handler: string }>;
+    expect(alarmTable).toMatchObject({
+      "module:chat_voting:poll-a": { deadline: 14_410_000, handler: "module:chat_voting:close" },
+      "module:chat_voting:start:poll-a": { deadline: 10_000, handler: "module:chat_voting:announce_start" },
+    });
   });
 
   it("allows only one open ballot per channel across modules", async () => {

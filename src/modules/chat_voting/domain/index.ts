@@ -1,6 +1,7 @@
 import type { ModuleLanguage } from "../../contract";
 import { CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
 import type { ChatVoteTerm, ChatVotingPreset, ChatVotingSettings, ChatVotingTextMode } from "../contracts";
+import { chatVotingFreeTextOptionText } from "../contracts/chat-defaults";
 
 export type VoteCommand =
   | { kind: "start"; preset: ChatVotingPreset; optionCount: number; textMode?: ChatVotingTextMode; title: string | null }
@@ -113,6 +114,24 @@ export const labelsForVote = (
   if (preset === "digit_01") return language === "de" ? ["Nein", "Ja"] : ["No", "Yes"];
   if (preset === "digit_12") return ["1", "2"];
   return Array.from({ length: optionCount }, (_, index) => String(index + 1));
+};
+
+export const formatVoteOptions = (
+  vote: {
+    preset: ChatVotingPreset;
+    optionCount: number;
+    labels: readonly string[];
+    textMode?: ChatVotingTextMode | null;
+  },
+  language: ModuleLanguage,
+): string => {
+  if (vote.preset === "free_text") return chatVotingFreeTextOptionText(language, vote.textMode);
+  if (vote.preset === "digit_01") {
+    return `0 = ${vote.labels[0] ?? "0"}, 1 = ${vote.labels[1] ?? "1"}`;
+  }
+  return Array.from({ length: vote.optionCount }, (_, index) =>
+    `${String(index + 1)} = ${vote.labels[index] ?? String(index + 1)}`,
+  ).join(", ");
 };
 
 const normalizeVoteText = (text: string): string => text.normalize("NFKC").toLowerCase()
