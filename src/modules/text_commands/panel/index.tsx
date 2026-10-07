@@ -1110,7 +1110,7 @@ export const TextCommandsPanel = ({
       <div className="list-create-action">
         <Button icon="add" iconOnly ariaLabel={labels.add} disabled={!canManageContent}
           {...(!canManageContent ? { describedBy: "text-command-create-reason" } : {})} onClick={openCreate} />
-        <p id="text-command-create-reason" className="list-create-action__reason" role={canManageContent ? undefined : "note"} aria-hidden={canManageContent}>{createReason}</p>
+        <p id="text-command-create-reason" className="list-create-action__reason" role={canManageContent ? undefined : "note"} aria-hidden={canManageContent ? true : undefined}>{createReason}</p>
       </div>
     </div>
     <LoadState status={listStatus} minHeight="calc(var(--s10) * 15)"

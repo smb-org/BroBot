@@ -419,7 +419,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
             <div className="list-create-action">
               <Button icon="add" iconOnly ariaLabel={labels.addBlock} disabled={pending || createReason.length > 0}
                 {...(createReason.length === 0 ? {} : { describedBy: "text-library-create-reason" })} onClick={openCreate} />
-              <p id="text-library-create-reason" className="list-create-action__reason" aria-hidden={createReason.length === 0}>{createReason}</p>
+              <p id="text-library-create-reason" className="list-create-action__reason" aria-hidden={createReason.length === 0 ? true : undefined}>{createReason}</p>
             </div>
           </div>
           <FilterBar label={labels.library} className="text-library__filters" summary={activeFilters.length === 0 ? undefined : <div className="form-actions"><p className="muted" aria-live="polite">{labels.activeFilters} {activeFilters.join(" · ")}</p><Button variant="subtle" onClick={() => { setSearch(""); setCategoryFilter(""); setGameFilter([]); }}>{labels.resetFilters}</Button></div>}>

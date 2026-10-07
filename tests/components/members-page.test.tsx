@@ -43,7 +43,9 @@ describe("members list permissions", () => {
     expect(reason).toBeInTheDocument();
     if (disabled) {
       expect(grantButton).toHaveAttribute("aria-describedby", "members-create-reason");
+      expect(reason).toBeVisible();
       expect(reason).toHaveTextContent(membersTexts().managementLocked);
+      expect(reason).not.toHaveAttribute("aria-hidden");
     } else {
       expect(reason).toBeEmptyDOMElement();
     }

@@ -372,7 +372,7 @@ export const MembersPage = ({
         <Button ref={grantButtonRef} variant="subtle" iconOnly icon="add" ariaLabel={texts.grantAccessTitle}
           {...(!canManageMembers ? { describedBy: "members-create-reason" } : {})}
           disabled={!canManageMembers} onClick={openGrant} />
-        <p id="members-create-reason" className="list-create-action__reason" role={canManageMembers ? undefined : "note"} aria-hidden={canManageMembers}>{canManageMembers ? "" : texts.managementLocked}</p>
+        <p id="members-create-reason" className="list-create-action__reason" role={canManageMembers ? undefined : "note"} aria-hidden={canManageMembers ? true : undefined}>{canManageMembers ? "" : texts.managementLocked}</p>
       </div>} />
       <section className="content-section" aria-label={texts.membersWithAccess}>
         <div className="section-heading">

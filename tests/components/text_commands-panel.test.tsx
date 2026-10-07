@@ -100,7 +100,10 @@ describe("Text command editor", () => {
     const addButton = await screen.findByRole("button", { name: "Befehl anlegen" });
     expect(addButton).toBeDisabled();
     expect(addButton).toHaveAttribute("aria-describedby", "text-command-create-reason");
-    expect(document.getElementById("text-command-create-reason")).toHaveTextContent(textCommandsTexts("de").managementLocked);
+    const reason = document.getElementById("text-command-create-reason");
+    expect(reason).toBeVisible();
+    expect(reason).toHaveTextContent(textCommandsTexts("de").managementLocked);
+    expect(reason).not.toHaveAttribute("aria-hidden");
     expect(document.querySelector(".command-list .form-error")).toBeNull();
   });
 

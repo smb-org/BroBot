@@ -32,7 +32,10 @@ describe("Text library panel layout slots", () => {
     const addButton = await screen.findByRole("button", { name: "Add text block" });
     expect(addButton).toBeDisabled();
     expect(addButton).toHaveAttribute("aria-describedby", "text-library-create-reason");
-    expect(document.getElementById("text-library-create-reason")).toHaveTextContent("Only broadcasters and managers may add text blocks.");
+    const reason = document.getElementById("text-library-create-reason");
+    expect(reason).toBeVisible();
+    expect(reason).toHaveTextContent("Only broadcasters and managers may add text blocks.");
+    expect(reason).not.toHaveAttribute("aria-hidden");
   });
 
   it("disables creation at the block limit with a visible reason", async () => {
@@ -48,7 +51,10 @@ describe("Text library panel layout slots", () => {
     const addButton = await screen.findByRole("button", { name: "Add text block" });
     expect(addButton).toBeDisabled();
     expect(addButton).toHaveAttribute("aria-describedby", "text-library-create-reason");
-    expect(document.getElementById("text-library-create-reason")).toHaveTextContent("200 of 200 used: limit reached.");
+    const reason = document.getElementById("text-library-create-reason");
+    expect(reason).toBeVisible();
+    expect(reason).toHaveTextContent("200 of 200 used: limit reached.");
+    expect(reason).not.toHaveAttribute("aria-hidden");
   });
 
   it("keeps the preview, warning, and usage areas mounted for an empty draft", async () => {
