@@ -54,7 +54,10 @@ const formatCountdown = (seconds: number): string =>
 const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
   const incoming = useMemo(() => parseState(state), [state]);
   const current = incoming;
-  const [clock, setClock] = useState(() => Date.now());
+  // The state only triggers re-renders; every render reads the clock itself so idle periods cannot leave it stale.
+  const [, setClock] = useState(0);
+  // eslint-disable-next-line react-hooks/purity -- intentional: remaining time is local-clock minus closesAt at render time
+  const clock = Date.now();
   const [zeroLatchedPollId, setZeroLatchedPollId] = useState<string | null>(null);
   const labels = chatVotingOverlayLabels(language);
   const countdownEnabled = config.showCountdown !== false;

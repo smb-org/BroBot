@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { OverlayCanvas } from "../../src/overlay/canvas";
 import Tally from "../../src/modules/chat_voting/overlay/tally";
 
 describe("chat voting overlay tally", () => {
@@ -275,6 +276,36 @@ describe("chat voting overlay tally", () => {
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       clearIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows 1:30 for a timed vote arriving after an hour idle in the overlay canvas", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    try {
+      const overlay = (state: Record<string, unknown> | null) => ({
+        id: "overlay-a", revision: 1, width: 1280, height: 720, css: "",
+        elements: [{
+          id: "tally-a", kind: "chat_voting.tally", label: "Vote", variableName: null, text: "",
+          config: { showCountdown: true }, state, moduleEnabled: true,
+          x: 0, y: 0, scalePercent: 100, z: 0, inComposition: true,
+        }],
+      });
+      const { container, rerender } = render(
+        <OverlayCanvas overlay={overlay({ pollId: "idle", status: "open", preset: "yes_no", labels: ["Yes", "No"], counts: [0, 0], revision: 0 })} language="en" variables={{}} elementId={null} />);
+      // Wait until the lazy chunk has mounted the idle tally before time passes.
+      await vi.waitFor(() => { expect(container.querySelector("[data-element='tally-a']")?.childElementCount).toBeGreaterThan(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(3_600_000); });
+      const now = Date.now();
+      rerender(<OverlayCanvas overlay={overlay({
+        pollId: "late-poll", openedAt: new Date(now).toISOString(),
+        closesAt: new Date(now + 90_000).toISOString(), requestedDurationSeconds: 90,
+        status: "open", preset: "yes_no", optionCount: 2, labels: ["Yes", "No"], counts: [0, 0], revision: 0,
+      })} language="en" variables={{}} elementId={null} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(container.querySelector(".chat-voting-tally__countdown")).toHaveTextContent("1:30");
+    } finally {
       vi.useRealTimers();
     }
   });
