@@ -77,13 +77,8 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
     : null;
   const currentPollId = current?.pollId;
   const currentStatus = current?.status;
-  useEffect(() => {
-    if (currentPollId === undefined || currentStatus !== "open" || rawCountdownSeconds !== 0 ||
-        zeroLatchedPollId === currentPollId) return;
-    const pollId = currentPollId;
-    const timer = window.setTimeout(() => setZeroLatchedPollId(pollId), 0);
-    return () => window.clearTimeout(timer);
-  }, [currentPollId, currentStatus, rawCountdownSeconds, zeroLatchedPollId]);
+  if (currentPollId !== undefined && currentStatus === "open" && rawCountdownSeconds === 0 &&
+      zeroLatchedPollId !== currentPollId) setZeroLatchedPollId(currentPollId);
   const countdownSeconds = current?.status === "open" && zeroLatchedPollId === current.pollId
     ? 0
     : rawCountdownSeconds;

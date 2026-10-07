@@ -207,6 +207,43 @@ describe("chat voting overlay tally", () => {
     }
   });
 
+  it("does not let a delayed synchronization sample revive a zero countdown", () => {
+    const serverNow = "2030-01-01T00:00:00.000Z";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2040-01-01T00:00:00.000Z"));
+    try {
+      const config = { layout: "bars", showPercent: true, showCountdown: true };
+      const state = {
+        pollId: "delayed-sync-poll",
+        openedAt: "2029-12-31T23:58:30.000Z",
+        closesAt: serverNow,
+        requestedDurationSeconds: 90,
+        serverNow,
+        serverTimeOffsetMs: Date.parse(serverNow) - Date.now(),
+        serverTimeLocalNowMs: Date.now(),
+        status: "open" as const,
+        preset: "yes_no" as const,
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        counts: [0, 0],
+        revision: 0,
+      };
+      const { container, rerender } = render(<Tally config={config} state={state} now={Date.now()} language="en" />);
+      const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
+      expect(countdown).toHaveTextContent("0:00");
+
+      const delayedSampleLocalNow = Date.now();
+      rerender(<Tally config={config} state={{
+        ...state,
+        serverTimeOffsetMs: Date.parse(serverNow) - delayedSampleLocalNow - 1_000,
+        serverTimeLocalNowMs: delayedSampleLocalNow,
+      }} now={delayedSampleLocalNow} language="en" />);
+      expect(countdown).toHaveTextContent("0:00");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["open-ended", { requestedDurationSeconds: null, status: "open" }],
     ["closed", { requestedDurationSeconds: 90, status: "closed", closedAt: "2030-01-01T00:00:00.000Z" }],
