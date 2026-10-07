@@ -1471,8 +1471,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .list-toolbar__search { grid-column: 1 / -1; }
   .list-toolbar__filters { grid-column: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; }
   .text-library__list-toolbar .list-toolbar__filters { overflow: visible; }
+  .list-toolbar__filters > * { min-width: 0; }
   .text-library__list-toolbar .ui-select,
-  .text-library__list-toolbar .ui-game-picker { flex: 1 1 5rem; min-width: 5rem; }
+  .text-library__list-toolbar .ui-game-picker { flex: 1 1 0; min-width: 0; }
   .text-library__list-toolbar .ui-game-picker--compact .ui-game-picker__selected { display: none; }
   .text-library__list-toolbar .ui-game-picker--compact .ui-game-picker__search > input { padding-right: var(--s2); }
   .list-toolbar__create { grid-column: 2; }
