@@ -226,6 +226,85 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the bootstrap countdown sync sample when replaying a buffered tally message", async () => {
+    let localNow = Date.parse("2030-01-01T00:00:09.000Z");
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => localNow);
+    const bootstrapResponse = (revision: number): Response => new Response(JSON.stringify({
+      language: "en",
+      overlay: {
+        id: "voting-overlay",
+        revision: 1,
+        width: 1920,
+        height: 1080,
+        css: "",
+        elements: [{
+          id: "voting-element",
+          kind: "chat_voting.tally",
+          label: "Voting",
+          variableName: null,
+          text: "",
+          config: { layout: "bars", showPercent: true, showCountdown: true },
+          state: {
+            pollId: "poll-sync",
+            openedAt: "2030-01-01T00:00:00.000Z",
+            closesAt: "2030-01-01T00:01:30.000Z",
+            requestedDurationSeconds: 90,
+            serverNow: "2030-01-01T00:00:10.000Z",
+            status: "open",
+            preset: "yes_no",
+            optionCount: 2,
+            labels: ["Yes", "No"],
+            counts: [0, 0],
+            revision,
+          },
+          moduleEnabled: true,
+          x: 0,
+          y: 0,
+          scalePercent: 100,
+          z: 0,
+          inComposition: true,
+        }],
+      },
+      variables: {},
+    }), { status: 200 });
+    let finishRefresh: ((response: Response) => void) | null = null;
+    const refreshResponse = new Promise<Response>((resolve) => { finishRefresh = resolve; });
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(bootstrapResponse(0))
+      .mockReturnValueOnce(refreshResponse);
+    vi.stubGlobal("fetch", fetcher);
+
+    try {
+      const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+      await waitFor(() => expect(container.querySelector(".chat-voting-tally__countdown")).toHaveTextContent("1:20"));
+
+      act(() => realtimeCallbacks?.onOpen?.(true));
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      act(() => realtimeCallbacks?.onModuleMessage?.({
+        version: 1,
+        id: "buffered-tally-update",
+        createdAt: "2030-01-01T00:00:01.000Z",
+        channelId: "fictional-channel",
+        type: "modul.chat_voting.tally",
+        payload: { pollId: "poll-sync", counts: [1, 0], revision: 1 },
+      }));
+
+      localNow = Date.parse("2030-01-01T00:00:10.000Z");
+      await act(async () => {
+        finishRefresh?.(bootstrapResponse(0));
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(container.textContent).toContain("1 · 100%"));
+      expect(container.querySelector(".chat-voting-tally__countdown")).toHaveTextContent("1:20");
+    } finally {
+      cleanup();
+      nowSpy.mockRestore();
+    }
+  });
+
   it("replaces rendered voting state with bootstrap snapshots, including null, and hides closed results on time", async () => {
     const responseFor = (state: Readonly<Record<string, unknown>> | null): Response => new Response(JSON.stringify({
       language: "en",

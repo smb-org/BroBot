@@ -52,6 +52,52 @@ const takePendingReload = (lifecycle: OverlayLifecycle): boolean => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+interface ReceivedModuleMessage {
+  message: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>;
+  serverNow: string | null;
+  localNow: number;
+}
+
+const receiveModuleMessage = (
+  message: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>,
+): ReceivedModuleMessage => ({
+  message,
+  serverNow: typeof message.payload.serverNow === "string" && Number.isFinite(Date.parse(message.payload.serverNow))
+    ? message.payload.serverNow
+    : Number.isFinite(Date.parse(message.createdAt)) ? message.createdAt : null,
+  localNow: Date.now(),
+});
+
+const readServerTimeSample = (state: Readonly<Record<string, unknown>> | null): {
+  serverNow: string;
+  serverTimeOffsetMs: number;
+  serverTimeLocalNowMs: number;
+} | null => {
+  if (state === null || typeof state.serverNow !== "string" || !Number.isFinite(Date.parse(state.serverNow)) ||
+      typeof state.serverTimeOffsetMs !== "number" || !Number.isFinite(state.serverTimeOffsetMs) ||
+      typeof state.serverTimeLocalNowMs !== "number" || !Number.isFinite(state.serverTimeLocalNowMs)) return null;
+  return {
+    serverNow: state.serverNow,
+    serverTimeOffsetMs: state.serverTimeOffsetMs,
+    serverTimeLocalNowMs: state.serverTimeLocalNowMs,
+  };
+};
+
+const preserveNewerServerTimeSample = (
+  previous: Readonly<Record<string, unknown>> | null,
+  merged: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> => {
+  const previousSample = readServerTimeSample(previous);
+  const mergedSample = readServerTimeSample(merged);
+  const mergedIsNewer = previousSample !== null && mergedSample !== null && (
+    mergedSample.serverTimeLocalNowMs > previousSample.serverTimeLocalNowMs ||
+    mergedSample.serverTimeLocalNowMs === previousSample.serverTimeLocalNowMs &&
+      Date.parse(mergedSample.serverNow) >= Date.parse(previousSample.serverNow)
+  );
+  if (previousSample === null || mergedIsNewer) return merged;
+  return { ...merged, ...previousSample };
+};
+
 const isInteger = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value);
 
 const isOverlayLanguage = (value: unknown): value is OverlayLanguage => value === "de" || value === "en";
@@ -116,14 +162,11 @@ const applyVariableMessage = (
 
 const applyModuleMessage = (
   bootstrap: OverlayBootstrapData,
-  message: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>,
+  received: ReceivedModuleMessage,
 ): OverlayBootstrapData => {
   if (bootstrap.overlay === null) return bootstrap;
+  const { message, serverNow, localNow } = received;
   const kind = moduleOverlayElementKindForMessage(message.type);
-  const serverNow = typeof message.payload.serverNow === "string" && Number.isFinite(Date.parse(message.payload.serverNow))
-    ? message.payload.serverNow
-    : Number.isFinite(Date.parse(message.createdAt)) ? message.createdAt : null;
-  const localNow = Date.now();
   const payload = serverNow === null
     ? message.payload
     : {
@@ -136,9 +179,12 @@ const applyModuleMessage = (
     ...bootstrap,
     overlay: {
       ...bootstrap.overlay,
-      elements: bootstrap.overlay.elements.map((element) => element.kind === kind && element.moduleEnabled === true
-        ? { ...element, state: mergeModuleOverlayElementState(kind, element.state ?? null, payload) }
-        : element),
+      elements: bootstrap.overlay.elements.map((element) => {
+        if (element.kind !== kind || element.moduleEnabled !== true) return element;
+        const previousState = element.state ?? null;
+        const mergedState = mergeModuleOverlayElementState(kind, previousState, payload);
+        return { ...element, state: preserveNewerServerTimeSample(previousState, mergedState) };
+      }),
     },
   };
 };
@@ -205,7 +251,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
     let timelineRefreshTimer: number | null = null;
     let retryAttempt = 0;
     const pendingVariableChanges = new Map<string, number | null>();
-    const pendingModuleMessages: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>[] = [];
+    const pendingModuleMessages: ReceivedModuleMessage[] = [];
 
     const install = (next: OverlayBootstrapData | null, nextState: LoadState): void => {
       bootstrapRef.current = next;
@@ -293,12 +339,11 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
         if (parsedBootstrap === null) throw new Error("Overlay bootstrap response had an invalid shape.");
         const parsed = estimateOverlayStateTransit(parsedBootstrap, performance.now() - requestStartedAt);
         const next = pendingModuleMessages.reduce(
-          (current, message) => applyModuleMessage(current, message),
+          (current, received) => applyModuleMessage(current, received),
           applyPendingVariableChanges(parsed, pendingVariableChanges),
         );
         pendingModuleMessages.length = 0;
         pendingVariableChanges.clear();
-        pendingModuleMessages.length = 0;
         document.documentElement.lang = next.language;
         install(next, next.overlay === null ? "unbound" : "ready");
         scheduleTimelineRefresh(next);
@@ -381,15 +426,16 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
           if (message.payload.overlayId === current.overlay?.id) scheduleReload();
         },
         onModuleMessage: (message) => {
+          const received = receiveModuleMessage(message);
           if (moduleOverlayMessageRequiresStateReload(message.type)) {
             if (bootstrapRef.current === null) lifecycle.reloadPending = true;
             else scheduleReload();
             return;
           }
           const current = bootstrapRef.current;
-          if (loadInFlight || current === null) pendingModuleMessages.push(message);
+          if (loadInFlight || current === null) pendingModuleMessages.push(received);
           if (current === null) return;
-          const next = applyModuleMessage(current, message);
+          const next = applyModuleMessage(current, received);
           bootstrapRef.current = next;
           setBootstrap(next);
         },

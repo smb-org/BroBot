@@ -161,7 +161,8 @@ describe("chat voting overlay tally", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2040-01-01T00:00:00.000Z"));
     try {
-      const { container } = render(<Tally config={{ layout: "bars", showPercent: true, showCountdown: true }} state={{
+      const config = { layout: "bars", showPercent: true, showCountdown: true };
+      const state = {
         pollId: "timed-poll",
         openedAt: serverNow,
         closesAt: "2030-01-01T00:01:30.000Z",
@@ -175,7 +176,8 @@ describe("chat voting overlay tally", () => {
         labels: ["Yes", "No"],
         counts: [0, 0],
         revision: 0,
-      }} now={Date.now()} language="en" />);
+      };
+      const { container, rerender } = render(<Tally config={config} state={state} now={Date.now()} language="en" />);
 
       const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
       expect(countdown).toHaveTextContent("1:30");
@@ -185,6 +187,21 @@ describe("chat voting overlay tally", () => {
       expect(countdown).toHaveTextContent("0:00");
       act(() => { vi.advanceTimersByTime(5_000); });
       expect(countdown).toHaveTextContent("0:00");
+
+      const delayedSampleLocalNow = Date.now();
+      rerender(<Tally config={config} state={{
+        ...state,
+        serverTimeOffsetMs: Date.parse(serverNow) - delayedSampleLocalNow - 1_000,
+        serverTimeLocalNowMs: delayedSampleLocalNow,
+      }} now={delayedSampleLocalNow} language="en" />);
+      expect(countdown).toHaveTextContent("0:00");
+
+      rerender(<Tally config={config} state={{
+        ...state,
+        status: "closed",
+        closedAt: new Date(Date.now()).toISOString(),
+      }} now={Date.now()} language="en" />);
+      expect(countdown).toBeEmptyDOMElement();
     } finally {
       vi.useRealTimers();
     }
@@ -193,43 +210,89 @@ describe("chat voting overlay tally", () => {
   it.each([
     ["open-ended", { requestedDurationSeconds: null, status: "open" }],
     ["closed", { requestedDurationSeconds: 90, status: "closed", closedAt: "2030-01-01T00:00:00.000Z" }],
-  ] as const)("keeps the countdown slot empty for %s votes", (_name, extraState) => {
-    const { container } = render(<Tally config={{ layout: "bars", showPercent: true, showCountdown: true }} state={{
-      pollId: "empty-countdown-poll",
-      closesAt: "2030-01-01T00:01:30.000Z",
-      serverNow: "2030-01-01T00:00:00.000Z",
-      preset: "yes_no",
-      optionCount: 2,
-      labels: ["Yes", "No"],
-      counts: [0, 0],
-      revision: 0,
-      ...extraState,
-    }} now={Date.parse("2030-01-01T00:00:00.000Z")} language="en" />);
+  ] as const)("clears the visible countdown for %s votes while keeping its slot", (_name, extraState) => {
+    const serverNow = "2030-01-01T00:00:00.000Z";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(serverNow));
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+    try {
+      const config = { layout: "bars", showPercent: true, showCountdown: true };
+      const state = {
+        pollId: "changing-countdown-poll",
+        openedAt: serverNow,
+        closesAt: "2030-01-01T00:01:30.000Z",
+        requestedDurationSeconds: 90,
+        serverNow,
+        serverTimeOffsetMs: 0,
+        serverTimeLocalNowMs: Date.now(),
+        status: "open" as const,
+        preset: "yes_no" as const,
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        counts: [0, 0],
+        revision: 0,
+      };
+      const { container, rerender, unmount } = render(<Tally config={config} state={state} now={Date.now()} language="en" />);
 
-    const header = container.querySelector<HTMLElement>(".chat-voting-tally__header");
-    const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
-    expect(countdown).toBeEmptyDOMElement();
-    expect(countdown?.style.width).toBe("6ch");
-    expect(countdown?.style.minWidth).toBe("6ch");
-    expect(header?.style.gridTemplateColumns).toContain("6ch");
+      expect(container.querySelector(".chat-voting-tally__countdown")).toHaveTextContent("1:30");
+      expect(vi.getTimerCount()).toBe(1);
+      rerender(<Tally config={config} state={{ ...state, ...extraState }} now={Date.now()} language="en" />);
+
+      const header = container.querySelector<HTMLElement>(".chat-voting-tally__header");
+      const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
+      expect(countdown).toBeEmptyDOMElement();
+      expect(countdown?.style.width).toBe("6ch");
+      expect(countdown?.style.minWidth).toBe("6ch");
+      expect(header?.style.gridTemplateColumns).toContain("6ch");
+      expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(_name === "closed" ? 1 : 0);
+
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      clearIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the countdown slot when the overlay option is disabled", () => {
-    const { container } = render(<Tally config={{ layout: "bars", showPercent: true, showCountdown: false }} state={{
-      pollId: "disabled-countdown-poll",
-      closesAt: "2030-01-01T00:01:30.000Z",
-      requestedDurationSeconds: 90,
-      serverNow: "2030-01-01T00:00:00.000Z",
-      status: "open",
-      preset: "yes_no",
-      optionCount: 2,
-      labels: ["Yes", "No"],
-      counts: [0, 0],
-      revision: 0,
-    }} now={Date.parse("2030-01-01T00:00:00.000Z")} language="en" />);
+    const serverNow = "2030-01-01T00:00:00.000Z";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(serverNow));
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+    try {
+      const state = {
+        pollId: "disabled-countdown-poll",
+        openedAt: serverNow,
+        closesAt: "2030-01-01T00:01:30.000Z",
+        requestedDurationSeconds: 90,
+        serverNow,
+        serverTimeOffsetMs: 0,
+        serverTimeLocalNowMs: Date.now(),
+        status: "open" as const,
+        preset: "yes_no" as const,
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        counts: [0, 0],
+        revision: 0,
+      };
+      const enabledConfig = { layout: "bars", showPercent: true, showCountdown: true };
+      const { container, rerender, unmount } = render(<Tally config={enabledConfig} state={state} now={Date.now()} language="en" />);
 
-    const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
-    expect(countdown).toBeEmptyDOMElement();
-    expect(countdown?.style.width).toBe("6ch");
+      expect(container.querySelector(".chat-voting-tally__countdown")).toHaveTextContent("1:30");
+      expect(vi.getTimerCount()).toBe(1);
+      rerender(<Tally config={{ ...enabledConfig, showCountdown: false }} state={state} now={Date.now()} language="en" />);
+
+      const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
+      expect(countdown).toBeEmptyDOMElement();
+      expect(countdown?.style.width).toBe("6ch");
+      expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      clearIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

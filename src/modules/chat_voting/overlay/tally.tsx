@@ -60,6 +60,7 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
   const incoming = useMemo(() => parseState(state), [state]);
   const current = incoming;
   const [clock, setClock] = useState(() => Date.now());
+  const [zeroLatchedPollId, setZeroLatchedPollId] = useState<string | null>(null);
   const labels = chatVotingOverlayLabels(language);
   const countdownEnabled = config.showCountdown !== false;
   const closesAt = current?.closesAt === undefined ? Number.NaN : Date.parse(current.closesAt);
@@ -71,9 +72,21 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
   const remainingMilliseconds = timeLimitedOpenVote
     ? closesAt - (Math.max(clock, serverTimeLocalNow) + serverTimeOffset)
     : Number.NaN;
-  const countdownSeconds = Number.isFinite(remainingMilliseconds)
+  const rawCountdownSeconds = Number.isFinite(remainingMilliseconds)
     ? Math.max(0, Math.ceil(remainingMilliseconds / 1_000))
     : null;
+  const currentPollId = current?.pollId;
+  const currentStatus = current?.status;
+  useEffect(() => {
+    if (currentPollId === undefined || currentStatus !== "open" || rawCountdownSeconds !== 0 ||
+        zeroLatchedPollId === currentPollId) return;
+    const pollId = currentPollId;
+    const timer = window.setTimeout(() => setZeroLatchedPollId(pollId), 0);
+    return () => window.clearTimeout(timer);
+  }, [currentPollId, currentStatus, rawCountdownSeconds, zeroLatchedPollId]);
+  const countdownSeconds = current?.status === "open" && zeroLatchedPollId === current.pollId
+    ? 0
+    : rawCountdownSeconds;
   const countdownText = countdownSeconds === null ? "" : formatCountdown(countdownSeconds);
 
   useEffect(() => {
