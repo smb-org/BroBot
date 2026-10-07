@@ -1,6 +1,17 @@
 import type { ModuleLanguage } from "../../contract";
 import type { ChatVotePreset, ChatVotingTextMode } from "./index";
 
+export const DEFAULT_CHAT_VOTING_START_TEXT = "Abstimmung gestartet: {vote.title} – {vote.options}";
+export const DEFAULT_CHAT_VOTING_START_TEXT_EN = "Vote started: {vote.title} – {vote.options}";
+
+const freeTextOptionCatalog = {
+  de: { firstWord: "schreib ein Wort", wholeMessage: "schreib deine Antwort" },
+  en: { firstWord: "type one word", wholeMessage: "type your answer" },
+} as const satisfies Readonly<Record<ModuleLanguage, { firstWord: string; wholeMessage: string }>>;
+
+export const chatVotingFreeTextOptionText = (language: ModuleLanguage, mode: ChatVotingTextMode | null | undefined): string =>
+  mode === "whole_message" ? freeTextOptionCatalog[language].wholeMessage : freeTextOptionCatalog[language].firstWord;
+
 type ChatTextKey = "help" | "busy" | "started" | "result" | "startFailed" | "noOpenVote" | "closing";
 type ChatTextCatalog = Readonly<Record<Exclude<ChatTextKey, "started" | "result">, string>> & {
   started: (preset: ChatVotePreset, count: number, textMode: ChatVotingTextMode | null, title: string | null) => string;

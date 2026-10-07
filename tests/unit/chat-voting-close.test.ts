@@ -5,7 +5,7 @@ import { chatVotingModule } from "../../src/modules/chat_voting";
 import { createTemplateRenderer } from "../../src/worker/template-resolver";
 import type { ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
-import { closeChatVoteFromAlarm, requestChatVoteClose } from "../../src/modules/chat_voting/service";
+import { announceChatVoteStartFromAlarm, closeChatVoteFromAlarm, requestChatVoteClose } from "../../src/modules/chat_voting/service";
 import { insertChannel } from "./fixtures";
 import { createReadBarrierDatabase, TestD1Database } from "./test-d1";
 
@@ -17,11 +17,11 @@ describe("chat voting close service", () => {
   beforeEach(() => { database = new TestD1Database(); });
   afterEach(() => { database.close(); });
 
-  const seedOpenVote = async (announceResult: boolean, title: string | null = null, resultText?: string): Promise<ReturnType<typeof createChatVotingRepository>> => {
+  const seedOpenVote = async (announceResult: boolean, title: string | null = null, resultText?: string, startText?: string): Promise<ReturnType<typeof createChatVotingRepository>> => {
     await insertChannel(database, "fictional-channel");
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, ?)",
-    ).bind("fictional-channel", JSON.stringify({ announceResult, ...(resultText === undefined ? {} : { resultText }) })).run();
+    ).bind("fictional-channel", JSON.stringify({ announceResult, ...(resultText === undefined ? {} : { resultText }), ...(startText === undefined ? {} : { startText }) })).run();
     const repository = createChatVotingRepository(database as unknown as D1Database);
     const vote: ChatVoteDraft = {
       id: "fictional-poll",
@@ -233,6 +233,122 @@ describe("chat voting close service", () => {
     );
   });
 
+  it("sends the start announcement once through automated output with a vote-scoped idempotency key", async () => {
+    const repository = await seedOpenVote(false, "Pizza today?");
+    let attempts = 0;
+    const { context } = createAlarmContext([], {
+      sendChat: () => {
+        attempts += 1;
+        return Promise.resolve(attempts === 1
+          ? { sent: false, reason: "automated_output_limit", retryable: true }
+          : { sent: true, reason: null, retryable: false });
+      },
+    });
+    (context as { renderTemplate: unknown }).renderTemplate = (text: string, _now: number, values: Record<string, string>) =>
+      Promise.resolve({ text: text.replaceAll("{vote.title}", values["vote.title"] ?? "").replaceAll("{vote.options}", values["vote.options"] ?? "") });
+
+    await expect(announceChatVoteStartFromAlarm(context, repository, "fictional-poll"))
+      .rejects.toThrow("waiting for the automated output limit");
+    await announceChatVoteStartFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.sendChat).toHaveBeenCalledTimes(2);
+    expect(context.sendChat).toHaveBeenNthCalledWith(
+      1,
+      "Vote started: Pizza today? – 1 = Yes, 2 = No",
+      "chat-voting:fictional-poll:start",
+      undefined,
+      expect.any(Function),
+      "source_only",
+    );
+  });
+
+  it("sends nothing when the optional start template is empty", async () => {
+    const repository = await seedOpenVote(false, null, undefined, "");
+    const { context } = createAlarmContext([]);
+
+    await announceChatVoteStartFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.renderTemplate).not.toHaveBeenCalled();
+    expect(context.sendChat).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["de", "yes_no", 2, ["Ja", "Nein"], null, null, "1 = Ja, 2 = Nein"],
+    ["en", "yes_no", 2, ["Yes", "No"], null, "Lunch?", "1 = Yes, 2 = No"],
+    ["de", "scale_5", 5, ["Sehr schlecht", "Schlecht", "Okay", "Gut", "Sehr gut"], null, null, "1 = Sehr schlecht, 2 = Schlecht, 3 = Okay, 4 = Gut, 5 = Sehr gut"],
+    ["en", "scale_5", 5, ["Very bad", "Bad", "Okay", "Good", "Great"], null, "Rate this", "1 = Very bad, 2 = Bad, 3 = Okay, 4 = Good, 5 = Great"],
+    ["de", "options_n", 3, ["Pizza", "Burger", "Döner"], null, null, "1 = Pizza, 2 = Burger, 3 = Döner"],
+    ["en", "options_n", 3, ["Pizza", "Burger", "Kebab"], null, "Dinner?", "1 = Pizza, 2 = Burger, 3 = Kebab"],
+    ["en", "digit_01", 2, ["No", "Yes"], null, null, "0 = No, 1 = Yes"],
+    ["de", "digit_01", 2, ["Nein", "Ja"], null, "Heute?", "0 = Nein, 1 = Ja"],
+    ["de", "digit_12", 2, ["eins", "zwei"], null, null, "1 = eins, 2 = zwei"],
+    ["en", "digit_12", 2, ["one", "two"], null, "Pick one", "1 = one, 2 = two"],
+    ["de", "free_text", 0, [], "first_word", null, "schreib ein Wort"],
+    ["en", "free_text", 0, [], "first_word", "Favorite food?", "type one word"],
+    ["en", "free_text", 0, [], "whole_message", null, "type your answer"],
+    ["de", "free_text", 0, [], "whole_message", "Was essen wir?", "schreib deine Antwort"],
+  ] as const)("renders localized options with the host template renderer (%s, %s, title %s)", async (language, preset, optionCount, labels, textMode, title, options) => {
+    await insertChannel(database, "fictional-channel");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, ?)",
+    ).bind("fictional-channel", JSON.stringify({ announceResult: false })).run();
+    const repository = createChatVotingRepository(database as unknown as D1Database);
+    const vote: ChatVoteDraft = {
+      id: "fictional-poll",
+      channelId: "fictional-channel",
+      preset,
+      optionCount,
+      labels,
+      title,
+      ...(textMode === null ? {} : { textMode }),
+      ...(preset === "free_text" ? { termFilterReady: true } : {}),
+      openedAt: "2026-10-04T10:00:00.000Z",
+      closesAt: "2026-10-04T14:00:00.000Z",
+      requestedDurationSeconds: null,
+      closeReason: "limit",
+      status: "open",
+    };
+    await repository.insertOpen(vote);
+    const { context } = createAlarmContext([]);
+    const event: ModuleEvent = {
+      channelId: "fictional-channel", subscriptionType: "channel.chat.message", triggerId: "start-template", payload: {},
+      settings: {}, receivedAt: "2026-10-04T10:00:00.000Z", actor: null, chatStatus: null,
+    };
+    const variables = [
+      ...(chatVotingModule.templateFields?.startText ?? []),
+      ...(chatVotingModule.templateFields?.resultText ?? []),
+    ];
+    const renderer = createTemplateRenderer(event, "event", variables, {
+      DB: {} as D1Database,
+      channelInfo: () => Promise.resolve(null),
+      channelTimeZone: () => Promise.resolve("UTC"),
+      channelLocation: () => Promise.resolve(null),
+      streamState: () => Promise.resolve("unknown"),
+      channelDetails: () => Promise.resolve(null),
+      streamDetails: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve(language),
+      readChannelVariables: () => Promise.resolve({}),
+      followedAt: () => Promise.resolve(null),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+    });
+    (context as { channelLanguage: unknown }).channelLanguage = () => Promise.resolve(language);
+    (context as { renderTemplate: unknown }).renderTemplate = (text: string, _now: number, values: Record<string, string>) => renderer(text, values);
+
+    await announceChatVoteStartFromAlarm(context, repository, "fictional-poll");
+
+    const titlePart = title === null ? "" : `${title} – `;
+    const prefix = language === "de" ? "Abstimmung gestartet: " : "Vote started: ";
+    expect(context.sendChat).toHaveBeenCalledWith(
+      `${prefix}${titlePart}${options}`,
+      "chat-voting:fictional-poll:start",
+      undefined,
+      expect.any(Function),
+      "source_only",
+    );
+  });
+
   it("provides the question variable to custom result templates", async () => {
     const repository = await seedOpenVote(true, "Pizza today?", "{vote.title}: {vote.result}");
     const order: string[] = [];
@@ -243,12 +359,12 @@ describe("chat voting close service", () => {
     expect(context.renderTemplate).toHaveBeenCalledWith(
       "{vote.title}: {vote.result}",
       expect.any(Number),
-      { "vote.result": "Yes: 7 (70%) · No: 3 (30%)", "vote.title": "Pizza today?" },
+      { "vote.result": "Yes: 7 (70%) · No: 3 (30%)", "vote.title": "Pizza today?", "vote.options": "1 = Yes, 2 = No" },
     );
   });
 
   it("renders vote.title as the question while the system title stays the stream title", async () => {
-    const text = "{title} | {vote.title}: {vote.result}";
+    const text = "{title} | {vote.title}: {vote.result} | {vote.options}";
     const repository = await seedOpenVote(true, "Pizza today?", text);
     const { context } = createAlarmContext([]);
     const event: ModuleEvent = {
@@ -275,7 +391,7 @@ describe("chat voting close service", () => {
     await closeChatVoteFromAlarm(context, repository, "fictional-poll");
 
     expect(context.sendChat).toHaveBeenCalledWith(
-      "Fictional stream title | Pizza today?: Yes: 7 (70%) · No: 3 (30%)",
+      "Fictional stream title | Pizza today?: Yes: 7 (70%) · No: 3 (30%) | 1 = Yes, 2 = No",
       "chat-voting:fictional-poll:result",
       undefined,
       expect.any(Function),

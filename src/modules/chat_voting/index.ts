@@ -1,8 +1,8 @@
 import { settingsVariableReferences } from "../contract";
 import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../contract";
 import { createChatVotingRepository } from "./repository";
-import { chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
-import { chatVotingAlarmDefinition, processChatVotingMessage } from "./service";
+import { chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
+import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage } from "./service";
 import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
 import { chatVotingOverlayElements } from "./overlay/element";
 import { chatVotingOverlayLabels } from "./overlay/locale";
@@ -22,6 +22,13 @@ const titleVariable = {
   maxLength: 80,
   sample: "Pizza today?",
   picker: chatVotingTitleVariableCatalog,
+} as const;
+
+const optionsVariable = {
+  name: "vote.options",
+  maxLength: 500,
+  sample: "1 = Pizza, 2 = Burger, 3 = Kebab",
+  picker: chatVotingOptionsVariableCatalog,
 } as const;
 
 const initialTallyState = async (
@@ -80,8 +87,11 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   settingsSchema,
   defaultSettings: DEFAULT_CHAT_VOTING_SETTINGS,
   templateContext: "event",
-  templateFields: { resultText: [resultVariable, titleVariable] },
-  variableReferences: settingsVariableReferences(CHAT_VOTING_MODULE_ID, ["resultText"]),
+  templateFields: {
+    startText: [titleVariable, optionsVariable],
+    resultText: [resultVariable, titleVariable, optionsVariable],
+  },
+  variableReferences: settingsVariableReferences(CHAT_VOTING_MODULE_ID, ["startText", "resultText"]),
   templateVariableGroup: {
     label: { de: "Abstimmung", en: "Voting" },
     icon: { paths: ["M4 5h16v14H4z", "M7 9h3", "M14 9h3", "M7 13h3", "M14 13h3"] },
@@ -90,7 +100,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   panel: () => import("./panel"),
   settingsEditor: () => import("./panel/settings-editor"),
   eventSubTypes: ["channel.chat.message"],
-  alarms: [chatVotingAlarmDefinition],
+  alarms: [chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition],
   overlayElements: chatVotingOverlayElements.map((element) => ({
     ...element,
     kind: CHAT_VOTING_ELEMENT_KIND,
