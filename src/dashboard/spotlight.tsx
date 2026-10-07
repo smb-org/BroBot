@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { MODULES } from "../modules/registry";
 import type { TextCommand } from "../modules/text_commands/contracts";
@@ -9,9 +9,11 @@ import { createClip, fetchChannelVariables, sendManualShoutout, setChannelModule
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { channelVariablesTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
+import { modulePermissionsAreMissing } from "./channel-health";
 import { ModuleIcon, NavigationIcon } from "./module-panels";
 import { dashboardNavEntries, navPageGroupHeading, registeredModuleNavEntries } from "./nav-pages";
-import { dashboardRouteRequiresBot, type DashboardRoute } from "./router";
+import { dashboardRoutePath, dashboardRouteRequiresBot, type DashboardRoute } from "./router";
+import { readRecentTargets, rememberRecentTarget, RECENT_TARGET_LIMIT } from "./spotlight-recents";
 import { Spotlight, type SpotlightItem } from "./ui";
 
 const SHOUTOUT_KEYWORD = "shoutout";
@@ -44,8 +46,10 @@ const moduleImmediateActionAvailability = (
 };
 
 interface ChannelSpotlightProperties {
-  channelId: string;
-  ownRole: ChannelRole;
+  channelId: string | null;
+  ownRole: ChannelRole | null;
+  viewerUserId?: string | null;
+  route?: DashboardRoute;
   /** Account-wide platform admin flag (#208) -- same gate `PanelSidebar` uses to show the platform page, never the per-channel "operator" role. */
   isPlatformAdmin?: boolean;
   /** Whether the installation bot is signed in; undefined while its status is unknown. */
@@ -62,6 +66,17 @@ interface ChannelSpotlightProperties {
 const variableDescription = (variable: PanelChannelVariable): string =>
   variable.description.trim().length > 0 ? variable.description : channelVariablesTexts().noDescription;
 
+const recentTargetPathForRoute = (route: DashboardRoute, channelId: string | null): string | null => {
+  if (channelId === null) return null;
+  if (route.kind === "module" && route.channelId === channelId) {
+    return dashboardRoutePath({ kind: "module", channelId, moduleId: route.moduleId });
+  }
+  if (route.kind === "channel" && route.channelId === channelId) {
+    return dashboardRoutePath({ kind: "channel", channelId, section: route.section });
+  }
+  return null;
+};
+
 /**
  * ⌘K/Ctrl+K (#164): finds every sidebar page, modules, text commands,
  * channel variables, and runs a small set of registered actions for the
@@ -71,29 +86,43 @@ const variableDescription = (variable: PanelChannelVariable): string =>
  * useful here, and the sidebar's "Mitglieder" page (still indexed below)
  * covers it.
  */
-export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, botSignedIn, streamState, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelSpotlightProperties): ReactElement => {
+export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, streamState, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelSpotlightProperties): ReactElement => {
   const texts = dashboardTexts();
-  const manageable = canManage(ownRole);
+  const manageable = ownRole !== null && canManage(ownRole);
   const [commands, setCommands] = useState<TextCommand[]>([]);
   const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
   const [query, setQuery] = useState("");
+  const currentTargetPath = route === undefined ? null : recentTargetPathForRoute(route, channelId);
+  const recentTargetPaths = useMemo(() => {
+    const stored = readRecentTargets(viewerUserId, channelId ?? "");
+    return currentTargetPath === null
+      ? stored
+      : [currentTargetPath, ...stored.filter((path) => path !== currentTargetPath)].slice(0, RECENT_TARGET_LIMIT);
+  }, [channelId, currentTargetPath, viewerUserId]);
 
-  // Loaded on open, not on mount: Spotlight is mounted on every
-  // channel/module route so it's ready for mod+K, but most page visits
+  useEffect(() => {
+    if (currentTargetPath === null || channelId === null) return;
+    rememberRecentTarget(viewerUserId, channelId, currentTargetPath);
+  }, [channelId, currentTargetPath, viewerUserId]);
+
+  // Loaded on open, not on mount: Spotlight is mounted in the dashboard shell
+  // so the sidebar trigger and shortcut work from every route, but most page visits
   // never open it -- fetching commands/variables eagerly would be a
   // background request on every navigation for a feature nobody used yet.
   const loadResultData = useCallback((): void => {
+    if (channelId === null) return;
     loadTextCommands(channelId).then(setCommands).catch(() => { setCommands([]); });
     fetchChannelVariables(channelId).then((data) => { setVariables(data.variables); }).catch(() => { setVariables([]); });
   }, [channelId]);
 
   const moduleItems = useMemo<SpotlightItem[]>(() => {
+    if (channelId === null) return [];
     const declarations = registeredModuleNavEntries(MODULES, channelId, dashboardLanguage());
     return MODULES.flatMap((module) => {
       const entries = declarations.filter((entry) => entry.moduleId === module.id);
       if (entries.length > 0) {
         const state = modules.find((candidate) => candidate.id === module.id);
-        if (state?.enabled !== true || (state.missingBroadcasterScopes?.length ?? 0) > 0) return [];
+        if (state?.enabled !== true || modulePermissionsAreMissing(state)) return [];
         return entries.map((entry) => {
         const description = entry.description ?? moduleDescription(module.id) ?? "";
         const accessibleDescription = module.mandatory === true
@@ -103,6 +132,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
         return {
           id: `module:${entry.id}`,
           label: entry.label,
+          recentTargetPath: dashboardRoutePath(entry.route),
           icon: <NavigationIcon kind={entry.iconKind} className="spotlight-module-icon" />,
           ...(accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
           group: texts.spotlight.groupModules,
@@ -121,6 +151,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
       return [{
         id: `module:${module.id}`,
         label: moduleName(module.id),
+        recentTargetPath: dashboardRoutePath(route),
         icon: <ModuleIcon moduleId={module.id} className="spotlight-module-icon" />,
         ...(accessibleDescription === null || accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
         group: texts.spotlight.groupModules,
@@ -130,7 +161,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
     });
   }, [botSignedIn, channelId, modules, onNavigate, texts.blocking.botTitle, texts.spotlight.groupModules]);
 
-  const commandItems = useMemo<SpotlightItem[]>(() => commands.map((command) => {
+  const commandItems = useMemo<SpotlightItem[]>(() => channelId === null ? [] : commands.map((command) => {
     const route: DashboardRoute = { kind: "module", channelId, moduleId: "text_commands" };
     const blockedByBot = botBlocksRoute(route, botSignedIn);
     return {
@@ -150,14 +181,15 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
   // Static pages and platform visibility come from the same list as the sidebar.
   const pageItems = useMemo<SpotlightItem[]>(() => dashboardNavEntries(
     { isPlatformAdmin },
-    channelId,
+    channelId ?? "",
     texts,
-  ).map((page) => {
+  ).filter((page) => channelId !== null || page.route.kind !== "channel").map((page) => {
     const pageRoute = page.route;
     const blockedByBot = botBlocksRoute(pageRoute, botSignedIn);
     return {
       id: `page:${page.id}`,
       label: page.label,
+      recentTargetPath: dashboardRoutePath(pageRoute),
       icon: <NavigationIcon kind={page.iconKind} className="spotlight-module-icon" />,
       group: navPageGroupHeading(page.group, texts),
       keywords: [...page.keywords],
@@ -166,7 +198,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
     };
   }), [botSignedIn, channelId, isPlatformAdmin, onNavigate, texts]);
 
-  const variableItems = useMemo<SpotlightItem[]>(() => variables.map((variable) => ({
+  const variableItems = useMemo<SpotlightItem[]>(() => channelId === null ? [] : variables.map((variable) => ({
     id: `variable:${variable.name}`,
     label: `{var.${variable.name}}`,
     description: variableDescription(variable),
@@ -184,6 +216,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
     : "";
 
   const actionItems = useMemo<SpotlightItem[]>(() => {
+    if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
     // Ad now, clip, and shoutout are the same immediate actions Stream
     // Manager offers -- each hidden when its module is disabled, and
@@ -257,7 +290,16 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
     return items;
   }, [texts, manageable, adsEnabled, channelId, shoutoutLogin, streamState, modules]);
 
-  const items = [...actionItems, ...pageItems, ...moduleItems, ...commandItems, ...variableItems];
+  const targetItems = [...pageItems, ...moduleItems];
+  const recentItems = recentTargetPaths.flatMap((path, index) => {
+    const target = targetItems.find((item) => item.recentTargetPath === path);
+    return target === undefined ? [] : [{
+      ...target,
+      id: `recent:${String(index)}:${target.id}`,
+      group: texts.spotlight.groupRecentTargets,
+    }];
+  });
+  const items = [...recentItems, ...actionItems, ...pageItems, ...moduleItems, ...commandItems, ...variableItems];
 
   return (
     <Spotlight

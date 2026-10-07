@@ -739,7 +739,7 @@ test("immediate-action cards keep their reserved strip height after a shoutout f
   }
 });
 
-test("immediate-action strip keeps a fixed row through module loading and one enabled action at desktop and mobile widths", async ({ page }) => {
+test("stream manager waits for module data and keeps its immediate-action strip stable at desktop and mobile widths", async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     let releaseModules!: () => void;
@@ -752,15 +752,20 @@ test("immediate-action strip keeps a fixed row through module loading and one en
 
     await page.goto(`/channels/${channelId}/overview`);
     await modulesStarted;
-    const strip = page.locator(".stream-manager-actions");
-    await expect(strip.locator(":scope > .stream-manager-action--loading")).toHaveCount(4);
-    const before = await measureDocumentBox(page, ".stream-manager-actions");
-    expect(before[3]).toBe(192);
+    const pageLoad = page.locator(".main-content > .ui-load-state");
+    await expect(pageLoad).toHaveAttribute("data-status", "loading");
+    await expect(page.getByRole("heading", { name: "Stable Channel", level: 1 })).toHaveCount(0);
+    await expect(page.locator(".stream-manager-actions")).toHaveCount(0);
 
     releaseModules();
+    await expect(page.getByRole("heading", { name: "Stable Channel", level: 1 })).toBeVisible();
+    const strip = page.locator(".stream-manager-actions");
     await expect(page.getByRole("textbox", { name: "Twitch login" })).toBeVisible();
     await expect(strip.locator(":scope > .stream-manager-action--loading")).toHaveCount(0);
     await expect(strip.locator(":scope > .stream-manager-action")).toHaveCount(1);
+    const before = await measureDocumentBox(page, ".stream-manager-actions");
+    expect(before[3]).toBe(192);
+    await page.waitForTimeout(100);
     expect(await measureDocumentBox(page, ".stream-manager-actions")).toEqual(before);
     const card = await measureBox(page, ".stream-manager-action");
     expect(card[2]).toBe(300);
@@ -933,7 +938,7 @@ test("a location-search error toast can be dismissed above its dialog backdrop",
   const dialog = page.getByRole("dialog", { name: "Change location" });
   await expect(dialog).toBeVisible();
   await page.getByRole("textbox", { name: "Search for a place" }).fill("Reykjavik");
-  await page.getByRole("button", { name: "Search" }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
 
   const toast = page.locator(".ui-toast--error");
   await expect(toast).toBeVisible();

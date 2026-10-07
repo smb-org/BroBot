@@ -935,6 +935,28 @@ export interface DashboardTexts {
    *  itself, never a global toast (see docs/input/umbau-plan.md Epic 4). */
   streamManager: {
     immediateActions: string;
+    notices: {
+      title: string;
+      showAll: (count: string) => string;
+      showFewer: string;
+      botPermissionsSentence: string;
+      botPermissionsConsequence: string;
+      broadcasterPermissionsSentence: string;
+      broadcasterPermissionsConsequence: string;
+      moderatorMissingSentence: string;
+      moderatorMissingConsequence: string;
+      modulePermissionsSentence: (name: string) => string;
+      modulePermissionsConsequence: string;
+      tokenExpiredSentence: string;
+      tokenExpiredConsequence: string;
+      tokenRenewalSentence: string;
+      tokenRenewalConsequence: string;
+      grantPermission: string;
+      reviewPermissions: string;
+      checkModerator: string;
+      checkModeratorRunning: string;
+      checkModeratorLocked: string;
+    };
     availabilityReasons: Record<ImmediateActionUnavailableReason, string>;
     checksHealthy: (count: string) => string;
     checksNeedAttention: (problems: string, checks: string) => string;
@@ -984,6 +1006,7 @@ export interface DashboardTexts {
   spotlight: {
     placeholder: string;
     empty: string;
+    groupRecentTargets: string;
     groupModules: string;
     groupCommands: string;
     groupVariables: string;
@@ -1233,6 +1256,28 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Sofortaktionen",
+      notices: {
+        title: "Hinweise",
+        showAll: (count) => `Alle ${count} Hinweise anzeigen`,
+        showFewer: "Weniger Hinweise anzeigen",
+        botPermissionsSentence: "Dem Bot fehlen benötigte Berechtigungen.",
+        botPermissionsConsequence: "Chatbefehle und Moderationsaktionen können fehlschlagen.",
+        broadcasterPermissionsSentence: "Dem Broadcaster fehlen angeforderte Berechtigungen.",
+        broadcasterPermissionsConsequence: "Module, die diese Berechtigungen brauchen, können nicht laufen.",
+        moderatorMissingSentence: "Der Bot ist in diesem Kanal kein Moderator.",
+        moderatorMissingConsequence: "Chataktionen mit Moderationsrechten können fehlschlagen.",
+        modulePermissionsSentence: (name) => `Für das Modul „${name}“ fehlen Berechtigungen.`,
+        modulePermissionsConsequence: "Das Modul bleibt deaktiviert, bis die Berechtigungen erteilt sind.",
+        tokenExpiredSentence: "Ein Twitch-Token ist abgelaufen.",
+        tokenExpiredConsequence: "Die Verbindung des Bots kann unterbrochen sein.",
+        tokenRenewalSentence: "Die Erneuerung eines Twitch-Tokens ist überfällig.",
+        tokenRenewalConsequence: "Die Verbindung des Bots kann unterbrochen werden.",
+        grantPermission: "Berechtigung erteilen",
+        reviewPermissions: "Berechtigungen prüfen",
+        checkModerator: "Moderator prüfen",
+        checkModeratorRunning: "Moderatorprüfung läuft …",
+        checkModeratorLocked: "Nur Broadcaster und Verwalter dürfen diese Prüfung ausführen.",
+      },
       availabilityReasons: {
         stream_offline: "Der Stream ist offline.",
         stream_state_unknown: "Der Streamstatus ist derzeit nicht verfügbar.",
@@ -1280,6 +1325,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     spotlight: {
       placeholder: "Suchen oder Aktion ausführen …",
       empty: "Keine Treffer.",
+      groupRecentTargets: "Zuletzt besucht",
       groupModules: "Module",
       groupCommands: "Befehle",
       groupVariables: "Variablen",
@@ -1516,6 +1562,28 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Immediate actions",
+      notices: {
+        title: "Notices",
+        showAll: (count) => `Show all ${count} notices`,
+        showFewer: "Show fewer notices",
+        botPermissionsSentence: "The bot is missing required permissions.",
+        botPermissionsConsequence: "Chat commands and moderation actions may fail.",
+        broadcasterPermissionsSentence: "The broadcaster is missing requested permissions.",
+        broadcasterPermissionsConsequence: "Modules that need these permissions cannot run.",
+        moderatorMissingSentence: "The bot is not a moderator in this channel.",
+        moderatorMissingConsequence: "Chat actions that need moderator rights may fail.",
+        modulePermissionsSentence: (name) => `The ${name} module is missing permissions.`,
+        modulePermissionsConsequence: "The module stays disabled until they are granted.",
+        tokenExpiredSentence: "A Twitch token has expired.",
+        tokenExpiredConsequence: "The bot connection may be interrupted.",
+        tokenRenewalSentence: "A Twitch token renewal is overdue.",
+        tokenRenewalConsequence: "The bot connection may be interrupted.",
+        grantPermission: "Grant permission",
+        reviewPermissions: "Review permissions",
+        checkModerator: "Check moderator",
+        checkModeratorRunning: "Checking moderator …",
+        checkModeratorLocked: "Only broadcasters and managers may run this check.",
+      },
       availabilityReasons: {
         stream_offline: "The stream is offline.",
         stream_state_unknown: "The stream status is currently unavailable.",
@@ -1561,8 +1629,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       failure: "The channel control could not be changed.",
     },
     spotlight: {
-      placeholder: "Search or run an action …",
+      placeholder: "Search or run action …",
       empty: "No matches.",
+      groupRecentTargets: "Recently visited",
       groupModules: "Modules",
       groupCommands: "Commands",
       groupVariables: "Variables",

@@ -102,6 +102,9 @@ export const getMissingBindings = (env: Env): string[] => [
   }),
 ];
 
+// The highest migration number counts, not the most recently applied row:
+// migrations can be applied out of order (names are zero-padded, so a
+// name sort equals a number sort).
 // Accept a newer schema: during a deploy the previous code still serves right
 // after the migration ran. Migrations are usually additive, but some drop
 // columns or tables (e.g. 0018, 0020), so this only avoids false deploy
@@ -115,7 +118,7 @@ const getMissingSchema = async (env: Env): Promise<string[]> => {
   try {
     const schema = await env.DB.prepare(`
       SELECT
-        (SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1) AS latest_migration,
+        (SELECT name FROM d1_migrations ORDER BY name DESC LIMIT 1) AS latest_migration,
         (SELECT COUNT(*) FROM sqlite_master
           WHERE type = 'table' AND name = ?) AS latest_table_count
     `).bind(LATEST_SCHEMA_TABLE).first<{

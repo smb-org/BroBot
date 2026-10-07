@@ -7,6 +7,7 @@ import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
 import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
+import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
 import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
@@ -571,8 +572,9 @@ const ModuleWorkspaceRow = ({
   const texts = dashboardTexts();
   const details = moduleDetails(moduleId);
   const mandatory = moduleId === "channel_events";
-  const effectiveEnabled = (rawEnabled || mandatory) && missingScopes.length === 0;
-  const state = missingScopes.length > 0 ? labels.disabled : statusWord(effectiveEnabled);
+  const permissionsMissing = modulePermissionsAreMissing({ missingBroadcasterScopes: missingScopes });
+  const effectiveEnabled = (rawEnabled || mandatory) && !permissionsMissing;
+  const state = permissionsMissing ? labels.disabled : statusWord(effectiveEnabled);
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
   const lockedReason = mandatory ? labels.mandatoryReason : manageable ? undefined : texts.module.managementLocked;
 
@@ -585,7 +587,7 @@ const ModuleWorkspaceRow = ({
       description={details.description}
       status={mandatory
         ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={labels.mandatoryReason} />
-        : <Led status={missingScopes.length > 0 ? "amber" : effectiveEnabled ? "green" : "off"} label={state} />}
+        : <Led status={permissionsMissing ? "amber" : effectiveEnabled ? "green" : "off"} label={state} />}
       action={mandatory ? null : <Switch
         checked={rawEnabled}
         ariaLabel={details.name}
@@ -731,20 +733,21 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const disabledReason = mandatory ? labels.mandatoryReason : manageable ? null : texts.module.managementLocked;
   const switchDisabled = mandatory || registered === undefined || moduleState === undefined;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
+  const permissionsMissing = modulePermissionsAreMissing(moduleState);
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
   const missingScopeSet = new Set(missingScopes);
-  const effectiveEnabled = enabled && missingScopes.length === 0;
+  const effectiveEnabled = enabled && !permissionsMissing;
   const viewLoading = loading || moduleState === undefined || ((registered?.panel !== undefined || registered?.settingsEditor !== undefined) && enabled && activeModule === undefined);
   const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
 
   const stateMessage = registered === undefined
     ? labels.unknown(details.name)
-    : missingScopes.length > 0
+    : permissionsMissing
       ? texts.module.scopesMissing(details.name)
       : moduleState?.enabled === false
         ? labels.switchedOff(details.name)
         : null;
-  const stateTone = registered === undefined || missingScopes.length > 0 ? "notice" : "neutral";
+  const stateTone = registered === undefined || permissionsMissing ? "notice" : "neutral";
 
   useEffect(() => {
     if (error !== null) notify({ tone: "error", message: error });
@@ -771,7 +774,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           {mandatory ? null : <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />}
             {disabledReason === null ? null : <p className="lock-reason lock-reason--with-icon"><Icon name="lock" size={16} />{disabledReason}</p>}
         </section>}
-        {missingScopes.length === 0 ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>
+        {!permissionsMissing ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>
           <div className="section-heading"><h2>{texts.module.scopeList}</h2></div>
           <div className="state-list module-scope-list">
             {requiredScopes.map((scope) => {
