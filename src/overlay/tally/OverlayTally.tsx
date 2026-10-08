@@ -142,6 +142,13 @@ export const OverlayTallyOptions = ({
     width: layout === "bars" ? "100%" : undefined,
     boxSizing: "border-box" as const,
   } : layout === "strip" ? { flex: "1 1 8em" } : undefined;
+  const trackStyle = {
+    height: "0.45em",
+    ...(variant === "terms" ? { width: "100%", minWidth: 0, boxSizing: "border-box" as const } : {}),
+    borderRadius: "999px",
+    background: "rgba(127, 127, 127, 0.25)",
+    overflow: "hidden",
+  };
 
   return <>
     <div className={classNames("overlay-tally__options", `overlay-tally__options--${layout}`, `overlay-tally__options--${variant}`, classPrefix === undefined ? undefined : `${classPrefix}__options`)} style={optionsStyle}>
@@ -154,7 +161,7 @@ export const OverlayTallyOptions = ({
               {String(row.count)}{showPercent ? ` · ${String(percent)}%` : ""}
             </span>
           </div>
-          {layout === "bars" ? <div className={classNames("overlay-tally__track", classPrefix === undefined ? undefined : `${classPrefix}__track`)} aria-hidden="true" style={{ height: "0.45em", width: "100%", minWidth: 0, boxSizing: "border-box", borderRadius: "999px", background: "rgba(127, 127, 127, 0.25)", overflow: "hidden" }}>
+          {layout === "bars" ? <div className={classNames("overlay-tally__track", classPrefix === undefined ? undefined : `${classPrefix}__track`)} aria-hidden="true" style={trackStyle}>
             <span className="overlay-tally__fill" style={{ width: `${String(percent)}%` }} />
           </div> : null}
         </div>;
@@ -162,7 +169,7 @@ export const OverlayTallyOptions = ({
       {Array.from({ length: Math.max(0, emptySlots - rows.length) }, (_, index) => (
         <div className={classNames("overlay-tally__option", classPrefix === undefined ? undefined : `${classPrefix}__option`)} key={`empty-${String(index)}`} aria-hidden="true" style={{ ...optionStyle, visibility: "hidden" }}>
           <div className={classNames("overlay-tally__caption", classPrefix === undefined ? undefined : `${classPrefix}__caption`)} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 10rem", alignItems: "center", gap: "0 0.5em", minWidth: 0, width: "100%", boxSizing: "border-box" }}><span className="overlay-tally__label" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>&nbsp;</span><span className="overlay-tally__count" style={{ minWidth: 0, overflow: "hidden", textOverflow: "clip", textAlign: "right", whiteSpace: "nowrap", fontSize: "0.5em", fontVariantNumeric: "tabular-nums" }}>&nbsp;</span></div>
-          {layout === "bars" ? <div className={classNames("overlay-tally__track", classPrefix === undefined ? undefined : `${classPrefix}__track`)} style={{ height: "0.45em", width: "100%", minWidth: 0, boxSizing: "border-box", borderRadius: "999px", background: "rgba(127, 127, 127, 0.25)", overflow: "hidden" }}><span className="overlay-tally__fill" /></div> : null}
+          {layout === "bars" ? <div className={classNames("overlay-tally__track", classPrefix === undefined ? undefined : `${classPrefix}__track`)} style={trackStyle}><span className="overlay-tally__fill" /></div> : null}
         </div>
       ))}
     </div>

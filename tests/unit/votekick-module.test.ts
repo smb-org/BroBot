@@ -305,7 +305,7 @@ describe("Votekick module", () => {
       reason: "Votekick (3:0) · ballot-1",
       onSuccess: { kind: "chat", text: "Votekick passed: sampleviewer receives a 2 min timeout.", target: "source_only", automated: false },
       onFailure: { kind: "chat", text: "The timeout for sampleviewer could not be applied.", target: "source_only", automated: false },
-    }]);
+    }, expect.objectContaining({ kind: "overlay", type: "tally", elementKind: "votekick.tally" })]);
   });
 
   it("does not pass when an opposing Durable Object vote commits before the D1 snapshot update", async () => {
@@ -392,7 +392,36 @@ describe("Votekick module", () => {
     const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
 
     expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 3, 120, expect.any(String));
-    expect(result.actions).toEqual([expect.objectContaining({ kind: "timeout" })]);
+    expect(result.actions).toMatchObject([
+      expect.objectContaining({ kind: "timeout" }),
+      expect.objectContaining({ kind: "overlay", type: "tally" }),
+    ]);
+  });
+
+  it("returns a claimed timeout even when reading the terminal row for its overlay fails", async () => {
+    const running = runningVotekick();
+    const byId = vi.fn(() => Promise.reject(new Error("D1 terminal row unavailable")));
+    const repository = repositoryFor({
+      running: vi.fn(() => Promise.resolve(running)),
+      byId,
+    });
+    const context = contextFor({ ballots: {
+      open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
+      cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
+      read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 3 })),
+      close: vi.fn(() => Promise.resolve(null)),
+      finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [3, 0], revision: 3 })),
+    } });
+
+    const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
+
+    expect(byId).not.toHaveBeenCalled();
+    expect(result.actions[0]).toMatchObject({ kind: "timeout", reason: "Votekick (3:0) · ballot-1" });
+    expect(result.actions[1]).toMatchObject({
+      kind: "overlay",
+      type: "tally",
+      payload: { status: "passed", yesVotes: 3, noVotes: 0, ballotRevision: 3 },
+    });
   });
 
   it("rejects voters who first appeared after the ballot started", async () => {
@@ -483,7 +512,10 @@ describe("Votekick module", () => {
     await vi.waitFor(() => { expect(renderTemplate).toHaveBeenCalledTimes(2); });
     await expect(context.ballots.cast("ballot-1", "opposing-voter", 2)).resolves.toMatchObject({ status: "not_open" });
     releaseTemplates?.();
-    await expect(processing).resolves.toMatchObject({ actions: [expect.objectContaining({ kind: "timeout", reason: "Votekick (3:0) · ballot-1" })] });
+    await expect(processing).resolves.toMatchObject({ actions: [
+      expect.objectContaining({ kind: "timeout", reason: "Votekick (3:0) · ballot-1" }),
+      expect.objectContaining({ kind: "overlay", type: "tally" }),
+    ] });
 
     expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 4, 120, expect.any(String));
     expect(close).toHaveBeenCalledOnce();
@@ -903,5 +935,49 @@ describe("Votekick module", () => {
     expect(sendChat).toHaveBeenCalledWith(expect.stringContaining("sampleviewer"), "votekick:ballot-1:passed:applied", undefined, expect.any(Function), settings.chatTarget);
     expect(order).toEqual(["finalize", "language", "template", "template", "timeout:Votekick (4:1) · ballot-1", "close", "clear"]);
     expect(current.status).toBe("passed");
+  });
+
+  it("executes a claimed timeout before best-effort overlay work in the alarm path", async () => {
+    const running = runningVotekick();
+    let byIdCalls = 0;
+    const byId = vi.fn(() => {
+      byIdCalls += 1;
+      return byIdCalls === 1
+        ? Promise.resolve(running)
+        : Promise.reject(new Error("D1 terminal row unavailable"));
+    });
+    const repository = repositoryFor({ byId });
+    const order: string[] = [];
+    const executeTimeout = vi.fn(() => { order.push("timeout"); return Promise.resolve("applied" as const); });
+    const db = { prepare: vi.fn(() => ({
+      bind: vi.fn().mockReturnThis(),
+      first: vi.fn(() => Promise.resolve({ settings: JSON.stringify(settings) })),
+    })) };
+    const context = {
+      channelId: "channel-a",
+      DB: db,
+      ballots: {
+        finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [4, 1], revision: 6 })),
+        close: vi.fn(() => Promise.resolve(null)),
+      },
+      channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
+      secureRandomInteger: vi.fn(() => 0),
+      executeTimeout,
+      schedule: vi.fn(() => Promise.resolve()),
+      clear: vi.fn(() => { order.push("clear"); return Promise.resolve(); }),
+      renderTemplate: vi.fn((text: string) => Promise.resolve({ text })),
+      sendChat: vi.fn(() => Promise.resolve({ sent: true, reason: null, retryable: false })),
+      publishModuleOverlayMessage: vi.fn(() => {
+        order.push("overlay");
+        return Promise.reject(new Error("overlay publication unavailable"));
+      }),
+    } as unknown as ModuleAlarmContext;
+
+    await expect(closeExpiredVotekick(context, "close:ballot-1", repository)).resolves.toBeUndefined();
+
+    expect(byId).toHaveBeenCalledOnce();
+    expect(executeTimeout).toHaveBeenCalledOnce();
+    expect(order.indexOf("timeout")).toBeLessThan(order.indexOf("overlay"));
+    expect(order).toContain("clear");
   });
 });

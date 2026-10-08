@@ -4,7 +4,6 @@ import { timeoutDurationRangeSchema, type TimeoutDurationRange } from "../../con
 import { VOTEKICK_DEFAULT_TEXTS } from "./chat-defaults";
 
 export const VOTEKICK_MODULE_ID = "votekick";
-export const VOTEKICK_ELEMENT_KIND = "votekick.tally" as const;
 export const VOTEKICK_WINDOW_MS = 10 * 60 * 1000;
 export const VOTEKICK_MAX_WINDOW_SECONDS = 180;
 export const VOTEKICK_MIN_WINDOW_SECONDS = 30;

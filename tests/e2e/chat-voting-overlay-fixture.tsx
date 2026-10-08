@@ -6,6 +6,9 @@ import "../../src/overlay/variable.css";
 const parameters = new URLSearchParams(window.location.search);
 const count = Number(parameters.get("terms") ?? "0");
 const mobile = parameters.get("mobile") === "1";
+const narrow = parameters.get("narrow") === "1";
+const standard = parameters.get("preset") === "standard";
+const width = narrow ? 200 : mobile ? 390 : 1920;
 const title = parameters.has("title") ? parameters.get("title") || null : null;
 const countdownMode = parameters.get("countdown") ?? "none";
 const localNow = Date.now();
@@ -20,7 +23,7 @@ document.body.style.margin = "0";
 const overlay = {
   id: "overlay-fixture",
   revision: 1,
-  width: mobile ? 390 : 1920,
+  width,
   height: mobile ? 844 : 1080,
   css: "",
   elements: [{
@@ -31,7 +34,7 @@ const overlay = {
       showPercent: true,
       showCountdown: countdownMode !== "off",
       hideAfterCloseSeconds: 15,
-      width: mobile ? 360 : 480,
+      width: narrow ? 200 : mobile ? 360 : 480,
     },
     state: {
       pollId: "layout-poll",
@@ -41,10 +44,13 @@ const overlay = {
       requestedDurationSeconds: countdownMode === "open-ended" || countdownMode === "none" ? null : 90,
       ...(countdownMode === "closed" ? { closedAt: new Date(localNow).toISOString() } : {}),
       title,
-      preset: "free_text",
-      optionCount: 0,
-      labels: [],
-      counts: [],
+      preset: standard ? "yes_no" : "free_text",
+      optionCount: standard ? 2 : 0,
+      labels: standard ? [
+        "A deliberately long affirmative choice that wraps at narrow widths",
+        "A deliberately long negative choice that wraps at narrow widths",
+      ] : [],
+      counts: standard ? [1, 2] : [],
       terms,
       termFilterReady: true,
       revision: 1,

@@ -67,11 +67,6 @@
   flex-direction: row;
 }
 
-.overlay-tally__option {
-  min-width: 0;
-  box-sizing: border-box;
-}
-
 .overlay-tally__options--terms .overlay-tally__option {
   min-height: 2.3em;
   min-width: 0;
@@ -94,17 +89,9 @@
   box-sizing: border-box;
 }
 
-.overlay-tally__label {
-  min-width: 0;
-}
-
 .overlay-tally__options--terms .overlay-tally__label {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.overlay-tally__count {
   white-space: nowrap;
 }
 
@@ -119,12 +106,15 @@
 
 .overlay-tally__track {
   height: 0.45em;
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
   border-radius: 999px;
   background: rgba(127, 127, 127, 0.25);
   overflow: hidden;
+}
+
+.overlay-tally__options--terms .overlay-tally__track {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .overlay-tally__fill {

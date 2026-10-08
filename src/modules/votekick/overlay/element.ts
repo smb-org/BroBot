@@ -1,7 +1,7 @@
 import type { JsonObject, ModuleLanguage } from "../../contract";
-import { VOTEKICK_ELEMENT_KIND } from "../contracts";
 import { mergeVotekickRealtimeState } from "./state";
 import { votekickOverlayLabels } from "./locale";
+import { VOTEKICK_ELEMENT_KIND } from "./kinds";
 
 const german = votekickOverlayLabels("de");
 const english = votekickOverlayLabels("en");

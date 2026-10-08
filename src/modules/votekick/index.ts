@@ -3,11 +3,12 @@ import { settingsVariableReferences } from "../contract";
 import { VOTEKICK_TEMPLATE_FIELDS } from "./contracts/template-variable-catalog";
 import { votekickCatalog } from "./contracts/catalog";
 import { VOTEKICK_CHAT_COMMANDS } from "./contracts/chat-commands";
-import { DEFAULT_VOTEKICK_SETTINGS, VOTEKICK_ELEMENT_KIND, VOTEKICK_HISTORY_DAYS, VOTEKICK_MODULE_ID, votekickSettingsSchema } from "./contracts";
+import { DEFAULT_VOTEKICK_SETTINGS, VOTEKICK_HISTORY_DAYS, VOTEKICK_MODULE_ID, votekickSettingsSchema } from "./contracts";
 import { createVotekickRepository, purgeExpiredVotekickUserIds } from "./adapters/d1";
 import { processVotekickMessage, closeExpiredVotekick, votekickOverlayPayload } from "./service";
 import { votekickRoutes } from "./routes";
 import { votekickOverlayElements } from "./overlay/element";
+import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
 
 const votekickIcon = { paths: ["M12 3v18", "M3 12h18", "m5 5 14 14", "M19 5 5 19"] } as const;
 const templateFields = ["startText", "passText", "failText", "expiredText", "protectedText", "busyText"] as const;

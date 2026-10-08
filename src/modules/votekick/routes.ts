@@ -2,7 +2,8 @@ import { Hono } from "hono";
 
 import type { AuditAction } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
-import { VOTEKICK_ELEMENT_KIND, VOTEKICK_HISTORY_DAYS, VOTEKICK_MODULE_ID } from "./contracts";
+import { VOTEKICK_HISTORY_DAYS, VOTEKICK_MODULE_ID } from "./contracts";
+import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
 import { createVotekickRepository } from "./adapters/d1";
 import { votekickTimeoutReason } from "./domain";
 import { votekickOverlayPayload } from "./service";

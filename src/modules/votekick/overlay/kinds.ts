@@ -1,3 +1,1 @@
-import { VOTEKICK_ELEMENT_KIND } from "../contracts";
-
-export { VOTEKICK_ELEMENT_KIND };
+export const VOTEKICK_ELEMENT_KIND = "votekick.tally" as const;

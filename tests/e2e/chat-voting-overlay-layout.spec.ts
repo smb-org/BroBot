@@ -132,3 +132,63 @@ test("countdown appearance and absence keep the header slot fixed at the canvas 
   expect(measurements[0]?.countdown.width).toBe(measurements[2]?.countdown.width);
   expect(measurements[0]?.countdown.width).toBe(measurements[3]?.countdown.width);
 });
+
+test("standard vote options keep the original narrow bars and strip sizing", async ({ page }) => {
+  await page.setViewportSize({ width: 200, height: 900 });
+  const layouts = ["bars", "strip"] as const;
+
+  for (const layout of layouts) {
+    await page.goto(`/tests/e2e/chat-voting-overlay-fixture.html?preset=standard&narrow=1&layout=${layout}`);
+    const tally = page.locator(".chat-voting-tally");
+    const rows = tally.locator(".chat-voting-tally__option");
+    await expect(rows).toHaveCount(2);
+    const measurements = await tally.evaluate((element) => {
+      const read = (target: Element): Record<string, string | number> => {
+        const style = getComputedStyle(target);
+        const rect = target.getBoundingClientRect();
+        return {
+          width: rect.width,
+          height: rect.height,
+          minWidth: style.minWidth,
+          boxSizing: style.boxSizing,
+          whiteSpace: style.whiteSpace,
+          fontSize: style.fontSize,
+        };
+      };
+      const firstRow = element.querySelector(".chat-voting-tally__option");
+      const label = firstRow?.querySelector(".overlay-tally__label");
+      const count = firstRow?.querySelector(".overlay-tally__count");
+      const track = firstRow?.querySelector(".overlay-tally__track");
+      const options = element.querySelector(".overlay-tally__options");
+      if (firstRow === null || label === null || label === undefined || count === null || count === undefined) {
+        throw new Error("The standard vote option is incomplete.");
+      }
+      return {
+        tally: read(element),
+        row: read(firstRow),
+        label: read(label),
+        count: read(count),
+        track: track === null || track === undefined ? null : read(track),
+        trackStyle: track?.getAttribute("style") ?? null,
+        optionsClass: options?.className ?? "",
+        rows: [...element.querySelectorAll(".chat-voting-tally__option")].map((row) => row.getBoundingClientRect().height),
+      };
+    });
+
+    expect(measurements.tally.width).toBe(200);
+    expect(measurements.optionsClass).toContain("overlay-tally__options--standard");
+    expect(measurements.row).toMatchObject({ minWidth: "auto", boxSizing: "content-box" });
+    expect(measurements.label).toMatchObject({ minWidth: "auto", whiteSpace: "normal" });
+    expect(measurements.count).toMatchObject({ minWidth: "auto", whiteSpace: "normal" });
+    expect(measurements.count.fontSize).toBe(measurements.tally.fontSize);
+    if (layout === "bars") {
+      expect(measurements.track).not.toBeNull();
+      expect(measurements.trackStyle).not.toMatch(/(?:width|min-width|box-sizing):/u);
+    } else {
+      expect(measurements.track).toBeNull();
+    }
+    expect(measurements.rows).toHaveLength(2);
+    expect(measurements.rows[0]).toBeGreaterThan(400);
+    expect(measurements.rows[1]).toBeGreaterThan(400);
+  }
+});

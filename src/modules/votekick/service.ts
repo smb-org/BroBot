@@ -1,9 +1,10 @@
 import { ballotChoiceFromMessage } from "../contract";
 import type { BallotSnapshot, JsonObject, ModuleAction, ModuleAlarmContext, ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { formatTimeoutDuration, rollTimeoutSeconds } from "../contracts/moderation";
-import { VOTEKICK_ELEMENT_KIND, VOTEKICK_WINDOW_MS, votekickSettingsSchema, type Votekick, type VotekickSettings } from "./contracts";
+import { VOTEKICK_WINDOW_MS, votekickSettingsSchema, type Votekick, type VotekickSettings } from "./contracts";
 import { canStartVotekick, isActiveVotekickTarget, votekickThreshold, votekickTimeoutReason, VOTEKICK_COMMAND_PATTERN, wasActiveBeforeVotekick } from "./domain";
 import type { VotekickRepository, VotekickStart } from "./repository";
+import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
 
 const emptyResult = (): ModuleResult => ({ actions: [], diagnostics: [] });
 const textFromEvent = (event: ModuleEvent): string | null => {
@@ -47,7 +48,9 @@ const publishVotekickOverlayState = async (
   votekick: Votekick,
 ): Promise<void> => {
   if (typeof context.publishModuleOverlayMessage !== "function") return;
-  await context.publishModuleOverlayMessage("tally", VOTEKICK_ELEMENT_KIND, votekickOverlayPayload(votekick));
+  try {
+    await context.publishModuleOverlayMessage("tally", VOTEKICK_ELEMENT_KIND, votekickOverlayPayload(votekick));
+  } catch { /* Overlay presentation must never hold up moderation or alarm cleanup. */ }
 };
 
 const chatAction = (text: string, target: VotekickSettings["chatTarget"], automated = false): ModuleAction | null =>
@@ -135,7 +138,7 @@ type VotekickFinalizeAccess = {
 type VotekickFinalizeAttempt =
   | { outcome: "open"; claimed: false; counts: readonly [number, number]; revision: number }
   | { outcome: "expired" | "not_open"; claimed: false }
-  | { outcome: "passed"; claimed: boolean; prepared: PassPreparation };
+  | { outcome: "passed"; claimed: boolean; prepared: PassPreparation; votekick: Votekick };
 
 const finalizeVotekick = async (
   channelId: string,
@@ -180,6 +183,16 @@ const finalizeVotekick = async (
     access.secureRandomInteger,
     access.renderTemplate,
   );
+  const endedAt = new Date().toISOString();
+  const votekick = {
+    ...running,
+    status: "passed" as const,
+    yesVotes,
+    noVotes,
+    ballotRevision: finalized.revision,
+    durationSeconds: prepared.action.durationSeconds,
+    endedAt,
+  };
   const claimed = await repository.finalize(
     channelId,
     running.id,
@@ -188,9 +201,9 @@ const finalizeVotekick = async (
     noVotes,
     finalized.revision,
     prepared.action.durationSeconds,
-    new Date().toISOString(),
+    endedAt,
   );
-  return { outcome: "passed", claimed, prepared };
+  return { outcome: "passed", claimed, prepared, votekick };
 };
 
 const bestEffortClose = async (context: ModuleExecutionContext, id: string): Promise<void> => {
@@ -398,18 +411,24 @@ export const processVotekickMessage = async (
 
   const finishAttempt = async (running: Votekick, attempt: VotekickFinalizeAttempt): Promise<ModuleResult | null> => {
     if (attempt.outcome === "passed") {
-      const finalized = await repository.byId(event.channelId, running.id);
-      const overlayActions = finalized === null ? [] : [votekickOverlayAction("tally", votekickOverlayPayload(finalized))];
-      if (!attempt.claimed) return { actions: overlayActions, diagnostics: [] };
+      if (!attempt.claimed) {
+        let finalized: Votekick | null = null;
+        try { finalized = await repository.byId(event.channelId, running.id); } catch { /* The other claimant owns moderation. */ }
+        return { actions: finalized === null ? [] : [votekickOverlayAction("tally", votekickOverlayPayload(finalized))], diagnostics: [] };
+      }
       await bestEffortClose(context, running.id);
       await bestEffortClear(context, `close:${running.id}`);
-      return { actions: [...overlayActions, attempt.prepared.action], diagnostics: [...attempt.prepared.diagnostics] };
+      return {
+        actions: [attempt.prepared.action, votekickOverlayAction("tally", votekickOverlayPayload(attempt.votekick))],
+        diagnostics: [...attempt.prepared.diagnostics],
+      };
     }
     if (attempt.outcome === "expired") {
       await bestEffortClose(context, running.id);
       if (event.settings.expiredText.length === 0) await bestEffortClear(context, `close:${running.id}`);
       else await context.scheduleAlarm("close", `close:${running.id}`, Date.now());
-      const expired = await repository.byId(event.channelId, running.id);
+      let expired: Votekick | null = null;
+      try { expired = await repository.byId(event.channelId, running.id); } catch { /* Overlay presentation is best-effort. */ }
       return { actions: expired === null ? [] : [votekickOverlayAction("tally", votekickOverlayPayload(expired))], diagnostics: [] };
     }
     return null;
@@ -481,13 +500,12 @@ export const closeExpiredVotekick = async (
       return;
     }
     if (attempt.outcome === "passed") {
-      const finalized = await repository.byId(context.channelId, id);
-      if (finalized?.status === "passed") await publishVotekickOverlayState(context, finalized);
       if (!attempt.claimed) {
         const current = await repository.byId(context.channelId, id);
         if (current?.status === "running") throw new Error("Finalized votekick pass is waiting for its D1 claim.");
         await bestEffortCloseAlarm(context, id);
         try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }
+        if (current?.status === "passed") await publishVotekickOverlayState(context, current);
         return;
       }
       try {
@@ -509,6 +527,7 @@ export const closeExpiredVotekick = async (
         await bestEffortCloseAlarm(context, id);
         try { await context.clear(`close:${id}`); } catch { /* The host hard-delete alarm is independent. */ }
       }
+      await publishVotekickOverlayState(context, attempt.votekick);
       return;
     }
     if (attempt.outcome === "not_open") {
