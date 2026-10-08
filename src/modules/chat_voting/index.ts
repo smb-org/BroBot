@@ -1,6 +1,7 @@
 import { settingsVariableReferences } from "../contract";
 import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../contract";
 import { createChatVotingRepository } from "./repository";
+import { CHAT_VOTING_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
 import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage } from "./service";
 import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
@@ -94,6 +95,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   defaultEnabled: true,
   settingsSchema,
   defaultSettings: DEFAULT_CHAT_VOTING_SETTINGS,
+  chatCommands: CHAT_VOTING_CHAT_COMMANDS,
   templateContext: "event",
   templateFields: {
     startText: [titleVariable, optionsVariable, durationVariable],

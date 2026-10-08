@@ -42,7 +42,7 @@ describe("Votekick panel", () => {
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><VotekickPanel channelId="channel-a" language="en" /></UiProvider>);
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(screen.getByText("No votekick is running.")).toBeInTheDocument();
+    expect(screen.getByText("No votekick yet. Start one in chat with !votekick @user.")).toBeInTheDocument();
 
     hasRunningVote = true;
     await act(async () => {

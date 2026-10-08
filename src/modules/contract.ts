@@ -1230,6 +1230,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   /** Host-catalog category used to place this module in the channel sidebar. */
   navigationCategory: ModuleNavigationCategory;
   panelIcon?: ModuleIconDescriptor;
+  /** Read-only help shown on the module page for commands listened to in chat. */
+  chatCommands?: readonly ModuleChatCommandDeclaration[];
   /** The module is always enabled for every released channel and cannot be disabled. */
   mandatory?: boolean;
   /** Localized explanation shown when this module cannot be disabled. */
@@ -1365,3 +1367,31 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   /** Lazily loaded immediate-action card, shown only while this module is enabled. */
   immediateActions?: ModuleImmediateActionDefinition;
 };
+
+/**
+ * A localized hint about one argument accepted by a built-in chat command.
+ * The name is shown in the command's syntax, and the hint explains it in the
+ * dashboard language.
+ */
+export interface ModuleChatCommandArgument {
+  name: string;
+  hint: Readonly<Record<ModuleLanguage, string>>;
+}
+
+export type ModuleChatCommandThreshold = "everyone" | Exclude<ModuleChatStatus, "viewer">;
+
+/**
+ * Help metadata for a command a module parses from Twitch chat. This is
+ * descriptive only: the module remains responsible for parsing and access
+ * checks in its domain and service code.
+ */
+export interface ModuleChatCommandDeclaration {
+  /** Command token consumed by the module parser, such as `!vote`. */
+  name: string;
+  /** A representative form users can type, such as `!votekick @user`. */
+  syntax: string;
+  description: Readonly<Record<ModuleLanguage, string>>;
+  arguments?: readonly ModuleChatCommandArgument[];
+  /** Minimum Twitch chat badge/status required; higher statuses also qualify. */
+  minimumChatStatus: ModuleChatCommandThreshold;
+}

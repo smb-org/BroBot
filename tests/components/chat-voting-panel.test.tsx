@@ -83,6 +83,13 @@ describe("chat voting live panel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("explains how to start a vote when there is no result yet", async () => {
+    vi.stubGlobal("fetch", fetchFor());
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    expect(await screen.findByText("No vote yet. Start one in chat with !vote yesno [question].")).toBeInTheDocument();
+  });
+
   it("groups vote types and explains the exact chat input in the options", async () => {
     vi.stubGlobal("fetch", fetchFor());
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);

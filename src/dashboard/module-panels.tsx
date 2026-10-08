@@ -7,6 +7,7 @@ import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
 import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
+import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
@@ -764,6 +765,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           title={details.name}
           subtitle={details.description}
         />
+        {registered?.chatCommands === undefined ? null : <ChatCommands commands={registered.chatCommands} />}
         {navigationPage?.showMainSwitch === false ? null : <section className="module-detail__switch inspector-section--switch" aria-label={labels.status}>
           <div>
             <strong>{labels.mainSwitch}</strong>

@@ -3,6 +3,7 @@ import { settingsVariableReferences } from "../contract";
 import { VOTEKICK_DEFAULT_TEXTS } from "./contracts/chat-defaults";
 import { VOTEKICK_TEMPLATE_FIELDS } from "./contracts/template-variable-catalog";
 import { votekickCatalog } from "./contracts/catalog";
+import { VOTEKICK_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { VOTEKICK_MODULE_ID, votekickSettingsSchema } from "./contracts";
 import { createVotekickRepository, purgeExpiredVotekickUserIds } from "./adapters/d1";
 import { processVotekickMessage, closeExpiredVotekick } from "./service";
@@ -28,6 +29,7 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   id: VOTEKICK_MODULE_ID,
   navigationCategory: "interaction",
   panelIcon: votekickIcon,
+  chatCommands: VOTEKICK_CHAT_COMMANDS,
   templateVariableGroup: { label: { de: votekickCatalog.de.name, en: votekickCatalog.en.name }, icon: votekickIcon, order: 74 },
   settingsSchema: votekickSettingsSchema,
   defaultSettings: {

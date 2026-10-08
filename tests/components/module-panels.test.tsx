@@ -62,7 +62,20 @@ const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: ({ 
 
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
-    { id: "aktiv", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {}, panel: activeLoader },
+    {
+      id: "aktiv",
+      navigationCategory: "chat",
+      settingsSchema: {},
+      defaultSettings: {},
+      chatCommands: [{
+        name: "!sample",
+        syntax: "!sample @user",
+        description: { de: "Startet einen Beispielbefehl.", en: "Starts an example command." },
+        arguments: [{ name: "@user", hint: { de: "Twitch-Login.", en: "Twitch login." } }],
+        minimumChatStatus: "everyone",
+      }],
+      panel: activeLoader,
+    },
     { id: "ohne-panel", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {} },
     {
       id: "channel-page-fixture",
@@ -148,6 +161,27 @@ describe("Module panel loader", () => {
 
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
     expect(activeLoader).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the chat command section mounted while module data loads", async () => {
+    const common = {
+      channelId: "kanal-a",
+      moduleId: "aktiv",
+      ownRole: "manager" as const,
+      modules: [{ id: "aktiv", enabled: true, settings: "{}" }],
+      onNavigate: vi.fn(),
+      onToggle: vi.fn(),
+    };
+    const { rerender } = render(<ModulePage {...common} activeModules={[]} />);
+
+    const commands = screen.getByRole("region", { name: /Chatbefehle|Chat commands/ });
+    expect(commands).toHaveTextContent("!sample @user");
+    expect(commands).toHaveTextContent(/Twitch-Login\.|Twitch login\./);
+
+    rerender(<ModulePage {...common} activeModules={[{ moduleId: "aktiv", settings: "{}" }]} />);
+
+    expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /Chatbefehle|Chat commands/ })).toBe(commands);
   });
 
   it("places a long module panel after its settings editor", async () => {
