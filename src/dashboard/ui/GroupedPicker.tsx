@@ -158,11 +158,16 @@ export function GroupedPicker<T = unknown>({
   // Focus returns only after the surface has finished its exit transition. Mantine's focus trap
   // schedules timeouts that refocus the search input while the dropdown is still mounted, so any
   // earlier call (rAF, timer) can be overwritten on a slow runner.
-  const restoreFocusPending = useRef(false);
-  const restoreFocus = (): void => { restoreFocusPending.current = true; };
+  // This component is the only owner of focus restoration (Mantine's returnFocus is off). Each
+  // close records the current generation; reopening bumps it, so an exit callback of an abandoned
+  // close can no longer restore focus. Zero-duration (reduced motion) exits call the callback
+  // synchronously, after `close` has already recorded its generation.
+  const focusGeneration = useRef(0);
+  const pendingFocusGeneration = useRef<number | null>(null);
+  const restoreFocus = (): void => { pendingFocusGeneration.current = focusGeneration.current; };
   const finishRestoreFocus = (): void => {
-    if (!restoreFocusPending.current) return;
-    restoreFocusPending.current = false;
+    if (pendingFocusGeneration.current !== focusGeneration.current) return;
+    pendingFocusGeneration.current = null;
     if (onDismissFocus !== undefined) onDismissFocus();
     else focusTrigger();
   };
@@ -194,6 +199,12 @@ export function GroupedPicker<T = unknown>({
       },
     },
   );
+
+  useEffect(() => {
+    if (!opened) return;
+    focusGeneration.current += 1;
+    pendingFocusGeneration.current = null;
+  }, [opened]);
 
   useEffect(() => {
     if (!opened) return;
@@ -358,6 +369,7 @@ export function GroupedPicker<T = unknown>({
           closeOnEscape={false}
           onExitTransitionEnd={finishRestoreFocus}
           trapFocus
+          returnFocus={false}
           closeOnClickOutside
         >
           <Popover.Target>{interactiveTrigger}</Popover.Target>
@@ -384,7 +396,8 @@ export function GroupedPicker<T = unknown>({
         overlayProps={{ backgroundOpacity: 0.35, blur: 1 }}
         classNames={{ content: "ui-grouped-picker__drawer-content", body: "ui-grouped-picker__drawer-body" }}
         withinPortal
-        transitionProps={{ onExited: finishRestoreFocus }}
+        returnFocus={false}
+        onExitTransitionEnd={finishRestoreFocus}
       >
         {renderContent("sheet")}
       </Drawer>
