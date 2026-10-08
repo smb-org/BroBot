@@ -80,9 +80,13 @@ test("module overlay elements have visible previews and drag by their measured b
   const addElement = page.getByRole("button", { name: "Add element" });
   await addElement.click();
   await page.getByRole("option", { name: "Voting tally" }).click();
+  await expect(frame.locator("style[data-brobot-overlay-tally-css]")).toHaveCount(1, { timeout: 15_000 });
   const tally = frame.locator('[data-kind="chat_voting.tally"]');
-  await expect(tally).toBeVisible();
+  await expect(tally).toBeVisible({ timeout: 15_000 });
   await expect.poll(async () => (await tally.boundingBox())?.width ?? 0).toBeGreaterThan(0);
+  const tallyFill = tally.locator(".overlay-tally__fill").first();
+  await expect.poll(async () => tallyFill.evaluate((element) => getComputedStyle(element).display)).toBe("block");
+  await expect.poll(async () => (await tallyFill.boundingBox())?.height ?? 0).toBeGreaterThan(0);
   await dragElement(page, tally);
 
   await addElement.click();

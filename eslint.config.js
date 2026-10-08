@@ -34,8 +34,8 @@ const overlayViewBoundaryPattern = {
   message: "Panel views may not import overlay modules.",
 };
 const overlayEditorImportBoundaryPattern = {
-  regex: "(^|/)overlay/(?!canvas(?:\\.[^/]+)?$|model(?:\\.[^/]+)?$|variable\\.css(?:\\?inline)?$)",
-  message: "The overlay editor may only import the shared canvas, model types and variable styles.",
+  regex: "(^|/)overlay/(?!canvas(?:\\.[^/]+)?$|model(?:\\.[^/]+)?$|variable\\.css(?:\\?inline)?$|tally/overlay-tally\\.css\\?inline$)",
+  message: "The overlay editor may only import the shared canvas, model types and shared overlay styles.",
 };
 
 const moduleSharedImportPattern = [

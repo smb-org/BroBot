@@ -199,6 +199,16 @@ describe("Votekick module", () => {
     expect(context.lookupUserByLogin).not.toHaveBeenCalled();
   });
 
+  it("returns a normal rejection when channel language lookup fails before a start", async () => {
+    const context = contextFor({ channelLanguage: vi.fn(() => Promise.reject(new Error("language unavailable"))) });
+    const result = await processVotekickMessage(eventFor("!votekick sampleviewer"), repositoryFor(), context);
+
+    expect(result.actions).toEqual([]);
+    expect(result.diagnostics).toEqual([{ code: "votekick.rejected", detail: { reason: "lookup_failure" } }]);
+    expect(context.lookupUserByLogin).not.toHaveBeenCalled();
+    expect(context.ballots.open).not.toHaveBeenCalled();
+  });
+
   it("protects moderators and fails closed when moderator lookup is unavailable", async () => {
     const context = contextFor({ isChannelModerator: vi.fn(() => Promise.resolve(true)) });
     const result = await processVotekickMessage(eventFor("!votekick sampleviewer"), repositoryFor(), context);
@@ -643,6 +653,28 @@ describe("Votekick module", () => {
     expect(result.diagnostics).toContainEqual({ code: "votekick.rejected", detail: { reason: "lookup_failure" } });
   });
 
+  it("publishes the failed overlay from rollback data without a readback", async () => {
+    const finish = vi.fn(() => Promise.resolve(true));
+    const byId = vi.fn(() => Promise.reject(new Error("D1 temporarily unavailable")));
+    const repository = repositoryFor({
+      admit: vi.fn(() => Promise.reject(new Error("D1 admission response lost"))),
+      finish,
+      byId,
+    });
+
+    const result = await processVotekickMessage(eventFor("!votekick sampleviewer"), repository, contextFor());
+
+    expect(finish).toHaveBeenCalledOnce();
+    expect(byId).not.toHaveBeenCalled();
+    expect(result.diagnostics).toContainEqual({ code: "votekick.rejected", detail: { reason: "lookup_failure" } });
+    const overlayAction = result.actions.find((action) => action.kind === "overlay");
+    if (overlayAction?.kind !== "overlay") throw new Error("Rollback did not publish a terminal overlay action.");
+    expect(overlayAction.type).toBe("tally");
+    expect(overlayAction.elementKind).toBe("votekick.tally");
+    expect(overlayAction.payload.status).toBe("failed");
+    expect(typeof overlayAction.payload.votekickId).toBe("string");
+  });
+
   it("uses the DO expiry outcome before processing a start attempt", async () => {
     const overdue = runningVotekick({ endsAt: new Date(Date.now() - 1_000).toISOString() });
     const finalize = vi.fn(() => Promise.resolve(true));
@@ -839,8 +871,11 @@ describe("Votekick module", () => {
     expect(sendChat).toHaveBeenCalledWith(settings.expiredText, "votekick:ballot-1:expired", undefined, expect.any(Function), settings.chatTarget);
   });
 
-  it("uses the authoritative ballot snapshot for expiry counts", async () => {
-    let current = runningVotekick({ endsAt: new Date(Date.now() - 1_000).toISOString() });
+  it("uses the ballot snapshot and stored vote window for expiry messages", async () => {
+    let current = runningVotekick({
+      startedAt: "2026-01-15T11:58:00.000Z",
+      endsAt: "2026-01-15T11:59:00.000Z",
+    });
     const byId = vi.fn(() => Promise.resolve(current));
     const finalize = vi.fn((
       _channelId: string, _id: string, status: "passed" | "expired", yesVotes: number, noVotes: number,
@@ -854,7 +889,7 @@ describe("Votekick module", () => {
     const renderTemplate = vi.fn((text: string) => Promise.resolve({ text, attributions: [] }));
     const db = { prepare: vi.fn(() => ({
       bind: vi.fn().mockReturnThis(),
-      first: vi.fn(() => Promise.resolve({ settings: JSON.stringify(settings) })),
+      first: vi.fn(() => Promise.resolve({ settings: JSON.stringify({ ...settings, windowSeconds: 180 }) })),
     })) };
     const context = {
       channelId: "channel-a",
@@ -878,7 +913,11 @@ describe("Votekick module", () => {
   });
 
   it("recovers a frozen pass from the alarm and executes one timeout with frozen counts", async () => {
-    let current = runningVotekick();
+    let current = runningVotekick({
+      startedAt: "2026-01-15T11:59:00.000Z",
+      endsAt: "2026-01-15T12:00:00.000Z",
+    });
+    const terminalSettings = { ...settings, windowSeconds: 180 };
     const byId = vi.fn(() => Promise.resolve(current));
     const finalize = vi.fn((
       _channelId: string,
@@ -908,7 +947,7 @@ describe("Votekick module", () => {
     });
     const db = { prepare: vi.fn(() => ({
       bind: vi.fn().mockReturnThis(),
-      first: vi.fn(() => Promise.resolve({ settings: JSON.stringify(settings) })),
+      first: vi.fn(() => Promise.resolve({ settings: JSON.stringify(terminalSettings) })),
     })) };
     const sendChat = vi.fn(() => Promise.resolve({ sent: true, reason: null, retryable: false }));
     const context = {
@@ -933,6 +972,7 @@ describe("Votekick module", () => {
       reason: "Votekick (4:1) · ballot-1",
     }));
     expect(sendChat).toHaveBeenCalledWith(expect.stringContaining("sampleviewer"), "votekick:ballot-1:passed:applied", undefined, expect.any(Function), settings.chatTarget);
+    expect(renderTemplate.mock.calls.map(([, values]) => values["votekick.window"])).toEqual(["1 min", "1 min"]);
     expect(order).toEqual(["finalize", "language", "template", "template", "timeout:Votekick (4:1) · ballot-1", "close", "clear"]);
     expect(current.status).toBe("passed");
   });
@@ -979,5 +1019,42 @@ describe("Votekick module", () => {
     expect(executeTimeout).toHaveBeenCalledOnce();
     expect(order.indexOf("timeout")).toBeLessThan(order.indexOf("overlay"));
     expect(order).toContain("clear");
+  });
+
+  it("publishes the terminal overlay state when retryable pass chat delivery throws", async () => {
+    const running = runningVotekick();
+    const repository = repositoryFor({ byId: vi.fn(() => Promise.resolve(running)) });
+    const db = { prepare: vi.fn(() => ({
+      bind: vi.fn().mockReturnThis(),
+      first: vi.fn(() => Promise.resolve({ settings: JSON.stringify(settings) })),
+    })) };
+    const publishModuleOverlayMessage = vi.fn(() => Promise.resolve());
+    const context = {
+      channelId: "channel-a",
+      DB: db,
+      ballots: {
+        finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [4, 1], revision: 6 })),
+        close: vi.fn(() => Promise.resolve({ counts: [4, 1], revision: 6 })),
+      },
+      channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
+      secureRandomInteger: vi.fn(() => 0),
+      executeTimeout: vi.fn(() => Promise.resolve("applied" as const)),
+      schedule: vi.fn(() => Promise.resolve()),
+      clear: vi.fn(() => Promise.resolve()),
+      renderTemplate: vi.fn((text: string) => Promise.resolve({ text })),
+      sendChat: vi.fn(() => Promise.resolve({ sent: false, reason: "rate_limited", retryable: true })),
+      publishModuleOverlayMessage,
+    } as unknown as ModuleAlarmContext;
+
+    await expect(closeExpiredVotekick(context, "close:ballot-1", repository))
+      .rejects.toThrow("Votekick pass follow-up failed: rate_limited.");
+
+    expect(publishModuleOverlayMessage).toHaveBeenCalledOnce();
+    expect(publishModuleOverlayMessage).toHaveBeenCalledWith("tally", "votekick.tally", expect.objectContaining({
+      votekickId: "ballot-1",
+      status: "passed",
+      yesVotes: 4,
+      noVotes: 1,
+    }));
   });
 });

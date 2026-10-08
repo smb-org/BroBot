@@ -47,6 +47,13 @@ describe("effective ESLint module boundaries", () => {
     expect(rejects(restrictions, "../modules/overlay-element-registry")).toBe(false);
   });
 
+  it("allows only the shared tally stylesheet through the overlay editor boundary", async () => {
+    const restrictions = await restrictionsFor("src/dashboard/OverlayEditorPage.tsx");
+
+    expect(rejects(restrictions, "../overlay/tally/overlay-tally.css?inline")).toBe(false);
+    expect(rejects(restrictions, "../overlay/tally/OverlayTally")).toBe(true);
+  });
+
   it("keeps the panel boundaries and module isolation effective", async () => {
     const restrictions = await restrictionsFor("src/modules/example/panel/view.tsx");
 
