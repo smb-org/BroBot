@@ -155,11 +155,28 @@ export function GroupedPicker<T = unknown>({
     target?.focus();
   };
 
+  // Focus returns only after the surface has finished its exit transition. Mantine's focus trap
+  // schedules timeouts that refocus the search input while the dropdown is still mounted, so any
+  // earlier call (rAF, timer) can be overwritten on a slow runner.
+  // This component is the only owner of focus restoration (Mantine's returnFocus is off). Each
+  // close records the current generation; reopening bumps it, so an exit callback of an abandoned
+  // close can no longer restore focus. Zero-duration (reduced motion) exits call the callback
+  // synchronously, after `close` has already recorded its generation.
+  const focusGeneration = useRef(0);
+  const pendingFocusGeneration = useRef<number | null>(null);
+  // `onDismissFocus` (variable picker) is called on the next frame after close, as before: the caller
+  // owns its own selection handling. Only the default trigger restoration waits for the exit end,
+  // and only acts if focus is lost (nothing focused, or still inside the closing surface).
   const restoreFocus = (): void => {
-    window.requestAnimationFrame(() => {
-      if (onDismissFocus !== undefined) onDismissFocus();
-      else focusTrigger();
-    });
+    if (onDismissFocus !== undefined) window.requestAnimationFrame(onDismissFocus);
+    else pendingFocusGeneration.current = focusGeneration.current;
+  };
+  const finishRestoreFocus = (): void => {
+    if (pendingFocusGeneration.current !== focusGeneration.current) return;
+    pendingFocusGeneration.current = null;
+    const active = document.activeElement;
+    const lost = active === null || active === document.body || document.getElementById(panel)?.contains(active) === true;
+    if (lost) focusTrigger();
   };
 
   const changeOpened = (nextOpened: boolean): void => {
@@ -189,6 +206,12 @@ export function GroupedPicker<T = unknown>({
       },
     },
   );
+
+  useEffect(() => {
+    if (!opened) return;
+    focusGeneration.current += 1;
+    pendingFocusGeneration.current = null;
+  }, [opened]);
 
   useEffect(() => {
     if (!opened) return;
@@ -351,7 +374,9 @@ export function GroupedPicker<T = unknown>({
           position="bottom-end"
           width={width}
           closeOnEscape={false}
+          onExitTransitionEnd={finishRestoreFocus}
           trapFocus
+          returnFocus={false}
           closeOnClickOutside
         >
           <Popover.Target>{interactiveTrigger}</Popover.Target>
@@ -378,6 +403,8 @@ export function GroupedPicker<T = unknown>({
         overlayProps={{ backgroundOpacity: 0.35, blur: 1 }}
         classNames={{ content: "ui-grouped-picker__drawer-content", body: "ui-grouped-picker__drawer-body" }}
         withinPortal
+        returnFocus={false}
+        onExitTransitionEnd={finishRestoreFocus}
       >
         {renderContent("sheet")}
       </Drawer>
