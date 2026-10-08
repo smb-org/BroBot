@@ -155,11 +155,16 @@ export function GroupedPicker<T = unknown>({
     target?.focus();
   };
 
-  const restoreFocus = (): void => {
-    window.requestAnimationFrame(() => {
-      if (onDismissFocus !== undefined) onDismissFocus();
-      else focusTrigger();
-    });
+  // Focus returns only after the surface has finished its exit transition. Mantine's focus trap
+  // schedules timeouts that refocus the search input while the dropdown is still mounted, so any
+  // earlier call (rAF, timer) can be overwritten on a slow runner.
+  const restoreFocusPending = useRef(false);
+  const restoreFocus = (): void => { restoreFocusPending.current = true; };
+  const finishRestoreFocus = (): void => {
+    if (!restoreFocusPending.current) return;
+    restoreFocusPending.current = false;
+    if (onDismissFocus !== undefined) onDismissFocus();
+    else focusTrigger();
   };
 
   const changeOpened = (nextOpened: boolean): void => {
@@ -351,6 +356,7 @@ export function GroupedPicker<T = unknown>({
           position="bottom-end"
           width={width}
           closeOnEscape={false}
+          onExitTransitionEnd={finishRestoreFocus}
           trapFocus
           closeOnClickOutside
         >
@@ -378,6 +384,7 @@ export function GroupedPicker<T = unknown>({
         overlayProps={{ backgroundOpacity: 0.35, blur: 1 }}
         classNames={{ content: "ui-grouped-picker__drawer-content", body: "ui-grouped-picker__drawer-body" }}
         withinPortal
+        transitionProps={{ onExited: finishRestoreFocus }}
       >
         {renderContent("sheet")}
       </Drawer>
