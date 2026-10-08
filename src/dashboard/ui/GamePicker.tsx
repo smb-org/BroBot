@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
 import { LoadState } from "./LoadState";
 import { Skeleton } from "./Skeleton";
@@ -18,6 +18,8 @@ export interface GamePickerMessages {
   empty: string;
   error: string;
   remove: (name: string) => string;
+  selectedCount?: (count: number) => string;
+  clearSelection?: string;
 }
 
 const coverUrl = (game: GamePickerGame, width: number, height: number): string | null => {
@@ -54,13 +56,14 @@ interface GameSearchState {
   results: GamePickerGame[];
 }
 
-export function GamePicker({ searchGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false }: {
+export function GamePicker({ searchGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false, compact = false }: {
   searchGames: (query: string) => Promise<readonly GamePickerGame[]>;
   value: readonly GamePickerGame[];
   onChange: (games: GamePickerGame[]) => void;
   messages: GamePickerMessages;
   disabled?: boolean;
   visuallyHiddenLabel?: boolean;
+  compact?: boolean;
 }): ReactElement {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -100,27 +103,46 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
     return () => { document.removeEventListener("pointerdown", dismissOutside); };
   }, [showResults]);
 
+  useEffect(() => {
+    const root = rootRef.current;
+    if (root === null) return;
+    const closeOnFocusLeave = (event: FocusEvent): void => {
+      if (!root.contains(event.relatedTarget as Node | null)) setResultsOpen(false);
+    };
+    root.addEventListener("focusout", closeOnFocusLeave);
+    return () => { root.removeEventListener("focusout", closeOnFocusLeave); };
+  }, []);
+
+  const closeOnEscape = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.key === "Escape") setResultsOpen(false);
+  };
   const add = (game: GamePickerGame): void => {
     if (value.some((entry) => entry.id === game.id)) return;
     onChange([...value, game]);
     setQuery("");
     setResultsOpen(false);
   };
+  const selectionSummary = messages.selectedCount?.(value.length) ?? `${String(value.length)} selected`;
 
   return (
-    <div className="ui-game-picker" ref={rootRef}
-      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setResultsOpen(false); }}
-      onKeyDown={(event) => { if (event.key === "Escape") setResultsOpen(false); }}>
+    <div className={`ui-game-picker${compact ? " ui-game-picker--compact" : ""}`} ref={rootRef}>
       <label className={`ui-game-picker__label${visuallyHiddenLabel ? " sr-only" : ""}`} htmlFor={id}>{messages.label}</label>
       <p className="ui-game-picker__hint">{messages.hint}</p>
       <div className="ui-game-picker__selected" aria-live="polite">
-        {value.map((game) => (
+        {compact
+          ? value.length === 0 ? null : <button className="ui-game-picker__compact-selection" type="button" disabled={disabled}
+            aria-label={`${messages.clearSelection ?? messages.label} (${selectionSummary})`}
+            title={value.map((game) => game.name).join(", ")} onClick={() => onChange([])}>
+            <span className="mono">{String(value.length)}</span>
+            <span className="sr-only">{selectionSummary}</span>
+          </button>
+          : value.map((game) => (
           <span className="ui-game-picker__chip" key={game.id}>
             <GameCover game={game} width={20} height={27} />
             <span>{game.name}</span>
             <button type="button" disabled={disabled} aria-label={messages.remove(game.name)} onClick={() => onChange(value.filter((entry) => entry.id !== game.id))}>×</button>
           </span>
-        ))}
+          ))}
       </div>
       <div className="ui-game-picker__search">
         <input
@@ -132,6 +154,7 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
           aria-describedby={`${id}-hint`}
           disabled={disabled}
           onFocus={() => setResultsOpen(true)}
+          onKeyDown={closeOnEscape}
           onChange={(event) => { setQuery(event.currentTarget.value); setResultsOpen(true); }}
         />
         {!showResults ? null : <div className="ui-game-picker__results-slot">
@@ -145,7 +168,7 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
             <ul className="ui-game-picker__results" role="listbox" aria-label={messages.label}>
               {currentSearch?.status === "ready" ? currentSearch.results.map((game) => (
                 <li key={game.id}>
-                  <button type="button" role="option" aria-selected={value.some((entry) => entry.id === game.id)} disabled={disabled || value.some((entry) => entry.id === game.id)} onClick={() => add(game)}>
+                  <button type="button" role="option" aria-selected={value.some((entry) => entry.id === game.id)} disabled={disabled || value.some((entry) => entry.id === game.id)} onKeyDown={closeOnEscape} onClick={() => add(game)}>
                     <GameCover game={game} width={28} height={38} />
                     {game.name}
                   </button>

@@ -42,7 +42,7 @@ const expectEveryFieldHasHelperText = (scope: HTMLElement): void => {
     ...within(scope).queryAllByRole("spinbutton"),
     ...within(scope).queryAllByRole("radiogroup"),
     ...within(scope).queryAllByRole("switch"),
-  ];
+  ].filter((field) => field.closest(".ui-field--search") === null);
   expect(fields.length).toBeGreaterThan(0);
   for (const field of fields) {
     const label = field.getAttribute("aria-label") ?? field.getAttribute("id") ?? field.tagName;

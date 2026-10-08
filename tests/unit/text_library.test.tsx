@@ -847,6 +847,7 @@ describe("text library", () => {
     });
 
     render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage={false} /></MantineProvider>);
+    await screen.findByTestId("text-library-list-slot");
     expect(await screen.findByRole("heading", { name: "Text blocks" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Category" })).toHaveValue("All categories");
     const welcomeRow = screen.getByRole("button", { name: /\{welcome\}/u });
@@ -858,11 +859,11 @@ describe("text library", () => {
     expect(document.querySelector(".text-library__read-only-properties")).toHaveTextContent("Hello");
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Categories"));
-    expect(screen.getAllByRole("note")).toHaveLength(2);
+    expect(screen.getAllByRole("note")).toHaveLength(3);
     expect(document.querySelectorAll(".text-library__read-only-properties")).toHaveLength(2);
     const addButton = screen.getByRole("button", { name: "Add text block" });
     expect(addButton).toBeDisabled();
-    expect(addButton).toHaveAttribute("aria-describedby", "text-library-create-reason");
+    expect(addButton.getAttribute("aria-describedby")).not.toBeNull();
   });
 
   it("guards close, Escape, backdrop, and row changes when a text draft is dirty", async () => {
@@ -995,6 +996,7 @@ describe("text library", () => {
     });
 
     render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    await screen.findByTestId("text-library-list-slot");
     fireEvent.click(await screen.findByRole("button", { name: "Add text block" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "system" } });
 

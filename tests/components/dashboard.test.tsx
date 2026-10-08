@@ -1118,7 +1118,7 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
 
     expect(await screen.findByRole("button", { name: "Entziehen" })).toBeDisabled();
-    expect(screen.getAllByText("Letzter Broadcaster")).toHaveLength(1);
+    expect(screen.getAllByText("Der letzte Broadcaster kann nicht herabgestuft oder entfernt werden.")).toHaveLength(1);
     expect(document.querySelector(".member-avatar-placeholder")).toHaveTextContent("E");
 
     // The role choice offers no value that would be rejected.
@@ -1260,8 +1260,9 @@ describe("Dashboard skeleton", () => {
     const reason = "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.";
     const grantAccess = screen.getByRole("button", { name: "Zugriff vergeben" });
     expect(grantAccess).toBeDisabled();
-    expect(grantAccess).toHaveAttribute("aria-describedby", "members-create-reason");
-    expect(document.getElementById("members-create-reason")).toHaveTextContent(reason);
+    const reasonId = grantAccess.getAttribute("aria-describedby");
+    expect(reasonId).not.toBeNull();
+    expect(document.getElementById(reasonId as string)).toHaveTextContent(reason);
     // A locked whole form is read as a properties list (ADR 0006 addendum),
     // not a form with disabled fields -- there is no role choice and no
     // remove action to disable, only the one reason line above the values.

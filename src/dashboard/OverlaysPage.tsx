@@ -25,8 +25,8 @@ import {
   type PanelOverlaySummary,
   type PanelOverlayToken,
 } from "./api";
-import { apiErrorText, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
-import { ActionMenu, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, ListPaginationFooter, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
+import { ActionMenu, Button, ConfirmDialog, EmptyCellValue, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -230,10 +230,10 @@ function OverlaySetupAssistant({
 }
 
 export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEditor }: OverlaysPageProperties): ReactElement {
-  const createManagementReasonId = useId();
   const language = dashboardLanguage();
   const labels = overlaysTexts(language);
   const [overlays, setOverlays] = useState<readonly PanelOverlaySummary[]>([]);
+  const [search, setSearch] = useState("");
   const [maximum, setMaximum] = useState(20);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -706,6 +706,10 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const isAccessActive = (access: PanelOverlayAccess): boolean => access.revokedAt === null &&
     (access.expiresAt === null || Date.parse(access.expiresAt) > now);
   const manageReason = canManage ? undefined : labels.managementLocked;
+  const query = search.trim().toLocaleLowerCase();
+  const visibleOverlays = query.length === 0 ? overlays : overlays.filter((overlay) => overlay.name.toLocaleLowerCase().includes(query));
+  const limitReason = overlays.length >= maximum ? labels.limitReached : undefined;
+  const createReason = manageReason ?? limitReason;
   const setupCopyUrlReason = setupAccess === null ? null
     : !canManage ? null
       : !setupAccess.recoverable ? labels.accessUnrecoverable
@@ -718,23 +722,33 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     ? labels.legacyTokenName
     : `${labels.legacyTokenName} (${legacyRevokeTarget.id.slice(0, 8)})`;
   const list = <section className="overlays-page config-section" aria-label={labels.list}>
+    <ListToolbar
+      searchLabel={labels.search}
+      searchPlaceholder={labels.search}
+      searchClearLabel={dashboardCommonTexts().clearSearch}
+      searchValue={search}
+      onSearchChange={setSearch}
+      create={{ label: labels.create, onClick: beginCreate, disabled: !canManage || pending || overlays.length >= maximum, ...(createReason === undefined ? {} : { reason: createReason }) }}
+      usage={{ count: overlays.length, maximum, ...(query.length === 0 ? {} : { filteredCount: visibleOverlays.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: labels.limitSuffix, loadedSuffix: dashboardCommonTexts().loaded } }}
+      {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
+    />
     <LoadState
-      status={loading && overlays.length === 0 ? "loading" : loadFailed && overlays.length === 0 ? "error" : overlays.length === 0 ? "empty" : "success"}
+      status={loading && overlays.length === 0 ? "loading" : loadFailed && overlays.length === 0 ? "error" : visibleOverlays.length === 0 ? "empty" : "success"}
       minHeight={360}
       loading={<Skeleton rows={6} height={34} />}
-      empty={<p className="empty-state">{labels.empty}</p>}
+      empty={<p className="empty-state">{overlays.length === 0 ? labels.empty : dashboardCommonTexts().noMatches}</p>}
       error={<Skeleton rows={6} height={34} />}
     >
       <div className={`table-wrap overlays-table-wrap${selectedId !== null || creating ? " overlays-table-wrap--inspector-open" : ""}`}>
         <table className="table overlays-table">
           <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.elements}</th><th scope="col">{labels.accesses}</th><th scope="col">{labels.lastUsedAt}</th></tr></thead>
-          <tbody>{overlays.map((overlay) => <tr key={overlay.id} tabIndex={0} aria-selected={overlay.id === selectedId}
+          <tbody>{visibleOverlays.map((overlay) => <tr key={overlay.id} tabIndex={0} aria-selected={overlay.id === selectedId}
             onClick={() => { setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); }}
             onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); } }}>
             <th scope="row">{overlay.name}</th>
             <td>{overlay.elementCount}</td>
             <td>{overlay.accessCount}</td>
-            <td>{overlay.lastUsedAt === null ? labels.never : <time dateTime={overlay.lastUsedAt}>{formatTimestamp(overlay.lastUsedAt)}</time>}</td>
+            <td>{overlay.lastUsedAt === null ? <EmptyCellValue language={language} /> : <time dateTime={overlay.lastUsedAt}>{formatTimestamp(overlay.lastUsedAt)}</time>}</td>
           </tr>)}</tbody>
         </table>
       </div>
@@ -764,7 +778,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
               <span className="mono muted">{labels.legacyTokenId}: {token.id.slice(0, 8)}</span>
               <span className="muted">{labels.legacyCreatedAt}: {formatTimestamp(token.createdAt)}</span>
               <span className="muted">{token.createdBy ?? labels.legacyCreatedByUnknown}</span>
-              <span className="muted">{token.lastUsedAt === null ? labels.never : `${labels.lastUsedAt}: ${formatTimestamp(token.lastUsedAt)}`}</span>
+              <span className="muted">{token.lastUsedAt === null ? <EmptyCellValue language={language} /> : `${labels.lastUsedAt}: ${formatTimestamp(token.lastUsedAt)}`}</span>
             </div>
             <div className="overlay-access-list__actions"><ActionMenu label={labels.accessActions(`${labels.legacyTokenName} ${token.id.slice(0, 8)}`)} items={[
               { label: `${labels.revoke} …`, disabled: !canManage || pending, danger: true, onSelect: () => { setLegacyRevokeTarget(token); } },
@@ -805,7 +819,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         <dl className="properties">
           <div><dt>{labels.size}</dt><dd>{selectedOverlay.width} × {selectedOverlay.height}</dd></div>
           <div><dt>{labels.elements}</dt><dd>{labels.elementsSummary(selectedOverlay.elements.length, selectedOverlay.elements.slice(0, 3).map((element) => element.label || element.id).join(", ") + (selectedOverlay.elements.length > 3 ? ", …" : ""))}</dd></div>
-          <div><dt>{labels.lastUsedAt}</dt><dd>{selected?.lastUsedAt === null || selected?.lastUsedAt === undefined ? labels.lastUsedNever : formatTimestamp(selected.lastUsedAt)}</dd></div>
+          <div><dt>{labels.lastUsedAt}</dt><dd>{selected?.lastUsedAt === null || selected?.lastUsedAt === undefined ? <EmptyCellValue language={language} /> : formatTimestamp(selected.lastUsedAt)}</dd></div>
         </dl>
         {onOpenEditor === undefined ? null : <Button variant="primary" disabled={!canManage}
           onClick={() => { onOpenEditor(selectedOverlay.id); }}>{labels.editComposition}</Button>}
@@ -827,7 +841,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
                   <div className="overlay-access-list__summary">
                     <strong>{access.label}</strong>
                     <Led status={active ? "green" : "off"} word={status} />
-                    <span className="overlay-access-list__last-used mono">{labels.lastUsedAt}: {access.lastUsedAt === null ? labels.lastUsedNever : formatTimestamp(access.lastUsedAt)}</span>
+                    <span className="overlay-access-list__last-used mono">{labels.lastUsedAt}: {access.lastUsedAt === null ? <EmptyCellValue language={language} /> : formatTimestamp(access.lastUsedAt)}</span>
                   </div>
                 <div className="overlay-access-list__actions">
                   <Button size="compact" variant="neutral" icon="copy" className="overlay-access-list__copy" ariaLabel={`${copiedAccessId === access.tokenId ? labels.copied : labels.copyLink}: ${access.label}`}
@@ -900,14 +914,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   </SubInspector>;
 
   return <>
-    <PageHeader kind="overlays" title={labels.title} subtitle={labels.count(overlays.length, maximum)} actions={
-      <div className="overlays-page__create-action">
-        <Button icon="add" iconOnly ariaLabel={labels.create}
-          {...(manageReason === undefined ? {} : { describedBy: createManagementReasonId })}
-          disabled={!canManage || pending || overlays.length >= maximum} onClick={beginCreate} />
-        {manageReason === undefined ? null : <p id={createManagementReasonId} className="overlays-page__create-reason" role="note">{manageReason}</p>}
-      </div>
-    } />
+    <PageHeader kind="overlays" title={labels.title} subtitle="" />
     <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
     <ConfirmDialog opened={confirmDelete} title={labels.deleteTitle(selected?.name ?? "")} description={labels.deleteDescription(selected?.name ?? "")}
       confirmLabel={labels.deleteConfirm(selected?.name ?? "")} cancelLabel={labels.cancel} onCancel={() => { setConfirmDelete(false); }}

@@ -230,6 +230,7 @@ describe("Module panel loader", () => {
     const status = screen.getByText("Läuft · immer aktiv");
     expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse sind immer aktiv.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Kanalereignisse sind immer aktiv.");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv: Kanalereignisse sind immer aktiv.");
   });
 
   it("shows the mandatory module detail as always active without a switch", () => {
@@ -247,6 +248,8 @@ describe("Module panel loader", () => {
     const status = screen.getByText("Läuft · immer aktiv");
     expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse sind immer aktiv.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Kanalereignisse sind immer aktiv.");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv: Kanalereignisse sind immer aktiv.");
+    expect(screen.getByText("Kanalereignisse sind immer aktiv.")).toBeVisible();
     expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
   });
 

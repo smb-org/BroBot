@@ -201,7 +201,8 @@ describe("Overlays page", () => {
   };
 
   it("lists overlay counts and usage, and keeps operator management actions disabled without exposing links", async () => {
-    const fetcher = routeFetcher({ legacyTokens: [{ id: "legacy-token", name: null, createdAt: "2026-09-24T10:00:00.000Z", createdBy: null, lastUsedAt: null, expiresAt: null }] });
+    setBrowserLanguage("de-DE");
+    const fetcher = routeFetcher({ secondOverlay: true, legacyTokens: [{ id: "legacy-token", name: null, createdAt: "2026-09-24T10:00:00.000Z", createdBy: null, lastUsedAt: null, expiresAt: null }] });
     const onOpenEditor = vi.fn();
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} onOpenEditor={onOpenEditor} /></UiProvider>);
@@ -211,6 +212,9 @@ describe("Overlays page", () => {
     expect(table.closest(".overlays-table-wrap")).not.toHaveClass("overlays-table-wrap--inspector-open");
     expect(within(table).getByText("Gameplay")).toBeInTheDocument();
     expect(within(table).getAllByText("1", { selector: "td" })).toHaveLength(2);
+    const noLastUsedRow = within(table).getByText("Second scene").closest("tr");
+    expect(noLastUsedRow?.querySelector(".table-empty-value")).toHaveAttribute("aria-hidden", "true");
+    expect(noLastUsedRow?.querySelector(".sr-only")).toHaveTextContent("kein Wert");
     expect(within(table).queryByText("OBS Main PC")).not.toBeInTheDocument();
     fireEvent.click(within(table).getByText("Gameplay"));
     expect(table.closest(".overlays-table-wrap")).toHaveClass("overlays-table-wrap--inspector-open");
@@ -299,9 +303,9 @@ describe("Overlays page", () => {
   });
 
   it.each([
-    { language: "de-DE", lastUsed: "Zuletzt benutzt: nie", status: "Aktiv" },
-    { language: "en-US", lastUsed: "Last used: never", status: "Active" },
-  ])("labels access metadata and uses a compact row menu in $language", async ({ language, lastUsed, status }) => {
+    { language: "de-DE", lastUsed: "Zuletzt benutzt: —", noValue: "kein Wert", status: "Aktiv" },
+    { language: "en-US", lastUsed: "Last used: —", noValue: "no value", status: "Active" },
+  ])("labels access metadata and uses a compact row menu in $language", async ({ language, lastUsed, noValue, status }) => {
     setBrowserLanguage(language);
     vi.stubGlobal("fetch", routeFetcher({ accessLastUsedAt: null }));
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
@@ -310,7 +314,8 @@ describe("Overlays page", () => {
     const inspector = await screen.findByRole("region", { name: language === "en-US" ? "Accesses" : "Zugänge" });
     const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
-    expect(within(accessRow).getByText(lastUsed)).toBeInTheDocument();
+    expect(accessRow.querySelector(".overlay-access-list__last-used")).toHaveTextContent(lastUsed);
+    expect(within(accessRow).getByText(noValue)).toHaveClass("sr-only");
     expect(within(accessRow).getByText(status).parentElement).toHaveClass("led");
 
     const actions = within(accessRow).getAllByRole("button");

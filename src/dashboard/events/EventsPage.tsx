@@ -7,7 +7,7 @@ import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, LoadState as UiLoadState, Popover, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
+import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, Popover, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import type { LoadState } from "../load-state";
 import {
   actorLabel,
@@ -63,10 +63,12 @@ const CopyableId = ({ id, texts }: { id: string; texts: ReturnType<typeof dashbo
 const EventFilterBar = ({
   filters,
   moduleOptions,
+  loadedCount,
   onChange,
 }: {
   filters: PanelEventFilters;
   moduleOptions: readonly PanelModuleState[];
+  loadedCount: number;
   onChange: (filters: PanelEventFilters) => void;
 }): ReactElement => {
   const texts = dashboardTexts();
@@ -99,7 +101,17 @@ const EventFilterBar = ({
   activeFilter.push(...selectedTones.map((tone) => tone === "info" ? texts.events.info : tone === "warning" ? texts.events.notice : texts.events.error));
   if (filters.person !== null) activeFilter.push(filters.person);
   const moduleSelectOptions: SelectOption[] = moduleOptions.map((module) => ({ value: module.id, label: moduleName(module.id) }));
-  return <FilterBar label={texts.events.filter} className="event-filter" summary={activeFilter.length === 0 ? undefined : <div className="form-actions"><p className="muted" aria-live="polite">{texts.events.activeFilters} {activeFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(emptyEventFilter); }}>{texts.events.resetFilters}</button></div>}>
+  const common = dashboardCommonTexts();
+  return <ListToolbar
+    className="event-filter"
+    searchLabel={texts.events.person}
+    searchPlaceholder={texts.audit.personPlaceholder}
+    searchClearLabel={common.clearSearch}
+    searchValue={personDraft}
+    onSearchChange={setPersonDraft}
+    onSearchKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
+    filtersLabel={texts.events.filter}
+    filters={<>
       <ChipGroup
         className="event-filter__chips"
         ariaLabel={texts.events.origin}
@@ -151,15 +163,10 @@ const EventFilterBar = ({
         onChange={(value) => { onChange({ ...filters, module: value === "" ? null : value }); }}
         options={[{ value: "", label: texts.events.allModules }, ...moduleSelectOptions]}
       />
-      <Field
-        label={texts.events.person}
-        placeholder={texts.audit.personPlaceholder}
-        icon="search"
-        value={personDraft}
-        onChange={setPersonDraft}
-        onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
-      />
-  </FilterBar>;
+    </>}
+    usage={{ count: loadedCount, loaded: true, copy: { countSuffix: "", filteredInfix: common.of, filteredSuffix: "", limitInfix: common.of, limitSuffix: "", loadedSuffix: common.loaded } }}
+    {...(activeFilter.length === 0 ? {} : { activeFilters: activeFilter.join(" · "), activeFiltersLabel: texts.events.activeFilters, resetLabel: texts.events.resetFilters, onReset: () => { setPersonDraft(""); onChange(emptyEventFilter); } })}
+  />;
 };
 
 const EventFeedEnd = ({
@@ -280,7 +287,7 @@ export const EventsPage = ({
         list={
           <section className="content-section" aria-label={texts.events.log}>
             <div className="section-heading"><h2>{texts.events.log}</h2></div>
-            <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
+            <EventFilterBar filters={filters} moduleOptions={moduleOptions} loadedCount={eventEntries.length} onChange={onFiltersChange} />
             <div className="realtime-feed__notice-slot" data-pending={realtime.pendingCount > 0}>
               {realtime.pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
             </div>

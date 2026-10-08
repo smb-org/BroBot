@@ -8,6 +8,9 @@ export interface TextLibraryTexts {
   search: string;
   activeFilters: string;
   resetFilters: string;
+  countSuffix: string;
+  limitSuffix: string;
+  filteredSuffix: string;
   categoryFilter: string;
   gameFilter: string;
   allCategories: string;
@@ -119,6 +122,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     search: "Textbausteine suchen",
     activeFilters: "Aktive Filter:",
     resetFilters: "Zurücksetzen",
+    countSuffix: "Textbausteine",
+    limitSuffix: "Textbausteine belegt",
+    filteredSuffix: "Textbausteine",
     categoryFilter: "Kategorie",
     allCategories: "Alle Kategorien",
     gameFilter: "Spiel",
@@ -234,6 +240,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
       empty: "Keine Spiele gefunden.",
       error: "Die Twitch-Spiele konnten nicht geladen werden.",
       remove: (name) => `${name} entfernen`,
+      selectedCount: (count) => `${String(count)} ausgewählt`,
+      clearSelection: "Spielefilter leeren",
     },
     categoryLabels: { social: "Soziales", info: "Info", faq: "FAQ", game: "Spiel", fun: "Spaß" },
     weekdaysLabels: ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"],
@@ -259,6 +267,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     search: "Search text blocks",
     activeFilters: "Active filters:",
     resetFilters: "Reset",
+    countSuffix: "text blocks",
+    limitSuffix: "text blocks used",
+    filteredSuffix: "text blocks",
     categoryFilter: "Category",
     allCategories: "All categories",
     gameFilter: "Game",
@@ -374,6 +385,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
       empty: "No games found.",
       error: "Twitch games could not be loaded.",
       remove: (name) => `Remove ${name}`,
+      selectedCount: (count) => `${String(count)} selected`,
+      clearSelection: "Clear game filter",
     },
     categoryLabels: { social: "Social", info: "Info", faq: "FAQ", game: "Game", fun: "Fun" },
     weekdaysLabels: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],

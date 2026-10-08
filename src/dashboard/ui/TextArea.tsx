@@ -368,6 +368,7 @@ export function TextArea({
       onOptionSubmit={chooseSuggestion}
       withinPortal
       position="bottom-start"
+      hideDetached={false}
       middlewares={{ flip: true, shift: true }}
       shadow="xs"
       width={400}

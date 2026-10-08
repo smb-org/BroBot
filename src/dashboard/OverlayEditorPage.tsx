@@ -33,7 +33,7 @@ import {
   type PanelOverlayDraft,
   type PanelOverlayElement,
 } from "./api";
-import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, formatNumber, overlaysTexts } from "./locale";
+import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, overlaysTexts } from "./locale";
 import { moduleName } from "./module-labels";
 import { OverlayElementPalette, type OverlayElementPaletteOption } from "./OverlayElementPalette";
 import { useRealtimeVariableUpdates } from "./realtime";
@@ -1048,7 +1048,6 @@ function OverlayEditorWorkspace({
         <div className="overlay-editor__section-heading">
           <h2>{labels.editorElements}</h2>
           <div className="overlay-editor__element-heading-actions">
-            <span className="muted">{draft.elements.length} / {String(OVERLAY_ELEMENT_MAXIMUM_COUNT)}</span>
             <OverlayElementPalette
               options={paletteItems}
               messages={{
@@ -1076,6 +1075,10 @@ function OverlayEditorWorkspace({
               }}
             />
           </div>
+        </div>
+        <div className={`overlay-editor__element-usage${draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT * 0.9 ? " overlay-editor__element-usage--warning" : ""}`} role="status">
+          <span><span className="mono">{formatNumber(draft.elements.length, language)}</span> {dashboardCommonTexts(language).of} <span className="mono">{formatNumber(OVERLAY_ELEMENT_MAXIMUM_COUNT, language)}</span> {labels.editorElementUsage}</span>
+          <span className="overlay-editor__element-limit">{draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT ? labels.editorElementLimit : ""}</span>
         </div>
         {!canManage ? <p className="overlay-editor__locked-reason" id="overlay-editor-readonly-reason">{labels.editorLockedReason}</p> : null}
         {orderedElements.length === 0 ? <p className="muted">{labels.editorNoElements}</p> : <ul className="overlay-editor__element-list">

@@ -22,6 +22,13 @@ export const catalogString = (catalog: object, key: string): string | undefined 
 export interface DashboardCommonTexts {
   cancel: string;
   close: string;
+  clearSearch: string;
+  noValue: string;
+  noMatches: string;
+  activeFilters: string;
+  of: string;
+  reset: string;
+  loaded: string;
   dismissNotification: string;
   invalidFieldCount: (count: number) => string;
   invalidFieldsTitle: string;
@@ -48,6 +55,13 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   de: {
     cancel: "Abbrechen",
     close: "Schließen",
+    clearSearch: "Suche leeren",
+    noValue: "kein Wert",
+    noMatches: "Keine passenden Einträge gefunden.",
+    activeFilters: "Aktive Filter:",
+    of: "von",
+    reset: "Zurücksetzen",
+    loaded: "geladen",
     dismissNotification: "Benachrichtigung schließen",
     invalidFieldCount: (count) => `${String(count)} ${count === 1 ? "Feld" : "Felder"} fehlerhaft`,
     invalidFieldsTitle: "Fehlerhafte Felder",
@@ -74,6 +88,13 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   en: {
     cancel: "Cancel",
     close: "Close",
+    clearSearch: "Clear search",
+    noValue: "no value",
+    noMatches: "No matching entries found.",
+    activeFilters: "Active filters:",
+    of: "of",
+    reset: "Reset",
+    loaded: "loaded",
     dismissNotification: "Dismiss notification",
     invalidFieldCount: (count) => `${String(count)} invalid ${count === 1 ? "field" : "fields"}`,
     invalidFieldsTitle: "Invalid fields",
@@ -175,6 +196,10 @@ export const channelVariableTemplateDescription: Readonly<Record<DashboardLangua
 export interface ChannelVariablesTexts {
   title: string;
   list: string;
+  search: string;
+  countSuffix: string;
+  limitSuffix: string;
+  filteredSuffix: string;
   create: string;
   count: (count: number, maximum: number) => string;
   empty: string;
@@ -239,7 +264,7 @@ export interface ChannelVariablesTexts {
 
 const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
   de: {
-    title: "Kanalvariablen", list: "Variablen", create: "Variable anlegen", count: (count, maximum) => `${String(count)} von ${String(maximum)}`,
+    title: "Kanalvariablen", list: "Variablen", search: "Variablen suchen", countSuffix: "Variablen", limitSuffix: "Variablen belegt", filteredSuffix: "Variablen", create: "Variable anlegen", count: (count, maximum) => `${String(count)} von ${String(maximum)}`,
     empty: "Noch keine Kanalvariablen angelegt.", loading: "Kanalvariablen werden geladen …", loadError: "Kanalvariablen konnten nicht geladen werden.", retry: "Erneut versuchen",
     saveError: "Die Kanalvariable konnte nicht gespeichert werden.", deleteError: "Die Kanalvariable konnte nicht gelöscht werden.",
     name: "Name", nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; höchstens 32 Zeichen.", nameInvalid: "Nur Kleinbuchstaben, Zahlen und Unterstrich.",
@@ -270,7 +295,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     legacyRenameWarning: "Alte Links mit #var=… zeigen diese Variable nach der Umbenennung nicht mehr an.",
   },
   en: {
-    title: "Channel variables", list: "Variables", create: "Create variable", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
+    title: "Channel variables", list: "Variables", search: "Search variables", countSuffix: "variables", limitSuffix: "variables used", filteredSuffix: "variables", create: "Create variable", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
     empty: "No channel variables yet.", loading: "Loading channel variables …", loadError: "Channel variables could not be loaded.", retry: "Retry",
     saveError: "The channel variable could not be saved.", deleteError: "The channel variable could not be deleted.",
     name: "Name", nameHint: "Lowercase letters, numbers, and underscores; up to 32 characters.", nameInvalid: "Use lowercase letters, numbers, and underscores only.",
@@ -305,10 +330,10 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
 export const channelVariablesTexts = (language: DashboardLanguage = dashboardLanguage()): ChannelVariablesTexts => channelVariablesCatalog[language];
 
 export interface OverlaysTexts {
-  title: string; list: string; details: string; count: (count: number, maximum: number) => string; empty: string; loading: string;
+  title: string; list: string; search: string; countSuffix: string; limitSuffix: string; filteredSuffix: string; limitReached: string; details: string; count: (count: number, maximum: number) => string; empty: string; loading: string;
   loadError: string; actionError: string; managementLocked: string; create: string; createTitle: string;
   name: string; size: string; width: string; height: string; standardSize: string; compactSize: string; customSize: string;
-  createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; lastUsedNever: string; never: string; statusLabel: string;
+  createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; statusLabel: string;
   openAccesses: string; issue: string; issueLabel: string; issueHint: string; copied: string;
   editComposition: string; editorBack: string; editorLoading: string; editorLoadError: string;
   editorElements: string; editorPreview: string; editorPreviewCanvas: string; editorProperties: string;
@@ -339,7 +364,7 @@ export interface OverlaysTexts {
   editorVariable: string; editorX: string; editorY: string; editorScale: string; editorZ: string;
   editorMoveForward: string; editorMoveBackward: string; editorInComposition: string;
   editorZoom: string; editorReference: (width: number, height: number) => string; editorTextHint: string;
-  editorElementLimit: string; editorMissingPrefill: (name: string) => string; editorSave: string;
+  editorElementLimit: string; editorElementUsage: string; editorMissingPrefill: (name: string) => string; editorSave: string;
   editorDiscard: string; editorSaved: string; editorClean: string; editorUnsaved: string; editorSaving: string;
   editorSaveError: string; editorConflictTitle: string; editorConflictDescription: string;
   editorConflictKeep: string; editorConflictReload: string; editorConflictOverwrite: string;
@@ -378,13 +403,13 @@ export interface OverlaysTexts {
 
 const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
   de: {
-    title: "Overlays", list: "Overlays", count: (count, maximum) => `${String(count)} von ${String(maximum)}`,
+    title: "Overlays", list: "Overlays", search: "Overlays suchen", countSuffix: "Overlays", limitSuffix: "Overlays belegt", filteredSuffix: "Overlays", limitReached: "Das Overlay-Limit ist erreicht.", count: (count, maximum) => `${String(count)} von ${String(maximum)}`,
     details: "Übersicht",
     empty: "Noch keine Overlays angelegt.", loading: "Overlays werden geladen …", loadError: "Overlays konnten nicht geladen werden.",
     actionError: "Die Änderung konnte nicht durchgeführt werden.", managementLocked: "Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.",
     create: "Neues Overlay", createTitle: "Neues Overlay anlegen", name: "Name", size: "Größe", width: "Breite", height: "Höhe",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Eigene Fläche", createSubmit: "Overlay anlegen", cancel: "Abbrechen",
-    elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", lastUsedNever: "nie", never: "Nie", statusLabel: "Status", openAccesses: "Zugänge verwalten", editComposition: "Komposition bearbeiten",
+    elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", statusLabel: "Status", openAccesses: "Zugänge verwalten", editComposition: "Komposition bearbeiten",
     editorBack: "Zurück zu Overlays", editorLoading: "Overlay wird geladen …", editorLoadError: "Das Overlay konnte nicht geladen werden.",
     editorElements: "Elemente", editorPreview: "Live-Vorschau", editorPreviewCanvas: "Overlay-Vorschau", editorProperties: "Eigenschaften",
     editorPropertiesTab: "Position", editorStyleTab: "Stil-Editor", editorCssTab: "CSS-Code",
@@ -420,7 +445,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorVariable: "Kanalvariable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Skalierung (%)", editorZ: "Ebene (z)",
     editorMoveForward: "Eine Ebene nach vorn", editorMoveBackward: "Eine Ebene nach hinten", editorInComposition: "In der Komposition anzeigen",
     editorZoom: "Vorschau-Zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} Referenz`, editorTextHint: "Genau ein {value}-Platzhalter ist erforderlich.",
-    editorElementLimit: "Pro Overlay sind höchstens 20 Elemente möglich.", editorMissingPrefill: (name) => `Die Variable ${name} ist nicht mehr verfügbar.`, editorSave: "Speichern",
+    editorElementLimit: "Pro Overlay sind höchstens 20 Elemente möglich.", editorElementUsage: "Elemente belegt", editorMissingPrefill: (name) => `Die Variable ${name} ist nicht mehr verfügbar.`, editorSave: "Speichern",
     editorDiscard: "Entwurf verwerfen", editorSaved: "Gespeichert — verbundene Quellen übernehmen die Änderungen sofort.", editorClean: "Gespeicherte Komposition. Änderungen werden erst nach dem Speichern live.",
     editorUnsaved: "Ungespeicherte Änderungen", editorSaving: "Wird gespeichert …", editorSaveError: "Die Komposition konnte nicht gespeichert werden.",
     editorConflictTitle: "Overlay wurde geändert", editorConflictDescription: "Eine andere Person hat dieses Overlay geändert. Du kannst die aktuelle Fassung laden oder deinen Entwurf überschreiben.",
@@ -486,13 +511,13 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     legacyImportClosingPending: "Overlay importiert. Die verbundene alte Quelle wird noch geschlossen.",
   },
   en: {
-    title: "Overlays", list: "Overlays", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
+    title: "Overlays", list: "Overlays", search: "Search overlays", countSuffix: "overlays", limitSuffix: "overlays used", filteredSuffix: "overlays", limitReached: "The overlay limit has been reached.", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
     details: "Overview",
     empty: "No overlays yet.", loading: "Loading overlays …", loadError: "Overlays could not be loaded.",
     actionError: "The change could not be completed.", managementLocked: "Only broadcasters and managers may change overlays or accesses.",
     create: "New overlay", createTitle: "Create an overlay", name: "Name", size: "Size", width: "Width", height: "Height",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Custom size", createSubmit: "Create overlay", cancel: "Cancel",
-    elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", lastUsedNever: "never", never: "Never", statusLabel: "Status", openAccesses: "Manage accesses", editComposition: "Edit composition",
+    elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", statusLabel: "Status", openAccesses: "Manage accesses", editComposition: "Edit composition",
     editorBack: "Back to overlays", editorLoading: "Loading overlay …", editorLoadError: "The overlay could not be loaded.",
     editorElements: "Elements", editorPreview: "Live preview", editorPreviewCanvas: "Overlay preview", editorProperties: "Properties",
     editorPropertiesTab: "Layout", editorStyleTab: "Style editor", editorCssTab: "CSS code",
@@ -528,7 +553,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorVariable: "Channel variable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Scale (%)", editorZ: "Layer (z)",
     editorMoveForward: "Move one layer forward", editorMoveBackward: "Move one layer backward", editorInComposition: "Show in composition",
     editorZoom: "Preview zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} reference`, editorTextHint: "Exactly one {value} placeholder is required.",
-    editorElementLimit: "An overlay can contain at most 20 elements.", editorMissingPrefill: (name) => `Variable ${name} is no longer available.`, editorSave: "Save",
+    editorElementLimit: "An overlay can contain at most 20 elements.", editorElementUsage: "elements used", editorMissingPrefill: (name) => `Variable ${name} is no longer available.`, editorSave: "Save",
     editorDiscard: "Discard draft", editorSaved: "Saved — connected sources use the changes immediately.", editorClean: "Saved composition. Changes go live after you save.",
     editorUnsaved: "Unsaved changes", editorSaving: "Saving …", editorSaveError: "The composition could not be saved.",
     editorConflictTitle: "Overlay changed", editorConflictDescription: "Someone else changed this overlay. Reload the latest version or overwrite it with your draft.",
@@ -3033,5 +3058,5 @@ export const formatStreamManagerFeedTime = (value: string, now = new Date()): st
   return `${formatDate(value)} ${time}`;
 };
 
-export const formatNumber = (value: number): string =>
-  new Intl.NumberFormat(dashboardLanguage()).format(value);
+export const formatNumber = (value: number, language: DashboardLanguage = dashboardLanguage()): string =>
+  new Intl.NumberFormat(language).format(value);

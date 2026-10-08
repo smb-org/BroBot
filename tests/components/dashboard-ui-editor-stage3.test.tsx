@@ -97,6 +97,39 @@ describe("editor field seam", () => {
     expect(selectedImage).toHaveAttribute("height", "27");
   });
 
+  it("closes game results on Escape from the input or an option and when focus leaves the picker", async () => {
+    const messages: GamePickerMessages = {
+      label: "Games", hint: "h", search: "s", searchHint: "sh", loading: "l", empty: "e", error: "x",
+      remove: (name) => `Remove ${name}`,
+    };
+    const searchGames = vi.fn().mockResolvedValue([{ id: "1", name: "Example Game" }]);
+    renderUi(
+      <div>
+        <GamePicker searchGames={searchGames} value={[]} onChange={() => {}} messages={messages} />
+        <button type="button">outside</button>
+      </div>,
+    );
+    const input = screen.getByRole("searchbox", { name: "Games" });
+    const open = async () => {
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: "Example" } });
+      return screen.findByRole("option", { name: /Example Game/u });
+    };
+
+    fireEvent.keyDown(await open(), { key: "Escape" });
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+
+    await open();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+
+    const option = await open();
+    fireEvent.focusOut(option, { relatedTarget: input });
+    expect(screen.getByRole("option")).toBeInTheDocument();
+    fireEvent.focusOut(option, { relatedTarget: screen.getByRole("button", { name: "outside" }) });
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+  });
+
   it("keeps a visual prefix out of the value, normalizes input, and gives icon fields only their label", () => {
     const onChange = vi.fn();
     renderUi(

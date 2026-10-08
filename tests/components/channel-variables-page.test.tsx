@@ -48,7 +48,7 @@ describe("Channel variables page", () => {
     expect(table.querySelector(".channel-variables-table__description")).toHaveClass("channel-variables-table__description");
     expect(table.querySelector(".channel-variables-table__value")).toHaveClass("number");
     expect(screen.getByLabelText("Bei Streamstart auf null setzen")).toBeInTheDocument();
-    expect(screen.getByText("Bis zu 25 Variablen pro Kanal.")).toBeInTheDocument();
+    expect(document.querySelector(".list-toolbar__usage")).toHaveTextContent(/1\s*von\s*25\s*Variablen belegt/u);
 
     const row = table.querySelector("tbody tr");
     if (row === null) throw new Error("Channel variable row is missing.");

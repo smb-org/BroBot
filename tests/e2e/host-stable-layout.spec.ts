@@ -526,7 +526,7 @@ test("setting an event filter leaves the list top fixed at desktop and 390px", a
     await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
     const listTop = await measureDocumentBox(page, ".ui-load-state");
     await page.getByRole("textbox", { name: "Person" }).fill("Operator");
-    await expect(page.locator(".dashboard-filter-bar__summary")).toContainText("Operator");
+    await expect(page.locator(".event-filter .list-toolbar__active-filters")).toContainText("Operator");
     await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
     expect(await measureDocumentBox(page, ".ui-load-state")).toEqual(listTop);
     await page.unrouteAll();
@@ -567,11 +567,17 @@ test("the channel-variable limit and create controls stay above a full list", as
   await page.goto(`/channels/${channelId}/variables`);
   await variablesStarted;
   const limitSlotBefore = await measureBox(page, ".channel-variables-limit-slot");
-  const createActionBefore = await measureBox(page, ".page-header__actions");
+  const toolbarBefore = await measureBox(page, ".list-toolbar");
+  const createActionBefore = await measureBox(page, ".list-toolbar__create");
+  const usageBefore = await measureBox(page, ".list-toolbar__status");
   releaseVariables();
   await expect(page.locator(".channel-variables-table tbody tr")).toHaveCount(25);
   expect(await measureBox(page, ".channel-variables-limit-slot")).toEqual(limitSlotBefore);
-  expect(await measureBox(page, ".page-header__actions")).toEqual(createActionBefore);
+  expect(await measureBox(page, ".list-toolbar")).toEqual(toolbarBefore);
+  expect(await measureBox(page, ".list-toolbar__create")).toEqual(createActionBefore);
+  expect(await measureBox(page, ".list-toolbar__status")).toEqual(usageBefore);
+  await expect(page.locator(".list-toolbar__status")).toContainText("25 of 25 variables used");
+  await expect(page.getByRole("button", { name: "Create variable" })).toBeDisabled();
   expect(limitSlotBefore[1] + limitSlotBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".ui-load-state"))[1]);
 });
 
@@ -907,20 +913,20 @@ test("the collapsed legacy overlay list stays below primary content while loadin
     await expect(overlayList).toHaveAttribute("data-status", "success");
     await expect(page.locator(".overlays-table tbody tr")).toHaveCount(20);
     const primaryListBefore = await measureDocumentBox(page, ".overlays-table");
-    const createActionBefore = await measureDocumentBox(page, ".overlays-page__create-action");
+    const createActionBefore = await measureDocumentBox(page, ".list-toolbar__create");
 
     releaseLegacyTokens();
     await expect(details.locator("summary")).toContainText("Legacy links (50)");
     await expect(details.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
     expect(await measureDocumentBox(page, ".overlays-table")).toEqual(primaryListBefore);
-    expect(await measureDocumentBox(page, ".overlays-page__create-action")).toEqual(createActionBefore);
+    expect(await measureDocumentBox(page, ".list-toolbar__create")).toEqual(createActionBefore);
     expect(primaryListBefore[1] + primaryListBefore[3]).toBeLessThanOrEqual((await measureDocumentBox(page, ".overlay-legacy-links"))[1]);
 
     await details.locator("summary").click();
     await expect(details.locator(".overlay-access-list__item--legacy").first()).toBeVisible();
     await expect(details.locator(".overlay-access-list__item--legacy")).toHaveCount(50);
     expect(await measureDocumentBox(page, ".overlays-table")).toEqual(primaryListBefore);
-    expect(await measureDocumentBox(page, ".overlays-page__create-action")).toEqual(createActionBefore);
+    expect(await measureDocumentBox(page, ".list-toolbar__create")).toEqual(createActionBefore);
     await page.unrouteAll();
   }
 });

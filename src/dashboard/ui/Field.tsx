@@ -36,14 +36,21 @@ interface FieldBaseProps {
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
 }
 
-export type FieldProps = FieldBaseProps & (
+type FieldCountProps = (
   | { maxLength: number; countLabel: (count: number, maxLength: number) => ReactNode }
   | { maxLength?: undefined; countLabel?: never }
-) & (
+);
+
+type FieldAdornmentProps = (
   | { icon: IconName; prefix?: never; leftLabel?: never }
   | { prefix: string; icon?: never; leftLabel?: never }
   | { leftLabel: string; icon?: never; prefix?: never }
   | { icon?: undefined; prefix?: undefined; leftLabel?: undefined }
+);
+
+export type FieldProps = FieldBaseProps & FieldCountProps & (
+  | ({ variant: "search"; clearLabel: string } & { icon?: never; prefix?: never; leftLabel?: never })
+  | ({ variant?: undefined; clearLabel?: never } & FieldAdornmentProps)
 );
 
 /**
@@ -53,8 +60,10 @@ export type FieldProps = FieldBaseProps & (
  * `×` and the border stays strong (wired in the theme's `Input`
  * override, not here).
  */
-export function Field({ label, ariaLabel, labelHidden = false, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, countLength, name, id, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, onKeyDown }: FieldProps) {
+export function Field({ label, ariaLabel, labelHidden = false, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, countLength, name, id, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, onKeyDown, variant, clearLabel }: FieldProps) {
   const disabledReason = useDisabledFieldReason();
+  const searchVariant = variant === "search";
+  const effectiveLabelHidden = labelHidden || searchVariant;
   const count = countLength?.(value) ?? value.length;
   const overLimit = maxLength !== undefined && count > maxLength;
   const nearLimit = maxLength !== undefined && count >= maxLength * 0.9;
@@ -63,9 +72,23 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
     <span><span aria-hidden="true">× </span>{typeof effectiveError === "string" ? <TruncatedText text={effectiveError} /> : effectiveError}</span>
   );
   const leadingLabel = prefix ?? leftLabel;
-  const leading = leadingLabel === undefined ? (icon === undefined ? undefined : <Icon name={icon} size={16} />) : (
+  const leading = searchVariant ? <Icon name="search" size={16} /> : leadingLabel === undefined ? (icon === undefined ? undefined : <Icon name={icon} size={16} />) : (
     <span className="ui-field__prefix" aria-hidden="true">{leadingLabel}</span>
   );
+  const clearButton = searchVariant ? (
+    <button
+      type="button"
+      className="ui-field__clear"
+      aria-label={clearLabel}
+      aria-hidden={value.length === 0 ? true : undefined}
+      tabIndex={value.length === 0 ? -1 : undefined}
+      disabled={disabled || value.length === 0}
+      style={{ visibility: value.length === 0 ? "hidden" : "visible" }}
+      onClick={() => { onChange(""); }}
+    >
+      <Icon name="close" size={16} />
+    </button>
+  ) : undefined;
   const description: ReactNode = (
     <span className="ui-field__description">
       {hint === undefined ? null : <TruncatedText className="ui-field__hint" text={hint} />}
@@ -76,9 +99,9 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
 
   return (
     <TextInput
-      className={["ui-field", className, leadingLabel === undefined ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ")}
-      label={labelHidden ? undefined : label}
-      aria-label={ariaLabel ?? (labelHidden ? label : undefined)}
+      className={["ui-field", searchVariant ? "ui-field--search" : undefined, className, leadingLabel === undefined ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ")}
+      label={searchVariant ? label : effectiveLabelHidden ? undefined : label}
+      aria-label={ariaLabel ?? (labelHidden && !searchVariant ? label : undefined)}
       description={description}
       error={errorNode}
       inputWrapperOrder={["label", "input", "description", "error"]}
@@ -88,7 +111,13 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
         if (prefix !== undefined && next.startsWith(prefix)) next = next.slice(prefix.length);
         onChange(next);
       }}
-      onKeyDown={onKeyDown}
+      onKeyDown={(event) => {
+        if (searchVariant && event.key === "Escape" && value.length > 0) {
+          event.preventDefault();
+          onChange("");
+        }
+        onKeyDown?.(event);
+      }}
       placeholder={placeholder}
       disabled={disabled}
       readOnly={readOnly}
@@ -99,10 +128,13 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
       name={name}
       id={id}
       leftSection={leading}
-      leftSectionWidth={leadingLabel === undefined ? undefined : 36}
+      leftSectionWidth={leadingLabel === undefined && !searchVariant ? undefined : 36}
       leftSectionPointerEvents="none"
+      rightSection={clearButton}
+      rightSectionWidth={searchVariant ? 44 : undefined}
+      rightSectionPointerEvents={searchVariant ? "all" : "none"}
       styles={{
-        ...(leadingLabel === undefined ? {} : { section: { color: "var(--text-3)", fontFamily: "var(--mantine-font-family-monospace)", borderRight: "1px solid var(--line)" } }),
+        ...(leadingLabel === undefined && !searchVariant ? {} : { section: { color: "var(--text-3)", ...(leadingLabel === undefined ? {} : { fontFamily: "var(--mantine-font-family-monospace)", borderRight: "1px solid var(--line)" }) } }),
         ...(mono ? { input: { fontFamily: "var(--mantine-font-family-monospace)" } } : {}),
       }}
     />

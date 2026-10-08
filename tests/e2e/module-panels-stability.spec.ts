@@ -591,12 +591,27 @@ test("text-library game filter keeps the list position when games are selected a
     ] }) });
   });
 
-  for (const width of [1280, 390]) {
+  for (const width of [1280, 700, 390]) {
     await page.setViewportSize({ width, height: 844 });
     await gotoPanel(page, "text_library");
     const list = page.getByTestId("text-library-list-slot");
     await expect(list).toBeVisible();
-    const slot = page.locator(".text-library__filters .ui-game-picker__selected");
+    const toolbar = page.locator(".text-library__list-toolbar");
+    const filters = toolbar.locator(".list-toolbar__filters");
+    const create = toolbar.getByRole("button", { name: "Add text block" });
+    const picker = filters.locator(".ui-game-picker--compact");
+    const slot = picker.locator(".ui-game-picker__selected");
+    const pickerBox = await picker.boundingBox();
+    const filtersBox = await filters.boundingBox();
+    const createBox = await create.boundingBox();
+    expect(pickerBox?.height).toBeLessThanOrEqual(44);
+    expect(pickerBox?.y ?? 0).toBeGreaterThanOrEqual(filtersBox?.y ?? 0);
+    expect((pickerBox?.y ?? 0) + (pickerBox?.height ?? 0)).toBeLessThanOrEqual((filtersBox?.y ?? 0) + (filtersBox?.height ?? 0) + 0.5);
+    expect(createBox?.x ?? 0).toBeGreaterThanOrEqual((filtersBox?.x ?? 0) + (filtersBox?.width ?? 0) - 0.5);
+    if (width === 700) {
+      const filterOverflow = await filters.evaluate((element) => element.scrollWidth > element.clientWidth);
+      expect(filterOverflow).toBe(true);
+    }
     const before = { list: await box(list), slot: await box(slot) };
     const search = page.getByPlaceholder("Search games");
     for (const name of ["Just Chatting", "Software and Game Development", "Retro Adventure Collection Deluxe"]) {
@@ -605,10 +620,15 @@ test("text-library game filter keeps the list position when games are selected a
       expect(await box(list)).toEqual(before.list);
       expect(await box(slot)).toEqual(before.slot);
     }
-    for (const name of ["Just Chatting", "Software and Game Development", "Retro Adventure Collection Deluxe"]) {
-      await page.getByRole("button", { name: `Remove ${name}` }).click();
-      expect(await box(list)).toEqual(before.list);
-      expect(await box(slot)).toEqual(before.slot);
+    if (width === 390) {
+      const activeFilters = toolbar.locator(".list-toolbar__active-filters");
+      await expect(activeFilters).toContainText("Just Chatting");
+      await expect(activeFilters).toContainText("Software and Game Development");
+      await expect(activeFilters).toContainText("Retro Adventure Collection Deluxe");
+      await page.getByRole("button", { name: "Reset" }).click();
     }
+    else await page.getByRole("button", { name: "Clear game filter (3 selected)" }).click();
+    expect(await box(list)).toEqual(before.list);
+    expect(await box(slot)).toEqual(before.slot);
   }
 });

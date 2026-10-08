@@ -66,7 +66,7 @@ export const StateRow = ({ label, tone, word, detail, action, icon }: {
 };
 
 const LockedModuleStatus = ({ status, reason }: { status: string; reason: string }): ReactElement => (
-  <span className="module-locked-status" aria-label={status} aria-description={reason} title={reason}>
+  <span className="module-locked-status" aria-label={`${status}: ${reason}`} aria-description={reason} title={reason}>
     <Icon name="lock" size={16} className="module-locked-status__icon" />
     <span>{status}</span>
   </span>
@@ -772,7 +772,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
               : <Led status={effectiveEnabled ? "green" : "off"} label={statusWord(effectiveEnabled)} />}
           </div>
           {mandatory ? null : <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />}
-          {disabledReason === null || mandatory ? null : <p className="lock-reason lock-reason--with-icon"><Icon name="lock" size={16} />{disabledReason}</p>}
+            {disabledReason === null ? null : <p className="lock-reason lock-reason--with-icon"><Icon name="lock" size={16} />{disabledReason}</p>}
         </section>}
         {!permissionsMissing ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>
           <div className="section-heading"><h2>{texts.module.scopeList}</h2></div>

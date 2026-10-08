@@ -13,8 +13,9 @@ import VotekickPanel from "../../src/modules/votekick/panel";
 import "../../src/dashboard/styles.css";
 
 const channelId = "channel-a";
-const language = "en";
-const panelName = new URLSearchParams(window.location.search).get("panel");
+const query = new URLSearchParams(window.location.search);
+const language = query.get("lang") === "de" ? "de" : "en";
+const panelName = query.get("panel");
 
 const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId} language={language} canManage />
   : panelName === "belabox" ? <BelaboxPanel channelId={channelId} language={language} canManage />
