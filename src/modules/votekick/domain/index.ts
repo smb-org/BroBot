@@ -2,8 +2,18 @@ import type { ModuleChatStatus } from "../../contract";
 
 export const VOTEKICK_COMMAND_PATTERN = /^!votekick\s+@?([a-z0-9_]{1,25})$/iu;
 
-export const canStartVotekick = (statuses: readonly ModuleChatStatus[] | null): boolean =>
-  statuses?.some((status) => status === "vip" || status === "moderator" || status === "broadcaster") ?? false;
+const CHAT_STATUS_RANK: Readonly<Record<ModuleChatStatus, number>> = {
+  viewer: 0,
+  subscriber: 1,
+  vip: 2,
+  moderator: 3,
+  broadcaster: 4,
+};
+
+export const canStartVotekick = (
+  statuses: readonly ModuleChatStatus[] | null,
+  minimumRole: ModuleChatStatus = "vip",
+): boolean => statuses?.some((status) => CHAT_STATUS_RANK[status] >= CHAT_STATUS_RANK[minimumRole]) ?? false;
 
 export const votekickThreshold = (minNetVotes: number, percent: number, activeChatterCount: number): number => {
   if (!Number.isSafeInteger(minNetVotes) || minNetVotes < 1 ||

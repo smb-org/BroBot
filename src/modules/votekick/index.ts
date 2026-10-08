@@ -1,13 +1,14 @@
-import type { BotModule, ModuleTemplateUsageSource } from "../contract";
+import type { BotModule, JsonObject, ModuleTemplateUsageSource } from "../contract";
 import { settingsVariableReferences } from "../contract";
-import { VOTEKICK_DEFAULT_TEXTS } from "./contracts/chat-defaults";
 import { VOTEKICK_TEMPLATE_FIELDS } from "./contracts/template-variable-catalog";
 import { votekickCatalog } from "./contracts/catalog";
 import { VOTEKICK_CHAT_COMMANDS } from "./contracts/chat-commands";
-import { VOTEKICK_MODULE_ID, votekickSettingsSchema } from "./contracts";
+import { DEFAULT_VOTEKICK_SETTINGS, VOTEKICK_HISTORY_DAYS, VOTEKICK_MODULE_ID, votekickSettingsSchema } from "./contracts";
 import { createVotekickRepository, purgeExpiredVotekickUserIds } from "./adapters/d1";
-import { processVotekickMessage, closeExpiredVotekick } from "./service";
+import { processVotekickMessage, closeExpiredVotekick, votekickOverlayPayload } from "./service";
 import { votekickRoutes } from "./routes";
+import { votekickOverlayElements } from "./overlay/element";
+import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
 
 const votekickIcon = { paths: ["M12 3v18", "M3 12h18", "m5 5 14 14", "M19 5 5 19"] } as const;
 const templateFields = ["startText", "passText", "failText", "expiredText", "protectedText", "busyText"] as const;
@@ -25,6 +26,15 @@ const templateUsageSources = async (db: D1Database, channelId: string): Promise<
   });
 };
 
+const initialVotekickOverlayState = async (db: D1Database, channelId: string): Promise<JsonObject | null> => {
+  const repository = createVotekickRepository(db);
+  const running = await repository.running(channelId);
+  if (running !== null) return votekickOverlayPayload(running);
+  const cutoff = new Date(Date.now() - VOTEKICK_HISTORY_DAYS * 24 * 60 * 60 * 1_000).toISOString();
+  const latest = (await repository.listRecent(channelId, cutoff))[0];
+  return latest === undefined ? null : votekickOverlayPayload(latest);
+};
+
 export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   id: VOTEKICK_MODULE_ID,
   navigationCategory: "interaction",
@@ -32,16 +42,7 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   chatCommands: VOTEKICK_CHAT_COMMANDS,
   templateVariableGroup: { label: { de: votekickCatalog.de.name, en: votekickCatalog.en.name }, icon: votekickIcon, order: 74 },
   settingsSchema: votekickSettingsSchema,
-  defaultSettings: {
-    minNetVotes: 5,
-    percent: 20,
-    windowSeconds: 60,
-    duration: { minSeconds: 120, maxSeconds: 120 },
-    channelCooldownSeconds: 300,
-    targetCooldownSeconds: 1800,
-    chatTarget: "source_only",
-    ...VOTEKICK_DEFAULT_TEXTS.en,
-  },
+  defaultSettings: DEFAULT_VOTEKICK_SETTINGS,
   broadcasterScopes: ["moderation:read"],
   needsActiveChatters: true,
   eventSubTypes: ["channel.chat.message"],
@@ -55,6 +56,12 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
     retryDelaysMs: [5_000, 15_000, 60_000],
     handle: (context, alarmKey) => closeExpiredVotekick(context, alarmKey, createVotekickRepository(context.DB)),
   }],
+  overlayElements: votekickOverlayElements.map((element) => ({
+    ...element,
+    kind: VOTEKICK_ELEMENT_KIND,
+    initialState: (db: D1Database, channelId: string) =>
+      initialVotekickOverlayState(db, channelId),
+  })),
   scheduledMaintenance: purgeExpiredVotekickUserIds,
   navigationEntries: [{
     id: "votekick",

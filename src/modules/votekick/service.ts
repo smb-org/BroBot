@@ -1,9 +1,10 @@
 import { ballotChoiceFromMessage } from "../contract";
-import type { BallotSnapshot, ModuleAction, ModuleAlarmContext, ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
+import type { BallotSnapshot, JsonObject, ModuleAction, ModuleAlarmContext, ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { formatTimeoutDuration, rollTimeoutSeconds } from "../contracts/moderation";
 import { VOTEKICK_WINDOW_MS, votekickSettingsSchema, type Votekick, type VotekickSettings } from "./contracts";
 import { canStartVotekick, isActiveVotekickTarget, votekickThreshold, votekickTimeoutReason, VOTEKICK_COMMAND_PATTERN, wasActiveBeforeVotekick } from "./domain";
 import type { VotekickRepository, VotekickStart } from "./repository";
+import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
 
 const emptyResult = (): ModuleResult => ({ actions: [], diagnostics: [] });
 const textFromEvent = (event: ModuleEvent): string | null => {
@@ -16,10 +17,41 @@ const payloadString = (event: ModuleEvent, key: string): string | null => {
   const value = Reflect.get(event.payload, key);
   return typeof value === "string" && value.length > 0 ? value : null;
 };
-const rejection = (reason: string, target?: string): ModuleResult => ({
+const rejection = (reason: string, target?: string, extra?: Readonly<Record<string, string>>): ModuleResult => ({
   actions: [],
-  diagnostics: [{ code: "votekick.rejected", detail: { reason, ...(target === undefined ? {} : { target }) } }],
+  diagnostics: [{ code: "votekick.rejected", detail: { reason, ...(target === undefined ? {} : { target }), ...extra } }],
 });
+
+export const votekickOverlayPayload = (votekick: Votekick): JsonObject => ({
+  votekickId: votekick.id,
+  targetLogin: votekick.targetLogin,
+  targetUserId: votekick.targetUserId,
+  yesVotes: votekick.yesVotes,
+  noVotes: votekick.noVotes,
+  threshold: votekick.threshold,
+  ballotRevision: votekick.ballotRevision,
+  status: votekick.status,
+  startedAt: votekick.startedAt,
+  endsAt: votekick.endsAt,
+  endedAt: votekick.endedAt,
+});
+
+const votekickOverlayAction = (type: "opened" | "tally", payload: Readonly<Record<string, unknown>>) => ({
+  kind: "overlay" as const,
+  type,
+  elementKind: VOTEKICK_ELEMENT_KIND,
+  payload,
+});
+
+const publishVotekickOverlayState = async (
+  context: Pick<ModuleAlarmContext, "publishModuleOverlayMessage">,
+  votekick: Votekick,
+): Promise<void> => {
+  if (typeof context.publishModuleOverlayMessage !== "function") return;
+  try {
+    await context.publishModuleOverlayMessage("tally", VOTEKICK_ELEMENT_KIND, votekickOverlayPayload(votekick));
+  } catch { /* Overlay presentation must never hold up moderation or alarm cleanup. */ }
+};
 
 const chatAction = (text: string, target: VotekickSettings["chatTarget"], automated = false): ModuleAction | null =>
   text.length === 0 ? null : { kind: "chat", text, target, automated };
@@ -47,6 +79,11 @@ const snapshotCounts = (snapshot: { counts: readonly number[] }): readonly [numb
   snapshot.counts[1] ?? 0,
 ];
 
+const storedWindowSeconds = (votekick: Pick<Votekick, "startedAt" | "endsAt">, fallback: number): number => {
+  const durationMs = Date.parse(votekick.endsAt) - Date.parse(votekick.startedAt);
+  return Number.isFinite(durationMs) && durationMs > 0 ? Math.round(durationMs / 1_000) : fallback;
+};
+
 type PassPreparation = {
   action: Extract<ModuleAction, { kind: "timeout" }>;
   diagnostics: readonly ModuleDiagnostic[];
@@ -66,6 +103,7 @@ const preparePass = async (
   const [yesVotes, noVotes] = snapshotCounts(snapshot);
   const durationSeconds = rollTimeoutSeconds(settings.duration, randomInteger);
   const duration = formatTimeoutDuration(durationSeconds, language);
+  const window = formatTimeoutDuration(storedWindowSeconds(running, settings.windowSeconds), language);
   const values = {
     "votekick.target": running.targetLogin ?? running.targetUserId ?? "",
     "votekick.yes": yesVotes,
@@ -73,6 +111,7 @@ const preparePass = async (
     "votekick.threshold": running.threshold,
     "votekick.seconds": durationSeconds,
     "votekick.duration": duration,
+    "votekick.window": window,
   };
   const [pass, fail] = await Promise.all([
     renderTemplate(settings.passText, values),
@@ -102,8 +141,9 @@ type VotekickFinalizeAccess = {
 };
 
 type VotekickFinalizeAttempt =
-  | { outcome: "open" | "expired" | "not_open"; claimed: false }
-  | { outcome: "passed"; claimed: boolean; prepared: PassPreparation };
+  | { outcome: "open"; claimed: false; counts: readonly [number, number]; revision: number }
+  | { outcome: "expired" | "not_open"; claimed: false }
+  | { outcome: "passed"; claimed: boolean; prepared: PassPreparation; votekick: Votekick };
 
 const finalizeVotekick = async (
   channelId: string,
@@ -116,7 +156,7 @@ const finalizeVotekick = async (
   const [yesVotes, noVotes] = snapshotCounts(finalized);
   if (finalized.outcome === "open") {
     await repository.updateCounts(channelId, running.id, yesVotes, noVotes, finalized.revision);
-    return { outcome: "open", claimed: false };
+    return { outcome: "open", claimed: false, counts: [yesVotes, noVotes], revision: finalized.revision };
   }
   if (finalized.outcome === "not_open") {
     const endedAt = new Date().toISOString();
@@ -148,6 +188,16 @@ const finalizeVotekick = async (
     access.secureRandomInteger,
     access.renderTemplate,
   );
+  const endedAt = new Date().toISOString();
+  const votekick = {
+    ...running,
+    status: "passed" as const,
+    yesVotes,
+    noVotes,
+    ballotRevision: finalized.revision,
+    durationSeconds: prepared.action.durationSeconds,
+    endedAt,
+  };
   const claimed = await repository.finalize(
     channelId,
     running.id,
@@ -156,9 +206,9 @@ const finalizeVotekick = async (
     noVotes,
     finalized.revision,
     prepared.action.durationSeconds,
-    new Date().toISOString(),
+    endedAt,
   );
-  return { outcome: "passed", claimed, prepared };
+  return { outcome: "passed", claimed, prepared, votekick };
 };
 
 const bestEffortClose = async (context: ModuleExecutionContext, id: string): Promise<void> => {
@@ -190,6 +240,7 @@ const commandResult = async (
   let admissionAttempted = false;
   let start: VotekickStart | null = null;
   let id: string | null = null;
+  let window = "";
   const reject = (reason: string, target?: string, includeProtectedText = false, displayTarget = login): Promise<ModuleResult> => {
     if (!includeProtectedText) return Promise.resolve(rejection(reason, target));
     return renderChat(context, event.settings.protectedText, {
@@ -199,6 +250,7 @@ const commandResult = async (
       "votekick.threshold": event.settings.minNetVotes,
       "votekick.seconds": 0,
       "votekick.duration": "",
+      "votekick.window": window,
     }, event.settings.chatTarget).then(({ action, diagnostics, attributions }) => ({
       actions: action === null ? [] : [action],
       diagnostics: [...diagnostics, { code: "votekick.rejected", detail: { reason, ...(target === undefined ? {} : { target }) } }],
@@ -207,8 +259,7 @@ const commandResult = async (
   };
 
   try {
-    const streamState = await context.streamState();
-    if (streamState !== "online") return await reject("stream_not_online");
+    window = formatTimeoutDuration(event.settings.windowSeconds, await context.channelLanguage());
     if (context.lookupUserByLogin === undefined) return await reject("lookup_failure");
     const lookup = await context.lookupUserByLogin(login.toLowerCase());
     if (lookup === null) return await reject("target_unresolvable", login.toLowerCase());
@@ -241,6 +292,7 @@ const commandResult = async (
       "votekick.threshold": threshold,
       "votekick.seconds": 0,
       "votekick.duration": "",
+      "votekick.window": window,
     }, event.settings.chatTarget);
 
     // Register this first so the module can snapshot and close the ballot before its own expiry alarm.
@@ -256,6 +308,7 @@ const commandResult = async (
         "votekick.threshold": threshold,
         "votekick.seconds": 0,
         "votekick.duration": "",
+        "votekick.window": window,
       }, event.settings.chatTarget);
       return {
         actions: busy.action === null ? [] : [busy.action],
@@ -306,6 +359,7 @@ const commandResult = async (
           "votekick.threshold": threshold,
           "votekick.seconds": 0,
           "votekick.duration": "",
+          "votekick.window": window,
         }, event.settings.chatTarget);
         return {
           actions: busy.action === null ? [] : [busy.action],
@@ -318,17 +372,22 @@ const commandResult = async (
     ballotOpened = false;
     alarmScheduled = false;
     return {
-      actions: startMessage.action === null ? [] : [startMessage.action],
+      actions: [
+        votekickOverlayAction("opened", { votekickId: id }),
+        ...(startMessage.action === null ? [] : [startMessage.action]),
+      ],
       diagnostics: startMessage.diagnostics,
       ...(startMessage.attributions === undefined ? {} : { attributions: startMessage.attributions }),
     };
   } catch {
     // If D1's admission response was ambiguous, end any row that may have committed before cleanup.
     let admissionRollbackConfirmed = false;
+    let rollbackEndedAt: string | null = null;
     if (admissionAttempted && start !== null) {
       try {
+        rollbackEndedAt = new Date().toISOString();
         admissionRollbackConfirmed = await repository.finish(
-          event.channelId, start.id, "failed", start.yesVotes, 0, start.ballotRevision, null, new Date().toISOString(),
+          event.channelId, start.id, "failed", start.yesVotes, 0, start.ballotRevision, null, rollbackEndedAt,
         );
       } catch { /* The persisted expiry and module alarm recover an uncertain admission. */ }
     }
@@ -336,7 +395,20 @@ const commandResult = async (
     if (alarmScheduled && id !== null && (!admissionAttempted || admissionRollbackConfirmed)) {
       await bestEffortClear(context, `close:${id}`);
     }
-    return rejection("lookup_failure");
+    const failed: Votekick | null = admissionRollbackConfirmed && start !== null && rollbackEndedAt !== null
+      ? {
+        ...start,
+        status: "failed",
+        noVotes: 0,
+        durationSeconds: null,
+        endedAt: rollbackEndedAt,
+        liftedAt: null,
+      }
+      : null;
+    return {
+      actions: failed === null ? [] : [votekickOverlayAction("tally", votekickOverlayPayload(failed))],
+      diagnostics: rejection("lookup_failure").diagnostics,
+    };
   }
 };
 
@@ -355,16 +427,25 @@ export const processVotekickMessage = async (
 
   const finishAttempt = async (running: Votekick, attempt: VotekickFinalizeAttempt): Promise<ModuleResult | null> => {
     if (attempt.outcome === "passed") {
-      if (!attempt.claimed) return emptyResult();
+      if (!attempt.claimed) {
+        let finalized: Votekick | null = null;
+        try { finalized = await repository.byId(event.channelId, running.id); } catch { /* The other claimant owns moderation. */ }
+        return { actions: finalized === null ? [] : [votekickOverlayAction("tally", votekickOverlayPayload(finalized))], diagnostics: [] };
+      }
       await bestEffortClose(context, running.id);
       await bestEffortClear(context, `close:${running.id}`);
-      return { actions: [attempt.prepared.action], diagnostics: [...attempt.prepared.diagnostics] };
+      return {
+        actions: [attempt.prepared.action, votekickOverlayAction("tally", votekickOverlayPayload(attempt.votekick))],
+        diagnostics: [...attempt.prepared.diagnostics],
+      };
     }
     if (attempt.outcome === "expired") {
       await bestEffortClose(context, running.id);
       if (event.settings.expiredText.length === 0) await bestEffortClear(context, `close:${running.id}`);
       else await context.scheduleAlarm("close", `close:${running.id}`, Date.now());
-      return emptyResult();
+      let expired: Votekick | null = null;
+      try { expired = await repository.byId(event.channelId, running.id); } catch { /* Overlay presentation is best-effort. */ }
+      return { actions: expired === null ? [] : [votekickOverlayAction("tally", votekickOverlayPayload(expired))], diagnostics: [] };
     }
     return null;
   };
@@ -378,7 +459,9 @@ export const processVotekickMessage = async (
   }
 
   if (command !== null) {
-    if (!canStartVotekick(event.chatStatus)) return rejection("starter_not_authorized");
+    if (!canStartVotekick(event.chatStatus, event.settings.starterMinRole)) {
+      return rejection("starter_not_authorized", undefined, { minimumRole: event.settings.starterMinRole });
+    }
     return commandResult(event, repository, context, command[1] ?? "");
   }
 
@@ -391,9 +474,21 @@ export const processVotekickMessage = async (
       messageAt < startedAt || messageAt > endsAt) return emptyResult();
   const activity = await context.activeChatters.seen(starterId);
   if (starterId !== current.initiatorUserId && !wasActiveBeforeVotekick(activity?.firstSeenAt ?? null, current.startedAt)) return emptyResult();
-  await context.ballots.cast(current.id, starterId, choice);
+  const cast = await context.ballots.cast(current.id, starterId, choice);
+  if (cast.status !== "counted" && cast.status !== "changed") return emptyResult();
   const attempt = await finalizeVotekick(event.channelId, current, event.settings, repository, context);
-  return await finishAttempt(current, attempt) ?? emptyResult();
+  const completed = await finishAttempt(current, attempt);
+  if (completed !== null) return completed;
+  if (attempt.outcome !== "open") return emptyResult();
+  return {
+    actions: [votekickOverlayAction("tally", votekickOverlayPayload({
+      ...current,
+      yesVotes: attempt.counts[0],
+      noVotes: attempt.counts[1],
+      ballotRevision: attempt.revision,
+    }))],
+    diagnostics: [],
+  };
 };
 
 export const closeExpiredVotekick = async (
@@ -426,6 +521,7 @@ export const closeExpiredVotekick = async (
         if (current?.status === "running") throw new Error("Finalized votekick pass is waiting for its D1 claim.");
         await bestEffortCloseAlarm(context, id);
         try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }
+        if (current?.status === "passed") await publishVotekickOverlayState(context, current);
         return;
       }
       try {
@@ -446,6 +542,7 @@ export const closeExpiredVotekick = async (
       } finally {
         await bestEffortCloseAlarm(context, id);
         try { await context.clear(`close:${id}`); } catch { /* The host hard-delete alarm is independent. */ }
+        await publishVotekickOverlayState(context, attempt.votekick);
       }
       return;
     }
@@ -463,6 +560,8 @@ export const closeExpiredVotekick = async (
     }
   }
   if (running?.status !== "expired") return;
+
+  await publishVotekickOverlayState(context, running);
 
   const stored = await context.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?")
     .bind(context.channelId, "votekick").first<{ settings: string }>();
@@ -484,6 +583,7 @@ export const closeExpiredVotekick = async (
     "votekick.threshold": running.threshold,
     "votekick.seconds": 0,
     "votekick.duration": "",
+    "votekick.window": formatTimeoutDuration(storedWindowSeconds(running, settings.windowSeconds), await context.channelLanguage()),
   }, Date.parse(running.endedAt ?? running.endsAt));
   if (rendered.text.length > 0) {
     const result = await context.sendChat(rendered.text, `votekick:${id}:expired`, rendered.attributions, async () =>

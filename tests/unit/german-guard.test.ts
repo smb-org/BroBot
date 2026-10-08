@@ -74,6 +74,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/votekick/contracts/chat-commands.ts": "Bilingual DE/EN built-in chat command help catalogue; only its `de` half is German.",
   "src/modules/votekick/contracts/template-variable-catalog.ts": "Bilingual DE/EN catalog for votekick template variable labels and descriptions; only its `de` half is German.",
   "src/modules/votekick/contracts/catalog.ts": "Bilingual DE/EN votekick module navigation catalogue; only its `de` half is German.",
+  "src/modules/votekick/overlay/locale.ts": "Bilingual DE/EN votekick overlay text catalogue; only its `de` half is German.",
   "src/modules/votekick/panel/locale.ts": "Bilingual DE/EN votekick panel text catalogue; only its `de` half is German.",
   "src/modules/template-language.ts": "Bilingual DE/EN catalog for runtime system-variable wording; only its `de` half is German.",
   "src/worker/auth/oauth-error-texts.ts": "Bilingual DE/EN catalogue for OAuth redirect pages the browser shows directly -- no dashboard script sits between Twitch's redirect and the page to translate a code, so this stays prose (see the file's own comment).",

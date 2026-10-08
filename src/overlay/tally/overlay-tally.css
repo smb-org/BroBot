@@ -1,0 +1,130 @@
+.overlay-tally {
+  display: grid;
+  gap: 0.6em;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.overlay-tally__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6ch;
+  align-items: start;
+  min-width: 0;
+  height: 2.4em;
+  min-height: 2.4em;
+}
+
+.overlay-tally__title {
+  display: -webkit-box;
+  height: 2.4em;
+  min-height: 2.4em;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.overlay-tally__countdown {
+  display: flex;
+  width: 6ch;
+  min-width: 6ch;
+  height: 2.4em;
+  min-height: 2.4em;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: right;
+  white-space: nowrap;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.overlay-tally__summary {
+  height: 1.5em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-tally__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65em;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.overlay-tally__options--bars {
+  flex-direction: column;
+}
+
+.overlay-tally__options--strip {
+  flex-direction: row;
+}
+
+.overlay-tally__options--terms .overlay-tally__option {
+  min-height: 2.3em;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.overlay-tally__caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5em;
+}
+
+.overlay-tally__options--terms .overlay-tally__caption {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 10rem;
+  align-items: center;
+  gap: 0 0.5em;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.overlay-tally__options--terms .overlay-tally__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-tally__options--terms .overlay-tally__count {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  text-align: right;
+  font-size: 0.5em;
+  font-variant-numeric: tabular-nums;
+}
+
+.overlay-tally__track {
+  height: 0.45em;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.25);
+  overflow: hidden;
+}
+
+.overlay-tally__options--terms .overlay-tally__track {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.overlay-tally__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.8;
+}
+
+.overlay-tally__more {
+  min-height: 1.5em;
+}

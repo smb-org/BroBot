@@ -555,32 +555,45 @@ function OverlayEditorWorkspace({
     if (frame === null) return;
     const frameDocument = frame.contentDocument;
     if (frameDocument === null) return;
-    const base = frameDocument.createElement("base");
-    base.href = "/overlay";
-    // The iframe has its own document and cannot see the dashboard stylesheet, so the focus
-    // outline color is read from the dashboard's own token instead of a hardcoded value; the
-    // fallback is that same token's DESIGN.md value, used only if the property is unset (e.g. in tests).
-    const focusOutlineColor = getComputedStyle(document.documentElement).getPropertyValue("--brand-text").trim() || "#9bc3ed";
-    const baseStyle = frameDocument.createElement("style");
-    baseStyle.textContent = `html,body,#root{width:100%;height:100%;margin:0;overflow:hidden;background:transparent}body{display:grid;place-items:center}#root:focus-visible{outline:2px solid ${focusOutlineColor};outline-offset:3px}#root:active{cursor:grabbing}`;
-    frameDocument.head.replaceChildren(base, baseStyle);
-    const root = frameDocument.createElement("div");
-    root.id = "root";
-    frameDocument.body.replaceChildren(root);
-    const boundsHost = frameDocument.createElement("div");
-    boundsHost.dataset.brobotEditorBoundsLayer = "";
-    Object.assign(boundsHost.style, { position: "fixed", inset: "0", zIndex: "2147483647", pointerEvents: "none" });
-    boundsHost.attachShadow({ mode: "open" });
-    frameDocument.body.appendChild(boundsHost);
-    const variableStyle = frameDocument.createElement("style");
-    variableStyle.textContent = variableViewCss;
-    frameDocument.head.appendChild(variableStyle);
+    const existingRoot = frameDocument.getElementById("root");
+    const root = existingRoot === null ? frameDocument.createElement("div") : existingRoot as HTMLDivElement;
+    if (existingRoot === null) {
+      const base = frameDocument.createElement("base");
+      base.href = "/overlay";
+      // The iframe has its own document and cannot see the dashboard stylesheet, so the focus
+      // outline color is read from the dashboard's own token instead of a hardcoded value; the
+      // fallback is that same token's DESIGN.md value, used only if the property is unset (e.g. in tests).
+      const focusOutlineColor = getComputedStyle(document.documentElement).getPropertyValue("--brand-text").trim() || "#9bc3ed";
+      const baseStyle = frameDocument.createElement("style");
+      baseStyle.textContent = `html,body,#root{width:100%;height:100%;margin:0;overflow:hidden;background:transparent}body{display:grid;place-items:center}#root:focus-visible{outline:2px solid ${focusOutlineColor};outline-offset:3px}#root:active{cursor:grabbing}`;
+      frameDocument.head.replaceChildren(base, baseStyle);
+      root.id = "root";
+      frameDocument.body.replaceChildren(root);
+      const boundsHost = frameDocument.createElement("div");
+      boundsHost.dataset.brobotEditorBoundsLayer = "";
+      Object.assign(boundsHost.style, { position: "fixed", inset: "0", zIndex: "2147483647", pointerEvents: "none" });
+      boundsHost.attachShadow({ mode: "open" });
+      frameDocument.body.appendChild(boundsHost);
+      const variableStyle = frameDocument.createElement("style");
+      variableStyle.textContent = variableViewCss;
+      frameDocument.head.appendChild(variableStyle);
+    }
     root.setAttribute("role", "application");
     root.setAttribute("aria-label", labels.editorPreviewCanvas);
     root.tabIndex = 0;
-    canvasRef.current = root;
-    previewFrameRootRef.current = root;
-    setPreviewFrameRoot(root);
+    void import("../overlay/tally/overlay-tally.css?inline").then(({ default: overlayTallyCss }) => {
+      if (!frame.isConnected || frame.contentDocument !== frameDocument) return;
+      let overlayTallyStyle = frameDocument.head.querySelector<HTMLStyleElement>("style[data-brobot-overlay-tally-css]");
+      if (overlayTallyStyle === null) {
+        overlayTallyStyle = frameDocument.createElement("style");
+        overlayTallyStyle.dataset.brobotOverlayTallyCss = "";
+        frameDocument.head.appendChild(overlayTallyStyle);
+      }
+      overlayTallyStyle.textContent = overlayTallyCss;
+      canvasRef.current = root;
+      previewFrameRootRef.current = root;
+      setPreviewFrameRoot(root);
+    });
   }, [labels.editorPreviewCanvas]);
 
   useLayoutEffect(() => {

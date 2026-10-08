@@ -31,10 +31,13 @@ const rejects = (restrictions: ImportRestrictions, importPath: string): boolean 
 describe("effective ESLint module boundaries", () => {
   it("keeps the overlay boundaries effective, including service.js and worker code", async () => {
     const restrictions = await restrictionsFor("src/modules/example/overlay/view.tsx");
+    const panelRestrictions = await restrictionsFor("src/modules/example/panel/view.tsx");
 
     expect(rejects(restrictions, "../service.js")).toBe(true);
     expect(rejects(restrictions, "../../worker/config")).toBe(true);
     expect(rejects(restrictions, "zod")).toBe(true);
+    expect(rejects(restrictions, "../../../overlay/tally/OverlayTally")).toBe(false);
+    expect(rejects(panelRestrictions, "../../../overlay/tally/OverlayTally")).toBe(true);
   });
 
   it("blocks static module overlay view imports from the host renderer", async () => {
@@ -42,6 +45,13 @@ describe("effective ESLint module boundaries", () => {
 
     expect(rejects(restrictions, "../modules/ads/overlay/countdown")).toBe(true);
     expect(rejects(restrictions, "../modules/overlay-element-registry")).toBe(false);
+  });
+
+  it("allows only the shared tally stylesheet through the overlay editor boundary", async () => {
+    const restrictions = await restrictionsFor("src/dashboard/OverlayEditorPage.tsx");
+
+    expect(rejects(restrictions, "../overlay/tally/overlay-tally.css?inline")).toBe(false);
+    expect(rejects(restrictions, "../overlay/tally/OverlayTally")).toBe(true);
   });
 
   it("keeps the panel boundaries and module isolation effective", async () => {

@@ -1,5 +1,5 @@
 import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type ModerationFailureReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
-import { browserModuleLanguage, type ModuleChatCommandThreshold, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
+import { browserModuleLanguage, type ModuleChatCommandThreshold, type ModuleChatStatus, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 import type { SystemVariableName } from "../template-variables";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -1265,6 +1265,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         vip: "VIPs, Moderatoren und Broadcaster",
         moderator: "Moderatoren und Broadcaster",
         broadcaster: "Broadcaster",
+        configurable: "in den Votekick-Einstellungen (Standard: VIP)",
       },
       unknown: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
     },
@@ -1582,6 +1583,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         vip: "VIPs, moderators, and broadcasters",
         moderator: "moderators and broadcasters",
         broadcaster: "broadcaster",
+        configurable: "in Votekick settings (default: VIP)",
       },
     },
     streamManager: {
@@ -1730,29 +1732,40 @@ const chatUnknownText = (
 const detailText = (detail: EventDetail, key: string, fallback: string): string =>
   typeof detail[key] === "string" && detail[key].length > 0 ? detail[key] : fallback;
 
-const votekickRejectionReasonText = (reason: unknown, language: DashboardLanguage): string => {
+const votekickRejectionReasonText = (reason: unknown, language: DashboardLanguage, minimumRole: unknown): string => {
+  const roleLabels: LocaleCatalog<Record<ModuleChatStatus, string>> = {
+    de: { viewer: "Zuschauer", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
+    en: { viewer: "viewers", subscriber: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcasters" },
+  };
+  if (reason === "starter_not_authorized" && typeof minimumRole === "string" && Object.hasOwn(roleLabels[language], minimumRole)) {
+    const role = roleLabels[language][minimumRole as ModuleChatStatus];
+    if (minimumRole === "broadcaster") return language === "de"
+      ? "Nur Broadcaster dürfen eine Abstimmung starten."
+      : "Only broadcasters can start a ballot.";
+    return language === "de"
+      ? `Nur ${role} und höhere Rollen dürfen eine Abstimmung starten.`
+      : `Only ${role} and higher roles can start a ballot.`;
+  }
   const reasons: LocaleCatalog<Record<string, string>> = {
     de: {
       busy: "Es läuft bereits eine Abstimmung.",
       channel_cooldown: "Die kanalweite Abklingzeit läuft noch.",
       target_cooldown: "Für dieses Ziel läuft die Abklingzeit noch.",
       lookup_failure: "Die erforderlichen Kanaldaten waren nicht verfügbar.",
-      stream_not_online: "Der Stream ist nicht live.",
       target_unresolvable: "Das Zielkonto wurde nicht gefunden.",
       target_protected: "Das Ziel kann nicht abgestimmt werden.",
       target_not_active: "Das Ziel war kürzlich nicht im Chat aktiv.",
-      starter_not_authorized: "Nur VIPs und Moderatoren dürfen eine Abstimmung starten.",
+      starter_not_authorized: "Die eingestellte Mindestrolle erlaubt diesen Start nicht.",
     },
     en: {
       busy: "A ballot is already running.",
       channel_cooldown: "The channel cooldown is still active.",
       target_cooldown: "The target cooldown is still active.",
       lookup_failure: "Required channel data was unavailable.",
-      stream_not_online: "The stream is not live.",
       target_unresolvable: "The target account could not be found.",
       target_protected: "This target cannot be voted against.",
       target_not_active: "The target has not been active in chat recently.",
-      starter_not_authorized: "Only VIPs and moderators can start a ballot.",
+      starter_not_authorized: "The configured minimum role does not allow this start.",
     },
   };
   return typeof reason === "string" ? reasons[language][reason] ?? (language === "de" ? "Unbekannter Grund" : "Unknown reason")
@@ -2238,7 +2251,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "raid.outgoing": (detail) => `Ausgehender Raid zu ${detailText(detail, "targetChannelId", "unbekannt")}`,
     "raid.shoutout": (detail) => `Raid über der Schwelle (${detailNumber(detail, "viewers", "unbekannt")} von ${detailNumber(detail, "threshold", "unbekannt")}): Shoutout und Chatzeile`,
     "raid.invalid": (detail) => `Raid verworfen: ${raidInvalidReasonText(detail.reason, "de")}`,
-    "votekick.rejected": (detail) => `Votekick abgelehnt: ${votekickRejectionReasonText(detail.reason, "de")}`,
+    "votekick.rejected": (detail) => `Votekick abgelehnt: ${votekickRejectionReasonText(detail.reason, "de", detail.minimumRole)}`,
     "shoutout.suppressed": (detail) => detail.reason === ("disabled" satisfies ShoutoutSuppressedReason)
       ? "Shoutout abgeschaltet"
       : detail.reason === ("below_threshold" satisfies ShoutoutSuppressedReason)
@@ -2354,7 +2367,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "raid.outgoing": (detail) => `Outgoing raid to ${detailText(detail, "targetChannelId", "unknown")}`,
     "raid.shoutout": (detail) => `Raid above threshold (${detailNumber(detail, "viewers", "unknown")} of ${detailNumber(detail, "threshold", "unknown")}): shoutout and chat line`,
     "raid.invalid": (detail) => `Raid discarded: ${raidInvalidReasonText(detail.reason, "en")}`,
-    "votekick.rejected": (detail) => `Votekick rejected: ${votekickRejectionReasonText(detail.reason, "en")}`,
+    "votekick.rejected": (detail) => `Votekick rejected: ${votekickRejectionReasonText(detail.reason, "en", detail.minimumRole)}`,
     "shoutout.suppressed": (detail) => detail.reason === ("disabled" satisfies ShoutoutSuppressedReason)
       ? "Shoutout disabled"
       : detail.reason === ("below_threshold" satisfies ShoutoutSuppressedReason)

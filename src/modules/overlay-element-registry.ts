@@ -3,6 +3,7 @@ import { adsOverlayElements } from "./ads/overlay/element";
 import { textBlockOverlayElement } from "./text_library/overlay/element";
 import { chatVotingOverlayElements } from "./chat_voting/overlay/element";
 import { belaboxOverlayElements } from "./belabox/overlay/element";
+import { votekickOverlayElements } from "./votekick/overlay/element";
 
 export interface RegisteredOverlayElement {
   moduleId: string;
@@ -14,6 +15,7 @@ export const MODULE_OVERLAY_ELEMENTS: readonly RegisteredOverlayElement[] = [
   { moduleId: "text_library", definition: textBlockOverlayElement },
   ...belaboxOverlayElements.map((definition) => ({ moduleId: "belabox", definition })),
   ...adsOverlayElements.map((definition) => ({ moduleId: "ads", definition })),
+  ...votekickOverlayElements.map((definition) => ({ moduleId: "votekick", definition })),
 ];
 
 export const moduleOverlayElementKindForMessage = (messageType: string): string => {

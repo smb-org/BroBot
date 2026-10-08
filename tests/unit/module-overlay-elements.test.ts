@@ -5,7 +5,7 @@ import { adsModule } from "../../src/modules/ads";
 import { chatVotingModule } from "../../src/modules/chat_voting";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { MODULES, validateModuleOverlayElements } from "../../src/modules/registry";
-import { MODULE_OVERLAY_ELEMENTS, moduleOverlayMessageRequiresStateReload } from "../../src/modules/overlay-element-registry";
+import { MODULE_OVERLAY_ELEMENTS, moduleOverlayElementKindForMessage, moduleOverlayMessageRequiresStateReload } from "../../src/modules/overlay-element-registry";
 
 const moduleWithElements = (id: string, kinds: readonly string[]): BotModule => ({
   id,
@@ -133,6 +133,9 @@ describe("module overlay element declarations", () => {
     expect(moduleOverlayMessageRequiresStateReload("modul.chat_voting.opened")).toBe(true);
     expect(moduleOverlayMessageRequiresStateReload("modul.chat_voting.closed")).toBe(false);
     expect(moduleOverlayMessageRequiresStateReload("modul.chat_voting.tally")).toBe(false);
+    expect(moduleOverlayMessageRequiresStateReload("modul.votekick.opened")).toBe(true);
+    expect(moduleOverlayMessageRequiresStateReload("modul.votekick.tally")).toBe(false);
+    expect(moduleOverlayElementKindForMessage("modul.votekick.tally")).toBe("votekick.tally");
     expect(moduleOverlayMessageRequiresStateReload("modul.unknown.changed")).toBe(false);
   });
 });

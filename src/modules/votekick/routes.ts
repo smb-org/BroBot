@@ -3,8 +3,10 @@ import { Hono } from "hono";
 import type { AuditAction } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { VOTEKICK_HISTORY_DAYS, VOTEKICK_MODULE_ID } from "./contracts";
+import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
 import { createVotekickRepository } from "./adapters/d1";
 import { votekickTimeoutReason } from "./domain";
+import { votekickOverlayPayload } from "./service";
 
 export const votekickRoutes = new Hono<ModuleRouteEnvironment>();
 
@@ -54,6 +56,18 @@ votekickRoutes.post("/votekicks/:id/cancel", async (context) => {
     const snapshot = await ballots.close(id);
     if (snapshot !== null) await ballots.acknowledgeClosed?.(id);
   } catch { /* The host hard-delete alarm is the cleanup fallback. */ }
+  try {
+    const cancelled = await createVotekickRepository(context.env.DB).byId(channelId, id);
+    if (cancelled !== null) {
+      await context.get("publishModuleOverlayMessage")(
+        channelId,
+        VOTEKICK_MODULE_ID,
+        "tally",
+        VOTEKICK_ELEMENT_KIND,
+        votekickOverlayPayload(cancelled),
+      );
+    }
+  } catch { /* The overlay bootstrap reloads the persisted cancellation later. */ }
   return context.body(null, 204);
 });
 
