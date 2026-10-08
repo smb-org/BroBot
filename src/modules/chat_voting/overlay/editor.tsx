@@ -7,6 +7,7 @@ const ChatVotingOverlayEditor = ({ config, onChange, language = "en", readOnly =
   const labels = chatVotingOverlayLabels(language);
   const layout = config.layout === "strip" ? "strip" : "bars";
   const showPercent = config.showPercent !== false;
+  const showCountdown = config.showCountdown !== false;
   const hideAfterCloseSeconds = typeof config.hideAfterCloseSeconds === "number" ? config.hideAfterCloseSeconds : 15;
   const width = typeof config.width === "number" ? config.width : 480;
   const disabledProps = readOnly ? { title: readOnlyReason, "aria-describedby": readOnlyReason === undefined ? undefined : "overlay-editor-readonly-reason" } : {};
@@ -24,6 +25,17 @@ const ChatVotingOverlayEditor = ({ config, onChange, language = "en", readOnly =
         <option value="strip">{labels.strip}</option>
         <option value="bars">{labels.bars}</option>
       </select>
+    </label>
+    <label className="config-field">
+      <span>{labels.showCountdown}</span>
+      <input
+        type="checkbox"
+        aria-label={labels.showCountdown}
+        checked={showCountdown}
+        disabled={readOnly}
+        {...disabledProps}
+        onChange={(event) => { if (!readOnly) onChange({ ...config, showCountdown: event.currentTarget.checked }); }}
+      />
     </label>
     <label className="config-field">
       <span>{labels.showPercent}</span>

@@ -10,10 +10,12 @@ export const chatVotingOverlayElement = {
   kind: CHAT_VOTING_TALLY_ELEMENT_KIND,
   configVersion: 1,
   defaultSize: { width: 480, height: 240 },
-  defaultConfig: { layout: "bars", showPercent: true, hideAfterCloseSeconds: 15, width: 480 },
+  defaultConfig: { layout: "bars", showPercent: true, showCountdown: true, hideAfterCloseSeconds: 15, width: 480 },
   previewState: (_config: JsonObject, language: ModuleLanguage, now: number): JsonObject => ({
     pollId: "overlay-editor-preview",
     openedAt: new Date(now).toISOString(),
+    closesAt: new Date(now + 120_000).toISOString(),
+    requestedDurationSeconds: 120,
     title: chatVotingOverlayLabels(language).previewTitle,
     status: "open",
     preset: "free_text",
@@ -38,16 +40,17 @@ export const chatVotingOverlayElement = {
   parseConfig: (raw: unknown) => {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
     const config = raw as Record<string, unknown>;
-    if (Object.keys(config).some((key) => !["layout", "showPercent", "hideAfterCloseSeconds", "width"].includes(key))) return null;
+    if (Object.keys(config).some((key) => !["layout", "showPercent", "showCountdown", "hideAfterCloseSeconds", "width"].includes(key))) return null;
     const layout = config.layout ?? "bars";
     const showPercent = config.showPercent ?? true;
+    const showCountdown = config.showCountdown ?? true;
     const hideAfterCloseSeconds = config.hideAfterCloseSeconds ?? 15;
     const width = config.width ?? 480;
     if (typeof width !== "number" || !Number.isSafeInteger(width) || width < 200 || width > 1920) return null;
-    if ((layout !== "strip" && layout !== "bars") || typeof showPercent !== "boolean" ||
+    if ((layout !== "strip" && layout !== "bars") || typeof showPercent !== "boolean" || typeof showCountdown !== "boolean" ||
         typeof hideAfterCloseSeconds !== "number" || !Number.isSafeInteger(hideAfterCloseSeconds) ||
         hideAfterCloseSeconds < 0 || hideAfterCloseSeconds > 120) return null;
-    return { layout, showPercent, hideAfterCloseSeconds, width };
+    return { layout, showPercent, showCountdown, hideAfterCloseSeconds, width };
   },
   load: () => import("./tally"),
   editor: () => import("./editor"),

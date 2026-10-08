@@ -4,6 +4,8 @@ import type { ChatVotingPreset, ChatVotingTextMode } from "../contracts";
 export interface TallyState {
   pollId: string;
   openedAt?: string;
+  closesAt?: string;
+  requestedDurationSeconds?: number | null;
   title?: string | null;
   status?: "open" | "closed";
   labels?: readonly string[];
@@ -26,6 +28,9 @@ const isTallyState = (value: unknown): value is TallyState => {
     typeof state.revision === "number" && Number.isSafeInteger(state.revision) && state.revision >= 0 &&
     (state.status === undefined || state.status === "open" || state.status === "closed") &&
     (state.openedAt === undefined || typeof state.openedAt === "string" && Number.isFinite(Date.parse(state.openedAt))) &&
+    (state.closesAt === undefined || typeof state.closesAt === "string" && Number.isFinite(Date.parse(state.closesAt))) &&
+    (state.requestedDurationSeconds === undefined || state.requestedDurationSeconds === null ||
+      typeof state.requestedDurationSeconds === "number" && Number.isSafeInteger(state.requestedDurationSeconds) && state.requestedDurationSeconds > 0) &&
     (state.title === undefined || state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80) &&
     (state.labels === undefined || Array.isArray(state.labels) && state.labels.every((label) => typeof label === "string")) &&
     (state.preset === undefined || state.preset === "yes_no" || state.preset === "scale_5" || state.preset === "options_n" ||

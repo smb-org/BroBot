@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { chatVotingOverlayElement } from "../../src/modules/chat_voting/overlay/element";
 import { mergeTallyRealtimeState, mergeTallyState, type TallyState } from "../../src/modules/chat_voting/overlay/tally-state";
 
 const tally = (
@@ -17,6 +18,12 @@ const tally = (
 });
 
 describe("chat voting tally state", () => {
+  it("defaults the countdown option on and accepts it as an element setting", () => {
+    expect(chatVotingOverlayElement.defaultConfig.showCountdown).toBe(true);
+    expect(chatVotingOverlayElement.parseConfig({})).toMatchObject({ showCountdown: true });
+    expect(chatVotingOverlayElement.parseConfig({ showCountdown: false })).toMatchObject({ showCountdown: false });
+  });
+
   it("keeps the newest counts when a delayed tally arrives", () => {
     const current = tally("poll-a", 4);
 

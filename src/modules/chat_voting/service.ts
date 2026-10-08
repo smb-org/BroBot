@@ -4,7 +4,7 @@ import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING
 import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
 import { configuredLabels, formatFreeTextVoteResult, formatVoteOptions, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, normalizeVoteTitle, parseVoteCommand, voteChoiceFromMessage, voteCloseDeadline, voteLabelLength } from "./domain";
 import type { ChatVotingRepository } from "./repository";
-import { chatVotingChatText } from "./contracts/chat-defaults";
+import { chatVotingChatText, chatVotingDurationText, DEFAULT_CHAT_VOTING_START_DURATION_SUFFIX, LEGACY_CHAT_VOTING_START_TEXT, LEGACY_CHAT_VOTING_START_TEXT_EN } from "./contracts/chat-defaults";
 import { createChatVotingRepository } from "./repository";
 
 export interface StartChatVoteInput {
@@ -24,6 +24,17 @@ export interface StartChatVoteInput {
 export type VoteStartResult =
   | { status: "started"; vote: ChatVoteDraft }
   | { status: "busy" };
+
+export const chatVotingTemplateValues = (
+  vote: Pick<ChatVote, "title" | "preset" | "optionCount" | "labels" | "textMode" | "requestedDurationSeconds">,
+  language: ModuleLanguage,
+  result?: string,
+): Record<string, string> => ({
+  ...(result === undefined ? {} : { "vote.result": result }),
+  "vote.title": vote.title ?? "",
+  "vote.options": formatVoteOptions(vote, language),
+  "vote.duration": chatVotingDurationText(language, vote.requestedDurationSeconds),
+});
 
 export const startChatVote = async (
   repository: ChatVotingRepository,
@@ -253,6 +264,8 @@ export const processChatVotingMessage = async (
         payload: {
           pollId: vote.id,
           openedAt: vote.openedAt,
+          closesAt: vote.closesAt,
+          requestedDurationSeconds: vote.requestedDurationSeconds,
           preset: vote.preset,
           optionCount: vote.optionCount,
           title: vote.title,
@@ -278,7 +291,15 @@ export const processChatVotingMessage = async (
       kind: "overlay",
       type: "tally",
       elementKind: CHAT_VOTING_ELEMENT_KIND,
-      payload: { pollId: vote.id, openedAt: vote.openedAt, title: vote.title, counts: [...result.counts], revision: result.revision },
+      payload: {
+        pollId: vote.id,
+        openedAt: vote.openedAt,
+        closesAt: vote.closesAt,
+        requestedDurationSeconds: vote.requestedDurationSeconds,
+        title: vote.title,
+        counts: [...result.counts],
+        revision: result.revision,
+      },
     }],
     diagnostics: [],
   };
@@ -329,11 +350,24 @@ const alarmSettings = async (context: ModuleAlarmContext): Promise<ChatVotingSet
   } catch { return DEFAULT_CHAT_VOTING_SETTINGS; }
 };
 
-const startAnnouncementTemplate = (startText: string, title: string | null, language: ModuleLanguage): string => {
-  const usesDefault = startText === DEFAULT_CHAT_VOTING_START_TEXT || startText === DEFAULT_CHAT_VOTING_START_TEXT_EN;
+export const startAnnouncementTemplate = (
+  startText: string,
+  title: string | null,
+  duration: string,
+  language: ModuleLanguage,
+): string => {
+  const usesDefault = startText === DEFAULT_CHAT_VOTING_START_TEXT ||
+    startText === DEFAULT_CHAT_VOTING_START_TEXT_EN ||
+    startText === LEGACY_CHAT_VOTING_START_TEXT ||
+    startText === LEGACY_CHAT_VOTING_START_TEXT_EN;
   if (!usesDefault) return startText;
   const localized = language === "de" ? DEFAULT_CHAT_VOTING_START_TEXT : DEFAULT_CHAT_VOTING_START_TEXT_EN;
-  return title === null ? localized.replace("{vote.title} – ", "") : localized;
+  let result = localized;
+  if (title === null) result = result.replace("{vote.title} – ", "");
+  if (duration.length === 0) {
+    result = result.replace(DEFAULT_CHAT_VOTING_START_DURATION_SUFFIX[language], "");
+  }
+  return result;
 };
 
 export const announceChatVoteStartFromAlarm = async (
@@ -346,11 +380,12 @@ export const announceChatVoteStartFromAlarm = async (
   const settings = await alarmSettings(context);
   if (settings.startText.trim().length === 0) return;
   const language = await context.channelLanguage();
-  const template = startAnnouncementTemplate(settings.startText, vote.title, language);
+  const values = chatVotingTemplateValues(vote, language);
+  const template = startAnnouncementTemplate(settings.startText, vote.title, values["vote.duration"] ?? "", language);
   const rendered = await context.renderTemplate(
     template,
     Date.parse(vote.openedAt),
-    { "vote.title": vote.title ?? "", "vote.options": formatVoteOptions(vote, language) },
+    values,
   );
   if (rendered.text.trim().length === 0) return;
   const delivery = await context.sendChat(
@@ -430,6 +465,8 @@ export const closeChatVoteFromAlarm = async (
   await context.publishModuleOverlayMessage("tally", CHAT_VOTING_ELEMENT_KIND, {
     pollId,
     openedAt: closedVote.openedAt,
+    closesAt: closedVote.closesAt,
+    requestedDurationSeconds: closedVote.requestedDurationSeconds,
     title: closedVote.title,
     status: "closed",
     counts: [...(closedVote.counts ?? snapshot.counts)],
@@ -454,11 +491,7 @@ export const closeChatVoteFromAlarm = async (
     const rendered = await context.renderTemplate(
       settings.resultText,
       Date.parse(closedVote.closedAt ?? new Date().toISOString()),
-      {
-        "vote.result": result,
-        "vote.title": closedVote.title ?? "",
-        "vote.options": formatVoteOptions(closedVote, language),
-      },
+      chatVotingTemplateValues(closedVote, language, result),
     );
     const announcement = settings.resultText === DEFAULT_CHAT_VOTING_SETTINGS.resultText
       ? closedVote.title === null ? result

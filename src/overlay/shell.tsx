@@ -10,7 +10,6 @@ import {
   moduleOverlayElementKindForMessage,
   moduleOverlayMessageRequiresStateReload,
 } from "../modules/overlay-element-registry";
-import { estimateOverlayStateTransit } from "./server-time";
 
 const LazyLegacyOverlayEntry = lazy(async () => {
   const module = await import("./legacy");
@@ -51,6 +50,20 @@ const takePendingReload = (lifecycle: OverlayLifecycle): boolean => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+interface ReceivedModuleMessage {
+  message: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>;
+  serverNow: string | null;
+}
+
+const receiveModuleMessage = (
+  message: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>,
+): ReceivedModuleMessage => ({
+  message,
+  serverNow: typeof message.payload.serverNow === "string" && Number.isFinite(Date.parse(message.payload.serverNow))
+    ? message.payload.serverNow
+    : Number.isFinite(Date.parse(message.createdAt)) ? message.createdAt : null,
+});
 
 const isInteger = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value);
 
@@ -116,17 +129,24 @@ const applyVariableMessage = (
 
 const applyModuleMessage = (
   bootstrap: OverlayBootstrapData,
-  message: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>,
+  received: ReceivedModuleMessage,
 ): OverlayBootstrapData => {
   if (bootstrap.overlay === null) return bootstrap;
+  const { message, serverNow } = received;
   const kind = moduleOverlayElementKindForMessage(message.type);
+  const isChatVotingTally = message.type === "modul.chat_voting.tally";
+  const payload = serverNow === null || isChatVotingTally
+    ? message.payload
+    : { ...message.payload, serverNow };
   return {
     ...bootstrap,
     overlay: {
       ...bootstrap.overlay,
-      elements: bootstrap.overlay.elements.map((element) => element.kind === kind && element.moduleEnabled === true
-        ? { ...element, state: mergeModuleOverlayElementState(kind, element.state ?? null, message.payload) }
-        : element),
+      elements: bootstrap.overlay.elements.map((element) => {
+        if (element.kind !== kind || element.moduleEnabled !== true) return element;
+        const previousState = element.state ?? null;
+        return { ...element, state: mergeModuleOverlayElementState(kind, previousState, payload) };
+      }),
     },
   };
 };
@@ -193,7 +213,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
     let timelineRefreshTimer: number | null = null;
     let retryAttempt = 0;
     const pendingVariableChanges = new Map<string, number | null>();
-    const pendingModuleMessages: ModuleOverlayRealtimeEnvelope<ModuleOverlayRealtimeMessageType>[] = [];
+    const pendingModuleMessages: ReceivedModuleMessage[] = [];
 
     const install = (next: OverlayBootstrapData | null, nextState: LoadState): void => {
       bootstrapRef.current = next;
@@ -255,7 +275,6 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
       const controller = new AbortController();
       activeController = controller;
       loadInFlight = true;
-      const requestStartedAt = performance.now();
       try {
         const response = await fetch("/api/overlay/bootstrap", {
           headers: { Authorization: `Bearer ${token}` },
@@ -279,14 +298,12 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
         }
         const parsedBootstrap = parseBootstrap(payload);
         if (parsedBootstrap === null) throw new Error("Overlay bootstrap response had an invalid shape.");
-        const parsed = estimateOverlayStateTransit(parsedBootstrap, performance.now() - requestStartedAt);
         const next = pendingModuleMessages.reduce(
-          (current, message) => applyModuleMessage(current, message),
-          applyPendingVariableChanges(parsed, pendingVariableChanges),
+          (current, received) => applyModuleMessage(current, received),
+          applyPendingVariableChanges(parsedBootstrap, pendingVariableChanges),
         );
         pendingModuleMessages.length = 0;
         pendingVariableChanges.clear();
-        pendingModuleMessages.length = 0;
         document.documentElement.lang = next.language;
         install(next, next.overlay === null ? "unbound" : "ready");
         scheduleTimelineRefresh(next);
@@ -369,15 +386,16 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
           if (message.payload.overlayId === current.overlay?.id) scheduleReload();
         },
         onModuleMessage: (message) => {
+          const received = receiveModuleMessage(message);
           if (moduleOverlayMessageRequiresStateReload(message.type)) {
             if (bootstrapRef.current === null) lifecycle.reloadPending = true;
             else scheduleReload();
             return;
           }
           const current = bootstrapRef.current;
-          if (loadInFlight || current === null) pendingModuleMessages.push(message);
+          if (loadInFlight || current === null) pendingModuleMessages.push(received);
           if (current === null) return;
-          const next = applyModuleMessage(current, message);
+          const next = applyModuleMessage(current, received);
           bootstrapRef.current = next;
           setBootstrap(next);
         },

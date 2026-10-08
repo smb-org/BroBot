@@ -121,7 +121,15 @@ describe("chat voting event service", () => {
       kind: "overlay",
       type: "tally",
       elementKind: "chat_voting.tally",
-      payload: { pollId: "fictional-poll", openedAt: openVote.openedAt, title: null, counts: [0, 1], revision: 1 },
+      payload: {
+        pollId: "fictional-poll",
+        openedAt: openVote.openedAt,
+        closesAt: openVote.closesAt,
+        requestedDurationSeconds: null,
+        title: null,
+        counts: [0, 1],
+        revision: 1,
+      },
     }]);
   });
 
@@ -147,6 +155,8 @@ describe("chat voting event service", () => {
       payload: {
         pollId: "fictional-poll",
         openedAt: openTextVote.openedAt,
+        closesAt: openTextVote.closesAt,
+        requestedDurationSeconds: null,
         preset: "free_text",
         optionCount: 0,
         textMode: "first_word",

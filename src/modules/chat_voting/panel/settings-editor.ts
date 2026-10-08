@@ -16,14 +16,16 @@ const spec: SettingsEditorSpec<ChatVotingSettings> = {
     { id: "start", icon: "tabMessages", fields: [
       { kind: "template", key: "startText", optional: true, minRows: 2, preview: (template, values) =>
         template.replaceAll("{vote.title}", values["vote.title"] ?? "What should we eat today?")
-          .replaceAll("{vote.options}", values["vote.options"] ?? "1 = Pizza, 2 = Burger, 3 = Kebab") },
+          .replaceAll("{vote.options}", values["vote.options"] ?? "1 = Pizza, 2 = Burger, 3 = Kebab")
+          .replaceAll("{vote.duration}", values["vote.duration"] ?? "2 minutes") },
     ] },
     { id: "result", icon: "tabMessages", fields: [
       { kind: "switchCard", key: "announceResult", children: [
         { kind: "template", key: "resultText", minRows: 2, preview: (template, values) =>
           template.replaceAll("{vote.result}", values["vote.result"] ?? "Yes: 8 (67%) · No: 4 (33%)")
             .replaceAll("{vote.title}", values["vote.title"] ?? "What should we eat today?")
-            .replaceAll("{vote.options}", values["vote.options"] ?? "1 = Pizza, 2 = Burger, 3 = Kebab") },
+            .replaceAll("{vote.options}", values["vote.options"] ?? "1 = Pizza, 2 = Burger, 3 = Kebab")
+            .replaceAll("{vote.duration}", values["vote.duration"] ?? "2 minutes") },
         { kind: "chatTarget", key: "resultTarget" },
       ] },
     ] },
