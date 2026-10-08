@@ -212,7 +212,7 @@ export function EditorShell({
   const pendingValidationFocus = useRef(false);
   // Bumped on every invalid save so the focus effect re-runs even when the parent state is unchanged.
   const [saveAttempt, setSaveAttempt] = useState(0);
-  const invalidFieldSignature = JSON.stringify(invalidFields.map(invalidFieldKey).sort());
+  const invalidFieldSignature = JSON.stringify(invalidFields.map(invalidFieldKey).sort((a, b) => a.localeCompare(b)));
   const activeSectionId = section ?? internalSection;
   const activeSection = sections.find((candidate) => candidate.id === activeSectionId) ?? sections[0];
   const activeIndex = useMemo(() => Math.max(0, sections.findIndex((candidate) => candidate.id === activeSection?.id)), [activeSection?.id, sections]);
