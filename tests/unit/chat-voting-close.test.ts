@@ -54,7 +54,9 @@ describe("chat voting close service", () => {
     });
     const read = vi.fn(() => { order.push("read"); return Promise.resolve(snapshot); });
     const close = vi.fn(() => { order.push("close"); return Promise.resolve(snapshot); });
-    const publishModuleOverlayMessage = vi.fn(() => { order.push("overlay"); return Promise.resolve(); });
+    const publishModuleOverlayMessage = vi.fn<ModuleAlarmContext["publishModuleOverlayMessage"]>(
+      () => { order.push("overlay"); return Promise.resolve(); },
+    );
     const sendChat = vi.fn(overrides.sendChat ?? (() => Promise.resolve({ sent: true, reason: null, retryable: false })));
     const storagePut = vi.fn((key: string, value: unknown) => {
       order.push("put");
@@ -202,7 +204,12 @@ describe("chat voting close service", () => {
       .rejects.toThrow("waiting for the automated output limit");
     expect(order.indexOf("overlay")).toBeLessThan(order.indexOf("chat"));
     expect(publishModuleOverlayMessage).toHaveBeenCalledOnce();
-    expect(publishModuleOverlayMessage).toHaveBeenCalledWith("tally", "chat_voting.tally", expect.objectContaining({ status: "closed" }));
+    const publishedPayload = publishModuleOverlayMessage.mock.calls[0]?.[2];
+    expect(publishedPayload).toMatchObject({
+      status: "closed",
+      requestedDurationSeconds: null,
+    });
+    expect(typeof publishedPayload?.closesAt).toBe("string");
 
     await closeChatVoteFromAlarm(context, repository, "fictional-poll");
 
@@ -359,7 +366,12 @@ describe("chat voting close service", () => {
     expect(context.renderTemplate).toHaveBeenCalledWith(
       "{vote.title}: {vote.result}",
       expect.any(Number),
-      { "vote.result": "Yes: 7 (70%) · No: 3 (30%)", "vote.title": "Pizza today?", "vote.options": "1 = Yes, 2 = No" },
+      {
+        "vote.result": "Yes: 7 (70%) · No: 3 (30%)",
+        "vote.title": "Pizza today?",
+        "vote.options": "1 = Yes, 2 = No",
+        "vote.duration": "",
+      },
     );
   });
 

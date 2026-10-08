@@ -423,7 +423,11 @@ describe("Text command editor", () => {
     expect(within(picker).getByRole("option", { name: /\{uptime\}/u, hidden: true })).toBeInTheDocument();
     expect(within(picker).getByRole("option", { name: /\{random 1-100\}/u, hidden: true })).toBeInTheDocument();
     expect(within(picker).getByRole("group", { name: "Stream", hidden: true })).toBeInTheDocument();
-    expect(picker.querySelector(".ui-variable-picker__option-copy .ui-variable-picker__description")).not.toBeNull();
+    const detail = document.querySelector(".ui-grouped-picker__detail");
+    expect(detail?.textContent ?? "").not.toBe("");
+    const combobox = within(picker.closest(".ui-grouped-picker") as HTMLElement).getByRole("combobox", { hidden: true });
+    expect(combobox.getAttribute("aria-describedby")).toBe(detail?.id);
+    expect(combobox).toHaveAccessibleDescription(detail?.textContent ?? "");
     expect(picker.querySelector(".ui-variable-picker__sample")).not.toBeNull();
     const liveLookups = within(picker).getAllByRole("img", { name: "Fragt Twitch live ab, wenn der Befehl ausgeführt wird", hidden: true });
     expect(liveLookups.length).toBeGreaterThan(0);

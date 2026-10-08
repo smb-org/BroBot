@@ -114,16 +114,16 @@ export function TemplateVariablePicker({
       description: option.description,
       icon: null,
       searchText: `${option.name} ${tokenFor(option)} ${group.label}`,
-      trailing: <>
-        <span className={`ui-variable-picker__sample${option.isTextBlock ? " ui-variable-picker__sample--tag" : ""}`}>
-          {option.isTextBlock ? messages.textBlockSample : option.sample}
+      // Fixed-width column so the info icon shares one x across rows; empty when absent.
+      trailing: (
+        <span className="ui-variable-picker__info">
+          {option.external === true ? (
+            <span className="ui-variable-picker__external" role="img" title={messages.externalHelp} aria-label={messages.externalHelp}>
+              <Icon name="cause" size={16} />
+            </span>
+          ) : null}
         </span>
-        {option.external === true ? (
-          <span className="ui-variable-picker__external" role="img" title={messages.externalHelp} aria-label={messages.externalHelp}>
-            <Icon name="cause" size={16} />
-          </span>
-        ) : null}
-      </>,
+      ),
       value: option,
     })),
     footer: group.id === "host:channel" && createVariableHref !== undefined
@@ -190,19 +190,26 @@ export function TemplateVariablePicker({
       disabled={disabled}
       onSelect={choose}
       onDismissFocus={restoreEditorFocus}
-      renderEntryContent={(entry, active) => {
+      renderActiveDetail={(entry) => entry.value?.description}
+      renderEntryContent={(entry) => {
         const option = entry.value;
         return (
           <span className="ui-variable-picker__option-copy">
             <span className="ui-variable-picker__label">{entry.label}</span>
-            {option === undefined ? null : <span className="ui-variable-picker__token">{tokenFor(option)}</span>}
-            {active && option !== undefined ? <span className="ui-variable-picker__description">{option.description}</span> : null}
+            {option === undefined ? null : (
+              <span className="ui-variable-picker__token-line">
+                <span className="ui-variable-picker__token">{tokenFor(option)}</span>
+                <span className={`ui-variable-picker__sample${option.isTextBlock ? " ui-variable-picker__sample--tag" : ""}`} data-testid="variable-sample">
+                  {option.isTextBlock ? messages.textBlockSample : option.sample}
+                </span>
+              </span>
+            )}
           </span>
         );
       }}
       transformGroups={transformGroups}
       showNoResults={createVariableHref === undefined}
-      width={360}
+      width="min(440px, calc(100vw - 32px))"
     />
   );
 }

@@ -209,6 +209,8 @@ chatVotingRoutes.post("/approve-term", async (context) => {
       {
         pollId: vote.id,
         openedAt: vote.openedAt,
+        closesAt: vote.closesAt,
+        requestedDurationSeconds: vote.requestedDurationSeconds,
         preset: vote.preset,
         optionCount: vote.optionCount,
         textMode: vote.textMode,

@@ -443,15 +443,28 @@ const InvitationLink = ({ channel: channel }: { channel: PanelPlatformChannelOve
   );
 };
 
+/** Error state shown inside the reserved load box instead of the skeleton. */
+const PlatformLoadError = ({ message, onRetry }: { message: string | null; onRetry: () => void }): ReactElement => {
+  const texts = platformTexts();
+  return (
+    <div className="empty-state">
+      <p className="muted" role="alert">{message ?? texts.error}</p>
+      <Button variant="neutral" onClick={onRetry}>{texts.retry}</Button>
+    </div>
+  );
+};
+
 const PlatformAudit = ({
   auditState: auditState,
   channels: channels,
   onLoadMore: onLoadMore,
+  onRetry: onRetry,
   loadingMore: loadingMore,
 }: {
   auditState: LoadState<PanelPlatformAuditResponse>;
   channels: PanelPlatformChannelOverview[];
   onLoadMore: () => void;
+  onRetry: () => void;
   loadingMore: boolean;
 }): ReactElement => {
   const texts = platformTexts();
@@ -469,9 +482,9 @@ const PlatformAudit = ({
       <LoadStateView
         status={status}
         minHeight={280}
-        loading={<Skeleton rows={50} height={34} />}
+        loading={<Skeleton rows={6} height={34} />}
         empty={<p className="muted">{texts.auditEmpty}</p>}
-        error={<Skeleton rows={50} height={34} />}
+        error={<PlatformLoadError message={auditState.error} onRetry={onRetry} />}
       >{auditState.data === null || auditState.data.entries.length === 0 ? null : (
         <div className="table-wrap">
           <table className="table">
@@ -496,7 +509,8 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
   const channelReleaseButton = useRef<HTMLButtonElement | null>(null);
   const [auditLoadingMore, setAuditLoadingMore] = useState(false);
   const notifiedPageError = useRef<string | null>(null);
-  const pageError = overview.error ?? audit.error;
+  // Initial-load errors render in place of the list; the toast only covers failures while data is already shown.
+  const pageError = (overview.data === null ? null : overview.error) ?? (audit.data === null ? null : audit.error);
 
   useEffect(() => {
     if (pageError === null) {
@@ -523,40 +537,50 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
     if (selectedChannelId !== null) closeChannel();
   }, [selectedChannelId, closeChannel]);
 
+  // Every load (initial or retry) is guarded: a newer request or an unmount makes older results, including a 401, irrelevant.
+  const overviewGeneration = useRef(0);
+  const auditGeneration = useRef(0);
+  const unmounted = useRef(false);
+  useEffect(() => {
+    unmounted.current = false;
+    return () => { unmounted.current = true; };
+  }, []);
+
   const loadOverview = async (): Promise<void> => {
+    const generation = ++overviewGeneration.current;
+    const stale = (): boolean => unmounted.current || generation !== overviewGeneration.current;
     setOverview((current) => current.data === null ? loadState() : { ...current, status: "loading", error: null });
     try {
       const response = await getPlatformOverview();
+      if (stale()) return;
       setOverview(loadedState(response.channels));
       if (selectedChannelId !== null && !response.channels.some((channel) => channel.channelId === selectedChannelId)) closeChannel();
     } catch (error: unknown) {
+      if (stale()) return;
       setOverview({ status: "error", data: null, error: errorText(error, texts.error) });
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     }
   };
 
-  useEffect(() => {
-    let aborted = false;
-    const load = async (): Promise<void> => {
-      setOverview(loadState());
-      setAudit(loadState());
-      try {
-        const [channelResponse, auditResponse] = await Promise.all([getPlatformOverview(), getPlatformAudit()]);
-        if (aborted) return;
-        setOverview(loadedState(channelResponse.channels));
-        closeChannel();
-        setAudit(loadedState(auditResponse));
-      } catch (error: unknown) {
-        if (aborted) return;
-        const message = errorText(error, texts.error);
-        setOverview({ status: "error", data: null, error: message });
-        setAudit({ status: "error", data: null, error: message });
-        if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
-      }
-    };
-    void load();
-    return () => { aborted = true; };
-  }, [onAuthenticationRequired, closeChannel, texts.error]);
+  const loadAudit = async (): Promise<void> => {
+    const generation = ++auditGeneration.current;
+    const stale = (): boolean => unmounted.current || generation !== auditGeneration.current;
+    setAudit(loadState());
+    try {
+      const response = await getPlatformAudit();
+      if (!stale()) setAudit(loadedState(response));
+    } catch (error: unknown) {
+      if (stale()) return;
+      setAudit({ status: "error", data: null, error: errorText(error, texts.error) });
+      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
+    }
+  };
+
+  // Overview and audit load independently so one failing request cannot block the other tab.
+  const loaders = useRef({ loadOverview, loadAudit });
+  loaders.current = { loadOverview, loadAudit };
+  useEffect(() => { void loaders.current.loadOverview(); }, [onAuthenticationRequired]);
+  useEffect(() => { void loaders.current.loadAudit(); }, [onAuthenticationRequired]);
 
   const selectedChannel = overview.data?.find((channel) => channel.channelId === selectedChannelId) ?? null;
   const inspectorOpen = selectedChannelId !== null;
@@ -599,7 +623,7 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
                     minHeight={360}
                     loading={<Skeleton rows={6} height={34} />}
                     empty={<p className="muted">{texts.noChannels}</p>}
-                    error={<Skeleton rows={6} height={34} />}
+                    error={<PlatformLoadError message={overview.error} onRetry={() => { void loadOverview(); }} />}
                   >{overview.data === null || overview.data.length === 0 ? null : (
                     <div className="table-wrap">
                       <table className={`table table--content platform-channel-table${inspectorOpen ? " platform-channel-table--inspector-open" : ""}`}>
@@ -626,7 +650,7 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
           </section>
         </Tabs.Panel>
         <Tabs.Panel className="platform-tabs__panel" value="audit">
-          <PlatformAudit auditState={audit} channels={overview.data ?? []} onLoadMore={() => { void loadMoreAudit(); }} loadingMore={auditLoadingMore} />
+          <PlatformAudit auditState={audit} channels={overview.data ?? []} onLoadMore={() => { void loadMoreAudit(); }} onRetry={() => { void loadAudit(); }} loadingMore={auditLoadingMore} />
         </Tabs.Panel>
       </Tabs>
       <ChannelRelease opened={channelReleaseOpen} onReloadOverview={loadOverview} onAuthenticationRequired={onAuthenticationRequired} onClose={closeChannelRelease} />

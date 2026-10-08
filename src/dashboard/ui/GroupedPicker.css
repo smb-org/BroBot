@@ -21,6 +21,7 @@
 .ui-grouped-picker__disabled-reason { overflow: hidden; color: var(--text-3); font-family: Archivo, ui-sans-serif, system-ui, sans-serif; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .ui-grouped-picker__group-footer { padding-inline: var(--s3); }
 .ui-grouped-picker__empty { margin: var(--s2); color: var(--text-3); font-size: 12px; }
+.ui-grouped-picker__detail { flex: none; box-sizing: border-box; height: 48px; padding: var(--s1) var(--s3); overflow: hidden; color: var(--text-2); font-size: 12px; line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .ui-grouped-picker__footer { flex: none; }
 .ui-grouped-picker__key-hints { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: var(--s3); padding: var(--s2) var(--s3) 0; border-top: 1px solid var(--line); color: var(--text-3); font-size: 12px; line-height: 1.5; }
 .ui-grouped-picker__key-hint { display: inline-flex; align-items: center; gap: var(--s1); white-space: nowrap; }
