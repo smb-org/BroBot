@@ -124,6 +124,18 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 /* ── Regions instead of cards ──────────────────────────── Spacing and a hairline separate sections; no border, gradient, or shadow. */
 
 .content-section { width: min(var(--dashboard-content-width), 100%); margin-top: var(--s10); }
+.module-chat-commands { margin-top: var(--s6); }
+.module-chat-commands__list { display: grid; gap: var(--s4); margin: 0; padding: 0; list-style: none; }
+.module-chat-command { display: grid; gap: var(--s2); min-width: 0; padding-bottom: var(--s4); border-bottom: 1px solid var(--line); }
+.module-chat-command > .number { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.module-chat-command__description, .module-chat-command__threshold { margin: 0; color: var(--text-2); font-size: 12.5px; }
+.module-chat-command__arguments { display: grid; gap: var(--s2); }
+.module-chat-command__arguments h3 { color: var(--text-2); font-size: 12px; }
+.module-chat-command__arguments dl { display: grid; gap: var(--s2); margin: 0; }
+.module-chat-command__arguments dl > div { display: grid; grid-template-columns: minmax(5rem, auto) minmax(0, 1fr); gap: var(--s2); }
+.module-chat-command__arguments dt, .module-chat-command__arguments dd { margin: 0; color: var(--text-2); font-size: 12.5px; }
+.module-chat-command__arguments dd { overflow-wrap: anywhere; }
+.module-chat-command__threshold span { color: var(--text-3); }
 .section-heading {
   display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3);
   padding-bottom: var(--s2); margin-bottom: var(--s4);

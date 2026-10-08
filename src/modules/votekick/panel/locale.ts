@@ -161,7 +161,7 @@ const panelCopy: LocaleCatalog<{
 }> = {
   de: {
     ariaLabel: "Votekick-Betrieb", running: "Laufender Votekick", history: "Letzte Votekicks",
-    emptyRunning: "Kein Votekick läuft.", emptyHistory: "In den letzten 14 Tagen gab es keine Votekicks.",
+    emptyRunning: "Noch kein Votekick. Starte einen im Chat mit !votekick @user.", emptyHistory: "In den letzten 14 Tagen gab es keine Votekicks.",
     target: "Ziel", votes: (yes, no, threshold) => `${String(yes)} Ja · ${String(no)} Nein · Schwelle ${String(threshold)}`,
     remaining: (seconds) => `Noch ${String(seconds)} s`, cancel: "Abbrechen", cancelTitle: "Votekick abbrechen?",
     cancelDescription: "Die laufende Abstimmung wird geschlossen.", confirmCancel: "Votekick abbrechen", cancelDialogCancel: "Zurück",
@@ -174,7 +174,7 @@ const panelCopy: LocaleCatalog<{
   },
   en: {
     ariaLabel: "Votekick operations", running: "Running votekick", history: "Recent votekicks",
-    emptyRunning: "No votekick is running.", emptyHistory: "There have been no votekicks in the last 14 days.",
+    emptyRunning: "No votekick yet. Start one in chat with !votekick @user.", emptyHistory: "There have been no votekicks in the last 14 days.",
     target: "Target", votes: (yes, no, threshold) => `${String(yes)} yes · ${String(no)} no · threshold ${String(threshold)}`,
     remaining: (seconds) => `${String(seconds)} s remaining`, cancel: "Cancel", cancelTitle: "Cancel this votekick?",
     cancelDescription: "The running ballot will be closed.", confirmCancel: "Cancel votekick", cancelDialogCancel: "Keep running",

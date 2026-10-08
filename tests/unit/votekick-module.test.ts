@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModuleAction, ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { votekickModule } from "../../src/modules/votekick";
 import { votekickSettingsSchema, type Votekick } from "../../src/modules/votekick/contracts";
-import { votekickThreshold } from "../../src/modules/votekick/domain";
+import { VOTEKICK_COMMAND_PATTERN, votekickThreshold } from "../../src/modules/votekick/domain";
 import { closeExpiredVotekick, processVotekickMessage } from "../../src/modules/votekick/service";
 import type { VotekickRepository } from "../../src/modules/votekick/repository";
 import { moduleScopePurpose } from "../../src/dashboard/module-labels";
@@ -91,6 +91,16 @@ const contextFor = (overrides: Record<string, unknown> = {}): ModuleExecutionCon
 };
 
 describe("Votekick module", () => {
+  it("declares a chat command accepted by the Votekick parser", () => {
+    const command = votekickModule.chatCommands?.find(({ name }) => name === "!votekick");
+
+    expect(command).toBeDefined();
+    if (command === undefined) return;
+    expect(command.syntax).toBe("!votekick @user");
+    expect(command.minimumChatStatus).toBe("vip");
+    expect(VOTEKICK_COMMAND_PATTERN.test(`${command.name} sampleviewer`)).toBe(true);
+  });
+
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-01-15T12:00:00.000Z"));

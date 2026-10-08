@@ -1,5 +1,5 @@
 import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type ModerationFailureReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
-import { browserModuleLanguage, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
+import { browserModuleLanguage, type ModuleChatCommandThreshold, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 import type { SystemVariableName } from "../template-variables";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -929,6 +929,10 @@ export interface DashboardTexts {
     scopeList: string;
     scopeMissing: string;
     scopeGranted: string;
+    chatCommands: string;
+    chatCommandArguments: string;
+    chatCommandAvailableTo: string;
+    chatCommandThresholds: Record<ModuleChatCommandThreshold, string>;
   };
   /** Stream Manager: the immediate-action row and the warnings/errors feed
    *  on the channel overview -- each action reports success/failure at
@@ -1252,6 +1256,16 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeList: "Benötigte Broadcaster-Berechtigungen",
       scopeMissing: "Fehlt",
       scopeGranted: "Erteilt",
+      chatCommands: "Chatbefehle",
+      chatCommandArguments: "Argumente",
+      chatCommandAvailableTo: "Im Chat ausführbar für",
+      chatCommandThresholds: {
+        everyone: "alle",
+        subscriber: "Abonnenten und höher",
+        vip: "VIPs, Moderatoren und Broadcaster",
+        moderator: "Moderatoren und Broadcaster",
+        broadcaster: "Broadcaster",
+      },
       unknown: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
     },
     streamManager: {
@@ -1559,6 +1573,16 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeList: "Required broadcaster permissions",
       scopeMissing: "Missing",
       scopeGranted: "Granted",
+      chatCommands: "Chat commands",
+      chatCommandArguments: "Arguments",
+      chatCommandAvailableTo: "Available in chat to",
+      chatCommandThresholds: {
+        everyone: "everyone",
+        subscriber: "subscribers and higher",
+        vip: "VIPs, moderators, and broadcasters",
+        moderator: "moderators and broadcasters",
+        broadcaster: "broadcaster",
+      },
     },
     streamManager: {
       immediateActions: "Immediate actions",
