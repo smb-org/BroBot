@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
+import { useMemo, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
 import { rankVoteTerms } from "../domain";
 import { chatVotingOverlayLabels } from "./locale";
 import type { TallyState } from "./tally-state";
+import { OverlayTally, OverlayTallyOptions, type OverlayTallyRow } from "../../../overlay/tally/OverlayTally";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -48,206 +49,66 @@ const parseState = (value: unknown): TallyState | null => {
   };
 };
 
-const formatCountdown = (seconds: number): string =>
-  `${String(Math.floor(seconds / 60))}:${String(seconds % 60).padStart(2, "0")}`;
-
 const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
-  const incoming = useMemo(() => parseState(state), [state]);
-  const current = incoming;
-  // The state only triggers re-renders; every render reads the clock itself so idle periods cannot leave it stale.
-  const [, setClock] = useState(0);
-  // eslint-disable-next-line react-hooks/purity -- intentional: remaining time is local-clock minus closesAt at render time
-  const clock = Date.now();
-  const [zeroLatchedPollId, setZeroLatchedPollId] = useState<string | null>(null);
+  const current = useMemo(() => parseState(state), [state]);
   const labels = chatVotingOverlayLabels(language);
+  if (current === null || current.counts.length === 0 && current.preset !== "free_text") return null;
+
+  const closed = current.status === "closed";
   const countdownEnabled = config.showCountdown !== false;
-  const closesAt = current?.closesAt === undefined ? Number.NaN : Date.parse(current.closesAt);
-  const timeLimitedOpenVote = countdownEnabled && current?.status === "open" &&
+  const closesAt = current.closesAt === undefined ? Number.NaN : Date.parse(current.closesAt);
+  const timeLimitedOpenVote = countdownEnabled && current.status === "open" &&
     typeof current.requestedDurationSeconds === "number" && current.requestedDurationSeconds > 0 &&
     Number.isFinite(closesAt);
-  const remainingMilliseconds = timeLimitedOpenVote
-    ? closesAt - clock
-    : Number.NaN;
-  const rawCountdownSeconds = Number.isFinite(remainingMilliseconds)
-    ? Math.max(0, Math.ceil(remainingMilliseconds / 1_000))
-    : null;
-  const currentPollId = current?.pollId;
-  const currentStatus = current?.status;
-  if (currentPollId !== undefined && currentStatus === "open" && rawCountdownSeconds === 0 &&
-      zeroLatchedPollId !== currentPollId) setZeroLatchedPollId(currentPollId);
-  const countdownSeconds = current?.status === "open" && zeroLatchedPollId === current.pollId
-    ? 0
-    : rawCountdownSeconds;
-  const countdownText = countdownSeconds === null ? "" : formatCountdown(countdownSeconds);
-
-  useEffect(() => {
-    if (countdownSeconds === null || countdownSeconds === 0) return;
-    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [countdownSeconds, current?.pollId]);
-
-  useEffect(() => {
-    if (current?.status !== "closed") return;
-    const closeAt = current.closedAt == null ? Number.NaN : Date.parse(current.closedAt);
-    if (!Number.isFinite(closeAt)) return;
-    const timer = window.setInterval(() => setClock(Date.now()), 500);
-    return () => window.clearInterval(timer);
-  }, [current?.pollId, current?.status, current?.closedAt, config.hideAfterCloseSeconds]);
-
-  const closeAt = current?.closedAt == null ? Number.NaN : Date.parse(current.closedAt);
-  const hideAfter = typeof config.hideAfterCloseSeconds === "number" ? config.hideAfterCloseSeconds : 15;
-  if (current === null || current.counts.length === 0 && current.preset !== "free_text" ||
-      current.status === "closed" && (!Number.isFinite(closeAt) || clock >= closeAt + hideAfter * 1_000)) return null;
-
-  const total = current.counts.reduce((sum, count) => sum + count, 0);
-  const rows = current.counts.map((count, index) => ({
-    label: current.labels?.[index] ?? String(index + 1),
-    count,
-    percent: total === 0 ? 0 : Math.round(count * 100 / total),
-  }));
-  // Fixed width: the canvas wrapper is content-sized, so a percentage would follow the term length.
+  const hideAfterCloseSeconds = typeof config.hideAfterCloseSeconds === "number" ? config.hideAfterCloseSeconds : 15;
   const width = typeof config.width === "number" && Number.isFinite(config.width)
     ? Math.max(200, Math.min(1920, config.width)) : 480;
   const layout = config.layout === "strip" ? "strip" : "bars";
+  const headerText = current.title?.trim() || (closed ? labels.closed : labels.title);
+  const standardRows: OverlayTallyRow[] = current.counts.map((count, index) => ({
+    id: String(index),
+    label: current.labels?.[index] ?? String(index + 1),
+    count,
+  }));
   const visibleTextTerms = current.termFilterReady === true
     ? current.terms ?? []
     : (current.terms ?? []).filter((entry) => entry.approved);
   const textTerms = current.preset === "free_text" ? rankVoteTerms(visibleTextTerms) : [];
+  const textRows: OverlayTallyRow[] = textTerms.slice(0, 5).map((entry) => ({
+    id: entry.term,
+    label: entry.approved ? entry.term : "?",
+    count: entry.count,
+    title: entry.approved ? entry.term : "?",
+  }));
+  const options = current.preset === "free_text" ? textRows : standardRows;
   const textTotal = visibleTextTerms.reduce((sum, entry) => sum + entry.count, 0);
-  const headerText = current.title?.trim() || (current.status === "closed" ? labels.closed : labels.title);
-  const headerTitleStyle: CSSProperties = {
-    display: "-webkit-box",
-    height: "2.4em",
-    minHeight: "2.4em",
-    minWidth: 0,
-    overflow: "hidden",
-    overflowWrap: "anywhere",
-    lineHeight: 1.2,
-    fontWeight: 700,
-    textOverflow: "ellipsis",
-    WebkitBoxOrient: "vertical" as const,
-    WebkitLineClamp: 2,
-  };
-  const textRowStyle = {
-    flex: layout === "strip" ? "1 1 8em" : undefined,
-    minHeight: "2.3em",
-    minWidth: 0,
-    width: layout === "bars" ? "100%" : undefined,
-    boxSizing: "border-box" as const,
-  };
-  const textCaptionStyle = {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 10rem",
-    alignItems: "center",
-    gap: "0 0.5em",
-    minWidth: 0,
-    width: "100%",
-    boxSizing: "border-box" as const,
-  };
-  const textLabelStyle = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const };
-  const textCountStyle = {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "clip",
-    textAlign: "right" as const,
-    whiteSpace: "nowrap" as const,
-    fontSize: "0.5em",
-    fontVariantNumeric: "tabular-nums" as const,
-  };
-  const textTrackStyle = {
-    height: "0.45em",
-    width: "100%",
-    minWidth: 0,
-    boxSizing: "border-box" as const,
-    borderRadius: "999px",
-    background: "rgba(127, 127, 127, 0.25)",
-    overflow: "hidden",
-  };
-  return <section
-    className={`brobot-module-text chat-voting-tally chat-voting-tally--${layout}`}
-    aria-label={headerText}
-    style={{ display: "grid", gap: "0.6em", width: `${String(width)}px`, minWidth: 0, boxSizing: "border-box" }}
+
+  return <OverlayTally
+    id={current.pollId}
+    title={headerText}
+    open={!closed}
+    closesAt={timeLimitedOpenVote ? current.closesAt ?? null : null}
+    closedAt={current.closedAt ?? null}
+    showCountdown={timeLimitedOpenVote}
+    hideAfterCloseSeconds={hideAfterCloseSeconds}
+    countdownRemainingLabel={labels.countdownRemaining}
+    width={width}
+    classPrefix="chat-voting-tally"
+    className={`chat-voting-tally--${layout}`}
   >
-    <div
-      className="chat-voting-tally__header"
-      role="heading"
-      aria-level={2}
-      aria-label={headerText}
-      title={headerText}
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 6ch",
-        alignItems: "start",
-        minWidth: 0,
-        height: "2.4em",
-        minHeight: "2.4em",
-      }}
-    >
-      <span className="chat-voting-tally__header-title" style={headerTitleStyle}>{headerText}</span>
-      <span
-        className="chat-voting-tally__countdown"
-        role="timer"
-        aria-hidden={countdownText.length === 0}
-        aria-label={countdownText.length === 0 ? undefined : labels.countdownRemaining(countdownText)}
-        style={{
-          display: "flex",
-          width: "6ch",
-          minWidth: "6ch",
-          height: "2.4em",
-          minHeight: "2.4em",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          textAlign: "right",
-          whiteSpace: "nowrap",
-          fontFamily: "\"IBM Plex Mono\", ui-monospace, monospace",
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >{countdownText}</span>
-    </div>
-    <div className="chat-voting-tally__options" style={{
-      display: "flex",
-      flexDirection: layout === "strip" ? "row" : "column",
-      flexWrap: "wrap",
-      gap: "0.65em",
-      width: "100%",
-      minWidth: 0,
-      boxSizing: "border-box",
-      ...(current.preset === "free_text" && layout === "strip" ? { height: "14.1em" } : {}),
-    }}>
-      {current.preset === "free_text" ? <>
-        {Array.from({ length: 5 }, (_, index) => {
-          const entry = textTerms[index];
-          if (entry === undefined) return <div className="chat-voting-tally__option" key={`${current.pollId}-empty-${String(index)}`} aria-hidden="true" style={{ ...textRowStyle, visibility: "hidden" }}>
-            <div className="chat-voting-tally__caption" style={textCaptionStyle}>
-              <span style={textLabelStyle}>&nbsp;</span><span style={textCountStyle}>&nbsp;</span>
-            </div>
-            {layout === "bars" ? <div className="chat-voting-tally__track" style={textTrackStyle} /> : null}
-          </div>;
-          const percent = textTotal === 0 ? 0 : Math.round(entry.count * 100 / textTotal);
-          return <div className="chat-voting-tally__option" key={`${current.pollId}-${entry.term}`} style={textRowStyle}>
-            <div className="chat-voting-tally__caption" style={textCaptionStyle}>
-              <span title={entry.approved ? entry.term : "?"} style={textLabelStyle}>{entry.approved ? entry.term : "?"}</span>
-              <span style={textCountStyle}>{String(entry.count)}{config.showPercent === false ? "" : ` · ${String(percent)}%`}</span>
-            </div>
-            {layout === "bars" ? <div className="chat-voting-tally__track" aria-hidden="true" style={textTrackStyle}>
-              <span style={{ display: "block", height: "100%", width: `${String(percent)}%`, borderRadius: "inherit", background: "currentColor", opacity: 0.8 }} />
-            </div> : null}
-          </div>;
-        })}
-      </> : rows.map((row, index) => <div className="chat-voting-tally__option" key={`${current.pollId}-${String(index)}`} style={{ flex: layout === "strip" ? "1 1 8em" : undefined }}>
-          <div className="chat-voting-tally__caption" style={{ display: "flex", justifyContent: "space-between", gap: "0.5em" }}>
-            <span>{row.label}</span>
-            <span>{String(row.count)}{config.showPercent === false ? "" : ` · ${String(row.percent)}%`}</span>
-          </div>
-          {layout === "bars" ? <div className="chat-voting-tally__track" aria-hidden="true" style={{ height: "0.45em", borderRadius: "999px", background: "rgba(127, 127, 127, 0.25)", overflow: "hidden" }}>
-            <span style={{ display: "block", height: "100%", width: `${String(row.percent)}%`, borderRadius: "inherit", background: "currentColor", opacity: 0.8 }} />
-          </div> : null}
-        </div>)}
-    </div>
-    {current.preset === "free_text" ? current.more !== undefined && current.more > 0
-      ? <div style={{ minHeight: "1.5em" }}>{labels.more}: {String(current.more)}</div>
-      : <div aria-hidden="true" style={{ minHeight: "1.5em", visibility: "hidden" }} /> : null}
-  </section>;
+    <OverlayTallyOptions
+      rows={options}
+      layout={layout}
+      showPercent={config.showPercent !== false}
+      variant={current.preset === "free_text" ? "terms" : "standard"}
+      emptySlots={current.preset === "free_text" ? 5 : 0}
+      classPrefix="chat-voting-tally"
+      {...(current.preset === "free_text" ? {
+        totalCount: textTotal,
+        more: { label: labels.more, count: current.more ?? 0, reserve: true },
+      } : {})}
+    />
+  </OverlayTally>;
 };
 
 export default Tally;

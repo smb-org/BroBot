@@ -9,6 +9,7 @@ import { ChatOutputTargetControl } from "./ChatOutputTargetControl";
 import { Field } from "./Field";
 import { InspectorFieldRow, InspectorSection } from "./InspectorParts";
 import { NumberField } from "./NumberField";
+import { Select } from "./Select";
 import { SegmentedControl } from "./SegmentedControl";
 import { Switch } from "./Switch";
 import { TemplateText } from "./TemplateText";
@@ -22,6 +23,7 @@ export type SettingsFieldSpec<Settings> =
   | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number; lengthUnit?: "utf16" | "codePoints"; optional?: boolean; validate?: (value: string) => boolean }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; optional?: boolean; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
   | { kind: "chatTarget"; key: keyof Settings & string; includeWhereAsked?: boolean }
+  | { kind: "select"; key: keyof Settings & string; options: readonly { value: string }[] }
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string | number }[] }
   | { kind: "choice"; key: keyof Settings & string; options: readonly { value: string; icon?: IconName }[] }
   | { kind: "switchCard"; key: keyof Settings & string; children?: readonly SettingsFieldSpec<Settings>[] };
@@ -141,6 +143,23 @@ export function SettingsEditor<Settings extends object>({
           {...(field.includeWhereAsked === undefined ? {} : { includeWhereAsked: field.includeWhereAsked })}
           disabled={disabled}
         />
+      );
+    }
+    if (field.kind === "select") {
+      const options = field.options.map(({ value }) => ({ value, label: copy.options?.[value]?.label ?? "" }));
+      return (
+        <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
+          <Select
+            id={id}
+            label={copy.label}
+            hint={copy.hint}
+            value={typeof fieldValue === "string" ? fieldValue : null}
+            onChange={(next) => { if (next !== null) onChange(field.key, next as Settings[typeof field.key]); }}
+            options={options}
+            required
+            disabled={disabled}
+          />
+        </InspectorFieldRow>
       );
     }
     if (field.kind === "number") {

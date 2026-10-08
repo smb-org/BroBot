@@ -401,6 +401,7 @@ const expectedModuleSettings = {
   text_library: {},
   timers: {},
   votekick: {
+    starterMinRole: "vip",
     minNetVotes: 5,
     percent: 20,
     windowSeconds: 60,
@@ -408,7 +409,7 @@ const expectedModuleSettings = {
     channelCooldownSeconds: 300,
     targetCooldownSeconds: 1800,
     chatTarget: "source_only",
-    startText: "Votekick for {votekick.target} is open. 1 = yes, 2 = no. Needed: {votekick.threshold} net yes votes.",
+    startText: "Votekick for {votekick.target} is open for {votekick.window}. 1 = yes, 2 = no. Needed: {votekick.threshold} net yes votes.",
     passText: "Votekick passed: {votekick.target} receives a {votekick.duration} timeout.",
     failText: "The timeout for {votekick.target} could not be applied.",
     expiredText: "Votekick for {votekick.target} expired ({votekick.yes} yes, {votekick.no} no).",

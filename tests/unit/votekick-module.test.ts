@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModuleAction, ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { votekickModule } from "../../src/modules/votekick";
 import { votekickSettingsSchema, type Votekick } from "../../src/modules/votekick/contracts";
-import { VOTEKICK_COMMAND_PATTERN, votekickThreshold } from "../../src/modules/votekick/domain";
+import { VOTEKICK_TEMPLATE_VARIABLES } from "../../src/modules/votekick/contracts/template-variable-catalog";
+import { canStartVotekick, VOTEKICK_COMMAND_PATTERN, votekickThreshold } from "../../src/modules/votekick/domain";
 import { closeExpiredVotekick, processVotekickMessage } from "../../src/modules/votekick/service";
 import type { VotekickRepository } from "../../src/modules/votekick/repository";
 import { moduleScopePurpose } from "../../src/dashboard/module-labels";
@@ -97,7 +98,7 @@ describe("Votekick module", () => {
     expect(command).toBeDefined();
     if (command === undefined) return;
     expect(command.syntax).toBe("!votekick @user");
-    expect(command.minimumChatStatus).toBe("vip");
+    expect(command.minimumChatStatus).toBe("configurable");
     expect(VOTEKICK_COMMAND_PATTERN.test(`${command.name} sampleviewer`)).toBe(true);
   });
 
@@ -107,11 +108,14 @@ describe("Votekick module", () => {
   });
   afterEach(() => { vi.useRealTimers(); });
 
-  it("registers active chatter tracking, chat messages, and no overlay", () => {
+  it("registers active chatter tracking, chat messages, and the votekick overlay", () => {
     expect(votekickModule.broadcasterScopes).toEqual(["moderation:read"]);
     expect(votekickModule.needsActiveChatters).toBe(true);
     expect(votekickModule.eventSubTypes).toEqual(["channel.chat.message"]);
-    expect(votekickModule.overlayElements).toBeUndefined();
+    expect(votekickModule.overlayElements?.[0]).toMatchObject({
+      kind: "votekick.tally",
+      defaultConfig: { showCountdown: true, hideAfterCloseSeconds: 15 },
+    });
   });
 
   it("localizes the moderator lookup scope", () => {
@@ -155,11 +159,43 @@ describe("Votekick module", () => {
     expect(votekickThreshold(5, 20, 40)).toBe(8);
   });
 
-  it("limits ballot starters to VIPs, moderators, and broadcasters", async () => {
+  it("defaults older settings without a starter role to VIP", () => {
+    const { starterMinRole, ...legacySettings } = settings;
+    expect(starterMinRole).toBe("vip");
+    expect(votekickSettingsSchema.parse(legacySettings).starterMinRole).toBe("vip");
+  });
+
+  it("registers the formatted ballot window as a bilingual template variable", () => {
+    const variable = VOTEKICK_TEMPLATE_VARIABLES.find(({ name }) => name === "votekick.window");
+    expect(variable).toMatchObject({
+      sample: "2 min",
+      picker: {
+        de: { label: "Abstimmungsfenster" },
+        en: { label: "Voting window" },
+      },
+    });
+    expect(settings.startText).toContain("{votekick.window}");
+  });
+
+  it.each([
+    ["viewer", ["viewer"], true],
+    ["subscriber", ["viewer"], false],
+    ["subscriber", ["subscriber"], true],
+    ["vip", ["subscriber"], false],
+    ["vip", ["vip"], true],
+    ["moderator", ["vip"], false],
+    ["moderator", ["moderator"], true],
+    ["broadcaster", ["moderator"], false],
+    ["broadcaster", ["broadcaster"], true],
+  ] as const)("checks the %s starter threshold against chat status", (minimumRole, statuses, expected) => {
+    expect(canStartVotekick(statuses, minimumRole)).toBe(expected);
+  });
+
+  it("uses the configured minimum role to limit ballot starters", async () => {
     const context = contextFor();
     const result = await processVotekickMessage(eventFor("!votekick sampleviewer", ["subscriber"]), repositoryFor(), context);
 
-    expect(result.diagnostics).toEqual([{ code: "votekick.rejected", detail: { reason: "starter_not_authorized" } }]);
+    expect(result.diagnostics).toEqual([{ code: "votekick.rejected", detail: { reason: "starter_not_authorized", minimumRole: "vip" } }]);
     expect(context.lookupUserByLogin).not.toHaveBeenCalled();
   });
 
@@ -193,12 +229,31 @@ describe("Votekick module", () => {
     expect(context.ballots.cast).toHaveBeenCalledWith(expect.any(String), "starter-user", 1);
     expect(admit).toHaveBeenCalledWith("channel-a", expect.objectContaining({ threshold: 8, targetLogin: "sampleviewer", initiatorUserId: "starter-user", ballotRevision: 1 }), expect.any(String), settings.channelCooldownSeconds, settings.targetCooldownSeconds);
     expect(context.scheduleAlarm).toHaveBeenCalledWith("close", expect.stringMatching(/^close:/u), expect.any(Number));
-    expect(result.actions).toEqual([{
+    expect(result.actions[0]).toMatchObject({
+      kind: "overlay",
+      type: "opened",
+      elementKind: "votekick.tally",
+    });
+    expect(result.actions[1]).toEqual({
       kind: "chat",
-      text: "Votekick for sampleviewer is open. 1 = yes, 2 = no. Needed: 8 net yes votes.",
+      text: "Votekick for sampleviewer is open for 1 min. 1 = yes, 2 = no. Needed: 8 net yes votes.",
       target: "source_only",
       automated: false,
-    }]);
+    });
+  });
+
+  it("starts a ballot while offline", async () => {
+    const admit = vi.fn(() => Promise.resolve("admitted" as const));
+    const context = contextFor({ streamState: vi.fn(() => Promise.resolve("offline" as const)) });
+    const result = await processVotekickMessage(eventFor("!votekick sampleviewer"), repositoryFor({ admit }), context);
+
+    expect(admit).toHaveBeenCalledOnce();
+    expect(context.streamState).not.toHaveBeenCalled();
+    expect(result.actions[0]).toMatchObject({ kind: "overlay", type: "opened", elementKind: "votekick.tally" });
+    const startMessage = result.actions[1];
+    expect(startMessage?.kind).toBe("chat");
+    if (startMessage?.kind !== "chat") throw new Error("The offline start announcement is missing.");
+    expect(startMessage.text).toContain("for 1 min");
   });
 
   it("admits a target seen one millisecond after the lookup started", async () => {
@@ -279,7 +334,14 @@ describe("Votekick module", () => {
 
     const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
 
-    expect(result.actions).toEqual([]);
+    const tallyAction = result.actions[0];
+    expect(tallyAction?.kind).toBe("overlay");
+    if (tallyAction?.kind !== "overlay") throw new Error("The updated votekick tally is missing.");
+    expect(tallyAction.type).toBe("tally");
+    expect(tallyAction.elementKind).toBe("votekick.tally");
+    expect(tallyAction.payload.yesVotes).toBe(3);
+    expect(tallyAction.payload.noVotes).toBe(1);
+    expect(tallyAction.payload.ballotRevision).toBe(4);
     expect(finalize).not.toHaveBeenCalled();
     expect(updateCounts).toHaveBeenLastCalledWith("channel-a", "ballot-1", 3, 1, 4);
     expect(order.indexOf("finalize-2")).toBeLessThan(order.indexOf("d1:3:1"));
@@ -304,7 +366,14 @@ describe("Votekick module", () => {
 
     expect(finalize).not.toHaveBeenCalled();
     expect(updateCounts).toHaveBeenLastCalledWith("channel-a", "ballot-1", 1, 2, 4);
-    expect(result.actions).toEqual([]);
+    const tallyAction = result.actions[0];
+    expect(tallyAction?.kind).toBe("overlay");
+    if (tallyAction?.kind !== "overlay") throw new Error("The updated votekick tally is missing.");
+    expect(tallyAction.type).toBe("tally");
+    expect(tallyAction.elementKind).toBe("votekick.tally");
+    expect(tallyAction.payload.yesVotes).toBe(1);
+    expect(tallyAction.payload.noVotes).toBe(2);
+    expect(tallyAction.payload.ballotRevision).toBe(4);
     expect(context.clearAlarm).not.toHaveBeenCalled();
   });
 
@@ -689,6 +758,7 @@ describe("Votekick module", () => {
       channelId: "channel-a",
       DB: db,
       ballots: { close: vi.fn(() => Promise.resolve(null)) },
+      channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
       schedule: vi.fn(() => Promise.resolve()),
       clear,
       renderTemplate: vi.fn((text: string) => Promise.resolve({ text, attributions: [] })),
@@ -724,6 +794,7 @@ describe("Votekick module", () => {
       channelId: "channel-a",
       DB: db,
       ballots: { close: closeBallot },
+      channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
       schedule: vi.fn(() => Promise.resolve()),
       clear: vi.fn(() => Promise.resolve()),
       renderTemplate: vi.fn((text: string) => Promise.resolve({ text })),
@@ -757,6 +828,7 @@ describe("Votekick module", () => {
       channelId: "channel-a",
       DB: db,
       ballots: { finalize: vi.fn(() => Promise.resolve({ outcome: "expired" as const, counts: [4, 2], revision: 6 })), close },
+      channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
       schedule: vi.fn(() => Promise.resolve()),
       clear: vi.fn(() => Promise.resolve()),
       renderTemplate,
@@ -769,6 +841,7 @@ describe("Votekick module", () => {
     expect(renderTemplate).toHaveBeenCalledWith(settings.expiredText, expect.objectContaining({
       "votekick.yes": 4,
       "votekick.no": 2,
+      "votekick.window": "1 min",
     }), expect.any(Number));
   });
 

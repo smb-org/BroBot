@@ -1378,7 +1378,7 @@ export interface ModuleChatCommandArgument {
   hint: Readonly<Record<ModuleLanguage, string>>;
 }
 
-export type ModuleChatCommandThreshold = "everyone" | Exclude<ModuleChatStatus, "viewer">;
+export type ModuleChatCommandThreshold = "everyone" | Exclude<ModuleChatStatus, "viewer"> | "configurable";
 
 /**
  * Help metadata for a command a module parses from Twitch chat. This is
@@ -1392,6 +1392,6 @@ export interface ModuleChatCommandDeclaration {
   syntax: string;
   description: Readonly<Record<ModuleLanguage, string>>;
   arguments?: readonly ModuleChatCommandArgument[];
-  /** Minimum Twitch chat badge/status required; higher statuses also qualify. */
+  /** Minimum Twitch chat badge/status required; configurable means module settings determine it. */
   minimumChatStatus: ModuleChatCommandThreshold;
 }

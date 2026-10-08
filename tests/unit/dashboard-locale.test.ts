@@ -73,8 +73,8 @@ describe("dashboard locale", () => {
     expect(eventText("text_commands.lookup_unavailable", { name: "uptime", kind: "uptime" })).toBe("Textbefehl !uptime: Stream-Daten nicht verfügbar");
     expect(eventText("text_commands.argument_missing", { name: "so" })).toBe("Befehl !so: Twitch-Name fehlt");
     expect(eventText("text_commands.variable_update_failed", { name: "score" })).toBe("Befehl !score konnte die Kanalvariable nicht ändern");
-    expect(eventText("votekick.rejected", { reason: "starter_not_authorized" }))
-      .toBe("Votekick abgelehnt: Nur VIPs und Moderatoren dürfen eine Abstimmung starten.");
+    expect(eventText("votekick.rejected", { reason: "starter_not_authorized", minimumRole: "vip" }))
+      .toBe("Votekick abgelehnt: Nur VIPs und höhere Rollen dürfen eine Abstimmung starten.");
   });
 
   it("returns the English detail texts", () => {

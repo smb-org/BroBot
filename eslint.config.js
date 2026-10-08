@@ -38,9 +38,23 @@ const overlayEditorImportBoundaryPattern = {
   message: "The overlay editor may only import the shared canvas, model types and variable styles.",
 };
 
+const moduleSharedImportPattern = [
+  "(?:\\.\\./)+dashboard/(?:locale|ui)(?:\\.[^/]+)?",
+  "(?:\\.\\./)+contracts",
+  "(?:\\.\\./)+contract",
+  "contract",
+  "contracts",
+  "domain",
+  "service",
+  "repository",
+  "adapters",
+  "overlay",
+  "panel",
+].join("|");
+
 const moduleIsolationPatterns = [
   {
-    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:(?:\\.\\./)+dashboard/(?:locale|ui)(?:\\.[^/]+)?(?:/|$)|(?:\\.\\./)+contracts|(?:\\.\\./)+contract|contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
+    regex: `^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:${moduleSharedImportPattern})(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))`,
     message: "Module dürfen kein anderes Modul importieren.",
   },
   {
@@ -50,6 +64,14 @@ const moduleIsolationPatterns = [
   mantineBoundaryPattern,
   tablerBoundaryPattern,
   richTextareaBoundaryPattern,
+];
+
+const moduleOverlayIsolationPatterns = [
+  {
+    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:(?:\\.\\./)+overlay/tally/OverlayTally|(?:\\.\\./)+dashboard/(?:locale|ui)(?:\\.[^/]+)?|(?:\\.\\./)+contracts|(?:\\.\\./)+contract|contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
+    message: "Module dürfen kein anderes Modul importieren.",
+  },
+  ...moduleIsolationPatterns.slice(1),
 ];
 
 const overlayBoundaryPatterns = [
@@ -75,7 +97,7 @@ const overlayBoundaryPatterns = [
 ];
 
 const overlayRestrictedImportPatterns = [
-  ...moduleIsolationPatterns,
+  ...moduleOverlayIsolationPatterns,
   ...overlayBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern && pattern !== richTextareaBoundaryPattern),
 ];
 

@@ -39,6 +39,7 @@ const variableCopies = {
     { name: "votekick.threshold", label: "Schwelle", description: "Benötigte Netto-Ja-Stimmen", sample: "5" },
     { name: "votekick.seconds", label: "Sekunden", description: "Timeout-Dauer in Sekunden", sample: "120" },
     { name: "votekick.duration", label: "Dauer", description: "Lesbare Timeout-Dauer", sample: "2 Min." },
+    { name: "votekick.window", label: "Abstimmungsfenster", description: "Formatierte Dauer der Abstimmung", sample: "2 Min." },
   ],
   en: [
     { name: "votekick.target", label: "Target", description: "Target login", sample: "sampleviewer" },
@@ -47,6 +48,7 @@ const variableCopies = {
     { name: "votekick.threshold", label: "Threshold", description: "Required net yes votes", sample: "5" },
     { name: "votekick.seconds", label: "Seconds", description: "Timeout duration in seconds", sample: "120" },
     { name: "votekick.duration", label: "Duration", description: "Readable timeout duration", sample: "2 min" },
+    { name: "votekick.window", label: "Voting window", description: "Formatted duration of the ballot", sample: "2 min" },
   ],
 } as const;
 
@@ -58,6 +60,7 @@ const makeSettingsCatalog = (language: DashboardLanguage): SettingsEditorCatalog
     invalid: "Bitte korrigiere die markierten Felder.", load: "Einstellungen konnten nicht geladen werden.", error: "Einstellungen konnten nicht gespeichert werden.",
     conflict: "Einstellungen wurden inzwischen geändert.", reload: "Serverstand laden", settings: "Schwelle und Zeit", messages: "Chat-Nachrichten",
     minVotes: "Mindest-Netto-Ja-Stimmen", percent: "Aktive Chatter in Prozent", window: "Abstimmungsfenster",
+    starterRole: "Mindestrolle zum Starten",
     duration: "Timeout-Dauer", minimum: "Mindestens", maximum: "Höchstens", cooldown: "Kanal-Abkühlzeit", targetCooldown: "Ziel-Abkühlzeit",
     target: "Chat-Ausgabeziel", targetHint: "Wirkt nur während eines Shared Chats.", start: "Startnachricht", pass: "Erfolgsnachricht", fail: "Fehlernachricht",
     expired: "Ablaufnachricht", protected: "Geschütztes Ziel", busy: "Laufende Abstimmung", seconds: "Sekunden", percentUnit: "%",
@@ -71,6 +74,7 @@ const makeSettingsCatalog = (language: DashboardLanguage): SettingsEditorCatalog
     invalid: "Please correct the marked fields.", load: "Settings could not be loaded.", error: "Settings could not be saved.",
     conflict: "Settings have changed since they were loaded.", reload: "Load server version", settings: "Threshold and timing", messages: "Chat messages",
     minVotes: "Minimum net yes votes", percent: "Active chatters percent", window: "Voting window",
+    starterRole: "Minimum role to start",
     duration: "Timeout duration", minimum: "Minimum", maximum: "Maximum", cooldown: "Channel cooldown", targetCooldown: "Target cooldown",
     target: "Chat output target", targetHint: "Only affects output during Shared Chat.", start: "Start message", pass: "Success message", fail: "Failure message",
     expired: "Expiry message", protected: "Protected target", busy: "Ballot already running", seconds: "seconds", percentUnit: "%",
@@ -109,6 +113,23 @@ const makeSettingsCatalog = (language: DashboardLanguage): SettingsEditorCatalog
         : `${de ? "Vorlage kann" : "Template can be"} ${String(warning.worstCaseLength)} ${de ? "Zeichen lang sein." : "characters long."}`,
     sections: { thresholds: words.settings, messages: words.messages },
     fields: {
+      starterMinRole: {
+        label: words.starterRole,
+        hint: de ? "Diese Twitch-Chatrolle und höhere Rollen dürfen !votekick starten." : "This Twitch chat role and higher roles can start !votekick.",
+        options: de ? {
+          viewer: { label: "Zuschauer und höher" },
+          subscriber: { label: "Abonnent und höher" },
+          vip: { label: "VIP und höher" },
+          moderator: { label: "Moderator und Broadcaster" },
+          broadcaster: { label: "Nur Broadcaster" },
+        } : {
+          viewer: { label: "Viewer and higher" },
+          subscriber: { label: "Subscriber and higher" },
+          vip: { label: "VIP and higher" },
+          moderator: { label: "Moderator and broadcaster" },
+          broadcaster: { label: "Broadcaster only" },
+        },
+      },
       minNetVotes: { label: words.minVotes, hint: de ? "Die Netto-Schwelle fällt nie unter diesen Wert." : "The net threshold never falls below this value." },
       percent: { label: words.percent, hint: de ? "Wird auf die nächste ganze Stimme aufgerundet." : "Rounded up to the next whole vote.", unit: words.percentUnit },
       windowSeconds: { label: words.window, hint: de ? "Das Panel zeigt die verbleibende Zeit." : "The panel shows the remaining time.", unit: words.seconds },

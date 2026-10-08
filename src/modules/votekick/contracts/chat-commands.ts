@@ -15,6 +15,6 @@ export const VOTEKICK_CHAT_COMMANDS = [
         en: "Twitch login of the active chatter proposed for a timeout.",
       },
     }],
-    minimumChatStatus: "vip",
+    minimumChatStatus: "configurable",
   },
 ] as const satisfies readonly ModuleChatCommandDeclaration[];

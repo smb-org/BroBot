@@ -8,6 +8,9 @@ const preview = (template: string, samples: Readonly<Record<string, string>>): s
 const spec: SettingsEditorSpec<VotekickSettings> = {
   sections: [
     { id: "thresholds", icon: "tabSettings", fields: [
+      { kind: "select", key: "starterMinRole", options: [
+        { value: "viewer" }, { value: "subscriber" }, { value: "vip" }, { value: "moderator" }, { value: "broadcaster" },
+      ] },
       { kind: "number", key: "minNetVotes", min: 3, max: 100_000, step: 1 },
       { kind: "number", key: "percent", min: 5, max: 100, step: 1, unit: "%" },
       { kind: "number", key: "windowSeconds", min: 30, max: 180, step: 1, unit: "s" },
