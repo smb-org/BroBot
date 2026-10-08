@@ -89,6 +89,24 @@ test("desktop palette closes with Escape after Tab and removal moves focus to th
   await expect(add).toBeFocused();
 });
 
+test("desktop palette returns focus to the plus button when focus-trap timers fire late", async ({ page }) => {
+  // Simulates slow CI runners: Mantine's focus trap refocuses the search input from 0 ms timeouts,
+  // which on a loaded runner fire after the palette closed but before its exit transition ended.
+  await page.addInitScript(() => {
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) =>
+      nativeSetTimeout(handler, (delay ?? 0) <= 0 ? 60 : delay, ...args)) as typeof window.setTimeout;
+  });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await routeApi(page);
+  const add = page.getByRole("button", { name: "Add element" });
+  await add.click();
+  await expect(page.getByRole("combobox", { name: "Search elements" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("combobox", { name: "Search elements" })).toHaveCount(0);
+  await expect(add).toBeFocused();
+});
+
 for (const width of [1280, 390]) {
   test(`the usage count stays visible inside the panel at the element limit (${String(width)}px)`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
