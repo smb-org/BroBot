@@ -153,7 +153,6 @@ describe("GroupedPicker", () => {
   });
 
   it("does not run a stale focus restore when reopened during the exit transition", async () => {
-    const onDismissFocus = vi.fn();
     function ControlledPicker() {
       const [opened, setOpened] = useState(false);
       return <>
@@ -165,7 +164,6 @@ describe("GroupedPicker", () => {
           onSelect={() => {}}
           opened={opened}
           onOpenedChange={setOpened}
-          onDismissFocus={onDismissFocus}
         />
       </>;
     }
@@ -180,10 +178,35 @@ describe("GroupedPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Programmatic close", hidden: true }));
     await waitFor(() => expect(screen.queryByRole("listbox", { name: "Choose an element", hidden: true })).not.toBeInTheDocument());
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(onDismissFocus).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(trigger);
   });
 
-  it("restores focus to the caller target after a zero-duration (reduced motion) exit on small screens", async () => {
+  it("calls onDismissFocus right after close, before the exit transition ends", async () => {
+    const onDismissFocus = vi.fn();
+    renderPicker(<GroupedPicker groups={groups} messages={messages} trigger={<button type="button">Add element</button>} onSelect={() => {}} onDismissFocus={onDismissFocus} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add element" }));
+    const search = await screen.findByRole("combobox", { name: "Search elements" });
+    fireEvent.keyDown(search, { key: "Escape" });
+    await waitFor(() => expect(onDismissFocus).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("combobox", { name: "Search elements", hidden: true })).toBeInTheDocument();
+  });
+
+  it("does not move focus to the trigger after the exit when focus went elsewhere meanwhile", async () => {
+    renderPicker(<>
+      <textarea aria-label="Editor" />
+      <GroupedPicker groups={groups} messages={messages} trigger={<button type="button">Add element</button>} onSelect={() => {}} />
+    </>);
+    fireEvent.click(screen.getByRole("button", { name: "Add element" }));
+    const search = await screen.findByRole("combobox", { name: "Search elements" });
+    fireEvent.keyDown(search, { key: "Escape" });
+    const editor = screen.getByRole("textbox", { name: "Editor" });
+    editor.focus();
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Search elements" })).not.toBeInTheDocument());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(document.activeElement).toBe(editor);
+  });
+
+  it("restores focus to the trigger after a zero-duration (reduced motion) exit on small screens", async () => {
     const originalMatchMedia = window.matchMedia.bind(window);
     window.matchMedia = (query: string): MediaQueryList => ({
       matches: query === "(max-width: 599px)" || query === "(prefers-reduced-motion: reduce)",
@@ -203,7 +226,6 @@ describe("GroupedPicker", () => {
           messages={messages}
           trigger={<button type="button">Add element</button>}
           onSelect={() => {}}
-          onDismissFocus={() => screen.getByRole("textbox", { name: "Editor" }).focus()}
         />
       </MantineProvider>);
       fireEvent.click(screen.getByRole("button", { name: "Add element" }));
@@ -211,7 +233,7 @@ describe("GroupedPicker", () => {
       fireEvent.click(screen.getByRole("button", { name: "Close", hidden: true }));
       await waitFor(() => expect(screen.queryByRole("combobox", { name: "Search elements" })).not.toBeInTheDocument());
       await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Editor" }));
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add element" }));
     } finally {
       window.matchMedia = originalMatchMedia;
     }

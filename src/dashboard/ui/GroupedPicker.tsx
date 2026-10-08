@@ -164,12 +164,19 @@ export function GroupedPicker<T = unknown>({
   // synchronously, after `close` has already recorded its generation.
   const focusGeneration = useRef(0);
   const pendingFocusGeneration = useRef<number | null>(null);
-  const restoreFocus = (): void => { pendingFocusGeneration.current = focusGeneration.current; };
+  // `onDismissFocus` (variable picker) is called on the next frame after close, as before: the caller
+  // owns its own selection handling. Only the default trigger restoration waits for the exit end,
+  // and only acts if focus is lost (nothing focused, or still inside the closing surface).
+  const restoreFocus = (): void => {
+    if (onDismissFocus !== undefined) window.requestAnimationFrame(onDismissFocus);
+    else pendingFocusGeneration.current = focusGeneration.current;
+  };
   const finishRestoreFocus = (): void => {
     if (pendingFocusGeneration.current !== focusGeneration.current) return;
     pendingFocusGeneration.current = null;
-    if (onDismissFocus !== undefined) onDismissFocus();
-    else focusTrigger();
+    const active = document.activeElement;
+    const lost = active === null || active === document.body || document.getElementById(panel)?.contains(active) === true;
+    if (lost) focusTrigger();
   };
 
   const changeOpened = (nextOpened: boolean): void => {
