@@ -40,6 +40,7 @@
     "@mantine/hooks": "^9.6.2",
     "@mantine/spotlight": "9.6.2",
     "@tabler/icons-react": "^3.47.0",
+    "@tanstack/react-query": "^5.104.1",
     "hono": "^4.13.1",
     "jsonata": "2.2.2",
     "react": "^19.2.8",

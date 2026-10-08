@@ -29,6 +29,10 @@ const richTextareaBoundaryPattern = {
   group: ["rich-textarea", "rich-textarea/*"],
   message: "Import rich-textarea only from src/dashboard/ui/.",
 };
+const tanstackBoundaryPattern = {
+  group: ["@tanstack/*"],
+  message: "Import TanStack Query only from src/dashboard/data/.",
+};
 const overlayViewBoundaryPattern = {
   regex: "(^|/)overlay(/|$)",
   message: "Panel views may not import overlay modules.",
@@ -39,7 +43,7 @@ const overlayEditorImportBoundaryPattern = {
 };
 
 const moduleSharedImportPattern = [
-  "(?:\\.\\./)+dashboard/(?:locale|ui)(?:\\.[^/]+)?",
+  "(?:\\.\\./)+dashboard/(?:locale|ui|data)(?:\\.[^/]+)?",
   "(?:\\.\\./)+contracts",
   "(?:\\.\\./)+contract",
   "contract",
@@ -64,6 +68,7 @@ const moduleIsolationPatterns = [
   mantineBoundaryPattern,
   tablerBoundaryPattern,
   richTextareaBoundaryPattern,
+  tanstackBoundaryPattern,
 ];
 
 const moduleOverlayIsolationPatterns = [
@@ -94,11 +99,14 @@ const overlayBoundaryPatterns = [
   mantineBoundaryPattern,
   tablerBoundaryPattern,
   richTextareaBoundaryPattern,
+  tanstackBoundaryPattern,
 ];
 
 const overlayRestrictedImportPatterns = [
   ...moduleOverlayIsolationPatterns,
-  ...overlayBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern && pattern !== richTextareaBoundaryPattern),
+  ...overlayBoundaryPatterns.filter((pattern) =>
+    pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern &&
+    pattern !== richTextareaBoundaryPattern && pattern !== tanstackBoundaryPattern),
 ];
 
 const panelBoundaryPatterns = [
