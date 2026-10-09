@@ -414,6 +414,8 @@ export const useRealtimeEventFeed = ({
   const jumpToBeginning = useCallback((): void => {
     scrollToBeginningRef.current();
     setPendingState({ identityKey: currentIdentityKeyRef.current, count: 0 });
+    // The held-back hints were not fetched while the reader was further down.
+    refreshRef.current();
   }, []);
 
   useEffect(() => {
@@ -481,13 +483,15 @@ export const useRealtimeEventFeed = ({
       onEventHintRef.current?.();
       const hints = parsed.message.payload.entries.filter((hint) => realtimeHintMatchesFilters(hint, filtersRef.current));
       if (hints.length > 0) {
-        if (!atBeginningRef.current()) {
+        if (atBeginningRef.current()) {
+          scheduleBatch();
+        } else {
+          // Reading further down: only count; fetching would shift the list. The jump fetches.
           const identityKey = currentIdentityKeyRef.current;
           setPendingState((current) => current.identityKey === identityKey
             ? { ...current, count: current.count + hints.length }
             : { identityKey, count: hints.length });
         }
-        scheduleBatch();
       }
     };
 

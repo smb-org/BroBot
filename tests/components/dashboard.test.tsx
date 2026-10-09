@@ -656,6 +656,8 @@ describe("Dashboard skeleton", () => {
     socket.receive(JSON.stringify({ version: 1, id: "message-lower", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
     expect(await screen.findByRole("button", { name: "1 neue Ereignisse" })).toBeInTheDocument();
+    // Outwait the realtime batch delay: a hint must not trigger a fetch while the reader is further down.
+    await new Promise((resolve) => { setTimeout(resolve, 400); });
     expect(screen.queryByText("Raid von unbekannt mit 8 Zuschauern")).not.toBeInTheDocument();
     expect(eventRequests).toBe(1);
     expect(screen.getAllByRole("row")).toHaveLength(2);
