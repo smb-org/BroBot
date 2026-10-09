@@ -63,11 +63,13 @@ export const refreshQuery = async (
   }
 };
 
-interface DirtyRecord {
+type FetchState = { status: "idle" } | { status: "fetching"; startSeq: number };
+
+interface QueryRefreshState {
   /** Sequence of the newest hint that no later-started complete fetch has covered yet. */
   dirtySeq: number | null;
-  /** Start of the newest first-page fetch whose whole query has not settled yet. */
-  lastStart: number | null;
+  /** Only a tracked first-page request can settle hints for this infinite query. */
+  fetch: FetchState;
   /** Start of the newest fetch whose whole query settled successfully. */
   lastSuccessStart: number | null;
 }
@@ -75,12 +77,16 @@ interface DirtyRecord {
 interface ClientOwner {
   seq: number;
   nextSeq: () => number;
-  byKey: Map<string, DirtyRecord>;
+  byKey: Map<string, QueryRefreshState>;
 }
 
 const owners = new WeakMap<QueryClient, ClientOwner>();
 
-const newRecord = (): DirtyRecord => ({ dirtySeq: null, lastStart: null, lastSuccessStart: null });
+const newRecord = (): QueryRefreshState => ({
+  dirtySeq: null,
+  fetch: { status: "idle" },
+  lastSuccessStart: null,
+});
 
 const ownerFor = (queryClient: QueryClient): ClientOwner => {
   let owner = owners.get(queryClient);
@@ -92,20 +98,22 @@ const ownerFor = (queryClient: QueryClient): ClientOwner => {
     queryClient.getQueryCache().subscribe((event) => {
       if (event.type !== "updated") return;
       const record = created.byKey.get(event.query.queryHash);
-      if (record === undefined || record.lastStart === null) return;
+      if (record === undefined || record.fetch.status !== "fetching") return;
       if (event.action.type === "success") {
-        record.lastSuccessStart = record.lastStart;
-        if (record.dirtySeq !== null && record.dirtySeq < record.lastStart) record.dirtySeq = null;
-        record.lastStart = null;
-      } else if (event.action.type === "error") {
-        record.lastStart = null;
+        record.lastSuccessStart = record.fetch.startSeq;
+        if (record.dirtySeq !== null && record.dirtySeq < record.fetch.startSeq) record.dirtySeq = null;
+        record.fetch = { status: "idle" };
+      } else if (event.action.type === "error" ||
+        (event.action.type === "setState" && event.query.state.fetchStatus === "idle")) {
+        // Errors and cancellations end this tracked fetch without covering a pending hint.
+        record.fetch = { status: "idle" };
       }
     });
   }
   return owner;
 };
 
-const recordFor = (queryClient: QueryClient, queryKey: QueryKey): DirtyRecord => {
+const recordFor = (queryClient: QueryClient, queryKey: QueryKey): QueryRefreshState => {
   const owner = ownerFor(queryClient);
   const id = hashKey(queryKey);
   let record = owner.byKey.get(id);
@@ -132,8 +140,7 @@ export const trackFetch = <Value>(
   fetchPage: () => Promise<Value>,
 ): Promise<Value> => {
   const record = recordFor(queryClient, queryKey);
-  const start = ownerFor(queryClient).nextSeq();
-  record.lastStart = start;
+  record.fetch = { status: "fetching", startSeq: ownerFor(queryClient).nextSeq() };
   return fetchPage();
 };
 
@@ -142,7 +149,7 @@ export const refreshIfDirty = (queryClient: QueryClient, queryKey: QueryKey, can
   const record = recordFor(queryClient, queryKey);
   const dirtySeq = record.dirtySeq;
   if (dirtySeq === null) return;
-  if (record.lastStart !== null && record.lastStart > dirtySeq) return;
+  if (record.fetch.status === "fetching" && record.fetch.startSeq > dirtySeq) return;
   const run = running.get(queryClient)?.get(hashKey(queryKey));
   if (run !== undefined && run.startSeq > dirtySeq) return;
   void refreshQuery(queryClient, queryKey, "active", canRun);

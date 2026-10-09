@@ -88,6 +88,17 @@ class TestEventsWebSocket {
   }
 }
 
+const emitEventHint = (socket: TestEventsWebSocket, id: string, event: PanelEventEntry): void => {
+  socket.receive(JSON.stringify({
+    version: 1,
+    id,
+    createdAt: event.createdAt,
+    channelId: "kanal-a",
+    type: "event_log.new",
+    payload: { entries: [{ eventId: event.eventId, createdAt: event.createdAt, moduleId: event.moduleId, code: event.code, actorUserId: null }] },
+  }));
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -420,6 +431,149 @@ describe("EventsPage failure cause icon", () => {
     expect(await screen.findByText(/Raid von firsthint/u)).toBeVisible();
     expect(await screen.findByText(/Raid von secondhint/u)).toBeVisible();
     expect(fetcher).toHaveBeenCalledTimes(2);
+    rendered.unmount();
+  });
+
+  it("retries a cancelled dirty event refresh when the reader returns to the top", async () => {
+    const cachedEntry = entry({ eventId: "cached-event" });
+    const hintedEntry = entry({ eventId: "hinted-event", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"cancelled","viewers":1}' });
+    let firstPageRequests = 0;
+    const response = (entries: PanelEventEntry[], nextCursor: string | null = null) => new Response(JSON.stringify({ entries, nextCursor }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      if (requestUrl(input).searchParams.has("cursor")) return Promise.resolve(response([]));
+      firstPageRequests += 1;
+      if (firstPageRequests === 1) return Promise.resolve(response([cachedEntry], "cursor-1"));
+      if (firstPageRequests === 2) return new Promise<Response>(() => undefined);
+      return Promise.resolve(response([hintedEntry, cachedEntry], "cursor-1"));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{ queryKey, data: { pages: [{ entries: [cachedEntry], nextCursor: "cursor-1" }], pageParams: [null] } }],
+      },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    fetcher.mockClear();
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    emitEventHint(socket, "cancelled-refresh-hint", hintedEntry);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await act(async () => { await rendered.queryClient.cancelQueries({ queryKey, exact: true }); });
+
+    act(() => { window.dispatchEvent(new Event("scroll")); });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/Raid von cancelled/u)).toBeVisible();
+    rendered.unmount();
+  });
+
+  it("does not let a paginated success settle a cancelled dirty first-page refresh", async () => {
+    const cachedEntry = entry({ eventId: "cached-event" });
+    const olderEntry = entry({ eventId: "older-event", createdAt: "2026-09-21T10:00:00.000Z" });
+    const hintedEntry = entry({ eventId: "hinted-event", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"pagination","viewers":1}' });
+    let firstPageRequests = 0;
+    const response = (entries: PanelEventEntry[], nextCursor: string | null = null) => new Response(JSON.stringify({ entries, nextCursor }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      if (requestUrl(input).searchParams.has("cursor")) return Promise.resolve(response([olderEntry]));
+      firstPageRequests += 1;
+      if (firstPageRequests === 1) return Promise.resolve(response([cachedEntry], "cursor-1"));
+      if (firstPageRequests === 2) return new Promise<Response>(() => undefined);
+      return Promise.resolve(response([hintedEntry, cachedEntry], "cursor-1"));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{ queryKey, data: { pages: [{ entries: [cachedEntry], nextCursor: "cursor-1" }], pageParams: [null] } }],
+      },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    fetcher.mockClear();
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    emitEventHint(socket, "cancelled-pagination-hint", hintedEntry);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await act(async () => { await rendered.queryClient.cancelQueries({ queryKey, exact: true }); });
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    expect(screen.getByRole("button", { name: "Ältere Ereignisse laden" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(requestUrl(fetcher.mock.calls[1]?.[0] as RequestInfo | URL).searchParams.get("cursor")).toBe("cursor-1");
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+
+    act(() => { window.dispatchEvent(new Event("scroll")); });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(4));
+    expect(requestUrl(fetcher.mock.calls[2]?.[0] as RequestInfo | URL).searchParams.has("cursor")).toBe(false);
+    expect(requestUrl(fetcher.mock.calls[3]?.[0] as RequestInfo | URL).searchParams.get("cursor")).toBe("cursor-1");
+    expect(await screen.findByText(/Raid von pagination/u)).toBeVisible();
+    rendered.unmount();
+  });
+
+  it("skips the batch refresh when a retry started after the hint already covered it", async () => {
+    const cachedEntry = entry({ eventId: "cached-event" });
+    const hintedEntry = entry({ eventId: "hinted-event", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"retry","viewers":1}' });
+    let initialRequest = true;
+    const response = (entries: PanelEventEntry[]) => new Response(JSON.stringify({ entries, nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    const fetcher = vi.fn((): Promise<Response> => {
+      if (initialRequest) {
+        initialRequest = false;
+        return Promise.resolve(response([cachedEntry]));
+      }
+      if (fetcher.mock.calls.length === 1) return Promise.reject(new Error("temporary network failure"));
+      return Promise.resolve(response([hintedEntry, cachedEntry]));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{ queryKey, data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] } }],
+      },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    fetcher.mockClear();
+    const query = rendered.queryClient.getQueryCache().find({ queryKey });
+    if (query === undefined) throw new Error("Events query was not created.");
+    query.setOptions({ ...query.options, retry: 1, retryDelay: 20 });
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+
+    void rendered.queryClient.invalidateQueries({ queryKey, exact: true });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    emitEventHint(socket, "retry-covered-hint", hintedEntry);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    await new Promise((resolve) => setTimeout(resolve, 180));
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText(/Raid von retry/u)).toBeVisible();
     rendered.unmount();
   });
 

@@ -425,7 +425,7 @@ export const useRealtimeEventFeed = ({
     batchTimerRef.current = window.setTimeout(() => {
       batchTimerRef.current = null;
       // The reader may have scrolled away meanwhile: keep the hint pending instead of shifting the list.
-      if (atBeginningRef.current()) refreshRef.current();
+      if (atBeginningRef.current()) (refreshIfDirtyRef.current ?? refreshRef.current)();
       else setPendingState((current) => current.identityKey === currentIdentityKeyRef.current && current.count > 0
         ? current
         : { identityKey: currentIdentityKeyRef.current, count: 1 });
