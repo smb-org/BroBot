@@ -97,6 +97,12 @@ typography:
     fontWeight: 600
     lineHeight: 1.5
     letterSpacing: "normal"
+  kleinetikett:
+    fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "11px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
   spaltenkopf:
     fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
     fontSize: "10px"
@@ -463,7 +469,7 @@ ablesbar, nie an der Farbe allein.
 - **Body** (400, 13 px, 1.5): Beschreibungen (max. 70 ch), Seitenkopf-Unterzeile, Eigenschaftswerte, Seitenleisten-Link, Knopftext, Leerzustand.
 - **Feldname** (500, 12 px, Text-2): Beschriftung über Feldern; Hinweis darunter 12 px, 400, Text-3. Auch Zustandsdetail, Eigenschaftsnamen und Login-Hinweis stehen in 12 px.
 - **LED-Wort** (600, 12 px): das Wort neben dem LED-Punkt, in Zustandsfarbe (bei Rot in Fehler-Text); auch das Wort im Art-Chip der Ereigniszeile, dort in Familienfarbe.
-- **Kleinetikett** (400, 11 px, 1.1, Ellipse): Modul-ID unter dem Modultitel; Sperrgrund unter dem Schalter; Vorher/Nachher-Kopf im Sub-Inspector (600, Text-3).
+- **Kleinetikett** (400, 11 px, 1.5, Text-3 bzw. Text-2): kleinste Stufe für Nebenangaben unter oder neben dem Hauptinhalt — Modul-ID unter dem Modultitel, Sperrgrund unter dem Schalter und in der Zeile, Grund im Zugriffs-Overlay, Nur-Lesen-Hinweis im Editor, Feldliste der Speicherleiste, Zeichenvorschau-Etikett (600), Kürzel im Avatar-Platzhalter (600), Vorher/Nachher-Kopf im Sub-Inspector (600).
 - **Spaltenkopf** (600, 11 px, Text-3, auf Tint-2): ruhige Satzschreibung ohne Versalien und ohne Laufweite.
 - **Zahl** (Plex Mono 400, 12 px, Tabellenziffern): Twitch-ID in der Kopfleiste, Abkühlzeit, Befehlstoken `!name`, Meta-Zeile „zuletzt“, Zeitstempel und Nutzer-IDs in Audit und Ereignissen, Audit-Aktion, Audit-/Ereignis-ID, rohe Ereignis- und Modulcodes, Zähler neben Bereichstiteln, der Zahl-Chip der Ereigniszeile.
 

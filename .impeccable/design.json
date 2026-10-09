@@ -181,6 +181,10 @@
         "displayName": "Schienenetikett",
         "purpose": "Wort unter dem Symbol in der 64er-Taste; Modul-ID."
       },
+      "kleinetikett": {
+        "displayName": "Kleinetikett",
+        "purpose": "Kleinste Stufe (11 px) für Nebenangaben: Modul-ID, Sperrgrund, Nur-Lesen-Hinweis, Avatar-Kürzel."
+      },
       "spaltenkopf": {
         "displayName": "Spaltenkopf",
         "purpose": "Einziger Versalien-Einsatz; Tabellenköpfe auf Tint-2."
