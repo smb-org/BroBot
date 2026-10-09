@@ -126,7 +126,7 @@ describe("API source outbound fetch", () => {
     expect(second).toEqual(payload);
     expect(fetcher).toHaveBeenCalledOnce();
     expect(new Headers(request?.headers).get("User-Agent")).toBe("BroBot/0.1.0 (+https://github.com/smb-org/BroBot)");
-    expect([...new Headers(request?.headers).keys()].sort()).toEqual(["accept", "user-agent"]);
+    expect([...new Headers(request?.headers).keys()].sort((a, b) => a.localeCompare(b))).toEqual(["accept", "user-agent"]);
     expect(request).toMatchObject({ method: "GET", redirect: "manual", credentials: "omit", referrerPolicy: "no-referrer" });
     expect(budget.count()).toBe(1);
   });

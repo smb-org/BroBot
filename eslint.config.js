@@ -172,6 +172,7 @@ export default defineConfig(
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-unnecessary-type-assertion": "error",
+      "@typescript-eslint/require-array-sort-compare": ["error", { ignoreStringArrays: false }],
     },
   },
   {

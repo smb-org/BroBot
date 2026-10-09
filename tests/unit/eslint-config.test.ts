@@ -97,6 +97,13 @@ describe("effective ESLint module boundaries", () => {
     expect(rejects(uiRestrictions, "rich-textarea/lib/types")).toBe(false);
   });
 
+  it("requires compare functions for every array sort, strings included", async () => {
+    for (const file of ["src/dashboard/data/keys.ts", "tests/unit/example.test.ts"]) {
+      const config = await eslint.calculateConfigForFile(file) as unknown as CalculatedConfig;
+      expect(config.rules?.["@typescript-eslint/require-array-sort-compare"]).toEqual([2, { ignoreStringArrays: false }]);
+    }
+  });
+
   it("allows module panels to use dashboard data and keeps TanStack out of overlays", async () => {
     const panelRestrictions = await restrictionsFor("src/modules/example/panel/view.tsx");
     const overlayRestrictions = await restrictionsFor("src/overlay/main.tsx");

@@ -199,7 +199,7 @@ describe("dashboard locale", () => {
       "text_commands.argument_invalid", "text_commands.changed_concurrently", "text_commands.variable_update_failed", "template.lookup_unavailable", "template_parameters_invalid", "votekick.rejected",
     ];
 
-    expect(Object.keys(eventToneEntries).sort()).toEqual([...codes].sort());
+    expect(Object.keys(eventToneEntries).sort((a, b) => a.localeCompare(b))).toEqual([...codes].sort((a, b) => a.localeCompare(b)));
     expect(eventToneEntries["channel_events.chat.community_gift"]).toEqual({
       family: "community", tier: "full", word: { de: "Gift", en: "Gift" }, numberKey: "count",
     });

@@ -10,7 +10,7 @@ import {
 const migrationsDirectory = path.resolve(import.meta.dirname, "../../migrations");
 
 const migrationFiles = (): string[] =>
-  readdirSync(migrationsDirectory).filter((name) => name.endsWith(".sql")).sort();
+  readdirSync(migrationsDirectory).filter((name) => name.endsWith(".sql")).sort((a, b) => a.localeCompare(b));
 
 const readMigration = (file: string): string =>
   readFileSync(path.join(migrationsDirectory, file), "utf8");

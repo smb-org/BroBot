@@ -66,7 +66,7 @@ const sourceFiles = (directory: string): string[] => readdirSync(directory, { wi
     if (entry.isDirectory()) return sourceFiles(fileName);
     return /\.(ts|tsx)$/.test(entry.name) && !entry.name.startsWith("__eslint_probe_") ? [fileName] : [];
   })
-  .sort();
+  .sort((a, b) => a.localeCompare(b));
 
 // Every gap is filled with the **real** production fragment, not a
 // stand-in. A stand-in would take exactly the query from the check it

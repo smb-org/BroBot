@@ -229,7 +229,7 @@ describe("host module secrets", () => {
       MODULE_ID,
     );
 
-    expect(Object.keys(readOnly).sort()).toEqual(["read", "readWithVersion", "status"]);
+    expect(Object.keys(readOnly).sort((a, b) => a.localeCompare(b))).toEqual(["read", "readWithVersion", "status"]);
     expect(await readOnly.status(SECRET_NAME)).toEqual({ configured: false, updatedAt: null });
     await expect(readOnly.readWithVersion(SECRET_NAME)).resolves.toBeNull();
   });

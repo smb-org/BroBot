@@ -3449,7 +3449,7 @@ describe("Dashboard skeleton", () => {
       .filter((id): id is string => id !== undefined);
     const spotlightPageIds = Array.from(dialog.querySelectorAll<HTMLElement>("[data-spotlight-item-id^='page:']"), (action) => action.dataset.spotlightItemId?.slice("page:".length))
       .filter((id): id is string => id !== undefined);
-    expect([...spotlightPageIds].sort()).toEqual([...sidebarPageIds].sort());
+    expect([...spotlightPageIds].sort((a, b) => a.localeCompare(b))).toEqual([...sidebarPageIds].sort((a, b) => a.localeCompare(b)));
 
     fireEvent.keyDown(document.body, { key: "Escape" });
   });

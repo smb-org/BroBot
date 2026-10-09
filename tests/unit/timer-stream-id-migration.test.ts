@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
-const migrationFiles = readdirSync(migrationsDirectory).filter((name) => name.endsWith(".sql")).sort();
+const migrationFiles = readdirSync(migrationsDirectory).filter((name) => name.endsWith(".sql")).sort((a, b) => a.localeCompare(b));
 const migration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
 
 describe("timer stream id migration", () => {

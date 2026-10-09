@@ -47,7 +47,7 @@ const memoryBallotStorage = (): TestBallotStorage => {
     let keys = [...values.keys()]
       .filter((key) => options.prefix === undefined || key.startsWith(options.prefix))
       .filter((key) => options.startAfter === undefined || key > options.startAfter)
-      .sort();
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     if (options.limit !== undefined) keys = keys.slice(0, options.limit);
     return Promise.resolve(new Map(keys.map((key) => [key, values.get(key)])));
   };

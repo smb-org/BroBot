@@ -23,7 +23,7 @@ const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
 
 const applyMigrations = async (): Promise<void> => {
   const database = (env as unknown as { DB: D1Database }).DB;
-  for (const path of Object.keys(migrationSources).sort()) {
+  for (const path of Object.keys(migrationSources).sort((a, b) => a.localeCompare(b))) {
     const filename = path.split("/").pop();
     if (filename === "0019_sun_data_source.sql") {
       await database.prepare(

@@ -30,7 +30,7 @@ export const dashboardDataKeys = {
     origin: filters.origin,
     module: filters.module,
     tone: filters.tone,
-    tones: filters.tones === undefined ? null : [...filters.tones].sort().join(","),
+    tones: filters.tones === undefined ? null : [...filters.tones].sort((a, b) => a.localeCompare(b)).join(","),
     person: filters.person,
   }),
 };

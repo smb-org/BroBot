@@ -1043,7 +1043,7 @@ describe("Panel read endpoints", () => {
     ).run();
     const twitch = vi.fn((input: RequestInfo | URL) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
-      expect(url.searchParams.getAll("id").sort()).toEqual(["user-1", "user-2"]);
+      expect(url.searchParams.getAll("id").sort((a, b) => a.localeCompare(b))).toEqual(["user-1", "user-2"]);
       return Promise.resolve(Response.json({ data: [
         { id: "user-1", login: "alice", display_name: "Alice" },
         { id: "user-2", login: "member_c", display_name: "member_c" },

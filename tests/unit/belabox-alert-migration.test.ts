@@ -10,7 +10,7 @@ const alertMigration = "0041_belabox_alerts.sql";
 const applyMigrationsBeforeAlerts = (database: DatabaseSync): void => {
   for (const name of readdirSync(migrationsDirectory)
     .filter((file) => file.endsWith(".sql") && file < alertMigration)
-    .sort()) {
+    .sort((a, b) => a.localeCompare(b))) {
     database.exec(readFileSync(resolve(migrationsDirectory, name), "utf8"));
   }
 };

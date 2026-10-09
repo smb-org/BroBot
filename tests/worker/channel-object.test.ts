@@ -162,7 +162,7 @@ const objectFor = (
     let keys = [...values.keys()]
       .filter((key) => options?.prefix === undefined || key.startsWith(options.prefix))
       .filter((key) => options?.startAfter === undefined || key > options.startAfter)
-      .sort();
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     if (options?.limit !== undefined) keys = keys.slice(0, options.limit);
     return new Map(keys.map((key) => [key, values.get(key)]));
   };
@@ -217,7 +217,7 @@ const objectFor = (
       return { toArray: () => chatterKey === undefined ? [] : [{ ...chatterKey }], one: () => chatterKey };
     }
     if (/^\s*SELECT MIN\(last_seen_at\) AS first_expiry FROM active_chatters\b/iu.test(query)) {
-      const firstExpiry = [...chatterRows.values()].map((row) => row.last_seen_at).sort()[0] ?? null;
+      const firstExpiry = [...chatterRows.values()].map((row) => row.last_seen_at).sort((a, b) => a.localeCompare(b))[0] ?? null;
       return { toArray: () => [{ first_expiry: firstExpiry }], one: () => ({ first_expiry: firstExpiry }) };
     }
     if (/^\s*DELETE FROM active_chatters\b/iu.test(query)) {

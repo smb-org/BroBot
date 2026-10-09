@@ -16,7 +16,7 @@ describe("EventSub subscription types", () => {
   it("keeps the tuple and the definition table congruent", () => {
     const fromTable = [...new Set(
       EVENTSUB_SUBSCRIPTION_DEFINITIONS.map((definition) => definition.subscriptionType),
-    )].sort();
-    expect(fromTable).toEqual([...EVENTSUB_SUBSCRIPTION_TYPES].sort());
+    )].sort((a, b) => a.localeCompare(b));
+    expect(fromTable).toEqual([...EVENTSUB_SUBSCRIPTION_TYPES].sort((a, b) => a.localeCompare(b)));
   });
 });

@@ -126,7 +126,7 @@ describe("sun error text settings", () => {
     ).bind(CHANNEL_ID, "sun.settings_changed").first<{ count: number }>();
     const saved = await readSunSettings(database as unknown as D1Database, CHANNEL_ID);
 
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(responses.map((response) => response.status).sort((a, b) => a - b)).toEqual([200, 409]);
     expect(auditCount?.count).toBe(1);
     expect(["First DE", "Second DE"]).toContain(saved.errorTexts.de);
   });
