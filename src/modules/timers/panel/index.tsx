@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useMemo, useState, type ReactElement } from "react";
 
+import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { formatTimestamp } from "../../../dashboard/locale";
 import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
@@ -109,10 +110,16 @@ const triggerDetail = (timer: Timer, data: TimersPanelData, labels: ReturnType<t
   return `${String(trigger.minutes)} ${labels.minutes.toLowerCase()} ${labels.beforeEvent.toLowerCase()} · ${label}`;
 };
 
-export default function TimersPanel({ channelId, language, canManage = true, canOperate = true }: ModulePanelProperties): ReactElement {
+export default function TimersPanel(properties: ModulePanelProperties): ReactElement {
+  return <TimersPanelContent key={properties.channelId} {...properties} />;
+}
+
+function TimersPanelContent({ channelId, language, canManage = true, canOperate = true }: ModulePanelProperties): ReactElement {
   const labels = timersTexts(language);
-  const [data, setData] = useState<TimersPanelData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useDashboardQueryClient();
+  const query = useModuleQuery(channelId, "timers", "panel", (signal) => loadTimersPanel(channelId, signal));
+  const data = query.data;
+  const loading = query.isPending;
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<TimerDraft | null>(null);
   const [editing, setEditing] = useState<Timer | null>(null);
@@ -122,21 +129,6 @@ export default function TimersPanel({ channelId, language, canManage = true, can
   const [previewBusy, setPreviewBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Timer | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-
-  const reload = useCallback(async (): Promise<void> => {
-    try { setData(await loadTimersPanel(channelId)); }
-    catch { notify({ tone: "error", message: labels.loadError }); }
-    finally { setLoading(false); }
-  }, [channelId, labels.loadError]);
-
-  useEffect(() => {
-    let active = true;
-    void loadTimersPanel(channelId)
-      .then((value) => { if (active) setData(value); })
-      .catch(() => { if (active) notify({ tone: "error", message: labels.loadError }); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [channelId, labels.loadError]);
 
   const sourceOptions = useMemo(() => (data?.sources ?? []).map((source) => ({
     value: source.id,
@@ -172,11 +164,10 @@ export default function TimersPanel({ channelId, language, canManage = true, can
     setPending(true);
     setError(null);
     try {
-      if (editing === null) await createTimer(channelId, input);
-      else await updateTimer(channelId, editing, input);
+      await runModuleQueryWrite(queryClient, channelId, "timers", "panel", () =>
+        editing === null ? createTimer(channelId, input) : updateTimer(channelId, editing, input));
       setDraft(null);
       setEditing(null);
-      await reload();
     } catch (failure: unknown) {
       const code = timerErrorCode(failure);
       setError(code === "timer_block_input_dependent" ? labels.inputDependentBlock
@@ -189,8 +180,7 @@ export default function TimersPanel({ channelId, language, canManage = true, can
     if (busyTimerId !== null) return;
     setBusyTimerId(timer.id);
     try {
-      await setTimerEnabled(channelId, timer, enabled);
-      await reload();
+      await runModuleQueryWrite(queryClient, channelId, "timers", "panel", () => setTimerEnabled(channelId, timer, enabled));
     } catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setBusyTimerId(null); }
   };
@@ -200,9 +190,8 @@ export default function TimersPanel({ channelId, language, canManage = true, can
     setPending(true);
     setDeleteError(null);
     try {
-      await deleteTimer(channelId, deleteTarget);
+      await runModuleQueryWrite(queryClient, channelId, "timers", "panel", () => deleteTimer(channelId, deleteTarget));
       setDeleteTarget(null);
-      await reload();
     } catch { setDeleteError(labels.deleteError); }
     finally { setPending(false); }
   };
@@ -214,17 +203,18 @@ export default function TimersPanel({ channelId, language, canManage = true, can
     { value: "time_of_day", label: labels.timeOfDay },
     { value: "before_event", label: labels.beforeEvent },
   ];
-  const listStatus = loading ? "loading" : data === null ? "error" : data.timers.length === 0 ? "empty" : "success";
+  const listStatus = loading ? "loading" : data === undefined ? "error" : data.timers.length === 0 ? "empty" : "success";
 
   return (
     <section aria-label={labels.title}>
       <InspectorSection title={labels.title}>
-        {canManage ? <Button variant="primary" onClick={openCreate}>{labels.add}</Button> : <p className="lock-reason">{labels.roleLocked}</p>}
+        <Button variant="primary" disabled={!canManage} onClick={openCreate}>{labels.add}</Button>
+        {canManage ? null : <p className="lock-reason">{labels.roleLocked}</p>}
         <div data-testid="timers-list-slot" style={{ height: "calc(var(--s10) * 18)", overflow: "hidden" }}>
         <LoadState status={listStatus} minHeight="calc(var(--s10) * 18)"
           loading={<Skeleton rows={7} height={34} />}
           empty={<p className="muted">{labels.empty}</p>}
-          error={<div style={{ minHeight: "calc(var(--s10) * 18)" }} />}
+          error={<p className="muted">{labels.loadError}</p>}
         >
         <div className="state-list" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>
           {(data?.timers ?? []).map((timer) => (

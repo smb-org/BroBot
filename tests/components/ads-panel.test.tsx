@@ -1,10 +1,11 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModulePage } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
 import { toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
+import { renderWithQuery } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
 const settings = {
@@ -21,9 +22,9 @@ const schedule: AdsScheduleResponse = {
 };
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
 
-const renderAds = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof render> => {
+const renderAds = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof renderWithQuery> => {
   vi.stubGlobal("fetch", fetcher);
-  return render(<UiProvider><ModulePage
+  return renderWithQuery(<UiProvider><ModulePage
     channelId="kanal-a"
     moduleId="ads"
     ownRole={ownRole}

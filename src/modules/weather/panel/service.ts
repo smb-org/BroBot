@@ -13,8 +13,8 @@ const readJson = async <T,>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const fetchWeatherSettings = async (channelId: string): Promise<WeatherSettings> =>
-  readJson<WeatherSettings>(await fetch(`${modulePath(channelId)}/provider-settings`));
+export const fetchWeatherSettings = async (channelId: string, signal?: AbortSignal): Promise<WeatherSettings> =>
+  readJson<WeatherSettings>(await fetch(`${modulePath(channelId)}/provider-settings`, signal ? { signal } : undefined));
 
 export const saveWeatherSettings = async (
   channelId: string,

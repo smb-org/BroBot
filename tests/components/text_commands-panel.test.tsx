@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -11,6 +11,7 @@ import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
 import { useDashboardRoute } from "../../src/dashboard/router";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery } from "../query-test-utils";
 
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
 
@@ -60,10 +61,10 @@ const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMut
     return Promise.resolve(jsonResponse({}, 404));
   });
 
-const renderPanel = (fetcher: typeof fetch, props: { language?: "de" | "en"; canManage?: boolean; botIsModerator?: boolean | null } = {}): ReturnType<typeof render> => {
+const renderPanel = (fetcher: typeof fetch, props: { language?: "de" | "en"; canManage?: boolean; botIsModerator?: boolean | null } = {}) => {
   vi.stubGlobal("fetch", fetcher);
   const { language = "de", ...panelProps } = props;
-  return render(<UiProvider><TextCommandsPanel channelId="kanal-a" language={language} {...panelProps} /></UiProvider>);
+  return renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language={language} {...panelProps} /></UiProvider>);
 };
 
 const selectCommand = async (name = "hallo"): Promise<HTMLElement> => {
@@ -93,6 +94,16 @@ describe("Text command editor", () => {
     vi.unstubAllGlobals();
     toastsSnapshot().forEach((toast) => dismissToast(toast.id));
     if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
+  });
+
+  it("shows cached commands immediately when returning to the module", async () => {
+    vi.stubGlobal("fetch", panelFetch());
+    const view = renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, { gcTime: 300_000 });
+    await screen.findByText("!hallo");
+    view.rerender(<UiProvider><div /></UiProvider>);
+    view.rerender(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>);
+    expect(screen.getByText("!hallo")).toBeInTheDocument();
+    expect(document.querySelector(".ui-load-state")).not.toHaveAttribute("data-status", "loading");
   });
 
   it("keeps command creation visible and explains why an operator cannot use it", async () => {
@@ -155,7 +166,7 @@ describe("Text command editor", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    render(<UiProvider><ToastHost /><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>);
+    renderWithQuery(<UiProvider><ToastHost /><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(textCommandsTexts("de").loadError);
     expect(document.querySelector(".command-list .form-error")).toBeNull();
@@ -444,7 +455,8 @@ describe("Text command editor", () => {
     renderPanel(fetcher);
     await selectCommand();
 
-    await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/template-variables")));
+    await waitFor(() => expect(fetcher.mock.calls.some(([input]) => (typeof input === "string" ? input : input instanceof URL ? input.href : input.url).includes("/template-variables"))).toBe(true));
+    await waitFor(() => expect(within(templateEditorFor("text")).getByRole("combobox", { name: "Text aus Bibliothek" })).toBeEnabled());
     const picker = templateEditorFor("text").querySelector(".command-library-picker");
     if (!(picker instanceof HTMLElement)) throw new Error("Text-library picker is missing");
     fireEvent.click(within(picker).getByRole("combobox", { name: "Text aus Bibliothek" }));
@@ -899,7 +911,7 @@ describe("Text command editor", () => {
         {route.kind === "module" ? <TextCommandsPanel channelId="kanal-a" language="de" initialSelection="hallo" /> : null}
       </>;
     };
-    render(<UiProvider><Harness /></UiProvider>);
+    renderWithQuery(<UiProvider><Harness /></UiProvider>);
 
     const response = await screen.findByRole("textbox", { name: "Antwort" });
     fireEvent.change(response, { target: { value: "Entwurf" } });
@@ -1104,7 +1116,7 @@ describe("Text command editor", () => {
     const fetcher = panelFetch();
     const onCloseInspector = vi.fn();
     vi.stubGlobal("fetch", fetcher);
-    render(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" onCloseInspector={onCloseInspector} /></UiProvider>);
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" onCloseInspector={onCloseInspector} /></UiProvider>);
 
     const row = await screen.findByRole("row", { name: /!hallo/u });
     expect(within(row).getByText("Alle")).toHaveClass("ui-badge");
@@ -1194,15 +1206,15 @@ describe("Text command editor", () => {
   it("follows the browser language when the host does not pass one", async () => {
     vi.stubGlobal("fetch", panelFetch());
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
-    render(<UiProvider><TextCommandsPanel channelId="kanal-a" /></UiProvider>);
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" /></UiProvider>);
 
     expect(await screen.findByRole("button", { name: "Add command" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Response" })).toBeInTheDocument();
+    expect(await screen.findByRole("columnheader", { name: "Response" })).toBeInTheDocument();
   });
 
   it("preselects the command requested by Spotlight after the command list loads", async () => {
     vi.stubGlobal("fetch", panelFetch({ commands: () => [makeCommand({ name: "clip" }), makeCommand()] }));
-    render(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" initialSelection="clip" /></UiProvider>);
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" initialSelection="clip" /></UiProvider>);
 
     expect(await screen.findByRole("region", { name: "Eigenschaften von !clip" })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /!clip/u })).toHaveAttribute("aria-selected", "true");

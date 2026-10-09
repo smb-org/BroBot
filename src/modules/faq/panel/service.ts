@@ -28,11 +28,11 @@ const readJson = async <Value,>(response: Response): Promise<Value> => {
 
 const csrf = async (): Promise<string> => (await readJson<{ token: string }>(await fetch("/api/csrf"))).token;
 
-export const loadFaqPanel = async (channelId: string): Promise<FaqPanelData> => {
+export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Promise<FaqPanelData> => {
   const encoded = encodeURIComponent(channelId);
   const [entriesResponse, variablesResponse] = await Promise.all([
-    fetch(`${basePath(channelId)}/entries`),
-    fetch(`/api/channels/${encoded}/template-variables`),
+    fetch(`${basePath(channelId)}/entries`, signal === undefined ? undefined : { signal }),
+    fetch(`/api/channels/${encoded}/template-variables`, signal === undefined ? undefined : { signal }),
   ]);
   const [entries, variables] = await Promise.all([
     readJson<{ entries: FaqEntry[] }>(entriesResponse),

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PanelApiError } from "../../src/dashboard/api";
 import { createDashboardQueryClient } from "../../src/dashboard/data/client";
+import { moduleQueryKey, runModuleQueryWrite, useModuleQuery } from "../../src/dashboard/data";
 import { queryKeys } from "../../src/dashboard/data/keys";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
@@ -42,6 +43,98 @@ describe("dashboard query data layer", () => {
     expect(dashboardDataKeys.events(channelId, emptyEventFilter)).not.toEqual(
       dashboardDataKeys.events(channelId, { ...emptyEventFilter, origin: "channel" }),
     );
+  });
+
+  it("keeps module query keys scoped to their channel, module, and part", () => {
+    expect(moduleQueryKey(channelId, "faq", "panel")).toEqual([
+      "channel",
+      channelId,
+      "modules/faq/panel",
+    ]);
+  });
+
+  it("does not let a read started before a module write replace the refetched value", async () => {
+    let resolveOldRead: ((value: string) => void) | undefined;
+    let markReadStarted: (() => void) | undefined;
+    let oldSignal: AbortSignal | undefined;
+    let readCount = 0;
+    const firstReadStarted = new Promise<void>((resolve) => { markReadStarted = resolve; });
+
+    function ModuleQueryProbe() {
+      const query = useModuleQuery(channelId, "faq", "panel", async (signal) => {
+        readCount += 1;
+        if (readCount === 1) {
+          oldSignal = signal;
+          markReadStarted?.();
+          return new Promise<string>((resolve) => { resolveOldRead = resolve; });
+        }
+        return "revision-2";
+      });
+      return <p>{query.data ?? "loading"}</p>;
+    }
+
+    const view = renderWithQuery(<ModuleQueryProbe />, {}, { gcTime: 600_000, staleTime: 0 });
+    await firstReadStarted;
+    await runModuleQueryWrite(view.queryClient, channelId, "faq", "panel", () => Promise.resolve(undefined));
+    resolveOldRead?.("revision-1");
+
+    expect(await screen.findByText("revision-2")).toBeInTheDocument();
+    await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "faq", "panel"))).toBe("revision-2"));
+    expect(oldSignal?.aborted).toBe(true);
+  });
+
+  it("keeps a higher cached module revision when a later read returns older data", async () => {
+    let readCount = 0;
+    function RevisionProbe() {
+      const query = useModuleQuery(channelId, "sun", "error-texts", () => {
+        readCount += 1;
+        return Promise.resolve(readCount === 1 ? { revision: 2, value: "new" } : { revision: 1, value: "old" });
+      });
+      return <><p>{query.data?.value ?? "loading"}</p><button onClick={() => { void query.refetch(); }}>Refresh</button></>;
+    }
+    const view = renderWithQuery(<RevisionProbe />, {}, { gcTime: 600_000, staleTime: 0 });
+
+    await waitFor(() => expect(view.container).toHaveTextContent("new"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(readCount).toBe(2));
+    await waitFor(() => expect(view.container).toHaveTextContent("new"));
+    expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "sun", "error-texts"))).toEqual({ revision: 2, value: "new" });
+  });
+
+  it("checks the latest cached module revision after a read resolves", async () => {
+    let resolveRead: ((value: { revision: number; value: string }) => void) | undefined;
+    function RevisionProbe() {
+      const query = useModuleQuery(channelId, "sun", "error-texts", () => new Promise<{ revision: number; value: string }>((resolve) => { resolveRead = resolve; }));
+      return <p>{query.data?.value ?? "loading"}</p>;
+    }
+    const view = renderWithQuery(<RevisionProbe />, {}, { gcTime: 600_000, staleTime: 0 });
+    const key = moduleQueryKey(channelId, "sun", "error-texts");
+
+    await waitFor(() => expect(resolveRead).toBeDefined());
+    act(() => { view.queryClient.setQueryData(key, { revision: 2, value: "new" }); });
+    act(() => { resolveRead?.({ revision: 1, value: "old" }); });
+
+    await waitFor(() => expect(view.queryClient.getQueryData(key)).toEqual({ revision: 2, value: "new" }));
+    expect(view.container).toHaveTextContent("new");
+  });
+
+  it("invalidates dependent module reads after a write", async () => {
+    const view = renderWithQuery(<p>Ready</p>);
+    const dependentKey = moduleQueryKey(channelId, "text_commands", "template-variables");
+    view.queryClient.setQueryData(dependentKey, [{ name: "text.old", isTextBlock: true }]);
+
+    await runModuleQueryWrite(
+      view.queryClient,
+      channelId,
+      "text_library",
+      "library",
+      () => Promise.resolve(undefined),
+      { relatedParts: [{ moduleId: "text_commands", part: "template-variables" }] },
+    );
+
+    expect(view.queryClient.getQueryState(dependentKey)?.isInvalidated).toBe(true);
+    view.unmount();
   });
 
   it("creates a fresh query client with isolated test defaults for each render", () => {

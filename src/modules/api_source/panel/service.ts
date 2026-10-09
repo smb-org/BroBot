@@ -13,8 +13,8 @@ const readJson = async <T,>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const loadApiSources = async (channelId: string): Promise<readonly ApiSource[]> =>
-  (await readJson<{ sources: ApiSource[] }>(await fetch(`${modulePath(channelId)}/sources`))).sources;
+export const loadApiSources = async (channelId: string, signal?: AbortSignal): Promise<readonly ApiSource[]> =>
+  (await readJson<{ sources: ApiSource[] }>(await fetch(`${modulePath(channelId)}/sources`, signal === undefined ? undefined : { signal }))).sources;
 
 const csrfToken = async (): Promise<string> =>
   (await readJson<{ token: string }>(await fetch("/api/csrf"))).token;

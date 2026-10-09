@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 
+import { DashboardDataProvider } from "../../src/dashboard/data/provider";
 import { UiProvider } from "../../src/dashboard/ui";
 import ApiSourcePanel from "../../src/modules/api_source/panel";
 import BelaboxPanel from "../../src/modules/belabox/panel";
@@ -29,9 +30,11 @@ const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId}
               : <p>Choose a module panel.</p>;
 
 createRoot(document.getElementById("root") as HTMLElement).render(
-  <UiProvider>
-    <main className="main-content" style={{ width: "min(960px, 100%)", padding: "16px" }}>
-      {panel}
-    </main>
-  </UiProvider>,
+  <DashboardDataProvider>
+    <UiProvider>
+      <main className="main-content" style={{ width: "min(960px, 100%)", padding: "16px" }}>
+        {panel}
+      </main>
+    </UiProvider>
+  </DashboardDataProvider>,
 );

@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SunSettings } from "../../src/modules/sun/contracts";
 import { UiProvider } from "../../src/dashboard/ui";
+import { renderWithQuery } from "../query-test-utils";
 
 const service = vi.hoisted(() => ({
   fetchSunSettings: vi.fn(),
@@ -23,7 +24,7 @@ describe("sun module settings", () => {
     };
     service.fetchSunSettings.mockResolvedValue(settings);
 
-    const { container } = render(
+    const { container } = renderWithQuery(
       <UiProvider>
         <SunSettingsPanel
           channelId="sun-channel"
@@ -34,7 +35,7 @@ describe("sun module settings", () => {
     );
 
     expect(await screen.findByText("Operators can read this setting but cannot change it.")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "German" })).toHaveValue("Eigener deutscher Fehler");
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "German" })).toHaveValue("Eigener deutscher Fehler"));
     expect(screen.getByRole("textbox", { name: "English" })).toHaveValue("Custom English fallback");
     expect(container.querySelector("dl.properties")).toBeNull();
     expect(screen.getAllByRole("textbox")).toHaveLength(2);

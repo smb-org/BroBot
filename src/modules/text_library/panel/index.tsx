@@ -8,6 +8,7 @@ import { PanelApiError } from "../../../contracts/panel-error";
 import { Badge, Button, ChatPreview, ConfirmDialog, Field, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, Skeleton, SubInspector, TextArea, notify, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
+import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { textLibraryTexts } from "./locale";
 import { estimateEmbeddedBlockOverflow } from "./embedded-block-overflow";
 import {
@@ -109,12 +110,18 @@ const withDataCondition = (conditions: TextBlockConditions, id: string, value: s
 const updateVariant = (variants: TextBlockVariant[], id: string, update: (variant: TextBlockVariant) => TextBlockVariant): TextBlockVariant[] =>
   variants.map((variant) => variant.id === id ? update(variant) : variant);
 
-export default function TextLibraryPanel({ channelId, language, canManage = true, textBlockConditions = [] }: ModulePanelProperties): ReactElement {
+export default function TextLibraryPanel(props: ModulePanelProperties): ReactElement {
+  return <TextLibraryPanelContent key={props.channelId} {...props} />;
+}
+
+function TextLibraryPanelContent({ channelId, language, canManage = true, textBlockConditions = [] }: ModulePanelProperties): ReactElement {
   const labels = useMemo(() => textLibraryTexts(language), [language]);
   const resolvedLanguage = language === "en" ? "en" : "de";
   const common = dashboardCommonTexts(resolvedLanguage);
   const searchGames = useCallback((query: string) => searchTextLibraryGames(channelId, query), [channelId]);
-  const [data, setData] = useState<Awaited<ReturnType<typeof loadTextLibrary>> | null>(null);
+  const queryClient = useDashboardQueryClient();
+  const libraryQuery = useModuleQuery(channelId, "text_library", "library", (signal) => loadTextLibrary(channelId, signal));
+  const data = libraryQuery.data ?? null;
   const conditionDefinitions = data?.dataConditionDefinitions ?? textBlockConditions;
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftBlock | null>(null);
@@ -129,7 +136,6 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const [simulatedTier, setSimulatedTier] = useState("everyone");
   const [pending, setPending] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [categoryDrafts, setCategoryDrafts] = useState<Record<string, string>>({});
   const [previewNow, setPreviewNow] = useState(() => Date.now());
@@ -140,9 +146,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   }, []);
 
   const refresh = useCallback(async (select?: string): Promise<void> => {
-    const next = await loadTextLibrary(channelId);
-    setData(next);
-    setLoadFailed(false);
+    const next = await queryClient.query({ queryKey: moduleQueryKey(channelId, "text_library", "library"), queryFn: ({ signal }) => loadTextLibrary(channelId, signal) });
     if (select !== undefined) {
       const selected = next.blocks.find((block) => block.name === select);
       if (selected !== undefined) {
@@ -164,17 +168,20 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
         setRevision(selected.revision);
       }
     }
-  }, [channelId, selectedName]);
+  }, [channelId, queryClient, selectedName]);
+
+  const write = useCallback(<Value,>(mutation: () => Promise<Value>): Promise<Value> =>
+    runModuleQueryWrite(queryClient, channelId, "text_library", "library", mutation, {
+      relatedParts: [
+        { moduleId: "text_commands", part: "template-variables" },
+        { moduleId: "faq", part: "panel" },
+        { moduleId: "timers", part: "panel" },
+      ],
+    }), [channelId, queryClient]);
 
   useEffect(() => {
-    let active = true;
-    loadTextLibrary(channelId).then((next) => {
-      if (!active) return;
-      setData(next);
-      setLoadFailed(false);
-    }).catch(() => { if (active) { setLoadFailed(true); notify({ tone: "error", message: labels.loadError }); } });
-    return () => { active = false; };
-  }, [channelId, labels.loadError]);
+    if (libraryQuery.isError) notify({ tone: "error", message: labels.loadError });
+  }, [libraryQuery.isError, labels.loadError]);
 
   const blockByName = useMemo(() => new Map((data?.blocks ?? []).map((block) => [block.name, block])), [data]);
   const reservedNames = new Set(data?.reservedNames ?? []);
@@ -299,9 +306,9 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
         ...draft,
         variants: draft.variants.map((variant, index) => index === draft.variants.length - 1 ? { ...variant, conditions: {} } : variant),
       };
-      const saved = revision === null
-        ? await createTextBlock(channelId, payload)
-        : await saveTextBlock(channelId, { ...payload, revision });
+      const saved = await write(() => revision === null
+        ? createTextBlock(channelId, payload)
+        : saveTextBlock(channelId, { ...payload, revision }));
       await refresh(saved.name);
       return null;
     } catch (caught: unknown) {
@@ -336,7 +343,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     if (selectedName === null || revision === null || !canManage) return;
     setPending(true);
     try {
-      await deleteTextBlock(channelId, selectedName, revision);
+      await write(() => deleteTextBlock(channelId, selectedName, revision));
       setSelectedName(null);
       setDraft(null);
       setBaselineDraft(null);
@@ -360,7 +367,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     if (!canManage || name.trim().length === 0) return;
     setPending(true);
     try {
-      await renameTextCategory(channelId, category.id, name.trim());
+      await write(() => renameTextCategory(channelId, category.id, name.trim()));
       setCategoryDrafts({});
       await refresh();
     } catch { notify({ tone: "error", message: labels.saveError }); } finally { setPending(false); }
@@ -370,7 +377,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     if (!canManage || newCategoryName.trim().length === 0) return;
     setPending(true);
     try {
-      await createTextCategory(channelId, newCategoryName.trim());
+      await write(() => createTextCategory(channelId, newCategoryName.trim()));
       setNewCategoryName("");
       await refresh();
     } catch (caught: unknown) {
@@ -382,7 +389,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const removeCategory = async (category: TextBlockCategory): Promise<void> => {
     if (!canManage) return;
     setPending(true);
-    try { await deleteTextCategory(channelId, category.id); await refresh(); }
+    try { await write(() => deleteTextCategory(channelId, category.id)); await refresh(); }
     catch (caught: unknown) { notify({ tone: "error", message: errorCode(caught) === "text_library_category_not_empty" ? labels.categoryDeleteBlocked : labels.saveError }); }
     finally { setPending(false); }
   };
@@ -407,7 +414,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
         </>}
         create={{ label: labels.addBlock, onClick: openCreate, disabled: true, ...(!canManage ? { reason: labels.managementLocked } : {}) }}
       />
-      <LoadState status={loadFailed ? "error" : "loading"} minHeight="calc(var(--s10) * 30)"
+      <LoadState status={libraryQuery.isError ? "error" : "loading"} minHeight="calc(var(--s10) * 30)"
         loading={<Skeleton rows={8} height={34} />}
         empty={<div />}
         error={<div style={{ minHeight: "calc(var(--s10) * 30)" }} />}

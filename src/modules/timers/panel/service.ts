@@ -26,12 +26,12 @@ const readJson = async <Value,>(response: Response): Promise<Value> => {
 
 const csrf = async (): Promise<string> => (await readJson<{ token: string }>(await fetch("/api/csrf"))).token;
 
-export const loadTimersPanel = async (channelId: string): Promise<TimersPanelData> => {
+export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): Promise<TimersPanelData> => {
   const encoded = encodeURIComponent(channelId);
   const [timersResponse, sourcesResponse, variablesResponse] = await Promise.all([
-    fetch(`${basePath(channelId)}/timers`),
-    fetch(`${basePath(channelId)}/event-time-sources`),
-    fetch(`/api/channels/${encoded}/template-variables`),
+    fetch(`${basePath(channelId)}/timers`, signal === undefined ? undefined : { signal }),
+    fetch(`${basePath(channelId)}/event-time-sources`, signal === undefined ? undefined : { signal }),
+    fetch(`/api/channels/${encoded}/template-variables`, signal === undefined ? undefined : { signal }),
   ]);
   const [timers, sources, variables] = await Promise.all([
     readJson<{ timers: Timer[] }>(timersResponse),

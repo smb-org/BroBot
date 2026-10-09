@@ -1,10 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import type { FaqEntry } from "../../src/modules/faq/contracts";
 import FaqPanel from "../../src/modules/faq/panel";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery } from "../query-test-utils";
 
 const entry: FaqEntry = {
   id: "entry-1",
@@ -35,7 +36,7 @@ describe("FAQ panel", () => {
       if (url.pathname.endsWith("/entries")) return Promise.resolve(jsonResponse({ entries: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
-    render(<UiProvider><FaqPanel channelId="channel-a" language="de" /></UiProvider>);
+    renderWithQuery(<UiProvider><FaqPanel channelId="channel-a" language="de" /></UiProvider>);
 
     expect(await screen.findByTestId("faq-test-result-slot")).toBeInTheDocument();
   });
@@ -57,7 +58,9 @@ describe("FAQ panel", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    render(<UiProvider><FaqPanel channelId="channel-a" language="de" canManage={false} /></UiProvider>);
+    renderWithQuery(<UiProvider><FaqPanel channelId="channel-a" language="de" canManage={false} /></UiProvider>);
+    expect(screen.getByRole("button", { name: "FAQ-Eintrag anlegen" })).toBeDisabled();
+    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen FAQ-Einträge bearbeiten.")).toBeInTheDocument();
     const enabledSwitch = await screen.findByRole("switch", { name: "Greeting: Aktiviert" });
     expect(enabledSwitch).toBeEnabled();
 
@@ -67,5 +70,29 @@ describe("FAQ panel", () => {
       expect.objectContaining({ method: "PATCH" }),
     ));
     expect(await screen.findByRole("switch", { name: "Greeting: Deaktiviert" })).toBeEnabled();
+  });
+
+  it("reuses warm FAQ data when the panel is mounted again", async () => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/entries")) return Promise.resolve(jsonResponse({ entries: [entry] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const view = renderWithQuery(
+      <UiProvider><FaqPanel channelId="channel-a" language="en" /></UiProvider>,
+      {},
+      { gcTime: 600_000, staleTime: 600_000 },
+    );
+    expect(await screen.findByText("Greeting")).toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    view.rerender(<UiProvider>{null}</UiProvider>);
+    view.rerender(<UiProvider><FaqPanel channelId="channel-a" language="en" /></UiProvider>);
+
+    expect(await screen.findByText("Greeting")).toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

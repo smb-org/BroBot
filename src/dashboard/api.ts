@@ -510,11 +510,14 @@ export const setChannelModuleEnabled = (
   { enabled },
 );
 
-export const getChannelModuleSettings = (channelId: string, moduleId: string): Promise<{
+export const getChannelModuleSettings = (channelId: string, moduleId: string, signal?: AbortSignal): Promise<{
   settings: Record<string, unknown>;
   revision: number;
   variables: { name: string; value: number; description: string }[];
-}> => requestJson<{ settings: Record<string, unknown>; revision: number; variables: { name: string; value: number; description: string }[] }>(`${modulePath(channelId, moduleId)}/settings`);
+}> => requestJson<{ settings: Record<string, unknown>; revision: number; variables: { name: string; value: number; description: string }[] }>(
+  `${modulePath(channelId, moduleId)}/settings`,
+  requestOptions(signal),
+);
 
 export interface PanelChannelVariableRecord {
   channelId: string;

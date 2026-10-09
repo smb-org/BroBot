@@ -32,15 +32,15 @@ const json = async <T>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const loadTextCommandData = async (channelId: string): Promise<TextCommandPanelData> => {
-  const response = await fetch(pathFor(channelId));
+export const loadTextCommandData = async (channelId: string, signal?: AbortSignal): Promise<TextCommandPanelData> => {
+  const response = await fetch(pathFor(channelId), signal === undefined ? undefined : { signal });
   return json<TextCommandPanelData>(response);
 };
 
 export const loadTextCommands = async (channelId: string): Promise<TextCommand[]> => (await loadTextCommandData(channelId)).commands;
 
-export const loadRegisteredTemplateVariables = async (channelId: string): Promise<readonly ModuleRegisteredTemplateVariable[]> => {
-  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/template-variables`);
+export const loadRegisteredTemplateVariables = async (channelId: string, signal?: AbortSignal): Promise<readonly ModuleRegisteredTemplateVariable[]> => {
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/template-variables`, signal === undefined ? undefined : { signal });
   return (await json<{ variables: readonly ModuleRegisteredTemplateVariable[] }>(response)).variables;
 };
 

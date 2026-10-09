@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModulePage } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery } from "../query-test-utils";
 
 const settings = {
   shoutoutEnabled: false,
@@ -14,9 +15,9 @@ const settings = {
 };
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
 
-const renderRaid = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof render> => {
+const renderRaid = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof renderWithQuery> => {
   vi.stubGlobal("fetch", fetcher);
-  return render(<UiProvider><ModulePage
+  return renderWithQuery(<UiProvider><ModulePage
     channelId="kanal-a"
     moduleId="raid"
     ownRole={ownRole}
