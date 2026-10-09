@@ -67,6 +67,7 @@ import { ChannelTimeZoneField } from "./ChannelTimeZoneField";
 import { ChannelLocationField } from "./ChannelLocationField";
 import { botPermissionsAreMissing, broadcasterPermissionsAreMissing, moderatorIsMissing, parseDashboardDate, tokenHealth } from "./channel-health";
 import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
+import { DashboardDataProvider } from "./data/provider";
 import "./styles.css";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -1919,7 +1920,13 @@ export const DashboardApp = (): ReactElement => {
 
   if (authenticationRequired) {
     const texts = dashboardTexts();
-    return <UiProvider><main className="auth-screen"><div className="auth-card"><h1>{texts.signIn.required}</h1><p>{texts.signIn.explanation}</p><a className="button" href="/auth/login">{texts.signIn.signInWithTwitch}</a></div></main></UiProvider>;
+    return (
+      <DashboardDataProvider onAuthenticationRequired={requestLogin}>
+        <UiProvider>
+          <main className="auth-screen"><div className="auth-card"><h1>{texts.signIn.required}</h1><p>{texts.signIn.explanation}</p><a className="button" href="/auth/login">{texts.signIn.signInWithTwitch}</a></div></main>
+        </UiProvider>
+      </DashboardDataProvider>
+    );
   }
 
   const sidebarModuleStates = route.kind === "channel" || route.kind === "module"
@@ -1950,15 +1957,16 @@ export const DashboardApp = (): ReactElement => {
     : overview.status === "error" ? "error" : "loading";
 
   return (
-    <UiProvider>
-      <Shell
-        header={<DashboardHeader route={route} channels={channels.data ?? []} activeChannel={activeHeaderChannel} loadedAt={activeHeaderLoadedAt} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} onRefreshState={refreshChannelState} />}
-        navbar={(context) => <PanelSidebar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} moduleStates={sidebarModuleStates} collapsed={context.collapsed} onToggleCollapsed={context.onToggleCollapsed} onEntryNavigate={context.closeMobileNav} onNavigate={navigate} />}
-        navLabel={dashboardTexts().navigation.mainNavigation}
-        openSidebarLabel={dashboardTexts().navigation.openSidebar}
-        closeSidebarLabel={dashboardTexts().navigation.closeSidebar}
-      >
-        <div className="main-content">
+    <DashboardDataProvider onAuthenticationRequired={requestLogin}>
+      <UiProvider>
+        <Shell
+          header={<DashboardHeader route={route} channels={channels.data ?? []} activeChannel={activeHeaderChannel} loadedAt={activeHeaderLoadedAt} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} onRefreshState={refreshChannelState} />}
+          navbar={(context) => <PanelSidebar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} moduleStates={sidebarModuleStates} collapsed={context.collapsed} onToggleCollapsed={context.onToggleCollapsed} onEntryNavigate={context.closeMobileNav} onNavigate={navigate} />}
+          navLabel={dashboardTexts().navigation.mainNavigation}
+          openSidebarLabel={dashboardTexts().navigation.openSidebar}
+          closeSidebarLabel={dashboardTexts().navigation.closeSidebar}
+        >
+          <div className="main-content">
         {!showBotBlocking && route.kind === "overview" ? <OverviewPage channelState={channels} onNavigate={navigate} /> : null}
         {route.kind === "platform" && isPlatform ? <PlatformPage onAuthenticationRequired={requestLogin} /> : null}
         {!showBotBlocking && isChannelOrModuleRoute && selectedChannel === null && channels.status !== "success" ? (
@@ -2043,9 +2051,10 @@ export const DashboardApp = (): ReactElement => {
           onOpenCommand={setPendingModuleSelection}
           onOpenVariable={(channelId, name) => { setPendingVariableSelection({ channelId, name }); }}
         />
-        </div>
-      </Shell>
-    </UiProvider>
+          </div>
+        </Shell>
+      </UiProvider>
+    </DashboardDataProvider>
   );
 };
 

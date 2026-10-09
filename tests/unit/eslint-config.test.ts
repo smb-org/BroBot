@@ -96,4 +96,13 @@ describe("effective ESLint module boundaries", () => {
     expect(rejects(uiRestrictions, "rich-textarea")).toBe(false);
     expect(rejects(uiRestrictions, "rich-textarea/lib/types")).toBe(false);
   });
+
+  it("allows module panels to use dashboard data and keeps TanStack out of overlays", async () => {
+    const panelRestrictions = await restrictionsFor("src/modules/example/panel/view.tsx");
+    const overlayRestrictions = await restrictionsFor("src/overlay/main.tsx");
+
+    expect(rejects(panelRestrictions, "../../../dashboard/data/keys")).toBe(false);
+    expect(rejects(panelRestrictions, "@tanstack/react-query")).toBe(true);
+    expect(rejects(overlayRestrictions, "@tanstack/react-query")).toBe(true);
+  });
 });
