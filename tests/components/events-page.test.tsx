@@ -193,6 +193,39 @@ describe("EventsPage failure cause icon", () => {
     view.unmount();
   });
 
+  it("shows cached events on return and revalidates to pick up events received while away", async () => {
+    const json = (entries: PanelEventEntry[]) => Promise.resolve(new Response(JSON.stringify({ entries, nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    const oldEntry = entry({ eventId: "old-event" });
+    const newEntry = entry({ eventId: "new-event", code: "channel_events.chat.sub", detail: "{\"person\":\"late-subscriber\",\"tier\":\"1000\"}" });
+    let serverEntries = [oldEntry];
+    const fetcher = vi.fn(() => json(serverEntries));
+    vi.stubGlobal("fetch", fetcher);
+    const page = (
+      <UiProvider>
+        <EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} />
+      </UiProvider>
+    );
+
+    // Production cache lifetime: gcTime keeps the data, the default staleTime (30 s) applies.
+    const view = renderWithQuery(page, undefined, { gcTime: 600_000 });
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // Leave the page; the server gets a new event and no hint reaches the page.
+    view.unmount();
+    serverEntries = [newEntry, oldEntry];
+
+    const returned = renderWithQuery(page, undefined, { gcTime: 600_000, queryClient: view.queryClient });
+    // Cached rows are visible at once, without a skeleton.
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(returned.container.querySelector(".skeleton")).not.toBeInTheDocument();
+    expect(await screen.findByText("Sub von late-subscriber")).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps cached events visible and offers Retry after a background failure", async () => {
     const cachedEntry = entry({ eventId: "cached-event" });
     const refreshedEntry = entry({
@@ -225,13 +258,10 @@ describe("EventsPage failure cause icon", () => {
       },
     );
 
+    // The revalidation on mount fails; the cached rows stay.
     expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
-    await act(async () => {
-      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter), exact: true });
-    });
-
+    await waitFor(() => { expect(rendered.container.querySelector(".list-toolbar__query-error")).not.toBeEmptyDOMElement(); });
     expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
-    expect(rendered.container.querySelector(".list-toolbar__query-error")).not.toBeEmptyDOMElement();
     fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
 
     expect(await screen.findByText("Raid von recoveredraid mit 2 Zuschauern")).toBeVisible();
@@ -329,7 +359,15 @@ describe("EventsPage failure cause icon", () => {
       detail: '{"source":"secondhint","viewers":2}',
     });
     const refreshResponses: Array<(response: Response) => void> = [];
-    const fetcher = vi.fn(() => new Promise<Response>((resolve) => { refreshResponses.push(resolve); }));
+    let mounted = false;
+    const fetcher = vi.fn((): Promise<Response> => {
+      if (!mounted) {
+        // The revalidation on mount answers at once with the cached rows.
+        mounted = true;
+        return Promise.resolve(new Response(JSON.stringify({ entries: [initialEntry], nextCursor: null }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      return new Promise<Response>((resolve) => { refreshResponses.push(resolve); });
+    });
     vi.stubGlobal("fetch", fetcher);
     vi.stubGlobal("WebSocket", TestEventsWebSocket);
 
@@ -346,6 +384,8 @@ describe("EventsPage failure cause icon", () => {
       },
     );
     expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    await waitFor(() => { expect(rendered.queryClient.isFetching()).toBe(0); });
+    fetcher.mockClear();
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
@@ -432,6 +472,9 @@ describe("EventsPage failure cause icon", () => {
           }],
         },
       );
+      // Let the revalidation on mount finish before the storm starts.
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      maxInFlight = 0;
       const socket = TestEventsWebSocket.instances[0];
       if (socket === undefined) throw new Error("Realtime socket was not created.");
       socket.open();
@@ -462,8 +505,9 @@ describe("EventsPage failure cause icon", () => {
     const oldRaid = entry({ eventId: "old", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"oldraid","viewers":1}' });
     const newRaid = entry({ eventId: "new", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"newraid","viewers":2}' });
     const hostEntry = entry({ eventId: "host-one" });
+    let serverHasNewRaid = false;
     const fetcher = vi.fn((input: RequestInfo | URL) => Promise.resolve(new Response(JSON.stringify({
-      entries: requestUrl(input).searchParams.get("module") === "channel_events" ? [newRaid, oldRaid] : [hostEntry],
+      entries: requestUrl(input).searchParams.get("module") === "channel_events" ? (serverHasNewRaid ? [newRaid, oldRaid] : [oldRaid]) : [hostEntry],
       nextCursor: null,
     }), { status: 200, headers: { "Content-Type": "application/json" } })));
     vi.stubGlobal("fetch", fetcher);
@@ -484,6 +528,10 @@ describe("EventsPage failure cause icon", () => {
         { queryKey: dashboardDataKeys.events("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
       ],
     });
+    await waitFor(() => { expect(fetcher).toHaveBeenCalled(); });
+    await waitFor(() => { expect(rendered.queryClient.isFetching()).toBe(0); });
+    fetcher.mockClear();
+    serverHasNewRaid = true;
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();

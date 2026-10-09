@@ -26,6 +26,8 @@ export const useAuditQuery = (channelId: string, filters: PanelAuditFilters) => 
 
 export const useEventsQuery = (channelId: string, filters: PanelEventFilters) => useInfiniteQuery({
   queryKey: dashboardDataKeys.events(channelId, filters),
+  // ponytail: revalidate on every mount; central socket invalidation replaces this in #387
+  refetchOnMount: "always",
   initialPageParam: null as string | null,
   queryFn: ({ pageParam, signal }) => fetchEvents(channelId, pageParam, signal, filters),
   getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,

@@ -1,4 +1,4 @@
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { render, type RenderOptions } from "@testing-library/react";
 import type { ReactElement } from "react";
 
@@ -9,6 +9,8 @@ export interface DashboardQueryTestOptions {
   gcTime?: number;
   staleTime?: number;
   initialData?: readonly { queryKey: readonly unknown[]; data: unknown }[];
+  /** Reuse an existing client, e.g. to remount a page against a warm cache. */
+  queryClient?: QueryClient;
 }
 
 export const renderWithQuery = (
@@ -16,7 +18,7 @@ export const renderWithQuery = (
   options?: Omit<RenderOptions, "wrapper">,
   queryOptions: DashboardQueryTestOptions = {},
 ) => {
-  const queryClient = createDashboardQueryClient(dispatchDashboardAuthenticationRequired);
+  const queryClient = queryOptions.queryClient ?? createDashboardQueryClient(dispatchDashboardAuthenticationRequired);
   queryClient.setDefaultOptions({
     ...queryClient.getDefaultOptions(),
     queries: {
