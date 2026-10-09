@@ -359,8 +359,8 @@ export interface PanelChannelLocationResult extends PanelChannelLocation {
   admin1: string | null;
 }
 
-export const fetchChannelSettings = (channelId: string): Promise<PanelChannelSettings> =>
-  requestJson<PanelChannelSettings>(channelPath(channelId, "settings"));
+export const fetchChannelSettings = (channelId: string, signal?: AbortSignal): Promise<PanelChannelSettings> =>
+  requestJson<PanelChannelSettings>(channelPath(channelId, "settings"), requestOptions(signal));
 
 export const saveChannelTimeZone = (
   channelId: string,

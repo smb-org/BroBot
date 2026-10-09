@@ -28,6 +28,7 @@ import type {
 import {
   fetchAuditLog,
   fetchChannelOverview,
+  fetchChannelSettings,
   fetchChannels,
   fetchEvents,
   fetchMembers,
@@ -221,6 +222,16 @@ const mergeModeratorStatus = <T extends { moderator: PanelModeratorStatus | null
   ...current,
   moderator,
   lastError: current.lastError?.source === "moderator" ? moderatorLastError(moderator) : current.lastError,
+});
+
+const mergeChannelSettings = (
+  current: PanelChannelSettings | undefined,
+  incoming: PanelChannelSettings,
+): PanelChannelSettings => ({
+  timeZone: current !== undefined && current.revision > incoming.revision ? current.timeZone : incoming.timeZone,
+  revision: Math.max(current?.revision ?? -1, incoming.revision),
+  location: current !== undefined && current.locationRevision > incoming.locationRevision ? current.location : incoming.location,
+  locationRevision: Math.max(current?.locationRevision ?? -1, incoming.locationRevision),
 });
 
 const formatTimestamp = (value: string): string => formatTimestampBase(value);
@@ -921,6 +932,10 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
   const settingsQueryKey = queryKeys.channel(overview.channelId, "settings");
   const channelSettingsQuery = useQuery<PanelChannelSettings>({
     queryKey: settingsQueryKey,
+    queryFn: async ({ signal }) => {
+      const fetched = await fetchChannelSettings(overview.channelId, signal);
+      return mergeChannelSettings(queryClient.getQueryData<PanelChannelSettings>(settingsQueryKey), fetched);
+    },
     placeholderData: (previousData, previousQuery) =>
       previousQuery?.queryKey[1] === overview.channelId ? previousData : undefined,
   });
@@ -932,6 +947,12 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
       ? timeZoneDraftState.value
       : channelSettings.timeZone;
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const commitSettingsUpdate = async (update: Partial<PanelChannelSettings>): Promise<void> => {
+    await queryClient.cancelQueries({ queryKey: settingsQueryKey, exact: true });
+    queryClient.setQueryData<PanelChannelSettings>(settingsQueryKey, (current) => current === undefined
+      ? current
+      : mergeChannelSettings(current, { ...current, ...update }));
+  };
   useEffect(() => {
     if (channelSettingsQuery.error !== null) notify({ tone: "error", message: settingsTexts.loadError });
   }, [channelSettingsQuery.error, settingsTexts.loadError]);
@@ -947,9 +968,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
     setSettingsBusy(true);
     try {
       const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZoneDraft.trim());
-      queryClient.setQueryData<PanelChannelSettings>(settingsQueryKey, (current) => current === undefined
-        ? current
-        : { ...current, timeZone: saved.timeZone, revision: saved.revision });
+      await commitSettingsUpdate({ timeZone: saved.timeZone, revision: saved.revision });
       setTimeZoneDraftState({ channelId: overview.channelId, revision: saved.revision, value: saved.timeZone });
     } catch {
       notify({ tone: "error", message: settingsTexts.saveError });
@@ -962,18 +981,14 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
     setSettingsBusy(true);
     try {
       const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZone);
-      queryClient.setQueryData<PanelChannelSettings>(settingsQueryKey, (current) => current === undefined
-        ? current
-        : { ...current, timeZone: saved.timeZone, revision: saved.revision });
+      await commitSettingsUpdate({ timeZone: saved.timeZone, revision: saved.revision });
       setTimeZoneDraftState({ channelId: overview.channelId, revision: saved.revision, value: saved.timeZone });
     } finally {
       setSettingsBusy(false);
     }
   };
-  const locationSaved = (location: PanelChannelSettings["location"], revision: number): void => {
-    queryClient.setQueryData<PanelChannelSettings>(settingsQueryKey, (current) => current === undefined
-      ? current
-      : { ...current, location, locationRevision: revision });
+  const locationSaved = async (location: PanelChannelSettings["location"], revision: number): Promise<void> => {
+    await commitSettingsUpdate({ location, locationRevision: revision });
     onLocationChanged(overview.channelId, location);
   };
   const entries = sortBySeverity([
@@ -1179,8 +1194,8 @@ export const DashboardApp = (): ReactElement => {
   const [loadingNextMembersPage, setLoadingNextMembersPage] = useState(false);
   const membersRequest = useRef<MembersRequestState>({ controller: null, generation: 0 });
   const [loggingOut, setLoggingOut] = useState(false);
-  const [headerModuleBusyKey, setHeaderModuleBusyKey] = useState<string | null>(null);
-  const headerModuleBusy = route.kind === "module" && headerModuleBusyKey === `${route.channelId}:${route.moduleId}`;
+  const [headerModuleBusyKeys, setHeaderModuleBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const headerModuleBusy = route.kind === "module" && headerModuleBusyKeys.has(`${route.channelId}:${route.moduleId}`);
   // Spotlight (#164): set right before navigating to a module so its panel
   // can pre-select something on mount (e.g. a text command by name). Not
   // part of the route/URL -- see the deep-link discussion in that commit.
@@ -1588,31 +1603,32 @@ export const DashboardApp = (): ReactElement => {
     };
   }, []);
 
-  const expiryCandidates = [
-    ...(channels.data ?? []).flatMap((channel) => [channel.tokens.botExpiresAt, channel.tokens.loginExpiresAt]
-      .flatMap((value) => {
-        const expiresAt = parseDashboardDate(value);
-        return channels.loadedAt !== undefined && expiresAt !== null && expiresAt > channels.loadedAt
-          ? [{ expiresAt, loadedAt: channels.loadedAt, channelId: channel.channelId }]
-          : [];
-      })),
-    ...(overview.data === null ? [] : [overview.data.tokens.botExpiresAt, overview.data.tokens.loginExpiresAt]
-      .flatMap((value) => {
-        const expiresAt = parseDashboardDate(value);
-        return overview.loadedAt !== undefined && expiresAt !== null && expiresAt > overview.loadedAt
-          ? [{ expiresAt, loadedAt: overview.loadedAt, channelId: overview.data?.channelId ?? "" }]
-          : [];
-      })),
-    ...(route.kind !== "channel" || route.section !== "system" || route.channelId !== systemChannelId || system.data === null
-      ? []
-      : [system.data.tokens.botExpiresAt, system.data.tokens.loginExpiresAt]
-      .flatMap((value) => {
-        const expiresAt = parseDashboardDate(value);
-        return system.loadedAt !== undefined && expiresAt !== null && expiresAt > system.loadedAt
-          ? [{ expiresAt, loadedAt: system.loadedAt, channelId: route.channelId }]
-          : [];
-      })),
-  ];
+  const routeUsesOverview = route.kind === "module" || (route.kind === "channel" && route.section === "overview");
+  // Keep the freshest token snapshot per channel. The channels query covers all
+  // channels; only a currently refreshed overview or System view may supersede
+  // its selected channel. Inactive route snapshots never schedule refreshes.
+  const tokenSnapshots = new Map<string, { tokens: PanelTokenStatus; loadedAt: number }>();
+  const rememberTokenSnapshot = (channelId: string, tokens: PanelTokenStatus, loadedAt: number): void => {
+    const current = tokenSnapshots.get(channelId);
+    if (current === undefined || loadedAt >= current.loadedAt) tokenSnapshots.set(channelId, { tokens, loadedAt });
+  };
+  if (channels.loadedAt !== undefined) {
+    for (const channel of channels.data ?? []) rememberTokenSnapshot(channel.channelId, channel.tokens, channels.loadedAt);
+  }
+  if (routeUsesOverview && overview.data?.channelId === route.channelId && overview.loadedAt !== undefined) {
+    rememberTokenSnapshot(overview.data.channelId, overview.data.tokens, overview.loadedAt);
+  }
+  if (route.kind === "channel" && route.section === "system" && route.channelId === systemChannelId &&
+      system.data !== null && system.loadedAt !== undefined) {
+    rememberTokenSnapshot(route.channelId, system.data.tokens, system.loadedAt);
+  }
+  const expiryCandidates = [...tokenSnapshots].flatMap(([channelId, snapshot]) =>
+    [snapshot.tokens.botExpiresAt, snapshot.tokens.loginExpiresAt].flatMap((value) => {
+      const expiresAt = parseDashboardDate(value);
+      return expiresAt !== null && expiresAt > snapshot.loadedAt
+        ? [{ expiresAt, loadedAt: snapshot.loadedAt, channelId }]
+        : [];
+    }));
   expiryCandidates.sort((left, right) => left.expiresAt - right.expiresAt);
   const nextExpiry = expiryCandidates[0];
   const expiryRefreshKey = nextExpiry === undefined ? "" : `${nextExpiry.channelId}:${String(nextExpiry.loadedAt)}:${String(nextExpiry.expiresAt)}`;
@@ -1645,8 +1661,8 @@ export const DashboardApp = (): ReactElement => {
     const targetKey = `${route.channelId}:${targetModuleId}`;
     const state = (selectedChannel?.modules ?? modules.data?.modules ?? []).find((module) => module.id === targetModuleId);
     if (state === undefined || state.mandatory === true || targetModuleId === "channel_events" ||
-        (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusyKey === targetKey) return;
-    setHeaderModuleBusyKey(targetKey);
+        (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusyKeys.has(targetKey)) return;
+    setHeaderModuleBusyKeys((current) => new Set(current).add(targetKey));
     try {
       await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);
       await reloadModules();
@@ -1657,7 +1673,12 @@ export const DashboardApp = (): ReactElement => {
         : dashboardTexts().errors.changeFailed });
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {
-      setHeaderModuleBusyKey((current) => current === targetKey ? null : current);
+      setHeaderModuleBusyKeys((current) => {
+        if (!current.has(targetKey)) return current;
+        const next = new Set(current);
+        next.delete(targetKey);
+        return next;
+      });
     }
   };
 
@@ -1730,7 +1751,6 @@ export const DashboardApp = (): ReactElement => {
       ...(channels.loadedAt === undefined ? {} : { loadedAt: channels.loadedAt }),
     };
 
-  const routeUsesOverview = route.kind === "module" || (route.kind === "channel" && route.section === "overview");
   const overviewForHeader = routeUsesOverview && overview.data !== null && selectedChannel !== null &&
     overview.data.channelId === selectedChannel.channelId
     ? overview.data

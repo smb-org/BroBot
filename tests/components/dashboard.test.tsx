@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { dashboardRoutePath, parseDashboardRoute } from "../../src/dashboard/router";
+import { queryKeys } from "../../src/dashboard/data/keys";
 import { renderWithQuery as render } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -2132,6 +2133,88 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByText("text_commands", { exact: true })).not.toBeInTheDocument();
   });
 
+  it("keeps each pending module switch locked while another channel mutation is pending", async () => {
+    const alpha = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      modules: [{ id: "ads", enabled: true, settings: "{}" }],
+    };
+    const beta = {
+      ...healthyChannel("kanal-b", "Beta"),
+      modules: [{ id: "ads", enabled: true, settings: "{}" }],
+    };
+    const channels = [alpha, beta];
+    const toggleRequests = new Map<string, number>();
+    const overviewRequests = new Map<string, number>();
+    const toggleResolvers = new Map<string, (response: Response) => void>();
+    const settleToggle = (channelId: string): void => {
+      toggleResolvers.get(channelId)?.(jsonResponse({ module: { id: "ads", enabled: false, settings: "{}" } }));
+      toggleResolvers.delete(channelId);
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels, bot: alpha.bot }));
+      if (url.pathname.endsWith("/overview")) {
+        const owner = url.pathname.includes("kanal-b") ? beta : alpha;
+        overviewRequests.set(owner.channelId, (overviewRequests.get(owner.channelId) ?? 0) + 1);
+        return Promise.resolve(jsonResponse({ ...overview(owner), activeModules: [{ moduleId: "ads", settings: "{}" }] }));
+      }
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      const toggleMatch = /^\/api\/channels\/([^/]+)\/modules\/ads$/.exec(url.pathname);
+      if (toggleMatch !== null && init?.method === "PATCH") {
+        const channelId = toggleMatch[1] ?? "";
+        toggleRequests.set(channelId, (toggleRequests.get(channelId) ?? 0) + 1);
+        return new Promise<Response>((resolve) => { toggleResolvers.set(channelId, resolve); });
+      }
+      if (url.pathname.endsWith("/modules/ads/settings")) return Promise.resolve(jsonResponse({
+        settings: { automatic: "Ad break", manual: "Manual ad break", prewarning: false, leadSeconds: 60, prewarningText: "Ad break in {ads.seconds} seconds." },
+        revision: 1,
+        variables: [],
+      }));
+      if (url.pathname.endsWith("/modules/ads/schedule")) return Promise.resolve(jsonResponse({
+        schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: 0, snoozeRefreshAt: null },
+        snoozeScopeAvailable: true,
+        recentAdBreaks: [],
+      }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/ads");
+
+    render(<DashboardApp />);
+    try {
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveValue("Alpha — kanal-a"));
+      await screen.findByRole("switch");
+      const alphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
+      expect(alphaSwitch).not.toBeNull();
+      fireEvent.click(alphaSwitch as HTMLElement);
+      await waitFor(() => expect(toggleRequests.get("kanal-a")).toBe(1));
+
+      navigateToPath("/channels/kanal-b/modules/ads");
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveValue("Beta — kanal-b"));
+      await waitFor(() => expect(overviewRequests.get("kanal-b")).toBeGreaterThan(0));
+      await screen.findByRole("switch");
+      const betaSwitch = document.querySelector(".module-detail__switch [role='switch']");
+      expect(betaSwitch).not.toBeNull();
+      fireEvent.click(betaSwitch as HTMLElement);
+      await waitFor(() => expect(toggleRequests.get("kanal-b")).toBe(1));
+
+      navigateToPath("/channels/kanal-a/modules/ads");
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveValue("Alpha — kanal-a"));
+      await screen.findByRole("switch");
+      const returningAlphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
+      expect(returningAlphaSwitch).toBeDisabled();
+      expect(toggleRequests.get("kanal-a")).toBe(1);
+
+      settleToggle("kanal-a");
+      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).toBeEnabled());
+      navigateToPath("/channels/kanal-b/modules/ads");
+      await screen.findByRole("switch");
+      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).toBeDisabled());
+    } finally {
+      settleToggle("kanal-a");
+      settleToggle("kanal-b");
+    }
+  });
+
   it("shows the stored live duration, offline state, and unknown state in the header", async () => {
     const liveChannel = {
       ...healthyChannel("kanal-a", "Alpha"),
@@ -2444,6 +2527,116 @@ describe("Dashboard skeleton", () => {
     expect([channelCalls, overviewCalls, systemCalls]).toEqual([3, 3, 1]);
   });
 
+  it("schedules the latest token expiry after leaving the overview for System", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-09-23T09:00:00.000Z");
+    vi.setSystemTime(now);
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const expiresAt = (milliseconds: number): string => new Date(now.getTime() + milliseconds).toISOString();
+    const channelWithExpiry = (expiry: string) => ({
+      ...channel,
+      tokens: { ...channel.tokens, botExpiresAt: expiry, loginExpiresAt: expiry },
+    });
+    let channelCalls = 0;
+    let overviewCalls = 0;
+    let systemCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") {
+        channelCalls += 1;
+        const expiry = channelCalls === 1 ? expiresAt(60_000) : channelCalls === 2 ? expiresAt(20_000) : expiresAt(30_000);
+        return Promise.resolve(jsonResponse({ channels: [channelWithExpiry(expiry)], bot: channel.bot }));
+      }
+      if (path === "/api/channels/kanal-a/overview") {
+        overviewCalls += 1;
+        return Promise.resolve(jsonResponse(overview(channelWithExpiry(expiresAt(10_000)))));
+      }
+      if (path === "/api/channels/kanal-a/system") {
+        systemCalls += 1;
+        const expiry = systemCalls === 1 ? expiresAt(10_000) : systemCalls === 2 ? expiresAt(20_000) : expiresAt(30_000);
+        return Promise.resolve(jsonResponse({
+          ...system,
+          tokens: { ...system.tokens, botExpiresAt: expiry, loginExpiresAt: expiry },
+        }));
+      }
+      if (path === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+    await flushQueryUpdates();
+    navigateToPath("/channels/kanal-a/system");
+    await flushQueryUpdates();
+    expect([channelCalls, overviewCalls, systemCalls]).toEqual([1, 1, 1]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    await flushQueryUpdates();
+    expect([channelCalls, overviewCalls, systemCalls]).toEqual([2, 1, 2]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    await flushQueryUpdates();
+    expect([channelCalls, overviewCalls, systemCalls]).toEqual([3, 1, 3]);
+  });
+
+  it("keeps a completed time zone save when a stale settings read resolves later", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const oldSettings = { timeZone: "UTC", revision: 1, location: null, locationRevision: 1 };
+    let settingsReads = 0;
+    const staleSettingsResolvers = new Map<number, (response: Response) => void>();
+    let savedRevision: number | null = null;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(overview(channel)));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/settings") {
+        if (init?.method === "PATCH") {
+          if (typeof init.body !== "string") throw new Error("Channel settings mutation body must be JSON.");
+          const body = JSON.parse(init.body) as { revision: number; timeZone: string };
+          savedRevision = body.revision + 1;
+          return Promise.resolve(jsonResponse({ ok: true, timeZone: body.timeZone, revision: savedRevision }));
+        }
+        settingsReads += 1;
+        if (settingsReads === 1) return Promise.resolve(jsonResponse(oldSettings));
+        return new Promise<Response>((resolve) => { staleSettingsResolvers.set(settingsReads, resolve); });
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    const rendered = render(<DashboardApp />, undefined, { staleTime: 0 });
+    const timeZoneField = await screen.findByRole("combobox", { name: "Kanalzeitzone" });
+    await waitFor(() => expect(settingsReads).toBe(1));
+    await waitFor(() => expect(timeZoneField).toHaveValue("UTC"));
+    const settingsKey = queryKeys.channel("kanal-a", "settings");
+    // A stale background read is already in flight when the settings mutation completes.
+    const staleRead = rendered.queryClient.refetchQueries({ queryKey: settingsKey, exact: true });
+    await waitFor(() => expect(settingsReads).toBe(2));
+
+    fireEvent.click(timeZoneField);
+    fireEvent.change(timeZoneField, { target: { value: "Europe/Vienna" } });
+    await waitFor(() => expect(document.querySelector('[data-combobox-option="true"][value="Europe/Vienna"]')).not.toBeNull());
+    fireEvent.click(document.querySelector('[data-combobox-option="true"][value="Europe/Vienna"]') as Element);
+    await waitFor(() => expect(timeZoneField).toHaveValue("Europe/Vienna"));
+    fireEvent.click(screen.getByRole("button", { name: "Zeitzone speichern" }));
+    await waitFor(() => expect(savedRevision).toBe(2));
+    await waitFor(() => expect(rendered.queryClient.getQueryData<typeof oldSettings>(settingsKey)?.revision).toBe(2));
+
+    staleSettingsResolvers.get(2)?.(jsonResponse(oldSettings));
+    await act(async () => { await staleRead; });
+
+    // A later read can also return an older revision. The shared revision
+    // merge keeps it from replacing the mutation result in the cache.
+    const laterStaleRead = rendered.queryClient.refetchQueries({ queryKey: settingsKey, exact: true });
+    await waitFor(() => expect(settingsReads).toBe(3));
+    staleSettingsResolvers.get(3)?.(jsonResponse(oldSettings));
+    await act(async () => { await laterStaleRead; });
+    expect(rendered.queryClient.getQueryData<typeof oldSettings>(settingsKey)).toMatchObject({ timeZone: "Europe/Vienna", revision: 2 });
+    expect(timeZoneField).toHaveValue("Europe/Vienna");
+  });
+
   it("resets ad settings when a warm module route changes channel", async () => {
     Object.defineProperty(window.navigator, "language", { configurable: true, value: "en-US" });
     const alpha = { ...healthyChannel("kanal-a", "Alpha"), modules: [{ id: "ads", enabled: true, settings: "{}" }] };
@@ -2503,10 +2696,11 @@ describe("Dashboard skeleton", () => {
     }));
     window.history.replaceState({}, "", "/channels/kanal-b");
 
-    render(<DashboardApp />);
+    const rendered = render(<DashboardApp />, undefined, { gcTime: 600_000 });
     await screen.findByRole("heading", { name: "Beta", level: 1 });
     navigateToPath("/channels/kanal-a");
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    expect(rendered.queryClient.getQueryData(queryKeys.channel("kanal-b", "overview"))).toMatchObject({ channelId: "kanal-b" });
     navigateToPath("/channels/kanal-a/modules/ads");
     const announcement = await screen.findByRole("textbox", { name: "Automatic ad break" });
     await waitFor(() => expect(announcement).toHaveValue("Alpha announcement"));

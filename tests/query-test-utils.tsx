@@ -5,14 +5,24 @@ import type { ReactElement } from "react";
 import { createDashboardQueryClient } from "../src/dashboard/data/client";
 import { dispatchDashboardAuthenticationRequired } from "../src/dashboard/data/events";
 
-export const renderWithQuery = (ui: ReactElement, options?: Omit<RenderOptions, "wrapper">) => {
+export interface DashboardQueryTestOptions {
+  gcTime?: number;
+  staleTime?: number;
+}
+
+export const renderWithQuery = (
+  ui: ReactElement,
+  options?: Omit<RenderOptions, "wrapper">,
+  queryOptions: DashboardQueryTestOptions = {},
+) => {
   const queryClient = createDashboardQueryClient(dispatchDashboardAuthenticationRequired);
   queryClient.setDefaultOptions({
     ...queryClient.getDefaultOptions(),
     queries: {
       ...queryClient.getDefaultOptions().queries,
       retry: false,
-      gcTime: 0,
+      gcTime: queryOptions.gcTime ?? 0,
+      ...(queryOptions.staleTime === undefined ? {} : { staleTime: queryOptions.staleTime }),
     },
   });
 
