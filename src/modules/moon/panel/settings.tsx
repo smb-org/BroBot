@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { ModulePanelProperties } from "../../contract";
 import { MOON_ERROR_TEXT_MAX_LENGTH, type MoonSettings } from "../contracts";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, Field, InspectorFieldRow, notify } from "../../../dashboard/ui";
+import { Button, Field, InspectorFieldRow, LoadState, notify, Skeleton } from "../../../dashboard/ui";
 import { moonSettingsTexts } from "./locale";
 import { fetchMoonSettings, saveMoonSettings } from "./service";
 
@@ -42,9 +42,14 @@ function MoonSettingsPanelContent({ channelId, language, canManage }: ModulePane
     if (settings === null || !canEdit) return;
     setBusy(true);
     try {
-      const revision = draft !== null && !draft.saved ? draft.baseRevision : settings.revision;
-      const next = await runModuleQueryWrite(queryClient, channelId, "moon", "unavailable-texts", () =>
-        saveMoonSettings(channelId, { revision, errorTexts: settings.errorTexts }), { updateCache: (_current, result) => result });
+      const baselineRevision = draft !== null && !draft.saved ? draft.baseRevision : settings.revision;
+      const next = await runModuleQueryWrite(queryClient, channelId, "moon", "unavailable-texts", (revision) => {
+        if (revision === null) throw new Error("A moon settings revision is required.");
+        return saveMoonSettings(channelId, { revision, errorTexts: settings.errorTexts });
+      }, {
+        baselineRevision,
+        updateCache: (_current, result) => result,
+      });
       setDraft({ baseRevision: next.revision, value: next, saved: true });
       notify({ tone: "success", message: labels.saved });
     } catch (saveFailure: unknown) {
@@ -56,6 +61,15 @@ function MoonSettingsPanelContent({ channelId, language, canManage }: ModulePane
   };
 
   return (
+    <LoadState
+      status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
+      minHeight="calc(var(--s10) * 12)"
+      loading={<Skeleton rows={3} height={34} />}
+      empty={<div />}
+      error={<p>{labels.loadFailed}</p>}
+      onRetry={() => { void settingsQuery.refetch(); }}
+      refreshError={settingsQuery.isRefetchError}
+    >
     <div className="module-stack moon-settings" aria-label={labels.errorTexts}>
       <InspectorFieldRow label={labels.errorTexts} help={labels.errorTextsHint}>
         <div className="moon-settings__fields">
@@ -93,5 +107,6 @@ function MoonSettingsPanelContent({ channelId, language, canManage }: ModulePane
         >{labels.save}</Button>
       </div>
     </div>
+    </LoadState>
   );
 }

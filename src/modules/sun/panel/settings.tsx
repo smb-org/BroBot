@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { ModulePanelProperties } from "../../contract";
 import { SUN_ERROR_TEXT_MAX_LENGTH, type SunSettings } from "../contracts";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, Field, InspectorFieldRow, notify } from "../../../dashboard/ui";
+import { Button, Field, InspectorFieldRow, LoadState, notify, Skeleton } from "../../../dashboard/ui";
 import { sunSettingsTexts } from "./locale";
 import { fetchSunSettings, saveSunSettings } from "./service";
 
@@ -49,11 +49,14 @@ function SunSettingsPanelContent({
     if (settings === null || !canEdit) return;
     setBusy(true);
     try {
-      const revision = draft !== null && !draft.saved ? draft.baseRevision : settings.revision;
-      const next = await runModuleQueryWrite(queryClient, channelId, "sun", "error-texts", () => saveSunSettings(channelId, {
+      const baselineRevision = draft !== null && !draft.saved ? draft.baseRevision : settings.revision;
+      const next = await runModuleQueryWrite(queryClient, channelId, "sun", "error-texts", (revision) => {
+        if (revision === null) throw new Error("A sun settings revision is required.");
+        return saveSunSettings(channelId, {
         revision,
         errorTexts: settings.errorTexts,
-      }), { updateCache: (_current, result) => result });
+        });
+      }, { baselineRevision, updateCache: (_current, result) => result });
       setDraft({ baseRevision: next.revision, value: next, saved: true });
       notify({ tone: "success", message: labels.saved });
     } catch (saveFailure: unknown) {
@@ -65,6 +68,15 @@ function SunSettingsPanelContent({
   };
 
   return (
+    <LoadState
+      status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
+      minHeight="calc(var(--s10) * 12)"
+      loading={<Skeleton rows={3} height={34} />}
+      empty={<div />}
+      error={<p>{labels.loadFailed}</p>}
+      onRetry={() => { void settingsQuery.refetch(); }}
+      refreshError={settingsQuery.isRefetchError}
+    >
     <div className="module-stack sun-settings" aria-label={labels.errorTexts}>
       <>
         <InspectorFieldRow label={labels.errorTexts} help={labels.errorTextsHint}>
@@ -104,5 +116,6 @@ function SunSettingsPanelContent({
         </div>
       </>
     </div>
+    </LoadState>
   );
 }

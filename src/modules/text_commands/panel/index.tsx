@@ -23,6 +23,28 @@ import { convertLeadingSlashCommand, parseLeadingSlashCommand, SLASH_COMMAND_NAM
 
 const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
 
+const updateCommandCache = (current: unknown, command: TextCommand, previousName?: string): TextCommandPanelData => {
+  const data = typeof current === "object" && current !== null ? current as Partial<TextCommandPanelData> : {};
+  const commands = Array.isArray(data.commands) ? data.commands : [];
+  const variables = Array.isArray(data.variables) ? data.variables : [];
+  return {
+    commands: [...commands.filter((item) => item.name !== previousName && item.name !== command.name), command],
+    variables,
+  };
+};
+
+const removeCommandFromCache = (current: unknown, name: string): TextCommandPanelData => {
+  const data = typeof current === "object" && current !== null ? current as Partial<TextCommandPanelData> : {};
+  const commands = Array.isArray(data.commands) ? data.commands : [];
+  const variables = Array.isArray(data.variables) ? data.variables : [];
+  return { commands: commands.filter((item) => item.name !== name), variables };
+};
+
+const requireCommandRevision = (revision: number | null): number => {
+  if (revision === null) throw new Error("command_revision_missing");
+  return revision;
+};
+
 interface CommandDraft {
   name: string;
   text: string;
@@ -200,7 +222,11 @@ interface TextCommandEditorProperties {
   onCreateSuccess?: () => void;
   onGuardChange: (guard: ((proceed: () => void, cancel?: () => void) => void) | null) => void;
   onRefresh: (selectName?: string, force?: boolean) => Promise<TextCommand[]>;
-  onWrite: <Value>(write: () => Promise<Value>) => Promise<Value>;
+  onWrite: <Value>(
+    baselineRevision: number | null,
+    write: (baselineRevision: number | null) => Promise<Value>,
+    updateCache: (current: unknown, result: Value) => unknown,
+  ) => Promise<Value>;
   onDeleted: () => Promise<void>;
 }
 
@@ -548,12 +574,17 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     };
     setPending(true); setDeleteError(undefined); setFieldError(null); setConcurrentConflict(false); setSaved(false);
     try {
-      const returnedWarnings = await onWrite(() => isCreate
-        ? createTextCommand(channelId, payload)
-        : saveTextCommand(channelId, { oldName: command.name, revision: draftRevision.current ?? command.revision, ...payload }));
-      if (!isCreate && draftRevision.current !== null) draftRevision.current += 1;
+      const baselineRevision = isCreate ? null : draftRevision.current;
+      const result = await onWrite(
+        baselineRevision,
+        (revision) => command === null
+          ? createTextCommand(channelId, payload)
+          : saveTextCommand(channelId, { oldName: command.name, revision: requireCommandRevision(revision), ...payload }),
+        (current, mutationResult) => updateCommandCache(current, mutationResult.command, command?.name),
+      );
+      draftRevision.current = result.command.revision;
       accept({ ...savedDraft, ...payload, name: payload.name });
-      setServerWarnings(returnedWarnings);
+      setServerWarnings(result.warnings);
       await onRefresh(payload.name);
       setSaved(true);
       return null;
@@ -640,9 +671,14 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     if (command === null) return;
     setActivePending(true);
     try {
-      await onWrite(() => toggleTextCommand(channelId, command.name, command.revision, next));
-      setActive(next);
-      await onRefresh(command.name);
+      const baselineRevision = draftRevision.current;
+      const result = await onWrite(
+        baselineRevision,
+        (revision) => toggleTextCommand(channelId, command.name, requireCommandRevision(revision), next),
+        (current, mutationResult) => updateCommandCache(current, mutationResult.command),
+      );
+      draftRevision.current = result.command.revision;
+      setActive(result.command.enabled);
     } catch {
       notify({ tone: "error", message: labels.saveError });
     } finally { setActivePending(false); }
@@ -651,7 +687,16 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const remove = async (): Promise<void> => {
     if (command === null) return;
     setDeleting(true); setDeleteError(undefined);
-    try { await onWrite(() => deleteTextCommand(channelId, command.name, command.revision)); setConfirmingDelete(false); await onDeleted(); }
+    try {
+      const baselineRevision = draftRevision.current;
+      await onWrite(
+        baselineRevision,
+        (revision) => deleteTextCommand(channelId, command.name, requireCommandRevision(revision)),
+        (current) => removeCommandFromCache(current, command.name),
+      );
+      setConfirmingDelete(false);
+      await onDeleted();
+    }
     catch { setDeleteError(labels.deleteError); }
     finally { setDeleting(false); }
   };
@@ -730,6 +775,15 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       icon: "tabSettings" as const,
       ...(settingsIssue === undefined ? {} : { issue: settingsIssue }),
       content: <>
+        <LoadState
+          status={registeredVariablesQuery.data === undefined ? registeredVariablesQuery.isPending ? "loading" : "error" : "success"}
+          minHeight="var(--s6)"
+          loading={<div />}
+          empty={<div />}
+          error={<p className="muted" role="alert" style={{ height: "var(--s6)", overflow: "hidden", margin: 0, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{labels.templateVariablesLoadError}</p>}
+          onRetry={() => { void registeredVariablesQuery.refetch(); }}
+          refreshError={registeredVariablesQuery.isRefetchError}
+        >{null}</LoadState>
         <Field
           id="command-name"
           label={labels.name}
@@ -1033,6 +1087,7 @@ const TextCommandsPanelContent = ({
   const common = dashboardCommonTexts(resolvedLanguage);
   const queryClient = useDashboardQueryClient();
   const commandsQuery = useModuleQuery(channelId, "text_commands", "commands", (signal) => loadTextCommandData(channelId, signal));
+  const refetchCommands = commandsQuery.refetch;
   const commands = useMemo(() => commandsQuery.data?.commands ?? [], [commandsQuery.data]);
   const [search, setSearch] = useState("");
   const channelVariables = commandsQuery.data?.variables ?? [];
@@ -1050,20 +1105,30 @@ const TextCommandsPanelContent = ({
   const initialSelectionApplied = useRef(false);
 
   const refresh = useCallback(async (selectAfter?: string, force = false): Promise<TextCommand[]> => {
-    const data = force
-      ? await queryClient.query({ queryKey: moduleQueryKey(channelId, "text_commands", "commands"), queryFn: ({ signal }) => loadTextCommandData(channelId, signal), staleTime: 0 })
-      : queryClient.getQueryData<TextCommandPanelData>(moduleQueryKey(channelId, "text_commands", "commands"))
-        ?? await queryClient.query({ queryKey: moduleQueryKey(channelId, "text_commands", "commands"), queryFn: ({ signal }) => loadTextCommandData(channelId, signal) });
+    const cached = queryClient.getQueryData<TextCommandPanelData>(moduleQueryKey(channelId, "text_commands", "commands"));
+    const data = force || cached === undefined
+      ? (await refetchCommands()).data
+      : cached;
     if (data === undefined) throw new Error("Command data is unavailable after refresh.");
     if (selectAfter !== undefined && data.commands.some((item) => item.name === selectAfter)) {
       setCreateOpen(false);
       selectName(selectAfter);
     }
     return data.commands;
-  }, [channelId, queryClient, selectName]);
+  }, [channelId, queryClient, refetchCommands, selectName]);
 
-  const write = useCallback(<Value,>(mutation: () => Promise<Value>): Promise<Value> =>
-    runModuleQueryWrite(queryClient, channelId, "text_commands", "commands", mutation), [channelId, queryClient]);
+  const write = useCallback(<Value,>(
+    baselineRevision: number | null,
+    mutation: (revision: number | null) => Promise<Value>,
+    updateCache: (current: unknown, result: Value) => unknown,
+  ): Promise<Value> => runModuleQueryWrite(
+    queryClient,
+    channelId,
+    "text_commands",
+    "commands",
+    mutation,
+    { baselineRevision, updateCache },
+  ), [channelId, queryClient]);
 
   useEffect(() => {
     if (commandsQuery.isError) notify({ tone: "error", message: labels.loadError });
@@ -1097,7 +1162,13 @@ const TextCommandsPanelContent = ({
   });
   const toggle = async (command: TextCommand): Promise<void> => {
     setToggleBusyName(command.name);
-    try { await write(() => toggleTextCommand(channelId, command.name, command.revision, !command.enabled)); await refresh(); }
+    try {
+      await write(
+        command.revision,
+        (revision) => toggleTextCommand(channelId, command.name, requireCommandRevision(revision), !command.enabled),
+        (current, result) => updateCommandCache(current, result.command),
+      );
+    }
     catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setToggleBusyName(null); }
   };
@@ -1115,7 +1186,9 @@ const TextCommandsPanelContent = ({
     command.usageText ?? "",
     labels.kindLabels[command.kind],
   ].some((value) => value.toLocaleLowerCase().includes(query))), [commands, labels.kindLabels, query]);
-  const listStatus = commandsQuery.isPending ? "loading" : commandsQuery.isError ? "error" : visibleCommands.length === 0 ? "empty" : "success";
+  const listStatus = commandsQuery.data === undefined
+    ? commandsQuery.isPending ? "loading" : "error"
+    : visibleCommands.length === 0 ? "empty" : "success";
   const createReason = canManageContent ? undefined : labels.managementLocked;
   const list = <section className="command-list config-section" aria-label={labels.list}>
     <div className="section-heading">
@@ -1139,7 +1212,9 @@ const TextCommandsPanelContent = ({
     <LoadState status={listStatus} minHeight="calc(var(--s10) * 15)"
       loading={<Skeleton rows={8} height={34} />}
       empty={<p className="empty-state">{commands.length > 0 ? common.noMatches : labels.empty}</p>}
-      error={<div aria-hidden="true" />}>
+      error={<p className="muted">{labels.loadError}</p>}
+      onRetry={() => { void refetchCommands(); }}
+      refreshError={commandsQuery.isRefetchError}>
       <div className="table-wrap" style={{ maxHeight: "calc(var(--s10) * 15)", overflowY: "auto" }}><table className="table"><thead><tr>
         <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>
       </tr></thead><tbody>{visibleCommands.map((command) => <TextCommandRow

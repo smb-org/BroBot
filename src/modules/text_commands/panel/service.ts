@@ -1,7 +1,7 @@
 import type { TextCommand, TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, TextCommandStreamCondition } from "../contracts";
 import type { TextCommandGame as TwitchGame } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../contract";
+import type { PanelTemplateWarning } from "../contract";
 import type { ModuleRegisteredTemplateVariable } from "../../contract";
 
 export interface TextCommandChannelVariable {
@@ -13,6 +13,11 @@ export interface TextCommandChannelVariable {
 export interface TextCommandPanelData {
   commands: TextCommand[];
   variables: TextCommandChannelVariable[];
+}
+
+export interface TextCommandMutationResult {
+  command: TextCommand;
+  warnings: readonly PanelTemplateWarning[];
 }
 
 export const textBlockNamesForPicker = (variables: readonly ModuleRegisteredTemplateVariable[]): string[] =>
@@ -49,13 +54,13 @@ export const searchTextGames = async (channelId: string, query: string): Promise
   return (await json<{ games: TwitchGame[] }>(response)).games;
 };
 
-const mutation = async (
+const mutation = async <Result,>(
   channelId: string,
   method: "POST" | "PATCH" | "DELETE",
   body?: unknown,
   name?: string,
   query?: string,
-): Promise<readonly PanelTemplateWarning[]> => {
+): Promise<Result> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);
   const response = await fetch(`${pathFor(channelId, name)}${query === undefined ? "" : `?${query}`}`, {
@@ -66,17 +71,13 @@ const mutation = async (
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  if (method === "DELETE") {
-    await json<unknown>(response);
-    return [];
-  }
-  return (await json<PanelTemplateWarningResponse>(response)).warnings;
+  return json<Result>(response);
 };
 
 export const createTextCommand = async (
   channelId: string,
   command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "games" | "responseType" | "chatTarget" | "variableAction" | "timeoutAction">,
-): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "POST", command);
+): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "POST", command);
 
 export const saveTextCommand = async (
   channelId: string,
@@ -101,7 +102,7 @@ export const saveTextCommand = async (
     variableAction: TextCommand["variableAction"];
     timeoutAction: TextCommand["timeoutAction"];
 },
-): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", {
+): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "PATCH", {
   revision: command.revision,
   name: command.name,
   kind: command.kind,
@@ -127,15 +128,15 @@ export const toggleTextCommand = async (
   name: string,
   revision: number,
   enabled: boolean,
-): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { revision, enabled }, name);
+): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "PATCH", { revision, enabled }, name);
 
 export const setTextCommandMinimumTier = async (
   channelId: string,
   name: string,
   revision: number,
   minimumTier: TextCommandMinimumTier,
-): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { revision, minimumTier: minimumTier }, name);
+): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "PATCH", { revision, minimumTier: minimumTier }, name);
 
 export const deleteTextCommand = async (channelId: string, name: string, revision: number): Promise<void> => {
-  await mutation(channelId, "DELETE", undefined, name, `revision=${String(revision)}`);
+  await mutation<{ ok: true }>(channelId, "DELETE", undefined, name, `revision=${String(revision)}`);
 };

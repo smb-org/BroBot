@@ -39,6 +39,6 @@ export const updateApiSource = async (
   input: Pick<ApiSource, "url" | "expression" | "revision">,
 ): Promise<ApiSource> => (await mutate<{ source: ApiSource }>(channelId, `/sources/${encodeURIComponent(name)}`, "PATCH", input)).source;
 
-export const deleteApiSource = async (channelId: string, source: ApiSource): Promise<void> => {
-  await mutate<{ ok: true }>(channelId, `/sources/${encodeURIComponent(source.name)}`, "DELETE", { revision: source.revision });
+export const deleteApiSource = async (channelId: string, name: string, revision: number): Promise<void> => {
+  await mutate<{ ok: true }>(channelId, `/sources/${encodeURIComponent(name)}`, "DELETE", { revision });
 };

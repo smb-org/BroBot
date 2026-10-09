@@ -20,6 +20,7 @@ export interface TextCommandsTexts {
   empty: string;
   load: string;
   loadError: string;
+  templateVariablesLoadError: string;
   saveError: string;
   deleteError: string;
   name: string;
@@ -198,7 +199,7 @@ const templateMessages: LocaleCatalog<TextAreaMessages> = {
 const catalog: LocaleCatalog<TextCommandsTexts> = {
   de: {
     title: "Textbefehle", search: "Befehle suchen", activeFilters: "Aktive Filter:", resetFilters: "Zurücksetzen", countSuffix: "Befehle", filteredSuffix: "Befehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
-    load: "Textbefehle werden geladen …", loadError: "Die Textbefehle konnten nicht geladen werden.",
+    load: "Textbefehle werden geladen …", loadError: "Die Textbefehle konnten nicht geladen werden.", templateVariablesLoadError: "Vorlagenvariablen konnten nicht geladen werden.",
     saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
     name: "Name", aliases: "Aliase", templateFieldLabels: { usageText: "Antwort bei fehlenden oder ungültigen Argumenten" }, usageAdvanced: "Erweitert", usageTextHint: "Wird gesendet, wenn erforderliche Argumente fehlen oder ungültig sind.", createVariable: "Variable anlegen",
     shoutoutCooldownHint: "Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.",
@@ -303,7 +304,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
   },
   en: {
     title: "Text commands", search: "Search commands", activeFilters: "Active filters:", resetFilters: "Reset", countSuffix: "commands", filteredSuffix: "commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
-    load: "Loading text commands …", loadError: "The text commands could not be loaded.",
+    load: "Loading text commands …", loadError: "The text commands could not be loaded.", templateVariablesLoadError: "Template variables could not be loaded.",
     saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
     name: "Name", aliases: "Aliases", templateFieldLabels: { usageText: "Reply when arguments are missing or invalid" }, usageAdvanced: "Advanced", usageTextHint: "Sent when required arguments are missing or invalid.", createVariable: "Create variable",
     shoutoutCooldownHint: "Twitch enforces shoutout cooldowns: 2 minutes per channel and 60 minutes per target.",

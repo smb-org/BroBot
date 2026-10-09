@@ -106,7 +106,9 @@ describe("Ad settings editor declaration", () => {
     const editor = await screen.findByRole("region", { name: "Ansagen-Einstellungen" });
     const view = editor.closest(".module-view");
     expect(view?.firstElementChild).toHaveAttribute("aria-label", "Ansagen");
-    expect(view?.lastElementChild).toBe(editor);
+    const editorLoadState = view?.lastElementChild;
+    expect(editorLoadState).toHaveClass("ui-load-state");
+    expect(editorLoadState?.firstElementChild?.firstElementChild).toBe(editor);
 
     fireEvent.click(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ }));
     await waitFor(() => expect(toastsSnapshot().some((toast) => toast.message === "Die nächste Werbepause wurde verschoben.")).toBe(true));

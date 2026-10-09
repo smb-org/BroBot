@@ -40,8 +40,37 @@ describe("moon settings panel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Switch channel" }));
 
-    expect(screen.getByRole("textbox", { name: "German" })).not.toHaveValue("Unsaved A");
+    const germanField = await screen.findByRole("textbox", { name: "German" });
+    expect(germanField).not.toHaveValue("Unsaved A");
     expect(await screen.findByDisplayValue("Moon B")).toBeInTheDocument();
+  });
+
+  it("shows cached settings immediately when the panel is reopened", async () => {
+    mocks.fetchMoonSettings.mockResolvedValue({ errorTexts: { de: "Cached moon text", en: "" }, revision: 1 });
+    function TogglePanel() {
+      const [open, setOpen] = useState(true);
+      return <UiProvider>
+        <button onClick={() => setOpen((current) => !current)}>Toggle panel</button>
+        {open ? <MoonSettingsPanel channelId="channel-a" language="en" canManage /> : null}
+      </UiProvider>;
+    }
+    renderWithQuery(<TogglePanel />, undefined, { gcTime: 600_000 });
+    expect(await screen.findByDisplayValue("Cached moon text")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle panel" }));
+
+    expect(screen.getByRole("textbox", { name: "German" })).toHaveValue("Cached moon text");
+  });
+
+  it("retries a failed settings read", async () => {
+    mocks.fetchMoonSettings.mockRejectedValueOnce(new Error("offline"));
+    renderWithQuery(<UiProvider><MoonSettingsPanel channelId="channel-a" language="en" canManage /></UiProvider>);
+
+    expect(await screen.findByText("Moon settings could not be loaded.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /retry|erneut versuchen/iu }));
+
+    expect(await screen.findByRole("textbox", { name: "German" })).toBeEnabled();
   });
 
   it("keeps an unsaved draft visible when a newer settings revision arrives", async () => {
@@ -58,5 +87,11 @@ describe("moon settings panel", () => {
     });
 
     expect(germanField).toHaveValue("Unsaved moon text");
+    mocks.saveMoonSettings.mockResolvedValue({ errorTexts: { de: "Unsaved moon text", en: "" }, revision: 3 });
+    fireEvent.click(screen.getByRole("button", { name: "Save error texts" }));
+    await waitFor(() => expect(mocks.saveMoonSettings).toHaveBeenCalledWith("channel-a", {
+      revision: 1,
+      errorTexts: { de: "Unsaved moon text", en: "" },
+    }));
   });
 });

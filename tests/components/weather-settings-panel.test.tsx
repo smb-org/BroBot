@@ -61,5 +61,25 @@ describe("weather settings panel", () => {
     });
 
     expect(germanField).toHaveValue("Unsaved weather text");
+    mocks.saveWeatherSettings.mockResolvedValue({
+      provider: "met_norway", showFahrenheit: false, errorTexts: { de: "Unsaved weather text", en: "" }, revision: 3,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(mocks.saveWeatherSettings).toHaveBeenCalledWith("channel-a", {
+      provider: "met_norway",
+      showFahrenheit: false,
+      errorTexts: { de: "Unsaved weather text", en: "" },
+      revision: 1,
+    }));
+  });
+
+  it("retries a failed settings read", async () => {
+    mocks.fetchWeatherSettings.mockRejectedValueOnce(new Error("offline"));
+    renderWithQuery(<UiProvider><WeatherSettingsPanel channelId="channel-a" language="en" canManage /></UiProvider>);
+
+    expect(await screen.findByText("Weather settings could not be loaded.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /retry|erneut versuchen/iu }));
+
+    expect(await screen.findByRole("textbox", { name: "German" })).toBeEnabled();
   });
 });

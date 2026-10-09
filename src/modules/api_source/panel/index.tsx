@@ -37,6 +37,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const sources = query.data ?? [];
   const [editingName, setEditingName] = useState<string | null>(null);
   const [draft, setDraft] = useState<SourceDraft | null>(null);
+  const [draftBaselineRevision, setDraftBaselineRevision] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | undefined>();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -45,6 +46,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const closeEditor = (): void => {
     setDraft(null);
     setEditingName(null);
+    setDraftBaselineRevision(null);
     setFormError(undefined);
     setConfirmDeleteOpen(false);
     setDeleteError(undefined);
@@ -52,12 +54,14 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
 
   const startCreate = (): void => {
     setEditingName(null);
+    setDraftBaselineRevision(null);
     setDraft(emptyDraft());
     setFormError(undefined);
   };
 
   const startEdit = (source: ApiSource): void => {
     setEditingName(source.name);
+    setDraftBaselineRevision(source.revision);
     setDraft({ name: source.name, url: source.url, expression: source.expression });
     setFormError(undefined);
   };
@@ -68,11 +72,36 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setBusy(true);
     setFormError(undefined);
     try {
-      if (editingName === null) await runModuleQueryWrite(queryClient, channelId, "api_source", "sources", () => createApiSource(channelId, normalized));
+      if (editingName === null) {
+        await runModuleQueryWrite(
+          queryClient,
+          channelId,
+          "api_source",
+          "sources",
+          () => createApiSource(channelId, normalized),
+          {
+            baselineRevision: null,
+            updateCache: (current, created) => updateSourceCache(current, created),
+          },
+        );
+      }
       else {
-        const current = sources.find((source) => source.name === editingName);
-        if (current === undefined) throw new Error("api_source_not_found");
-        await runModuleQueryWrite(queryClient, channelId, "api_source", "sources", () => updateApiSource(channelId, editingName, { url: normalized.url, expression: normalized.expression, revision: current.revision }));
+        if (draftBaselineRevision === null) throw new Error("api_source_revision_missing");
+        await runModuleQueryWrite(
+          queryClient,
+          channelId,
+          "api_source",
+          "sources",
+          (baselineRevision) => updateApiSource(channelId, editingName, {
+            url: normalized.url,
+            expression: normalized.expression,
+            revision: requireBaselineRevision(baselineRevision),
+          }),
+          {
+            baselineRevision: draftBaselineRevision,
+            updateCache: (current, updated) => updateSourceCache(current, updated),
+          },
+        );
       }
       closeEditor();
       notify({ tone: "success", message: editingName === null ? labels.created : labels.saved });
@@ -95,7 +124,18 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setBusy(true);
     setDeleteError(undefined);
     try {
-      await runModuleQueryWrite(queryClient, channelId, "api_source", "sources", () => deleteApiSource(channelId, source));
+      if (draftBaselineRevision === null) throw new Error("api_source_revision_missing");
+      await runModuleQueryWrite(
+        queryClient,
+        channelId,
+        "api_source",
+        "sources",
+        (baselineRevision) => deleteApiSource(channelId, source.name, requireBaselineRevision(baselineRevision)),
+        {
+          baselineRevision: draftBaselineRevision,
+          updateCache: (current) => removeSourceFromCache(current, source.name),
+        },
+      );
       closeEditor();
       notify({ tone: "success", message: labels.deleted });
     } catch (failure: unknown) {
@@ -105,18 +145,20 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     }
   };
 
-  const loadStatus = query.isPending ? "loading" : query.data === undefined ? "error" : sources.length === 0 ? "empty" : "success";
+  const loadStatus = query.data === undefined ? query.isPending ? "loading" : "error" : sources.length === 0 ? "empty" : "success";
 
   return <section className="module-stack api-source-panel" aria-label={labels.title}>
     <p className="muted">{labels.explanation}</p>
     <InspectorSection title={labels.sourceList}>
-      <div data-testid="api-source-list-slot" style={{ height: "calc(var(--s10) * 5)", overflow: "hidden" }}>
+      <div data-testid="api-source-list-slot" style={{ height: "calc(var(--s10) * 6)", overflow: "hidden" }}>
       <LoadState
         status={loadStatus}
         minHeight="calc(var(--s10) * 5)"
         loading={<Skeleton rows={4} height={34} />}
         empty={<p className="muted">{labels.empty}</p>}
         error={<p className="muted">{labels.loadFailed}</p>}
+        onRetry={() => { void query.refetch(); }}
+        refreshError={query.isRefetchError}
       >
         <ul className="api-source-panel__list" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", margin: 0, padding: 0, listStyle: "none" }}>
           {sources.map((source) => <li key={source.name}>
@@ -181,3 +223,18 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     />
   </section>;
 }
+
+const requireBaselineRevision = (revision: number | null): number => {
+  if (revision === null) throw new Error("api_source_revision_missing");
+  return revision;
+};
+
+const updateSourceCache = (current: unknown, source: ApiSource): unknown => {
+  const sources = Array.isArray(current) ? current as ApiSource[] : [];
+  return [...sources.filter((entry) => entry.name !== source.name), source];
+};
+
+const removeSourceFromCache = (current: unknown, name: string): unknown => {
+  const sources = Array.isArray(current) ? current as ApiSource[] : [];
+  return sources.filter((entry) => entry.name !== name);
+};

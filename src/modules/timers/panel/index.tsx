@@ -88,6 +88,33 @@ const inputFromDraft = (draft: TimerDraft): TimerMutationInput | null => {
   return { name: draft.name.trim(), blockName: draft.blockName, chatTarget: draft.chatTarget, trigger };
 };
 
+const timersPanelDataFrom = (value: unknown): TimersPanelData => {
+  if (typeof value === "object" && value !== null && "timers" in value && "sources" in value && "blocks" in value &&
+      Array.isArray(value.timers) && Array.isArray(value.sources) && Array.isArray(value.blocks)) {
+    return value as TimersPanelData;
+  }
+  return { timers: [], sources: [], blocks: [] };
+};
+
+const withTimer = (current: unknown, timer: Timer): TimersPanelData => {
+  const data = timersPanelDataFrom(current);
+  const found = data.timers.some((candidate) => candidate.id === timer.id);
+  const timers = found
+    ? data.timers.map((candidate) => candidate.id === timer.id ? timer : candidate)
+    : [...data.timers, timer];
+  return { ...data, timers };
+};
+
+const withoutTimer = (current: unknown, timerId: string): TimersPanelData => {
+  const data = timersPanelDataFrom(current);
+  return { ...data, timers: data.timers.filter((timer) => timer.id !== timerId) };
+};
+
+const requireBaselineRevision = (revision: number | null): number => {
+  if (revision === null) throw new Error("An existing timer requires its opening revision.");
+  return revision;
+};
+
 const triggerTitle = (type: TriggerType, labels: ReturnType<typeof timersTexts>): string => {
   if (type === "interval") return labels.interval;
   if (type === "stream_start") return labels.streamStart;
@@ -119,7 +146,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
   const queryClient = useDashboardQueryClient();
   const query = useModuleQuery(channelId, "timers", "panel", (signal) => loadTimersPanel(channelId, signal));
   const data = query.data;
-  const loading = query.isPending;
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<TimerDraft | null>(null);
   const [editing, setEditing] = useState<Timer | null>(null);
@@ -164,8 +190,11 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     setPending(true);
     setError(null);
     try {
-      await runModuleQueryWrite(queryClient, channelId, "timers", "panel", () =>
-        editing === null ? createTimer(channelId, input) : updateTimer(channelId, editing, input));
+      await runModuleQueryWrite(queryClient, channelId, "timers", "panel", (revision) =>
+        editing === null ? createTimer(channelId, input) : updateTimer(channelId, editing.id, input, requireBaselineRevision(revision)), {
+        baselineRevision: editing?.revision ?? null,
+        updateCache: (current, timer) => withTimer(current, timer),
+      });
       setDraft(null);
       setEditing(null);
     } catch (failure: unknown) {
@@ -180,7 +209,11 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     if (busyTimerId !== null) return;
     setBusyTimerId(timer.id);
     try {
-      await runModuleQueryWrite(queryClient, channelId, "timers", "panel", () => setTimerEnabled(channelId, timer, enabled));
+      await runModuleQueryWrite(queryClient, channelId, "timers", "panel", (revision) =>
+        setTimerEnabled(channelId, timer.id, enabled, requireBaselineRevision(revision)), {
+        baselineRevision: timer.revision,
+        updateCache: (current, updated) => withTimer(current, updated),
+      });
     } catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setBusyTimerId(null); }
   };
@@ -190,7 +223,12 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     setPending(true);
     setDeleteError(null);
     try {
-      await runModuleQueryWrite(queryClient, channelId, "timers", "panel", () => deleteTimer(channelId, deleteTarget));
+      const timerId = deleteTarget.id;
+      await runModuleQueryWrite(queryClient, channelId, "timers", "panel", (revision) =>
+        deleteTimer(channelId, timerId, requireBaselineRevision(revision)), {
+        baselineRevision: deleteTarget.revision,
+        updateCache: (current) => withoutTimer(current, timerId),
+      });
       setDeleteTarget(null);
     } catch { setDeleteError(labels.deleteError); }
     finally { setPending(false); }
@@ -203,18 +241,20 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     { value: "time_of_day", label: labels.timeOfDay },
     { value: "before_event", label: labels.beforeEvent },
   ];
-  const listStatus = loading ? "loading" : data === undefined ? "error" : data.timers.length === 0 ? "empty" : "success";
+  const listStatus = query.isPending ? "loading" : data === undefined ? "error" : data.timers.length === 0 ? "empty" : "success";
 
   return (
     <section aria-label={labels.title}>
       <InspectorSection title={labels.title}>
         <Button variant="primary" disabled={!canManage} onClick={openCreate}>{labels.add}</Button>
         {canManage ? null : <p className="lock-reason">{labels.roleLocked}</p>}
-        <div data-testid="timers-list-slot" style={{ height: "calc(var(--s10) * 18)", overflow: "hidden" }}>
+        <div data-testid="timers-list-slot" style={{ height: "calc(var(--s10) * 19)", overflow: "hidden" }}>
         <LoadState status={listStatus} minHeight="calc(var(--s10) * 18)"
           loading={<Skeleton rows={7} height={34} />}
           empty={<p className="muted">{labels.empty}</p>}
           error={<p className="muted">{labels.loadError}</p>}
+          onRetry={() => { void query.refetch(); }}
+          refreshError={query.isRefetchError}
         >
         <div className="state-list" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>
           {(data?.timers ?? []).map((timer) => (

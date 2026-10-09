@@ -585,9 +585,10 @@ describe("Module panel loader", () => {
       if (path.endsWith("/modules/editor-fixture/settings")) return deferredSettings;
       return Promise.resolve(Response.json({}));
     });
-    renderSettingsFixture(fetcher);
+    const view = renderSettingsFixture(fetcher);
 
-    expect(screen.getByText("Modulansichten werden geladen …")).toBeInTheDocument();
+    expect(view.container.querySelector('.ui-load-state[data-status="loading"]')).not.toBeNull();
+    expect(view.container.querySelectorAll(".mantine-Skeleton-root").length).toBeGreaterThan(0);
     expect(editorFixture.loader).toHaveBeenCalledOnce();
     resolveSettings?.(Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }));
 
@@ -769,6 +770,25 @@ describe("Module panel loader", () => {
 
     expect(await screen.findByRole("textbox", { name: "Konto" })).toHaveValue("ada");
     expect(settingsReadCount()).toBe(initialSettingsReadCount);
+  });
+
+  it("shows an explicit retry after the initial module settings query fails", async () => {
+    let settingsReads = 0;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (!path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({}));
+      settingsReads += 1;
+      return Promise.resolve(settingsReads === 1
+        ? Response.json({ error: "temporarily_unavailable" }, { status: 503 })
+        : Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }));
+    });
+    renderSettingsFixture(fetcher, "manager", { gcTime: 600_000, staleTime: 30_000 });
+
+    expect(await screen.findByText("Moduleinstellungen konnten nicht geladen werden.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Erneut versuchen|Retry/u }));
+
+    expect(await screen.findByRole("textbox", { name: "Konto" })).toHaveValue("ada");
+    expect(settingsReads).toBe(2);
   });
 
   it("notifies a mounted module panel after its sibling settings save succeeds", async () => {

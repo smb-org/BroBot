@@ -12,7 +12,7 @@ import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Skeleton, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -214,29 +214,46 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       : settingsQuery.error === null
         ? null
         : dashboardTexts().module.settingsLoadError;
-    return <p className="loading-line" role={loadError === null ? undefined : "alert"}>{loadError ?? dashboardTexts().module.loadingViews}</p>;
+    return <LoadState
+      status={settingsQuery.isPending || settingsQuery.isFetching ? "loading" : "error"}
+      minHeight="calc(var(--s10) * 8)"
+      loading={<Skeleton rows={3} height={34} />}
+      empty={null}
+      error={<p className="muted" role="alert">{loadError ?? dashboardTexts().module.settingsLoadError}</p>}
+      onRetry={() => { void settingsQuery.refetch(); }}
+    >{null}</LoadState>;
   }
   const copy = loaded.definition.locales[language];
-  return <LoadedModuleSettingsEditor
-    key={`${module.id}-${String(generation)}`}
-    module={module}
-    channelId={channelId}
-    canManageContent={canManageContent}
-    definition={loaded.definition}
-    copy={copy}
-    channelVariables={loaded.variables}
-    initial={loaded.settings}
-    initialRevision={loaded.revision}
-    {...(onSaved === undefined ? {} : { onSaved })}
-    onReload={async () => {
-      const result = await settingsQuery.refetch();
-      if (result.isSuccess) {
-        setGeneration((current) => current + 1);
-        return true;
-      }
-      return false;
-    }}
-  />;
+  return <LoadState
+    status="success"
+    minHeight="calc(var(--s10) * 8)"
+    loading={<Skeleton rows={3} height={34} />}
+    empty={null}
+    error={<p className="muted" role="alert">{dashboardTexts().module.settingsLoadError}</p>}
+    refreshError={settingsQuery.isRefetchError}
+    onRetry={() => { void settingsQuery.refetch(); }}
+  >
+    <LoadedModuleSettingsEditor
+      key={`${module.id}-${String(generation)}`}
+      module={module}
+      channelId={channelId}
+      canManageContent={canManageContent}
+      definition={loaded.definition}
+      copy={copy}
+      channelVariables={loaded.variables}
+      initial={loaded.settings}
+      initialRevision={loaded.revision}
+      {...(onSaved === undefined ? {} : { onSaved })}
+      onReload={async () => {
+        const result = await settingsQuery.refetch();
+        if (result.isSuccess) {
+          setGeneration((current) => current + 1);
+          return true;
+        }
+        return false;
+      }}
+    />
+  </LoadState>;
 };
 
 const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, channelVariables, initial, initialRevision, onSaved, onReload }: {
@@ -421,8 +438,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
         channelId,
         module.id,
         "settings",
-        () => saveChannelModuleSettings(channelId, module.id, currentBaseline.revision, currentValue),
+        (baselineRevision) => {
+          if (baselineRevision === null) throw new Error("Module settings require a baseline revision.");
+          return saveChannelModuleSettings(channelId, module.id, baselineRevision, currentValue);
+        },
         {
+          baselineRevision: currentBaseline.revision,
           updateCache: (current, result) => typeof current === "object" && current !== null
             ? { ...current, ...result }
             : current,

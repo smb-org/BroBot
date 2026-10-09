@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { ModulePanelProperties } from "../../contract";
 import { WEATHER_ERROR_TEXT_MAX_LENGTH, type WeatherSettings } from "../contracts";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, Field, InspectorFieldRow, InspectorSection, Select, Switch, notify } from "../../../dashboard/ui";
+import { Button, Field, InspectorFieldRow, InspectorSection, LoadState, Select, Skeleton, Switch, notify } from "../../../dashboard/ui";
 import { weatherModuleCatalog } from "../contracts/catalog";
 import { weatherSettingsTexts } from "./locale";
 import { fetchWeatherSettings, saveWeatherSettings } from "./service";
@@ -45,9 +45,11 @@ function WeatherSettingsPanelContent({ channelId, language, canManage }: ModuleP
     if (settings === null || !canEdit) return;
     setBusy(true);
     try {
-      const revision = draft !== null && !draft.saved ? draft.baseRevision : settings.revision;
-      const next = await runModuleQueryWrite(queryClient, channelId, "weather", "provider-settings", () =>
-        saveWeatherSettings(channelId, { ...settings, revision }), { updateCache: (_current, result) => result });
+      const baselineRevision = draft !== null && !draft.saved ? draft.baseRevision : settings.revision;
+      const next = await runModuleQueryWrite(queryClient, channelId, "weather", "provider-settings", (revision) => {
+        if (revision === null) throw new Error("A weather settings revision is required.");
+        return saveWeatherSettings(channelId, { ...settings, revision });
+      }, { baselineRevision, updateCache: (_current, result) => result });
       setDraft({ baseRevision: next.revision, value: next, saved: true });
       notify({ tone: "success", message: labels.saved });
     } catch (failure: unknown) {
@@ -63,7 +65,16 @@ function WeatherSettingsPanelContent({ channelId, language, canManage }: ModuleP
     if (settings !== null) updateSettings({ errorTexts: { ...settings.errorTexts, [languageKey]: value } });
   };
 
-  return <div className="module-stack weather-settings" aria-label={labels.settings}>
+  return <LoadState
+    status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
+    minHeight="calc(var(--s10) * 16)"
+    loading={<Skeleton rows={4} height={34} />}
+    empty={<div />}
+    error={<p>{labels.loadFailed}</p>}
+    onRetry={() => { void settingsQuery.refetch(); }}
+    refreshError={settingsQuery.isRefetchError}
+  >
+  <div className="module-stack weather-settings" aria-label={labels.settings}>
     <InspectorSection title={labels.settings}>
       <InspectorFieldRow label={labels.provider} help={catalog.providers[settings?.provider ?? "met_norway"].description}>
         <Select
@@ -106,5 +117,6 @@ function WeatherSettingsPanelContent({ channelId, language, canManage }: ModuleP
         {settings?.provider === "open_meteo" ? catalog.providers.open_meteo.description : ""}
       </p>
     </InspectorSection>
-  </div>;
+  </div>
+  </LoadState>;
 }

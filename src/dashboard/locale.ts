@@ -30,6 +30,7 @@ export interface DashboardCommonTexts {
   reset: string;
   retry: string;
   loaded: string;
+  retry: string;
   dismissNotification: string;
   invalidFieldCount: (count: number) => string;
   invalidFieldsTitle: string;
@@ -64,6 +65,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     reset: "Zurücksetzen",
     retry: "Erneut versuchen",
     loaded: "geladen",
+    retry: "Erneut versuchen",
     dismissNotification: "Benachrichtigung schließen",
     invalidFieldCount: (count) => `${String(count)} ${count === 1 ? "Feld" : "Felder"} fehlerhaft`,
     invalidFieldsTitle: "Fehlerhafte Felder",
@@ -98,6 +100,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     reset: "Reset",
     retry: "Retry",
     loaded: "loaded",
+    retry: "Retry",
     dismissNotification: "Dismiss notification",
     invalidFieldCount: (count) => `${String(count)} invalid ${count === 1 ? "field" : "fields"}`,
     invalidFieldsTitle: "Invalid fields",

@@ -17,6 +17,7 @@ import {
   testFaqMessage,
   updateFaqEntry,
   type FaqTestResult,
+  type FaqPanelData,
 } from "./service";
 
 interface FaqDraft {
@@ -53,6 +54,38 @@ const inputFromDraft = (draft: FaqDraft): FaqMutationInput | null => {
     games: draft.games,
     chatTarget: draft.chatTarget,
   };
+};
+
+const faqPanelDataFrom = (value: unknown): FaqPanelData => {
+  if (typeof value === "object" && value !== null && "entries" in value && "blocks" in value &&
+      Array.isArray(value.entries) && Array.isArray(value.blocks)) {
+    return value as FaqPanelData;
+  }
+  return { entries: [], blocks: [] };
+};
+
+const withFaqEntry = (current: unknown, entry: FaqEntry): FaqPanelData => {
+  const data = faqPanelDataFrom(current);
+  const found = data.entries.some((candidate) => candidate.id === entry.id);
+  const entries = found
+    ? data.entries.map((candidate) => candidate.id === entry.id ? entry : candidate)
+    : [...data.entries, entry];
+  return { ...data, entries: entries.sort((left, right) => left.order - right.order) };
+};
+
+const withFaqEntries = (current: unknown, entries: FaqEntry[]): FaqPanelData => ({
+  ...faqPanelDataFrom(current),
+  entries,
+});
+
+const withoutFaqEntry = (current: unknown, entryId: string): FaqPanelData => {
+  const data = faqPanelDataFrom(current);
+  return { ...data, entries: data.entries.filter((entry) => entry.id !== entryId) };
+};
+
+const requireBaselineRevision = (revision: number | null): number => {
+  if (revision === null) throw new Error("An existing FAQ entry requires its opening revision.");
+  return revision;
 };
 
 const matchCopy = (result: FaqTestResult, labels: ReturnType<typeof faqTexts>): string => {
@@ -101,8 +134,11 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     setPending(true);
     setError(null);
     try {
-      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", () =>
-        editing === null ? createFaqEntry(channelId, input) : updateFaqEntry(channelId, editing, input));
+      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
+        editing === null ? createFaqEntry(channelId, input) : updateFaqEntry(channelId, editing.id, input, requireBaselineRevision(revision)), {
+        baselineRevision: editing?.revision ?? null,
+        updateCache: (current, entry) => withFaqEntry(current, entry),
+      });
       setDraft(null);
       setEditing(null);
     } catch (failure: unknown) {
@@ -117,7 +153,13 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const toggle = async (entry: FaqEntry, enabled: boolean): Promise<void> => {
     if (busyEntryId !== null) return;
     setBusyEntryId(entry.id);
-    try { await runModuleQueryWrite(queryClient, channelId, "faq", "panel", () => setFaqEntryEnabled(channelId, entry, enabled)); }
+    try {
+      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
+        setFaqEntryEnabled(channelId, entry.id, enabled, requireBaselineRevision(revision)), {
+        baselineRevision: entry.revision,
+        updateCache: (current, updated) => withFaqEntry(current, updated),
+      });
+    }
     catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setBusyEntryId(null); }
   };
@@ -125,7 +167,13 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const move = async (entry: FaqEntry, direction: "up" | "down"): Promise<void> => {
     if (busyEntryId !== null) return;
     setBusyEntryId(entry.id);
-    try { await runModuleQueryWrite(queryClient, channelId, "faq", "panel", () => moveFaqEntry(channelId, entry, direction)); }
+    try {
+      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
+        moveFaqEntry(channelId, entry.id, direction, requireBaselineRevision(revision)), {
+        baselineRevision: entry.revision,
+        updateCache: (current, entries) => withFaqEntries(current, entries),
+      });
+    }
     catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setBusyEntryId(null); }
   };
@@ -134,7 +182,15 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     if (deleteTarget === null) return;
     setPending(true);
     setDeleteError(null);
-    try { await runModuleQueryWrite(queryClient, channelId, "faq", "panel", () => deleteFaqEntry(channelId, deleteTarget)); setDeleteTarget(null); }
+    try {
+      const entryId = deleteTarget.id;
+      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
+        deleteFaqEntry(channelId, entryId, requireBaselineRevision(revision)), {
+        baselineRevision: deleteTarget.revision,
+        updateCache: (current) => withoutFaqEntry(current, entryId),
+      });
+      setDeleteTarget(null);
+    }
     catch { setDeleteError(labels.deleteError); }
     finally { setPending(false); }
   };
@@ -150,7 +206,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
 
   const blockOptions = (data?.blocks ?? []).map((name) => ({ value: name, label: name }));
   const orderedEntries = data?.entries ?? [];
-  const listStatus = loading ? "loading" : data === undefined ? "error" : orderedEntries.length === 0 ? "empty" : "success";
+  const listStatus = query.isPending ? "loading" : data === undefined ? "error" : orderedEntries.length === 0 ? "empty" : "success";
 
   return (
     <section aria-label={labels.title}>
@@ -161,6 +217,8 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
           loading={<Skeleton rows={7} height={34} />}
           empty={<p className="muted">{labels.noEntries}</p>}
           error={<p className="muted">{labels.loadError}</p>}
+          onRetry={() => { void query.refetch(); }}
+          refreshError={query.isRefetchError}
         >
         <div className="state-list" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>
           {orderedEntries.map((entry, index) => (

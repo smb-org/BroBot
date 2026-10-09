@@ -75,12 +75,86 @@ describe("dashboard query data layer", () => {
 
     const view = renderWithQuery(<ModuleQueryProbe />, {}, { gcTime: 600_000, staleTime: 0 });
     await firstReadStarted;
-    await runModuleQueryWrite(view.queryClient, channelId, "faq", "panel", () => Promise.resolve(undefined));
+    await runModuleQueryWrite(view.queryClient, channelId, "faq", "panel", () => Promise.resolve(undefined), {
+      baselineRevision: null,
+      updateCache: (current) => current,
+    });
     resolveOldRead?.("revision-1");
 
     expect(await screen.findByText("revision-2")).toBeInTheDocument();
     await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "faq", "panel"))).toBe("revision-2"));
     expect(oldSignal?.aborted).toBe(true);
+  });
+
+  it("restarts a cancelled cold read when the module write fails", async () => {
+    let markReadStarted: (() => void) | undefined;
+    let oldSignal: AbortSignal | undefined;
+    let readCount = 0;
+    const firstReadStarted = new Promise<void>((resolve) => { markReadStarted = resolve; });
+
+    function ModuleQueryProbe() {
+      const query = useModuleQuery(channelId, "api_source", "sources", async (signal) => {
+        readCount += 1;
+        if (readCount === 1) {
+          oldSignal = signal;
+          markReadStarted?.();
+          return new Promise<string>(() => undefined);
+        }
+        return "recovered";
+      });
+      return <p>{query.data ?? (query.isPending ? "loading" : "failed")}</p>;
+    }
+
+    const view = renderWithQuery(<ModuleQueryProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
+    await firstReadStarted;
+
+    await expect(runModuleQueryWrite(
+      view.queryClient,
+      channelId,
+      "api_source",
+      "sources",
+      (baselineRevision) => {
+        expect(baselineRevision).toBe(4);
+        return Promise.reject(new Error("write failed"));
+      },
+      { baselineRevision: 4, updateCache: (current) => current },
+    )).rejects.toThrow("write failed");
+
+    expect(oldSignal?.aborted).toBe(true);
+    expect(await screen.findByText("recovered")).toBeInTheDocument();
+    expect(readCount).toBe(2);
+    view.unmount();
+  });
+
+  it("reuses warm module data when a panel is mounted again", async () => {
+    let readCount = 0;
+
+    function QueryProbe() {
+      const query = useModuleQuery(channelId, "faq", "panel", () => {
+        readCount += 1;
+        return Promise.resolve("warm data");
+      });
+      return <p>{query.data ?? "loading"}</p>;
+    }
+
+    function Harness() {
+      const [mounted, setMounted] = useState(true);
+      return <>
+        <button onClick={() => setMounted((current) => !current)}>{mounted ? "Leave module" : "Re-enter module"}</button>
+        {mounted ? <QueryProbe /> : null}
+      </>;
+    }
+
+    const view = renderWithQuery(<Harness />, {}, { gcTime: 600_000, staleTime: 600_000 });
+    expect(await screen.findByText("warm data")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave module" }));
+    fireEvent.click(screen.getByRole("button", { name: "Re-enter module" }));
+
+    expect(await screen.findByText("warm data")).toBeInTheDocument();
+    expect(screen.queryByText("loading")).not.toBeInTheDocument();
+    expect(readCount).toBe(1);
+    view.unmount();
   });
 
   it("keeps a higher cached module revision when a later read returns older data", async () => {
@@ -100,6 +174,32 @@ describe("dashboard query data layer", () => {
     await waitFor(() => expect(readCount).toBe(2));
     await waitFor(() => expect(view.container).toHaveTextContent("new"));
     expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "sun", "error-texts"))).toEqual({ revision: 2, value: "new" });
+  });
+
+  it("preserves newer revisions inside module list responses", async () => {
+    let readCount = 0;
+    function RevisionListProbe() {
+      const query = useModuleQuery(channelId, "faq", "panel", () => {
+        readCount += 1;
+        return Promise.resolve(readCount === 1
+          ? { entries: [{ id: "entry-a", revision: 2, answer: "new" }] }
+          : { entries: [{ id: "entry-a", revision: 1, answer: "old" }, { id: "entry-b", revision: 1, answer: "other" }] });
+      });
+      return <p>{query.data?.entries.map((entry) => entry.answer).join(",") ?? "loading"}</p>;
+    }
+
+    const view = renderWithQuery(<RevisionListProbe />, {}, { gcTime: 600_000, staleTime: 0 });
+    expect(await screen.findByText("new")).toBeInTheDocument();
+    const key = moduleQueryKey(channelId, "faq", "panel");
+    await act(async () => { await view.queryClient.refetchQueries({ queryKey: key, exact: true }); });
+
+    expect(view.queryClient.getQueryData(key)).toEqual({
+      entries: [
+        { id: "entry-a", revision: 2, answer: "new" },
+        { id: "entry-b", revision: 1, answer: "other" },
+      ],
+    });
+    view.unmount();
   });
 
   it("checks the latest cached module revision after a read resolves", async () => {
@@ -130,7 +230,11 @@ describe("dashboard query data layer", () => {
       "text_library",
       "library",
       () => Promise.resolve(undefined),
-      { relatedParts: [{ moduleId: "text_commands", part: "template-variables" }] },
+      {
+        baselineRevision: null,
+        updateCache: (current) => current,
+        relatedParts: [{ moduleId: "text_commands", part: "template-variables" }],
+      },
     );
 
     expect(view.queryClient.getQueryState(dependentKey)?.isInvalidated).toBe(true);

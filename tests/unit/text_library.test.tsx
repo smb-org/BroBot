@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent } from "../../src/modules/contract";
@@ -42,9 +43,14 @@ const variant = (id: string, text: string, conditions: TextBlockConditions = {})
   texts: [text],
 });
 
-const stubTextLibraryPanelApi = (library: unknown): void => {
+const stubTextLibraryPanelApi = (library: unknown, failFirstLibraryRead = false): void => {
+  let shouldFailLibraryRead = failFirstLibraryRead;
   vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+    if (shouldFailLibraryRead && url.pathname.includes("/modules/text_library/")) {
+      shouldFailLibraryRead = false;
+      return Promise.resolve(jsonResponse({ error: "offline" }, 503));
+    }
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
     if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
     if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ timeZone: DEFAULT_CHANNEL_TIME_ZONE, revision: 1 }));
@@ -127,6 +133,59 @@ describe("text library", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add time window" }));
     expect(screen.getByRole("textbox", { name: "From" })).toHaveValue("00:00");
+  });
+
+  it("shows cached library data immediately when the panel is reopened", async () => {
+    const timestamp = new Date(NOW).toISOString();
+    stubTextLibraryPanelApi({
+      blocks: [{
+        channelId: CHANNEL_ID,
+        name: "cached_text",
+        categoryId: "social",
+        games: [],
+        variants: [variant("default", "Cached value")],
+        revision: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }],
+      categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+      settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
+      usages: { cached_text: [] },
+      reservedNames: ["user"],
+    });
+    function TogglePanel() {
+      const [open, setOpen] = useState(true);
+      return <MantineProvider>
+        <button onClick={() => setOpen((current) => !current)}>Toggle panel</button>
+        {open ? <TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /> : null}
+      </MantineProvider>;
+    }
+
+    renderWithQuery(<TogglePanel />, undefined, { gcTime: 600_000 });
+    expect(await screen.findByRole("button", { name: /\{cached_text\}/u })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle panel" }));
+
+    expect(screen.getByRole("button", { name: /\{cached_text\}/u })).toBeInTheDocument();
+  });
+
+  it("retries a failed library read", async () => {
+    const timestamp = new Date(NOW).toISOString();
+    stubTextLibraryPanelApi({
+      blocks: [],
+      categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+      settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
+      usages: {},
+      reservedNames: ["user"],
+    }, true);
+
+    renderTextLibraryPanel();
+
+    expect(await screen.findByText("The text library could not be loaded.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /retry|erneut versuchen/iu }));
+
+    expect(await screen.findByText("No text blocks found.")).toBeInTheDocument();
   });
 
   afterEach(() => {

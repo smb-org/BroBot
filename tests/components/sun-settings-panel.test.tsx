@@ -55,5 +55,21 @@ describe("sun settings panel", () => {
     });
 
     expect(germanField).toHaveValue("Unsaved sun text");
+    mocks.saveSunSettings.mockResolvedValue({ errorTexts: { de: "Unsaved sun text", en: "" }, revision: 3 });
+    fireEvent.click(screen.getByRole("button", { name: "Save error texts" }));
+    await waitFor(() => expect(mocks.saveSunSettings).toHaveBeenCalledWith("channel-a", {
+      revision: 1,
+      errorTexts: { de: "Unsaved sun text", en: "" },
+    }));
+  });
+
+  it("retries a failed settings read", async () => {
+    mocks.fetchSunSettings.mockRejectedValueOnce(new Error("offline"));
+    renderWithQuery(<UiProvider><SunSettingsPanel channelId="channel-a" language="en" canManage /></UiProvider>);
+
+    expect(await screen.findByText("Sun settings could not be loaded.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /retry|erneut versuchen/iu }));
+
+    expect(await screen.findByRole("textbox", { name: "German" })).toBeEnabled();
   });
 });

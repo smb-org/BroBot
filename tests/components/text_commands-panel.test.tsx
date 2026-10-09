@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -56,7 +57,27 @@ const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMut
     if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: [] }));
     if (url.pathname.includes("/commands/") || (url.pathname.endsWith("/commands") && method !== "GET")) {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
-      return Promise.resolve(onMutation(method, url.pathname, body));
+      return Promise.resolve(onMutation(method, url.pathname, body)).then(async (response) => {
+        if (!response.ok) return response;
+        const payload: unknown = await response.clone().json().catch(() => null);
+        if (typeof payload === "object" && payload !== null && "command" in payload) return response;
+        const fields = typeof body === "object" && body !== null ? body as Partial<TextCommand> : {};
+        const oldName = url.pathname.endsWith("/commands") ? undefined : url.pathname.split("/").at(-1);
+        const existing = commands().find((command) => command.name === oldName);
+        const name = typeof fields.name === "string" ? fields.name : existing?.name ?? "neu";
+        const command: TextCommand = {
+          ...(existing ?? makeCommand({ name })),
+          ...fields,
+          channelId: "kanal-a",
+          name,
+          enabled: typeof fields.enabled === "boolean" ? fields.enabled : existing?.enabled ?? true,
+          revision: (existing?.revision ?? 0) + 1,
+        };
+        const warnings = typeof payload === "object" && payload !== null && "warnings" in payload && Array.isArray(payload.warnings)
+          ? payload.warnings
+          : [];
+        return jsonResponse({ command, warnings }, response.status);
+      });
     }
     return Promise.resolve(jsonResponse({}, 404));
   });
@@ -98,7 +119,7 @@ describe("Text command editor", () => {
 
   it("shows cached commands immediately when returning to the module", async () => {
     vi.stubGlobal("fetch", panelFetch());
-    const view = renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, { gcTime: 300_000 });
+    const view = renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, { gcTime: 600_000 });
     await screen.findByText("!hallo");
     view.rerender(<UiProvider><div /></UiProvider>);
     view.rerender(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>);
@@ -157,11 +178,17 @@ describe("Text command editor", () => {
   });
 
   it("reports a command-list load failure in the persistent toast host", async () => {
+    let commandLoads = 0;
     const fetcher = vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
-      if (url.pathname.endsWith("/commands")) return Promise.resolve(jsonResponse({ error: "command_load_failed" }, 500));
+      if (url.pathname.endsWith("/commands")) {
+        commandLoads += 1;
+        return Promise.resolve(commandLoads === 1
+          ? jsonResponse({ error: "command_load_failed" }, 500)
+          : jsonResponse({ commands: [makeCommand()], variables: [] }));
+      }
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -171,6 +198,77 @@ describe("Text command editor", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(textCommandsTexts("de").loadError);
     expect(document.querySelector(".command-list .form-error")).toBeNull();
     expect(screen.getByRole("button", { name: "Befehl anlegen" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u }));
+    expect(await screen.findByText("!hallo")).toBeInTheDocument();
+    expect(commandLoads).toBe(2);
+  });
+
+  it("retries a failed template-variable query inside the editor", async () => {
+    let variableReads = 0;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/template-variables")) {
+        variableReads += 1;
+        return Promise.resolve(variableReads === 1
+          ? jsonResponse({ error: "temporarily_unavailable" }, 503)
+          : jsonResponse({ variables: [] }));
+      }
+      if (url.pathname.endsWith("/commands")) return Promise.resolve(jsonResponse({ commands: [makeCommand()], variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="en" /></UiProvider>, undefined, { gcTime: 600_000 });
+    await selectCommand();
+
+    expect(await screen.findByText(textCommandsTexts("en").templateVariablesLoadError)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u }));
+
+    await waitFor(() => expect(screen.queryByText(textCommandsTexts("en").templateVariablesLoadError)).not.toBeInTheDocument());
+    expect(variableReads).toBe(2);
+  });
+
+  it("shows and retries a background template-variable refresh failure", async () => {
+    let variableReads = 0;
+    let failNextRead = false;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/template-variables")) {
+        variableReads += 1;
+        return Promise.resolve(failNextRead
+          ? jsonResponse({ error: "temporarily_unavailable" }, 503)
+          : jsonResponse({ variables: [] }));
+      }
+      if (url.pathname.endsWith("/commands")) return Promise.resolve(jsonResponse({ commands: [makeCommand()], variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    function TogglePanel() {
+      const [mounted, setMounted] = useState(true);
+      return <>
+        <button onClick={() => setMounted((current) => !current)}>{mounted ? "Leave module" : "Re-enter module"}</button>
+        {mounted ? <TextCommandsPanel channelId="kanal-a" language="en" /> : null}
+      </>;
+    }
+    renderWithQuery(<UiProvider><TogglePanel /></UiProvider>, undefined, {
+      gcTime: 600_000,
+      staleTime: 0,
+    });
+    await selectCommand();
+    expect(variableReads).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Leave module" }));
+    failNextRead = true;
+    fireEvent.click(screen.getByRole("button", { name: "Re-enter module" }));
+    await screen.findByText("!hallo");
+    await selectCommand();
+    await waitFor(() => expect(variableReads).toBe(2));
+
+    expect(await screen.findByText(textCommandsTexts("en").templateVariablesLoadError)).toBeInTheDocument();
+    failNextRead = false;
+    fireEvent.click(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u }));
+    await waitFor(() => expect(screen.queryByText(textCommandsTexts("en").templateVariablesLoadError)).not.toBeInTheDocument());
+    expect(variableReads).toBe(3);
   });
 
   it("opens in the ListDetail inspector with icon tabs, prefixes, counters, preview, and tier descriptions", async () => {

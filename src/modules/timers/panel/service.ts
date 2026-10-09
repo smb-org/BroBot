@@ -59,14 +59,14 @@ const mutate = async <Value,>(channelId: string, path: string, method: "POST" | 
 export const createTimer = async (channelId: string, input: TimerMutationInput): Promise<Timer> =>
   (await mutate<{ timer: Timer }>(channelId, "/timers", "POST", input)).timer;
 
-export const updateTimer = async (channelId: string, timer: Timer, input: TimerMutationInput): Promise<Timer> =>
-  (await mutate<{ timer: Timer }>(channelId, `/timers/${encodeURIComponent(timer.id)}`, "PATCH", { ...input, revision: timer.revision })).timer;
+export const updateTimer = async (channelId: string, timerId: string, input: TimerMutationInput, revision: number): Promise<Timer> =>
+  (await mutate<{ timer: Timer }>(channelId, `/timers/${encodeURIComponent(timerId)}`, "PATCH", { ...input, revision })).timer;
 
-export const setTimerEnabled = async (channelId: string, timer: Timer, enabled: boolean): Promise<Timer> =>
-  (await mutate<{ timer: Timer }>(channelId, `/timers/${encodeURIComponent(timer.id)}/enabled`, "PATCH", { enabled, revision: timer.revision })).timer;
+export const setTimerEnabled = async (channelId: string, timerId: string, enabled: boolean, revision: number): Promise<Timer> =>
+  (await mutate<{ timer: Timer }>(channelId, `/timers/${encodeURIComponent(timerId)}/enabled`, "PATCH", { enabled, revision })).timer;
 
-export const deleteTimer = async (channelId: string, timer: Timer): Promise<void> => {
-  await mutate(channelId, `/timers/${encodeURIComponent(timer.id)}?revision=${String(timer.revision)}`, "DELETE");
+export const deleteTimer = async (channelId: string, timerId: string, revision: number): Promise<void> => {
+  await mutate(channelId, `/timers/${encodeURIComponent(timerId)}?revision=${String(revision)}`, "DELETE");
 };
 
 export const previewTimerBlock = async (channelId: string, blockName: string): Promise<string> => {
