@@ -75,6 +75,13 @@ const appendOlderDayGroups = (
 
 const EMPTY_EVENT_PAGES: readonly PanelEventsResponse[] = [];
 
+interface EventDisplaySnapshot {
+  entries: readonly PanelEventEntry[];
+  days: readonly EventDayGroup[];
+  pageCount: number;
+  paginationIds: ReadonlySet<string>;
+}
+
 const actorCell = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTexts>): ReactNode =>
   entry.actorDisplayName ?? (entry.actorLogin == null
     ? entry.actorUserId == null ? texts.events.automatic : <span className="mono">{entry.actorUserId}</span>
@@ -408,7 +415,12 @@ const EventsPageFilterState = ({
   realtime: RealtimeFeedState;
 }): ReactElement => {
   const texts = dashboardTexts();
-  const [snapshot, setSnapshot] = useState(() => ({ entries, days: eventDayGroups(eventGroups(entries)), pageCount: pages.length }));
+  const [snapshot, setSnapshot] = useState<EventDisplaySnapshot>(() => ({
+    entries,
+    days: eventDayGroups(eventGroups(entries)),
+    pageCount: pages.length,
+    paginationIds: new Set(),
+  }));
   const [followIdentityQuery, setFollowIdentityQuery] = useState(fetching || queryStale);
   const [wasReaderAtTop, setWasReaderAtTop] = useState(readerAtTop);
   let followsIdentityQuery = followIdentityQuery;
@@ -422,28 +434,32 @@ const EventsPageFilterState = ({
   const followsQuery = readerAtTop || followsIdentityQuery;
   if (followsQuery) {
     if (snapshot.entries !== entries || snapshot.pageCount !== pages.length) {
-      setSnapshot({ entries, days: eventDayGroups(eventGroups(entries)), pageCount: pages.length });
+      setSnapshot({ entries, days: eventDayGroups(eventGroups(entries)), pageCount: pages.length, paginationIds: new Set() });
     }
     if (followIdentityQuery && !fetching) setFollowIdentityQuery(false);
   } else if (pages.length < snapshot.pageCount) {
     setSnapshot({ ...snapshot, pageCount: pages.length });
   } else if (pages.length > snapshot.pageCount) {
-    const loadedOlderEntries = pages.slice(snapshot.pageCount).flatMap((page) => page.entries);
+    const appendedPages = pages.slice(snapshot.pageCount);
+    const loadedOlderEntries = appendedPages.flatMap((page) => page.entries);
     const entriesWithOlderPage = appendOlderEntries(snapshot.entries, loadedOlderEntries);
     const existingIds = new Set(snapshot.entries.map((entry) => entry.eventId));
     const newlyAddedEntries = entriesWithOlderPage.filter((entry) => !existingIds.has(entry.eventId));
     const olderDays = eventDayGroups(eventGroups(newlyAddedEntries));
+    const paginationIds = new Set(snapshot.paginationIds);
+    for (const entry of loadedOlderEntries) paginationIds.add(entry.eventId);
     setSnapshot({
       entries: entriesWithOlderPage,
       days: appendOlderDayGroups(snapshot.days, olderDays),
       pageCount: pages.length,
+      paginationIds,
     });
   }
   const displayedEntries = followsQuery ? entries : snapshot.entries;
-  const firstDisplayedEntry = displayedEntries[0];
-  const pendingCount = readerAtTop ? 0 : firstDisplayedEntry === undefined
-    ? entries.length
-    : entries.filter((entry) => chronological(entry, firstDisplayedEntry) > 0).length;
+  const displayedIds = new Set(displayedEntries.map((entry) => entry.eventId));
+  const pendingCount = readerAtTop ? 0 : entries.filter((entry) =>
+    !displayedIds.has(entry.eventId) && !snapshot.paginationIds.has(entry.eventId),
+  ).length;
   const { selectedKey: selectedGroupKey, select: selectGroup, rowRef: groupRowRef, close: closeGroup } = useInspectorSelection<string>(identityKey);
   const dayGroups = followsQuery ? eventDayGroups(eventGroups(displayedEntries)) : snapshot.days;
   const groups = followsQuery ? eventGroups(displayedEntries) : dayGroups.flatMap((day) => day.groups);

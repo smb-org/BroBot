@@ -670,6 +670,60 @@ describe("EventsPage failure cause icon", () => {
     rendered.unmount();
   });
 
+  it.each([
+    ["an older timestamp", "late-older-time", "2026-09-22T10:00:59.000Z"],
+    ["a lower id at the same timestamp", "a-late-id", "2026-09-22T10:01:00.000Z"],
+  ] as const)("announces an unseen event with %s while the displayed rows stay frozen", async (_description, lateEventId, lateCreatedAt) => {
+    const newest = entry({ eventId: "z-newest", createdAt: "2026-09-22T10:01:00.000Z" });
+    const oldest = entry({ eventId: "oldest", createdAt: "2026-09-22T10:00:00.000Z" });
+    const late = entry({
+      eventId: lateEventId,
+      createdAt: lateCreatedAt,
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: `{"source":"${lateEventId}","viewers":2}`,
+    });
+    let serverEntries: readonly PanelEventEntry[] = [newest, oldest];
+    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ entries: serverEntries, nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{ queryKey, data: { pages: [{ entries: [newest, oldest], nextCursor: null }], pageParams: [null] } }],
+      },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    const rowsBefore = Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent);
+    serverEntries = [late, newest, oldest];
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    emitEventHint(socket, `hint-${lateEventId}`, late);
+
+    await waitFor(() => {
+      const data = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelEventEntry[] }> }>(queryKey);
+      expect(data?.pages.flatMap((page) => page.entries).some((candidate) => candidate.eventId === late.eventId)).toBe(true);
+    });
+
+    expect(Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent)).toEqual(rowsBefore);
+    expect(screen.queryByText(new RegExp(lateEventId, "u"))).not.toBeInTheDocument();
+    const notice = screen.getByRole("button", { name: /1 neue Ereignisse/u });
+    expect(notice).toBeVisible();
+    fireEvent.click(notice);
+    expect(await screen.findByText(new RegExp(`Raid von ${lateEventId}`, "u"))).toBeVisible();
+    rendered.unmount();
+  });
+
   it("appends loaded older event rows without moving the frozen rows", async () => {
     const newest = entry({ eventId: "page-newest", createdAt: "2026-09-22T10:00:00.000Z" });
     const older = entry({ eventId: "page-older", createdAt: "2026-09-22T09:00:00.000Z" });
@@ -680,13 +734,21 @@ describe("EventsPage failure cause icon", () => {
       code: "channel_events.raid.incoming",
       detail: '{"source":"oldestpage","viewers":1}',
     });
+    const olderDuplicate = entry({
+      eventId: "page-older-duplicate",
+      triggerId: newest.triggerId,
+      createdAt: "2026-09-22T07:30:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"olderduplicate","viewers":1}',
+    });
     const response = (entries: readonly PanelEventEntry[], nextCursor: string | null) => new Response(JSON.stringify({ entries, nextCursor }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
     const fetcher = vi.fn((input: RequestInfo | URL) => Promise.resolve(
       requestUrl(input).searchParams.get("cursor") === "cursor-2"
-        ? response([oldest], null)
+        ? response([oldest, olderDuplicate], null)
         : requestUrl(input).searchParams.get("cursor") === "cursor-1"
           ? response([older], "cursor-2")
           : response([newest], "cursor-1"),
@@ -718,6 +780,7 @@ describe("EventsPage failure cause icon", () => {
     const after = Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent);
     expect(after.slice(0, before.length)).toEqual(before);
     expect(after).toHaveLength(before.length + 1);
+    expect(rendered.container.querySelector(".realtime-feed__notice-slot")).toHaveAttribute("data-pending", "false");
     rendered.unmount();
   });
 
