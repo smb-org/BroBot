@@ -275,7 +275,7 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
   }, [channelId, texts.events.connectionLost]);
   const atBeginning = useCallback((): boolean => true, []);
   const scrollToBeginning = useCallback((): void => undefined, []);
-  useRealtimeEventFeed({ channelId, filters: emptyEventFilter, atBeginning, refreshFirstPage, scrollToBeginning });
+  useRealtimeEventFeed({ channelId, filters: emptyEventFilter, atBeginning, refresh: () => { void refreshFirstPage(); }, scrollToBeginning });
 
   useEffect(() => {
     const controller = new AbortController();

@@ -94,7 +94,8 @@ const shapeKeys = (value: unknown, path = "$", result: string[] = []): string[] 
     return result;
   }
   if (!isJsonRecord(value)) return result;
-  result.push(`${path}: ${Object.keys(value).sort().join(",")}`);
+  // Code-unit order keeps the recorded snapshot stable (localeCompare would be case-insensitive).
+  result.push(`${path}: ${Object.keys(value).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join(",")}`);
   for (const [key, nested] of Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) {
     shapeKeys(nested, `${path}.${key}`, result);
   }
@@ -639,7 +640,7 @@ describe("serialized contract shapes", () => {
       );
       const durableObjectKeys = [
         ...durableObjectSource.matchAll(/const (?:SECURITY_DEADLINE_KEY|AD_PREWARNING_DEADLINE_KEY) = "([^"]+)"/g),
-      ].map((match) => match[1]).sort();
+      ].map((match) => match[1] ?? "").sort((a, b) => a.localeCompare(b));
 
       // The signed OAuth state travels out to Twitch and back. It sat
       // outside this set for a long time and so silently carried a
@@ -823,7 +824,7 @@ describe("serialized contract shapes", () => {
         "$.textCommand: aliases,channelId,chatTarget,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,revision,streamCondition,text,timeoutAction,updatedAt,useCount,userCooldownSeconds,variableAction",
       ]);
       expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round"]);
-      expect(MODULES.map((module) => module.id).sort()).toEqual([
+      expect(MODULES.map((module) => module.id).sort((a, b) => a.localeCompare(b))).toEqual([
         "ads",
         "api_source",
         "belabox",
@@ -842,33 +843,33 @@ describe("serialized contract shapes", () => {
         "weather",
       ]);
       expect(Object.fromEntries(MODULES.map((module) => [module.id, JSON.parse(JSON.stringify(module.defaultSettings))]))).toEqual(expectedModuleSettings);
-      expect([...TEXT_COMMAND_MINIMUM_TIERS].sort()).toEqual(["broadcaster", "everyone", "moderator", "subscriber", "vip"]);
+      expect([...TEXT_COMMAND_MINIMUM_TIERS].sort((a, b) => a.localeCompare(b))).toEqual(["broadcaster", "everyone", "moderator", "subscriber", "vip"]);
       // The closed value sets are pure TypeScript unions and have no
       // runtime value to read. Checking a literal against the same
       // literal would be a tautology. Instead, a
       // `Record<Union, true>` forces the compiler to require every member exactly once:
       // a new, removed, or renamed member breaks `pnpm run typecheck`,
       // and the assertion below freezes the spelling.
-      expect(Object.keys(allRoles).sort()).toEqual(["broadcaster", "manager", "operator"]);
-      expect(Object.keys(allMessageTypes).sort()).toEqual([
+      expect(Object.keys(allRoles).sort((a, b) => a.localeCompare(b))).toEqual(["broadcaster", "manager", "operator"]);
+      expect(Object.keys(allMessageTypes).sort((a, b) => a.localeCompare(b))).toEqual([
         "ads.schedule.updated", "event_log.new", "modul.text_library.blocks_updated", "modul.text_library.state_changed",
         "overlay.changed", "stream.state.changed", "system.hello", "variables.changed",
       ]);
-      expect(Object.keys(allRecipientKinds).sort()).toEqual(["overlay", "panel"]);
-      expect(Object.keys(REALTIME_RECIPIENTS).sort()).toEqual([...REALTIME_MESSAGE_TYPES].sort());
+      expect(Object.keys(allRecipientKinds).sort((a, b) => a.localeCompare(b))).toEqual(["overlay", "panel"]);
+      expect(Object.keys(REALTIME_RECIPIENTS).sort((a, b) => a.localeCompare(b))).toEqual([...REALTIME_MESSAGE_TYPES].sort((a, b) => a.localeCompare(b)));
       expect(REALTIME_RECIPIENTS["event_log.new"]).toEqual(["panel"]);
       expect(REALTIME_RECIPIENTS["variables.changed"]).toEqual(["panel", "overlay"]);
       expect(REALTIME_RECIPIENTS["overlay.changed"]).toEqual(["panel", "overlay"]);
       expect(REALTIME_RECIPIENTS["ads.schedule.updated"]).toEqual(["panel"]);
       expect(REALTIME_RECIPIENTS["stream.state.changed"]).toEqual(["panel"]);
-      expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
-      expect(Object.keys(allActionKinds).sort()).toEqual(["announcement", "ban", "chat", "overlay", "shoutout", "timeout"]);
-      expect(Object.keys(allLanguages).sort()).toEqual(["de", "en"]);
-      expect(Object.keys(allTextCommandKinds).sort()).toEqual(["list", "shoutout", "text", "timeout"]);
-      expect(Object.keys(allTextCommandResponseTypes).sort()).toEqual([...TEXT_COMMAND_RESPONSE_TYPES].sort());
-      expect(Object.keys(allTextCommandStreamConditions).sort()).toEqual([...TEXT_COMMAND_STREAM_CONDITIONS].sort());
-      expect(Object.keys(allEventOrigins).sort()).toEqual(["channel", "module"]);
-      expect(Object.keys(alleTonlagen).sort()).toEqual(["error", "info", "warning"]);
+      expect(Object.keys(allChatStatus).sort((a, b) => a.localeCompare(b))).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
+      expect(Object.keys(allActionKinds).sort((a, b) => a.localeCompare(b))).toEqual(["announcement", "ban", "chat", "overlay", "shoutout", "timeout"]);
+      expect(Object.keys(allLanguages).sort((a, b) => a.localeCompare(b))).toEqual(["de", "en"]);
+      expect(Object.keys(allTextCommandKinds).sort((a, b) => a.localeCompare(b))).toEqual(["list", "shoutout", "text", "timeout"]);
+      expect(Object.keys(allTextCommandResponseTypes).sort((a, b) => a.localeCompare(b))).toEqual([...TEXT_COMMAND_RESPONSE_TYPES].sort((a, b) => a.localeCompare(b)));
+      expect(Object.keys(allTextCommandStreamConditions).sort((a, b) => a.localeCompare(b))).toEqual([...TEXT_COMMAND_STREAM_CONDITIONS].sort((a, b) => a.localeCompare(b)));
+      expect(Object.keys(allEventOrigins).sort((a, b) => a.localeCompare(b))).toEqual(["channel", "module"]);
+      expect(Object.keys(alleTonlagen).sort((a, b) => a.localeCompare(b))).toEqual(["error", "info", "warning"]);
     } finally {
       principalDatabase.close();
       eventDatabase.close();

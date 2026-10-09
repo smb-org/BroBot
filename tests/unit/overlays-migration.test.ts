@@ -12,7 +12,7 @@ describe("stored overlays migration", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
-      for (const file of readdirSync(migrationsDirectory).filter((name) => name < "0012_overlays.sql").sort()) {
+      for (const file of readdirSync(migrationsDirectory).filter((name) => name < "0012_overlays.sql").sort((a, b) => a.localeCompare(b))) {
         database.exec(readMigration(file));
       }
       database.exec(`

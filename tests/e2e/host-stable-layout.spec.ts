@@ -478,6 +478,7 @@ test("member pagination stays in a sticky 44px footer as more rows load at deskt
 
     await page.goto(`/channels/${channelId}/members`);
     await expect(page.locator(".members-table tbody tr")).toHaveCount(100);
+    await expect(page.getByText("Member 1", { exact: true })).toBeVisible();
     const listTop = await measureDocumentBox(page, ".members-table");
     const footer = page.locator(".members-page__list-column .list-pagination-footer");
     await expect(footer.getByRole("button", { name: "Load more members" })).toBeVisible();
@@ -508,6 +509,7 @@ test("member list errors use a toast and keep the table top fixed at desktop and
 
     await page.goto(`/channels/${channelId}/members`);
     await expect(page.locator(".members-table tbody tr")).toHaveCount(100);
+    await expect(page.getByText("Member 1", { exact: true })).toBeVisible();
     const listTop = await measureDocumentBox(page, ".members-table");
     await page.getByRole("button", { name: "Load more members" }).click();
     await expect(page.locator(".ui-toast").filter({ hasText: "The data could not be loaded." })).toBeVisible();

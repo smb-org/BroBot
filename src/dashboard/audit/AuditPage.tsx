@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 
-import type { PanelAuditEntry, PanelAuditFilters, PanelAuditResponse } from "../../panel-contract";
+import type { PanelAuditEntry, PanelAuditFilters } from "../../panel-contract";
 import { AUDIT_AREAS } from "../../contracts/values";
 import { MODULES } from "../../modules/registry";
-import { auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
+import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
 import { ModuleHeading } from "../module-panels";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
-import type { LoadState } from "../load-state";
+import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, QueryErrorState, QueryStatusRow, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { PanelApiError } from "../api";
+import { dashboardDataKeys } from "../data/keys";
+import { useAuditQuery } from "../data/lists";
 import {
   auditActorLabel,
   auditAreaForAction,
@@ -136,20 +138,60 @@ const useModuleFieldCatalog = (entry: PanelAuditEntry | null): SettingsEditorCat
 };
 
 interface AuditPageProperties {
-  auditState: LoadState<PanelAuditResponse>;
+  channelId: string;
   filters: PanelAuditFilters;
   onFiltersChange: (filters: PanelAuditFilters) => void;
-  onNextPage: () => void;
-  loadingNextPage: boolean;
 }
 
-export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, loadingNextPage }: AuditPageProperties): ReactElement => {
+export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProperties): ReactElement => {
+  const query = useAuditQuery(channelId, filters);
+  const queryKey = dashboardDataKeys.audit(channelId, filters);
+  const identityKey = JSON.stringify(queryKey);
+  useEffect(() => {
+    if (!query.isError) return;
+    const fallback = dashboardTexts().errors.dataLoadFailed;
+    const message = query.error instanceof PanelApiError ? apiErrorText(query.error.code, fallback) : fallback;
+    notify({ tone: "error", message });
+  }, [query.error, query.isError]);
+  const pages = query.data?.pages ?? [];
+  const entries = [...new Map(pages.flatMap((page) => page.entries).map((entry) => [entry.auditId, entry])).values()];
+  const nextCursor = pages.at(-1)?.nextCursor ?? null;
+  const error = query.error instanceof PanelApiError
+    ? apiErrorText(query.error.code, dashboardTexts().errors.dataLoadFailed)
+    : query.isError ? dashboardTexts().errors.dataLoadFailed : null;
+  return <AuditPageContent
+    identityKey={identityKey}
+    entries={entries}
+    nextCursor={query.isPlaceholderData ? null : nextCursor}
+    filters={filters}
+    onFiltersChange={onFiltersChange}
+    loading={query.isPending}
+    fetching={query.isFetching && !query.isFetchingNextPage}
+    error={error}
+    loadingNextPage={query.isFetchingNextPage}
+    onNextPage={() => { void query.fetchNextPage(); }}
+    onRetry={() => { void query.refetch(); }}
+  />;
+};
+
+const AuditPageContent = ({ identityKey, entries, nextCursor, filters, onFiltersChange, loading, fetching, error, onNextPage, onRetry, loadingNextPage }: {
+  identityKey: string;
+  entries: readonly PanelAuditEntry[];
+  nextCursor: string | null;
+  filters: PanelAuditFilters;
+  onFiltersChange: (filters: PanelAuditFilters) => void;
+  loading: boolean;
+  fetching: boolean;
+  error: string | null;
+  onNextPage: () => void;
+  onRetry: () => void;
+  loadingNextPage: boolean;
+}): ReactElement => {
   const texts = dashboardTexts();
-  const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>();
-  const selectedAudit = auditState.data?.entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
+  const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>(identityKey);
+  const selectedAudit = entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
   const moduleCatalog = useModuleFieldCatalog(selectedAudit);
   const selectedDiffRows = selectedAudit === null ? [] : auditDiffRows(selectedAudit.before, selectedAudit.after);
-  const entries = auditState.data?.entries ?? [];
   const dayGroups = auditDayGroups(entries, formatDate);
   const filterActive = auditFilterIsActive(filters);
   return (
@@ -157,28 +199,34 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
       <ModuleHeading
         kind="audit"
         title={texts.audit.title}
-        subtitle={auditState.data === null
+        subtitle={loading && entries.length === 0
           ? <span className="module-heading__subtitle-placeholder" aria-hidden="true"><span className="number">{formatNumber(0)}</span> {texts.audit.entries}</span>
-          : <><span className="number">{formatNumber(auditState.data.entries.length)}</span> {texts.audit.entries}</>}
+          : <><span className="number">{formatNumber(entries.length)}</span> {texts.audit.entries}</>}
       />
       <ListDetail
         onCloseInspector={closeAudit}
         list={
           <section className="content-section" aria-label={texts.audit.title}>
             <AuditFilterBar filters={filters} onChange={onFiltersChange} />
+            <QueryStatusRow
+              message={error !== null && entries.length > 0 ? error : null}
+              retryLabel={dashboardCommonTexts().retry}
+              onRetry={onRetry}
+            />
             <UiLoadState
-              status={auditState.data === null
-                ? auditState.status === "error" ? "error" : "loading"
+              status={loading
+                ? "loading"
+                : error !== null && entries.length === 0 ? "error"
                 : entries.length === 0 ? "empty" : "success"}
               minHeight={420}
               loading={<Skeleton rows={50} height={44} />}
               empty={filterActive
                 ? <EmptyState title={texts.audit.noMatches} description={texts.audit.activeFilters} action={{ label: texts.audit.resetFilters, onClick: () => { onFiltersChange(emptyAuditFilter); } }} />
                 : <p className="empty-state">{texts.audit.empty}</p>}
-              error={<EmptyState title={texts.audit.loadError} description={texts.audit.load} />}
+              error={<QueryErrorState title={texts.audit.loadError} reason={error ?? texts.audit.load} retryLabel={dashboardCommonTexts().retry} onRetry={onRetry} />}
             >
               {entries.length > 0 ? <>
-              <div className={auditState.status === "loading" ? "stale" : undefined}>
+              <div key={identityKey} className={fetching ? "stale" : undefined} aria-busy={fetching}>
                 {dayGroups.map((day) => (
                   <section key={day.key} className="event-day">
                     <h3 className="event-day__heading">{day.label}</h3>
@@ -214,8 +262,8 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
               </div>
             </> : null}
             </UiLoadState>
-            {entries.length === 0 && auditState.data?.nextCursor == null ? null : <ListPaginationFooter loadedCount={entries.length} loadedLabel={texts.audit.loaded}>
-              {auditState.data?.nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
+            {entries.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={entries.length} loadedLabel={texts.audit.loaded}>
+              {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
             </ListPaginationFooter>}
           </section>
         }

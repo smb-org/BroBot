@@ -7,15 +7,15 @@ interface InspectorSelection<Key extends string> {
   close: () => void;
 }
 
-export const useInspectorSelection = <Key extends string>(): InspectorSelection<Key> => {
-  const [selectedKey, setSelectedKey] = useState<Key | null>(null);
-  const selectedKeyRef = useRef<Key | null>(null);
+export const useInspectorSelection = <Key extends string>(identity: unknown = null): InspectorSelection<Key> => {
+  const [selection, setSelection] = useState<{ identity: unknown; key: Key | null }>(() => ({ identity, key: null }));
+  if (!Object.is(selection.identity, identity)) setSelection({ identity, key: null });
+  const selectedKey = Object.is(selection.identity, identity) ? selection.key : null;
   const rowRefs = useRef(new Map<Key, HTMLElement>());
 
   const select = useCallback((key: Key): void => {
-    selectedKeyRef.current = key;
-    setSelectedKey(key);
-  }, []);
+    setSelection({ identity, key });
+  }, [identity]);
 
   const rowRef = useCallback((key: Key): RefCallback<HTMLElement> => (row: HTMLElement | null): void => {
     if (row === null) {
@@ -26,11 +26,10 @@ export const useInspectorSelection = <Key extends string>(): InspectorSelection<
   }, []);
 
   const close = useCallback((): void => {
-    const key = selectedKeyRef.current;
-    selectedKeyRef.current = null;
-    setSelectedKey(null);
+    const key = selectedKey;
+    setSelection({ identity, key: null });
     if (key !== null) rowRefs.current.get(key)?.focus();
-  }, []);
+  }, [identity, selectedKey]);
 
   return { selectedKey, select, rowRef, close };
 };

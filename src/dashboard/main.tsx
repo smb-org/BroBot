@@ -1,10 +1,9 @@
-import { Fragment, StrictMode, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Fragment, StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 
 import type {
   PanelAuditFilters,
-  PanelAuditResponse,
   PanelBotPermissions,
   PanelBotStatus,
   PanelBroadcasterPermissions,
@@ -13,12 +12,9 @@ import type {
   PanelChannelControl,
   PanelChannelControls,
   PanelChannelState,
-  PanelEventEntry,
   PanelEventFilters,
-  PanelEventsResponse,
   PanelEventSubSubscription,
   PanelLastError,
-  PanelMembersResponse,
   PanelModeratorStatus,
   PanelModuleState,
   PanelModulesResponse,
@@ -26,13 +22,9 @@ import type {
   PanelTokenStatus,
 } from "../panel-contract";
 import {
-  fetchAuditLog,
   fetchChannelOverview,
   fetchChannelSettings,
   fetchChannels,
-  fetchEvents,
-  fetchMembers,
-  fetchSystemOverview,
   logout,
   PanelApiError,
   refreshModeratorStatus,
@@ -44,6 +36,7 @@ import {
 import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
 import { BroadcasterConsentAction, ChannelNotices, ImmediateActions, ModeratorCheckAction, WarningsAndErrorsFeed } from "./stream-manager";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
+import { useSystemQuery } from "./data/lists";
 import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
@@ -55,9 +48,9 @@ import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, QueryErrorState, QueryStatusRow, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
-import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
+import { emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
 import { ChannelVariablesPage } from "./ChannelVariablesPage";
 import { OverlaysPage } from "./OverlaysPage";
@@ -68,7 +61,7 @@ import { channelSettingsTexts } from "./channel-settings-locale";
 import { ChannelTimeZoneField } from "./ChannelTimeZoneField";
 import { ChannelLocationField } from "./ChannelLocationField";
 import { botPermissionsAreMissing, broadcasterPermissionsAreMissing, moderatorIsMissing, parseDashboardDate, tokenHealth } from "./channel-health";
-import { idleState, loadedState, loadingState, type LoadState } from "./load-state";
+import { loadingState, type LoadState } from "./load-state";
 import { queryKeys } from "./data/keys";
 import { dashboardAuthenticationRequiredEvent, dispatchDashboardAuthenticationRequired } from "./data/events";
 import { DashboardDataProvider } from "./data/provider";
@@ -80,16 +73,6 @@ interface ModeratorCheckState {
   status: "idle" | "loading" | "error";
   error: string | null;
   nextAllowedAt: string | null;
-}
-
-interface MembersRequestState {
-  controller: AbortController | null;
-  generation: number;
-}
-
-interface EventsRequestState {
-  controller: AbortController | null;
-  generation: number;
 }
 
 const idleModeratorCheck = (): ModeratorCheckState => ({
@@ -1057,25 +1040,96 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
   );
 };
 
-interface SystemPageProperties {
-  system: PanelSystemResponse | null;
-  systemState: LoadState<PanelSystemResponse>;
+interface ChannelOverviewRouteProperties {
+  routeKey: string;
+  overview: PanelChannelOverview;
+  loadedAt?: number | undefined;
+  onNavigate: (route: DashboardRoute) => void;
+  modules: PanelModuleState[];
+  modulesLoaded: boolean;
+  channelsLoadedAt: number;
+  onAuthenticationRequired: () => void;
+  onLocationChanged: (channelId: string, location: NonNullable<PanelChannelOverview["location"]> | null) => void;
 }
 
-const SystemPage = ({ system, systemState }: SystemPageProperties): ReactElement => {
+const ChannelOverviewRoute = ({ routeKey, overview, loadedAt, onNavigate, modules, modulesLoaded, channelsLoadedAt, onAuthenticationRequired, onLocationChanged }: ChannelOverviewRouteProperties): ReactElement => {
+  const queryClient = useQueryClient();
+  const [moderatorCheck, setModeratorCheck] = useState<ModeratorCheckState>(idleModeratorCheck);
+  const generationRef = useRef(0);
+  useLayoutEffect(() => {
+    generationRef.current += 1;
+    const generation = generationRef.current;
+    return () => {
+      if (generationRef.current === generation) generationRef.current += 1;
+    };
+  }, [routeKey]);
+
+  const handleModeratorStatusCheck = async (): Promise<void> => {
+    const channelId = overview.channelId;
+    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "overview" });
+    const generation = generationRef.current;
+    setModeratorCheck({ status: "loading", error: null, nextAllowedAt: null });
+    try {
+      const response = await refreshModeratorStatus(channelId);
+      if (generationRef.current !== generation || window.location.pathname !== routePath) return;
+      queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
+        current?.channelId !== channelId ? current : mergeModeratorStatus(current, response.moderator),
+      { ...(loadedAt === undefined ? {} : { updatedAt: loadedAt }) });
+      queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
+        ...current,
+        channels: current.channels.map((channel) => channel.channelId !== channelId ? channel : mergeModeratorStatus(channel, response.moderator)),
+      }, { updatedAt: channelsLoadedAt });
+      setModeratorCheck({ status: "idle", error: null, nextAllowedAt: response.nextAllowedAt });
+    } catch (error: unknown) {
+      if (generationRef.current !== generation || window.location.pathname !== routePath) return;
+      setModeratorCheck({ status: "error", error: errorMessage(error), nextAllowedAt: nextAllowedAtFromError(error) });
+      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
+    }
+  };
+
+  return <ChannelOverviewPage
+    overview={overview}
+    loadedAt={loadedAt}
+    moderatorCheck={moderatorCheck}
+    onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }}
+    onNavigate={onNavigate}
+    modules={modules}
+    modulesLoaded={modulesLoaded}
+    onLocationChanged={onLocationChanged}
+  />;
+};
+
+interface SystemPageProperties {
+  system: PanelSystemResponse | undefined;
+  error: string | null;
+  loadedAt: number | undefined;
+  onRetry: () => void;
+}
+
+const SystemPage = ({ system, error, loadedAt, onRetry }: SystemPageProperties): ReactElement => {
   const texts = dashboardTexts();
   return (
     <>
       <ModuleHeading kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
       <UiLoadState
-        status={system !== null ? "success" : systemState.status === "error" ? "error" : "loading"}
+        status={system !== undefined ? "success" : error !== null ? "error" : "loading"}
         minHeight={720}
         loading={<Skeleton rows={8} height={58} />}
         empty={<Skeleton rows={8} height={58} />}
-        error={<Skeleton rows={8} height={58} />}
+        error={<QueryErrorState
+          title={texts.errors.dataLoadFailed}
+          reason={error ?? texts.system.loadState}
+          retryLabel={dashboardCommonTexts().retry}
+          onRetry={onRetry}
+        />}
       >
-        {system === null ? null : <>
-          <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot, systemState.loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+        {system === undefined ? null : <>
+          <QueryStatusRow
+            message={error}
+            retryLabel={dashboardCommonTexts().retry}
+            onRetry={onRetry}
+          />
+          <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
           <BotPermissionsInspector permissions={system.botPermissions} />
           <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
           <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
@@ -1108,16 +1162,6 @@ const SystemProperties = ({ system }: { system: PanelSystemResponse }): ReactEle
   );
 };
 
-const mergeEventEntries = (
-  current: readonly PanelEventEntry[],
-  incoming: readonly PanelEventEntry[],
-): PanelEventEntry[] => {
-  const byId = new Map<string, PanelEventEntry>();
-  for (const entry of current) byId.set(entry.eventId, entry);
-  for (const entry of incoming) byId.set(entry.eventId, entry);
-  return Array.from(byId.values()).sort((left, right) => chronological(right, left));
-};
-
 export const DashboardApp = (): ReactElement => {
   useEffect(() => {
     document.documentElement.lang = dashboardLanguage();
@@ -1125,7 +1169,7 @@ export const DashboardApp = (): ReactElement => {
 
   const [route, navigate] = useDashboardRoute();
   const routeRef = useRef(route);
-  routeRef.current = route;
+  useLayoutEffect(() => { routeRef.current = route; }, [route]);
   const queryClient = useQueryClient();
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
   const requestLogin = useCallback((): void => { setAuthenticationRequired(true); }, []);
@@ -1153,6 +1197,9 @@ export const DashboardApp = (): ReactElement => {
     ...loadStateFromQuery(channelsQuery),
     data: channelsResponse?.channels ?? null,
   };
+  const selectedChannel = (route.kind !== "channel" && route.kind !== "module") || channels.data === null
+    ? null
+    : channels.data.find((channel) => channel.channelId === route.channelId) ?? null;
   const viewerUserId = channelsResponse?.viewerUserId ?? null;
   const isPlatform = channelsResponse?.platformAdmin ?? false;
   const viewerIsBot = channelsResponse?.viewerIsBot ?? false;
@@ -1179,21 +1226,10 @@ export const DashboardApp = (): ReactElement => {
   const routeHasOwnRealtimeFeed = route.kind === "channel" &&
     (route.section === "overview" || route.section === "events" || route.section === "variables");
   useRealtimePanelMessages(realtimeChannelId, realtimeChannelId !== null && !routeHasOwnRealtimeFeed);
+  const systemChannelId = route.kind === "channel" && route.section === "system" ? route.channelId : null;
+  const systemQuery = useSystemQuery(systemChannelId ?? "", !authenticationRequired && systemChannelId !== null);
   const [, setFreshnessTick] = useState(0);
-  const [moderatorCheck, setModeratorCheck] = useState<ModeratorCheckState>(() => idleModeratorCheck());
-  const [system, setSystem] = useState<LoadState<PanelSystemResponse>>(() => idleState());
-  const [members, setMembers] = useState<LoadState<PanelMembersResponse>>(() => idleState());
-  const [audit, setAudit] = useState<LoadState<PanelAuditResponse>>(() => idleState());
-  const [events, setEvents] = useState<LoadState<PanelEventsResponse>>(() => idleState());
-  const [systemChannelId, setSystemChannelId] = useState<string | null>(null);
-  const [auditChannelId, setAuditChannelId] = useState<string | null>(null);
-  const [eventsChannelId, setEventsChannelId] = useState<string | null>(null);
-  const [loadingNextAuditPage, setLoadingNextAuditPage] = useState(false);
-  const auditPageController = useRef<AbortController | null>(null);
-  const [loadingNextEventsPage, setLoadingNextEventsPage] = useState(false);
-  const eventsRequest = useRef<EventsRequestState>({ controller: null, generation: 0 });
-  const [loadingNextMembersPage, setLoadingNextMembersPage] = useState(false);
-  const membersRequest = useRef<MembersRequestState>({ controller: null, generation: 0 });
+  const routeKey = dashboardRoutePath(route);
   const [loggingOut, setLoggingOut] = useState(false);
   const [headerModuleBusyKeys, setHeaderModuleBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
   const headerModuleBusy = route.kind === "module" && headerModuleBusyKeys.has(`${route.channelId}:${route.moduleId}`);
@@ -1220,17 +1256,8 @@ export const DashboardApp = (): ReactElement => {
     reportLoadError("overview", route.kind === "channel" || route.kind === "module" ? overview.error : null);
   }, [overview.error, reportLoadError, route]);
   useEffect(() => {
-    reportLoadError("system", route.kind === "channel" && route.section === "system" ? system.error : null);
-  }, [reportLoadError, route, system.error]);
-  useEffect(() => {
-    reportLoadError("members", route.kind === "channel" && route.section === "members" ? members.error : null);
-  }, [members.error, reportLoadError, route]);
-  useEffect(() => {
-    reportLoadError("audit", route.kind === "channel" && route.section === "audit" ? audit.error : null);
-  }, [audit.error, reportLoadError, route]);
-  useEffect(() => {
-    reportLoadError("events", route.kind === "channel" && route.section === "events" ? events.error : null);
-  }, [events.error, reportLoadError, route]);
+    reportLoadError("system", systemChannelId !== null && systemQuery.isError ? errorMessage(systemQuery.error) : null);
+  }, [reportLoadError, systemChannelId, systemQuery.error, systemQuery.isError]);
   useEffect(() => {
     const handleRealtimeMessage = (event: Event): void => {
       const detail: unknown = (event as CustomEvent<unknown>).detail;
@@ -1280,92 +1307,9 @@ export const DashboardApp = (): ReactElement => {
     await queryClient.invalidateQueries(filter);
   }, [queryClient]);
 
-  const startMembersRequest = useCallback((): { controller: AbortController; generation: number } => {
-    membersRequest.current.controller?.abort();
-    const request = {
-      controller: new AbortController(),
-      generation: membersRequest.current.generation + 1,
-    };
-    membersRequest.current = request;
-    return request;
-  }, []);
-
-  const isCurrentMembersRequest = useCallback((generation: number): boolean => membersRequest.current.generation === generation, []);
-
-  const finishMembersRequest = useCallback((generation: number): void => {
-    if (isCurrentMembersRequest(generation)) membersRequest.current.controller = null;
-  }, [isCurrentMembersRequest]);
-
-  const cancelMembersRequest = useCallback((): void => {
-    membersRequest.current.controller?.abort();
-    membersRequest.current = { controller: null, generation: membersRequest.current.generation + 1 };
-  }, []);
-
-  const startEventsRequest = useCallback((): { controller: AbortController; generation: number } => {
-    eventsRequest.current.controller?.abort();
-    const request = {
-      controller: new AbortController(),
-      generation: eventsRequest.current.generation + 1,
-    };
-    eventsRequest.current = request;
-    return request;
-  }, []);
-
-  const isCurrentEventsRequest = useCallback((generation: number): boolean => eventsRequest.current.generation === generation, []);
-
-  const finishEventsRequest = useCallback((generation: number): void => {
-    if (isCurrentEventsRequest(generation)) eventsRequest.current.controller = null;
-  }, [isCurrentEventsRequest]);
-
-  const cancelEventsRequest = useCallback((): void => {
-    eventsRequest.current.controller?.abort();
-    eventsRequest.current = { controller: null, generation: eventsRequest.current.generation + 1 };
-  }, []);
-
-  const reloadFirstEventsPage = useCallback(async (channelId: string, filters: PanelEventFilters): Promise<void> => {
-    const routePath = dashboardRoutePath({
-      kind: "channel",
-      channelId,
-      section: "events",
-      ...(eventFilterIsActive(filters) ? { filters } : {}),
-    });
-    const request = startEventsRequest();
-    setEvents((current) => loadingState(current));
-    try {
-      const response = await fetchEvents(channelId, null, request.controller.signal, filters);
-      if (!isCurrentEventsRequest(request.generation) || request.controller.signal.aborted || window.location.pathname + window.location.search !== routePath) return;
-      setEvents((current) => loadedState({
-        entries: mergeEventEntries(current.data?.entries ?? [], response.entries),
-        nextCursor: current.data === null ? response.nextCursor : current.data.nextCursor,
-      }));
-      setEventsChannelId(channelId);
-    } catch (error) {
-      if (!isCurrentEventsRequest(request.generation) || request.controller.signal.aborted || window.location.pathname + window.location.search !== routePath || (error instanceof DOMException && error.name === "AbortError")) return;
-      setEvents((current) => ({ ...current, status: "error", error: errorMessage(error) }));
-      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-    } finally {
-      finishEventsRequest(request.generation);
-    }
-  }, [finishEventsRequest, isCurrentEventsRequest, startEventsRequest]);
-
   const clearProtectedState = (): void => {
-    auditPageController.current?.abort();
-    auditPageController.current = null;
-    cancelEventsRequest();
-    cancelMembersRequest();
     setAuthenticationRequired(true);
     queryClient.clear();
-    setModeratorCheck(idleModeratorCheck());
-    setSystem(idleState());
-    setMembers(idleState());
-    setAudit(idleState());
-    setEvents(idleState());
-    setSystemChannelId(null);
-    setAuditChannelId(null);
-    setEventsChannelId(null);
-    setLoadingNextAuditPage(false);
-    setLoadingNextEventsPage(false);
-    setLoadingNextMembersPage(false);
     navigate({ kind: "overview" });
   };
 
@@ -1382,154 +1326,7 @@ export const DashboardApp = (): ReactElement => {
     replaceDashboardRoute({ kind: "channel", channelId: channel.channelId, section: "overview" });
   }, [channels.data, channels.status, route.kind]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-    auditPageController.current?.abort();
-    auditPageController.current = null;
-    setLoadingNextAuditPage(false);
-    cancelEventsRequest();
-    setLoadingNextEventsPage(false);
-    cancelMembersRequest();
-    setLoadingNextMembersPage(false);
-    setModeratorCheck(idleModeratorCheck());
-    const cleanup = (): void => {
-      cancelled = true;
-      controller.abort();
-      auditPageController.current?.abort();
-      auditPageController.current = null;
-      cancelEventsRequest();
-      cancelMembersRequest();
-      setLoadingNextMembersPage(false);
-    };
-    if (route.kind !== "channel" && route.kind !== "module") return cleanup;
-
-    const load = async (): Promise<void> => {
-      if (route.kind === "module" || route.section === "overview" || route.section === "modules") return;
-      if (route.section === "members") {
-        const routePath = dashboardRoutePath({ kind: "channel", channelId: route.channelId, section: "members" });
-        const request = startMembersRequest();
-        setMembers(loadingState());
-        try {
-          const response = await fetchMembers(route.channelId, null, request.controller.signal);
-          if (!cancelled && isCurrentMembersRequest(request.generation) && !request.controller.signal.aborted && window.location.pathname === routePath) {
-            setMembers(loadedState(response));
-          }
-        } catch (error) {
-          if (!cancelled && isCurrentMembersRequest(request.generation) && !request.controller.signal.aborted && window.location.pathname === routePath && !(error instanceof DOMException && error.name === "AbortError")) {
-            setMembers({ status: "error", data: null, error: errorMessage(error) });
-            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-          }
-        } finally {
-          finishMembersRequest(request.generation);
-        }
-        return;
-      }
-      if (route.section === "events") {
-        setEvents(loadingState());
-        setEventsChannelId(route.channelId);
-        const request = startEventsRequest();
-        const filters = route.filters ?? emptyEventFilter;
-        try {
-          const response = await fetchEvents(route.channelId, null, request.controller.signal, filters);
-          if (!cancelled && isCurrentEventsRequest(request.generation) && !request.controller.signal.aborted) {
-            setEvents(loadedState(response));
-            setEventsChannelId(route.channelId);
-          }
-        } catch (error) {
-          if (!cancelled && isCurrentEventsRequest(request.generation) && !request.controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-            setEvents({ status: "error", data: null, error: errorMessage(error) });
-            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-          }
-        } finally {
-          finishEventsRequest(request.generation);
-        }
-        return;
-      }
-      if (route.section === "audit") {
-        setAudit(loadingState());
-        setAuditChannelId(route.channelId);
-        try {
-          const response = await fetchAuditLog(route.channelId, null, controller.signal, route.auditFilters ?? emptyAuditFilter);
-          if (!cancelled && !controller.signal.aborted) {
-            setAudit(loadedState(response));
-            setAuditChannelId(route.channelId);
-          }
-        } catch (error) {
-          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-            setAudit({ status: "error", data: null, error: errorMessage(error) });
-            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-          }
-        }
-        return;
-      }
-
-      if (route.section !== "system") return;
-      setSystem(loadingState());
-      setSystemChannelId(route.channelId);
-      try {
-        const response = await fetchSystemOverview(route.channelId, controller.signal);
-        if (!cancelled && !controller.signal.aborted) {
-          setSystem(loadedState(response));
-          setSystemChannelId(route.channelId);
-        }
-      } catch (error) {
-        if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-          setSystem({ status: "error", data: null, error: errorMessage(error) });
-          if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-        }
-      }
-    };
-    void load();
-    return cleanup;
-  }, [cancelEventsRequest, cancelMembersRequest, finishEventsRequest, finishMembersRequest, isCurrentEventsRequest, isCurrentMembersRequest, route, startEventsRequest, startMembersRequest]);
-
-  const handleModeratorStatusCheck = async (): Promise<void> => {
-    if (route.kind !== "channel" || route.section !== "overview") return;
-    const channelId = route.channelId;
-    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "overview" });
-    setModeratorCheck({ status: "loading", error: null, nextAllowedAt: null });
-    try {
-      const response = await refreshModeratorStatus(channelId);
-      if (window.location.pathname !== routePath) return;
-      queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
-        current?.channelId !== channelId ? current : mergeModeratorStatus(current, response.moderator),
-      { updatedAt: overviewQuery.dataUpdatedAt });
-      queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
-        ...current,
-        channels: current.channels.map((channel) => channel.channelId !== channelId ? channel : mergeModeratorStatus(channel, response.moderator)),
-      }, { updatedAt: channelsQuery.dataUpdatedAt });
-      setModeratorCheck({ status: "idle", error: null, nextAllowedAt: response.nextAllowedAt });
-    } catch (error: unknown) {
-      if (window.location.pathname !== routePath) return;
-      setModeratorCheck({ status: "error", error: errorMessage(error), nextAllowedAt: nextAllowedAtFromError(error) });
-      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-    }
-  };
-
-  const reloadMembers = async (): Promise<void> => {
-    if (route.kind !== "channel" || route.section !== "members") return;
-    const channelId = route.channelId;
-    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "members" });
-    setLoadingNextMembersPage(false);
-    const request = startMembersRequest();
-    setMembers((current) => loadingState(current));
-    try {
-      const response = await fetchMembers(channelId, null, request.controller.signal);
-      if (!isCurrentMembersRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
-      setMembers(loadedState(response));
-    } catch (error) {
-      if (!isCurrentMembersRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
-      setMembers((current) => current.loadedAt === undefined
-        ? { status: "error", data: null, error: errorMessage(error) }
-        : { status: "error", data: null, error: errorMessage(error), loadedAt: current.loadedAt });
-      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-    } finally {
-      finishMembersRequest(request.generation);
-    }
-  };
-
-  const reloadModules = async (): Promise<void> => {
+  const reloadModules = useCallback(async (): Promise<void> => {
     if (route.kind !== "channel" && route.kind !== "module") return;
     if (selectedChannel?.modules !== undefined) {
       await reloadChannels();
@@ -1538,18 +1335,18 @@ export const DashboardApp = (): ReactElement => {
     const filter = { queryKey: queryKeys.channel(route.channelId, "modules"), exact: true } as const;
     await queryClient.cancelQueries(filter);
     await queryClient.invalidateQueries(filter);
-  };
+  }, [queryClient, reloadChannels, route, selectedChannel]);
 
   const reloadAfterModuleToggle = async (channelId: string): Promise<void> => refreshAfterModuleToggle(queryClient, channelId);
 
-  const reloadOverview = async (): Promise<void> => {
+  const reloadOverview = useCallback(async (): Promise<void> => {
     if (route.kind !== "module" && !(route.kind === "channel" && route.section === "overview")) return;
     const filter = { queryKey: queryKeys.channel(route.channelId, "overview"), exact: true } as const;
     await queryClient.cancelQueries(filter);
     await queryClient.invalidateQueries(filter);
-  };
+  }, [queryClient, route]);
   const reloadOverviewRef = useRef(reloadOverview);
-  reloadOverviewRef.current = reloadOverview;
+  useLayoutEffect(() => { reloadOverviewRef.current = reloadOverview; }, [reloadOverview]);
   useEffect(() => {
     const reconcileOnSocketConnect = (event: Event): void => {
       const detail: unknown = (event as CustomEvent<unknown>).detail;
@@ -1564,36 +1361,22 @@ export const DashboardApp = (): ReactElement => {
     return () => window.removeEventListener("brobot:realtime-connected", reconcileOnSocketConnect);
   }, []);
 
-  const reloadSystem = async (): Promise<void> => {
-    if (route.kind !== "channel" || route.section !== "system") return;
-    const channelId = route.channelId;
-    const routePath = dashboardRoutePath(route);
-    setSystem((current) => loadingState(current));
-    try {
-      const response = await fetchSystemOverview(channelId);
-      if (window.location.pathname !== routePath) return;
-      setSystem(loadedState(response));
-      setSystemChannelId(channelId);
-    } catch (error: unknown) {
-      if (window.location.pathname !== routePath) return;
-      setSystem((current) => current.loadedAt === undefined
-        ? { status: "error", data: null, error: errorMessage(error) }
-        : { status: "error", data: current.data, error: errorMessage(error), loadedAt: current.loadedAt });
-      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-    }
-  };
-
-  const refreshChannelState = async (): Promise<void> => {
+  const refreshChannelState = useCallback(async (): Promise<void> => {
     const refreshFallbackModules = selectedChannel?.modules === undefined ? reloadModules() : Promise.resolve();
+    const refreshSystem = systemChannelId === null ? Promise.resolve() : (async () => {
+      const filter = { queryKey: queryKeys.channel(systemChannelId, "system"), exact: true } as const;
+      await queryClient.cancelQueries(filter);
+      await queryClient.invalidateQueries(filter);
+    })();
     await Promise.all([
       reloadChannels(),
       reloadOverview(),
-      reloadSystem(),
+      refreshSystem,
       refreshFallbackModules,
     ]);
-  };
+  }, [queryClient, reloadChannels, reloadModules, reloadOverview, selectedChannel?.modules, systemChannelId]);
   const refreshChannelStateRef = useRef(refreshChannelState);
-  refreshChannelStateRef.current = refreshChannelState;
+  useLayoutEffect(() => { refreshChannelStateRef.current = refreshChannelState; }, [refreshChannelState]);
   useEffect(() => {
     const refresh = (): void => {
       if (document.visibilityState === "visible") void refreshChannelStateRef.current();
@@ -1622,8 +1405,8 @@ export const DashboardApp = (): ReactElement => {
     rememberTokenSnapshot(overview.data.channelId, overview.data.tokens, overview.loadedAt);
   }
   if (route.kind === "channel" && route.section === "system" && route.channelId === systemChannelId &&
-      system.data !== null && system.loadedAt !== undefined) {
-    rememberTokenSnapshot(route.channelId, system.data.tokens, system.loadedAt);
+      systemQuery.data !== undefined && systemQuery.dataUpdatedAt > 0) {
+    rememberTokenSnapshot(route.channelId, systemQuery.data.tokens, systemQuery.dataUpdatedAt);
   }
   const expiryCandidates = [...tokenSnapshots].flatMap(([channelId, snapshot]) =>
     [snapshot.tokens.botExpiresAt, snapshot.tokens.loginExpiresAt].flatMap((value) => {
@@ -1684,46 +1467,6 @@ export const DashboardApp = (): ReactElement => {
     }
   };
 
-  const loadNextMembersPage = async (): Promise<void> => {
-    if (route.kind !== "channel" || route.section !== "members" || loadingNextMembersPage ||
-        members.status === "loading" || members.data?.nextCursor === null || members.data?.nextCursor === undefined) return;
-    const channelId = route.channelId;
-    const cursor = members.data.nextCursor;
-    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "members" });
-    const request = startMembersRequest();
-    setLoadingNextMembersPage(true);
-    try {
-      const nextPage = await fetchMembers(channelId, cursor, request.controller.signal);
-      if (!isCurrentMembersRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
-      setMembers((current) => {
-        if (current.data === null || current.data.nextCursor !== cursor) return current;
-        return {
-          status: "success",
-          data: {
-            members: [...current.data.members, ...nextPage.members],
-            nextCursor: nextPage.nextCursor,
-            // The count applies to the whole channel; the most recent response wins.
-            broadcasterCount: nextPage.broadcasterCount,
-            viewerUserId: nextPage.viewerUserId,
-          },
-          error: null,
-          loadedAt: Date.now(),
-        };
-      });
-    } catch (error) {
-      if (!isCurrentMembersRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
-      setMembers((current) => ({ ...current, status: "error", error: errorMessage(error) }));
-      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-    } finally {
-      finishMembersRequest(request.generation);
-      setLoadingNextMembersPage(false);
-    }
-  };
-
-  const selectedChannel = useMemo(() => {
-    if ((route.kind !== "channel" && route.kind !== "module") || channels.data === null) return null;
-    return channels.data.find((channel) => channel.channelId === route.channelId) ?? null;
-  }, [channels.data, route]);
   const selectedChannelIdForModules = selectedChannel?.channelId ?? null;
   const selectedModulesForChannel = selectedChannel?.modules;
   const spotlightChannel = route.kind === "channel" || route.kind === "module"
@@ -1802,71 +1545,6 @@ export const DashboardApp = (): ReactElement => {
       notify({ tone: "error", message: errorMessage(error) });
     } finally {
       setLoggingOut(false);
-    }
-  };
-
-  const loadNextAuditPage = async (): Promise<void> => {
-    if (route.kind !== "channel" || route.section !== "audit" || loadingNextAuditPage ||
-        audit.data?.nextCursor === null || audit.data?.nextCursor === undefined) return;
-    const channelId = route.channelId;
-    const cursor = audit.data.nextCursor;
-    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "audit" });
-    const controller = new AbortController();
-    auditPageController.current = controller;
-    setLoadingNextAuditPage(true);
-    try {
-      const nextPage = await fetchAuditLog(channelId, cursor, controller.signal, route.auditFilters ?? emptyAuditFilter);
-      if (window.location.pathname !== routePath) return;
-      setAudit((current) => {
-        if (current.data === null || current.data.nextCursor !== cursor) return current;
-        return {
-          status: "success",
-          data: { entries: [...current.data.entries, ...nextPage.entries], nextCursor: nextPage.nextCursor },
-          error: null,
-          ...(current.loadedAt === undefined ? {} : { loadedAt: current.loadedAt }),
-        };
-      });
-    } catch (error) {
-      if (controller.signal.aborted || window.location.pathname !== routePath) return;
-      setAudit((current) => ({ ...current, status: "error", error: errorMessage(error) }));
-      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-    } finally {
-      if (auditPageController.current === controller) {
-        auditPageController.current = null;
-        setLoadingNextAuditPage(false);
-      }
-    }
-  };
-
-  const loadNextEventsPage = async (): Promise<void> => {
-    if (route.kind !== "channel" || route.section !== "events" || loadingNextEventsPage ||
-        eventsRequest.current.controller !== null || events.data?.nextCursor === null || events.data?.nextCursor === undefined) return;
-    const channelId = route.channelId;
-    const cursor = events.data.nextCursor;
-    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "events" });
-    const request = startEventsRequest();
-    setLoadingNextEventsPage(true);
-    try {
-      const nextPage = await fetchEvents(channelId, cursor, request.controller.signal, route.filters ?? emptyEventFilter);
-      if (!isCurrentEventsRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
-      setEvents((current) => {
-        if (current.data === null || current.data.nextCursor !== cursor) return current;
-        return {
-          status: "success",
-          data: { entries: [...current.data.entries, ...nextPage.entries], nextCursor: nextPage.nextCursor },
-          error: null,
-          ...(current.loadedAt === undefined ? {} : { loadedAt: current.loadedAt }),
-        };
-      });
-    } catch (error) {
-      if (!isCurrentEventsRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
-      setEvents((current) => ({ ...current, status: "error", error: errorMessage(error) }));
-      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-    } finally {
-      if (isCurrentEventsRequest(request.generation)) {
-        finishEventsRequest(request.generation);
-        setLoadingNextEventsPage(false);
-      }
     }
   };
 
@@ -1979,16 +1657,27 @@ export const DashboardApp = (): ReactElement => {
           loading={<Skeleton rows={12} height={58} />}
           empty={<Skeleton rows={12} height={58} />}
           error={<Skeleton rows={12} height={58} />}
-        >{overviewMatchesRoute && overview.data !== null && overviewModulesLoaded ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} modulesLoaded={overviewModulesLoaded} onLocationChanged={(channelId, location) => {
-          queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
-            ...current,
-            channels: current.channels.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),
-          }, { updatedAt: channelsQuery.dataUpdatedAt });
-          queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
-            current?.channelId !== channelId ? current : { ...current, location },
-          { updatedAt: overviewQuery.dataUpdatedAt });
-        }} /> : null}</UiLoadState> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading" || members.status === "idle"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
+        >{overviewMatchesRoute && overview.data !== null && overviewModulesLoaded ? <ChannelOverviewRoute
+          key={routeKey}
+          routeKey={routeKey}
+          overview={overview.data}
+          loadedAt={overview.loadedAt}
+          onNavigate={navigate}
+          modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []}
+          modulesLoaded={overviewModulesLoaded}
+          channelsLoadedAt={channelsQuery.dataUpdatedAt}
+          onAuthenticationRequired={clearProtectedState}
+          onLocationChanged={(channelId, location) => {
+            queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
+              ...current,
+              channels: current.channels.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),
+            }, { updatedAt: channelsQuery.dataUpdatedAt });
+            queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
+              current?.channelId !== channelId ? current : { ...current, location },
+            { updatedAt: overviewQuery.dataUpdatedAt });
+          }}
+        /> : null}</UiLoadState> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection({ channelId: route.channelId, moduleId: "text_commands", value: name }); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onOpenOverlay={(overlayId, initialVariable, initialOverlayName) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId, ...(initialVariable === undefined ? {} : { initialVariable }), ...(overlayId === "new" && initialOverlayName !== undefined ? { initialOverlayName } : {}) }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "overlays" && selectedChannel !== null
           ? route.editorOverlayId === undefined
@@ -2006,9 +1695,15 @@ export const DashboardApp = (): ReactElement => {
           empty={<Skeleton rows={8} height={58} />}
           error={<Skeleton rows={8} height={58} />}
         >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId ? { initialSelection: pendingModuleSelection.value } : {})} /> : null}</UiLoadState> : null}
-        {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} /> : null}
-        {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} filters={auditFilters} onFiltersChange={updateAuditFilters} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={eventsChannelId === route.channelId ? events : idleState<PanelEventsResponse>()} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage
+          key={route.channelId}
+          system={systemQuery.data}
+          error={systemQuery.isError ? errorMessage(systemQuery.error) : null}
+          loadedAt={systemQuery.dataUpdatedAt > 0 ? systemQuery.dataUpdatedAt : undefined}
+          onRetry={() => { void systemQuery.refetch(); }}
+        /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} channelId={route.channelId} filters={auditFilters} onFiltersChange={updateAuditFilters} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} /> : null}
         <ChannelSpotlight
           key={`spotlight-${spotlightChannel?.channelId ?? "none"}`}
           channelId={spotlightChannel?.channelId ?? null}

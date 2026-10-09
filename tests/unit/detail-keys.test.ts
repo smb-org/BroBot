@@ -46,7 +46,7 @@ const detailKeys = (): string[] => {
       if (name !== null) found.add(name);
     }
   };
-  for (const file of moduleSources(resolve(import.meta.dirname, "../../src/modules")).sort()) {
+  for (const file of moduleSources(resolve(import.meta.dirname, "../../src/modules")).sort((a, b) => a.localeCompare(b))) {
     const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
     const visit = (node: ts.Node): void => {
       const isDetail = (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "detail")
@@ -62,7 +62,7 @@ const detailKeys = (): string[] => {
     };
     visit(source);
   }
-  return [...found].sort();
+  return [...found].sort((a, b) => a.localeCompare(b));
 };
 
 describe("diagnostic detail keys", () => {

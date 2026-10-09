@@ -13,7 +13,7 @@ import { LATEST_SCHEMA_MIGRATION, LATEST_SCHEMA_TABLE } from "../../src/worker/c
  */
 describe("Schema baseline", () => {
   const directory = resolve(import.meta.dirname, "../../migrations");
-  const files = readdirSync(directory).filter((name) => name.endsWith(".sql")).sort();
+  const files = readdirSync(directory).filter((name) => name.endsWith(".sql")).sort((a, b) => a.localeCompare(b));
 
   it("keeps LATEST_SCHEMA_MIGRATION pointed at the latest migration file", () => {
     expect(files.at(-1)).toBe(LATEST_SCHEMA_MIGRATION);

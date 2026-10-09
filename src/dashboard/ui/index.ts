@@ -18,7 +18,9 @@ export { PageHeader } from "./PageHeader";
 export type { PageHeaderProps } from "./PageHeader";
 export { FilterBar } from "./FilterBar";
 export { ListToolbar } from "./ListToolbar";
-export type { ListToolbarProperties, ListToolbarUsage } from "./ListToolbar";
+export type { ListToolbarProperties, ListToolbarQueryError, ListToolbarUsage } from "./ListToolbar";
+export { QueryStatusRow } from "./QueryStatusRow";
+export type { QueryStatusRowProperties } from "./QueryStatusRow";
 export { EmptyCellValue } from "./EmptyCellValue";
 export { AuditSentence } from "./AuditSentence";
 export type { AuditSentenceProps } from "./AuditSentence";
@@ -148,6 +150,8 @@ export type { EmptyStateProps, EmptyStateAction } from "./EmptyState";
 
 export { ErrorPanel } from "./ErrorPanel";
 export type { ErrorPanelProps, ErrorPanelAction } from "./ErrorPanel";
+export { QueryErrorState } from "./QueryErrorState";
+export type { QueryErrorStateProps } from "./QueryErrorState";
 
 export { BlockingState } from "./BlockingState";
 export type { BlockingStateProps, BlockingStateAction } from "./BlockingState";

@@ -11,7 +11,7 @@ describe("text command options migration", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec(readFileSync(resolve(migrationsDirectory, "0000_baseline.sql"), "utf8"));
-      for (const migration of readdirSync(migrationsDirectory).filter((name) => name > "0000_baseline.sql" && name < "0009_channel_variables.sql").sort()) {
+      for (const migration of readdirSync(migrationsDirectory).filter((name) => name > "0000_baseline.sql" && name < "0009_channel_variables.sql").sort((a, b) => a.localeCompare(b))) {
         database.exec(readFileSync(resolve(migrationsDirectory, migration), "utf8"));
       }
       database.exec(`
@@ -38,7 +38,7 @@ describe("text command options migration", () => {
   it("adds an inactive timeout action to existing commands", () => {
     const database = new DatabaseSync(":memory:");
     try {
-      for (const migration of readdirSync(migrationsDirectory).filter((name) => name <= "0027_faq.sql").sort()) {
+      for (const migration of readdirSync(migrationsDirectory).filter((name) => name <= "0027_faq.sql").sort((a, b) => a.localeCompare(b))) {
         database.exec(readFileSync(resolve(migrationsDirectory, migration), "utf8"));
       }
       database.exec(`
@@ -63,7 +63,7 @@ describe("text command options migration", () => {
     try {
       for (const migration of readdirSync(migrationsDirectory)
         .filter((name) => name.endsWith(".sql") && name < "0031_text_command_timeout_kind.sql")
-        .sort()) {
+        .sort((a, b) => a.localeCompare(b))) {
         database.exec(readFileSync(resolve(migrationsDirectory, migration), "utf8"));
       }
       database.exec(`
@@ -157,7 +157,7 @@ describe("text command options migration", () => {
     try {
       for (const migration of readdirSync(migrationsDirectory)
         .filter((name) => name.endsWith(".sql") && name < "0033_text_command_silent_timeout.sql")
-        .sort()) {
+        .sort((a, b) => a.localeCompare(b))) {
         database.exec(readFileSync(resolve(migrationsDirectory, migration), "utf8"));
       }
       database.exec(`

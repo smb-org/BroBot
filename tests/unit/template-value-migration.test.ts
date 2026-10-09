@@ -11,7 +11,7 @@ describe("template value provider migration", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
-      for (const name of readdirSync(migrationsDirectory).filter((file) => file.endsWith(".sql") && file < "0018_template_value_providers.sql").sort()) {
+      for (const name of readdirSync(migrationsDirectory).filter((file) => file.endsWith(".sql") && file < "0018_template_value_providers.sql").sort((a, b) => a.localeCompare(b))) {
         database.exec(migration(name));
       }
       database.exec(`

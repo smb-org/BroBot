@@ -20,10 +20,10 @@ const declarationProblems = (probe: DeclarationProbe): string[] => {
   if (probe.schemaKeys.length === 0) return [];
   if (!probe.hasEditor) return [`${probe.id} is missing settingsEditor`];
   const problems: string[] = [];
-  const schemaKeys = [...probe.schemaKeys].sort();
-  const declaredKeys = [...new Set(probe.declaredKeys)].sort();
+  const schemaKeys = [...probe.schemaKeys].sort((a, b) => a.localeCompare(b));
+  const declaredKeys = [...new Set(probe.declaredKeys)].sort((a, b) => a.localeCompare(b));
   if (JSON.stringify(declaredKeys) !== JSON.stringify(schemaKeys)) problems.push(`${probe.id} declaration keys do not match settingsSchema`);
-  if (JSON.stringify([...probe.templateKeys].sort()) !== JSON.stringify([...probe.templateFieldKeys].sort())) {
+  if (JSON.stringify([...probe.templateKeys].sort((a, b) => a.localeCompare(b))) !== JSON.stringify([...probe.templateFieldKeys].sort((a, b) => a.localeCompare(b)))) {
     problems.push(`${probe.id} template fields do not match templateFields`);
   }
   for (const key of schemaKeys) {

@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PanelApiError } from "../../src/dashboard/api";
 import { createDashboardQueryClient } from "../../src/dashboard/data/client";
 import { queryKeys } from "../../src/dashboard/data/keys";
+import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
+import { emptyAuditFilter } from "../../src/dashboard/audit/model";
+import { emptyEventFilter } from "../../src/dashboard/events/model";
 import { UiProvider } from "../../src/dashboard/ui";
 import { renderWithQuery } from "../query-test-utils";
 
@@ -24,6 +27,21 @@ describe("dashboard query data layer", () => {
       "events",
       { cursor: "cursor /?#&", tone: "error" },
     ]);
+  });
+
+  it("includes audit and event filters in their channel-scoped list keys", () => {
+    expect(dashboardDataKeys.audit(channelId, { person: "alice", area: "member" })).toEqual([
+      "channel", channelId, "audit-log", { person: "alice", area: "member" },
+    ]);
+    expect(dashboardDataKeys.audit(channelId, emptyAuditFilter)).not.toEqual(
+      dashboardDataKeys.audit(channelId, { person: "alice", area: "member" }),
+    );
+    expect(dashboardDataKeys.events(channelId, { ...emptyEventFilter, origin: "channel" })).toEqual([
+      "channel", channelId, "events", { origin: "channel", module: null, tone: null, tones: null, person: null },
+    ]);
+    expect(dashboardDataKeys.events(channelId, emptyEventFilter)).not.toEqual(
+      dashboardDataKeys.events(channelId, { ...emptyEventFilter, origin: "channel" }),
+    );
   });
 
   it("creates a fresh query client with isolated test defaults for each render", () => {

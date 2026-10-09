@@ -136,7 +136,7 @@ export class TestD1Database {
     // eventually falls behind the directory, and that only surfaces
     // when a migration silently fails to run.
     const verzeichnis = resolve(import.meta.dirname, "../../migrations");
-    for (const datei of readdirSync(verzeichnis).filter((name) => name.endsWith(".sql")).sort()) {
+    for (const datei of readdirSync(verzeichnis).filter((name) => name.endsWith(".sql")).sort((a, b) => a.localeCompare(b))) {
       this.sqlite.exec(readFileSync(resolve(verzeichnis, datei), "utf8"));
     }
   }

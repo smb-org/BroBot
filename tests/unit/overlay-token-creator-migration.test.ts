@@ -12,7 +12,7 @@ describe("overlay token creator migration", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
-      for (const file of readdirSync(migrationsDirectory).filter((name) => name < "0011_overlay_token_creator.sql").sort()) {
+      for (const file of readdirSync(migrationsDirectory).filter((name) => name < "0011_overlay_token_creator.sql").sort((a, b) => a.localeCompare(b))) {
         database.exec(migration(file));
       }
       database.exec(`

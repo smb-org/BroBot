@@ -7,9 +7,9 @@ import type { TemplateVariable } from "../../src/template";
 
 describe("template variable catalog", () => {
   it("provides bilingual descriptions and samples for every system variable", () => {
-    const names = SYSTEM_TEMPLATE_VARIABLE_LIST.map(({ name }) => name).sort();
+    const names = SYSTEM_TEMPLATE_VARIABLE_LIST.map(({ name }) => name).sort((a, b) => a.localeCompare(b));
     for (const language of ["de", "en"] as const) {
-      expect(Object.keys(systemTemplateVariableLocale[language]).sort()).toEqual(names);
+      expect(Object.keys(systemTemplateVariableLocale[language]).sort((a, b) => a.localeCompare(b))).toEqual(names);
       for (const entry of Object.values(systemTemplateVariableLocale[language])) {
         expect(entry.description.trim().length).toBeGreaterThan(0);
         expect(entry.sample.trim().length).toBeGreaterThan(0);

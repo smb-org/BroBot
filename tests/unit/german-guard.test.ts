@@ -142,7 +142,7 @@ const filesUnder = (directory: string): string[] => readdirSync(directory, { wit
     if (entry.isDirectory()) return filesUnder(full);
     return /\.(ts|tsx|css)$/.test(entry.name) ? [full] : [];
   })
-  .sort();
+  .sort((a, b) => a.localeCompare(b));
 
 describe("German guard", () => {
   it("keeps every allowlist entry pointed at a file that actually exists", () => {

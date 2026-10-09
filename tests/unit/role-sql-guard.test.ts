@@ -28,7 +28,7 @@ const filesUnder = (directory: string): string[] => readdirSync(directory, { wit
     if (entry.isDirectory()) return filesUnder(full);
     return entry.name.endsWith(".ts") ? [full] : [];
   })
-  .sort();
+  .sort((a, b) => a.localeCompare(b));
 
 const isRoleLiteralCandidate = (node: ts.Node): node is ts.StringLiteral | ts.NoSubstitutionTemplateLiteral | ts.TemplateExpression =>
   ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node);
