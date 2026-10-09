@@ -541,7 +541,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     onChange={(chatTarget) => { setDraftField("chatTarget", chatTarget); }}
   />;
 
-
+  const completeSwitchRef = useRef<() => boolean>(() => false);
   const saveDraft = useCallback(async (): Promise<string | null> => {
     setAttemptedSave(true);
     if (!canManageContent) return labels.invalid;
@@ -587,7 +587,8 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           : saveTextCommand(channelId, { oldName: command.name, revision: requireCommandRevision(revision), ...payload }),
         (current, mutationResult) => {
           const next = updateCommandCache(current, mutationResult.command, command?.name);
-          onSaved(token, mutationResult.command.name);
+          // A held "save and switch" navigates to its target here; otherwise select the saved command.
+          if (token !== generation() || !completeSwitchRef.current()) onSaved(token, mutationResult.command.name);
           return next;
         },
       );
@@ -628,6 +629,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   }, [accept, canManageContent, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
 
   const guard = useDraftGuard(dirty, saveDraft, reset);
+  useEffect(() => { completeSwitchRef.current = guard.completeSwitch; }, [guard.completeSwitch]);
   useEffect(() => {
     onGuardChange(guard.guardSwitch);
     return () => { onGuardChange(null); };

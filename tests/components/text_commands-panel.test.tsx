@@ -1101,7 +1101,7 @@ describe("Text command editor", () => {
 
   describe("obsolete editor continuations", () => {
     const setup = (hold: "POST" | "DELETE" | "GET") => {
-      let rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] })];
+      let rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] }), makeCommand({ name: "gamma", text: "Antwort C", aliases: [] })];
       let release: () => void = () => undefined;
       const gate = new Promise<void>((resolve) => { release = resolve; });
       let holdGets = false;
@@ -1115,6 +1115,11 @@ describe("Text command editor", () => {
         if (isCommands && method === "POST" && typeof init?.body === "string") {
           const { name } = JSON.parse(init.body) as { name: string };
           rows = [...rows, makeCommand({ name, text: "Hallo", aliases: [] })];
+          holdGets = hold === "GET";
+        }
+        if (isCommands && method === "PATCH" && typeof init?.body === "string") {
+          const { name } = JSON.parse(init.body) as { name: string };
+          rows = rows.map((row) => row.name === "hallo" ? { ...row, name, revision: 2 } : row);
           holdGets = hold === "GET";
         }
         if (isCommands && method === "DELETE") {
@@ -1162,6 +1167,22 @@ describe("Text command editor", () => {
       release();
       await settle();
       expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("zwei");
+    });
+
+    it("completes save-and-switch only for the current editor when the refresh is delayed", async () => {
+      const release = setup("GET");
+      await selectCommand("hallo");
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "hallo2" } });
+      fireEvent.click((await screen.findByText("!beta")).closest("tr") as HTMLElement);
+      fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("beta"));
+      await selectCommand("gamma");
+      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf C" } });
+
+      release();
+      await settle();
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("gamma");
+      expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf C");
     });
 
     it("keeps a newly selected command when a deletion's revalidation finishes late", async () => {
