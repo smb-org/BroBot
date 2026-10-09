@@ -1,10 +1,11 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { generateOverlayStyleBlock, OVERLAY_STYLE_BEGIN_MARKER, OVERLAY_STYLE_END_MARKER } from "../../src/dashboard/overlay-style-model";
 import { OverlayCanvas } from "../../src/overlay/canvas";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const channel = {
   channelId: "kanal-a", login: "kanal-a", displayName: "Alpha", language: "en", role: "manager",

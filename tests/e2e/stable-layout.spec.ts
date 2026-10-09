@@ -120,6 +120,104 @@ test("clipped hints and dialog errors keep full copy in fixed reserved rows", as
   expect((await dialog.boundingBox())?.height).toBe(dialogHeight);
 });
 
+test("returning from a module keeps the overview loaded at the same header position", async ({ page }) => {
+  test.setTimeout(15_000);
+
+  const channel = {
+    channelId: "stable-channel",
+    login: "stable-channel",
+    displayName: "Stable channel",
+    language: "en",
+    role: "manager",
+    broadcasterConnection: "connected",
+    channelBotConsent: "granted",
+    bot: { status: "connected", reason: null, updatedAt: "2026-10-08T08:00:00.000Z" },
+    botPermissions: { missingScopes: [] },
+    broadcasterPermissions: { missingScopes: [] },
+    moderator: { isModerator: true, checkedAt: "2026-10-08T08:00:00.000Z", reason: null },
+    chatSubscription: { status: "enabled", subscriptionId: "subscription-stable", reason: null, updatedAt: "2026-10-08T08:00:00.000Z" },
+    chatSubscriptionNeeded: false,
+    modules: [{ id: "text_commands", enabled: true, settings: "{}" }],
+    tokens: {
+      botExpiresAt: "2099-10-08T08:00:00.000Z",
+      loginStatus: "connected",
+      loginReason: null,
+      loginExpiresAt: "2099-10-08T08:00:00.000Z",
+    },
+    streamState: "offline",
+    streamStartedAt: null,
+    controls: {
+      mute: { active: false, until: null, mode: null },
+      pause: { active: false, until: null, mode: null },
+    },
+    lastError: null,
+  };
+  let overviewRequests = 0;
+
+  await page.route("**/api/channels**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/channels") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        channels: [channel],
+        bot: channel.bot,
+        platformAdmin: false,
+        viewerIsBot: false,
+      }) });
+      return;
+    }
+    if (pathname === "/api/channels/stable-channel/overview") {
+      overviewRequests += 1;
+      if (overviewRequests > 1) await new Promise((resolve) => setTimeout(resolve, 750));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        ...channel,
+        activeModules: [{ moduleId: "text_commands", settings: "{}" }],
+      }) });
+      return;
+    }
+    if (pathname === "/api/channels/stable-channel/settings") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        timeZone: "UTC",
+        revision: 1,
+        location: null,
+        locationRevision: 1,
+      }) });
+      return;
+    }
+    if (pathname === "/api/channels/stable-channel/modules/text_commands/commands") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ commands: [], variables: [] }) });
+      return;
+    }
+    if (pathname === "/api/channels/stable-channel/template-variables") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ variables: [] }) });
+      return;
+    }
+    if (pathname === "/api/channels/stable-channel/events") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], nextCursor: null }) });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+  });
+
+  await page.goto("/channels/stable-channel");
+  const pageHeader = page.locator(".main-content .page-header");
+  await expect(pageHeader).toBeVisible();
+  await expect(page.locator(".main-content .mantine-Skeleton-root")).toHaveCount(0);
+  const firstHeaderY = await pageHeader.evaluate((element) => element.getBoundingClientRect().y);
+  const initialOverviewRequestCount = overviewRequests;
+  expect(initialOverviewRequestCount).toBeGreaterThan(0);
+
+  await page.locator('a[href="/channels/stable-channel/modules/text_commands"]').click();
+  await expect(page).toHaveURL("/channels/stable-channel/modules/text_commands");
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1 })).toBeVisible();
+
+  await page.locator('a[href="/channels/stable-channel"]').click();
+  await expect(page).toHaveURL("/channels/stable-channel");
+  expect(await pageHeader.count()).toBe(1);
+  expect(await pageHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(firstHeaderY);
+  expect(await page.locator(".main-content .mantine-Skeleton-root").count()).toBe(0);
+  expect(overviewRequests).toBe(initialOverviewRequestCount);
+});
+
 test("game search results close on outside click, focus exit, and Escape at 390px", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tests/e2e/layout-fixture.html");

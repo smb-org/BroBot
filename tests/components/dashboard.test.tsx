@@ -1,8 +1,9 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { dashboardRoutePath, parseDashboardRoute } from "../../src/dashboard/router";
+import { renderWithQuery as render } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
 const moderator = {
@@ -114,7 +115,7 @@ const showChannelOverview = async (channel: ReturnType<typeof healthyChannel>): 
     if (url.pathname === `/api/channels/${channel.channelId}/overview`) return jsonResponse(overview(channel));
     if (url.pathname === `/api/channels/${channel.channelId}/modules`) return jsonResponse({ modules: [] });
   }, [channel]);
-  window.history.replaceState({}, "", `/channels/${channel.channelId}/overview`);
+  window.history.replaceState({}, "", `/channels/${channel.channelId}`);
   render(<DashboardApp />);
   await screen.findByRole("combobox", { name: "Kanal auswählen" });
 };
@@ -127,6 +128,15 @@ const requestUrl = (input: RequestInfo | URL): URL => {
   if (input instanceof Request) return new URL(input.url);
   if (input instanceof URL) return input;
   return new URL(input, window.location.origin);
+};
+
+const flushQueryUpdates = async (): Promise<void> => {
+  await act(async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1);
+    }
+  });
 };
 
 class TestWebSocket {
@@ -1947,7 +1957,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("switch", { name: "Textbefehle" })).not.toBeChecked();
-    expect(screen.getByRole("switch", { name: "Clips" })).toBeChecked();
+    await waitFor(() => { expect(screen.getByRole("switch", { name: "Clips" })).toBeChecked(); });
     expect(screen.queryByText("Keine Module aktiv.")).not.toBeInTheDocument();
   });
 
@@ -2185,7 +2195,7 @@ describe("Dashboard skeleton", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+    window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
     await screen.findByRole("button", { name: "Automatische Aktionen fortsetzen" });
@@ -2238,7 +2248,7 @@ describe("Dashboard skeleton", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+    window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
     // The pause control comes from the channel list, so it's available
@@ -2294,17 +2304,18 @@ describe("Dashboard skeleton", () => {
       }
       return Promise.resolve(jsonResponse({}, 404));
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+    window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await flushQueryUpdates();
     expect([channelCalls, overviewCalls, modulesCalls]).toEqual([1, 1, 1]);
 
     fireEvent(document, new Event("visibilitychange"));
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await flushQueryUpdates();
     expect([channelCalls, overviewCalls, modulesCalls]).toEqual([2, 2, 2]);
 
     await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000); });
+    await flushQueryUpdates();
     expect([channelCalls, overviewCalls, modulesCalls]).toEqual([3, 3, 3]);
   });
 
@@ -2343,10 +2354,10 @@ describe("Dashboard skeleton", () => {
       if (path === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+    window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await flushQueryUpdates();
     expect(channelCalls).toBe(1);
     expect(overviewCalls).toBe(1);
     expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toBeInTheDocument();
@@ -2356,12 +2367,11 @@ describe("Dashboard skeleton", () => {
     expect(channelCalls).toBe(2);
     expect(overviewCalls).toBe(2);
 
-    await act(async () => {
+    act(() => {
       resolveChannelReload?.(jsonResponse({ channels: [expiredChannel], bot: expiredChannel.bot }));
       resolveOverviewReload?.(jsonResponse(overview(expiredChannel)));
-      await Promise.resolve();
-      await Promise.resolve();
     });
+    await flushQueryUpdates();
     expect(screen.getAllByText("Abgelaufen").length).toBeGreaterThanOrEqual(1);
   });
 
@@ -2531,7 +2541,7 @@ describe("Dashboard skeleton", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+    window.history.replaceState({}, "", "/channels/kanal-a");
 
     const { container } = render(<DashboardApp />);
 
@@ -2636,7 +2646,7 @@ describe("Dashboard skeleton", () => {
       if (path === "/api/channels/kanal-a/events") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+    window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
     expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
@@ -2693,7 +2703,7 @@ describe("Dashboard skeleton", () => {
       if (path === "/api/channels/kanal-a/events") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+    window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
     expect(await screen.findByText("Alpha — kanal-a")).toBeInTheDocument();
@@ -2741,7 +2751,7 @@ describe("Dashboard skeleton", () => {
       if (url.pathname.endsWith("/modules")) return jsonResponse({ modules: [] });
       if (url.pathname.endsWith("/events")) return jsonResponse({ entries: [], nextCursor: null });
     }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+    window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
 
@@ -3019,19 +3029,16 @@ describe("Dashboard skeleton", () => {
     expect(window.location.pathname).toBe("/");
   });
 
-  it("does not mount the old overview state when switching to the module route", async () => {
+  it("reuses the loaded overview when switching to the module route", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
-    const inactiveModule = overview(channel);
     let overviewAufrufe = 0;
-    let resolveSecondResponse!: (response: Response) => void;
-    const secondResponse = new Promise<Response>((resolve) => { resolveSecondResponse = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") {
         overviewAufrufe += 1;
-        return overviewAufrufe === 1 ? jsonResponse(activeModule) : secondResponse;
+        return jsonResponse(activeModule);
       }
       if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
       return jsonResponse({}, 404);
@@ -3042,10 +3049,8 @@ describe("Dashboard skeleton", () => {
     const link = await within(screen.getByRole("navigation", { name: "Hauptnavigation" })).findByRole("link", { name: /Textbefehle/ });
     link.click();
 
-    expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
-    resolveSecondResponse(jsonResponse(inactiveModule));
-    expect(await screen.findByText("Module werden geladen …")).toBeInTheDocument();
-    expect(screen.queryByText("Das Modul „Textbefehle“ ist in diesem Kanal nicht aktiv.")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
+    expect(overviewAufrufe).toBe(1);
   });
 
   it("reports a disabled module understandably on its subpage", async () => {
@@ -3242,7 +3247,7 @@ describe("Dashboard skeleton", () => {
     showChannel(channel);
 
     expect((await screen.findAllByText("Broadcaster-Zustimmung fehlt")).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Der Broadcaster muss Twitch erneut autorisieren.")).toBeInTheDocument();
+    expect(await screen.findByText("Der Broadcaster muss Twitch erneut autorisieren.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Broadcaster-Zustimmung anfordern" })).toBeDisabled();
 
     cleanup();
@@ -3332,7 +3337,7 @@ describe("Dashboard skeleton", () => {
         moderator: { isModerator: true, checkedAt: "2026-09-18T02:00:00.000Z", reason: null },
       };
       const nextAllowedAt = new Date(Date.now() + 5000).toISOString();
-      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const fetcher = vi.fn((input: RequestInfo | URL) => {
         const url = requestUrl(input);
         if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
         if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
@@ -3343,14 +3348,15 @@ describe("Dashboard skeleton", () => {
           nextAllowedAt,
         }));
         return Promise.resolve(jsonResponse({}, 404));
-      }));
+      });
+      vi.stubGlobal("fetch", fetcher);
       window.history.replaceState({}, "", "/channels/kanal-a");
 
       render(<DashboardApp />);
-      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+      await flushQueryUpdates();
       const button = screen.getByRole("button", { name: "Moderatorstatus prüfen" });
       fireEvent.click(button);
-      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+      await flushQueryUpdates();
       expect(button).toBeDisabled();
 
       act(() => { vi.advanceTimersByTime(5000); });
@@ -4245,8 +4251,8 @@ describe("Dashboard skeleton", () => {
 
       render(<DashboardApp />);
 
-      expect(await screen.findByRole("heading", { name: "Übersicht", level: 1 })).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "Noch kein Kanal freigegeben", level: 2 })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Noch kein Kanal freigegeben", level: 2 })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Übersicht", level: 1 })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Der Bot ist nicht angemeldet" })).not.toBeInTheDocument();
     });
 
@@ -4348,7 +4354,7 @@ describe("Dashboard skeleton", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    window.history.replaceState({}, "", `/channels/${channel.channelId}/overview`);
+    window.history.replaceState({}, "", `/channels/${channel.channelId}`);
     render(<DashboardApp />);
     expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
 

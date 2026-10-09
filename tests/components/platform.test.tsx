@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { PlatformPage } from "../../src/dashboard/platform";
 import { UiProvider } from "../../src/dashboard/ui";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const response = (inhalt: unknown, status = 200): Response => new Response(JSON.stringify(inhalt), {
   status,
