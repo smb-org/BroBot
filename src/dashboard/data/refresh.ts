@@ -2,6 +2,8 @@ import { hashKey, type InvalidateQueryFilters, type QueryClient, type QueryKey }
 
 interface RefreshState {
   dirty: boolean;
+  /** Sequence at which the current run started; `refreshIfDirty` skips hints this run already covers. */
+  startSeq: number;
 }
 
 // Per-client, per-key state; a WeakMap keeps separate clients (and tests) isolated.
@@ -30,7 +32,7 @@ export const refreshQuery = async (
     current.dirty = true;
     return;
   }
-  const state: RefreshState = { dirty: false };
+  const state: RefreshState = { dirty: false, startSeq: recordFor(queryClient, queryKey).seq() };
   states.set(id, state);
   const invalidate = (): Promise<void> => queryClient.invalidateQueries({ queryKey, exact: true, refetchType });
   try {
@@ -38,9 +40,79 @@ export const refreshQuery = async (
     await invalidate();
     while (state.dirty) {
       state.dirty = false;
+      state.startSeq = recordFor(queryClient, queryKey).seq();
       await invalidate();
     }
   } finally {
     states.delete(id);
   }
+};
+
+interface DirtyRecord {
+  /** Sequence of the newest hint that no later-started fetch has covered yet. */
+  dirtySeq: number | null;
+  /** Sequences at which first-page fetches of this key are currently in flight. */
+  inflight: Set<number>;
+}
+
+const records = new WeakMap<QueryClient, { seq: number; byKey: Map<string, DirtyRecord> }>();
+
+const recordFor = (queryClient: QueryClient, queryKey: QueryKey): { seq: () => number; record: DirtyRecord; drop: () => void } => {
+  let entry = records.get(queryClient);
+  if (entry === undefined) {
+    entry = { seq: 0, byKey: new Map() };
+    records.set(queryClient, entry);
+  }
+  const owner = entry;
+  const id = hashKey(queryKey);
+  let record = owner.byKey.get(id);
+  if (record === undefined) {
+    record = { dirtySeq: null, inflight: new Set() };
+    owner.byKey.set(id, record);
+  }
+  const found = record;
+  return {
+    seq: () => (owner.seq += 1),
+    record: found,
+    drop: () => { if (found.dirtySeq === null && found.inflight.size === 0) owner.byKey.delete(id); },
+  };
+};
+
+/** Records that the server has something this key's cache has not seen yet. */
+export const markDirty = (queryClient: QueryClient, queryKey: QueryKey): void => {
+  const { seq, record } = recordFor(queryClient, queryKey);
+  record.dirtySeq = seq();
+};
+
+/**
+ * Wraps a first-page fetch. It clears the dirty marker only when it succeeds and started after the
+ * marker was set, so an older in-flight response can never satisfy a newer hint.
+ */
+export const trackFetch = async <Value>(
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+  fetchPage: () => Promise<Value>,
+): Promise<Value> => {
+  const { seq, record, drop } = recordFor(queryClient, queryKey);
+  const start = seq();
+  record.inflight.add(start);
+  try {
+    const result = await fetchPage();
+    if (record.dirtySeq !== null && record.dirtySeq < start) record.dirtySeq = null;
+    return result;
+  } finally {
+    record.inflight.delete(start);
+    drop();
+  }
+};
+
+/** Refreshes once when the key is dirty and no fetch that started after the hint is already running. */
+export const refreshIfDirty = (queryClient: QueryClient, queryKey: QueryKey): void => {
+  const { record } = recordFor(queryClient, queryKey);
+  const dirtySeq = record.dirtySeq;
+  if (dirtySeq === null) return;
+  for (const start of record.inflight) if (start > dirtySeq) return;
+  const run = running.get(queryClient)?.get(hashKey(queryKey));
+  if (run !== undefined && run.startSeq > dirtySeq) return;
+  void refreshQuery(queryClient, queryKey);
 };

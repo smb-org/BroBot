@@ -9,7 +9,7 @@ import { useRealtimeEventFeed, type RealtimeFeedState, type RealtimeFeedStatus a
 import { Icon } from "../ui/Icon";
 import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, QueryErrorState, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import { PanelApiError } from "../api";
-import { refreshQuery } from "../data/refresh";
+import { markDirty, refreshIfDirty, refreshQuery } from "../data/refresh";
 import { dashboardDataKeys, queryKeys } from "../data/keys";
 import { useEventsQuery } from "../data/lists";
 import {
@@ -253,6 +253,8 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   const markEventsStale = useCallback((): void => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.channel(channelId, "events"), refetchType: "none" });
   }, [queryClient, channelId]);
+  const markDirtyKey = useCallback((): void => { markDirty(queryClient, queryKey); }, [queryClient, queryKey]);
+  const refreshDirtyKey = useCallback((): void => { refreshIfDirty(queryClient, queryKey); }, [queryClient, queryKey]);
   const loadNextPage = useCallback((): void => {
     if (query.isFetching || query.isPlaceholderData || !query.hasNextPage) return;
     void query.fetchNextPage({ cancelRefetch: false });
@@ -283,6 +285,8 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     loadingNextPage={query.isFetchingNextPage}
     onRefresh={invalidateEvents}
     onEventHint={markEventsStale}
+    onMarkDirty={markDirtyKey}
+    onRefreshIfDirty={refreshDirtyKey}
     onNextPage={loadNextPage}
   />;
 };
@@ -300,12 +304,14 @@ interface EventsPageContentProperties {
   onFiltersChange: (filters: PanelEventFilters) => void;
   onRefresh: () => void;
   onEventHint: () => void;
+  onMarkDirty: () => void;
+  onRefreshIfDirty: () => void;
   onNextPage: () => void;
   loadingNextPage: boolean;
 }
 
 const EventsPageContent = (properties: EventsPageContentProperties): ReactElement => {
-  const { identityKey, channelId, filters, onRefresh, onEventHint, ...contentProperties } = properties;
+  const { identityKey, channelId, filters, onRefresh, onEventHint, onMarkDirty, onRefreshIfDirty, ...contentProperties } = properties;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const setFeedRef = useCallback<RefCallback<HTMLDivElement>>((feed) => { feedRef.current = feed; }, []);
   const atBeginning = useCallback((): boolean => {
@@ -326,6 +332,8 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
     atBeginning,
     refresh: onRefresh,
     onEventHint,
+    markDirty: onMarkDirty,
+    refreshIfDirty: onRefreshIfDirty,
     scrollToBeginning,
   });
   return <EventsPageFilterState
@@ -353,7 +361,7 @@ const EventsPageFilterState = ({
   loadingNextPage,
   feedRef,
   realtime,
-}: Omit<EventsPageContentProperties, "channelId" | "onEventHint"> & {
+}: Omit<EventsPageContentProperties, "channelId" | "onEventHint" | "onMarkDirty" | "onRefreshIfDirty"> & {
   feedRef: RefCallback<HTMLDivElement>;
   realtime: RealtimeFeedState;
 }): ReactElement => {

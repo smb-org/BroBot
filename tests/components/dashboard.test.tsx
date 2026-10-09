@@ -663,6 +663,101 @@ describe("Dashboard skeleton", () => {
     expect(screen.getAllByRole("row")).toHaveLength(2);
   });
 
+  describe("deferred event hints", () => {
+    const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":11}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const hint = (id: string): string => JSON.stringify({ version: 1, id, createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } });
+    /** Moves the reader away from or back to the start of the feed. */
+    let feedTop = 0;
+    const readAt = (position: "top" | "down"): void => {
+      feedTop = position === "top" ? 0 : -200;
+      Object.defineProperty(window, "scrollY", { configurable: true, value: position === "top" ? 0 : 400 });
+    };
+    const mountEvents = (respond: (url: URL, count: number) => Response | Promise<Response>, path = "/channels/kanal-a/events") => {
+      const channel = healthyChannel("kanal-a", "Alpha");
+      let count = 0;
+      Object.defineProperty(window, "scrollTo", { configurable: true, value: vi.fn() });
+      vi.stubGlobal("WebSocket", TestWebSocket);
+      stubEventFeedFetch((url) => { count += 1; return respond(url, count); }, channel);
+      window.history.replaceState({}, "", path);
+      readAt("top");
+      const rendered = render(<DashboardApp />, undefined, { gcTime: 600_000 });
+      return { requests: () => count, rendered };
+    };
+    const patchFeed = (): void => {
+      const feed = document.querySelector(".event-feed");
+      if (feed === null) throw new Error("Ereignis-Feed fehlt");
+      Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: feedTop }) });
+    };
+    const settle = async (): Promise<void> => { await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 400); }); }); };
+
+    it("fetches held hints when the reader scrolls back to the top by hand", async () => {
+      const { requests } = mountEvents((_url, count) => jsonResponse({ entries: count === 1 ? [alt] : [neu, alt], nextCursor: null }));
+      expect(await screen.findByText("alt")).toBeInTheDocument();
+      patchFeed();
+      readAt("down");
+      const socket = TestWebSocket.instances[0];
+      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+      socket.open();
+      socket.receive(hint("held-1"));
+      await screen.findByRole("button", { name: "1 neue Ereignisse" });
+      await settle();
+      expect(requests()).toBe(1);
+
+      readAt("top");
+      fireEvent.scroll(window);
+      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
+      expect(requests()).toBe(2);
+    });
+
+    it("fetches once when the notice is clicked while a batch from the top is still queued", async () => {
+      const { requests } = mountEvents((_url, count) => jsonResponse({ entries: count === 1 ? [alt] : [neu, alt], nextCursor: null }));
+      expect(await screen.findByText("alt")).toBeInTheDocument();
+      patchFeed();
+      const socket = TestWebSocket.instances[0];
+      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+      socket.open();
+      socket.receive(hint("queued-1"));
+      readAt("down");
+      socket.receive(hint("queued-2"));
+      fireEvent.click(await screen.findByRole("button", { name: "1 neue Ereignisse" }));
+      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
+      await settle();
+      expect(requests()).toBe(2);
+    });
+
+    it("keeps a hint that arrived during an older fetch across a filter round trip", async () => {
+      let releaseOlder: () => void = () => undefined;
+      const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
+      const { requests } = mountEvents(async (url, count) => {
+        if (count === 2) {
+          await olderGate;
+          return jsonResponse({ entries: [alt], nextCursor: null });
+        }
+        return jsonResponse({ entries: url.searchParams.has("tone") || count === 1 ? (count === 1 ? [alt] : []) : [neu, alt], nextCursor: null });
+      });
+      expect(await screen.findByText("alt")).toBeInTheDocument();
+      patchFeed();
+      const socket = TestWebSocket.instances[0];
+      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+      socket.open();
+      socket.receive(hint("round-1"));
+      await waitFor(() => expect(requests()).toBe(2));
+      readAt("down");
+      socket.receive(hint("round-2"));
+      await screen.findByRole("button", { name: "1 neue Ereignisse" });
+      releaseOlder();
+      await settle();
+
+      navigateToPath("/channels/kanal-a/events?tone=warning");
+      await settle();
+      navigateToPath("/channels/kanal-a/events");
+      readAt("top");
+      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
+      expect(requests()).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   it("jumps to the top via the notice and then loads more", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };

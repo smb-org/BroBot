@@ -358,11 +358,17 @@ export const useRealtimeEventFeed = ({
   scrollToBeginning,
   onRealtimeMessage,
   onEventHint,
+  markDirty,
+  refreshIfDirty,
 }: {
   channelId: string;
   filters: PanelEventFilters;
   atBeginning: () => boolean;
   refresh: () => void;
+  /** Records that the current query has hinted events it has not fetched yet. Survives the notice. */
+  markDirty?: () => void;
+  /** Fetches once if the current query is dirty; called whenever the reader is at the start. */
+  refreshIfDirty?: () => void;
   scrollToBeginning: () => void;
   onRealtimeMessage?: (message: RealtimeMessage) => void;
   /** Called for every event_log.new message, before the current filters are applied. */
@@ -391,32 +397,70 @@ export const useRealtimeEventFeed = ({
   const scrollToBeginningRef = useRef(scrollToBeginning);
   const onRealtimeMessageRef = useRef(onRealtimeMessage);
   const onEventHintRef = useRef(onEventHint);
+  const markDirtyRef = useRef(markDirty);
+  const refreshIfDirtyRef = useRef(refreshIfDirty);
   const filtersRef = useRef(filters);
 
   useEffect(() => {
     onEventHintRef.current = onEventHint;
+    markDirtyRef.current = markDirty;
+    refreshIfDirtyRef.current = refreshIfDirty;
     refreshRef.current = refresh;
     atBeginningRef.current = atBeginning;
     scrollToBeginningRef.current = scrollToBeginning;
     onRealtimeMessageRef.current = onRealtimeMessage;
     filtersRef.current = filters;
     currentIdentityKeyRef.current = currentIdentityKey;
-  }, [atBeginning, currentIdentityKey, filters, onEventHint, onRealtimeMessage, refresh, scrollToBeginning]);
+  }, [atBeginning, currentIdentityKey, filters, markDirty, onEventHint, onRealtimeMessage, refresh, refreshIfDirty, scrollToBeginning]);
+
+  const countNotice = useCallback((hints: number): void => {
+    const identityKey = currentIdentityKeyRef.current;
+    setPendingState((current) => current.identityKey === identityKey
+      ? { ...current, count: current.count + hints }
+      : { identityKey, count: hints });
+  }, []);
 
   const scheduleBatch = useCallback((): void => {
     if (batchTimerRef.current !== null) return;
     batchTimerRef.current = window.setTimeout(() => {
       batchTimerRef.current = null;
-      refreshRef.current();
+      // The reader may have scrolled away meanwhile: keep the hint pending instead of shifting the list.
+      if (atBeginningRef.current()) refreshRef.current();
+      else setPendingState((current) => current.identityKey === currentIdentityKeyRef.current && current.count > 0
+        ? current
+        : { identityKey: currentIdentityKeyRef.current, count: 1 });
     }, BATCH_DELAY_MS);
+  }, []);
+
+  /** The reader is at the start: fetch once if hints are held back, dropping any queued batch. */
+  const catchUp = useCallback((): void => {
+    if (batchTimerRef.current !== null) {
+      window.clearTimeout(batchTimerRef.current);
+      batchTimerRef.current = null;
+    }
+    setPendingState((current) => current.count === 0 ? current : { ...current, count: 0 });
+    (refreshIfDirtyRef.current ?? refreshRef.current)();
   }, []);
 
   const jumpToBeginning = useCallback((): void => {
     scrollToBeginningRef.current();
-    setPendingState({ identityKey: currentIdentityKeyRef.current, count: 0 });
-    // The held-back hints were not fetched while the reader was further down.
-    refreshRef.current();
-  }, []);
+    catchUp();
+  }, [catchUp]);
+
+  useEffect(() => {
+    const onScroll = (): void => {
+      if (refreshIfDirtyRef.current !== undefined && atBeginningRef.current()) catchUp();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => { window.removeEventListener("scroll", onScroll); };
+  }, [catchUp]);
+
+  useEffect(() => {
+    // After a channel/filter switch the parent's query effect must run first; mount is covered by refetch-on-mount.
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled && atBeginningRef.current()) refreshIfDirtyRef.current?.(); });
+    return () => { cancelled = true; };
+  }, [currentIdentityKey]);
 
   useEffect(() => {
     if (batchTimerRef.current !== null) {
@@ -483,14 +527,12 @@ export const useRealtimeEventFeed = ({
       onEventHintRef.current?.();
       const hints = parsed.message.payload.entries.filter((hint) => realtimeHintMatchesFilters(hint, filtersRef.current));
       if (hints.length > 0) {
+        markDirtyRef.current?.();
         if (atBeginningRef.current()) {
           scheduleBatch();
         } else {
-          // Reading further down: only count; fetching would shift the list. The jump fetches.
-          const identityKey = currentIdentityKeyRef.current;
-          setPendingState((current) => current.identityKey === identityKey
-            ? { ...current, count: current.count + hints.length }
-            : { identityKey, count: hints.length });
+          // Reading further down: only count; fetching would shift the list. Reaching the top fetches.
+          countNotice(hints.length);
         }
       }
     };
@@ -559,7 +601,7 @@ export const useRealtimeEventFeed = ({
         // The socket may already be closed.
       }
     };
-  }, [channelId, scheduleBatch]);
+  }, [channelId, countNotice, scheduleBatch]);
 
   return { status, pendingCount, jumpToBeginning };
 };
