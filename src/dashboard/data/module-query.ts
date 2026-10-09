@@ -94,7 +94,12 @@ export const refetchModuleQueryData = <Value,>(
     if (fn === undefined) throw new Error("Module query has no registered reader.");
     // Deliberately outside the query cache's fetch: cancelQueries reverts a cache
     // fetch to its cached data, which would look like a successful reload.
+    const startedAt = Date.now();
     const value = await fn(new AbortController().signal);
+    // A read or committed write that landed while this one was in flight is newer
+    // server-confirmed state; never regress the cache to this older snapshot.
+    const landed = queryClient.getQueryState<Value>(queryKey);
+    if (landed?.data !== undefined && landed.dataUpdatedAt > startedAt) return landed.data;
     // Older background reads must not overwrite this fresher value.
     commitWriteGeneration(queryClient, queryKey);
     queryClient.setQueryData(queryKey, value);

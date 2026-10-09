@@ -182,6 +182,37 @@ describe("dashboard query data layer", () => {
     expect(view.queryClient.getQueryData(key)).toBe("revision-2");
   });
 
+  it("does not regress the cache when a reload returns after a newer background read", async () => {
+    let readCount = 0;
+    let releaseReload: (() => void) | undefined;
+    const reloadReleased = new Promise<void>((resolve) => { releaseReload = resolve; });
+
+    function RevisionProbe() {
+      const query = useModuleQuery<string>(channelId, "text_commands", "commands", async () => {
+        readCount += 1;
+        const mine = readCount;
+        if (mine === 2) await reloadReleased;
+        return `revision-${String(mine)}`;
+      });
+      return <p>{query.data ?? "loading"}</p>;
+    }
+
+    const view = renderWithQuery(<RevisionProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
+    expect(await screen.findByText("revision-1")).toBeInTheDocument();
+    const key = moduleQueryKey(channelId, "text_commands", "commands");
+
+    const reload = refetchModuleQueryData<string>(view.queryClient, channelId, "text_commands", "commands");
+    await waitFor(() => expect(readCount).toBe(2));
+    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    // A focus-style refetch completes with revision 3 while the reload is held back.
+    await view.queryClient.refetchQueries({ queryKey: key, exact: true });
+    expect(view.queryClient.getQueryData(key)).toBe("revision-3");
+    releaseReload?.();
+
+    await expect(reload).resolves.toBe("revision-3");
+    expect(view.queryClient.getQueryData(key)).toBe("revision-3");
+  });
+
   it("restarts a cancelled cold read when the module write fails", async () => {
     let markReadStarted: (() => void) | undefined;
     let oldSignal: AbortSignal | undefined;
