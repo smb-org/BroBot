@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
+import { renderWithQuery as render } from "../query-test-utils";
 import BelaboxPanel from "../../src/modules/belabox/panel";
 
 const mocks = vi.hoisted(() => ({
@@ -48,7 +49,9 @@ describe("BELABOX panel", () => {
     mocks.removeBelaboxStatsUrl.mockRejectedValue(new Error("D1 DELETE failed"));
 
     render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: "Remove stats URL" }));
+    const removeButton = await screen.findByRole("button", { name: "Remove stats URL" });
+    await waitFor(() => { expect(removeButton).toBeEnabled(); });
+    fireEvent.click(removeButton);
 
     const dialog = await screen.findByRole("dialog", { name: "Remove stats URL?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove stats URL" }));
@@ -64,7 +67,9 @@ describe("BELABOX panel", () => {
     mocks.removeBelaboxStatsUrl.mockResolvedValue(undefined);
 
     render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: "Remove stats URL" }));
+    const removeButton = await screen.findByRole("button", { name: "Remove stats URL" });
+    await waitFor(() => { expect(removeButton).toBeEnabled(); });
+    fireEvent.click(removeButton);
     mocks.loadBelaboxStatus.mockRejectedValue(new Error("refresh failed"));
 
     const dialog = await screen.findByRole("dialog", { name: "Remove stats URL?" });
@@ -148,7 +153,7 @@ describe("BELABOX panel", () => {
 
     await waitFor(() => {
       expect(mocks.loadBelaboxStatus).toHaveBeenCalledTimes(2);
-      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "live", undefined);
+      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "live", undefined, expect.any(AbortSignal));
     });
     expect(mocks.loadBelaboxStreams).toHaveBeenCalledOnce();
     // A status without a finite intervalSeconds makes the refresh timer fire continuously.
@@ -195,7 +200,7 @@ describe("BELABOX panel", () => {
     expect(await screen.findByText(/Average 1200/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stream" }));
     await waitFor(() => {
-      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "stream", "stream-42");
+      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "stream", "stream-42", expect.any(AbortSignal));
     });
   });
 

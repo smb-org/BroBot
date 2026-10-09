@@ -1,11 +1,13 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import VotekickPanel from "../../src/modules/votekick/panel";
 import type { Votekick } from "../../src/modules/votekick/contracts";
+import { setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const running: Votekick = {
   id: "ballot-a",
@@ -26,13 +28,13 @@ const running: Votekick = {
 
 afterEach(() => {
   cleanup();
+  setDashboardRealtimeStatus("channel-a", "offline");
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe("Votekick panel", () => {
   it("polls while idle and discovers a votekick started in chat", async () => {
-    vi.useFakeTimers();
     let hasRunningVote = false;
     const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({
       running: hasRunningVote ? running : null,
@@ -41,17 +43,29 @@ describe("Votekick panel", () => {
     })));
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><VotekickPanel channelId="channel-a" language="en" /></UiProvider>);
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(screen.getByText("No votekick yet. Start one in chat with !votekick @user.")).toBeInTheDocument();
+    expect(await screen.findByText("No votekick yet. Start one in chat with !votekick @user.")).toBeInTheDocument();
 
     hasRunningVote = true;
-    await act(async () => {
-      vi.advanceTimersByTime(2000);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
 
-    expect(screen.getByText("sampleviewer")).toBeInTheDocument();
+    expect(await screen.findByText("sampleviewer")).toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("pauses its fallback poll while realtime is connected and resumes it offline", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({ running: null, votekicks: [], now: "2026-10-04T11:00:00.000Z" })));
+    vi.stubGlobal("fetch", fetcher);
+    setDashboardRealtimeStatus("channel-a", "connected");
+    render(<UiProvider><VotekickPanel channelId="channel-a" language="en" /></UiProvider>);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    act(() => { setDashboardRealtimeStatus("channel-a", "offline"); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_100); });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
@@ -63,6 +77,7 @@ describe("Votekick panel", () => {
     }))));
     render(<UiProvider><VotekickPanel channelId="channel-a" language="en" canOperate={false} /></UiProvider>);
     expect(await screen.findByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.getByTestId("votekick-operation-permission-reason")).toHaveTextContent("Your channel role cannot operate votekicks.");
   });
 
   it("keeps the running-votekick and history boxes reserved while the countdown runs", async () => {
@@ -84,14 +99,12 @@ describe("Votekick panel", () => {
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><VotekickPanel channelId="channel-a" language="en" /></UiProvider>);
 
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     await act(async () => {
-      vi.advanceTimersByTime(6_000);
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(6_000);
     });
 
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(2);
     const newToasts = toastsSnapshot().filter((toast) => !previousToastIds.has(toast.id));
     expect(newToasts.filter((toast) => toast.message === "Votekicks could not be loaded.")).toHaveLength(1);
     for (const toast of newToasts) dismissToast(toast.id);

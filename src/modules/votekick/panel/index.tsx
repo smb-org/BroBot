@@ -7,6 +7,8 @@ import type { Votekick } from "../contracts";
 import { remainingVotekickSeconds } from "../domain";
 import { cancelVotekick, liftVotekickTimeout, loadVotekickPanel, type VotekickPanelData } from "./service";
 import { votekickPanelTexts } from "./locale";
+import { refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 
 const formatTime = (value: string, language: "de" | "en"): string => {
   const date = new Date(value);
@@ -15,55 +17,73 @@ const formatTime = (value: string, language: "de" | "en"): string => {
     : value;
 };
 
+const VotekickCountdown = ({ endsAt, language }: { endsAt: string; language: "de" | "en" }): ReactElement => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const labels = votekickPanelTexts(language);
+  return <span style={{ minWidth: "calc(var(--s10) * 7)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+    {labels.remaining(remainingVotekickSeconds(endsAt, now))}
+  </span>;
+};
+
+const VotekickLiftAction = ({ item, canOperate, busy, onLift, liftLabel, liftedLabel }: {
+  item: Votekick;
+  canOperate: boolean;
+  busy: boolean;
+  onLift: () => void;
+  liftLabel: string;
+  liftedLabel: string;
+}): ReactElement | null => {
+  const expiredAt = item.endedAt === null || item.durationSeconds === null
+    ? Number.NaN
+    : Date.parse(item.endedAt) + item.durationSeconds * 1000;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const remaining = expiredAt - Date.now();
+    if (!Number.isFinite(remaining) || remaining <= 0) return;
+    const timer = window.setTimeout(() => { setNow(Date.now()); }, Math.min(2_147_483_647, remaining));
+    return () => window.clearTimeout(timer);
+  }, [expiredAt]);
+  if (item.liftedAt !== null) return <span role="status">{liftedLabel}</span>;
+  const expired = !Number.isFinite(expiredAt) || expiredAt <= now;
+  return expired ? null : <Button variant="neutral" disabled={!canOperate || busy} onClick={onLift}>{liftLabel}</Button>;
+};
+
 export default function VotekickPanel({ channelId, language, canOperate = true }: ModulePanelProperties): ReactElement {
   const resolvedLanguage = language ?? dashboardLanguage();
   const labels = useMemo(() => votekickPanelTexts(resolvedLanguage), [resolvedLanguage]);
-  const [data, setData] = useState<VotekickPanelData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const queryClient = useDashboardQueryClient();
+  const panelQuery = useModuleQuery(channelId, "votekick", "panel", (signal) => loadVotekickPanel(channelId, signal), {
+    refetchInterval: realtimeStatus === "connected" ? false : 2_000,
+  });
+  const data = panelQuery.data ?? null;
+  const loading = panelQuery.isPending;
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | undefined>();
   const loadErrorNotified = useRef(false);
   const [cancelTarget, setCancelTarget] = useState<Votekick | null>(null);
   const [liftTarget, setLiftTarget] = useState<Votekick | null>(null);
-  const [now, setNow] = useState(0);
 
-  const reload = useCallback(async (silent = false): Promise<void> => {
-    if (!silent) setLoading(true);
+  const reload = useCallback(async (): Promise<void> => {
     try {
-      setData(await loadVotekickPanel(channelId));
+      await refetchModuleQueryData<VotekickPanelData>(queryClient, channelId, "votekick", "panel");
       loadErrorNotified.current = false;
     } catch {
       if (!loadErrorNotified.current) {
         loadErrorNotified.current = true;
         notify({ tone: "error", message: labels.loadError });
       }
-    } finally {
-      if (!silent) setLoading(false);
     }
-  }, [channelId, labels.loadError]);
-
+  }, [channelId, labels.loadError, queryClient]);
   useEffect(() => {
-    let active = true;
-    loadErrorNotified.current = false;
-    void loadVotekickPanel(channelId)
-      .then((value) => { if (active) { setData(value); loadErrorNotified.current = false; } })
-      .catch(() => {
-        if (active && !loadErrorNotified.current) {
-          loadErrorNotified.current = true;
-          notify({ tone: "error", message: labels.loadError });
-        }
-      })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [channelId, labels.loadError]);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-  useEffect(() => {
-    const timer = window.setInterval(() => { void reload(true); }, 2000);
-    return () => window.clearInterval(timer);
-  }, [reload]);
+    if (!panelQuery.isError || loadErrorNotified.current) return;
+    loadErrorNotified.current = true;
+    notify({ tone: "error", message: labels.loadError });
+  }, [labels.loadError, panelQuery.error, panelQuery.isError]);
 
   const cancel = async (): Promise<void> => {
     if (cancelTarget === null) return;
@@ -72,7 +92,7 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
     try {
       await cancelVotekick(channelId, cancelTarget.id);
       setCancelTarget(null);
-      await reload(true);
+      await reload();
     } catch {
       setDialogError(labels.actionError);
     } finally {
@@ -87,7 +107,7 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
     try {
       await liftVotekickTimeout(channelId, liftTarget.id);
       setLiftTarget(null);
-      await reload(true);
+      await reload();
     } catch {
       setDialogError(labels.actionError);
     } finally {
@@ -96,9 +116,12 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
   };
 
   const running = data?.running ?? null;
-  const currentTime = now === 0 ? Date.parse(data?.now ?? "") : now;
   const history = data?.votekicks.filter((item) => item.status !== "running") ?? [];
   const renderSections = (skeleton: boolean): ReactElement => <div className="module-stack" data-testid="votekick-reserved-content">
+    <p className="lock-reason" data-testid="votekick-operation-permission-reason"
+      style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }}>
+      {canOperate ? "" : labels.readOnlyReason}
+    </p>
     <InspectorSection title={labels.running}>
       <div data-testid="votekick-running-slot" style={{ height: "calc(var(--s10) * 7)", overflowY: "auto" }}>
         {skeleton ? <Skeleton rows={2} height={34} /> : running === null
@@ -107,9 +130,7 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
               <div className="timer-row__copy">
                 <strong>{labels.target} · <code>{running.targetLogin ?? running.targetUserId ?? "—"}</code></strong>
                 <span>{labels.votes(running.yesVotes, running.noVotes, running.threshold)}</span>
-                <span style={{ minWidth: "calc(var(--s10) * 7)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                  {labels.remaining(remainingVotekickSeconds(running.endsAt, currentTime))}
-                </span>
+                <VotekickCountdown endsAt={running.endsAt} language={resolvedLanguage} />
               </div>
               <div className="timer-row__actions">
                 <Button variant="subtle" danger disabled={!canOperate || busy} onClick={() => { setDialogError(undefined); setCancelTarget(running); }}>{labels.cancel}</Button>
@@ -133,9 +154,9 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
                 <div className="timer-row__actions">
                   {item.status === "passed" && item.targetUserId !== null && item.liftedAt === null &&
                     item.endedAt !== null && item.durationSeconds !== null &&
-                    Number.isFinite(Date.parse(item.endedAt)) &&
-                    Date.parse(item.endedAt) + item.durationSeconds * 1000 > currentTime
-                    ? <Button variant="neutral" disabled={!canOperate || busy} onClick={() => { setDialogError(undefined); setLiftTarget(item); }}>{labels.lift}</Button>
+                    Number.isFinite(Date.parse(item.endedAt))
+                    ? <VotekickLiftAction key={`${item.id}:${item.endedAt}:${String(item.durationSeconds)}`} item={item} canOperate={canOperate} busy={busy}
+                        onLift={() => { setDialogError(undefined); setLiftTarget(item); }} liftLabel={labels.lift} liftedLabel={labels.lifted} />
                     : item.liftedAt === null ? null : <span role="status">{labels.lifted}</span>}
                 </div>
               </article>

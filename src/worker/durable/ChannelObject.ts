@@ -2153,7 +2153,10 @@ export class ChannelObject extends DurableObject<Env> {
           ...(overlaySocketsById.get(envelope.payload.overlayId) ?? []),
         ]
         : isModuleOverlayRealtimeEnvelope(envelope)
-          ? [...new Set((envelope.overlayIds ?? []).flatMap((overlayId) => overlaySocketsById.get(overlayId) ?? []))]
+          ? [
+            ...this.ctx.getWebSockets("kind:panel"),
+            ...new Set((envelope.overlayIds ?? []).flatMap((overlayId) => overlaySocketsById.get(overlayId) ?? [])),
+          ]
           : ordinarySockets,
     }));
     for (const message of serialized) {

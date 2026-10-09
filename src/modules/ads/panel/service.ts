@@ -29,8 +29,8 @@ const json = async <T>(response: Response): Promise<T> => {
 const schedulePathFor = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/ads/schedule`;
 
-export const loadAdsSchedule = async (channelId: string): Promise<AdsScheduleResponse> => {
-  const response = await fetch(schedulePathFor(channelId));
+export const loadAdsSchedule = async (channelId: string, signal?: AbortSignal): Promise<AdsScheduleResponse> => {
+  const response = await fetch(schedulePathFor(channelId), signal === undefined ? {} : { signal });
   const loadedResponse = await json<Partial<AdsScheduleResponse> | null>(response);
   const loaded = loadedResponse !== null && typeof loadedResponse === "object" ? loadedResponse : {};
   return {

@@ -1,52 +1,40 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { Button, Icon, notify } from "../../../dashboard/ui";
 import type { ModuleImmediateActionProperties } from "../../contract";
 import type { BelaboxStatusResponse } from "../contracts";
 import { belaboxPanelTexts, belaboxReasonText } from "./locale";
 import { loadBelaboxStatus, testBelaboxConnection } from "./service";
+import { refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 
 const language = typeof navigator === "undefined" || !navigator.language.toLowerCase().startsWith("en") ? "de" : "en";
 
-const RETRY_DELAYS_MS = [5_000, 10_000, 30_000];
-
 const BelaboxStatusAction = ({ channelId, canManage = false, availabilityReason }: ModuleImmediateActionProperties): ReactElement => {
   const labels = belaboxPanelTexts(language);
-  const [status, setStatus] = useState<BelaboxStatusResponse | null>(null);
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const queryClient = useDashboardQueryClient();
+  const statusQuery = useModuleQuery(channelId, "belabox", "status", (signal) => loadBelaboxStatus(channelId, signal), {
+    refetchInterval: realtimeStatus === "connected" ? false : (query) => {
+      const current = query.state.data;
+      return current?.pollingDesired === true
+        ? Math.max(5, current.intervalSeconds) * 1_000
+        : current === undefined ? 5_000 : 60_000;
+    },
+  });
+  const status = statusQuery.data ?? null;
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState("");
+  const suppressNextStatusResultClear = useRef(false);
 
   useEffect(() => {
-    let active = true;
-    let timer: number | undefined;
-    // Failed loads are retried with a bounded backoff until a status arrives.
-    const load = (attempt: number): void => {
-      void loadBelaboxStatus(channelId).then((next) => {
-        if (active) {
-          setStatus(next);
-          setResult("");
-        }
-      }).catch(() => {
-        if (active) timer = window.setTimeout(() => { load(attempt + 1); }, RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]);
-      });
-    };
-    load(0);
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [availabilityReason, channelId]);
-
-  useEffect(() => {
-    if (!status?.pollingDesired) return;
-    const timer = window.setInterval(() => {
-      void loadBelaboxStatus(channelId).then((next) => {
-        setStatus(next);
-        setResult("");
-      }).catch(() => undefined);
-    }, Math.max(5, status.intervalSeconds) * 1_000);
-    return () => window.clearInterval(timer);
-  }, [channelId, status?.intervalSeconds, status?.pollingDesired]);
+    if (statusQuery.dataUpdatedAt === 0) return;
+    if (suppressNextStatusResultClear.current) {
+      suppressNextStatusResultClear.current = false;
+      return;
+    }
+    setResult("");
+  }, [statusQuery.dataUpdatedAt]);
 
   const checkNow = async (): Promise<void> => {
     if (checking || availabilityReason !== null || !canManage) return;
@@ -63,8 +51,8 @@ const BelaboxStatusAction = ({ channelId, canManage = false, availabilityReason 
       const message = `${outcome.connected ? labels.connected : labels.disconnected} · ${labels.bitrate}: ${String(outcome.bitrateKbps)} kbps`;
       setResult(message);
       notify({ tone: outcome.connected ? "success" : "info", message });
-      const next = await loadBelaboxStatus(channelId).catch(() => null);
-      if (next !== null) setStatus(next);
+      suppressNextStatusResultClear.current = true;
+      await refetchModuleQueryData<BelaboxStatusResponse>(queryClient, channelId, "belabox", "status");
     } catch {
       setResult(labels.testFailed);
       notify({ tone: "error", message: labels.testFailed });

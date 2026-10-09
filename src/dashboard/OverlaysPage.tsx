@@ -7,9 +7,7 @@ import streamElementsJs from "../../docs/embedding/streamelements/widget.js?raw"
 import {
   createOverlay,
   deleteOverlay,
-  fetchOverlay,
   fetchOverlayAccesses,
-  fetchOverlays,
   fetchOverlayTokens,
   importLegacyOverlay,
   issueOverlayAccess,
@@ -27,6 +25,7 @@ import {
 } from "./api";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
 import { ActionMenu, Button, ConfirmDialog, EmptyCellValue, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
+import { useOverlayQuery, useOverlaysQuery } from "./data/lists";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -36,6 +35,7 @@ interface OverlaysPageProperties {
 }
 
 const blankOverlayName = "";
+const EMPTY_OVERLAYS: readonly PanelOverlaySummary[] = [];
 const maskOverlaySecret = (overlayUrl: string): string => overlayUrl.replace(/([#&]token=)[^&]*/u, "$1••••••");
 const copyPromiseToClipboard = async (text: Promise<string>): Promise<void> => {
   const clipboard = Reflect.get(navigator, "clipboard") as Clipboard | undefined;
@@ -232,18 +232,19 @@ function OverlaySetupAssistant({
 export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEditor }: OverlaysPageProperties): ReactElement {
   const language = dashboardLanguage();
   const labels = overlaysTexts(language);
-  const [overlays, setOverlays] = useState<readonly PanelOverlaySummary[]>([]);
+  const overlaysQuery = useOverlaysQuery(channelId);
+  const overlays = overlaysQuery.data?.overlays ?? EMPTY_OVERLAYS;
+  const maximum = overlaysQuery.data?.maximum ?? 20;
+  const loading = overlaysQuery.isPending;
+  const loadFailed = overlaysQuery.isError;
   const [search, setSearch] = useState("");
-  const [maximum, setMaximum] = useState(20);
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(initialSelection ?? null);
   const selectedIdRef = useRef<string | null>(initialSelection ?? null);
+  const selectedOverlayQuery = useOverlayQuery(channelId, selectedId ?? "", selectedId !== null);
   const [selectedOverlayData, setSelectedOverlayData] = useState<{
     id: string;
-    overlay: PanelOverlay;
     accesses: readonly PanelOverlayAccess[];
   } | null>(null);
   const [creating, setCreating] = useState(false);
@@ -273,7 +274,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const [legacyImportError, setLegacyImportError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const requestVersion = useRef(0);
   const secretVersion = useRef(0);
   const legacyRequestVersion = useRef(0);
   const pageActiveRef = useRef(true);
@@ -321,31 +321,25 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     channelIdRef.current = channelId;
   }, [canManage, channelId, changeSelection, invalidateSecret]);
   const selected = useMemo(() => overlays.find((overlay) => overlay.id === selectedId) ?? null, [overlays, selectedId]);
-  const selectedOverlay = selectedOverlayData?.id === selectedId ? selectedOverlayData.overlay : null;
+  const refetchOverlays = overlaysQuery.refetch;
+  const selectedOverlay = selectedOverlayQuery.data?.overlay ?? null;
   const accesses = selectedOverlayData?.id === selectedId ? selectedOverlayData.accesses : [];
   const revokedAccesses = accesses.filter((access) => access.revokedAt !== null);
   const setupAccess = accesses.find((access) => access.tokenId === setupAccessId) ?? null;
 
   const load = useCallback(async (isActive: () => boolean = () => true): Promise<void> => {
-    const version = ++requestVersion.current;
     try {
-      const result = await fetchOverlays(channelId);
-      if (!isActive() || version !== requestVersion.current) return;
-      setOverlays(result.overlays);
-      setMaximum(result.maximum);
-      setLoadFailed(false);
+      const result = await refetchOverlays({ throwOnError: true });
+      if (!isActive() || result.data === undefined) return;
       setError(null);
-      if (selectedIdRef.current === null && initialSelection !== undefined && result.overlays.some((item) => item.id === initialSelection)) {
+      if (selectedIdRef.current === null && initialSelection !== undefined && result.data.overlays.some((item) => item.id === initialSelection)) {
         changeSelection(initialSelection);
       }
     } catch (caught) {
-      if (!isActive() || version !== requestVersion.current) return;
-      setLoadFailed(true);
+      if (!isActive()) return;
       notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
-    } finally {
-      if (isActive() && version === requestVersion.current) setLoading(false);
     }
-  }, [channelId, changeSelection, initialSelection, labels.loadError]);
+  }, [changeSelection, initialSelection, labels.loadError, refetchOverlays]);
 
   const loadLegacyTokens = useCallback(async (offset = 0, append = false): Promise<void> => {
     const version = ++legacyRequestVersion.current;
@@ -386,13 +380,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   useEffect(() => {
     if (selectedId === null) return;
     let active = true;
-    const requests: [Promise<{ overlay: PanelOverlay }>, Promise<{ accesses: readonly PanelOverlayAccess[] }>] = [
-      fetchOverlay(channelId, selectedId),
-      fetchOverlayAccesses(channelId, selectedId),
-    ];
-    void Promise.all(requests).then(([overlayResult, accessResult]) => {
+    void fetchOverlayAccesses(channelId, selectedId).then((accessResult) => {
       if (!active) return;
-      setSelectedOverlayData({ id: selectedId, overlay: overlayResult.overlay, accesses: accessResult.accesses });
+      setSelectedOverlayData({ id: selectedId, accesses: accessResult.accesses });
       setError(null);
     }).catch((caught: unknown) => {
       if (!active) return;
@@ -404,12 +394,12 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const refreshSelected = async (): Promise<void> => {
     const overlayId = selectedIdRef.current;
     if (overlayId === null) return;
-    const [overlayResult, accessResult] = await Promise.all([
-      fetchOverlay(channelId, overlayId),
+    const [, accessResult] = await Promise.all([
+      selectedOverlayQuery.refetch({ throwOnError: true }),
       fetchOverlayAccesses(channelId, overlayId),
     ]);
     if (channelIdRef.current === channelId && selectedIdRef.current === overlayId) {
-      setSelectedOverlayData({ id: overlayId, overlay: overlayResult.overlay, accesses: accessResult.accesses });
+      setSelectedOverlayData({ id: overlayId, accesses: accessResult.accesses });
     }
   };
 

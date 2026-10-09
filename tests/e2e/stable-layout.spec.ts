@@ -157,6 +157,35 @@ test("returning from a module keeps the overview loaded at the same header posit
   };
   let overviewRequests = 0;
 
+  await page.addInitScript(() => {
+    type TrackedSocket = EventTarget & { url: string; readyState: number; open: () => void; close: (code?: number, reason?: string) => void };
+    const sockets: TrackedSocket[] = [];
+    class MockWebSocket extends EventTarget {
+      readonly url: string;
+      readyState = 0;
+      constructor(url: string, protocols?: string | string[]) {
+        super();
+        this.url = url;
+        void protocols;
+        sockets.push(this);
+        queueMicrotask(() => { this.open(); });
+      }
+      open(): void {
+        if (this.readyState !== 0) return;
+        this.readyState = 1;
+        this.dispatchEvent(new Event("open"));
+      }
+      close(code = 1000, reason = "closed"): void {
+        if (this.readyState === 3) return;
+        this.readyState = 3;
+        this.dispatchEvent(new CloseEvent("close", { code, reason }));
+      }
+      send(data: string): void { void data; }
+    }
+    Object.defineProperty(window, "__dashboardRealtimeSockets", { value: sockets, configurable: true });
+    Object.defineProperty(window, "WebSocket", { value: MockWebSocket, writable: true, configurable: true });
+  });
+
   await page.route("**/api/channels**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
@@ -247,6 +276,16 @@ test("returning from a module keeps the overview loaded at the same header posit
   expect(await pageHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(firstHeaderY);
   expect(await page.locator(".main-content .mantine-Skeleton-root").count()).toBe(0);
   expect(overviewRequests).toBe(initialOverviewRequestCount);
+  const socketStats = await page.evaluate(() => {
+    const sockets = (window as unknown as Window & { __dashboardRealtimeSockets: Array<{ url: string; readyState: number }> }).__dashboardRealtimeSockets
+      .filter((socket) => new URL(socket.url, window.location.href).pathname.startsWith("/ws/channels/"));
+    return {
+      created: sockets.length,
+      open: sockets.filter((socket) => socket.readyState === 1).length,
+      urls: sockets.map((socket) => new URL(socket.url, window.location.href).pathname),
+    };
+  });
+  expect(socketStats).toMatchObject({ created: 1, open: 1, urls: ["/ws/channels/stable-channel"] });
 });
 
 test("game search results close on outside click, focus exit, and Escape at 390px", async ({ page }) => {

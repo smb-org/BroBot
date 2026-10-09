@@ -1,16 +1,15 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ComponentType, type LazyExoticComponent, type ReactElement } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type LazyExoticComponent, type ReactElement } from "react";
 
 import type { ChannelStreamState } from "../contracts/values";
 import { canManage } from "../contracts/values";
-import type { PanelChannelOverview, PanelEventEntry, PanelModuleState } from "../panel-contract";
+import type { PanelChannelOverview, PanelModuleState } from "../panel-contract";
 import type { ModuleImmediateActionProperties } from "../modules/contract";
 import { MODULES } from "../modules/registry";
-import { fetchEvents } from "./api";
 import { dashboardLanguage, dashboardTexts, eventText, formatNumber, formatStreamManagerFeedTime, formatTimestamp, immediateActionUnavailableReasonText } from "./locale";
 import { channelPanelTexts } from "./labels";
 import { eventCause, eventDetail, eventMetadata } from "./events/model";
 import { emptyEventFilter } from "./events/model";
-import { useRealtimeEventFeed } from "./realtime";
+import { useEventsQuery } from "./data/lists";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { Button, LoadState, notify, Popover, Skeleton } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
@@ -249,61 +248,30 @@ export const ImmediateActions = ({ channelId, streamState, canManage = false, mo
  */
 export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: string; onNavigate?: (route: DashboardRoute) => void }): ReactElement => {
   const texts = dashboardTexts();
-  const [entries, setEntries] = useState<readonly PanelEventEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
+  const filters = { ...emptyEventFilter, tones: ["warning", "error"] as const };
+  const query = useEventsQuery(channelId, filters);
+  const entries = (query.data?.pages[0]?.entries ?? [])
+    .filter((entry) => {
+      const tone = eventMetadata(entry.code)?.tone;
+      return tone === "warning" || tone === "error";
+    })
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .slice(0, 3);
   const allAlertsRoute: DashboardRoute = {
     kind: "channel",
     channelId,
     section: "events",
     filters: { ...emptyEventFilter, tones: ["warning", "error"] },
   };
-  const refreshFirstPage = useCallback(async (): Promise<void> => {
-    try {
-      const response = await fetchEvents(channelId);
-      setFailed(false);
-      setEntries(response.entries
-        .filter((entry) => {
-          const tone = eventMetadata(entry.code)?.tone;
-          return tone === "warning" || tone === "error";
-        })
-        .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-        .slice(0, 3));
-    } catch {
-      notify({ tone: "error", message: texts.events.connectionLost });
-    }
-  }, [channelId, texts.events.connectionLost]);
-  const scrollToBeginning = useCallback((): void => undefined, []);
-  useRealtimeEventFeed({ channelId, filters: emptyEventFilter, refresh: () => { void refreshFirstPage(); }, scrollToBeginning });
-
   useEffect(() => {
-    const controller = new AbortController();
-    fetchEvents(channelId, null, controller.signal)
-      .then((response) => {
-        if (controller.signal.aborted) return;
-        setFailed(false);
-        setEntries(response.entries
-          .filter((entry) => {
-            const tone = eventMetadata(entry.code)?.tone;
-            return tone === "warning" || tone === "error";
-          })
-          .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-          .slice(0, 3));
-      })
-      .catch(() => {
-        if (controller.signal.aborted) return;
-        setFailed(true);
-        notify({ tone: "error", message: texts.events.connectionLost });
-      })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => { controller.abort(); };
-  }, [channelId, texts.events.connectionLost]);
+    if (query.isError) notify({ tone: "error", message: texts.events.connectionLost });
+  }, [query.error, query.isError, texts.events.connectionLost]);
 
   return (
     <section className="content-section" aria-label={texts.streamManager.feedTitle}>
       <div className="section-heading"><h2>{texts.streamManager.feedTitle}</h2><a className="stream-manager-feed__all" href={dashboardRoutePath(allAlertsRoute)} onClick={onNavigate === undefined ? undefined : (event) => { event.preventDefault(); onNavigate(allAlertsRoute); }}>{texts.streamManager.feedAll}</a></div>
       <LoadState
-        status={loading ? "loading" : failed ? "error" : entries.length === 0 ? "empty" : "success"}
+        status={query.isPending ? "loading" : query.isError ? "error" : entries.length === 0 ? "empty" : "success"}
         minHeight={132}
         loading={<Skeleton rows={3} height={44} />}
         empty={<p className="stream-manager-feed__empty">{texts.streamManager.feedEmpty}</p>}

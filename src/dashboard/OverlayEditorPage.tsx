@@ -23,9 +23,7 @@ import {
 import { DisabledFieldReasonContext } from "./ui/DisabledFieldReason";
 import {
   createOverlay,
-  fetchChannelVariables,
   fetchModules,
-  fetchOverlay,
   PanelApiError,
   saveOverlay,
   type PanelChannelVariable,
@@ -36,7 +34,7 @@ import {
 import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, overlaysTexts } from "./locale";
 import { moduleName } from "./module-labels";
 import { OverlayElementPalette, type OverlayElementPaletteOption } from "./OverlayElementPalette";
-import { useRealtimeVariableUpdates } from "./realtime";
+import { useChannelVariablesQuery, useOverlayQuery } from "./data/lists";
 import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, NumberField, PageHeader, SaveBar, Select, Switch, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
@@ -314,33 +312,63 @@ const conflictRevision = (error: PanelApiError): number | null => {
 export function OverlayEditorPage({ channelId, overlayId, canManage, language, initialVariable, initialOverlayName, onBack, onOverlayCreated }: OverlayEditorPageProperties): ReactElement {
   const dashboardLocale = dashboardLanguage();
   const labels = useMemo(() => overlaysTexts(dashboardLocale), [dashboardLocale]);
-  const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
+  const variablesQuery = useChannelVariablesQuery(channelId);
+  const overlayQuery = useOverlayQuery(channelId, overlayId, overlayId !== "new");
+  const refetchVariables = variablesQuery.refetch;
+  const refetchOverlay = overlayQuery.refetch;
+  const variables = variablesQuery.data?.variables ?? [];
   const [moduleStates, setModuleStates] = useState<readonly PanelModuleState[]>([]);
   const [session, setSession] = useState<OverlayEditorSession | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadGeneration, setLoadGeneration] = useState(0);
+  const variablesLoadError = variablesQuery.isError && variablesQuery.data === undefined
+    ? variablesQuery.error instanceof PanelApiError
+      ? apiErrorText(variablesQuery.error.code, labels.editorLoadError)
+      : labels.editorLoadError
+    : null;
+  const overlayLoadError = overlayId !== "new" && overlayQuery.isError && overlayQuery.data === undefined
+    ? overlayQuery.error instanceof PanelApiError
+      ? apiErrorText(overlayQuery.error.code, labels.editorLoadError)
+      : labels.editorLoadError
+    : null;
+  const visibleLoadError = loadError ?? variablesLoadError ?? overlayLoadError;
   const initialVariableRef = useRef(canManage ? initialVariable : undefined);
-
-  const refreshVariables = useCallback(async (): Promise<void> => {
-    const result = await fetchChannelVariables(channelId);
-    setVariables(result.variables);
-  }, [channelId]);
-
-  useRealtimeVariableUpdates({ channelId, refresh: refreshVariables });
+  const initializedSessionKey = useRef<string | null>(null);
 
   useEffect(() => {
+    const sessionKey = `${channelId}:${overlayId}:${String(loadGeneration)}`;
+    if (initializedSessionKey.current === sessionKey) return;
+    if (variablesQuery.isError && variablesQuery.data === undefined) {
+      const message = variablesQuery.error instanceof PanelApiError
+        ? apiErrorText(variablesQuery.error.code, labels.editorLoadError)
+        : labels.editorLoadError;
+      initializedSessionKey.current = sessionKey;
+      notify({ tone: "error", message });
+      return;
+    }
+    if (variablesQuery.data === undefined) return;
+    const variableData = variablesQuery.data;
+    if (overlayId !== "new" && overlayQuery.isError && overlayQuery.data === undefined) {
+      const message = overlayQuery.error instanceof PanelApiError
+        ? apiErrorText(overlayQuery.error.code, labels.editorLoadError)
+        : labels.editorLoadError;
+      initializedSessionKey.current = sessionKey;
+      notify({ tone: "error", message });
+      return;
+    }
+    if (overlayId !== "new" && overlayQuery.data === undefined) return;
     let disposed = false;
-    const overlayRequest = overlayId === "new"
-      ? Promise.resolve({ overlay: {
+    const overlay = overlayId === "new"
+      ? {
         id: "new", channelId, name: initialOverlayName ?? "", width: 1920, height: 1080, css: "", revision: 1,
         createdAt: "", updatedAt: "", elements: [],
-      } satisfies PanelOverlay })
-      : fetchOverlay(channelId, overlayId);
+      } satisfies PanelOverlay
+      : overlayQuery.data?.overlay;
+    if (overlay === undefined) return;
     const moduleRequest = fetchModules(channelId).catch(() => ({ modules: [] }));
-    void Promise.all([overlayRequest, fetchChannelVariables(channelId), moduleRequest])
-      .then(([overlayResult, variableResult, moduleResult]) => {
+    void moduleRequest
+      .then((moduleResult) => {
         if (disposed) return;
-        setVariables(variableResult.variables);
         setModuleStates(moduleResult.modules);
         const requestedVariable = initialVariableRef.current;
         initialVariableRef.current = undefined;
@@ -349,7 +377,8 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
           currentUrl.searchParams.delete("variable");
           window.history.replaceState(window.history.state, "", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
         }
-        setSession(initialSession(overlayResult.overlay, variableResult.variables, requestedVariable));
+        setSession(initialSession(overlay, variableData.variables, requestedVariable));
+        initializedSessionKey.current = sessionKey;
       })
       .catch((caught: unknown) => {
         if (disposed) return;
@@ -360,17 +389,28 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
         notify({ tone: "error", message });
       });
     return () => { disposed = true; };
-  }, [channelId, initialOverlayName, labels.editorLoadError, loadGeneration, overlayId]);
+  }, [channelId, initialOverlayName, labels.editorLoadError, loadGeneration, overlayId, overlayQuery.data, overlayQuery.error, overlayQuery.isError, variablesQuery.data, variablesQuery.error, variablesQuery.isError]);
 
   const reload = useCallback((): void => {
     setSession(null);
     setLoadError(null);
-    setLoadGeneration((current) => current + 1);
-  }, []);
+    void Promise.all([
+      refetchVariables({ throwOnError: true }),
+      overlayId === "new" ? Promise.resolve() : refetchOverlay({ throwOnError: true }),
+    ]).then(() => {
+      setLoadGeneration((current) => current + 1);
+    }).catch((caught: unknown) => {
+      const message = caught instanceof PanelApiError
+        ? apiErrorText(caught.code, labels.editorLoadError)
+        : labels.editorLoadError;
+      setLoadError(message);
+      notify({ tone: "error", message });
+    });
+  }, [labels.editorLoadError, overlayId, refetchOverlay, refetchVariables]);
 
-  if (loadError !== null || session === null) return <section className="overlay-editor overlay-editor--message">
+  if (visibleLoadError !== null || session === null) return <section className="overlay-editor overlay-editor--message">
     <Button variant="subtle" onClick={onBack}>{labels.editorBack}</Button>
-    <LoadState status={loadError === null ? "loading" : "error"} minHeight="360px"
+    <LoadState status={visibleLoadError === null ? "loading" : "error"} minHeight="360px"
       loading={<p className="loading-line">{labels.editorLoading}</p>}
       empty={<span />}
       error={<Button variant="neutral" onClick={reload}>{labels.editorConflictReload}</Button>}>

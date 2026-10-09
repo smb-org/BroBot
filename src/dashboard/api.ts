@@ -183,8 +183,8 @@ const overlayAccessesPath = (channelId: string, overlayId: string, tokenId?: str
   return action === undefined ? accessPath : `${accessPath}/${action}`;
 };
 
-export const fetchOverlays = (channelId: string): Promise<{ overlays: readonly PanelOverlaySummary[]; maximum: number; elementMaximum: number }> =>
-  requestJson(overlaysPath(channelId));
+export const fetchOverlays = (channelId: string, signal?: AbortSignal): Promise<{ overlays: readonly PanelOverlaySummary[]; maximum: number; elementMaximum: number }> =>
+  requestJson(overlaysPath(channelId), signal === undefined ? {} : { signal });
 
 export const createOverlay = (channelId: string, input: {
   name: string;
@@ -201,8 +201,8 @@ export const importLegacyOverlay = (channelId: string, input: {
 }): Promise<{ overlay: PanelOverlay; closingPending?: boolean }> =>
   requestMutation(`${overlaysPath(channelId)}/import-legacy`, "POST", input);
 
-export const fetchOverlay = (channelId: string, overlayId: string): Promise<{ overlay: PanelOverlay }> =>
-  requestJson(overlaysPath(channelId, overlayId));
+export const fetchOverlay = (channelId: string, overlayId: string, signal?: AbortSignal): Promise<{ overlay: PanelOverlay }> =>
+  requestJson(overlaysPath(channelId, overlayId), signal === undefined ? {} : { signal });
 
 export type PanelOverlayDraft = Pick<PanelOverlay, "name" | "width" | "height" | "css" | "elements">;
 export interface PanelOverlayReconnectExpectation {
@@ -552,8 +552,8 @@ export interface PanelChannelVariablesResponse {
 const variablesPath = (channelId: string, name?: string, suffix = ""): string =>
   `${channelPath(channelId, "variables")}${name === undefined ? "" : `/${encodeURIComponent(name)}`}${suffix}`;
 
-export const fetchChannelVariables = (channelId: string): Promise<PanelChannelVariablesResponse> =>
-  requestJson<PanelChannelVariablesResponse>(variablesPath(channelId));
+export const fetchChannelVariables = (channelId: string, signal?: AbortSignal): Promise<PanelChannelVariablesResponse> =>
+  requestJson<PanelChannelVariablesResponse>(variablesPath(channelId), signal === undefined ? {} : { signal });
 
 export const createChannelVariable = (
   channelId: string,

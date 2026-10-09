@@ -26,8 +26,8 @@ const readJson = async <Value>(response: Response): Promise<Value> => {
 const route = (channelId: string, path: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/chat_voting${path}`;
 
-export const loadChatVotingState = async (channelId: string): Promise<ChatVotingPanelState> =>
-  readJson<ChatVotingPanelState>(await fetch(route(channelId, "/current")));
+export const loadChatVotingState = async (channelId: string, signal?: AbortSignal): Promise<ChatVotingPanelState> =>
+  readJson<ChatVotingPanelState>(await fetch(route(channelId, "/current"), signal === undefined ? {} : { signal }));
 
 const csrfHeader = async (): Promise<string> => {
   const token = await readJson<{ token: string }>(await fetch("/api/csrf"));

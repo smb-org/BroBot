@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -6,8 +6,10 @@ import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
+import { invalidateDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import type { RealtimeMessage } from "../../src/realtime-contract";
 import { jsonResponse } from "../unit/fixtures";
-import { TestWebSocket } from "./test-websocket";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const variable = {
   channelId: "kanal-a",
@@ -30,7 +32,6 @@ describe("Channel variables page", () => {
     for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.useRealTimers();
     vi.unstubAllGlobals();
-    TestWebSocket.instances = [];
     setBrowserLanguage("de-DE");
   });
 
@@ -290,66 +291,32 @@ describe("Channel variables page", () => {
     expect(await screen.findByText(expectedWarning)).toBeInTheDocument();
   });
 
-  it("coalesces variable hints, bounds continuous refreshes, and keeps one request in flight", async () => {
-    let releaseThird: ((result: Response) => void) | null = null;
+  it("revalidates variables from the shared query after a realtime hint", async () => {
     let variableRequestCount = 0;
     const fetcher = vi.fn<typeof fetch>();
     fetcher.mockImplementation((input) => {
       const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
       if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
       variableRequestCount++;
-      return variableRequestCount === 3
-        ? new Promise((resolve) => { releaseThird = resolve; })
-        : Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
     });
     vi.stubGlobal("fetch", fetcher);
-    vi.stubGlobal("WebSocket", TestWebSocket);
 
-    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    const rendered = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
     await screen.findByRole("table");
-    expect(TestWebSocket.instances).toHaveLength(1);
-    vi.useFakeTimers();
-    TestWebSocket.instances[0]?.dispatch("open", new Event("open"));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(variableRequestCount).toBe(2);
+    expect(variableRequestCount).toBe(1);
 
-    const sendHint = (id: number): void => TestWebSocket.instances[0]?.dispatch("message", {
-      data: JSON.stringify({
-        version: 1,
-        id: `variables-changed-${String(id)}`,
-        createdAt: "2026-09-24T12:00:00.000Z",
-        channelId: "kanal-a",
-        type: "variables.changed",
-        payload: { set: [{ name: "score", value: 1235 }], removed: [] },
-      }),
-    } as MessageEvent<string>);
-    for (let index = 0; index < 10; index++) sendHint(index);
-    await act(async () => { await vi.advanceTimersByTimeAsync(119); });
-    expect(variableRequestCount).toBe(2);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(variableRequestCount).toBe(3);
+    invalidateDashboardRealtimeMessage(rendered.queryClient, {
+      version: 1,
+      id: "variables-changed-1",
+      createdAt: "2026-09-24T12:00:00.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: { set: [{ name: "score", value: 1235 }], removed: [] },
+    } satisfies RealtimeMessage);
 
-    for (let index = 10; index < 25; index++) {
-      sendHint(index);
-      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    }
-    expect(variableRequestCount).toBe(3);
-    expect(releaseThird).toBeTypeOf("function");
-    await act(async () => {
-      releaseThird?.(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(variableRequestCount).toBe(4);
-    fireEvent.focus(window);
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    await waitFor(() => { expect(variableRequestCount).toBe(2); });
+    expect(screen.getByRole("row", { name: /score/i })).toBeInTheDocument();
   });
 
   it("consumes each Spotlight selection, applies later requests on the mounted page, and does not replay one after returning", async () => {

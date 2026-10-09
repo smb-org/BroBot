@@ -1394,6 +1394,7 @@ describe("dispatch and execution", () => {
       expect(publish).toHaveBeenCalledTimes(1);
       expect(publish.mock.calls[0]?.[0]).toMatchObject([
         { type: "stream.state.changed", payload: { state: "online", startedAt: "2026-09-19T11:55:00.000Z" } },
+        { type: "modul.belabox.state_changed", payload: { reason: "stream.state.changed" } },
         { type: "variables.changed", payload: {
           set: [{ name: "score", value: 0 }], removed: [], overlayIdsByVariable: { score: ["overlay-a"] },
         } },

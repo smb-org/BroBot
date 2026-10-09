@@ -374,8 +374,6 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
   }, []);
   const realtime = useRealtimeEventFeed({
     channelId,
-    filters,
-    refresh: onRefresh,
     refreshOnReturn: onRefreshOnReturn,
     scrollToBeginning,
   });

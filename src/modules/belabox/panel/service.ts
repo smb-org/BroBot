@@ -30,21 +30,22 @@ const mutate = async <Value,>(channelId: string, path: string, method: "PUT" | "
   }));
 };
 
-export const loadBelaboxStatus = async (channelId: string): Promise<BelaboxStatusResponse> =>
-  readJson<BelaboxStatusResponse>(await fetch(`${modulePath(channelId)}/status`));
+export const loadBelaboxStatus = async (channelId: string, signal?: AbortSignal): Promise<BelaboxStatusResponse> =>
+  readJson<BelaboxStatusResponse>(await fetch(`${modulePath(channelId)}/status`, signal === undefined ? {} : { signal }));
 
 export const loadBelaboxHistory = async (
   channelId: string,
   range: "live" | "stream",
   streamId?: string,
+  signal?: AbortSignal,
 ): Promise<BelaboxHistoryPoint[]> => {
   const query = new URLSearchParams({ range });
   if (streamId !== undefined) query.set("streamId", streamId);
-  return readJson<BelaboxHistoryPoint[]>(await fetch(`${modulePath(channelId)}/history?${query.toString()}`));
+  return readJson<BelaboxHistoryPoint[]>(await fetch(`${modulePath(channelId)}/history?${query.toString()}`, signal === undefined ? {} : { signal }));
 };
 
-export const loadBelaboxStreams = async (channelId: string): Promise<BelaboxStreamSummary[]> =>
-  readJson<BelaboxStreamSummary[]>(await fetch(`${modulePath(channelId)}/streams`));
+export const loadBelaboxStreams = async (channelId: string, signal?: AbortSignal): Promise<BelaboxStreamSummary[]> =>
+  readJson<BelaboxStreamSummary[]>(await fetch(`${modulePath(channelId)}/streams`, signal === undefined ? {} : { signal }));
 
 export const replaceBelaboxStatsUrl = async (channelId: string, url: string): Promise<void> => {
   await mutate<{ configured: true }>(channelId, "/stats-url", "PUT", { url });

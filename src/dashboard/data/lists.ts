@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
-import { fetchAuditLog, fetchEvents, fetchMembers, fetchSystemOverview } from "../api";
+import { fetchAuditLog, fetchChannelVariables, fetchEvents, fetchMembers, fetchOverlay, fetchOverlays, fetchSystemOverview } from "../api";
 import type { PanelAuditFilters, PanelEventFilters } from "../../panel-contract";
 import { dashboardDataKeys } from "./keys";
 
@@ -46,4 +46,29 @@ export const useSystemQuery = (channelId: string, enabled: boolean) => useQuery(
   refetchOnWindowFocus: false,
   placeholderData: (previousData, previousQuery) =>
     previousQuery?.queryKey[1] === channelId ? previousData : undefined,
+});
+
+export const useChannelVariablesQuery = (channelId: string) => useQuery({
+  queryKey: dashboardDataKeys.variables(channelId),
+  queryFn: ({ signal }) => fetchChannelVariables(channelId, signal),
+  refetchOnWindowFocus: false,
+  placeholderData: (previousData, previousQuery) =>
+    previousQuery?.queryKey[1] === channelId ? previousData : undefined,
+});
+
+export const useOverlaysQuery = (channelId: string, enabled = true) => useQuery({
+  queryKey: dashboardDataKeys.overlays(channelId),
+  queryFn: ({ signal }) => fetchOverlays(channelId, signal),
+  enabled,
+  refetchOnWindowFocus: false,
+  placeholderData: (previousData, previousQuery) =>
+    previousQuery?.queryKey[1] === channelId ? previousData : undefined,
+});
+
+export const useOverlayQuery = (channelId: string, overlayId: string, enabled = true) => useQuery({
+  queryKey: dashboardDataKeys.overlay(channelId, overlayId),
+  queryFn: ({ signal }) => fetchOverlay(channelId, overlayId, signal),
+  enabled,
+  refetchOnWindowFocus: false,
+  placeholderData: () => undefined,
 });

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { URL as NodeURL } from "node:url";
 import { runInNewContext } from "node:vm";
@@ -13,6 +13,7 @@ import { UiProvider as BaseUiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const UiProvider = ({ children }: { children: ReactNode }) => <BaseUiProvider><ToastHost />{children}</BaseUiProvider>;
 

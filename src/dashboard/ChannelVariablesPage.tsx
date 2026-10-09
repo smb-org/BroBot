@@ -7,7 +7,6 @@ import {
   fetchOverlay,
   fetchOverlays,
   fetchOverlayTokens,
-  fetchChannelVariables,
   PanelApiError,
   saveOverlay,
   updateChannelVariable,
@@ -15,9 +14,11 @@ import {
   type PanelOverlayElement,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage } from "./locale";
-import { useRealtimeVariableUpdates } from "./realtime";
 import { Button, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
+import { dashboardDataKeys } from "./data/keys";
+import { useDashboardQueryClient } from "./data";
+import { useChannelVariablesQuery, useOverlaysQuery } from "./data/lists";
 
 interface ChannelVariablesPageProperties {
   channelId: string;
@@ -32,6 +33,7 @@ interface ChannelVariablesPageProperties {
 
 const normalizedVariableName = (value: string): string => value.trim().toLowerCase();
 const variableNamePattern = /^[a-z][a-z0-9_]{0,31}$/u;
+const EMPTY_VARIABLES: readonly PanelChannelVariable[] = [];
 const saveableOverlayElement = (element: PanelOverlayElement): Omit<PanelOverlayElement, "missingVariableName"> => ({
   id: element.id,
   kind: element.kind,
@@ -49,11 +51,13 @@ const saveableOverlayElement = (element: PanelOverlayElement): Omit<PanelOverlay
 export function ChannelVariablesPage({ channelId, canManage: canManageContent, onOpenCommand, initialSelection, onInitialSelectionConsumed, onOpenOverlay }: ChannelVariablesPageProperties): ReactElement {
   const language = dashboardLanguage();
   const labels = channelVariablesTexts(language);
-  const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
+  const variablesQuery = useChannelVariablesQuery(channelId);
+  const queryClient = useDashboardQueryClient();
+  const variables = variablesQuery.data?.variables ?? EMPTY_VARIABLES;
+  const maximum = variablesQuery.data?.maximum ?? CHANNEL_VARIABLE_MAXIMUM_COUNT;
+  const loading = variablesQuery.isPending;
+  const loadFailed = variablesQuery.isError;
   const [search, setSearch] = useState("");
-  const [maximum, setMaximum] = useState(CHANNEL_VARIABLE_MAXIMUM_COUNT);
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -67,38 +71,26 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [pending, setPending] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [useOverlayOpen, setUseOverlayOpen] = useState(false);
+  const overlaysQuery = useOverlaysQuery(channelId, useOverlayOpen);
+  const overlayOptions = (overlaysQuery.data?.overlays ?? []).map(({ id, name, elementCount }) => ({ id, name, elementCount }));
+  const refetchVariables = variablesQuery.refetch;
   const [legacyLinkStatus, setLegacyLinkStatus] = useState<{ channelId: string; hasLinks: boolean } | null>(null);
-  const [overlayOptions, setOverlayOptions] = useState<readonly { id: string; name: string; elementCount: number }[]>([]);
   const [overlaySelection, setOverlaySelection] = useState("");
   const [creatingOverlay, setCreatingOverlay] = useState(false);
   const [newOverlayName, setNewOverlayName] = useState("");
   const [overlayPending, setOverlayPending] = useState(false);
-  const refreshRequest = useRef(0);
-  const invalidateRefresh = useCallback((): void => { refreshRequest.current++; }, []);
   const lastInitialSelection = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const requestId = ++refreshRequest.current;
-    try {
-      const result = await fetchChannelVariables(channelId);
-      if (requestId !== refreshRequest.current) return;
-      setVariables(result.variables);
-      setMaximum(result.maximum);
-      setLoadFailed(false);
-    } catch (caught) {
-      if (requestId !== refreshRequest.current) return;
-      const loadErrorText = channelVariablesTexts(dashboardLanguage()).loadError;
-      setLoadFailed(true);
-      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, loadErrorText) : loadErrorText });
-    } finally {
-      if (requestId === refreshRequest.current) setLoading(false);
-    }
-  }, [channelId]);
+    const result = await refetchVariables({ throwOnError: true });
+    if (result.isError) throw result.error;
+  }, [refetchVariables]);
 
   useEffect(() => {
-    void Promise.resolve().then(refresh);
-    return () => { invalidateRefresh(); };
-  }, [invalidateRefresh, refresh]);
+    if (!variablesQuery.isError) return;
+    const loadErrorText = channelVariablesTexts(dashboardLanguage()).loadError;
+    notify({ tone: "error", message: variablesQuery.error instanceof PanelApiError ? apiErrorText(variablesQuery.error.code, loadErrorText) : loadErrorText });
+  }, [variablesQuery.error, variablesQuery.isError]);
 
   useEffect(() => {
     let active = true;
@@ -109,8 +101,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     });
     return () => { active = false; };
   }, [channelId]);
-
-  useRealtimeVariableUpdates({ channelId, refresh });
 
   const selected = useMemo(() => variables.find((variable) => variable.name === selectedName) ?? null, [selectedName, variables]);
   useLayoutEffect(() => {
@@ -137,7 +127,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setDraftReset(false);
     setDraftSetValue(0);
     setUseOverlayOpen(false);
-    setOverlayOptions([]);
     setOverlaySelection("");
     setCreatingOverlay(false);
     setNewOverlayName("");
@@ -151,7 +140,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setDraftReset(variable.resetOnStreamStart);
     setDraftSetValue(variable.value);
     setUseOverlayOpen(false);
-    setOverlayOptions([]);
     setOverlaySelection("");
     setCreatingOverlay(false);
     setNewOverlayName("");
@@ -216,7 +204,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setPending(true);
     try {
       const response = await changeChannelVariableValue(channelId, selected.name, operation, amount);
-      setVariables((current) => current.map((variable) => variable.name === selected.name ? { ...variable, ...response.variable } : variable));
+      await refresh();
       setDraftSetValue(response.variable.value);
       return true;
     } catch (caught) {
@@ -238,8 +226,10 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     if (selected === null || !canManageContent || overlayPending) return;
     setOverlayPending(true);
     try {
-      const result = await fetchOverlays(channelId);
-      setOverlayOptions(result.overlays.map(({ id, name, elementCount }) => ({ id, name, elementCount })));
+      const result = await queryClient.query({
+        queryKey: dashboardDataKeys.overlays(channelId),
+        queryFn: ({ signal }) => fetchOverlays(channelId, signal),
+      });
       setOverlaySelection(result.overlays[0]?.id ?? "");
       setCreatingOverlay(result.overlays.length === 0);
       setNewOverlayName(labels.defaultOverlayName(selected.name));

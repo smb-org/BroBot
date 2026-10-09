@@ -32,6 +32,7 @@ vi.mock("../../src/worker/module-secrets", () => ({
 
 import type {
   RealtimeEnvelope,
+  RealtimeMessage,
   RealtimeOverlayPrincipal,
   RealtimePanelPrincipal,
   RealtimePrincipal,
@@ -1156,6 +1157,39 @@ describe("ChannelObject realtime path", () => {
     expect(unrelated.send.mock.calls).toHaveLength(0);
     expect(legacy.send.mock.calls).toHaveLength(0);
     expect(panel.send.mock.calls).toHaveLength(0);
+  });
+
+  it("routes panel-enabled module messages to channel members and their overlays", async () => {
+    const overlay = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a", expiresAt: null,
+    });
+    const panel = socketFor(validPrincipal());
+    const object = objectFor([overlay, panel]);
+    const panelMessageTypes = [
+      "modul.chat_voting.opened",
+      "modul.chat_voting.tally",
+      "modul.belabox.state_changed",
+      "modul.belabox.sample",
+      "modul.votekick.opened",
+      "modul.votekick.tally",
+    ];
+    const messages = [...panelMessageTypes, "modul.text_library.blocks_updated"].map((type, index) => ({
+      version: 1,
+      id: `module-message-${String(index)}`,
+      createdAt: "2026-10-09T08:00:00.000Z",
+      channelId: "kanal-a",
+      type,
+      payload: { messageType: type },
+      overlayIds: ["overlay-a"],
+    } as unknown as RealtimeMessage));
+
+    await object.publish(messages);
+
+    expect(panel.send.mock.calls.map(([serialized]) => typeOfSerializedMessage(serialized))).toEqual(panelMessageTypes);
+    expect(overlay.send.mock.calls.map(([serialized]) => typeOfSerializedMessage(serialized))).toEqual([
+      ...panelMessageTypes,
+      "modul.text_library.blocks_updated",
+    ]);
   });
 
   it("routes overlay changes by the durable overlay tag after a fresh object instance", async () => {

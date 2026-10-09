@@ -1,13 +1,12 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import { Button, EmptyCellValue, Icon, LoadState, Skeleton, notify } from "../../../dashboard/ui";
-import type { AdsScheduleResponse } from "../contracts";
 import { loadAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
-
-const pickNewestSchedule = (left: AdsScheduleResponse, right: AdsScheduleResponse): AdsScheduleResponse =>
-  Date.parse(left.asOf ?? "") >= Date.parse(right.asOf ?? "") ? left : right;
+import { runModuleQueryWrite, useModuleQuery } from "../../../dashboard/data";
+import { useDashboardQueryClient } from "../../../dashboard/data";
+import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 
 const formatTimestamp = (value: string | null, language: DashboardLanguage): string => {
   if (value === null) return "—";
@@ -22,53 +21,18 @@ const formatTimestamp = (value: string | null, language: DashboardLanguage): str
 export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; language?: DashboardLanguage }): ReactElement => {
   const labels = adsPanelTexts(language);
   const loadError = labels.loadError;
-  const [schedule, setSchedule] = useState<AdsScheduleResponse | null>(null);
-  const latestRealtimeRef = useRef<{ schedule: AdsScheduleResponse["schedule"]; asOf: string } | null>(null);
-  const [loadStatus, setLoadStatus] = useState<"loading" | "error" | "success">("loading");
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const queryClient = useDashboardQueryClient();
+  const scheduleQuery = useModuleQuery(channelId, "ads", "schedule", (signal) => loadAdsSchedule(channelId, signal), {
+    refetchInterval: realtimeStatus === "connected" ? false : 60_000,
+  });
+  const schedule = scheduleQuery.data ?? null;
+  const loadStatus = scheduleQuery.isPending ? "loading" : scheduleQuery.isError ? "error" : "success";
   const [snoozeBusy, setSnoozeBusy] = useState(false);
 
   useEffect(() => {
-    let active = true;
-    latestRealtimeRef.current = null;
-    void loadAdsSchedule(channelId).then((loaded) => {
-      if (!active) return;
-      setSchedule((current) => {
-        const updates = [loaded, ...(current === null ? [] : [current])];
-        const buffered = latestRealtimeRef.current;
-        if (buffered !== null) {
-          const newest = updates.reduce((newestSoFar, candidate) => pickNewestSchedule(newestSoFar, candidate), loaded);
-          if (Date.parse(buffered.asOf) > Date.parse(newest.asOf ?? "")) {
-            return { ...loaded, schedule: buffered.schedule, asOf: buffered.asOf };
-          }
-        }
-        return updates.reduce((newestSoFar, candidate) => pickNewestSchedule(newestSoFar, candidate), loaded);
-      });
-      setLoadStatus("success");
-    }).catch(() => { if (active) { setLoadStatus("error"); notify({ tone: "error", message: loadError }); } });
-    return () => { active = false; };
-  }, [channelId, loadError]);
-
-  useEffect(() => {
-    const handleRealtimeMessage = (event: Event): void => {
-      const detail: unknown = (event as CustomEvent<unknown>).detail;
-      if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return;
-      const message = detail as Record<string, unknown>;
-      if (message.type !== "ads.schedule.updated" || message.channelId !== channelId ||
-          typeof message.payload !== "object" || message.payload === null || Array.isArray(message.payload)) return;
-      const payload = message.payload as Record<string, unknown>;
-      if (typeof payload.asOf !== "string" || typeof payload.schedule !== "object" || payload.schedule === null || Array.isArray(payload.schedule)) return;
-      const update = { schedule: payload.schedule as AdsScheduleResponse["schedule"], asOf: payload.asOf };
-      const buffered = latestRealtimeRef.current;
-      if (buffered === null || Date.parse(update.asOf) > Date.parse(buffered.asOf)) latestRealtimeRef.current = update;
-      setSchedule((current) => current === null || Date.parse(update.asOf) <= Date.parse(current.asOf ?? "") ? current : {
-        ...current,
-        schedule: update.schedule,
-        asOf: update.asOf,
-      });
-    };
-    window.addEventListener("brobot:realtime", handleRealtimeMessage);
-    return () => window.removeEventListener("brobot:realtime", handleRealtimeMessage);
-  }, [channelId]);
+    if (scheduleQuery.isError) notify({ tone: "error", message: loadError });
+  }, [loadError, scheduleQuery.error, scheduleQuery.isError]);
 
   const snoozeCount = schedule?.schedule.snoozeCount ?? null;
   const snoozeButtonDisabled = schedule === null || snoozeBusy || !schedule.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
@@ -86,7 +50,10 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
     if (schedule === null) return;
     setSnoozeBusy(true);
     try {
-      setSchedule(await snoozeAds(channelId));
+      await runModuleQueryWrite(queryClient, channelId, "ads", "schedule", () => snoozeAds(channelId), {
+        baselineRevision: null,
+        updateCache: (_current, result) => result,
+      });
       notify({ tone: "success", message: labels.snoozeSuccess });
     } catch {
       notify({ tone: "error", message: labels.snoozeError });

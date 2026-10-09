@@ -179,4 +179,28 @@ describe("module overlay realtime routing", () => {
 
     expect(result).toEqual({ outcome: "no_recipients" });
   });
+
+  it("still prepares panel state hints when a poll module has no overlay recipient", async () => {
+    const chatVoting: BotModule = {
+      id: "chat_voting",
+      navigationCategory: "chat",
+      settingsSchema: { parse: (value: unknown) => value } as never,
+      defaultSettings: {},
+      overlayElements: [declaration("chat_voting.poll")],
+    };
+
+    const result = await prepareModuleOverlayRealtimeMessage(
+      databaseFor([]).database,
+      "kanal-a",
+      "chat_voting",
+      { kind: "overlay", type: "tally", elementKind: "chat_voting.poll", payload: { pollId: "poll-1" } },
+      false,
+      [chatVoting],
+    );
+
+    expect(result).toMatchObject({
+      outcome: "ready",
+      message: { type: "modul.chat_voting.tally", overlayIds: [] },
+    });
+  });
 });

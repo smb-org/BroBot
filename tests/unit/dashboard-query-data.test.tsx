@@ -8,6 +8,8 @@ import { createDashboardQueryClient } from "../../src/dashboard/data/client";
 import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useModuleQuery } from "../../src/dashboard/data";
 import { queryKeys } from "../../src/dashboard/data/keys";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
+import { setDashboardRealtimeStatus, useDashboardRealtimeStatus, invalidateDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import { useOverlayQuery } from "../../src/dashboard/data/lists";
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
 import { emptyAuditFilter } from "../../src/dashboard/audit/model";
 import { emptyEventFilter } from "../../src/dashboard/events/model";
@@ -18,6 +20,7 @@ const channelId = "channel-a";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  setDashboardRealtimeStatus(channelId, "offline");
 });
 
 describe("dashboard query data layer", () => {
@@ -49,8 +52,125 @@ describe("dashboard query data layer", () => {
     expect(moduleQueryKey(channelId, "faq", "panel")).toEqual([
       "channel",
       channelId,
-      "modules/faq/panel",
+      "module",
+      "faq",
+      "panel",
     ]);
+  });
+
+  it("stops fallback interval reads as soon as the channel socket connects", async () => {
+    let readCount = 0;
+    function Probe() {
+      const status = useDashboardRealtimeStatus(channelId);
+      const query = useModuleQuery(channelId, "chat_voting", "panel", () => {
+        readCount += 1;
+        return Promise.resolve(readCount);
+      }, { refetchInterval: status === "connected" ? false : 20 });
+      return <p>{String(query.data ?? "loading")}</p>;
+    }
+
+    const view = renderWithQuery(<Probe />, {}, { gcTime: 600_000, staleTime: 0 });
+    expect(await screen.findByText("1")).toBeInTheDocument();
+    act(() => { setDashboardRealtimeStatus(channelId, "connected"); });
+    await new Promise((resolve) => { setTimeout(resolve, 100); });
+
+    expect(readCount).toBe(1);
+    view.unmount();
+  });
+
+  it("uses the fallback interval while the channel socket is offline", async () => {
+    let readCount = 0;
+    function Probe() {
+      const status = useDashboardRealtimeStatus(channelId);
+      const query = useModuleQuery(channelId, "votekick", "panel", () => {
+        readCount += 1;
+        return Promise.resolve(readCount);
+      }, { refetchInterval: status === "connected" ? false : 20 });
+      return <p>{String(query.data ?? "loading")}</p>;
+    }
+
+    const view = renderWithQuery(<Probe />, {}, { gcTime: 600_000, staleTime: 0 });
+    await waitFor(() => expect(readCount).toBeGreaterThan(1));
+
+    expect(readCount).toBeGreaterThan(1);
+    view.unmount();
+  });
+
+  it("does not show a previous overlay while another overlay is loading", async () => {
+    let releaseOverlayB: (() => void) | undefined;
+    let markOverlayBStarted: (() => void) | undefined;
+    const overlayBStarted = new Promise<void>((resolve) => { markOverlayBStarted = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const overlayId = new URL(requestUrl, window.location.href).pathname.split("/").at(-1);
+      if (overlayId === "overlay-a") {
+        return new Response(JSON.stringify({ overlay: { id: overlayId, name: "Overlay A" } }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      markOverlayBStarted?.();
+      await new Promise<void>((resolve) => { releaseOverlayB = resolve; });
+      return new Response(JSON.stringify({ overlay: { id: overlayId, name: "Overlay B" } }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    function OverlayProbe({ overlayId }: { overlayId: string }) {
+      const query = useOverlayQuery(channelId, overlayId);
+      return <p>{query.data?.overlay.name ?? "Loading"}</p>;
+    }
+
+    const view = renderWithQuery(<OverlayProbe overlayId="overlay-a" />);
+    expect(await screen.findByText("Overlay A")).toBeInTheDocument();
+
+    view.rerender(<OverlayProbe overlayId="overlay-b" />);
+    await overlayBStarted;
+
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("Overlay A")).not.toBeInTheDocument();
+    releaseOverlayB?.();
+    expect(await screen.findByText("Overlay B")).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("queues one trailing read when realtime hints arrive during an active refresh", async () => {
+    let readCount = 0;
+    let releaseRefresh: (() => void) | undefined;
+    let markRefreshStarted: (() => void) | undefined;
+    const refreshStarted = new Promise<void>((resolve) => { markRefreshStarted = resolve; });
+    function ModuleProbe() {
+      const query = useModuleQuery(channelId, "chat_voting", "panel", async () => {
+        readCount += 1;
+        if (readCount === 2) {
+          markRefreshStarted?.();
+          await new Promise<void>((resolve) => { releaseRefresh = resolve; });
+        }
+        return readCount;
+      });
+      return <p>{String(query.data ?? "Loading")}</p>;
+    }
+
+    const view = renderWithQuery(<ModuleProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
+    expect(await screen.findByText("1")).toBeInTheDocument();
+    const message = {
+      version: 1 as const,
+      id: "chat-vote-tally",
+      createdAt: "2026-10-09T08:00:00.000Z",
+      channelId,
+      type: "modul.chat_voting.tally" as const,
+      payload: {},
+    };
+
+    invalidateDashboardRealtimeMessage(view.queryClient, message);
+    await refreshStarted;
+    invalidateDashboardRealtimeMessage(view.queryClient, { ...message, id: "chat-vote-tally-2" });
+    invalidateDashboardRealtimeMessage(view.queryClient, { ...message, id: "chat-vote-tally-3" });
+    expect(readCount).toBe(2);
+
+    releaseRefresh?.();
+    await waitFor(() => expect(readCount).toBe(3));
+    await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "chat_voting", "panel"))).toBe(3));
+    view.unmount();
   });
 
   it("does not let a read started before a module write replace the refetched value", async () => {

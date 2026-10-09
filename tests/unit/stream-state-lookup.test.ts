@@ -177,6 +177,7 @@ describe("lookupAndRefreshStreamState", () => {
       ]);
       expect(publish.mock.calls[1]?.[0]).toMatchObject([
         { type: "stream.state.changed", payload: { state: "online", startedAt } },
+        { type: "modul.belabox.state_changed", payload: { reason: "stream.state.changed" } },
       ]);
       await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
         .resolves.toEqual({ value: 0 });
@@ -266,6 +267,10 @@ describe("lookupAndRefreshStreamState", () => {
         type: "stream.state.changed",
         channelId: "kanal-a",
         payload: { state: "online", startedAt: "2026-09-23T11:58:00.000Z" },
+      }, {
+        type: "modul.belabox.state_changed",
+        channelId: "kanal-a",
+        payload: { reason: "stream.state.changed" },
       }]);
     } finally {
       database.close();
@@ -286,6 +291,9 @@ describe("lookupAndRefreshStreamState", () => {
       expect(publish.mock.calls[0]?.[0]).toMatchObject([{
         type: "stream.state.changed",
         payload: { state: "offline", changedAt: NOW, checkedAt: NOW },
+      }, {
+        type: "modul.belabox.state_changed",
+        payload: { reason: "stream.state.changed" },
       }]);
     } finally {
       database.close();
@@ -409,6 +417,9 @@ describe("lookupAndRefreshStreamState", () => {
             pause: { active: true, mode: "until_stream_end" },
           },
         },
+      }, {
+        type: "modul.belabox.state_changed",
+        payload: { reason: "stream.state.changed" },
       }]);
     } finally {
       database.close();

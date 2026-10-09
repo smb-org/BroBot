@@ -588,13 +588,14 @@ test("the channel-variable limit and create controls stay above a full list", as
 
 test("a failed realtime variable refresh keeps rows visible and offers retry", async ({ page }) => {
   await page.addInitScript(() => {
-    type LayoutSocket = EventTarget & { open: () => void; close: () => void; readyState: number };
+    type LayoutSocket = EventTarget & { url: string; open: () => void; close: () => void; readyState: number };
     const sockets: LayoutSocket[] = [];
     class MockWebSocket extends EventTarget {
+      readonly url: string;
       readyState = 0;
       constructor(url: string, protocols?: string | string[]) {
         super();
-        void url;
+        this.url = url;
         void protocols;
         sockets.push(this);
       }
@@ -606,6 +607,7 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
     Object.defineProperty(window, "WebSocket", { value: MockWebSocket, writable: true, configurable: true });
   });
   let variableRequestCount = 0;
+  let failVariableRefresh = false;
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
@@ -618,7 +620,7 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
     }
     if (pathname === `/api/channels/${channelId}/variables`) {
       variableRequestCount++;
-      if (variableRequestCount === 3) {
+      if (failVariableRefresh) {
         await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "variables_load_failed" }) });
         return;
       }
@@ -645,19 +647,34 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
   const retrySlot = page.locator(".channel-variables-limit-slot");
   const slotBeforeRefreshFailure = await retrySlot.boundingBox();
+  const initialVariableRequestCount = variableRequestCount;
   await page.evaluate(() => {
-    const sockets = (window as Window & { __layoutSockets?: Array<{ open: () => void }> }).__layoutSockets ?? [];
-    sockets.forEach((socket) => { socket.open(); });
+    const sockets = (window as Window & { __layoutSockets?: Array<{ url: string; open: () => void; close: () => void }> }).__layoutSockets ?? [];
+    const panelSockets = sockets.filter((socket) => new URL(socket.url, window.location.href).pathname.startsWith("/ws/channels/"));
+    panelSockets[0]?.open();
+    panelSockets[0]?.close();
   });
-  await expect.poll(() => variableRequestCount).toBe(3);
+  await expect.poll(() => page.evaluate(() => {
+    const sockets = (window as Window & { __layoutSockets?: Array<{ url: string }> }).__layoutSockets ?? [];
+    return sockets.filter((socket) => new URL(socket.url, window.location.href).pathname.startsWith("/ws/channels/")).length;
+  })).toBeGreaterThan(1);
+  failVariableRefresh = true;
+  await page.evaluate(() => {
+    const sockets = (window as Window & { __layoutSockets?: Array<{ url: string; open: () => void }> }).__layoutSockets ?? [];
+    const panelSockets = sockets.filter((socket) => new URL(socket.url, window.location.href).pathname.startsWith("/ws/channels/"));
+    panelSockets.at(-1)?.open();
+  });
+  await expect.poll(() => variableRequestCount).toBeGreaterThan(initialVariableRequestCount);
   await expect(page.locator(".ui-toast--error")).toBeVisible();
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
   await expect(page.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
   expect(await retrySlot.boundingBox()).toEqual(slotBeforeRefreshFailure);
 
+  const failedVariableRequestCount = variableRequestCount;
+  failVariableRefresh = false;
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect.poll(() => variableRequestCount).toBe(4);
+  await expect.poll(() => variableRequestCount).toBeGreaterThan(failedVariableRequestCount);
   await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
 });

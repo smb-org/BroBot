@@ -1,10 +1,13 @@
-import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModulePage } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
 import { toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
+import { moduleQueryKey } from "../../src/dashboard/data/module-query";
+import { invalidateDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import type { RealtimeMessage } from "../../src/realtime-contract";
 import { renderWithQuery } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -159,57 +162,72 @@ describe("Ad settings editor declaration", () => {
       asOf: "2026-09-24T12:00:00.000Z",
     };
     const formatter = new Intl.DateTimeFormat("de-DE", { dateStyle: "short", timeStyle: "short" });
-    const fetcher = adsFetch(undefined, original);
-    renderAds(fetcher);
+    let serverSchedule = original;
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
+      if (path.endsWith("/schedule")) return Promise.resolve(jsonResponse(serverSchedule));
+      if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(jsonResponse(serverSchedule));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    const rendered = renderAds(fetcher);
 
     expect(await screen.findByText(`Stand ${formatter.format(new Date(original.asOf))}`)).toBeInTheDocument();
-    window.dispatchEvent(new CustomEvent("brobot:realtime", { detail: {
+    serverSchedule = {
+      ...original,
+      schedule: { ...original.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 1 },
+      asOf: "2026-09-24T13:00:00.000Z",
+    };
+    invalidateDashboardRealtimeMessage(rendered.queryClient, {
       version: 1,
       id: "ads-schedule-2",
       createdAt: "2026-09-24T13:00:00.000Z",
       channelId: "kanal-a",
       type: "ads.schedule.updated",
-      payload: {
-        schedule: { ...original.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 1 },
-        asOf: "2026-09-24T13:00:00.000Z",
-      },
-    } }));
+      payload: { schedule: serverSchedule.schedule, asOf: serverSchedule.asOf },
+    } satisfies RealtimeMessage);
 
     expect(await screen.findByText(`Stand ${formatter.format(new Date("2026-09-24T13:00:00.000Z"))}`)).toBeInTheDocument();
+    expect(rendered.queryClient.getQueryState(moduleQueryKey("kanal-a", "ads", "schedule"))?.isInvalidated).toBe(false);
   });
 
   it("keeps the newest realtime schedule when it arrives before the initial response", async () => {
-    let resolveInitial: ((response: Response) => void) | undefined;
     const formatter = new Intl.DateTimeFormat("de-DE", { dateStyle: "short", timeStyle: "short" });
-    const initial = { ...schedule, asOf: "2026-09-24T12:00:00.000Z" };
+    let serverSchedule = { ...schedule, asOf: "2026-09-24T12:00:00.000Z" };
+    let scheduleCalls = 0;
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
-      if (path.endsWith("/schedule")) return new Promise<Response>((resolve) => { resolveInitial = resolve; });
+      if (path.endsWith("/schedule")) {
+        scheduleCalls += 1;
+        return Promise.resolve(jsonResponse(scheduleCalls === 1 ? { ...serverSchedule, asOf: "2026-09-24T12:00:00.000Z" } : serverSchedule));
+      }
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
-      if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(jsonResponse(initial));
+      if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(jsonResponse(serverSchedule));
       return Promise.resolve(jsonResponse({}, 404));
     });
-    renderAds(fetcher);
+    const rendered = renderAds(fetcher);
+    await waitFor(() => { expect(scheduleCalls).toBe(1); });
 
     const newerAsOf = "2026-09-24T13:00:00.000Z";
-    window.dispatchEvent(new CustomEvent("brobot:realtime", { detail: {
+    serverSchedule = {
+      ...schedule,
+      schedule: { ...schedule.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 0 },
+      asOf: newerAsOf,
+    };
+    invalidateDashboardRealtimeMessage(rendered.queryClient, {
       version: 1,
       id: "ads-schedule-early",
       createdAt: newerAsOf,
       channelId: "kanal-a",
       type: "ads.schedule.updated",
-      payload: {
-        schedule: { ...schedule.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 0 },
-        asOf: newerAsOf,
-      },
-    } }));
-    act(() => {
-      resolveInitial?.(jsonResponse(initial));
-    });
+      payload: { schedule: serverSchedule.schedule, asOf: newerAsOf },
+    } satisfies RealtimeMessage);
 
     expect(await screen.findByText(`Stand ${formatter.format(new Date(newerAsOf))}`)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Snooze · 0 verfügbar/ })).toBeDisabled();
+    expect(scheduleCalls).toBeGreaterThanOrEqual(2);
   });
 
   it("keeps a cleared prewarning lead time empty and blocks the save", async () => {

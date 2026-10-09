@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -6,6 +6,7 @@ import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store
 import { ChatVotingPanel } from "../../src/modules/chat_voting/panel";
 import type { ChatVotePreset } from "../../src/modules/chat_voting/contracts";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const defaultLabels: Record<ChatVotePreset, string[]> = {
   yes_no: ["Yes", "No"],

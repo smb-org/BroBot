@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { RenderOptions } from "@testing-library/react";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { EventsPage } from "../../src/dashboard/events/EventsPage";
@@ -8,7 +9,19 @@ import { emptyEventFilter } from "../../src/dashboard/events/model";
 import type { PanelEventEntry, PanelEventsResponse } from "../../src/panel-contract";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { dashboardAuthenticationRequiredEvent } from "../../src/dashboard/data/events";
-import { renderWithQuery } from "../query-test-utils";
+import { renderWithQuery as renderWithQueryBase, type DashboardQueryTestOptions } from "../query-test-utils";
+import { useRealtimePanelMessages } from "../../src/dashboard/realtime";
+
+const RealtimeShell = ({ children }: { children: ReactNode }) => {
+  useRealtimePanelMessages("kanal-a", true);
+  return <>{children}</>;
+};
+
+const renderWithQuery = (
+  ui: ReactElement,
+  options?: Omit<RenderOptions, "wrapper">,
+  queryOptions: DashboardQueryTestOptions = {},
+) => renderWithQueryBase(<RealtimeShell>{ui}</RealtimeShell>, options, queryOptions);
 
 const entry = (overrides: Partial<PanelEventEntry>): PanelEventEntry => ({
   eventId: "event-1",
@@ -174,6 +187,7 @@ describe("EventsPage failure cause icon", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(FakeWebSocket.instances[0]?.close).not.toHaveBeenCalled();
     view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(FakeWebSocket.instances[0]?.close).toHaveBeenCalledTimes(1);
   });
 
@@ -241,7 +255,7 @@ describe("EventsPage failure cause icon", () => {
     const fetcher = vi.fn((input: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
       if (requestUrl(input).searchParams.get("module") !== "channel_events") return json([hostEntry]);
       channelRequests += 1;
-      if (channelRequests === 1) {
+      if (channelRequests === 1 || channelRequests === 2) {
         return new Promise<Response>((_resolve, reject) => {
           options?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
         });
@@ -272,6 +286,7 @@ describe("EventsPage failure cause icon", () => {
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
     emitEventHint(socket, "switch-filter-hint", newRaid);
+    await waitFor(() => expect(channelRequests).toBe(2));
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
@@ -281,7 +296,7 @@ describe("EventsPage failure cause icon", () => {
     expect(screen.getByText(/Raid von switchold/u)).toBeVisible();
     expect(rendered.container.querySelector(".skeleton")).not.toBeInTheDocument();
     expect(await screen.findByText(/Raid von switchnew/u)).toBeVisible();
-    expect(channelRequests).toBe(2);
+    expect(channelRequests).toBe(3);
     rendered.unmount();
   });
 
@@ -448,7 +463,7 @@ describe("EventsPage failure cause icon", () => {
     rendered.unmount();
   });
 
-  it("invalidates again when a second realtime hint arrives during a delayed refresh", async () => {
+  it("queues one trailing refresh when an event hint arrives during a fetch", async () => {
     const initialEntry = entry({ eventId: "initial-event" });
     const firstHint = entry({
       eventId: "first-hint-event",
@@ -463,11 +478,11 @@ describe("EventsPage failure cause icon", () => {
       detail: '{"source":"secondhint","viewers":2}',
     });
     const refreshResponses: Array<(response: Response) => void> = [];
-    let mounted = false;
+    let requestCount = 0;
     const fetcher = vi.fn((): Promise<Response> => {
-      if (!mounted) {
-        // The revalidation on mount answers at once with the cached rows.
-        mounted = true;
+      requestCount += 1;
+      if (requestCount <= 1) {
+        // The mount responds with cached rows before realtime refreshes begin.
         return Promise.resolve(new Response(JSON.stringify({ entries: [initialEntry], nextCursor: null }), { status: 200, headers: { "Content-Type": "application/json" } }));
       }
       return new Promise<Response>((resolve) => { refreshResponses.push(resolve); });
@@ -493,6 +508,8 @@ describe("EventsPage failure cause icon", () => {
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    fetcher.mockClear();
     const sendHint = (id: string, event: PanelEventEntry): void => {
       socket.receive(JSON.stringify({
         version: 1,
@@ -507,10 +524,7 @@ describe("EventsPage failure cause icon", () => {
     sendHint("first-hint-message", firstHint);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     sendHint("second-hint-message", secondHint);
-    // The second hint only marks a trailing refresh; it starts once the first one settles.
-    await new Promise((resolve) => setTimeout(resolve, 300));
     expect(fetcher).toHaveBeenCalledTimes(1);
-
     refreshResponses[0]?.(new Response(JSON.stringify({ entries: [initialEntry, firstHint], nextCursor: null }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -642,10 +656,12 @@ describe("EventsPage failure cause icon", () => {
     fetcher.mockClear();
     const position = positionEventReader(rendered.container);
     act(() => { position.away(); });
-    serverEntries = [newEntry, additionalEntry, oldEntry];
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    fetcher.mockClear();
+    serverEntries = [newEntry, additionalEntry, oldEntry];
     emitEventHint(socket, `top-hint-${action}`, newEntry);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
@@ -915,7 +931,7 @@ describe("EventsPage failure cause icon", () => {
     rendered.unmount();
   });
 
-  it("updates three cached pages during a hint storm with at most one refresh in flight", async () => {
+  it("keeps the event display frozen while a realtime invalidation refreshes cached pages", async () => {
     vi.useFakeTimers();
     try {
       const raid = (id: string, source: string, minute: number) => entry({
@@ -967,23 +983,21 @@ describe("EventsPage failure cause icon", () => {
       // Let the revalidation on mount finish before the storm starts.
       await act(async () => { await vi.advanceTimersByTimeAsync(500); });
       maxInFlight = 0;
+      const position = positionEventReader(rendered.container);
+      act(() => { position.away(); });
       const socket = TestEventsWebSocket.instances[0];
       if (socket === undefined) throw new Error("Realtime socket was not created.");
       socket.open();
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      expect(rendered.queryClient.isFetching()).toBe(0);
+      fetcher.mockClear();
       serverHasLive = true;
-      for (let index = 0; index < 12; index += 1) {
-        socket.receive(JSON.stringify({
-          version: 1,
-          id: `storm-${String(index)}`,
-          createdAt: live.createdAt,
-          channelId: "kanal-a",
-          type: "event_log.new",
-          payload: { entries: [{ eventId: live.eventId, createdAt: live.createdAt, moduleId: live.moduleId, code: live.code, actorUserId: null }] },
-        }));
-        await act(async () => { await vi.advanceTimersByTimeAsync(150); });
-      }
-      // Hints are still arriving (faster than a full refetch) and the rows are already fresh.
-      expect(screen.getByText(/Raid von stormraid/u)).toBeVisible();
+      emitEventHint(socket, "storm-message", live);
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      const cached = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelEventEntry[] }> }>(dashboardDataKeys.events("kanal-a", emptyEventFilter));
+      expect(cached?.pages[0]?.entries[0]?.eventId).toBe("live");
+      expect(screen.queryByText(/Raid von stormraid/u)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /1 neue Ereignisse/u })).toBeVisible();
       expect(maxInFlight).toBeLessThanOrEqual(1);
       rendered.unmount();
     } finally {
@@ -1023,15 +1037,17 @@ describe("EventsPage failure cause icon", () => {
     await waitFor(() => { expect(fetcher).toHaveBeenCalled(); });
     await waitFor(() => { expect(rendered.queryClient.isFetching()).toBe(0); });
     fetcher.mockClear();
-    serverHasNewRaid = true;
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    fetcher.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
     expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
     await waitFor(() => { expect(rendered.queryClient.isFetching()).toBe(0); });
     expect(fetcher).toHaveBeenCalledTimes(1);
     fetcher.mockClear();
+    serverHasNewRaid = true;
     socket.receive(JSON.stringify({
       version: 1,
       id: "only-a-hint",
@@ -1041,9 +1057,11 @@ describe("EventsPage failure cause icon", () => {
       payload: { entries: [{ eventId: newRaid.eventId, createdAt: newRaid.createdAt, moduleId: newRaid.moduleId, code: newRaid.code, actorUserId: null }] },
     }));
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(fetcher).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    fetcher.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
     expect(await screen.findByText(/Raid von newraid/u)).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(1);
     rendered.unmount();
   });
 
@@ -1065,7 +1083,7 @@ describe("EventsPage failure cause icon", () => {
         return new Promise<Response>((resolve) => { releaseNextPage = resolve; });
       }
       firstPageRequests += 1;
-      if (firstPageRequests === 1) {
+      if (firstPageRequests <= 1) {
         return Promise.resolve(new Response(JSON.stringify({ entries: [firstEntry], nextCursor: "cursor-1" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -1085,6 +1103,8 @@ describe("EventsPage failure cause icon", () => {
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
+    await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+    fetcher.mockClear();
     socket.receive(JSON.stringify({
       version: 1,
       id: "live-event-message",
@@ -1093,7 +1113,7 @@ describe("EventsPage failure cause icon", () => {
       type: "event_log.new",
       payload: { entries: [{ eventId: liveEntry.eventId, createdAt: liveEntry.createdAt, moduleId: liveEntry.moduleId, code: liveEntry.code, actorUserId: null }] },
     }));
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
 
     const refreshRows = view.container.querySelector(".event-feed [aria-busy]");
     const refreshBusyState = refreshRows?.getAttribute("aria-busy");
@@ -1119,7 +1139,7 @@ describe("EventsPage failure cause icon", () => {
     const initialEntry = entry({ eventId: "cached-event" });
     const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
       const url = requestUrl(input);
-      if (url.pathname.endsWith("/events") && fetcher.mock.calls.length === 1) {
+      if (url.pathname.endsWith("/events") && fetcher.mock.calls.length <= 1) {
         return Promise.resolve(new Response(JSON.stringify({ entries: [initialEntry], nextCursor: null }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -1140,6 +1160,7 @@ describe("EventsPage failure cause icon", () => {
     );
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
     TestEventsWebSocket.instances[0]?.open();
+    await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
     TestEventsWebSocket.instances[0]?.receive(JSON.stringify({
       version: 1,
       id: "expired-event-message",
