@@ -43,6 +43,7 @@ import {
 } from "./api";
 import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
 import { BroadcasterConsentAction, ChannelNotices, ImmediateActions, ModeratorCheckAction, WarningsAndErrorsFeed } from "./stream-manager";
+import { refreshAfterModuleToggle } from "./data/module-toggle";
 import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
@@ -1539,16 +1540,7 @@ export const DashboardApp = (): ReactElement => {
     await queryClient.invalidateQueries(filter);
   };
 
-  // Single path after every successful module enable/disable (list toggle and header switch).
-  // The overview carries activeModules, so it must be refetched even while its observer is
-  // inactive (refetchType "all"); a plain invalidate would leave it stale for staleTime.
-  const reloadAfterModuleToggle = async (): Promise<void> => {
-    if (route.kind !== "channel" && route.kind !== "module") return;
-    await Promise.all([
-      reloadModules(),
-      queryClient.invalidateQueries({ queryKey: queryKeys.channel(route.channelId, "overview"), exact: true, refetchType: "all" }),
-    ]);
-  };
+  const reloadAfterModuleToggle = async (channelId: string): Promise<void> => refreshAfterModuleToggle(queryClient, channelId);
 
   const reloadOverview = async (): Promise<void> => {
     if (route.kind !== "module" && !(route.kind === "channel" && route.section === "overview")) return;
@@ -1676,7 +1668,7 @@ export const DashboardApp = (): ReactElement => {
     setHeaderModuleBusyKeys((current) => new Set(current).add(targetKey));
     try {
       await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);
-      await reloadAfterModuleToggle();
+      await reloadAfterModuleToggle(route.channelId);
     } catch (error) {
       notify({ tone: "error", message: error instanceof PanelApiError
         ? apiErrorText(error.code, dashboardTexts().errors.changeFailed)
@@ -2006,7 +1998,7 @@ export const DashboardApp = (): ReactElement => {
               window.history.replaceState(window.history.state, "", path);
             }} />
           : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadAfterModuleToggle} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={() => reloadAfterModuleToggle(route.channelId)} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && selectedChannel !== null ? <UiLoadState
           status={overviewPageStatus}
           minHeight={720}

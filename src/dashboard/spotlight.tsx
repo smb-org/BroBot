@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { MODULES } from "../modules/registry";
@@ -6,6 +7,7 @@ import { loadTextCommands } from "../modules/text_commands/panel/service";
 import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelModuleState } from "../panel-contract";
 import { createClip, fetchChannelVariables, sendManualShoutout, setChannelModuleEnabled, startCommercial, type PanelChannelVariable } from "./api";
+import { refreshAfterModuleToggle } from "./data/module-toggle";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { channelVariablesTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
@@ -215,6 +217,16 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
     ? query.slice(SHOUTOUT_KEYWORD.length + 1).trim()
     : "";
 
+  const queryClient = useQueryClient();
+  const toggleAds = useCallback(async (enabled: boolean): Promise<void> => {
+    if (channelId === null) return;
+    try {
+      await setChannelModuleEnabled(channelId, "ads", enabled);
+    } catch {
+      return;
+    }
+    await refreshAfterModuleToggle(queryClient, channelId);
+  }, [channelId, queryClient]);
   const actionItems = useMemo<SpotlightItem[]>(() => {
     if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
@@ -249,7 +261,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
         disabled: !manageable || !adsEnabled,
         ...(managementLockReason === undefined ? {} : { disabledReason: managementLockReason }),
         icon: <ModuleIcon moduleId="ads" className="spotlight-module-icon" />,
-        onTrigger: () => { void setChannelModuleEnabled(channelId, "ads", false); },
+        onTrigger: () => { void toggleAds(false); },
       },
       {
         id: "action:ads-on",
@@ -259,7 +271,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
         disabled: !manageable || adsEnabled,
         ...(managementLockReason === undefined ? {} : { disabledReason: managementLockReason }),
         icon: <ModuleIcon moduleId="ads" className="spotlight-module-icon" />,
-        onTrigger: () => { void setChannelModuleEnabled(channelId, "ads", true); },
+        onTrigger: () => { void toggleAds(true); },
       },
     );
     if (clip.offered) {
@@ -288,7 +300,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
       });
     }
     return items;
-  }, [texts, manageable, adsEnabled, channelId, shoutoutLogin, streamState, modules]);
+  }, [texts, manageable, adsEnabled, channelId, shoutoutLogin, streamState, modules, toggleAds]);
 
   const targetItems = [...pageItems, ...moduleItems];
   const recentItems = recentTargetPaths.flatMap((path, index) => {

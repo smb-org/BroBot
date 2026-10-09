@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +13,9 @@ import { dashboardRoutePath, type DashboardRoute } from "../../src/dashboard/rou
 import { rememberRecentTarget } from "../../src/dashboard/spotlight-recents";
 import { jsonResponse } from "../unit/fixtures";
 
-const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
+const spotlightQueryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+const renderWithMantine = (element: ReactElement): ReturnType<typeof render> =>
+  render(<QueryClientProvider client={spotlightQueryClient}><UiProvider>{element}</UiProvider></QueryClientProvider>);
 
 const requestUrl = (input: RequestInfo | URL): URL =>
   input instanceof Request ? new URL(input.url) : new URL(String(input), window.location.origin);
@@ -156,6 +159,27 @@ describe("Channel Spotlight", () => {
     expect(adsGlyph).toHaveAttribute("aria-hidden", "true");
 
     expect(adsAction?.querySelector(".mantine-Spotlight-action-icon-dot")).toBeNull();
+  });
+
+  it("refreshes the cached overview after the ads off and on actions", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      calls.push(`${init?.method ?? "GET"} ${url.pathname}`);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/modules/ads") return Promise.resolve(jsonResponse({ module: { id: "ads", enabled: false, settings: "{}" } }));
+      return Promise.resolve(jsonResponse({ commands: [], variables: [], count: 0, maximum: 20 }));
+    }));
+    spotlightQueryClient.setQueryData(["channel", "kanal-a", "overview"], { activeModules: [{ moduleId: "ads" }] });
+    const { rerender } = renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[{ id: "ads", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "ads off" } });
+    fireEvent.click(await screen.findByText("Werbung aus"));
+    await waitFor(() => expect(spotlightQueryClient.getQueryState(["channel", "kanal-a", "overview"])?.isInvalidated).toBe(true));
+    expect(calls).toContain("PATCH /api/channels/kanal-a/modules/ads");
+    rerender(<div />);
   });
 
   it("renders a text-command result with the shared hand-drawn module icon family", () => {
