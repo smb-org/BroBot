@@ -213,6 +213,40 @@ describe("dashboard query data layer", () => {
     expect(view.queryClient.getQueryData(key)).toBe("revision-3");
   });
 
+  it("keeps a reload's newer revision when an older background read finishes during it", async () => {
+    let readCount = 0;
+    const releases = new Map<number, () => void>();
+
+    function RevisionProbe() {
+      const query = useModuleQuery<string>(channelId, "text_commands", "commands", async () => {
+        readCount += 1;
+        const mine = readCount;
+        if (mine >= 2) await new Promise<void>((resolve) => { releases.set(mine, resolve); });
+        return `revision-${String(mine)}`;
+      });
+      return <p>{query.data ?? "loading"}</p>;
+    }
+
+    const view = renderWithQuery(<RevisionProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
+    expect(await screen.findByText("revision-1")).toBeInTheDocument();
+    const key = moduleQueryKey(channelId, "text_commands", "commands");
+
+    // The background read starts first (revision 2), the reload second (revision 3).
+    const background = view.queryClient.refetchQueries({ queryKey: key, exact: true });
+    await waitFor(() => expect(readCount).toBe(2));
+    const reload = refetchModuleQueryData<string>(view.queryClient, channelId, "text_commands", "commands");
+    await waitFor(() => expect(readCount).toBe(3));
+
+    // The older background read finishes while the reload is still in flight.
+    releases.get(2)?.();
+    await background;
+    expect(view.queryClient.getQueryData(key)).toBe("revision-2");
+    releases.get(3)?.();
+
+    await expect(reload).resolves.toBe("revision-3");
+    expect(view.queryClient.getQueryData(key)).toBe("revision-3");
+  });
+
   it("restarts a cancelled cold read when the module write fails", async () => {
     let markReadStarted: (() => void) | undefined;
     let oldSignal: AbortSignal | undefined;
