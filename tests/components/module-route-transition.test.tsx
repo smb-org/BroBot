@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
@@ -8,6 +8,7 @@ vi.mock("../../src/modules/registry", () => ({
 }));
 
 import { DashboardApp } from "../../src/dashboard/main";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const channel = {
   channelId: "kanal-a",
@@ -39,18 +40,15 @@ describe("Module route during client-side navigation", () => {
     vi.unstubAllGlobals();
   });
 
-  it("starts the panel only after the new activity check", async () => {
+  it("starts the panel from the cached activity state on navigation", async () => {
     const activeState = { ...channel, activeModules: [{ moduleId: "aktiv", settings: "{}" }] };
-    const inactiveState = { ...channel, activeModules: [] };
     let overviewAufrufe = 0;
-    let resolveSecondResponse!: (value: Response) => void;
-    const secondResponse = new Promise<Response>((resolve) => { resolveSecondResponse = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), window.location.origin).pathname;
       if (path === "/api/channels") return response({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") {
         overviewAufrufe += 1;
-        return overviewAufrufe === 1 ? response(activeState) : secondResponse;
+        return response(activeState);
       }
       if (path === "/api/channels/kanal-a/modules") {
         return response({ modules: [{ id: "aktiv", enabled: true, settings: "{}" }] });
@@ -61,15 +59,15 @@ describe("Module route during client-side navigation", () => {
 
     render(<DashboardApp />);
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
+    expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
     const link = await within(nav).findByRole("link", { name: /^aktiv.*Läuft$/ });
     expect(activeLoader).not.toHaveBeenCalled();
 
     link.click();
     expect(activeLoader).not.toHaveBeenCalled();
 
-    resolveSecondResponse(response(inactiveState));
-    expect(await screen.findByText("Module werden geladen …")).toBeInTheDocument();
-    expect(screen.queryByText("Das Modul „aktiv“ ist in diesem Kanal nicht aktiv.")).not.toBeInTheDocument();
-    expect(activeLoader).not.toHaveBeenCalled();
+    expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
+    expect(activeLoader).toHaveBeenCalledTimes(1);
+    expect(overviewAufrufe).toBe(1);
   });
 });

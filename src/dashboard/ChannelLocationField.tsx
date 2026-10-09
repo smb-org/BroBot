@@ -14,7 +14,7 @@ interface ChannelLocationFieldProperties {
   language: "de" | "en";
   value: PanelChannelLocation | null;
   revision: number;
-  onSaved: (location: PanelChannelLocation | null, revision: number) => void;
+  onSaved: (location: PanelChannelLocation | null, revision: number) => void | Promise<void>;
   channelTimeZone: string;
   onSaveChannelTimeZone: (timeZone: string) => Promise<void>;
   canEdit: boolean;
@@ -64,7 +64,7 @@ export const ChannelLocationField = ({
     setConfirmError(undefined);
     try {
       const saved = await saveChannelLocation(channelId, revision, location);
-      onSaved(saved.location, saved.locationRevision);
+      await onSaved(saved.location, saved.locationRevision);
       notify({ tone: "success", message: location === null ? labels.locationRemoved : labels.locationSaved });
       setOpened(false);
       setRemoveConfirmation(false);

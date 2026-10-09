@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const relativeIso = (milliseconds: number): string => new Date(Date.now() + milliseconds).toISOString();
 
@@ -63,7 +64,7 @@ describe("Module navigation in the sidebar", () => {
     renderModulePage();
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    const textCommandsLink = within(nav).getByRole("link", { name: "Textbefehle · Läuft" });
+    const textCommandsLink = await within(nav).findByRole("link", { name: "Textbefehle · Läuft" });
     expect(textCommandsLink.querySelector("svg")).toBeInTheDocument();
     expect(textCommandsLink).toHaveAttribute("title", "Textbefehle · Läuft");
     expect(textCommandsLink.querySelector(".led--dot-only")).toBeInTheDocument();
@@ -75,10 +76,14 @@ describe("Module navigation in the sidebar", () => {
   it("switches straight from the sidebar to the selected module's detail page", async () => {
     renderModulePage(moduleStates, [channel, secondChannel]);
 
+    await screen.findByRole("heading", { name: "Textbefehle", level: 1 });
+    const pageHeader = document.querySelector(".main-content .page-header");
+    expect(pageHeader).not.toBeNull();
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    fireEvent.click(within(nav).getByRole("link", { name: "Werbung · Läuft" }));
+    fireEvent.click(await within(nav).findByRole("link", { name: "Werbung · Läuft" }));
 
     expect(await screen.findByRole("heading", { name: "Werbung", level: 1 })).toBeInTheDocument();
+    expect(document.querySelector(".main-content .page-header")).toBe(pageHeader);
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/ads");
   });
 
@@ -100,7 +105,7 @@ describe("Module navigation in the sidebar", () => {
     renderModulePage([moduleStates[0] as typeof moduleStates[number]]);
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    expect(within(nav).getByRole("link", { name: "Textbefehle · Läuft" })).toBeInTheDocument();
+    expect(await within(nav).findByRole("link", { name: "Textbefehle · Läuft" })).toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "Module verwalten" })).toBeInTheDocument();
     expect(within(nav).getAllByRole("link", { name: "Module verwalten" })).toHaveLength(1);
   });

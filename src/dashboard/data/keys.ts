@@ -2,6 +2,7 @@ export type ChannelQueryParams = Readonly<Record<string, string | number | boole
 export type ChannelQueryKey = readonly ["channel", string, string, ...ChannelQueryParams[]];
 
 export const queryKeys = {
+  channels: () => ["channels"] as const,
   channel: (channelId: string, resource: string, ...params: ChannelQueryParams[]): ChannelQueryKey => [
     "channel",
     channelId,
