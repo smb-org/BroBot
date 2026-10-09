@@ -1099,6 +1099,88 @@ describe("Text command editor", () => {
     expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf B");
   });
 
+  describe("obsolete editor continuations", () => {
+    const setup = (hold: "POST" | "DELETE" | "GET") => {
+      let rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] })];
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      let holdGets = false;
+      const baseFetch = panelFetch({ commands: () => rows });
+      vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input, init) => {
+        const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+        const method = init?.method ?? "GET";
+        const isCommands = url.pathname.includes("/commands");
+        if (isCommands && method === hold && hold !== "GET") await gate;
+        if (isCommands && method === "GET" && holdGets) await gate;
+        if (isCommands && method === "POST" && typeof init?.body === "string") {
+          const { name } = JSON.parse(init.body) as { name: string };
+          rows = [...rows, makeCommand({ name, text: "Hallo", aliases: [] })];
+          holdGets = hold === "GET";
+        }
+        if (isCommands && method === "DELETE") {
+          rows = rows.filter((row) => row.name !== url.pathname.split("/").at(-1));
+          holdGets = hold === "GET";
+        }
+        return baseFetch(input, init);
+      }));
+      renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, {
+        gcTime: 600_000,
+        staleTime: 600_000,
+      });
+      return release;
+    };
+    const openCreate = async (name: string): Promise<void> => {
+      fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: name } });
+    };
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50));
+
+    it("keeps a newer create draft when an earlier create POST is released late", async () => {
+      const release = setup("POST");
+      await openCreate("eins");
+      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+      fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+      fireEvent.click((await screen.findByText("!beta")).closest("tr") as HTMLElement);
+      fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
+      await openCreate("zwei");
+
+      release();
+      await screen.findByText("!eins");
+      await settle();
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("zwei");
+    });
+
+    it("keeps a newer create form when an earlier create's revalidation finishes late", async () => {
+      const release = setup("GET");
+      await openCreate("eins");
+      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+      fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("eins"));
+      fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "zwei" } });
+
+      release();
+      await settle();
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("zwei");
+    });
+
+    it("keeps a newly selected command when a deletion's revalidation finishes late", async () => {
+      const release = setup("GET");
+      await selectCommand("hallo");
+      fireEvent.click(screen.getByRole("button", { name: /löschen/u }));
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Befehl !hallo löschen" }));
+      await waitFor(() => expect(screen.queryByText("!hallo")).not.toBeInTheDocument());
+      await selectCommand("beta");
+      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf B" } });
+
+      release();
+      await settle();
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("beta");
+      expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf B");
+    });
+  });
+
   it("keeps the draft and conflict after a failed server reload, then retries against the refreshed revision", async () => {
     let rows = [makeCommand()];
     let failCommandReload = false;

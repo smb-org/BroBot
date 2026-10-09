@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
 import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
@@ -219,20 +219,21 @@ interface TextCommandEditorProperties {
   canManageContent: boolean;
   botIsModerator: boolean | null;
   onClose: () => void;
-  onCreateSuccess?: () => void;
   onGuardChange: (guard: ((proceed: () => void, cancel?: () => void) => void) | null) => void;
   onRefresh: (force?: boolean) => Promise<TextCommand[]>;
   /** Called in the same step as the committed cache write; a no-op if the selection moved on since. */
-  onSaved: (fromName: string | null, name: string) => void;
+  onSaved: (token: number, name: string) => void;
+  /** Current editor generation; capture it before a mutation starts. */
+  generation: () => number;
   onWrite: <Value>(
     baselineRevision: number | null,
     write: (baselineRevision: number | null) => Promise<Value>,
     updateCache: (current: unknown, result: Value) => unknown,
   ) => Promise<Value>;
-  onDeleted: () => Promise<void>;
+  onDeleted: (token: number) => void;
 }
 
-const TextCommandEditor = ({ channelId, language, initial, command, commands, channelVariables, canManageContent, botIsModerator, onClose, onCreateSuccess, onGuardChange, onRefresh, onSaved, onWrite, onDeleted }: TextCommandEditorProperties): ReactElement => {
+const TextCommandEditor = ({ channelId, language, initial, command, commands, channelVariables, canManageContent, botIsModerator, onClose, onGuardChange, onRefresh, onSaved, generation, onWrite, onDeleted }: TextCommandEditorProperties): ReactElement => {
   const labels = useMemo(() => textCommandsTexts(language), [language]);
   const searchGames = useCallback((query: string) => searchTextGames(channelId, query), [channelId]);
   const resolvedLanguage = language ?? dashboardLanguage();
@@ -578,6 +579,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     setPending(true); setDeleteError(undefined); setFieldError(null); setConcurrentConflict(false); setReloadError(false); setSaved(false);
     try {
       const baselineRevision = isCreate ? null : draftRevision.current;
+      const token = generation();
       const result = await onWrite(
         baselineRevision,
         (revision) => command === null
@@ -585,7 +587,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           : saveTextCommand(channelId, { oldName: command.name, revision: requireCommandRevision(revision), ...payload }),
         (current, mutationResult) => {
           const next = updateCommandCache(current, mutationResult.command, command?.name);
-          onSaved(command?.name ?? null, mutationResult.command.name);
+          onSaved(token, mutationResult.command.name);
           return next;
         },
       );
@@ -623,7 +625,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       notify({ tone: "error", message: labels.saveError });
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, channelId, channelVariables, command, draft, isCreate, labels, onRefresh, onSaved, onWrite, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
+  }, [accept, canManageContent, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
 
   const guard = useDraftGuard(dirty, saveDraft, reset);
   useEffect(() => {
@@ -660,14 +662,15 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   };
 
   const handleSave = async (): Promise<void> => {
-    const result = await saveDraft();
-    if (result === null && isCreate) onCreateSuccess?.();
+    await saveDraft();
   };
 
   const reloadServer = async (): Promise<void> => {
     setReloadError(false);
+    const token = generation();
     try {
       const data = await onRefresh(true);
+      if (token !== generation()) return;
       const latest = data.find((item) => item.name === command?.name || item.name === normalizedName);
       if (latest === undefined) { onClose(); return; }
       accept(draftFromCommand(latest));
@@ -701,13 +704,17 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     setDeleting(true); setDeleteError(undefined);
     try {
       const baselineRevision = draftRevision.current;
+      const token = generation();
       await onWrite(
         baselineRevision,
         (revision) => deleteTextCommand(channelId, command.name, requireCommandRevision(revision)),
-        (current) => removeCommandFromCache(current, command.name),
+        (current) => {
+          const next = removeCommandFromCache(current, command.name);
+          onDeleted(token);
+          return next;
+        },
       );
       setConfirmingDelete(false);
-      await onDeleted();
     }
     catch { setDeleteError(labels.deleteError); }
     finally { setDeleting(false); }
@@ -1128,15 +1135,15 @@ const TextCommandsPanelContent = ({
     return data.commands;
   }, [channelId, queryClient]);
 
-  // Latest rendered selection; an obsolete editor must never move a newer one.
-  const selectionRef = useRef<{ name: string | null; createOpen: boolean }>({ name: null, createOpen: false });
-  useLayoutEffect(() => { selectionRef.current = { name: selectedName, createOpen }; }, [selectedName, createOpen]);
-  const onSaved = useCallback((fromName: string | null, name: string): void => {
-    const current = selectionRef.current;
-    if (fromName === null ? !current.createOpen || current.name !== null : current.name !== fromName) return;
+  // Editor generation: bumped on every select, create-open, close and discard. A continuation
+  // of an obsolete editor (captured token differs) must never change a newer selection or draft.
+  const generationRef = useRef(0);
+  const generation = useCallback((): number => generationRef.current, []);
+  const onSaved = useCallback((token: number, name: string): void => {
+    if (token !== generationRef.current) return;
+    generationRef.current += 1;
     setCreateOpen(false);
     selectName(name);
-    selectionRef.current = { name, createOpen: false };
   }, [selectName]);
 
   const write = useCallback(<Value,>(
@@ -1159,26 +1166,28 @@ const TextCommandsPanelContent = ({
   useEffect(() => {
     if (commandsQuery.isPending || initialSelectionApplied.current || initialSelection === undefined || !commands.some((command) => command.name === initialSelection)) return;
     initialSelectionApplied.current = true;
-    guardSwitch(() => { selectName(initialSelection); });
+    guardSwitch(() => { generationRef.current += 1; selectName(initialSelection); });
   }, [commands, commandsQuery.isPending, guardSwitch, initialSelection, selectName]);
 
   const selected = useMemo(() => commands.find((command) => command.name === selectedName) ?? null, [commands, selectedName]);
   const closeInspector = useCallback((): void => {
     guardSwitch(() => {
+      generationRef.current += 1;
       setCreateOpen(false);
       closeSelection();
       onCloseInspector?.();
     });
   }, [closeSelection, guardSwitch, onCloseInspector]);
   const closeCreate = useCallback((): void => {
-    guardSwitch(() => { setCreateOpen(false); });
+    guardSwitch(() => { generationRef.current += 1; setCreateOpen(false); });
   }, [guardSwitch]);
-  const finishCreate = useCallback((): void => { setCreateOpen(false); }, []);
   const openCreate = (): void => guardSwitch(() => {
+    generationRef.current += 1;
     closeSelection();
     setCreateOpen(true);
   });
   const selectCommand = (name: string): void => guardSwitch(() => {
+    generationRef.current += 1;
     setCreateOpen(false);
     selectName(name);
   });
@@ -1194,11 +1203,9 @@ const TextCommandsPanelContent = ({
     catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setToggleBusyName(null); }
   };
-  const handleDeleted = async (): Promise<void> => {
-    const started = selectionRef.current;
-    await refresh();
-    const current = selectionRef.current;
-    if (current.name !== started.name || current.createOpen !== started.createOpen) return;
+  const handleDeleted = (token: number): void => {
+    if (token !== generationRef.current) return;
+    generationRef.current += 1;
     setCreateOpen(false);
     closeSelection();
   };
@@ -1269,6 +1276,7 @@ const TextCommandsPanelContent = ({
     onGuardChange={registerGuard}
     onRefresh={refresh}
     onSaved={onSaved}
+    generation={generation}
     onWrite={write}
     onDeleted={handleDeleted}
   /> : createOpen ? <TextCommandEditor
@@ -1282,10 +1290,10 @@ const TextCommandsPanelContent = ({
     canManageContent={canManageContent}
     botIsModerator={botIsModerator}
     onClose={closeCreate}
-    onCreateSuccess={finishCreate}
     onGuardChange={registerGuard}
     onRefresh={refresh}
     onSaved={onSaved}
+    generation={generation}
     onWrite={write}
     onDeleted={handleDeleted}
   /> : null;
