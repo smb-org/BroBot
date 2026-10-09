@@ -1,11 +1,13 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { EventsPage } from "../../src/dashboard/events/EventsPage";
 import { emptyEventFilter } from "../../src/dashboard/events/model";
-import { loadedState } from "../../src/dashboard/load-state";
 import type { PanelEventEntry, PanelEventsResponse } from "../../src/panel-contract";
+import { dashboardDataKeys } from "../../src/dashboard/data/keys";
+import { renderWithQuery } from "../query-test-utils";
 
 const entry = (overrides: Partial<PanelEventEntry>): PanelEventEntry => ({
   eventId: "event-1",
@@ -23,21 +25,23 @@ const entry = (overrides: Partial<PanelEventEntry>): PanelEventEntry => ({
   ...overrides,
 });
 
-const renderPage = (entries: readonly PanelEventEntry[]) => {
+const requestUrl = (input: RequestInfo | URL): URL => input instanceof Request
+  ? new URL(input.url)
+  : input instanceof URL ? input : new URL(input, window.location.origin);
+
+const renderPage = (entries: readonly PanelEventEntry[], filters = emptyEventFilter) => {
   const response: PanelEventsResponse = { entries: [...entries], nextCursor: null };
-  return render(
+  return renderWithQuery(
     <UiProvider>
       <EventsPage
         channelId="kanal-a"
-        eventsState={loadedState(response)}
-        filters={emptyEventFilter}
+        filters={filters}
         moduleOptions={[]}
         onFiltersChange={() => undefined}
-        onRefreshFirstPage={() => Promise.resolve()}
-        onNextPage={() => undefined}
-        loadingNextPage={false}
       />
     </UiProvider>,
+    undefined,
+    { initialData: [{ queryKey: dashboardDataKeys.events("kanal-a", filters), data: { pages: [response], pageParams: [null] } }] },
   );
 };
 
@@ -55,6 +59,101 @@ afterEach(() => {
 });
 
 describe("EventsPage failure cause icon", () => {
+  it("keeps the realtime socket open when filters change", async () => {
+    class FakeWebSocket {
+      static instances: FakeWebSocket[] = [];
+      readonly close = vi.fn();
+
+      constructor() {
+        FakeWebSocket.instances.push(this);
+      }
+
+      addEventListener(): void {}
+    }
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ entries: [entry({ eventId: "socket-test" })], nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+
+    function Harness() {
+      const [filters, setFilters] = useState(emptyEventFilter);
+      const isChannelFilter = filters.origin === "channel";
+      return <>
+        <button type="button" onClick={() => { setFilters(isChannelFilter ? emptyEventFilter : { ...emptyEventFilter, origin: "channel" }); }}>Change filter</button>
+        <EventsPage channelId="kanal-a" filters={filters} moduleOptions={[]} onFiltersChange={setFilters} />
+      </>;
+    }
+
+    const view = renderWithQuery(<UiProvider><Harness /></UiProvider>);
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Change filter" }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeWebSocket.instances[0]?.close).not.toHaveBeenCalled();
+    view.unmount();
+    expect(FakeWebSocket.instances[0]?.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the old rows busy during a filter change and restores cached rows immediately", async () => {
+    const initialEntry = entry({ eventId: "all-events" });
+    const filteredEntry = entry({ eventId: "channel-events", code: "channel_events.chat.sub", detail: "{\"person\":\"new-subscriber\",\"tier\":\"1000\"}" });
+    let releaseFilteredResponse: (response: Response) => void = () => { throw new Error("The filtered request has not started."); };
+    const filteredResponse = new Promise<Response>((resolve) => { releaseFilteredResponse = resolve; });
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      return url.searchParams.get("origin") === "channel"
+        ? filteredResponse
+        : Promise.resolve(new Response(JSON.stringify({ entries: [initialEntry], nextCursor: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    function Harness() {
+      const [filters, setFilters] = useState(emptyEventFilter);
+      const isChannelFilter = filters.origin === "channel";
+      return <>
+        <button type="button" onClick={() => { setFilters(isChannelFilter ? emptyEventFilter : { ...emptyEventFilter, origin: "channel" }); }}>Change filter</button>
+        <EventsPage channelId="kanal-a" filters={filters} moduleOptions={[]} onFiltersChange={setFilters} />
+      </>;
+    }
+
+    const view = renderWithQuery(<UiProvider><Harness /></UiProvider>, undefined, { gcTime: 600_000 });
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    const firstRow = view.container.querySelector(".event-table tbody tr");
+    if (!(firstRow instanceof HTMLTableRowElement)) throw new Error("Initial event row is missing.");
+    fireEvent.click(firstRow);
+    expect(screen.getByRole("region", { name: "Detail" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Change filter" }));
+    expect(screen.queryByRole("region", { name: "Detail" })).not.toBeInTheDocument();
+
+    const busyRows = await waitFor(() => {
+      const busy = view.container.querySelector(".event-feed [aria-busy='true']");
+      expect(busy).toBeInTheDocument();
+      expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+      expect(view.container.querySelectorAll(".event-table tbody tr")).toHaveLength(1);
+      return busy;
+    });
+    expect(busyRows).toHaveClass("stale");
+
+    releaseFilteredResponse(new Response(JSON.stringify({ entries: [filteredEntry], nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    expect(await screen.findByText("Sub von new-subscriber")).toBeVisible();
+    expect(screen.queryByText("Chat-Nachricht fehlgeschlagen")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Change filter" }));
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+
   it("uses the audit page person search placeholder", () => {
     renderPage([]);
 

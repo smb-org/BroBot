@@ -7,7 +7,10 @@ import { Field, UiProvider } from "../../src/dashboard/ui";
 import { MembersPage } from "../../src/dashboard/members";
 import { PlatformPage } from "../../src/dashboard/platform";
 import { ImmediateActions } from "../../src/dashboard/stream-manager";
+import type { PanelMembersResponse } from "../../src/panel-contract";
+import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery } from "../query-test-utils";
 
 /**
  * Cross-cutting check for the helper-text rule (editor-konzept 3.0/15.1.3):
@@ -73,21 +76,11 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
 
   it("gives every field in the members grant editor and member inspector a helper text", () => {
     const member = { userId: "1", login: "mod", displayName: "Mod", profileImageUrl: null, role: "manager" as const, joinedAt: "2026-09-01T00:00:00.000Z" };
-    const { container } = renderWithMantine(
-      <MembersPage
-        channelId="kanal-a"
-        ownRole="manager"
-        ownUserId="1"
-        members={[member]}
-        broadcasterCount={1}
-        nextCursor={null}
-        loading={false}
-        loadingNextPage={false}
-        error={null}
-        onReload={() => Promise.resolve()}
-        onLoadNextPage={() => Promise.resolve()}
-        onAuthenticationRequired={() => {}}
-      />,
+    const response: PanelMembersResponse = { members: [member], nextCursor: null, broadcasterCount: 1, viewerUserId: "1" };
+    const { container } = renderWithQuery(
+      <UiProvider><MembersPage channelId="kanal-a" ownRole="manager" onAuthenticationRequired={() => {}} /></UiProvider>,
+      undefined,
+      { initialData: [{ queryKey: dashboardDataKeys.members("kanal-a"), data: { pages: [response], pageParams: [null] } }] },
     );
 
     fireEvent.click(screen.getByRole("row", { name: /Mod/ }));

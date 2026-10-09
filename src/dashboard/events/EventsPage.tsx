@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type RefCallback } from "react";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 
 import type { PanelEventEntry, PanelEventFilters, PanelEventsResponse, PanelModuleState } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
-import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatClockTime, formatNumber, formatTimestamp } from "../locale";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatClockTime, formatNumber, formatTimestamp } from "../locale";
 import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
-import { useRealtimeEventFeed, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
+import { useRealtimeEventFeed, type RealtimeFeedState, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, Popover, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
-import type { LoadState } from "../load-state";
+import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
+import { fetchEvents, PanelApiError } from "../api";
+import { dashboardDataKeys } from "../data/keys";
+import { useEventsQuery } from "../data/lists";
 import {
   actorLabel,
   affectedPersonLabel,
@@ -27,6 +30,16 @@ import {
   moduleLabel,
   PERSON_FILTER_DEBOUNCE_MS,
 } from "./model";
+
+const mergeEventEntries = (
+  current: readonly PanelEventEntry[],
+  incoming: readonly PanelEventEntry[],
+): PanelEventEntry[] => {
+  const byId = new Map<string, PanelEventEntry>();
+  for (const entry of current) byId.set(entry.eventId, entry);
+  for (const entry of incoming) byId.set(entry.eventId, entry);
+  return Array.from(byId.values()).sort((left, right) => chronological(right, left));
+};
 
 const actorCell = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTexts>): ReactNode =>
   entry.actorDisplayName ?? (entry.actorLogin == null
@@ -220,27 +233,102 @@ const RealtimeFeedStatus = ({ status }: { status: RealtimeFeedStatusValue }): Re
   return <span className="realtime-status" aria-live="polite"><Led status={realtimeLedStatus(status)} label={label} />{status === "renew" ? <a className="profile-link" href="/auth/login">{texts.events.realtimeRenewSession}</a> : null}</span>;
 };
 
-export const EventsPage = ({
-  channelId,
-  eventsState,
-  filters,
-  moduleOptions,
-  onFiltersChange,
-  onRefreshFirstPage,
-  onNextPage,
-  loadingNextPage,
-}: {
+export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange }: {
   channelId: string;
-  eventsState: LoadState<PanelEventsResponse>;
   filters: PanelEventFilters;
   moduleOptions: readonly PanelModuleState[];
   onFiltersChange: (filters: PanelEventFilters) => void;
-  onRefreshFirstPage: (channelId: string, filters: PanelEventFilters) => Promise<void>;
+}): ReactElement => {
+  const query = useEventsQuery(channelId, filters);
+  const queryClient = useQueryClient();
+  const queryKey = useMemo(() => dashboardDataKeys.events(channelId, filters), [channelId, filters]);
+  const refreshGeneration = useRef(0);
+  const refreshController = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    refreshGeneration.current += 1;
+    refreshController.current?.abort();
+  }, []);
+  const refreshFirstPage = useCallback(async (): Promise<void> => {
+    const queryFilter = { queryKey, exact: true } as const;
+    const generation = refreshGeneration.current + 1;
+    refreshGeneration.current = generation;
+    refreshController.current?.abort();
+    const controller = new AbortController();
+    refreshController.current = controller;
+    await queryClient.cancelQueries(queryFilter);
+    if (refreshGeneration.current !== generation) return;
+    try {
+      const response = await fetchEvents(channelId, null, controller.signal, filters);
+      if (refreshGeneration.current !== generation) return;
+      queryClient.setQueryData<InfiniteData<PanelEventsResponse, string | null>>(queryKey, (current) => {
+        const firstPage = current?.pages[0];
+        if (current === undefined) return { pages: [response], pageParams: [null] };
+        if (firstPage === undefined) return current;
+        return {
+          ...current,
+          pages: [{ ...firstPage, entries: mergeEventEntries(firstPage.entries, response.entries) }, ...current.pages.slice(1)],
+        };
+      });
+    } catch (error: unknown) {
+      if (refreshGeneration.current !== generation || (error instanceof DOMException && error.name === "AbortError")) return;
+      const fallback = dashboardTexts().errors.dataLoadFailed;
+      const message = error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
+      notify({ tone: "error", message });
+      if (queryClient.getQueryData(queryKey) === undefined) void queryClient.invalidateQueries(queryFilter);
+      throw error;
+    } finally {
+      if (refreshController.current === controller) refreshController.current = null;
+    }
+  }, [channelId, filters, queryClient, queryKey]);
+  useEffect(() => {
+    if (!query.isError) return;
+    const fallback = dashboardTexts().errors.dataLoadFailed;
+    const message = query.error instanceof PanelApiError ? apiErrorText(query.error.code, fallback) : fallback;
+    notify({ tone: "error", message });
+  }, [query.error, query.isError]);
+  const pages = query.data?.pages ?? [];
+  const entries = mergeEventEntries([], pages.flatMap((page) => page.entries));
+  const nextCursor = pages.at(-1)?.nextCursor ?? null;
+  const error = query.error instanceof PanelApiError
+    ? apiErrorText(query.error.code, dashboardTexts().errors.dataLoadFailed)
+    : query.isError ? dashboardTexts().errors.dataLoadFailed : null;
+  return <EventsPageContent
+    identityKey={JSON.stringify(queryKey)}
+    channelId={channelId}
+    filters={filters}
+    moduleOptions={moduleOptions}
+    onFiltersChange={onFiltersChange}
+    entries={entries}
+    nextCursor={query.isPlaceholderData ? null : nextCursor}
+    loading={query.isPending}
+    fetching={query.isFetching && !query.isFetchingNextPage}
+    error={error}
+    loadingNextPage={query.isFetchingNextPage}
+    onRefreshFirstPage={refreshFirstPage}
+    onNextPage={() => { void query.fetchNextPage(); }}
+  />;
+};
+
+interface EventsPageContentProperties {
+  identityKey: string;
+  channelId: string;
+  entries: readonly PanelEventEntry[];
+  nextCursor: string | null;
+  loading: boolean;
+  fetching: boolean;
+  error: string | null;
+  filters: PanelEventFilters;
+  moduleOptions: readonly PanelModuleState[];
+  onFiltersChange: (filters: PanelEventFilters) => void;
+  onRefreshFirstPage: () => Promise<void>;
   onNextPage: () => void;
   loadingNextPage: boolean;
-}): ReactElement => {
-  const texts = dashboardTexts();
+}
+
+const EventsPageContent = (properties: EventsPageContentProperties): ReactElement => {
+  const { identityKey, channelId, filters, onRefreshFirstPage, ...contentProperties } = properties;
   const feedRef = useRef<HTMLDivElement | null>(null);
+  const setFeedRef = useCallback<RefCallback<HTMLDivElement>>((feed) => { feedRef.current = feed; }, []);
   const atBeginning = useCallback((): boolean => {
     const feed = feedRef.current;
     if (feed === null) return true;
@@ -257,11 +345,41 @@ export const EventsPage = ({
     channelId,
     filters,
     atBeginning,
-    refreshFirstPage: () => onRefreshFirstPage(channelId, filters),
+    refreshFirstPage: onRefreshFirstPage,
     scrollToBeginning,
   });
-  const { selectedKey: selectedGroupKey, select: selectGroup, rowRef: groupRowRef, close: closeGroup } = useInspectorSelection<string>();
-  const groups = eventsState.data === null ? [] : eventGroups(eventsState.data.entries);
+  return <EventsPageFilterState
+    {...contentProperties}
+    identityKey={identityKey}
+    filters={filters}
+    onRefreshFirstPage={onRefreshFirstPage}
+    feedRef={setFeedRef}
+    realtime={realtime}
+  />;
+};
+
+const EventsPageFilterState = ({
+  identityKey,
+  entries,
+  nextCursor,
+  loading,
+  fetching,
+  error,
+  filters,
+  moduleOptions,
+  onFiltersChange,
+  onRefreshFirstPage,
+  onNextPage,
+  loadingNextPage,
+  feedRef,
+  realtime,
+}: Omit<EventsPageContentProperties, "channelId"> & {
+  feedRef: RefCallback<HTMLDivElement>;
+  realtime: RealtimeFeedState;
+}): ReactElement => {
+  const texts = dashboardTexts();
+  const { selectedKey: selectedGroupKey, select: selectGroup, rowRef: groupRowRef, close: closeGroup } = useInspectorSelection<string>(identityKey);
+  const groups = eventGroups(entries);
   const dayGroups = eventDayGroups(groups);
   const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? null;
   const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronological);
@@ -272,16 +390,16 @@ export const EventsPage = ({
   const affectedNames = Array.from(new Set(
     selectedHistory.map((entry) => affectedPersonLabel(eventDetail(entry.detail, entry.code))).filter((name): name is string => name !== null),
   ));
-  const eventEntries = eventsState.data?.entries ?? [];
+  const eventEntries = entries;
   const filterActive = eventFilterIsActive(filters);
   const selectedTones = filters.tones !== undefined && filters.tones.length > 0
     ? filters.tones
     : filters.tone === null ? [] : [filters.tone];
   return (
     <>
-      <ModuleHeading kind="events" title={texts.events.title} subtitle={eventsState.data === null
+      <ModuleHeading kind="events" title={texts.events.title} subtitle={loading && entries.length === 0
         ? <span className="module-heading__subtitle-placeholder" aria-hidden="true"><ModuleCount count={0} label={texts.events.count} /></span>
-        : <ModuleCount count={eventsState.data.entries.length} label={texts.events.count} />} actions={<RealtimeFeedStatus status={realtime.status} />} />
+        : <ModuleCount count={entries.length} label={texts.events.count} />} actions={<RealtimeFeedStatus status={realtime.status} />} />
       <ListDetail
         onCloseInspector={closeGroup}
         list={
@@ -292,13 +410,14 @@ export const EventsPage = ({
               {realtime.pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
             </div>
             <div className="events-page__pagination-slot">
-              {eventsState.data === null ? null : eventsState.data.nextCursor === null
+              {loading || entries.length === 0 ? null : nextCursor === null
                 ? <p className="empty-state">{texts.events.feedEnd}</p>
-                : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
+                : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
             </div>
             <UiLoadState
-              status={eventsState.data === null
-                ? eventsState.status === "error" ? "error" : "loading"
+              status={loading
+                ? "loading"
+                : error !== null && entries.length === 0 ? "error"
                 : eventEntries.length === 0 ? "empty" : "success"}
               minHeight={420}
               loading={<Skeleton rows={50} height={34} />}
@@ -317,13 +436,13 @@ export const EventsPage = ({
               ) : <p className="empty-state">{texts.events.none}</p>}
               error={<EmptyState
                 title={texts.events.connectionLost}
-                description={eventsState.error ?? texts.events.load}
-                action={{ label: texts.events.retry, onClick: () => { void onRefreshFirstPage(channelId, filters); } }}
+                description={error ?? texts.events.load}
+                action={{ label: texts.events.retry, onClick: () => { void onRefreshFirstPage().catch(() => undefined); } }}
               />}
             >
               <>
               <div ref={feedRef} className="event-feed">
-                <div className={eventsState.status === "loading" ? "stale" : undefined}>
+                <div key={identityKey} className={fetching ? "stale" : undefined} aria-busy={fetching}>
                   {dayGroups.map((day) => (
                     <section key={day.key} className="event-day">
                       <h3 className="event-day__heading">{day.label}</h3>
@@ -370,7 +489,7 @@ export const EventsPage = ({
                     </section>
                   ))}
                 </div>
-                <EventFeedEnd nextCursor={eventsState.data?.nextCursor ?? null} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
+                <EventFeedEnd nextCursor={nextCursor} loadingNextPage={loadingNextPage || fetching} onNextPage={onNextPage} />
               </div>
               </>
             </UiLoadState>

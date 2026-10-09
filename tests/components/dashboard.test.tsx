@@ -789,12 +789,24 @@ describe("Dashboard skeleton", () => {
     expect(eventRequests).toBe(2);
   });
 
-  it("loads older events from the control above the feed and shows the end explicitly", async () => {
+  it("refreshes page one after loading older events without reloading the tail", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let releaseSecondPage: ((response: Response) => void) | undefined;
+    let firstPageRequests = 0;
     const firstPage = {
       entries: [{ eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "raid", code: "neu", detail: "{}", actorUserId: null }],
       nextCursor: "cursor-1",
+    };
+    const liveEntry = {
+      eventId: "event-live",
+      createdAt: "2026-09-18T05:00:00.000Z",
+      moduleId: "channel_events",
+      triggerId: "trigger-live",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"freshraid","viewers":2}',
+      actorUserId: null,
+      actorLogin: null,
+      actorDisplayName: null,
     };
     const secondPage = {
       entries: [{ eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null }],
@@ -807,11 +819,15 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/channels/kanal-a/events") {
         return url.searchParams.has("cursor")
           ? new Promise<Response>((resolve) => { releaseSecondPage = resolve; })
-          : Promise.resolve(jsonResponse(firstPage));
+          : Promise.resolve(jsonResponse({
+            ...firstPage,
+            entries: firstPageRequests++ === 0 ? firstPage.entries : [liveEntry, ...firstPage.entries],
+          }));
       }
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestWebSocket);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -825,6 +841,25 @@ describe("Dashboard skeleton", () => {
     releaseSecondPage?.(jsonResponse(secondPage));
     expect(await screen.findByText("alt")).toBeInTheDocument();
     expect(screen.getByText("Ende des Ereignisverlaufs erreicht.")).toBeInTheDocument();
+
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "message-after-pagination",
+      createdAt: liveEntry.createdAt,
+      channelId: "kanal-a",
+      type: "event_log.new",
+      payload: { entries: [{ eventId: liveEntry.eventId, createdAt: liveEntry.createdAt, moduleId: liveEntry.moduleId, code: liveEntry.code, actorUserId: null }] },
+    }));
+    expect(await screen.findByText("Raid von freshraid mit 2 Zuschauern")).toBeInTheDocument();
+    expect(screen.getByText("alt")).toBeInTheDocument();
+    await waitFor(() => {
+      const requests = fetcher.mock.calls.map(([input]) => requestUrl(input)).filter((url) => url.pathname.endsWith("/events"));
+      expect(requests).toHaveLength(3);
+      expect(requests[2]?.searchParams.has("cursor")).toBe(false);
+    });
   });
 
   it("groups the same trigger, shows the strongest tone and the chronological history", async () => {
@@ -1052,8 +1087,8 @@ describe("Dashboard skeleton", () => {
     expect(person).toBeInTheDocument();
 
     fireEvent.click(within(herkunftGroup).getByRole("radio", { name: "Kanalereignisse" }));
-    expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
-    expect(screen.queryByText("Befehl !hilfe ausgeführt")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Befehl !hilfe ausgeführt")).not.toBeInTheDocument());
+    expect(screen.getByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     expect(screen.getByText(/Aktive Filter:/)).toHaveTextContent("Kanalereignisse");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Filter zurücksetzen" })[0] as HTMLElement);
@@ -1068,6 +1103,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByText("Raid von unbekannt mit 21 Zuschauern")).not.toBeInTheDocument();
     fireEvent.change(person, { target: { value: "person-a" } });
     expect((await screen.findAllByText("Alice")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("actor")).toBe("person-a"));
 
     fireEvent.click(module);
     fireEvent.click(screen.getByRole("option", { name: "Werbung", hidden: true }));
@@ -4335,7 +4371,7 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByRole("region", { name: "Detail" })).toBeInTheDocument();
   });
 
-  it("keeps the event incident intact across a reload", async () => {
+  it("keeps the event incident selected when returning to cached events", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const entry = {
       eventId: "event-1",
@@ -4349,14 +4385,12 @@ describe("Dashboard skeleton", () => {
       actorDisplayName: "Alice",
     };
     let eventRequests = 0;
-    let resolveReload: ((response: Response) => void) | undefined;
-    const reload = new Promise<Response>((resolve) => { resolveReload = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/events")) {
         eventRequests += 1;
-        return eventRequests === 1 ? jsonResponse({ entries: [entry], nextCursor: null }) : reload;
+        return jsonResponse({ entries: [entry], nextCursor: null });
       }
       if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
       return jsonResponse({}, 404);
@@ -4372,8 +4406,7 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(row);
     expect(await screen.findByRole("region", { name: "Detail" })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("link", { name: "Ereignisse" }));
-    await waitFor(() => expect(eventRequests).toBe(2));
-    resolveReload?.(jsonResponse({ entries: [entry], nextCursor: null }));
+    expect(eventRequests).toBe(1);
 
     const restoredRow = (await screen.findAllByRole("row", { name: /Befehl !wiki ausgeführt/ }))[0];
     expect(restoredRow).toBeDefined();

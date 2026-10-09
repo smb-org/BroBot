@@ -1,11 +1,12 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { AuditPage } from "../../src/dashboard/audit/AuditPage";
 import { emptyAuditFilter } from "../../src/dashboard/audit/model";
-import { loadedState } from "../../src/dashboard/load-state";
 import type { PanelAuditEntry, PanelAuditResponse } from "../../src/panel-contract";
+import { dashboardDataKeys } from "../../src/dashboard/data/keys";
+import { renderWithQuery } from "../query-test-utils";
 
 const entry = (overrides: Partial<PanelAuditEntry>): PanelAuditEntry => ({
   auditId: "audit-1",
@@ -26,16 +27,16 @@ const entry = (overrides: Partial<PanelAuditEntry>): PanelAuditEntry => ({
 
 const renderPage = (entries: readonly PanelAuditEntry[]) => {
   const response: PanelAuditResponse = { entries: [...entries], nextCursor: null };
-  return render(
+  return renderWithQuery(
     <UiProvider>
       <AuditPage
-        auditState={loadedState(response)}
+        channelId="channel-a"
         filters={emptyAuditFilter}
         onFiltersChange={() => undefined}
-        onNextPage={() => undefined}
-        loadingNextPage={false}
       />
     </UiProvider>,
+    undefined,
+    { initialData: [{ queryKey: dashboardDataKeys.audit("channel-a", emptyAuditFilter), data: { pages: [response], pageParams: [null] } }] },
   );
 };
 

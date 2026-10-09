@@ -8,6 +8,7 @@ import { dispatchDashboardAuthenticationRequired } from "../src/dashboard/data/e
 export interface DashboardQueryTestOptions {
   gcTime?: number;
   staleTime?: number;
+  initialData?: readonly { queryKey: readonly unknown[]; data: unknown }[];
 }
 
 export const renderWithQuery = (
@@ -25,6 +26,9 @@ export const renderWithQuery = (
       ...(queryOptions.staleTime === undefined ? {} : { staleTime: queryOptions.staleTime }),
     },
   });
+  for (const entry of queryOptions.initialData ?? []) {
+    queryClient.setQueryData(entry.queryKey, entry.data);
+  }
 
   return {
     ...render(ui, {

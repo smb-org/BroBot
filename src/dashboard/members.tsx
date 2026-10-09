@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { CHANNEL_ROLES, canManage, type ChannelRole } from "../contracts/values";
 import type { PanelMember } from "../panel-contract";
 import { membersTexts, roleDescription, roleLabel } from "./labels";
-import { apiErrorText, dashboardCommonTexts, formatDate } from "./locale";
+import { apiErrorText, dashboardCommonTexts, dashboardTexts, formatDate } from "./locale";
 import { ModuleHeading } from "./module-panels";
 import { MemberAvatar } from "./member-avatar";
 import { MemberGrantEditor } from "./member-grant-editor";
 import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, useDraftGuard, useInspectorSelection } from "./ui";
+import { dashboardDataKeys } from "./data/keys";
+import { useMembersQuery } from "./data/lists";
 import {
   addChannelMember,
   PanelApiError,
@@ -19,17 +22,6 @@ import {
 interface MembersPageProperties {
   channelId: string;
   ownRole: ChannelRole;
-  /** Own Twitch user id, to recognize the own entry. */
-  ownUserId: string;
-  members: PanelMember[];
-  /** Broadcasters across the whole channel, not on this page. */
-  broadcasterCount: number;
-  nextCursor: string | null;
-  loading: boolean;
-  loadingNextPage: boolean;
-  error: string | null;
-  onReload: () => Promise<void>;
-  onLoadNextPage: () => Promise<void>;
   onAuthenticationRequired: () => void;
 }
 
@@ -42,6 +34,12 @@ const formatJoinDate = (value: string): string => formatDate(value);
 const errorMessage = (error: unknown): string => {
   if (error instanceof PanelApiError && error.status === 401) return membersTexts().sessionInvalid;
   const fallback = membersTexts().changeFailed;
+  return error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
+};
+
+const listErrorMessage = (error: unknown): string => {
+  if (error instanceof PanelApiError && error.status === 401) return membersTexts().sessionInvalid;
+  const fallback = dashboardTexts().errors.dataLoadFailed;
   return error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
 };
 
@@ -286,17 +284,32 @@ const MemberInspector = ({
 export const MembersPage = ({
   channelId,
   ownRole,
-  ownUserId,
-  members,
-  broadcasterCount,
-  nextCursor,
-  loading,
-  loadingNextPage,
-  error,
-  onReload,
-  onLoadNextPage,
   onAuthenticationRequired,
 }: MembersPageProperties): ReactElement => {
+  const queryClient = useQueryClient();
+  const membersQuery = useMembersQuery(channelId);
+  const membersQueryKey = dashboardDataKeys.members(channelId);
+  const queryFilter = { queryKey: membersQueryKey, exact: true } as const;
+  const memberPages = membersQuery.data?.pages;
+  const members = useMemo(
+    () => [...new Map((memberPages ?? []).flatMap((page) => page.members).map((member) => [member.userId, member])).values()],
+    [memberPages],
+  );
+  const latestPage = memberPages?.at(-1);
+  const broadcasterCount = latestPage?.broadcasterCount ?? 0;
+  const ownUserId = latestPage?.viewerUserId ?? "";
+  const nextCursor = membersQuery.isPlaceholderData ? null : latestPage?.nextCursor ?? null;
+  const loading = membersQuery.isPending;
+  const fetching = membersQuery.isFetching && !membersQuery.isFetchingNextPage;
+  const error = membersQuery.isError ? listErrorMessage(membersQuery.error) : null;
+  useEffect(() => {
+    if (!membersQuery.isError) return;
+    notify({ tone: "error", message: listErrorMessage(membersQuery.error) });
+  }, [membersQuery.error, membersQuery.isError]);
+  const refreshMembers = async (): Promise<void> => {
+    await queryClient.cancelQueries(queryFilter);
+    await queryClient.invalidateQueries(queryFilter);
+  };
   const texts = membersTexts();
   const canManageMembers = canManage(ownRole);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
@@ -324,9 +337,10 @@ export const MembersPage = ({
     if (selectedMember === null || roleDraft === null || !roleDirty) return null;
     setBusyUserId(roleDraft.userId);
     try {
+      await queryClient.cancelQueries(queryFilter);
       await updateChannelMemberRole(channelId, roleDraft.userId, roleDraft.role);
       setRoleDraft(null);
-      await onReload();
+      await queryClient.invalidateQueries(queryFilter);
       return null;
     } catch (error: unknown) {
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
@@ -365,9 +379,10 @@ export const MembersPage = ({
   const handleRemove = async (member: PanelMember): Promise<void> => {
     setBusyUserId(member.userId);
     try {
+      await queryClient.cancelQueries(queryFilter);
       await removeChannelMember(channelId, member.userId);
       closeSelection();
-      await onReload();
+      await queryClient.invalidateQueries(queryFilter);
     } catch (error: unknown) {
       notify({ tone: "error", message: errorMessage(error) });
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
@@ -383,7 +398,7 @@ export const MembersPage = ({
         <div className="section-heading">
           <h2>{texts.membersWithAccess}</h2>
         </div>
-        <div className={loading ? "stale" : undefined}>
+        <div>
           <ListDetail
             list={<div className="members-page__list-column">
               <ListToolbar
@@ -400,6 +415,7 @@ export const MembersPage = ({
                 }}
                 {...(query.length === 0 ? {} : { activeFilters: `${texts.searchMembers}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
               />
+              <div className={fetching ? "stale" : undefined} aria-busy={fetching}>
               <LoadState
                 status={members.length > 0 ? visibleMembers.length === 0 ? "empty" : "success" : error !== null ? "error" : loading ? "loading" : "empty"}
                 minHeight={320}
@@ -407,8 +423,9 @@ export const MembersPage = ({
                 empty={members.length > 0 ? <p className="empty-state">{dashboardCommonTexts().noMatches}</p> : <MemberList members={members} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
                 error={<MemberListSkeleton />}
               >{members.length === 0 ? null : <MemberList members={visibleMembers} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>
+              </div>
               {members.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={members.length} loadedLabel={texts.loaded}>
-                {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
+                {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={() => { void membersQuery.fetchNextPage(); }} disabled={loading || membersQuery.isFetching || membersQuery.isPlaceholderData}>{membersQuery.isFetchingNextPage ? texts.loadingMore : texts.loadMore}</button>}
               </ListPaginationFooter>}
             </div>}
             inspector={selectedMember !== null ? (
@@ -447,9 +464,12 @@ export const MembersPage = ({
                   closeLabel: dashboardCommonTexts().close,
                 }}
                 onSearch={(login) => searchTwitchUser(channelId, login).then((response) => response.user)}
-                onGrant={(userId, role) => addChannelMember(channelId, userId, role).then(() => undefined)}
+                onGrant={async (userId, role) => {
+                  await queryClient.cancelQueries(queryFilter);
+                  await addChannelMember(channelId, userId, role);
+                }}
                 errorText={errorMessage}
-                onGranted={() => { void onReload(); }}
+                onGranted={() => { void refreshMembers(); }}
                 onAuthenticationRequired={onAuthenticationRequired}
                 onClose={closeGrant}
               />
