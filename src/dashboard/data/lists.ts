@@ -28,8 +28,8 @@ export const useEventsQuery = (channelId: string, filters: PanelEventFilters) =>
   const queryKey = dashboardDataKeys.events(channelId, filters);
   return useInfiniteQuery({
     queryKey,
-    // The event feed revalidates on every activation; central socket invalidation replaces this in #387.
-    refetchOnMount: "always",
+    // A cached filter becomes stale immediately so switching back revalidates it in the background.
+    staleTime: 0,
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => fetchEvents(channelId, pageParam, signal, filters),
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,

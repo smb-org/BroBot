@@ -704,7 +704,8 @@ describe("Dashboard skeleton", () => {
     expect(newEventsNotice.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     fireEvent.click(newEventsNotice);
     expect(await screen.findByText("Raid von unbekannt mit 9 Zuschauern")).toBeInTheDocument();
-    expect(eventRequests).toBe(2);
+    // Returning to the top makes one catch-up refresh for the immediately stale events query.
+    expect(eventRequests).toBe(3);
     expect(scrollTo).toHaveBeenCalledOnce();
   });
 

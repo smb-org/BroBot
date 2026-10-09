@@ -356,7 +356,6 @@ export const useRealtimeEventFeed = ({
   refreshOnReturn,
   scrollToBeginning,
   onRealtimeMessage,
-  onEventHint,
 }: {
   channelId: string;
   filters: PanelEventFilters;
@@ -364,8 +363,6 @@ export const useRealtimeEventFeed = ({
   refreshOnReturn?: () => void;
   scrollToBeginning: () => void;
   onRealtimeMessage?: (message: RealtimeMessage) => void;
-  /** Called for every event_log.new message, before the current filters are applied. */
-  onEventHint?: () => void;
 }): RealtimeFeedState => {
   const currentFilterKey = filterKey(filters);
   const [status, setStatus] = useState<RealtimeFeedStatus>("connecting");
@@ -381,17 +378,15 @@ export const useRealtimeEventFeed = ({
   const refreshOnReturnRef = useRef(refreshOnReturn);
   const scrollToBeginningRef = useRef(scrollToBeginning);
   const onRealtimeMessageRef = useRef(onRealtimeMessage);
-  const onEventHintRef = useRef(onEventHint);
   const filtersRef = useRef(filters);
 
   useEffect(() => {
-    onEventHintRef.current = onEventHint;
     refreshRef.current = refresh;
     refreshOnReturnRef.current = refreshOnReturn;
     scrollToBeginningRef.current = scrollToBeginning;
     onRealtimeMessageRef.current = onRealtimeMessage;
     filtersRef.current = filters;
-  }, [filters, onEventHint, onRealtimeMessage, refresh, refreshOnReturn, scrollToBeginning]);
+  }, [filters, onRealtimeMessage, refresh, refreshOnReturn, scrollToBeginning]);
 
   const scheduleBatch = useCallback((): void => {
     if (batchTimerRef.current !== null) return;
@@ -469,7 +464,6 @@ export const useRealtimeEventFeed = ({
       onRealtimeMessageRef.current?.(parsed.message);
       relayRealtimeMessage(parsed.message);
       if (parsed.message.type !== "event_log.new") return;
-      onEventHintRef.current?.();
       const hints = parsed.message.payload.entries.filter((hint) => realtimeHintMatchesFilters(hint, filtersRef.current));
       if (hints.length > 0) scheduleBatch();
     };

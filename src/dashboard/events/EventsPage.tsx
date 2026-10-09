@@ -10,7 +10,7 @@ import { Icon } from "../ui/Icon";
 import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, QueryErrorState, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import { PanelApiError } from "../api";
 import { refreshQuery } from "../data/refresh";
-import { dashboardDataKeys, queryKeys } from "../data/keys";
+import { dashboardDataKeys } from "../data/keys";
 import { useEventsQuery } from "../data/lists";
 import {
   actorLabel,
@@ -20,6 +20,7 @@ import {
   eventCause,
   eventChipNumber,
   eventDayGroups,
+  type EventDayGroup,
   eventDetail,
   eventFilterIsActive,
   eventGroupKey,
@@ -54,6 +55,22 @@ const appendOlderEntries = (
     (oldest === undefined || chronological(entry, oldest) < 0),
   );
   return [...current, ...olderEntries];
+};
+
+const appendOlderDayGroups = (
+  current: readonly EventDayGroup[],
+  incoming: readonly EventDayGroup[],
+): EventDayGroup[] => {
+  const days = [...current];
+  for (const day of incoming) {
+    const last = days.at(-1);
+    if (last?.key === day.key) {
+      days[days.length - 1] = { ...last, groups: [...last.groups, ...day.groups] };
+    } else {
+      days.push(day);
+    }
+  }
+  return days;
 };
 
 const EMPTY_EVENT_PAGES: readonly PanelEventsResponse[] = [];
@@ -271,10 +288,6 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   const refreshOnReturn = useCallback((): void => {
     if (query.isStale && !query.isFetching) invalidateEvents();
   }, [invalidateEvents, query.isFetching, query.isStale]);
-  // Mark every cached event filter of this channel stale, so an inactive filter cannot stay "fresh" after a hint.
-  const markEventsStale = useCallback((): void => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.channel(channelId, "events"), refetchType: "none" });
-  }, [queryClient, channelId]);
   const loadNextPage = useCallback((): void => {
     if (query.isFetching || query.isPlaceholderData || !query.hasNextPage) return;
     void query.fetchNextPage({ cancelRefetch: false });
@@ -305,7 +318,6 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     pages={pages}
     onRefresh={invalidateEvents}
     onRefreshOnReturn={refreshOnReturn}
-    onEventHint={markEventsStale}
     onNextPage={loadNextPage}
   />;
 };
@@ -325,13 +337,12 @@ interface EventsPageContentProperties {
   onFiltersChange: (filters: PanelEventFilters) => void;
   onRefresh: () => void;
   onRefreshOnReturn: () => void;
-  onEventHint: () => void;
   onNextPage: () => void;
   loadingNextPage: boolean;
 }
 
 const EventsPageContent = (properties: EventsPageContentProperties): ReactElement => {
-  const { identityKey, channelId, filters, onRefresh, onRefreshOnReturn, onEventHint, ...contentProperties } = properties;
+  const { identityKey, channelId, filters, onRefresh, onRefreshOnReturn, ...contentProperties } = properties;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const setFeedRef = useCallback<RefCallback<HTMLDivElement>>((feed) => { feedRef.current = feed; }, []);
   const [readerAtTop, setReaderAtTop] = useState(true);
@@ -359,7 +370,6 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
     filters,
     refresh: onRefresh,
     refreshOnReturn: onRefreshOnReturn,
-    onEventHint,
     scrollToBeginning,
   });
   return <EventsPageFilterState
@@ -392,13 +402,13 @@ const EventsPageFilterState = ({
   loadingNextPage,
   feedRef,
   realtime,
-}: Omit<EventsPageContentProperties, "channelId" | "onEventHint" | "onRefreshOnReturn"> & {
+}: Omit<EventsPageContentProperties, "channelId" | "onRefreshOnReturn"> & {
   readerAtTop: boolean;
   feedRef: RefCallback<HTMLDivElement>;
   realtime: RealtimeFeedState;
 }): ReactElement => {
   const texts = dashboardTexts();
-  const [snapshot, setSnapshot] = useState(() => ({ entries, pageCount: pages.length }));
+  const [snapshot, setSnapshot] = useState(() => ({ entries, days: eventDayGroups(eventGroups(entries)), pageCount: pages.length }));
   const [followIdentityQuery, setFollowIdentityQuery] = useState(fetching || queryStale);
   const [wasReaderAtTop, setWasReaderAtTop] = useState(readerAtTop);
   let followsIdentityQuery = followIdentityQuery;
@@ -412,14 +422,22 @@ const EventsPageFilterState = ({
   const followsQuery = readerAtTop || followsIdentityQuery;
   if (followsQuery) {
     if (snapshot.entries !== entries || snapshot.pageCount !== pages.length) {
-      setSnapshot({ entries, pageCount: pages.length });
+      setSnapshot({ entries, days: eventDayGroups(eventGroups(entries)), pageCount: pages.length });
     }
-    if (followIdentityQuery && !fetching && !queryStale) setFollowIdentityQuery(false);
+    if (followIdentityQuery && !fetching) setFollowIdentityQuery(false);
   } else if (pages.length < snapshot.pageCount) {
     setSnapshot({ ...snapshot, pageCount: pages.length });
   } else if (pages.length > snapshot.pageCount) {
     const loadedOlderEntries = pages.slice(snapshot.pageCount).flatMap((page) => page.entries);
-    setSnapshot({ entries: appendOlderEntries(snapshot.entries, loadedOlderEntries), pageCount: pages.length });
+    const entriesWithOlderPage = appendOlderEntries(snapshot.entries, loadedOlderEntries);
+    const existingIds = new Set(snapshot.entries.map((entry) => entry.eventId));
+    const newlyAddedEntries = entriesWithOlderPage.filter((entry) => !existingIds.has(entry.eventId));
+    const olderDays = eventDayGroups(eventGroups(newlyAddedEntries));
+    setSnapshot({
+      entries: entriesWithOlderPage,
+      days: appendOlderDayGroups(snapshot.days, olderDays),
+      pageCount: pages.length,
+    });
   }
   const displayedEntries = followsQuery ? entries : snapshot.entries;
   const firstDisplayedEntry = displayedEntries[0];
@@ -427,8 +445,8 @@ const EventsPageFilterState = ({
     ? entries.length
     : entries.filter((entry) => chronological(entry, firstDisplayedEntry) > 0).length;
   const { selectedKey: selectedGroupKey, select: selectGroup, rowRef: groupRowRef, close: closeGroup } = useInspectorSelection<string>(identityKey);
-  const groups = eventGroups(displayedEntries);
-  const dayGroups = eventDayGroups(groups);
+  const dayGroups = followsQuery ? eventDayGroups(eventGroups(displayedEntries)) : snapshot.days;
+  const groups = followsQuery ? eventGroups(displayedEntries) : dayGroups.flatMap((day) => day.groups);
   const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? null;
   const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronological);
   const triggerNames = Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texts))));
@@ -502,8 +520,8 @@ const EventsPageFilterState = ({
               <>
               <div ref={feedRef} className="event-feed">
                 <div key={identityKey} className={fetching && followsQuery ? "stale" : undefined} aria-busy={fetching && followsQuery}>
-                  {dayGroups.map((day) => (
-                    <section key={day.key} className="event-day">
+                  {dayGroups.map((day, dayIndex) => (
+                    <section key={`${day.key}:${String(dayIndex)}`} className="event-day">
                       <h3 className="event-day__heading">{day.label}</h3>
                       <table className="table event-table">
                         <colgroup>
