@@ -17,7 +17,7 @@ const requestChannelResource: QueryFunction = ({ queryKey, signal }) => {
   const resourcePath = resource.split("/").map((segment) => encodeURIComponent(segment)).join("/");
   const searchParams = new URLSearchParams();
   for (const queryParams of params) {
-    for (const name of Object.keys(queryParams).sort()) {
+    for (const name of Object.keys(queryParams).sort((a, b) => a.localeCompare(b))) {
       const value = queryParams[name];
       if (value !== null && value !== undefined) searchParams.append(name, String(value));
     }
