@@ -20,7 +20,7 @@ const readJson = async <T,>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const loadTextLibrary = async (channelId: string): Promise<TextLibraryPanelData> => {
+export const loadTextLibrary = async (channelId: string, signal?: AbortSignal): Promise<TextLibraryPanelData> => {
   const encodedChannelId = encodeURIComponent(channelId);
   // The three requests are started together first and only then read as JSON.
   // Awaiting each `fetch` inside the `Promise.all([...])` array (as written
@@ -32,9 +32,9 @@ export const loadTextLibrary = async (channelId: string): Promise<TextLibraryPan
   // only runs once all three elements are known), so it surfaces as an
   // unhandled rejection instead of the caller's `catch`.
   const [libraryResponse, registeredResponse, settingsResponse] = await Promise.all([
-    fetch(`${basePath(channelId)}${TEXT_LIBRARY_LIBRARY_PATH}`),
-    fetch(`/api/channels/${encodedChannelId}/template-variables`),
-    fetch(`/api/channels/${encodedChannelId}/settings`),
+    fetch(`${basePath(channelId)}${TEXT_LIBRARY_LIBRARY_PATH}`, signal === undefined ? undefined : { signal }),
+    fetch(`/api/channels/${encodedChannelId}/template-variables`, signal === undefined ? undefined : { signal }),
+    fetch(`/api/channels/${encodedChannelId}/settings`, signal === undefined ? undefined : { signal }),
   ]);
   const [library, registered, channelSettings] = await Promise.all([
     readJson<TextLibraryData>(libraryResponse),

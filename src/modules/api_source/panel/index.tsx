@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
+import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { Button, CodeField, ConfirmDialog, Field, FormDialog, InspectorFieldRow, InspectorSection, LoadState, Skeleton, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { ApiSource } from "../contracts";
@@ -24,43 +25,28 @@ const disallowedConstructName = (error: unknown): string | null => {
   return typeof constructName === "string" ? constructName : null;
 };
 
-export default function ApiSourcePanel({ channelId, language, canManage }: ModulePanelProperties): ReactElement {
+export default function ApiSourcePanel(properties: ModulePanelProperties): ReactElement {
+  return <ApiSourcePanelContent key={properties.channelId} {...properties} />;
+}
+
+function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelProperties): ReactElement {
   const labels = apiSourcePanelTexts(language ?? "de");
   const canEdit = canManage ?? false;
-  const [sources, setSources] = useState<readonly ApiSource[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const queryClient = useDashboardQueryClient();
+  const query = useModuleQuery(channelId, "api_source", "sources", (signal) => loadApiSources(channelId, signal));
+  const sources = query.data ?? [];
   const [editingName, setEditingName] = useState<string | null>(null);
   const [draft, setDraft] = useState<SourceDraft | null>(null);
+  const [draftBaselineRevision, setDraftBaselineRevision] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | undefined>();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
 
-  const refresh = useCallback(async (): Promise<void> => {
-    setSources(await loadApiSources(channelId));
-    setLoadFailed(false);
-  }, [channelId]);
-
-  useEffect(() => {
-    let active = true;
-    loadApiSources(channelId).then((next) => {
-      if (active) {
-        setSources(next);
-        setLoadFailed(false);
-      }
-    }).catch(() => {
-      if (active) {
-        setLoadFailed(true);
-        notify({ tone: "error", message: labels.loadFailed });
-      }
-    }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [channelId, labels.loadFailed]);
-
   const closeEditor = (): void => {
     setDraft(null);
     setEditingName(null);
+    setDraftBaselineRevision(null);
     setFormError(undefined);
     setConfirmDeleteOpen(false);
     setDeleteError(undefined);
@@ -68,12 +54,14 @@ export default function ApiSourcePanel({ channelId, language, canManage }: Modul
 
   const startCreate = (): void => {
     setEditingName(null);
+    setDraftBaselineRevision(null);
     setDraft(emptyDraft());
     setFormError(undefined);
   };
 
   const startEdit = (source: ApiSource): void => {
     setEditingName(source.name);
+    setDraftBaselineRevision(source.revision);
     setDraft({ name: source.name, url: source.url, expression: source.expression });
     setFormError(undefined);
   };
@@ -84,13 +72,37 @@ export default function ApiSourcePanel({ channelId, language, canManage }: Modul
     setBusy(true);
     setFormError(undefined);
     try {
-      if (editingName === null) await createApiSource(channelId, normalized);
-      else {
-        const current = sources.find((source) => source.name === editingName);
-        if (current === undefined) throw new Error("api_source_not_found");
-        await updateApiSource(channelId, editingName, { url: normalized.url, expression: normalized.expression, revision: current.revision });
+      if (editingName === null) {
+        await runModuleQueryWrite(
+          queryClient,
+          channelId,
+          "api_source",
+          "sources",
+          () => createApiSource(channelId, normalized),
+          {
+            baselineRevision: null,
+            updateCache: (current, created) => updateSourceCache(current, created),
+          },
+        );
       }
-      await refresh();
+      else {
+        if (draftBaselineRevision === null) throw new Error("api_source_revision_missing");
+        await runModuleQueryWrite(
+          queryClient,
+          channelId,
+          "api_source",
+          "sources",
+          (baselineRevision) => updateApiSource(channelId, editingName, {
+            url: normalized.url,
+            expression: normalized.expression,
+            revision: requireBaselineRevision(baselineRevision),
+          }),
+          {
+            baselineRevision: draftBaselineRevision,
+            updateCache: (current, updated) => updateSourceCache(current, updated),
+          },
+        );
+      }
       closeEditor();
       notify({ tone: "success", message: editingName === null ? labels.created : labels.saved });
     } catch (failure: unknown) {
@@ -112,8 +124,18 @@ export default function ApiSourcePanel({ channelId, language, canManage }: Modul
     setBusy(true);
     setDeleteError(undefined);
     try {
-      await deleteApiSource(channelId, source);
-      await refresh();
+      if (draftBaselineRevision === null) throw new Error("api_source_revision_missing");
+      await runModuleQueryWrite(
+        queryClient,
+        channelId,
+        "api_source",
+        "sources",
+        (baselineRevision) => deleteApiSource(channelId, source.name, requireBaselineRevision(baselineRevision)),
+        {
+          baselineRevision: draftBaselineRevision,
+          updateCache: (current) => removeSourceFromCache(current, source.name),
+        },
+      );
       closeEditor();
       notify({ tone: "success", message: labels.deleted });
     } catch (failure: unknown) {
@@ -123,18 +145,20 @@ export default function ApiSourcePanel({ channelId, language, canManage }: Modul
     }
   };
 
-  const loadStatus = loading ? "loading" : loadFailed ? "error" : sources.length === 0 ? "empty" : "success";
+  const loadStatus = query.data === undefined ? query.isPending ? "loading" : "error" : sources.length === 0 ? "empty" : "success";
 
   return <section className="module-stack api-source-panel" aria-label={labels.title}>
     <p className="muted">{labels.explanation}</p>
     <InspectorSection title={labels.sourceList}>
-      <div data-testid="api-source-list-slot" style={{ height: "calc(var(--s10) * 5)", overflow: "hidden" }}>
+      <div data-testid="api-source-list-slot" style={{ height: "calc(var(--s10) * 6)", overflow: "hidden" }}>
       <LoadState
         status={loadStatus}
         minHeight="calc(var(--s10) * 5)"
         loading={<Skeleton rows={4} height={34} />}
         empty={<p className="muted">{labels.empty}</p>}
         error={<p className="muted">{labels.loadFailed}</p>}
+        onRetry={() => { void query.refetch(); }}
+        refreshError={query.isRefetchError}
       >
         <ul className="api-source-panel__list" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", margin: 0, padding: 0, listStyle: "none" }}>
           {sources.map((source) => <li key={source.name}>
@@ -199,3 +223,18 @@ export default function ApiSourcePanel({ channelId, language, canManage }: Modul
     />
   </section>;
 }
+
+const requireBaselineRevision = (revision: number | null): number => {
+  if (revision === null) throw new Error("api_source_revision_missing");
+  return revision;
+};
+
+const updateSourceCache = (current: unknown, source: ApiSource): unknown => {
+  const sources = Array.isArray(current) ? current as ApiSource[] : [];
+  return [...sources.filter((entry) => entry.name !== source.name), source];
+};
+
+const removeSourceFromCache = (current: unknown, name: string): unknown => {
+  const sources = Array.isArray(current) ? current as ApiSource[] : [];
+  return sources.filter((entry) => entry.name !== name);
+};

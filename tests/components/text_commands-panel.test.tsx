@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -11,6 +12,7 @@ import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
 import { useDashboardRoute } from "../../src/dashboard/router";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery } from "../query-test-utils";
 
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
 
@@ -55,15 +57,35 @@ const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMut
     if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: [] }));
     if (url.pathname.includes("/commands/") || (url.pathname.endsWith("/commands") && method !== "GET")) {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
-      return Promise.resolve(onMutation(method, url.pathname, body));
+      return Promise.resolve(onMutation(method, url.pathname, body)).then(async (response) => {
+        if (!response.ok) return response;
+        const payload: unknown = await response.clone().json().catch(() => null);
+        if (typeof payload === "object" && payload !== null && "command" in payload) return response;
+        const fields = typeof body === "object" && body !== null ? body as Partial<TextCommand> : {};
+        const oldName = url.pathname.endsWith("/commands") ? undefined : url.pathname.split("/").at(-1);
+        const existing = commands().find((command) => command.name === oldName);
+        const name = typeof fields.name === "string" ? fields.name : existing?.name ?? "neu";
+        const command: TextCommand = {
+          ...(existing ?? makeCommand({ name })),
+          ...fields,
+          channelId: "kanal-a",
+          name,
+          enabled: typeof fields.enabled === "boolean" ? fields.enabled : existing?.enabled ?? true,
+          revision: (existing?.revision ?? 0) + 1,
+        };
+        const warnings = typeof payload === "object" && payload !== null && "warnings" in payload && Array.isArray(payload.warnings)
+          ? payload.warnings
+          : [];
+        return jsonResponse({ command, warnings }, response.status);
+      });
     }
     return Promise.resolve(jsonResponse({}, 404));
   });
 
-const renderPanel = (fetcher: typeof fetch, props: { language?: "de" | "en"; canManage?: boolean; botIsModerator?: boolean | null } = {}): ReturnType<typeof render> => {
+const renderPanel = (fetcher: typeof fetch, props: { language?: "de" | "en"; canManage?: boolean; botIsModerator?: boolean | null } = {}) => {
   vi.stubGlobal("fetch", fetcher);
   const { language = "de", ...panelProps } = props;
-  return render(<UiProvider><TextCommandsPanel channelId="kanal-a" language={language} {...panelProps} /></UiProvider>);
+  return renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language={language} {...panelProps} /></UiProvider>);
 };
 
 const selectCommand = async (name = "hallo"): Promise<HTMLElement> => {
@@ -93,6 +115,16 @@ describe("Text command editor", () => {
     vi.unstubAllGlobals();
     toastsSnapshot().forEach((toast) => dismissToast(toast.id));
     if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
+  });
+
+  it("shows cached commands immediately when returning to the module", async () => {
+    vi.stubGlobal("fetch", panelFetch());
+    const view = renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, { gcTime: 600_000 });
+    await screen.findByText("!hallo");
+    view.rerender(<UiProvider><div /></UiProvider>);
+    view.rerender(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>);
+    expect(screen.getByText("!hallo")).toBeInTheDocument();
+    expect(document.querySelector(".ui-load-state")).not.toHaveAttribute("data-status", "loading");
   });
 
   it("keeps command creation visible and explains why an operator cannot use it", async () => {
@@ -146,20 +178,97 @@ describe("Text command editor", () => {
   });
 
   it("reports a command-list load failure in the persistent toast host", async () => {
+    let commandLoads = 0;
     const fetcher = vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
-      if (url.pathname.endsWith("/commands")) return Promise.resolve(jsonResponse({ error: "command_load_failed" }, 500));
+      if (url.pathname.endsWith("/commands")) {
+        commandLoads += 1;
+        return Promise.resolve(commandLoads === 1
+          ? jsonResponse({ error: "command_load_failed" }, 500)
+          : jsonResponse({ commands: [makeCommand()], variables: [] }));
+      }
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
 
-    render(<UiProvider><ToastHost /><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>);
+    renderWithQuery(<UiProvider><ToastHost /><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(textCommandsTexts("de").loadError);
     expect(document.querySelector(".command-list .form-error")).toBeNull();
     expect(screen.getByRole("button", { name: "Befehl anlegen" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u }));
+    expect(await screen.findByText("!hallo")).toBeInTheDocument();
+    expect(commandLoads).toBe(2);
+  });
+
+  it("retries a failed template-variable query inside the editor", async () => {
+    let variableReads = 0;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/template-variables")) {
+        variableReads += 1;
+        return Promise.resolve(variableReads === 1
+          ? jsonResponse({ error: "temporarily_unavailable" }, 503)
+          : jsonResponse({ variables: [] }));
+      }
+      if (url.pathname.endsWith("/commands")) return Promise.resolve(jsonResponse({ commands: [makeCommand()], variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="en" /></UiProvider>, undefined, { gcTime: 600_000 });
+    await selectCommand();
+
+    expect(await screen.findByText(textCommandsTexts("en").templateVariablesLoadError)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u }));
+
+    await waitFor(() => expect(screen.queryByText(textCommandsTexts("en").templateVariablesLoadError)).not.toBeInTheDocument());
+    expect(variableReads).toBe(2);
+  });
+
+  it("shows and retries a background template-variable refresh failure", async () => {
+    let variableReads = 0;
+    let failNextRead = false;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/template-variables")) {
+        variableReads += 1;
+        return Promise.resolve(failNextRead
+          ? jsonResponse({ error: "temporarily_unavailable" }, 503)
+          : jsonResponse({ variables: [] }));
+      }
+      if (url.pathname.endsWith("/commands")) return Promise.resolve(jsonResponse({ commands: [makeCommand()], variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    function TogglePanel() {
+      const [mounted, setMounted] = useState(true);
+      return <>
+        <button onClick={() => setMounted((current) => !current)}>{mounted ? "Leave module" : "Re-enter module"}</button>
+        {mounted ? <TextCommandsPanel channelId="kanal-a" language="en" /> : null}
+      </>;
+    }
+    renderWithQuery(<UiProvider><TogglePanel /></UiProvider>, undefined, {
+      gcTime: 600_000,
+      staleTime: 0,
+    });
+    await selectCommand();
+    expect(variableReads).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Leave module" }));
+    failNextRead = true;
+    fireEvent.click(screen.getByRole("button", { name: "Re-enter module" }));
+    await screen.findByText("!hallo");
+    await selectCommand();
+    await waitFor(() => expect(variableReads).toBe(2));
+
+    expect(await screen.findByText(textCommandsTexts("en").templateVariablesLoadError)).toBeInTheDocument();
+    failNextRead = false;
+    fireEvent.click(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u }));
+    await waitFor(() => expect(screen.queryByText(textCommandsTexts("en").templateVariablesLoadError)).not.toBeInTheDocument());
+    expect(variableReads).toBe(3);
   });
 
   it("opens in the ListDetail inspector with icon tabs, prefixes, counters, preview, and tier descriptions", async () => {
@@ -444,7 +553,8 @@ describe("Text command editor", () => {
     renderPanel(fetcher);
     await selectCommand();
 
-    await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/template-variables")));
+    await waitFor(() => expect(fetcher.mock.calls.some(([input]) => (typeof input === "string" ? input : input instanceof URL ? input.href : input.url).includes("/template-variables"))).toBe(true));
+    await waitFor(() => expect(within(templateEditorFor("text")).getByRole("combobox", { name: "Text aus Bibliothek" })).toBeEnabled());
     const picker = templateEditorFor("text").querySelector(".command-library-picker");
     if (!(picker instanceof HTMLElement)) throw new Error("Text-library picker is missing");
     fireEvent.click(within(picker).getByRole("combobox", { name: "Text aus Bibliothek" }));
@@ -899,7 +1009,7 @@ describe("Text command editor", () => {
         {route.kind === "module" ? <TextCommandsPanel channelId="kanal-a" language="de" initialSelection="hallo" /> : null}
       </>;
     };
-    render(<UiProvider><Harness /></UiProvider>);
+    renderWithQuery(<UiProvider><Harness /></UiProvider>);
 
     const response = await screen.findByRole("textbox", { name: "Antwort" });
     fireEvent.change(response, { target: { value: "Entwurf" } });
@@ -948,6 +1058,215 @@ describe("Text command editor", () => {
     rows[0] = makeCommand({ text: "Serverstand" });
     fireEvent.click(screen.getByRole("button", { name: "Serverstand laden" }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Serverstand"));
+  });
+
+  it("keeps a newer selection and its draft when a renamed command's refresh is delayed", async () => {
+    let rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] })];
+    let holdGet = false;
+    let releaseGet: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { releaseGet = resolve; });
+    const baseFetch = panelFetch({
+      commands: () => rows,
+      onMutation: (method, _path, body) => {
+        if (method === "PATCH" && typeof body === "object" && body !== null) {
+          const { name } = body as { name: string };
+          rows = rows.map((row) => row.name === "hallo" ? { ...row, name, revision: 2 } : row);
+          holdGet = true;
+        }
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (holdGet && url.pathname.endsWith("/commands") && (init?.method ?? "GET") === "GET") await gate;
+      return baseFetch(input, init);
+    }));
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, {
+      gcTime: 600_000,
+      staleTime: 600_000,
+    });
+
+    await selectCommand("hallo");
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "hallo2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await selectCommand("beta");
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf B" } });
+
+    releaseGet();
+    await screen.findByText("!hallo2");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("beta");
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf B");
+  });
+
+  describe("obsolete editor continuations", () => {
+    const setup = (hold: "POST" | "PATCH" | "DELETE" | "GET", onCloseInspector?: () => void) => {
+      let rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] }), makeCommand({ name: "gamma", text: "Antwort C", aliases: [] })];
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      let holdGets = false;
+      const baseFetch = panelFetch({ commands: () => rows });
+      vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input, init) => {
+        const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+        const method = init?.method ?? "GET";
+        const isCommands = url.pathname.includes("/commands");
+        if (isCommands && method === hold && hold !== "GET") await gate;
+        if (isCommands && method === "GET" && holdGets) await gate;
+        if (isCommands && method === "POST" && typeof init?.body === "string") {
+          const { name } = JSON.parse(init.body) as { name: string };
+          rows = [...rows, makeCommand({ name, text: "Hallo", aliases: [] })];
+          holdGets = hold === "GET";
+        }
+        if (isCommands && method === "PATCH" && typeof init?.body === "string") {
+          const { name } = JSON.parse(init.body) as { name: string };
+          rows = rows.map((row) => row.name === "hallo" ? { ...row, name, revision: 2 } : row);
+          holdGets = hold === "GET";
+        }
+        if (isCommands && method === "DELETE") {
+          rows = rows.filter((row) => row.name !== url.pathname.split("/").at(-1));
+          holdGets = hold === "GET";
+        }
+        return baseFetch(input, init);
+      }));
+      renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" {...(onCloseInspector === undefined ? {} : { onCloseInspector })} /></UiProvider>, undefined, {
+        gcTime: 600_000,
+        staleTime: 600_000,
+      });
+      return release;
+    };
+    const openCreate = async (name: string): Promise<void> => {
+      fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: name } });
+    };
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50));
+
+    it("keeps a newer create draft when an earlier create POST is released late", async () => {
+      const release = setup("POST");
+      await openCreate("eins");
+      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+      fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+      fireEvent.click((await screen.findByText("!beta")).closest("tr") as HTMLElement);
+      fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
+      await openCreate("zwei");
+
+      release();
+      await screen.findByText("!eins");
+      await settle();
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("zwei");
+    });
+
+    it("keeps a newer create form when an earlier create's revalidation finishes late", async () => {
+      const release = setup("GET");
+      await openCreate("eins");
+      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+      fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("eins"));
+      fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "zwei" } });
+
+      release();
+      await settle();
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("zwei");
+    });
+
+    it("completes save-and-switch only for the current editor when the refresh is delayed", async () => {
+      const release = setup("GET");
+      await selectCommand("hallo");
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "hallo2" } });
+      fireEvent.click((await screen.findByText("!beta")).closest("tr") as HTMLElement);
+      fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("beta"));
+      await selectCommand("gamma");
+      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf C" } });
+
+      release();
+      await settle();
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("gamma");
+      expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf C");
+    });
+
+    it("does not run a held save-and-switch navigation after the panel unmounted", async () => {
+      const onCloseInspector = vi.fn();
+      const release = setup("PATCH", onCloseInspector);
+      await selectCommand("hallo");
+      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf" } });
+      fireEvent.keyDown(editor(), { key: "Escape" });
+      fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
+      await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+
+      cleanup();
+      release();
+      await settle();
+      expect(onCloseInspector).not.toHaveBeenCalled();
+    });
+
+    it("keeps a newly selected command when a deletion's revalidation finishes late", async () => {
+      const release = setup("GET");
+      await selectCommand("hallo");
+      fireEvent.click(screen.getByRole("button", { name: /löschen/u }));
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Befehl !hallo löschen" }));
+      await waitFor(() => expect(screen.queryByText("!hallo")).not.toBeInTheDocument());
+      await selectCommand("beta");
+      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf B" } });
+
+      release();
+      await settle();
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("beta");
+      expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf B");
+    });
+  });
+
+  it("keeps the draft and conflict after a failed server reload, then retries against the refreshed revision", async () => {
+    let rows = [makeCommand()];
+    let failCommandReload = false;
+    const submittedRevisions: number[] = [];
+    const baseFetch = panelFetch({
+      commands: () => rows,
+      onMutation: (_method, _path, body) => {
+        const revision = typeof body === "object" && body !== null ? (body as { revision?: unknown }).revision : undefined;
+        if (typeof revision === "number") submittedRevisions.push(revision);
+        return submittedRevisions.length === 1
+          ? jsonResponse({ error: "command_changed_concurrently" }, 409)
+          : jsonResponse({ warnings: [] });
+      },
+    });
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/commands") && (init?.method ?? "GET") === "GET" && failCommandReload) {
+        return Promise.resolve(jsonResponse({ error: "temporarily_unavailable" }, 503));
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, {
+      gcTime: 600_000,
+      staleTime: 600_000,
+    });
+    await selectCommand();
+    const response = screen.getByRole("textbox", { name: "Antwort" });
+    fireEvent.change(response, { target: { value: "Mein Entwurf" } });
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await waitFor(() => expect(submittedRevisions).toEqual([1]));
+    expect(await screen.findByText(/Inzwischen von jemand anderem geändert\./u)).toBeInTheDocument();
+
+    failCommandReload = true;
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand laden" }));
+
+    expect(await screen.findByText(/Der Serverstand konnte nicht geladen werden\./u)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Mein Entwurf");
+    expect(screen.getByText(/Inzwischen von jemand anderem geändert\./u)).toBeInTheDocument();
+    expect(within(editor()).getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
+
+    failCommandReload = false;
+    rows = [makeCommand({ text: "Serverstand", revision: 2 })];
+    fireEvent.click(within(editor()).getByRole("button", { name: "Erneut versuchen" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Serverstand"));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Nach erneutem Laden" } });
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await waitFor(() => expect(submittedRevisions).toEqual([1, 2]));
   });
 
   it("maps command_already_exists and both command_alias_conflict fields to field errors", async () => {
@@ -1104,7 +1423,7 @@ describe("Text command editor", () => {
     const fetcher = panelFetch();
     const onCloseInspector = vi.fn();
     vi.stubGlobal("fetch", fetcher);
-    render(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" onCloseInspector={onCloseInspector} /></UiProvider>);
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" onCloseInspector={onCloseInspector} /></UiProvider>);
 
     const row = await screen.findByRole("row", { name: /!hallo/u });
     expect(within(row).getByText("Alle")).toHaveClass("ui-badge");
@@ -1194,15 +1513,15 @@ describe("Text command editor", () => {
   it("follows the browser language when the host does not pass one", async () => {
     vi.stubGlobal("fetch", panelFetch());
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
-    render(<UiProvider><TextCommandsPanel channelId="kanal-a" /></UiProvider>);
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" /></UiProvider>);
 
     expect(await screen.findByRole("button", { name: "Add command" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Response" })).toBeInTheDocument();
+    expect(await screen.findByRole("columnheader", { name: "Response" })).toBeInTheDocument();
   });
 
   it("preselects the command requested by Spotlight after the command list loads", async () => {
     vi.stubGlobal("fetch", panelFetch({ commands: () => [makeCommand({ name: "clip" }), makeCommand()] }));
-    render(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" initialSelection="clip" /></UiProvider>);
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" initialSelection="clip" /></UiProvider>);
 
     expect(await screen.findByRole("region", { name: "Eigenschaften von !clip" })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /!clip/u })).toHaveAttribute("aria-selected", "true");

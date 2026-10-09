@@ -13,8 +13,8 @@ const readJson = async <T,>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const loadApiSources = async (channelId: string): Promise<readonly ApiSource[]> =>
-  (await readJson<{ sources: ApiSource[] }>(await fetch(`${modulePath(channelId)}/sources`))).sources;
+export const loadApiSources = async (channelId: string, signal?: AbortSignal): Promise<readonly ApiSource[]> =>
+  (await readJson<{ sources: ApiSource[] }>(await fetch(`${modulePath(channelId)}/sources`, signal === undefined ? undefined : { signal }))).sources;
 
 const csrfToken = async (): Promise<string> =>
   (await readJson<{ token: string }>(await fetch("/api/csrf"))).token;
@@ -39,6 +39,6 @@ export const updateApiSource = async (
   input: Pick<ApiSource, "url" | "expression" | "revision">,
 ): Promise<ApiSource> => (await mutate<{ source: ApiSource }>(channelId, `/sources/${encodeURIComponent(name)}`, "PATCH", input)).source;
 
-export const deleteApiSource = async (channelId: string, source: ApiSource): Promise<void> => {
-  await mutate<{ ok: true }>(channelId, `/sources/${encodeURIComponent(source.name)}`, "DELETE", { revision: source.revision });
+export const deleteApiSource = async (channelId: string, name: string, revision: number): Promise<void> => {
+  await mutate<{ ok: true }>(channelId, `/sources/${encodeURIComponent(name)}`, "DELETE", { revision });
 };

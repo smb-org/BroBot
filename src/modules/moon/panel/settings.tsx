@@ -2,33 +2,50 @@ import { useEffect, useState, type ReactElement } from "react";
 
 import type { ModulePanelProperties } from "../../contract";
 import { MOON_ERROR_TEXT_MAX_LENGTH, type MoonSettings } from "../contracts";
-import { Button, Field, InspectorFieldRow, notify } from "../../../dashboard/ui";
+import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { Button, Field, InspectorFieldRow, LoadState, notify, Skeleton } from "../../../dashboard/ui";
 import { moonSettingsTexts } from "./locale";
 import { fetchMoonSettings, saveMoonSettings } from "./service";
 
-export default function MoonSettingsPanel({ channelId, language, canManage }: ModulePanelProperties): ReactElement {
+export default function MoonSettingsPanel({ channelId, ...properties }: ModulePanelProperties): ReactElement {
+  return <MoonSettingsPanelContent key={channelId} channelId={channelId} {...properties} />;
+}
+
+function MoonSettingsPanelContent({ channelId, language, canManage }: ModulePanelProperties): ReactElement {
   const labels = moonSettingsTexts(language ?? "de");
   const canEdit = canManage ?? false;
-  const [settings, setSettings] = useState<MoonSettings | null>(null);
+  const queryClient = useDashboardQueryClient();
+  const settingsQuery = useModuleQuery(channelId, "moon", "unavailable-texts", (signal) => fetchMoonSettings(channelId, signal));
+  const [draft, setDraft] = useState<{ baseRevision: number; value: MoonSettings } | null>(null);
+  const settings = draft?.value ?? settingsQuery.data ?? null;
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    let active = true;
-    fetchMoonSettings(channelId).then((moonSettings) => {
-      if (!active) return;
-      setSettings(moonSettings);
-    }).catch(() => {
-      if (active) notify({ tone: "error", message: labels.loadFailed });
+    if (settingsQuery.isError) notify({ tone: "error", message: labels.loadFailed });
+  }, [settingsQuery.isError, labels.loadFailed]);
+
+  const updateErrors = (languageKey: "de" | "en", value: string): void => {
+    if (settings === null) return;
+    const baseRevision = draft?.baseRevision ?? settings.revision;
+    setDraft({
+      baseRevision,
+      value: { ...settings, errorTexts: { ...settings.errorTexts, [languageKey]: value } },
     });
-    return () => { active = false; };
-  }, [channelId, labels.loadFailed]);
+  };
 
   const save = async (): Promise<void> => {
     if (settings === null || !canEdit) return;
     setBusy(true);
     try {
-      const next = await saveMoonSettings(channelId, { revision: settings.revision, errorTexts: settings.errorTexts });
-      setSettings(next);
+      const baselineRevision = draft?.baseRevision ?? settings.revision;
+      await runModuleQueryWrite(queryClient, channelId, "moon", "unavailable-texts", (revision) => {
+        if (revision === null) throw new Error("A moon settings revision is required.");
+        return saveMoonSettings(channelId, { revision, errorTexts: settings.errorTexts });
+      }, {
+        baselineRevision,
+        updateCache: (_current, result) => result,
+      });
+      setDraft(null);
       notify({ tone: "success", message: labels.saved });
     } catch (saveFailure: unknown) {
       notify({ tone: "error", message: saveFailure instanceof Error && "code" in saveFailure && saveFailure.code === "moon_settings_conflict"
@@ -39,13 +56,22 @@ export default function MoonSettingsPanel({ channelId, language, canManage }: Mo
   };
 
   return (
+    <LoadState
+      status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
+      minHeight="calc(var(--s10) * 12)"
+      loading={<Skeleton rows={3} height={34} />}
+      empty={<div />}
+      error={<p>{labels.loadFailed}</p>}
+      onRetry={() => { void settingsQuery.refetch(); }}
+      refreshError={settingsQuery.isRefetchError}
+    >
     <div className="module-stack moon-settings" aria-label={labels.errorTexts}>
       <InspectorFieldRow label={labels.errorTexts} help={labels.errorTextsHint}>
         <div className="moon-settings__fields">
           <Field
             label={labels.unavailableDe}
             value={settings?.errorTexts.de ?? ""}
-            onChange={(value) => setSettings((current) => current === null ? current : { ...current, errorTexts: { ...current.errorTexts, de: value } })}
+            onChange={(value) => updateErrors("de", value)}
             maxLength={MOON_ERROR_TEXT_MAX_LENGTH}
             countLabel={(count, max) => `${String(count)} / ${String(max)}`}
             readOnly={!canEdit}
@@ -54,7 +80,7 @@ export default function MoonSettingsPanel({ channelId, language, canManage }: Mo
           <Field
             label={labels.unavailableEn}
             value={settings?.errorTexts.en ?? ""}
-            onChange={(value) => setSettings((current) => current === null ? current : { ...current, errorTexts: { ...current.errorTexts, en: value } })}
+            onChange={(value) => updateErrors("en", value)}
             maxLength={MOON_ERROR_TEXT_MAX_LENGTH}
             countLabel={(count, max) => `${String(count)} / ${String(max)}`}
             readOnly={!canEdit}
@@ -76,5 +102,6 @@ export default function MoonSettingsPanel({ channelId, language, canManage }: Mo
         >{labels.save}</Button>
       </div>
     </div>
+    </LoadState>
   );
 }

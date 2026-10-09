@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,7 +7,6 @@ import { EventsPage } from "../../src/dashboard/events/EventsPage";
 import { emptyEventFilter } from "../../src/dashboard/events/model";
 import type { PanelEventEntry, PanelEventsResponse } from "../../src/panel-contract";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
-import { useRealtimeEventFeed } from "../../src/dashboard/realtime";
 import { dashboardAuthenticationRequiredEvent } from "../../src/dashboard/data/events";
 import { renderWithQuery } from "../query-test-utils";
 
@@ -88,9 +87,50 @@ class TestEventsWebSocket {
   }
 }
 
+const emitEventHint = (socket: TestEventsWebSocket, id: string, event: PanelEventEntry): void => {
+  socket.receive(JSON.stringify({
+    version: 1,
+    id,
+    createdAt: event.createdAt,
+    channelId: "kanal-a",
+    type: "event_log.new",
+    payload: { entries: [{ eventId: event.eventId, createdAt: event.createdAt, moduleId: event.moduleId, code: event.code, actorUserId: null }] },
+  }));
+};
+
+const positionSpies = new Set<() => void>();
+
+const positionEventReader = (container: HTMLElement) => {
+  const feed = container.querySelector<HTMLElement>(".event-feed");
+  if (feed === null) throw new Error("Event feed is missing.");
+  let scrollY = 700;
+  Object.defineProperty(window, "scrollY", { configurable: true, get: () => scrollY });
+  Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, get: () => 5_000 });
+  const feedRectSpy = vi.spyOn(feed, "getBoundingClientRect").mockImplementation(() => ({ top: scrollY === 500 ? 0 : -200 }) as DOMRect);
+  const scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {
+    scrollY = 500;
+    window.dispatchEvent(new Event("scroll"));
+  });
+  positionSpies.add(() => { feedRectSpy.mockRestore(); scrollToSpy.mockRestore(); });
+  return {
+    away: (): void => {
+      scrollY = 700;
+      window.dispatchEvent(new Event("scroll"));
+    },
+    top: (): void => {
+      scrollY = 500;
+      window.dispatchEvent(new Event("scroll"));
+    },
+  };
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  for (const restore of positionSpies) restore();
+  positionSpies.clear();
+  Object.defineProperty(window, "scrollY", { configurable: true, writable: true, value: 0 });
+  Reflect.deleteProperty(document.documentElement, "scrollHeight");
   TestEventsWebSocket.reset();
   // `dashboardLanguage()` reads `navigator.language`; reset it to the suite
   // default (`tests/setup.ts`) so an English test doesn't leak into the next.
@@ -137,7 +177,7 @@ describe("EventsPage failure cause icon", () => {
     expect(FakeWebSocket.instances[0]?.close).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the old rows busy during a filter change and restores cached rows immediately", async () => {
+  it("does not show another filter's rows while the selected query loads", async () => {
     const initialEntry = entry({ eventId: "all-events" });
     const filteredEntry = entry({ eventId: "channel-events", code: "channel_events.chat.sub", detail: "{\"person\":\"new-subscriber\",\"tier\":\"1000\"}" });
     let releaseFilteredResponse: (response: Response) => void = () => { throw new Error("The filtered request has not started."); };
@@ -171,14 +211,8 @@ describe("EventsPage failure cause icon", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change filter" }));
     expect(screen.queryByRole("region", { name: "Detail" })).not.toBeInTheDocument();
 
-    const busyRows = await waitFor(() => {
-      const busy = view.container.querySelector(".event-feed [aria-busy='true']");
-      expect(busy).toBeInTheDocument();
-      expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
-      expect(view.container.querySelectorAll(".event-table tbody tr")).toHaveLength(1);
-      return busy;
-    });
-    expect(busyRows).toHaveClass("stale");
+    expect(screen.queryByText("Chat-Nachricht fehlgeschlagen")).not.toBeInTheDocument();
+    expect(view.container.querySelectorAll(".event-table tbody tr")).toHaveLength(0);
 
     releaseFilteredResponse(new Response(JSON.stringify({ entries: [filteredEntry], nextCursor: null }), {
       status: 200,
@@ -189,8 +223,66 @@ describe("EventsPage failure cause icon", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Change filter" }));
     expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(3);
     view.unmount();
+  });
+
+  it("revalidates a hinted filter after switching away during its activation refresh", async () => {
+    const filtersA = { ...emptyEventFilter, module: "channel_events" };
+    const filtersB = { ...emptyEventFilter, module: "host" };
+    const oldRaid = entry({ eventId: "switch-old", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"switchold","viewers":1}' });
+    const newRaid = entry({ eventId: "switch-new", createdAt: "2026-09-22T10:01:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"switchnew","viewers":2}' });
+    const hostEntry = entry({ eventId: "switch-host" });
+    let channelRequests = 0;
+    const json = (entries: readonly PanelEventEntry[]) => Promise.resolve(new Response(JSON.stringify({ entries, nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    const fetcher = vi.fn((input: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
+      if (requestUrl(input).searchParams.get("module") !== "channel_events") return json([hostEntry]);
+      channelRequests += 1;
+      if (channelRequests === 1) {
+        return new Promise<Response>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+      }
+      return json([newRaid, oldRaid]);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    function Harness() {
+      const [showHost, setShowHost] = useState(false);
+      return <>
+        <button type="button" onClick={() => { setShowHost(!showHost); }}>Toggle filter</button>
+        <EventsPage channelId="kanal-a" filters={showHost ? filtersB : filtersA} moduleOptions={[]} onFiltersChange={() => undefined} />
+      </>;
+    }
+    const rendered = renderWithQuery(<UiProvider><Harness /></UiProvider>, undefined, {
+      gcTime: 600_000,
+      staleTime: 30_000,
+      initialData: [
+        { queryKey: dashboardDataKeys.events("kanal-a", filtersA), data: { pages: [{ entries: [oldRaid], nextCursor: null }], pageParams: [null] } },
+        { queryKey: dashboardDataKeys.events("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
+      ],
+    });
+    await waitFor(() => expect(channelRequests).toBe(1));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    emitEventHint(socket, "switch-filter-hint", newRaid);
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
+
+    expect(screen.getByText(/Raid von switchold/u)).toBeVisible();
+    expect(rendered.container.querySelector(".skeleton")).not.toBeInTheDocument();
+    expect(await screen.findByText(/Raid von switchnew/u)).toBeVisible();
+    expect(channelRequests).toBe(2);
+    rendered.unmount();
   });
 
   it("shows cached events on return and revalidates to pick up events received while away", async () => {
@@ -224,6 +316,53 @@ describe("EventsPage failure cause icon", () => {
     expect(returned.container.querySelector(".skeleton")).not.toBeInTheDocument();
     expect(await screen.findByText("Sub von late-subscriber")).toBeVisible();
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("freezes cached rows as soon as the reader leaves the top during activation refresh", async () => {
+    const cachedEntry = entry({ eventId: "activation-cached" });
+    const refreshedEntry = entry({
+      eventId: "activation-new",
+      createdAt: "2026-09-22T10:01:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"activationraid","viewers":2}',
+    });
+    let releaseRefresh: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => { releaseRefresh = resolve; }));
+    vi.stubGlobal("fetch", fetcher);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{
+          queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter),
+          data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] },
+        }],
+      },
+    );
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+
+    act(() => {
+      releaseRefresh?.(new Response(JSON.stringify({ entries: [refreshedEntry, cachedEntry], nextCursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(screen.queryByText(/Raid von activationraid/u)).not.toBeInTheDocument();
+    const notice = screen.getByRole("button", { name: /1 neue Ereignisse/u });
+    expect(notice).toBeVisible();
+
+    fireEvent.click(notice);
+    expect(await screen.findByText(/Raid von activationraid/u)).toBeVisible();
+    expect(rendered.container.querySelector(".realtime-feed__notice-slot")).toHaveAttribute("data-pending", "false");
+    rendered.unmount();
   });
 
   it("keeps cached events visible and offers Retry after a background failure", async () => {
@@ -309,41 +448,6 @@ describe("EventsPage failure cause icon", () => {
     rendered.unmount();
   });
 
-  it("drops pending new-event notices when the filter changes and does not restore them on return", () => {
-    vi.stubGlobal("WebSocket", TestEventsWebSocket);
-    const filtersA = { ...emptyEventFilter, module: "channel_events" };
-    const filtersB = { ...emptyEventFilter, module: "other_module" };
-    const { result, rerender, unmount } = renderHook(
-      ({ filters }) => useRealtimeEventFeed({
-        channelId: "kanal-a",
-        filters,
-        atBeginning: () => false,
-        refresh: () => undefined,
-        scrollToBeginning: () => undefined,
-      }),
-      { initialProps: { filters: filtersA } },
-    );
-    const socket = TestEventsWebSocket.instances[0];
-    if (socket === undefined) throw new Error("Realtime socket was not created.");
-    socket.open();
-    act(() => {
-      socket.receive(JSON.stringify({
-        version: 1,
-        id: "pending-hint-message",
-        createdAt: "2026-05-01T10:00:00.000Z",
-        channelId: "kanal-a",
-        type: "event_log.new",
-        payload: { entries: [{ eventId: "e1", createdAt: "2026-05-01T10:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", actorUserId: null }] },
-      }));
-    });
-    expect(result.current.pendingCount).toBe(1);
-    rerender({ filters: filtersB });
-    expect(result.current.pendingCount).toBe(0);
-    rerender({ filters: filtersA });
-    expect(result.current.pendingCount).toBe(0);
-    unmount();
-  });
-
   it("invalidates again when a second realtime hint arrives during a delayed refresh", async () => {
     const initialEntry = entry({ eventId: "initial-event" });
     const firstHint = entry({
@@ -420,6 +524,394 @@ describe("EventsPage failure cause icon", () => {
     expect(await screen.findByText(/Raid von firsthint/u)).toBeVisible();
     expect(await screen.findByText(/Raid von secondhint/u)).toBeVisible();
     expect(fetcher).toHaveBeenCalledTimes(2);
+    rendered.unmount();
+  });
+
+  it.each(["hint", "retry", "reconnect", "automatic refetch"] as const)(
+    "keeps event rows fixed while scrolled away when %s delivers newer data",
+    async (cause) => {
+      const oldEntry = entry({ eventId: "frozen-old" });
+      const newEntry = entry({
+        eventId: "frozen-new",
+        createdAt: "2026-09-22T10:01:00.000Z",
+        moduleId: "channel_events",
+        code: "channel_events.raid.incoming",
+        detail: '{"source":"frozen","viewers":2}',
+      });
+      const additionalEntry = entry({
+        eventId: "frozen-added",
+        createdAt: "2026-09-22T10:00:30.000Z",
+        moduleId: "channel_events",
+        code: "channel_events.raid.incoming",
+        detail: '{"source":"alsofrozen","viewers":1}',
+      });
+      const response = (entries: readonly PanelEventEntry[]) => new Response(JSON.stringify({ entries, nextCursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+      let serverEntries: readonly PanelEventEntry[] = [oldEntry];
+      let rejectNextRequest = false;
+      const fetcher = vi.fn((): Promise<Response> => {
+        if (rejectNextRequest) {
+          rejectNextRequest = false;
+          return Promise.reject(new Error("temporary network failure"));
+        }
+        return Promise.resolve(response(serverEntries));
+      });
+      vi.stubGlobal("fetch", fetcher);
+      vi.stubGlobal("WebSocket", TestEventsWebSocket);
+      const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+      const rendered = renderWithQuery(
+        <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+        undefined,
+        {
+          gcTime: 600_000,
+          staleTime: 30_000,
+          initialData: [{ queryKey, data: { pages: [{ entries: [oldEntry], nextCursor: null }], pageParams: [null] } }],
+        },
+      );
+      await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+      const position = positionEventReader(rendered.container);
+      act(() => { position.away(); });
+      const socket = TestEventsWebSocket.instances[0];
+      if (socket === undefined) throw new Error("Realtime socket was not created.");
+      socket.open();
+      serverEntries = [newEntry, additionalEntry, oldEntry];
+      fetcher.mockClear();
+
+      if (cause === "hint") {
+        emitEventHint(socket, "frozen-hint", newEntry);
+        await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      } else if (cause === "retry") {
+        const query = rendered.queryClient.getQueryCache().find({ queryKey });
+        if (query === undefined) throw new Error("Events query was not created.");
+        query.setOptions({ ...query.options, retry: 1, retryDelay: 0 });
+        rejectNextRequest = true;
+        await act(async () => { await rendered.queryClient.invalidateQueries({ queryKey, exact: true }); });
+      } else if (cause === "reconnect") {
+        socket.close();
+        socket.open();
+        await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      } else {
+        await act(async () => { await rendered.queryClient.invalidateQueries({ queryKey, exact: true }); });
+      }
+
+      await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+      expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+      expect(screen.queryByText(/Raid von frozen/u)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Raid von alsofrozen/u)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /2 neue Ereignisse/u })).toBeVisible();
+      rendered.unmount();
+    },
+  );
+
+  it.each(["notice click", "manual scroll"] as const)("shows refreshed events at the top by %s", async (action) => {
+    const oldEntry = entry({ eventId: "top-old" });
+    const newEntry = entry({
+      eventId: "top-new",
+      createdAt: "2026-09-22T10:01:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"topjump","viewers":2}',
+    });
+    const additionalEntry = entry({
+      eventId: "top-added",
+      createdAt: "2026-09-22T10:00:30.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"alsojump","viewers":1}',
+    });
+    let serverEntries: readonly PanelEventEntry[] = [oldEntry];
+    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ entries: serverEntries, nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{ queryKey, data: { pages: [{ entries: [oldEntry], nextCursor: null }], pageParams: [null] } }],
+      },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    fetcher.mockClear();
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    serverEntries = [newEntry, additionalEntry, oldEntry];
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    emitEventHint(socket, `top-hint-${action}`, newEntry);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const refreshedEvents = rendered.queryClient.getQueryData<{ pages: { entries: PanelEventEntry[] }[] }>(queryKey);
+    expect(refreshedEvents?.pages.flatMap((page) => page.entries).map((event) => event.eventId)).toEqual([
+      "top-new",
+      "top-added",
+      "top-old",
+    ]);
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(screen.queryByText(/Raid von topjump/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raid von alsojump/u)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /2 neue Ereignisse/u })).toBeVisible();
+
+    if (action === "notice click") fireEvent.click(screen.getByRole("button", { name: /2 neue Ereignisse/u }));
+    else act(() => { position.top(); });
+
+    expect(await screen.findByText(/Raid von topjump/u)).toBeVisible();
+    expect(await screen.findByText(/Raid von alsojump/u)).toBeVisible();
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(rendered.container.querySelector(".realtime-feed__notice-slot")).toHaveAttribute("data-pending", "false");
+    rendered.unmount();
+  });
+
+  it.each([
+    ["an older timestamp", "late-older-time", "2026-09-22T10:00:59.000Z"],
+    ["a lower id at the same timestamp", "a-late-id", "2026-09-22T10:01:00.000Z"],
+  ] as const)("announces an unseen event with %s while the displayed rows stay frozen", async (_description, lateEventId, lateCreatedAt) => {
+    const newest = entry({ eventId: "z-newest", createdAt: "2026-09-22T10:01:00.000Z" });
+    const oldest = entry({ eventId: "oldest", createdAt: "2026-09-22T10:00:00.000Z" });
+    const late = entry({
+      eventId: lateEventId,
+      createdAt: lateCreatedAt,
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: `{"source":"${lateEventId}","viewers":2}`,
+    });
+    let serverEntries: readonly PanelEventEntry[] = [newest, oldest];
+    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ entries: serverEntries, nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{ queryKey, data: { pages: [{ entries: [newest, oldest], nextCursor: null }], pageParams: [null] } }],
+      },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    const rowsBefore = Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent);
+    serverEntries = [late, newest, oldest];
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    emitEventHint(socket, `hint-${lateEventId}`, late);
+
+    await waitFor(() => {
+      const data = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelEventEntry[] }> }>(queryKey);
+      expect(data?.pages.flatMap((page) => page.entries).some((candidate) => candidate.eventId === late.eventId)).toBe(true);
+    });
+
+    expect(Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent)).toEqual(rowsBefore);
+    expect(screen.queryByText(new RegExp(lateEventId, "u"))).not.toBeInTheDocument();
+    const notice = screen.getByRole("button", { name: /1 neue Ereignisse/u });
+    expect(notice).toBeVisible();
+    fireEvent.click(notice);
+    expect(await screen.findByText(new RegExp(`Raid von ${lateEventId}`, "u"))).toBeVisible();
+    rendered.unmount();
+  });
+
+  it("appends loaded older event rows without moving the frozen rows", async () => {
+    const newest = entry({ eventId: "page-newest", createdAt: "2026-09-22T10:00:00.000Z" });
+    const older = entry({ eventId: "page-older", createdAt: "2026-09-22T09:00:00.000Z" });
+    const oldest = entry({
+      eventId: "page-oldest",
+      createdAt: "2026-09-22T08:00:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"oldestpage","viewers":1}',
+    });
+    const olderDuplicate = entry({
+      eventId: "page-older-duplicate",
+      triggerId: newest.triggerId,
+      createdAt: "2026-09-22T07:30:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"olderduplicate","viewers":1}',
+    });
+    const response = (entries: readonly PanelEventEntry[], nextCursor: string | null) => new Response(JSON.stringify({ entries, nextCursor }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    const fetcher = vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      requestUrl(input).searchParams.get("cursor") === "cursor-2"
+        ? response([oldest, olderDuplicate], null)
+        : requestUrl(input).searchParams.get("cursor") === "cursor-1"
+          ? response([older], "cursor-2")
+          : response([newest], "cursor-1"),
+    ));
+    vi.stubGlobal("fetch", fetcher);
+    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{
+          queryKey,
+          data: {
+            pages: [{ entries: [newest], nextCursor: "cursor-1" }, { entries: [older], nextCursor: "cursor-2" }],
+            pageParams: [null, "cursor-1"],
+          },
+        }],
+      },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    const before = Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
+    expect(await screen.findByText(/Raid von oldestpage/u)).toBeInTheDocument();
+    const after = Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent);
+    expect(after.slice(0, before.length)).toEqual(before);
+    expect(after).toHaveLength(before.length + 1);
+    expect(rendered.container.querySelector(".realtime-feed__notice-slot")).toHaveAttribute("data-pending", "false");
+    rendered.unmount();
+  });
+
+  it("appends older-day rows after the frozen day sections", async () => {
+    const previousDayError = new Date(2026, 8, 21, 23, 55).toISOString();
+    const todayInfo = new Date(2026, 8, 22, 0, 5).toISOString();
+    const todayOther = new Date(2026, 8, 22, 0, 3).toISOString();
+    const olderTime = new Date(2026, 8, 21, 22, 0).toISOString();
+    const crossMidnightInfo = entry({
+      eventId: "cross-midnight-info",
+      triggerId: "cross-midnight-trigger",
+      createdAt: todayInfo,
+      moduleId: "channel_events",
+      code: "channel_events.chat.sub",
+      detail: '{"person":"midnight-sub","tier":"1000"}',
+    });
+    const crossMidnightError = entry({
+      eventId: "cross-midnight-error",
+      triggerId: "cross-midnight-trigger",
+      createdAt: previousDayError,
+      code: "host.chat.failed",
+    });
+    const todayEntry = entry({
+      eventId: "today-entry",
+      createdAt: todayOther,
+      moduleId: "channel_events",
+      code: "channel_events.chat.sub",
+      detail: '{"person":"today-sub","tier":"1000"}',
+    });
+    const olderEntry = entry({
+      eventId: "older-day-entry",
+      createdAt: olderTime,
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"olderday","viewers":1}',
+    });
+    const response = (entries: readonly PanelEventEntry[], nextCursor: string | null) => new Response(JSON.stringify({ entries, nextCursor }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    const fetcher = vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      requestUrl(input).searchParams.get("cursor") === "older-cursor"
+        ? response([olderEntry], null)
+        : response([crossMidnightInfo, crossMidnightError, todayEntry], "older-cursor"),
+    ));
+    vi.stubGlobal("fetch", fetcher);
+    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{
+          queryKey,
+          data: { pages: [{ entries: [crossMidnightInfo, crossMidnightError, todayEntry], nextCursor: "older-cursor" }], pageParams: [null] },
+        }],
+      },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    const rowLabels = (): string[] => Array.from(
+      rendered.container.querySelectorAll<HTMLElement>(".event-table__primary .event-table__text"),
+      (label) => label.textContent,
+    );
+    const before = rowLabels();
+    expect(before).toEqual(["Chat-Nachricht fehlgeschlagen", "Sub von today-sub"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
+    await screen.findByText(/Raid von olderday/u);
+    expect(rowLabels()).toEqual([...before, expect.stringMatching(/Raid von olderday/u)]);
+    rendered.unmount();
+  });
+
+  it("shows a filter's refreshed cached data when returning to that filter while scrolled away", async () => {
+    const filtersA = { ...emptyEventFilter, module: "channel_events" };
+    const filtersB = { ...emptyEventFilter, module: "host" };
+    const oldRaid = entry({ eventId: "roundtrip-old", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"oldroundtrip","viewers":1}' });
+    const newRaid = entry({ eventId: "roundtrip-new", createdAt: "2026-09-22T10:01:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"newroundtrip","viewers":2}' });
+    const hostEntry = entry({ eventId: "roundtrip-host" });
+    let serverHasNewRaid = false;
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const module = requestUrl(input).searchParams.get("module");
+      const entries = module === "channel_events"
+        ? serverHasNewRaid ? [newRaid, oldRaid] : [oldRaid]
+        : [hostEntry];
+      return Promise.resolve(new Response(JSON.stringify({ entries, nextCursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    function Harness() {
+      const [showHost, setShowHost] = useState(false);
+      const filters = showHost ? filtersB : filtersA;
+      return <>
+        <button type="button" onClick={() => { setShowHost(!showHost); }}>Toggle filter</button>
+        <EventsPage channelId="kanal-a" filters={filters} moduleOptions={[]} onFiltersChange={() => undefined} />
+      </>;
+    }
+    const rendered = renderWithQuery(<UiProvider><Harness /></UiProvider>, undefined, {
+      gcTime: 600_000,
+      staleTime: 30_000,
+      initialData: [
+        { queryKey: dashboardDataKeys.events("kanal-a", filtersA), data: { pages: [{ entries: [oldRaid], nextCursor: null }], pageParams: [null] } },
+        { queryKey: dashboardDataKeys.events("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
+      ],
+    });
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    TestEventsWebSocket.instances[0]?.open();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    serverHasNewRaid = true;
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    emitEventHint(socket, "roundtrip-hint", newRaid);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
+
+    await waitFor(() => {
+      const data = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelEventEntry[] }> }>(dashboardDataKeys.events("kanal-a", filtersA));
+      expect(data?.pages[0]?.entries[0]?.eventId).toBe("roundtrip-new");
+    });
+    expect(await screen.findByText(/Raid von newroundtrip/u)).toBeVisible();
+    expect(screen.queryByText("Chat-Nachricht fehlgeschlagen")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /neue Ereignisse/u })).not.toBeInTheDocument();
     rendered.unmount();
   });
 
@@ -536,6 +1028,10 @@ describe("EventsPage failure cause icon", () => {
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
     fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    await waitFor(() => { expect(rendered.queryClient.isFetching()).toBe(0); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    fetcher.mockClear();
     socket.receive(JSON.stringify({
       version: 1,
       id: "only-a-hint",

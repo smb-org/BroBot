@@ -13,8 +13,8 @@ const readJson = async <T,>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const fetchSunSettings = async (channelId: string): Promise<SunSettings> =>
-  readJson<SunSettings>(await fetch(`${modulePath(channelId)}/error-texts`));
+export const fetchSunSettings = async (channelId: string, signal?: AbortSignal): Promise<SunSettings> =>
+  readJson<SunSettings>(await fetch(`${modulePath(channelId)}/error-texts`, signal ? { signal } : undefined));
 
 export const saveSunSettings = async (
   channelId: string,

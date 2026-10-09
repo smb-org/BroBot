@@ -13,6 +13,9 @@ export interface UseDraftGuardResult {
   continueEditing: () => void;
   discardAndSwitch: () => void;
   saveAndSwitch: () => Promise<void>;
+  /** For a save started by `saveAndSwitch`: completes the held navigation right now (call it in the
+   *  step that commits the save). Returns false if there is nothing to complete. */
+  completeSwitch: () => boolean;
 }
 
 /**
@@ -53,12 +56,30 @@ export const useDraftGuard = (
     setConfirmOpen(true);
   }, [dirty]);
 
-  const resolve = (): void => {
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      pending.current = null;
+    };
+  }, []);
+  const switching = useRef(false);
+
+  const resolve = useCallback((): void => {
+    if (!mounted.current) return;
     const pendingNavigation = pending.current;
     pending.current = null;
     setConfirmOpen(false);
     pendingNavigation?.proceed();
-  };
+  }, []);
+
+  const completeSwitch = useCallback((): boolean => {
+    if (!mounted.current || !switching.current || pending.current === null) return false;
+    switching.current = false;
+    resolve();
+    return true;
+  }, [resolve]);
 
   const continueEditing = useCallback((): void => {
     const pendingNavigation = pending.current;
@@ -70,22 +91,26 @@ export const useDraftGuard = (
   const discardAndSwitch = useCallback((): void => {
     onDiscard();
     resolve();
-  }, [onDiscard]);
+  }, [onDiscard, resolve]);
 
   const saveAndSwitch = useCallback(async (): Promise<void> => {
     setSaving(true);
     setSaveError(undefined);
+    switching.current = true;
     try {
       const error = await onSave();
+      // An unmounted guard belongs to an obsolete editor: it must not navigate after the await.
+      if (!mounted.current) return;
       if (error !== null) {
         setSaveError(error);
         return;
       }
       resolve();
     } finally {
+      switching.current = false;
       setSaving(false);
     }
-  }, [onSave]);
+  }, [onSave, resolve]);
 
-  return { confirmOpen, saveError, saving, guardSwitch, continueEditing, discardAndSwitch, saveAndSwitch };
+  return { confirmOpen, saveError, saving, guardSwitch, continueEditing, discardAndSwitch, saveAndSwitch, completeSwitch };
 };

@@ -5,13 +5,14 @@ import type { ModulePanelProperties } from "../modules/contract";
 import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
-import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
+import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Skeleton, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -181,60 +182,102 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, o
   canManageContent: boolean;
   language: DashboardLanguage;
   onSaved?: () => void;
-}): ReactElement | null => {
-  const [loaded, setLoaded] = useState<{ definition: SettingsEditorDefinition<Record<string, unknown>>; settings: Record<string, unknown>; revision: number; variables: PanelChannelVariable[] } | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [generation, setGeneration] = useState(0);
-  useEffect(() => {
-    let active = true;
-    if (module.settingsEditor === undefined) return;
-    void Promise.all([
-      module.settingsEditor(),
-      getChannelModuleSettings(channelId, module.id),
-    ]).then(([definition, response]) => {
-      if (!active) return;
-      setLoaded({ definition: definition.default, settings: response.settings, revision: response.revision, variables: response.variables });
-      setLoadError(null);
-    }).catch((error: unknown) => {
-      if (!active) return;
-      setLoadError(error instanceof PanelApiError ? apiErrorText(error.code, dashboardTexts().module.settingsLoadError) : dashboardTexts().module.settingsLoadError);
-    });
-    return () => { active = false; };
-  }, [channelId, generation, module]);
+}): ReactElement | null => module.settingsEditor === undefined ? null : <ModuleSettingsEditorQuery
+  key={`${channelId}:${module.id}`}
+  module={module}
+  channelId={channelId}
+  canManageContent={canManageContent}
+  language={language}
+  {...(onSaved === undefined ? {} : { onSaved })}
+/>;
 
-  if (module.settingsEditor === undefined) return null;
-  if (loaded === null) return <p className="loading-line" role={loadError === null ? undefined : "alert"}>{loadError ?? dashboardTexts().module.loadingViews}</p>;
+const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language, onSaved }: {
+  module: (typeof MODULES)[number];
+  channelId: string;
+  canManageContent: boolean;
+  language: DashboardLanguage;
+  onSaved?: () => void;
+}): ReactElement => {
+  const [generation, setGeneration] = useState(0);
+  const queryClient = useDashboardQueryClient();
+  const settingsQuery = useModuleQuery(channelId, module.id, "settings", async (signal) => {
+    if (module.settingsEditor === undefined) throw new Error("Module settings editor is unavailable.");
+    const [definition, response] = await Promise.all([
+      module.settingsEditor(),
+      getChannelModuleSettings(channelId, module.id, signal),
+    ]);
+    return { definition: definition.default, settings: response.settings, revision: response.revision, variables: response.variables };
+  });
+  const loaded = settingsQuery.data;
+  if (loaded === undefined) {
+    const loadError = settingsQuery.error instanceof PanelApiError
+      ? apiErrorText(settingsQuery.error.code, dashboardTexts().module.settingsLoadError)
+      : settingsQuery.error === null
+        ? null
+        : dashboardTexts().module.settingsLoadError;
+    return <LoadState
+      status={settingsQuery.isPending || settingsQuery.isFetching ? "loading" : "error"}
+      minHeight="calc(var(--s10) * 8)"
+      loading={<Skeleton rows={3} height={34} />}
+      empty={null}
+      error={<p className="muted" role="alert">{loadError ?? dashboardTexts().module.settingsLoadError}</p>}
+      onRetry={() => { void settingsQuery.refetch(); }}
+    >{null}</LoadState>;
+  }
   const copy = loaded.definition.locales[language];
-  return <LoadedModuleSettingsEditor
-    key={`${module.id}-${String(generation)}`}
-    module={module}
-    channelId={channelId}
-    canManageContent={canManageContent}
-    definition={loaded.definition}
-    copy={copy}
-    channelVariables={loaded.variables}
-    initial={loaded.settings}
-    initialRevision={loaded.revision}
-    {...(onSaved === undefined ? {} : { onSaved })}
-    onReload={() => { setLoaded(null); setLoadError(null); setGeneration((current) => current + 1); }}
-  />;
+  return <LoadState
+    status="success"
+    minHeight="calc(var(--s10) * 8)"
+    loading={<Skeleton rows={3} height={34} />}
+    empty={null}
+    error={<p className="muted" role="alert">{dashboardTexts().module.settingsLoadError}</p>}
+    refreshError={settingsQuery.isRefetchError}
+    onRetry={() => { void settingsQuery.refetch(); }}
+  >
+    <LoadedModuleSettingsEditor
+      key={`${module.id}-${String(generation)}`}
+      module={module}
+      channelId={channelId}
+      canManageContent={canManageContent}
+      definition={loaded.definition}
+      copy={copy}
+      retryLabel={dashboardCommonTexts(language).retry}
+      channelVariables={loaded.variables}
+      initial={loaded.settings}
+      initialRevision={loaded.revision}
+      {...(onSaved === undefined ? {} : { onSaved })}
+      onReload={async () => {
+        try {
+          await refetchModuleQueryData(queryClient, channelId, module.id, "settings");
+          setGeneration((current) => current + 1);
+          return true;
+        } catch {
+          return false;
+        }
+      }}
+    />
+  </LoadState>;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, channelVariables, initial, initialRevision, onSaved, onReload }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, retryLabel, channelVariables, initial, initialRevision, onSaved, onReload }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   definition: SettingsEditorDefinition<Record<string, unknown>>;
   copy: SettingsEditorDefinition<Record<string, unknown>>["locales"]["de"];
+  retryLabel: string;
   channelVariables: readonly PanelChannelVariable[];
   initial: Record<string, unknown>;
   initialRevision: number;
   onSaved?: () => void;
-  onReload: () => void;
+  onReload: () => Promise<boolean>;
 }): ReactElement => {
+  const queryClient = useDashboardQueryClient();
   const [value, setValue] = useState(initial);
   const [baseline, setBaseline] = useState({ settings: initial, revision: initialRevision });
   const [dirty, setDirty] = useState(false);
+  const currentValue = dirty ? value : initial;
+  const currentBaseline = dirty ? baseline : { settings: initial, revision: initialRevision };
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -278,9 +321,10 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
     <SettingsEditor
       spec={spec}
       sectionId={sectionId}
-      settings={value}
+      settings={currentValue}
       onChange={(key, next) => {
-        setValue((current) => ({ ...current, [key]: next }));
+        if (!dirty) setBaseline(currentBaseline);
+        setValue({ ...currentValue, [key]: next });
         setTouchedFields((current) => new Set(current).add(key));
         setDirty(true); setSaved(false); setConflict(false); setError(undefined);
       }}
@@ -300,12 +344,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
     const errors: Record<string, string> = {};
     const collect = (fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"]): void => {
       for (const field of fields) {
-        const current = value[field.key];
+        const current = currentValue[field.key];
         if (field.kind === "number" && (typeof current !== "number" || !Number.isInteger(current) || current < field.min || current > field.max)) {
           errors[field.key] = typeof current !== "number" ? copy.numberMissing : copy.invalidMessage;
         } else if (field.kind === "number" && field.validate !== undefined &&
             (includeUntouched || validationAttempted || touchedFields.has(field.key)) &&
-            !field.validate(current as number, value)) {
+            !field.validate(current as number, currentValue)) {
           errors[field.key] = copy.fields[field.key]?.invalidError ?? copy.invalidMessage;
         } else if (field.kind === "timeoutDurationRange") {
           const range = current !== null && typeof current === "object" ? current as { minSeconds?: unknown; maxSeconds?: unknown } : null;
@@ -339,7 +383,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       ...(issue.worstCaseExceeded ? [copy.warningLabel({
         field,
         code: "template_worst_case_too_long",
-        worstCaseLength: worstCaseTemplateLength(typeof value[field] === "string" ? value[field] : "", templateFields[field] ?? []),
+        worstCaseLength: worstCaseTemplateLength(typeof currentValue[field] === "string" ? currentValue[field] : "", templateFields[field] ?? []),
       })] : []),
     ]),
   ];
@@ -364,7 +408,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
           });
         }
         if (field.kind === "switchCard" && field.children !== undefined) {
-          const childFocusId = disabledBySwitch ?? (value[field.key] === true ? undefined : `settings-${field.key}`);
+          const childFocusId = disabledBySwitch ?? (currentValue[field.key] === true ? undefined : `settings-${field.key}`);
           visit(field.children, childFocusId);
         }
       }
@@ -392,7 +436,22 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
     if (pending || conflict || !canManageContent) return copy.saveError;
     setPending(true); setError(undefined); setSaved(false);
     try {
-      const response = await saveChannelModuleSettings(channelId, module.id, baseline.revision, value);
+      const response = await runModuleQueryWrite(
+        queryClient,
+        channelId,
+        module.id,
+        "settings",
+        (baselineRevision) => {
+          if (baselineRevision === null) throw new Error("Module settings require a baseline revision.");
+          return saveChannelModuleSettings(channelId, module.id, baselineRevision, currentValue);
+        },
+        {
+          baselineRevision: currentBaseline.revision,
+          updateCache: (current, result) => typeof current === "object" && current !== null
+            ? { ...current, ...result }
+            : current,
+        },
+      );
       setValue(response.settings);
       setBaseline({ settings: response.settings, revision: response.revision });
       setDirty(false);
@@ -412,12 +471,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
     } finally { setPending(false); }
   };
   const discard = (): void => {
-    setValue(baseline.settings); setTouchedFields(new Set()); setValidationAttempted(false);
+    setValue(currentBaseline.settings); setBaseline(currentBaseline); setTouchedFields(new Set()); setValidationAttempted(false);
     setDirty(false); setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({});
   };
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
-  const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={value} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
+  const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
   return <>
     <EditorShell
     ariaLabel={copy.ariaLabel}
@@ -434,7 +493,18 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
     onInvalidSave={() => { setValidationAttempted(true); }}
     warnings={warnings}
     warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${copy.savedLabel} ${items.join(" ")}` : items.join(" ")}
-    {...(conflict ? { conflict: { message: copy.conflictMessage, reloadLabel: copy.reloadLabel, onReload } } : {})}
+    {...(conflict ? { conflict: {
+      message: error === undefined
+        ? copy.conflictMessage
+        : `${copy.conflictMessage} ${dashboardTexts().module.settingsLoadError}`,
+      reloadLabel: error === undefined ? copy.reloadLabel : retryLabel,
+      onReload: () => {
+        setError(undefined);
+        void onReload().then((succeeded) => {
+          if (!succeeded) setError(dashboardTexts().module.settingsLoadError);
+        });
+      },
+    } } : {})}
     onSave={() => { void save(); }}
     onDiscard={discard}
     saveLabel={copy.saveLabel}
@@ -487,7 +557,7 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true, c
     <section className="module-stack" aria-label={dashboardTexts().module.views}>
       <Suspense fallback={<p className="muted">{dashboardTexts().module.loadingViews}</p>}>
         {registeredViews.map(({ id, Panel, module }) => <MountedModuleView
-          key={id}
+          key={`${channelId}:${id}`}
           module={module}
           Panel={Panel}
           channelId={channelId}

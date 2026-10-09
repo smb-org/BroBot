@@ -1,10 +1,11 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModulePage } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
 import { toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
+import { renderWithQuery } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
 const settings = {
@@ -21,9 +22,9 @@ const schedule: AdsScheduleResponse = {
 };
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
 
-const renderAds = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof render> => {
+const renderAds = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof renderWithQuery> => {
   vi.stubGlobal("fetch", fetcher);
-  return render(<UiProvider><ModulePage
+  return renderWithQuery(<UiProvider><ModulePage
     channelId="kanal-a"
     moduleId="ads"
     ownRole={ownRole}
@@ -105,7 +106,9 @@ describe("Ad settings editor declaration", () => {
     const editor = await screen.findByRole("region", { name: "Ansagen-Einstellungen" });
     const view = editor.closest(".module-view");
     expect(view?.firstElementChild).toHaveAttribute("aria-label", "Ansagen");
-    expect(view?.lastElementChild).toBe(editor);
+    const editorLoadState = view?.lastElementChild;
+    expect(editorLoadState).toHaveClass("ui-load-state");
+    expect(editorLoadState?.firstElementChild?.firstElementChild).toBe(editor);
 
     fireEvent.click(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ }));
     await waitFor(() => expect(toastsSnapshot().some((toast) => toast.message === "Die nächste Werbepause wurde verschoben.")).toBe(true));

@@ -24,17 +24,20 @@ export const useAuditQuery = (channelId: string, filters: PanelAuditFilters) => 
   refetchOnWindowFocus: false,
 });
 
-export const useEventsQuery = (channelId: string, filters: PanelEventFilters) => useInfiniteQuery({
-  queryKey: dashboardDataKeys.events(channelId, filters),
-  // ponytail: revalidate on every mount; central socket invalidation replaces this in #387
-  refetchOnMount: "always",
-  initialPageParam: null as string | null,
-  queryFn: ({ pageParam, signal }) => fetchEvents(channelId, pageParam, signal, filters),
-  getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  placeholderData: (previousData, previousQuery) =>
-    previousQuery?.queryKey[1] === channelId ? previousData : undefined,
-  refetchOnWindowFocus: false,
-});
+export const useEventsQuery = (channelId: string, filters: PanelEventFilters) => {
+  const queryKey = dashboardDataKeys.events(channelId, filters);
+  return useInfiniteQuery({
+    queryKey,
+    // A cached filter becomes stale immediately so switching back revalidates it in the background.
+    staleTime: 0,
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) => fetchEvents(channelId, pageParam, signal, filters),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    // Filters own separate displayed snapshots; do not borrow another filter's cached rows while loading.
+    placeholderData: () => undefined,
+    refetchOnWindowFocus: false,
+  });
+};
 
 export const useSystemQuery = (channelId: string, enabled: boolean) => useQuery({
   queryKey: dashboardDataKeys.system(channelId),

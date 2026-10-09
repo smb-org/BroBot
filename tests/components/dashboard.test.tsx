@@ -631,15 +631,16 @@ describe("Dashboard skeleton", () => {
     expect(eventRequests).toBe(2);
   });
 
-  it("keeps the list further down and shows only the notice", async () => {
+  it("refreshes while the reader is down without moving the displayed events", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":8}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let eventRequests = 0;
+    let serverEntries = [alt];
     vi.stubGlobal("WebSocket", TestWebSocket);
     stubEventFeedFetch(() => {
       eventRequests += 1;
-      return jsonResponse({ entries: [alt], nextCursor: null });
+      return jsonResponse({ entries: serverEntries, nextCursor: null });
     }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
@@ -650,15 +651,25 @@ describe("Dashboard skeleton", () => {
     if (feed === null) throw new Error("Ereignis-Feed fehlt");
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: -200 }) });
     Object.defineProperty(window, "scrollY", { configurable: true, value: 400 });
+    fireEvent.scroll(window);
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
+    serverEntries = [neu, alt];
     socket.receive(JSON.stringify({ version: 1, id: "message-lower", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
     expect(await screen.findByRole("button", { name: "1 neue Ereignisse" })).toBeInTheDocument();
+    // The query refreshes while the rows the reader is looking at stay frozen.
+    await new Promise((resolve) => { setTimeout(resolve, 400); });
     expect(screen.queryByText("Raid von unbekannt mit 8 Zuschauern")).not.toBeInTheDocument();
-    expect(eventRequests).toBe(1);
+    expect(eventRequests).toBe(2);
     expect(screen.getAllByRole("row")).toHaveLength(2);
+
+    Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0 }) });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+    fireEvent.scroll(window);
+    expect(await screen.findByText("Raid von unbekannt mit 8 Zuschauern")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /neue Ereignisse/u })).not.toBeInTheDocument();
   });
 
   it("jumps to the top via the notice and then loads more", async () => {
@@ -682,6 +693,7 @@ describe("Dashboard skeleton", () => {
     if (feed === null) throw new Error("Ereignis-Feed fehlt");
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: -200 }) });
     Object.defineProperty(window, "scrollY", { configurable: true, value: 400 });
+    fireEvent.scroll(window);
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
@@ -692,7 +704,8 @@ describe("Dashboard skeleton", () => {
     expect(newEventsNotice.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     fireEvent.click(newEventsNotice);
     expect(await screen.findByText("Raid von unbekannt mit 9 Zuschauern")).toBeInTheDocument();
-    expect(eventRequests).toBe(2);
+    // Returning to the top makes one catch-up refresh for the immediately stale events query.
+    expect(eventRequests).toBe(3);
     expect(scrollTo).toHaveBeenCalledOnce();
   });
 
@@ -1085,17 +1098,16 @@ describe("Dashboard skeleton", () => {
 
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     const herkunftGroup = screen.getByRole("group", { name: "Herkunft" });
-    const tonGroup = screen.getByRole("group", { name: "Ton" });
-    const module = screen.getByRole("combobox", { name: "Modul" });
-    const person = screen.getByRole("textbox", { name: "Person" });
+    let tonGroup = screen.getByRole("group", { name: "Ton" });
+    let module = screen.getByRole("combobox", { name: "Modul" });
+    let person = screen.getByRole("textbox", { name: "Person" });
     expect(herkunftGroup).toBeInTheDocument();
     expect(module).toBeInTheDocument();
     expect(tonGroup).toBeInTheDocument();
     expect(person).toBeInTheDocument();
 
     fireEvent.click(within(herkunftGroup).getByRole("radio", { name: "Kanalereignisse" }));
-    await waitFor(() => expect(screen.queryByText("Befehl !hilfe ausgeführt")).not.toBeInTheDocument());
-    expect(screen.getByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
+    expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     expect(screen.getByText(/Aktive Filter:/)).toHaveTextContent("Kanalereignisse");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Filter zurücksetzen" })[0] as HTMLElement);
@@ -1103,19 +1115,24 @@ describe("Dashboard skeleton", () => {
     // the reset above -- so its options can briefly be empty; wait for them
     // rather than opening the dropdown mid-fetch.
     await waitFor(() => { expect(screen.getByRole("option", { name: "Textbefehle", hidden: true })).toBeInTheDocument(); });
+    module = screen.getByRole("combobox", { name: "Modul" });
     fireEvent.click(module);
     fireEvent.click(screen.getByRole("option", { name: "Textbefehle", hidden: true }));
+    tonGroup = screen.getByRole("group", { name: "Ton" });
     fireEvent.click(within(tonGroup).getByRole("radio", { name: "Fehler" }));
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
     expect(screen.queryByText("Raid von unbekannt mit 21 Zuschauern")).not.toBeInTheDocument();
+    person = screen.getByRole("textbox", { name: "Person" });
     fireEvent.change(person, { target: { value: "person-a" } });
     expect((await screen.findAllByText("Alice")).length).toBeGreaterThan(0);
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("actor")).toBe("person-a"));
 
+    module = screen.getByRole("combobox", { name: "Modul" });
     fireEvent.click(module);
     fireEvent.click(screen.getByRole("option", { name: "Werbung", hidden: true }));
     expect(await screen.findByText("Keine Ereignisse passen zu den Filtern.")).toBeInTheDocument();
     await waitFor(() => { expect(screen.getByRole("option", { name: "Alle Module", hidden: true })).toBeInTheDocument(); });
+    module = screen.getByRole("combobox", { name: "Modul" });
     fireEvent.click(module);
     fireEvent.click(screen.getByRole("option", { name: "Alle Module", hidden: true }));
     await waitFor(() => {

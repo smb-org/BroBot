@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useState, type ReactElement } from "react";
 
+import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
@@ -15,8 +16,8 @@ import {
   setFaqEntryEnabled,
   testFaqMessage,
   updateFaqEntry,
-  type FaqPanelData,
   type FaqTestResult,
+  type FaqPanelData,
 } from "./service";
 
 interface FaqDraft {
@@ -55,16 +56,54 @@ const inputFromDraft = (draft: FaqDraft): FaqMutationInput | null => {
   };
 };
 
+const faqPanelDataFrom = (value: unknown): FaqPanelData => {
+  if (typeof value === "object" && value !== null && "entries" in value && "blocks" in value &&
+      Array.isArray(value.entries) && Array.isArray(value.blocks)) {
+    return value as FaqPanelData;
+  }
+  return { entries: [], blocks: [] };
+};
+
+const withFaqEntry = (current: unknown, entry: FaqEntry): FaqPanelData => {
+  const data = faqPanelDataFrom(current);
+  const found = data.entries.some((candidate) => candidate.id === entry.id);
+  const entries = found
+    ? data.entries.map((candidate) => candidate.id === entry.id ? entry : candidate)
+    : [...data.entries, entry];
+  return { ...data, entries: entries.sort((left, right) => left.order - right.order) };
+};
+
+const withFaqEntries = (current: unknown, entries: FaqEntry[]): FaqPanelData => ({
+  ...faqPanelDataFrom(current),
+  entries,
+});
+
+const withoutFaqEntry = (current: unknown, entryId: string): FaqPanelData => {
+  const data = faqPanelDataFrom(current);
+  return { ...data, entries: data.entries.filter((entry) => entry.id !== entryId) };
+};
+
+const requireBaselineRevision = (revision: number | null): number => {
+  if (revision === null) throw new Error("An existing FAQ entry requires its opening revision.");
+  return revision;
+};
+
 const matchCopy = (result: FaqTestResult, labels: ReturnType<typeof faqTexts>): string => {
   if (result.reason === "command_prefix") return labels.testCommand;
   if (!result.matches || result.entry === undefined || result.matchedPattern === undefined) return labels.testNoMatch;
   return labels.testMatch(result.entry.name, result.matchedPattern);
 };
 
-export default function FaqPanel({ channelId, language, canManage = true }: ModulePanelProperties): ReactElement {
+export default function FaqPanel(properties: ModulePanelProperties): ReactElement {
+  return <FaqPanelContent key={properties.channelId} {...properties} />;
+}
+
+function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelProperties): ReactElement {
   const labels = faqTexts(language);
-  const [data, setData] = useState<FaqPanelData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useDashboardQueryClient();
+  const query = useModuleQuery(channelId, "faq", "panel", (signal) => loadFaqPanel(channelId, signal));
+  const data = query.data;
+  const loading = query.isPending;
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<FaqDraft | null>(null);
   const [editing, setEditing] = useState<FaqEntry | null>(null);
@@ -78,21 +117,6 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
   const [testBusy, setTestBusy] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
   const searchGames = useCallback((query: string) => searchFaqGames(channelId, query), [channelId]);
-
-  const reload = useCallback(async (): Promise<void> => {
-    try { setData(await loadFaqPanel(channelId)); }
-    catch { notify({ tone: "error", message: labels.loadError }); }
-    finally { setLoading(false); }
-  }, [channelId, labels.loadError]);
-
-  useEffect(() => {
-    let active = true;
-    void loadFaqPanel(channelId)
-      .then((value) => { if (active) setData(value); })
-      .catch(() => { if (active) notify({ tone: "error", message: labels.loadError }); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [channelId, labels.loadError]);
 
   const openCreate = (): void => { setEditing(null); setDraft(emptyDraft()); setError(null); };
   const openEdit = (entry: FaqEntry): void => { setEditing(entry); setDraft(draftFromEntry(entry)); setError(null); };
@@ -110,11 +134,13 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
     setPending(true);
     setError(null);
     try {
-      if (editing === null) await createFaqEntry(channelId, input);
-      else await updateFaqEntry(channelId, editing, input);
+      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
+        editing === null ? createFaqEntry(channelId, input) : updateFaqEntry(channelId, editing.id, input, requireBaselineRevision(revision)), {
+        baselineRevision: editing?.revision ?? null,
+        updateCache: (current, entry) => withFaqEntry(current, entry),
+      });
       setDraft(null);
       setEditing(null);
-      await reload();
     } catch (failure: unknown) {
       const code = faqErrorCode(failure);
       setError(code === "faq_cooldown_too_short" ? labels.cooldownMinError
@@ -127,7 +153,13 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
   const toggle = async (entry: FaqEntry, enabled: boolean): Promise<void> => {
     if (busyEntryId !== null) return;
     setBusyEntryId(entry.id);
-    try { await setFaqEntryEnabled(channelId, entry, enabled); await reload(); }
+    try {
+      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
+        setFaqEntryEnabled(channelId, entry.id, enabled, requireBaselineRevision(revision)), {
+        baselineRevision: entry.revision,
+        updateCache: (current, updated) => withFaqEntry(current, updated),
+      });
+    }
     catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setBusyEntryId(null); }
   };
@@ -135,7 +167,13 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
   const move = async (entry: FaqEntry, direction: "up" | "down"): Promise<void> => {
     if (busyEntryId !== null) return;
     setBusyEntryId(entry.id);
-    try { await moveFaqEntry(channelId, entry, direction); await reload(); }
+    try {
+      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
+        moveFaqEntry(channelId, entry.id, direction, requireBaselineRevision(revision)), {
+        baselineRevision: entry.revision,
+        updateCache: (current, entries) => withFaqEntries(current, entries),
+      });
+    }
     catch { notify({ tone: "error", message: labels.saveError }); }
     finally { setBusyEntryId(null); }
   };
@@ -144,7 +182,15 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
     if (deleteTarget === null) return;
     setPending(true);
     setDeleteError(null);
-    try { await deleteFaqEntry(channelId, deleteTarget); setDeleteTarget(null); await reload(); }
+    try {
+      const entryId = deleteTarget.id;
+      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
+        deleteFaqEntry(channelId, entryId, requireBaselineRevision(revision)), {
+        baselineRevision: deleteTarget.revision,
+        updateCache: (current) => withoutFaqEntry(current, entryId),
+      });
+      setDeleteTarget(null);
+    }
     catch { setDeleteError(labels.deleteError); }
     finally { setPending(false); }
   };
@@ -160,16 +206,19 @@ export default function FaqPanel({ channelId, language, canManage = true }: Modu
 
   const blockOptions = (data?.blocks ?? []).map((name) => ({ value: name, label: name }));
   const orderedEntries = data?.entries ?? [];
-  const listStatus = loading ? "loading" : data === null ? "error" : orderedEntries.length === 0 ? "empty" : "success";
+  const listStatus = query.isPending ? "loading" : data === undefined ? "error" : orderedEntries.length === 0 ? "empty" : "success";
 
   return (
     <section aria-label={labels.title}>
       <InspectorSection title={labels.title}>
-        {canManage ? <Button variant="primary" onClick={openCreate}>{labels.add}</Button> : <p className="lock-reason">{labels.roleLocked}</p>}
+        <Button variant="primary" disabled={!canManage} onClick={openCreate}>{labels.add}</Button>
+        {canManage ? null : <p className="lock-reason">{labels.roleLocked}</p>}
         <LoadState status={listStatus} minHeight="calc(var(--s10) * 18)"
           loading={<Skeleton rows={7} height={34} />}
           empty={<p className="muted">{labels.noEntries}</p>}
-          error={<div style={{ minHeight: "calc(var(--s10) * 18)" }} />}
+          error={<p className="muted">{labels.loadError}</p>}
+          onRetry={() => { void query.refetch(); }}
+          refreshError={query.isRefetchError}
         >
         <div className="state-list" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>
           {orderedEntries.map((entry, index) => (

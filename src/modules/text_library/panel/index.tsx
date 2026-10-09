@@ -8,6 +8,7 @@ import { PanelApiError } from "../../../contracts/panel-error";
 import { Badge, Button, ChatPreview, ConfirmDialog, Field, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, Skeleton, SubInspector, TextArea, notify, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
+import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { textLibraryTexts } from "./locale";
 import { estimateEmbeddedBlockOverflow } from "./embedded-block-overflow";
 import {
@@ -20,6 +21,7 @@ import {
   renameTextCategory,
   searchTextLibraryGames,
   saveTextBlock,
+  type TextLibraryPanelData,
 } from "./service";
 
 interface DraftBlock {
@@ -109,12 +111,30 @@ const withDataCondition = (conditions: TextBlockConditions, id: string, value: s
 const updateVariant = (variants: TextBlockVariant[], id: string, update: (variant: TextBlockVariant) => TextBlockVariant): TextBlockVariant[] =>
   variants.map((variant) => variant.id === id ? update(variant) : variant);
 
-export default function TextLibraryPanel({ channelId, language, canManage = true, textBlockConditions = [] }: ModulePanelProperties): ReactElement {
+const updateLibraryCache = (
+  current: unknown,
+  update: (library: TextLibraryPanelData) => TextLibraryPanelData,
+  fallback: TextLibraryPanelData | null,
+): unknown => {
+  const candidate = typeof current === "object" && current !== null && Array.isArray(Reflect.get(current, "blocks")) && Array.isArray(Reflect.get(current, "categories"))
+    ? current
+    : fallback;
+  if (candidate === null) return current;
+  return update(candidate as TextLibraryPanelData);
+};
+
+export default function TextLibraryPanel(props: ModulePanelProperties): ReactElement {
+  return <TextLibraryPanelContent key={props.channelId} {...props} />;
+}
+
+function TextLibraryPanelContent({ channelId, language, canManage = true, textBlockConditions = [] }: ModulePanelProperties): ReactElement {
   const labels = useMemo(() => textLibraryTexts(language), [language]);
   const resolvedLanguage = language === "en" ? "en" : "de";
   const common = dashboardCommonTexts(resolvedLanguage);
   const searchGames = useCallback((query: string) => searchTextLibraryGames(channelId, query), [channelId]);
-  const [data, setData] = useState<Awaited<ReturnType<typeof loadTextLibrary>> | null>(null);
+  const queryClient = useDashboardQueryClient();
+  const libraryQuery = useModuleQuery(channelId, "text_library", "library", (signal) => loadTextLibrary(channelId, signal));
+  const data = libraryQuery.data ?? null;
   const conditionDefinitions = data?.dataConditionDefinitions ?? textBlockConditions;
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftBlock | null>(null);
@@ -129,7 +149,6 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const [simulatedTier, setSimulatedTier] = useState("everyone");
   const [pending, setPending] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [categoryDrafts, setCategoryDrafts] = useState<Record<string, string>>({});
   const [previewNow, setPreviewNow] = useState(() => Date.now());
@@ -139,42 +158,23 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     return () => window.clearInterval(timer);
   }, []);
 
-  const refresh = useCallback(async (select?: string): Promise<void> => {
-    const next = await loadTextLibrary(channelId);
-    setData(next);
-    setLoadFailed(false);
-    if (select !== undefined) {
-      const selected = next.blocks.find((block) => block.name === select);
-      if (selected !== undefined) {
-        setSelectedName(selected.name);
-        setDraft(draftFromBlock(selected));
-        setBaselineDraft(draftFromBlock(selected));
-        setRevision(selected.revision);
-      }
-    } else if (selectedName !== null) {
-      const selected = next.blocks.find((block) => block.name === selectedName);
-      if (selected === undefined) {
-        setSelectedName(null);
-        setDraft(null);
-        setBaselineDraft(null);
-        setRevision(null);
-      } else {
-        setDraft(draftFromBlock(selected));
-        setBaselineDraft(draftFromBlock(selected));
-        setRevision(selected.revision);
-      }
-    }
-  }, [channelId, selectedName]);
+  const write = useCallback(<Value,>(
+    baselineRevision: number | null,
+    mutation: (revision: number | null) => Promise<Value>,
+    updateCache: (current: unknown, result: Value) => unknown,
+  ): Promise<Value> => runModuleQueryWrite(queryClient, channelId, "text_library", "library", mutation, {
+      baselineRevision,
+      updateCache,
+      relatedParts: [
+        { moduleId: "text_commands", part: "template-variables" },
+        { moduleId: "faq", part: "panel" },
+        { moduleId: "timers", part: "panel" },
+      ],
+    }), [channelId, queryClient]);
 
   useEffect(() => {
-    let active = true;
-    loadTextLibrary(channelId).then((next) => {
-      if (!active) return;
-      setData(next);
-      setLoadFailed(false);
-    }).catch(() => { if (active) { setLoadFailed(true); notify({ tone: "error", message: labels.loadError }); } });
-    return () => { active = false; };
-  }, [channelId, labels.loadError]);
+    if (libraryQuery.isError) notify({ tone: "error", message: labels.loadError });
+  }, [libraryQuery.isError, labels.loadError]);
 
   const blockByName = useMemo(() => new Map((data?.blocks ?? []).map((block) => [block.name, block])), [data]);
   const reservedNames = new Set(data?.reservedNames ?? []);
@@ -268,7 +268,11 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   )) &&
     (data?.usages[draft.name] ?? []).some((usage) => usage.kind !== "command");
 
+  // Bumped on every editor switch; an obsolete save/delete must not touch the newer editor.
+  const editorSwitch = useRef(0);
+
   const openCreateNow = (): void => {
+    editorSwitch.current += 1;
     const categoryId = data?.categories[0]?.id ?? "";
     const initial = newDraft(categoryId);
     setSelectedName(null);
@@ -278,6 +282,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   };
 
   const closeEditorNow = (): void => {
+    editorSwitch.current += 1;
     setSelectedName(null);
     setDraft(null);
     setBaselineDraft(null);
@@ -285,6 +290,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   };
 
   const selectBlockNow = (block: TextBlock): void => {
+    editorSwitch.current += 1;
     setSelectedName(block.name);
     setDraft(draftFromBlock(block));
     setBaselineDraft(draftFromBlock(block));
@@ -294,15 +300,28 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const saveDraft = async (): Promise<string | null> => {
     if (draft === null || !valid || !canManage) return labels.saveError;
     setPending(true);
+    const startedSwitch = editorSwitch.current;
     try {
       const payload = {
         ...draft,
         variants: draft.variants.map((variant, index) => index === draft.variants.length - 1 ? { ...variant, conditions: {} } : variant),
       };
-      const saved = revision === null
-        ? await createTextBlock(channelId, payload)
-        : await saveTextBlock(channelId, { ...payload, revision });
-      await refresh(saved.name);
+      const saved = await write(revision, (baselineRevision) => baselineRevision === null
+        ? createTextBlock(channelId, payload)
+        : saveTextBlock(channelId, { ...payload, revision: baselineRevision }), (current, result) => updateLibraryCache(current, (library) => {
+          const existing = library.blocks.find((block) => block.name === result.name);
+          return {
+            ...library,
+            blocks: existing === undefined
+              ? [...library.blocks, result]
+              : library.blocks.map((block) => block.name === result.name ? result : block),
+          };
+        }, data));
+      if (editorSwitch.current !== startedSwitch) return null;
+      setSelectedName(saved.name);
+      setDraft(draftFromBlock(saved));
+      setBaselineDraft(draftFromBlock(saved));
+      setRevision(saved.revision);
       return null;
     } catch (caught: unknown) {
       const code = errorCode(caught);
@@ -336,13 +355,22 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     if (selectedName === null || revision === null || !canManage) return;
     setPending(true);
     try {
-      await deleteTextBlock(channelId, selectedName, revision);
+      const deletedName = selectedName;
+      const startedSwitch = editorSwitch.current;
+      await write(revision, (baselineRevision) => {
+        if (baselineRevision === null) throw new Error("A text block revision is required for deletion.");
+        return deleteTextBlock(channelId, deletedName, baselineRevision);
+      }, (current) => updateLibraryCache(current, (library) => {
+        const usages = { ...library.usages };
+        Reflect.deleteProperty(usages, deletedName);
+        return { ...library, blocks: library.blocks.filter((block) => block.name !== deletedName), usages };
+      }, data));
+      if (editorSwitch.current !== startedSwitch) return;
       setSelectedName(null);
       setDraft(null);
       setBaselineDraft(null);
       setRevision(null);
       setConfirmingDelete(false);
-      await refresh();
     } catch (caught: unknown) {
       notify({ tone: "error", message: errorCode(caught) === "text_library_block_conflict" ? labels.conflict : labels.saveError });
     } finally {
@@ -360,9 +388,14 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     if (!canManage || name.trim().length === 0) return;
     setPending(true);
     try {
-      await renameTextCategory(channelId, category.id, name.trim());
+      await write(null, async () => {
+        await renameTextCategory(channelId, category.id, name.trim());
+        return { id: category.id, name: name.trim() };
+      }, (current, result) => updateLibraryCache(current, (library) => ({
+        ...library,
+        categories: library.categories.map((entry) => entry.id === result.id ? { ...entry, customName: result.name } : entry),
+      }), data));
       setCategoryDrafts({});
-      await refresh();
     } catch { notify({ tone: "error", message: labels.saveError }); } finally { setPending(false); }
   };
 
@@ -370,9 +403,13 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     if (!canManage || newCategoryName.trim().length === 0) return;
     setPending(true);
     try {
-      await createTextCategory(channelId, newCategoryName.trim());
+      await write(null, () => createTextCategory(channelId, newCategoryName.trim()), (current, result) => updateLibraryCache(current, (library) => ({
+        ...library,
+        categories: library.categories.some((category) => category.id === result.id)
+          ? library.categories.map((category) => category.id === result.id ? result : category)
+          : [...library.categories, result],
+      }), data));
       setNewCategoryName("");
-      await refresh();
     } catch (caught: unknown) {
       const code = errorCode(caught);
       notify({ tone: "error", message: code === null ? labels.saveError : labels.errors[code] ?? labels.categoryLimit });
@@ -382,7 +419,15 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
   const removeCategory = async (category: TextBlockCategory): Promise<void> => {
     if (!canManage) return;
     setPending(true);
-    try { await deleteTextCategory(channelId, category.id); await refresh(); }
+    try {
+      await write(null, async () => {
+        await deleteTextCategory(channelId, category.id);
+        return category.id;
+      }, (current, deletedId) => updateLibraryCache(current, (library) => ({
+        ...library,
+        categories: library.categories.filter((entry) => entry.id !== deletedId),
+      }), data));
+    }
     catch (caught: unknown) { notify({ tone: "error", message: errorCode(caught) === "text_library_category_not_empty" ? labels.categoryDeleteBlocked : labels.saveError }); }
     finally { setPending(false); }
   };
@@ -407,10 +452,12 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
         </>}
         create={{ label: labels.addBlock, onClick: openCreate, disabled: true, ...(!canManage ? { reason: labels.managementLocked } : {}) }}
       />
-      <LoadState status={loadFailed ? "error" : "loading"} minHeight="calc(var(--s10) * 30)"
+      <LoadState status={libraryQuery.isError ? "error" : "loading"} minHeight="calc(var(--s10) * 30)"
         loading={<Skeleton rows={8} height={34} />}
         empty={<div />}
-        error={<div style={{ minHeight: "calc(var(--s10) * 30)" }} />}
+        error={<p>{labels.loadError}</p>}
+        onRetry={() => { void libraryQuery.refetch(); }}
+        refreshError={libraryQuery.isRefetchError}
       >{null}</LoadState>
     </section>
   </section>;
@@ -431,6 +478,15 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
     : atBlockLimit ? labels.blockLimitReached(data.blocks.length, TEXT_BLOCK_MAXIMUMS.blocksPerChannel) : undefined;
 
   return (
+    <LoadState
+      status="success"
+      minHeight="calc(var(--s10) * 30)"
+      loading={<Skeleton rows={8} height={34} />}
+      empty={<div />}
+      error={<p>{labels.loadError}</p>}
+      onRetry={() => { void libraryQuery.refetch(); }}
+      refreshError={libraryQuery.isRefetchError}
+    >
     <section className="module-stack text-library" aria-label={labels.library} style={{ minHeight: "calc(var(--s10) * 30)" }}>
 
       <ListDetail
@@ -719,6 +775,7 @@ export default function TextLibraryPanel({ channelId, language, canManage = true
         danger
       />
     </section>
+    </LoadState>
   );
 }
 

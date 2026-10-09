@@ -26,7 +26,6 @@ export type RealtimeFeedStatus = "connecting" | "connected" | "reconnecting" | "
 
 export interface RealtimeFeedState {
   status: RealtimeFeedStatus;
-  pendingCount: number;
   jumpToBeginning: () => void;
 }
 
@@ -353,31 +352,20 @@ export const useRealtimeVariableUpdates = ({
 export const useRealtimeEventFeed = ({
   channelId,
   filters,
-  atBeginning,
   refresh,
+  refreshOnReturn,
   scrollToBeginning,
   onRealtimeMessage,
-  onEventHint,
 }: {
   channelId: string;
   filters: PanelEventFilters;
-  atBeginning: () => boolean;
   refresh: () => void;
+  refreshOnReturn?: () => void;
   scrollToBeginning: () => void;
   onRealtimeMessage?: (message: RealtimeMessage) => void;
-  /** Called for every event_log.new message, before the current filters are applied. */
-  onEventHint?: () => void;
 }): RealtimeFeedState => {
   const currentFilterKey = filterKey(filters);
-  const currentIdentityKey = `${channelId}\u001f${currentFilterKey}`;
   const [status, setStatus] = useState<RealtimeFeedStatus>("connecting");
-  const [pendingState, setPendingState] = useState({ identityKey: currentIdentityKey, count: 0 });
-  if (pendingState.identityKey !== currentIdentityKey) {
-    // Identity changed: drop the old notice state during render so returning to it cannot resurrect the count.
-    setPendingState({ identityKey: currentIdentityKey, count: 0 });
-  }
-  const pendingCount = pendingState.identityKey === currentIdentityKey ? pendingState.count : 0;
-  const currentIdentityKeyRef = useRef(currentIdentityKey);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectGraceTimerRef = useRef<number | null>(null);
@@ -387,21 +375,18 @@ export const useRealtimeEventFeed = ({
   const fatalProtocolErrorRef = useRef(false);
   const seenMessageIdsRef = useRef(new Set<string>());
   const refreshRef = useRef(refresh);
-  const atBeginningRef = useRef(atBeginning);
+  const refreshOnReturnRef = useRef(refreshOnReturn);
   const scrollToBeginningRef = useRef(scrollToBeginning);
   const onRealtimeMessageRef = useRef(onRealtimeMessage);
-  const onEventHintRef = useRef(onEventHint);
   const filtersRef = useRef(filters);
 
   useEffect(() => {
-    onEventHintRef.current = onEventHint;
     refreshRef.current = refresh;
-    atBeginningRef.current = atBeginning;
+    refreshOnReturnRef.current = refreshOnReturn;
     scrollToBeginningRef.current = scrollToBeginning;
     onRealtimeMessageRef.current = onRealtimeMessage;
     filtersRef.current = filters;
-    currentIdentityKeyRef.current = currentIdentityKey;
-  }, [atBeginning, currentIdentityKey, filters, onEventHint, onRealtimeMessage, refresh, scrollToBeginning]);
+  }, [filters, onRealtimeMessage, refresh, refreshOnReturn, scrollToBeginning]);
 
   const scheduleBatch = useCallback((): void => {
     if (batchTimerRef.current !== null) return;
@@ -413,7 +398,8 @@ export const useRealtimeEventFeed = ({
 
   const jumpToBeginning = useCallback((): void => {
     scrollToBeginningRef.current();
-    setPendingState({ identityKey: currentIdentityKeyRef.current, count: 0 });
+    if (refreshOnReturnRef.current === undefined) refreshRef.current();
+    else refreshOnReturnRef.current();
   }, []);
 
   useEffect(() => {
@@ -478,17 +464,8 @@ export const useRealtimeEventFeed = ({
       onRealtimeMessageRef.current?.(parsed.message);
       relayRealtimeMessage(parsed.message);
       if (parsed.message.type !== "event_log.new") return;
-      onEventHintRef.current?.();
       const hints = parsed.message.payload.entries.filter((hint) => realtimeHintMatchesFilters(hint, filtersRef.current));
-      if (hints.length > 0) {
-        if (!atBeginningRef.current()) {
-          const identityKey = currentIdentityKeyRef.current;
-          setPendingState((current) => current.identityKey === identityKey
-            ? { ...current, count: current.count + hints.length }
-            : { identityKey, count: hints.length });
-        }
-        scheduleBatch();
-      }
+      if (hints.length > 0) scheduleBatch();
     };
 
     const handleClose = (event: CloseEvent): void => {
@@ -557,5 +534,5 @@ export const useRealtimeEventFeed = ({
     };
   }, [channelId, scheduleBatch]);
 
-  return { status, pendingCount, jumpToBeginning };
+  return { status, jumpToBeginning };
 };

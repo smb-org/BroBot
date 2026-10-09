@@ -44,7 +44,7 @@ interface RequestGate {
   started: () => void;
 }
 
-type ChannelGates = Partial<Record<"settings" | "members" | "membersNext" | "audit" | "events" | "overlays" | "legacyTokens" | "variables" | "modules", RequestGate>>;
+type ChannelGates = Partial<Record<"settings" | "members" | "membersNext" | "audit" | "events" | "eventsNext" | "overlays" | "legacyTokens" | "variables" | "modules", RequestGate>>;
 
 interface ChannelMockData {
   channelList?: readonly Record<string, unknown>[];
@@ -54,6 +54,7 @@ interface ChannelMockData {
   membersNextStatus?: number;
   audit?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
   events?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
+  eventsNext?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
   variables?: { variables: readonly Record<string, unknown>[]; count: number; maximum: number };
   overlays?: { overlays: readonly Record<string, unknown>[]; maximum: number; elementMaximum: number };
   legacyTokens?: { tokens: readonly Record<string, unknown>[]; nextOffset: number | null };
@@ -136,10 +137,12 @@ const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: C
       return;
     }
     if (pathname === `/api/channels/${channelId}/events`) {
-      const gate = gates.events;
+      const isNextPage = new URL(route.request().url()).searchParams.has("cursor");
+      const gate = isNextPage ? gates.eventsNext : gates.events;
       gate?.started();
       if (gate !== undefined) await gate.wait;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data.events ?? { entries: [], nextCursor: null }) });
+      const response = isNextPage ? data.eventsNext : data.events;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response ?? { entries: [], nextCursor: null }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/shoutout` && route.request().method() === "POST") {
@@ -673,24 +676,179 @@ test("the new-events notice stays visible while reading older events", async ({ 
     Object.defineProperty(window, "__layoutEventSockets", { value: sockets, configurable: true });
     Object.defineProperty(window, "WebSocket", { value: MockWebSocket, writable: true, configurable: true });
   });
-  await installChannelMocks(page, {}, { events: fullEventPage });
+  const now = new Date().toISOString();
+  const newEvent = {
+    eventId: "new-event",
+    createdAt: now,
+    moduleId: "channel_events",
+    triggerId: "new-event-trigger",
+    code: "channel_events.message_removed",
+    detail: "{}",
+    actorUserId: "operator",
+    actorLogin: "operator",
+    actorDisplayName: "Operator",
+  };
+  const events = { entries: [...fullEventPage.entries], nextCursor: fullEventPage.nextCursor };
+  await installChannelMocks(page, {}, { events });
   await page.goto(`/channels/${channelId}/events`);
   await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
   await expect.poll(() => page.evaluate(() => (window as Window & { __layoutEventSockets?: Array<{ open: () => void }> }).__layoutEventSockets?.length ?? 0)).toBeGreaterThan(0);
-  await page.evaluate(() => { window.scrollTo(0, 1200); });
-  await page.evaluate(() => {
+  const displayedRows = await page.locator(".event-table tbody tr").allTextContents();
+  await page.evaluate(async () => {
+    window.scrollTo(0, 1200);
+    await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  events.entries.unshift(newEvent);
+  const refreshResponse = page.waitForResponse((response) => response.url().includes(`/api/channels/${channelId}/events`));
+  await page.evaluate((timestamp) => {
     const sockets = (window as Window & { __layoutEventSockets?: Array<{ open: () => void; receive: (data: string) => void }> }).__layoutEventSockets ?? [];
     sockets.forEach((socket) => { socket.open(); });
-    const now = new Date().toISOString();
-    const envelope = JSON.stringify({ version: 1, id: "layout-new-event", createdAt: now, channelId: "stable-host-layout", type: "event_log.new", payload: { entries: [{ eventId: "new-event", createdAt: now, moduleId: "channel_events", code: "channel_events.message_removed", actorUserId: null }] } });
+    const envelope = JSON.stringify({ version: 1, id: "layout-new-event", createdAt: timestamp, channelId: "stable-host-layout", type: "event_log.new", payload: { entries: [{ eventId: "new-event", createdAt: timestamp, moduleId: "channel_events", code: "channel_events.message_removed", actorUserId: null }] } });
     sockets.forEach((socket) => { socket.receive(envelope); });
-  });
+  }, now);
+  await refreshResponse;
   const notice = page.locator(".realtime-feed__notice");
   await expect(notice).toBeVisible();
   await expect(notice).toBeInViewport();
+  expect(await page.locator(".event-table tbody tr").allTextContents()).toEqual(displayedRows);
   const noticeBox = await notice.boundingBox();
   expect(noticeBox?.y).toBeGreaterThanOrEqual(0);
   expect(noticeBox?.y).toBeLessThan(120);
+});
+
+test("event rows keep their cell geometry after loading older events at desktop and mobile widths", async ({ page }) => {
+  const widths = [1280, 390, 320];
+  const longActor = "A Very Long Actor Display Name That Used To Expand Its Table Column";
+  const firstPage = {
+    entries: fullEventPage.entries.map((entry, index) => ({
+      ...entry,
+      createdAt: `2026-09-20T23:${String(59 - index).padStart(2, "0")}:00.000Z`,
+    })),
+    nextCursor: "events-next",
+  };
+  const olderPage = {
+    entries: [{
+      eventId: "event-older-page",
+      triggerId: "event-older-page-trigger",
+      createdAt: "2026-09-20T22:59:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.message_removed",
+      detail: "{}",
+      actorUserId: "long-actor",
+      actorLogin: "long-actor",
+      actorDisplayName: longActor,
+    }],
+    nextCursor: null,
+  };
+
+  for (const width of widths) {
+    await page.unrouteAll();
+    await page.setViewportSize({ width, height: 900 });
+    await installChannelMocks(page, {}, { events: firstPage, eventsNext: olderPage });
+    await page.goto(`/channels/${channelId}/events`);
+    await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
+    const existingRow = page.locator(".event-table tbody tr").first();
+    const before = await existingRow.evaluate((row) => [row, ...Array.from(row.children)].map((element) => {
+      const rect = element.getBoundingClientRect();
+      const round = (value: number): number => Math.round(value * 100) / 100;
+      return [round(rect.x + window.scrollX), round(rect.y + window.scrollY), round(rect.width), round(rect.height)];
+    }));
+
+    await page.getByRole("button", { name: "Load older events" }).click();
+    await expect(page.locator(".event-table tbody tr")).toHaveCount(51);
+    const after = await existingRow.evaluate((row) => [row, ...Array.from(row.children)].map((element) => {
+      const rect = element.getBoundingClientRect();
+      const round = (value: number): number => Math.round(value * 100) / 100;
+      return [round(rect.x + window.scrollX), round(rect.y + window.scrollY), round(rect.width), round(rect.height)];
+    }));
+    expect(after).toEqual(before);
+    const olderActorCell = page.locator(".event-table tbody tr").last().locator("td").nth(2);
+    await expect(olderActorCell).toHaveAttribute("title", longActor);
+    await expect(olderActorCell).toHaveCSS("text-overflow", "ellipsis");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+});
+
+test("loading an older day does not move frozen rows across day sections", async ({ page }) => {
+  const timestamps = await page.evaluate(() => {
+    const local = (day: number, hour: number, minute: number): string => new Date(2026, 8, day, hour, minute).toISOString();
+    return {
+      previousDayError: local(21, 23, 55),
+      todayInfo: local(22, 0, 5),
+      todayOther: local(22, 0, 3),
+      filler: local(22, 0, 1),
+      older: local(21, 22, 0),
+    };
+  });
+  const crossMidnightInfo = {
+    eventId: "cross-midnight-info",
+    triggerId: "cross-midnight-trigger",
+    createdAt: timestamps.todayInfo,
+    moduleId: "channel_events",
+    code: "channel_events.chat.sub",
+    detail: JSON.stringify({ person: "midnight-sub", tier: "1000" }),
+    actorUserId: null,
+  };
+  const crossMidnightError = {
+    ...crossMidnightInfo,
+    eventId: "cross-midnight-error",
+    createdAt: timestamps.previousDayError,
+    moduleId: "host",
+    code: "host.chat.failed",
+    detail: "{}",
+  };
+  const todayEntry = {
+    ...crossMidnightInfo,
+    eventId: "today-entry",
+    triggerId: "today-trigger",
+    createdAt: timestamps.todayOther,
+    detail: JSON.stringify({ person: "today-sub", tier: "1000" }),
+  };
+  const fillers = Array.from({ length: 48 }, (_, index) => ({
+    ...crossMidnightInfo,
+    eventId: `today-filler-${String(index).padStart(2, "0")}`,
+    triggerId: `today-filler-trigger-${String(index).padStart(2, "0")}`,
+    createdAt: timestamps.filler,
+    detail: JSON.stringify({ person: `filler-${String(index).padStart(2, "0")}`, tier: "1000" }),
+  }));
+  const firstPage = { entries: [crossMidnightInfo, crossMidnightError, todayEntry, ...fillers], nextCursor: "older-midnight" };
+  const olderPage = {
+    entries: [{
+      eventId: "older-day-entry",
+      triggerId: "older-day-trigger",
+      createdAt: timestamps.older,
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: JSON.stringify({ source: "olderday", viewers: 1 }),
+      actorUserId: null,
+    }],
+    nextCursor: null,
+  };
+  let releaseOlderResponse!: () => void;
+  let markOlderStarted!: () => void;
+  const olderResponseGate: RequestGate = {
+    wait: new Promise<void>((resolve) => { releaseOlderResponse = resolve; }),
+    started: () => { markOlderStarted(); },
+  };
+  const olderRequestStarted = new Promise<void>((resolve) => { markOlderStarted = resolve; });
+  await installChannelMocks(page, { eventsNext: olderResponseGate }, { events: firstPage, eventsNext: olderPage });
+  await page.goto(`/channels/${channelId}/events`);
+  await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
+  const todayRow = page.getByRole("row", { name: /today-sub/u });
+  await expect(todayRow).toBeVisible();
+  const feedStart = await page.locator(".event-feed").evaluate((feed) => feed.getBoundingClientRect().top + window.scrollY);
+  await page.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); });
+  await olderRequestStarted;
+  await page.evaluate((start) => { window.scrollTo(0, start + 20); }, feedStart);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(feedStart + 8);
+  await expect(todayRow).toBeInViewport();
+  const before = await measureBox(page, ".event-table tbody tr:has-text('today-sub')");
+
+  releaseOlderResponse();
+  await expect(page.locator(".event-table tbody tr")).toHaveCount(51);
+  expect(await measureBox(page, ".event-table tbody tr:has-text('today-sub')")).toEqual(before);
+  expect(await page.locator(".event-table tbody tr").allTextContents()).toContainEqual(expect.stringContaining("olderday"));
 });
 
 test("a keyboard-focused immediate-action control scrolls fully into view at 390px", async ({ page }) => {

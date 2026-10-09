@@ -632,3 +632,29 @@ test("text-library game filter keeps the list position when games are selected a
     expect(await box(slot)).toEqual(before.slot);
   }
 });
+
+test("text-library inspector stays at its sticky offset while the page scrolls at desktop width", async ({ page }) => {
+  const blocks = Array.from({ length: 40 }, (_, index) => ({
+    name: `block_${String(index + 1)}`,
+    categoryId: "social",
+    games: [],
+    variants: [{ id: `variant_${String(index + 1)}`, conditions: {}, texts: ["Hello"] }],
+    revision: 1,
+  }));
+  const categories = [{ id: "social", catalogKey: "social", customName: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }];
+  await routeJson(page, "/api/channels/channel-a/modules/text_library/library", {
+    blocks, categories, settings: { revision: 1, graphRevision: 1, updatedAt: "2026-09-20T08:00:00.000Z" }, usages: {}, reservedNames: [],
+  });
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await routeJson(page, "/api/channels/channel-a/settings", { timeZone: "UTC", revision: 1 });
+
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await gotoPanel(page, "text_library");
+  await page.getByRole("button", { name: "{block_1}" }).click();
+  const inspector = page.locator(".list-detail__inspector");
+  await expect(inspector).toBeVisible();
+  await page.evaluate(() => { window.scrollTo(0, 100); });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(100);
+  const top = await inspector.evaluate((element) => element.getBoundingClientRect().top);
+  expect(top).toBe(16);
+});

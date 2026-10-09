@@ -1,5 +1,6 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent } from "../../src/modules/contract";
@@ -21,6 +22,7 @@ import { textLibraryTexts } from "../../src/modules/text_library/panel/locale";
 import { createTemplateRenderer, type TemplateResolverSources, type TemplateValueProvider } from "../../src/worker/template-resolver";
 import { truncateChatText } from "../../src/worker/chat";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../src/modules/contract";
+import { renderWithQuery } from "../query-test-utils";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -31,15 +33,24 @@ const authorize = () => ({ sql: "AND 1 = 1", values: [] as const });
 const TEST_SESSION_KEYS = JSON.stringify({ active: { id: "cookie-v1", key: testKey(1) }, retired: [] });
 const TEST_ENCRYPTION_KEYS = JSON.stringify({ active: { id: "encryption-v1", key: testKey(2) }, retired: [] });
 
+const renderTextLibraryPanel = (canManage = true): void => {
+  renderWithQuery(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage={canManage} /></MantineProvider>);
+};
+
 const variant = (id: string, text: string, conditions: TextBlockConditions = {}): TextBlockVariant => ({
   id,
   conditions,
   texts: [text],
 });
 
-const stubTextLibraryPanelApi = (library: unknown): void => {
+const stubTextLibraryPanelApi = (library: unknown, failFirstLibraryRead = false): void => {
+  let shouldFailLibraryRead = failFirstLibraryRead;
   vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+    if (shouldFailLibraryRead && url.pathname.includes("/modules/text_library/")) {
+      shouldFailLibraryRead = false;
+      return Promise.resolve(jsonResponse({ error: "offline" }, 503));
+    }
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
     if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
     if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ timeZone: DEFAULT_CHANNEL_TIME_ZONE, revision: 1 }));
@@ -102,7 +113,7 @@ describe("text library", () => {
       reservedNames: ["user"],
     });
 
-    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{schedule\}/u }));
 
     const weekdays = screen.getByRole("group", { name: "Weekdays" });
@@ -122,6 +133,112 @@ describe("text library", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add time window" }));
     expect(screen.getByRole("textbox", { name: "From" })).toHaveValue("00:00");
+  });
+
+  it("shows cached library data immediately when the panel is reopened", async () => {
+    const timestamp = new Date(NOW).toISOString();
+    stubTextLibraryPanelApi({
+      blocks: [{
+        channelId: CHANNEL_ID,
+        name: "cached_text",
+        categoryId: "social",
+        games: [],
+        variants: [variant("default", "Cached value")],
+        revision: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }],
+      categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+      settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
+      usages: { cached_text: [] },
+      reservedNames: ["user"],
+    });
+    function TogglePanel() {
+      const [open, setOpen] = useState(true);
+      return <MantineProvider>
+        <button onClick={() => setOpen((current) => !current)}>Toggle panel</button>
+        {open ? <TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /> : null}
+      </MantineProvider>;
+    }
+
+    renderWithQuery(<TogglePanel />, undefined, { gcTime: 600_000 });
+    expect(await screen.findByRole("button", { name: /\{cached_text\}/u })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle panel" }));
+
+    expect(screen.getByRole("button", { name: /\{cached_text\}/u })).toBeInTheDocument();
+  });
+
+  it("accepts a committed block from a recreated resource generation", async () => {
+    const timestamp = new Date(NOW).toISOString();
+    let block = {
+      channelId: CHANNEL_ID,
+      name: "welcome",
+      categoryId: "social",
+      games: [] as TwitchGame[],
+      variants: [variant("default", "Old generation")],
+      revision: 4,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ timeZone: DEFAULT_CHANNEL_TIME_ZONE, revision: 1 }));
+      if (url.pathname.endsWith("/template-preview")) return Promise.resolve(jsonResponse({ text: "", diagnostics: [] }));
+      if (url.pathname.endsWith("/blocks/welcome") && init?.method === "PATCH") {
+        block = {
+          ...block,
+          variants: [variant("default", "New generation")],
+          revision: 1,
+          updatedAt: new Date(NOW + 1_000).toISOString(),
+        };
+        return Promise.resolve(jsonResponse({ block }));
+      }
+      if (url.pathname.endsWith("/library")) return Promise.resolve(jsonResponse({
+        blocks: [block],
+        categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+        settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
+        usages: { welcome: [] },
+        reservedNames: ["user"],
+      }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    renderWithQuery(
+      <MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>,
+      undefined,
+      { gcTime: 600_000 },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Client draft" } });
+    fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("New generation"));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: /\{welcome\}/u }));
+
+    expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("New generation");
+  });
+
+  it("retries a failed library read", async () => {
+    const timestamp = new Date(NOW).toISOString();
+    stubTextLibraryPanelApi({
+      blocks: [],
+      categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+      settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
+      usages: {},
+      reservedNames: ["user"],
+    }, true);
+
+    renderTextLibraryPanel();
+
+    expect(await screen.findByText("The text library could not be loaded.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /retry|erneut versuchen/iu }));
+
+    expect(await screen.findByText("No text blocks found.")).toBeInTheDocument();
   });
 
   afterEach(() => {
@@ -672,7 +789,7 @@ describe("text library", () => {
       return response;
     }));
 
-    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
     fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
 
@@ -846,7 +963,7 @@ describe("text library", () => {
       reservedNames: ["user"],
     });
 
-    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage={false} /></MantineProvider>);
+    renderTextLibraryPanel(false);
     await screen.findByTestId("text-library-list-slot");
     expect(await screen.findByRole("heading", { name: "Text blocks" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Category" })).toHaveValue("All categories");
@@ -902,7 +1019,7 @@ describe("text library", () => {
       return Promise.resolve(jsonResponse({}, 404));
     }));
 
-    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Updated" } });
 
@@ -959,7 +1076,7 @@ describe("text library", () => {
       return Promise.resolve(jsonResponse({}, 404));
     }));
 
-    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Updated" } });
 
@@ -995,7 +1112,7 @@ describe("text library", () => {
       reservedNames: ["user", "system"],
     });
 
-    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    renderTextLibraryPanel();
     await screen.findByTestId("text-library-list-slot");
     fireEvent.click(await screen.findByRole("button", { name: "Add text block" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "system" } });
@@ -1029,7 +1146,7 @@ describe("text library", () => {
       reservedNames: ["user"],
     });
 
-    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{everyone_line\}/u }));
     fireEvent.click(screen.getByRole("combobox", { name: "Preview context" }));
     fireEvent.click(await screen.findByRole("option", { name: "Command" }));
@@ -1071,7 +1188,7 @@ describe("text library", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
     await waitFor(() => expect(fetcher.mock.calls.filter(([input]) => new URL(input instanceof Request ? input.url : String(input), window.location.href).pathname.endsWith("/template-preview"))).toHaveLength(1));
     await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
@@ -1132,7 +1249,7 @@ describe("text library", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
     await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
 
@@ -1186,7 +1303,7 @@ describe("text library", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    render(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>);
+    renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
     await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
 

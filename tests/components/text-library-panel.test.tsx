@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery } from "../query-test-utils";
 import TextLibraryPanel from "../../src/modules/text_library/panel";
 
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
@@ -30,7 +31,7 @@ afterEach(() => {
 describe("Text library panel layout slots", () => {
   it("keeps the heading and disabled toolbar mounted while loading and after a load failure", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.reject(new Error("offline"))));
-    render(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
 
     expect(screen.getByRole("heading", { level: 2, name: "Text blocks" })).toBeInTheDocument();
     const addButton = screen.getByRole("button", { name: "Add text block" });
@@ -47,7 +48,7 @@ describe("Text library panel layout slots", () => {
   ])("uses $panelLanguage for common toolbar text when the browser is $browserLanguage", async ({ browserLanguage, panelLanguage, search, clear, usage }) => {
     Object.defineProperty(window.navigator, "language", { configurable: true, value: browserLanguage });
     vi.stubGlobal("fetch", libraryFetcher());
-    render(<MantineProvider><TextLibraryPanel channelId="channel-a" language={panelLanguage} /></MantineProvider>);
+    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language={panelLanguage} /></MantineProvider>);
     await screen.findByTestId("text-library-list-slot");
 
     expect(await screen.findByRole("textbox", { name: search })).toBeInTheDocument();
@@ -57,7 +58,7 @@ describe("Text library panel layout slots", () => {
 
   it("keeps creation visible and states the operator lock", async () => {
     vi.stubGlobal("fetch", libraryFetcher());
-    render(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" canManage={false} /></MantineProvider>);
+    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" canManage={false} /></MantineProvider>);
     await screen.findByTestId("text-library-list-slot");
 
     const addButton = await screen.findByRole("button", { name: "Add text block" });
@@ -78,7 +79,7 @@ describe("Text library panel layout slots", () => {
       revision: 1,
     }));
     vi.stubGlobal("fetch", libraryFetcher(blocks));
-    render(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
     await screen.findByTestId("text-library-list-slot");
 
     const addButton = await screen.findByRole("button", { name: "Add text block" });
@@ -106,7 +107,7 @@ describe("Text library panel layout slots", () => {
       }));
     }));
 
-    render(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
     await screen.findByTestId("text-library-list-slot");
     fireEvent.click(await screen.findByRole("button", { name: "Add text block" }));
 

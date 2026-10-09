@@ -20,6 +20,7 @@ export interface TextCommandsTexts {
   empty: string;
   load: string;
   loadError: string;
+  templateVariablesLoadError: string;
   saveError: string;
   deleteError: string;
   name: string;
@@ -108,6 +109,8 @@ export interface TextCommandsTexts {
   issueError: string;
   issueWarning: string;
   conflictMessage: string;
+  reloadError: string;
+  retry: string;
   reload: string;
   managementLocked: string;
   active: string;
@@ -198,7 +201,7 @@ const templateMessages: LocaleCatalog<TextAreaMessages> = {
 const catalog: LocaleCatalog<TextCommandsTexts> = {
   de: {
     title: "Textbefehle", search: "Befehle suchen", activeFilters: "Aktive Filter:", resetFilters: "Zurücksetzen", countSuffix: "Befehle", filteredSuffix: "Befehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
-    load: "Textbefehle werden geladen …", loadError: "Die Textbefehle konnten nicht geladen werden.",
+    load: "Textbefehle werden geladen …", loadError: "Die Textbefehle konnten nicht geladen werden.", templateVariablesLoadError: "Vorlagenvariablen konnten nicht geladen werden.",
     saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
     name: "Name", aliases: "Aliase", templateFieldLabels: { usageText: "Antwort bei fehlenden oder ungültigen Argumenten" }, usageAdvanced: "Erweitert", usageTextHint: "Wird gesendet, wenn erforderliche Argumente fehlen oder ungültig sind.", createVariable: "Variable anlegen",
     shoutoutCooldownHint: "Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.",
@@ -271,7 +274,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln", close: "Schließen",
     save: "Änderungen speichern", create: "Anlegen", discard: "Verwerfen", saved: "Gespeichert.", saving: "Wird gespeichert …",
     pending: "Wird gespeichert …", invalid: "Bitte korrigiere die markierten Felder.", issueError: "Fehler", issueWarning: "Hinweis",
-    conflictMessage: "Inzwischen von jemand anderem geändert.", reload: "Serverstand laden",
+    conflictMessage: "Inzwischen von jemand anderem geändert.", reloadError: "Der Serverstand konnte nicht geladen werden.", retry: "Erneut versuchen", reload: "Serverstand laden",
     managementLocked: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.",
     active: "Aktiv", activeImmediately: "wirkt sofort", enabled: "eingeschaltet", disabled: "ausgeschaltet", noAliases: "keine",
     never: "noch nie", secondsAgo: (count) => `vor ${String(count)} s`, minutesAgo: (count) => `vor ${String(count)} min`, hoursAgo: (count) => `vor ${String(count)} h`,
@@ -303,7 +306,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
   },
   en: {
     title: "Text commands", search: "Search commands", activeFilters: "Active filters:", resetFilters: "Reset", countSuffix: "commands", filteredSuffix: "commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
-    load: "Loading text commands …", loadError: "The text commands could not be loaded.",
+    load: "Loading text commands …", loadError: "The text commands could not be loaded.", templateVariablesLoadError: "Template variables could not be loaded.",
     saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
     name: "Name", aliases: "Aliases", templateFieldLabels: { usageText: "Reply when arguments are missing or invalid" }, usageAdvanced: "Advanced", usageTextHint: "Sent when required arguments are missing or invalid.", createVariable: "Create variable",
     shoutoutCooldownHint: "Twitch enforces shoutout cooldowns: 2 minutes per channel and 60 minutes per target.",
@@ -376,7 +379,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch", close: "Close",
     save: "Save changes", create: "Create", discard: "Discard", saved: "Saved.", saving: "Saving …",
     pending: "Saving …", invalid: "Please correct the marked fields.", issueError: "Error", issueWarning: "Warning",
-    conflictMessage: "This command was changed by someone else.", reload: "Load server version",
+    conflictMessage: "This command was changed by someone else.", reloadError: "The server version could not be loaded.", retry: "Retry", reload: "Load server version",
     managementLocked: "Only broadcasters and managers may add, edit, or delete commands.",
     active: "Active", activeImmediately: "takes effect immediately", enabled: "enabled", disabled: "disabled", noAliases: "none",
     never: "never", secondsAgo: (count) => `${String(count)} s ago`, minutesAgo: (count) => `${String(count)} min ago`, hoursAgo: (count) => `${String(count)} h ago`,

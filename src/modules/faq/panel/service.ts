@@ -28,11 +28,11 @@ const readJson = async <Value,>(response: Response): Promise<Value> => {
 
 const csrf = async (): Promise<string> => (await readJson<{ token: string }>(await fetch("/api/csrf"))).token;
 
-export const loadFaqPanel = async (channelId: string): Promise<FaqPanelData> => {
+export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Promise<FaqPanelData> => {
   const encoded = encodeURIComponent(channelId);
   const [entriesResponse, variablesResponse] = await Promise.all([
-    fetch(`${basePath(channelId)}/entries`),
-    fetch(`/api/channels/${encoded}/template-variables`),
+    fetch(`${basePath(channelId)}/entries`, signal === undefined ? undefined : { signal }),
+    fetch(`/api/channels/${encoded}/template-variables`, signal === undefined ? undefined : { signal }),
   ]);
   const [entries, variables] = await Promise.all([
     readJson<{ entries: FaqEntry[] }>(entriesResponse),
@@ -62,19 +62,18 @@ const mutate = async <Value,>(channelId: string, path: string, method: "POST" | 
 export const createFaqEntry = async (channelId: string, input: FaqMutationInput): Promise<FaqEntry> =>
   (await mutate<{ entry: FaqEntry }>(channelId, "/entries", "POST", input)).entry;
 
-export const updateFaqEntry = async (channelId: string, entry: FaqEntry, input: FaqMutationInput): Promise<FaqEntry> =>
-  (await mutate<{ entry: FaqEntry }>(channelId, `/entries/${encodeURIComponent(entry.id)}`, "PATCH", { ...input, revision: entry.revision })).entry;
+export const updateFaqEntry = async (channelId: string, entryId: string, input: FaqMutationInput, revision: number): Promise<FaqEntry> =>
+  (await mutate<{ entry: FaqEntry }>(channelId, `/entries/${encodeURIComponent(entryId)}`, "PATCH", { ...input, revision })).entry;
 
-export const setFaqEntryEnabled = async (channelId: string, entry: FaqEntry, enabled: boolean): Promise<FaqEntry> =>
-  (await mutate<{ entry: FaqEntry }>(channelId, `/entries/${encodeURIComponent(entry.id)}/enabled`, "PATCH", { enabled, revision: entry.revision })).entry;
+export const setFaqEntryEnabled = async (channelId: string, entryId: string, enabled: boolean, revision: number): Promise<FaqEntry> =>
+  (await mutate<{ entry: FaqEntry }>(channelId, `/entries/${encodeURIComponent(entryId)}/enabled`, "PATCH", { enabled, revision })).entry;
 
-export const moveFaqEntry = async (channelId: string, entry: FaqEntry, direction: "up" | "down"): Promise<void> => {
-  await mutate<{ entries: FaqEntry[] }>(channelId, `/entries/${encodeURIComponent(entry.id)}/move`, "POST", { direction, revision: entry.revision });
-};
+export const moveFaqEntry = async (channelId: string, entryId: string, direction: "up" | "down", revision: number): Promise<FaqEntry[]> =>
+  (await mutate<{ entries: FaqEntry[] }>(channelId, `/entries/${encodeURIComponent(entryId)}/move`, "POST", { direction, revision })).entries;
 
-export const deleteFaqEntry = async (channelId: string, entry: FaqEntry): Promise<void> => {
+export const deleteFaqEntry = async (channelId: string, entryId: string, revision: number): Promise<void> => {
   const token = await csrf();
-  const response = await fetch(`${basePath(channelId)}/entries/${encodeURIComponent(entry.id)}?revision=${String(entry.revision)}`, {
+  const response = await fetch(`${basePath(channelId)}/entries/${encodeURIComponent(entryId)}?revision=${String(revision)}`, {
     method: "DELETE",
     headers: { "X-CSRF-Token": token },
   });

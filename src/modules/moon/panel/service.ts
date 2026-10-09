@@ -13,8 +13,8 @@ const readJson = async <T,>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const fetchMoonSettings = async (channelId: string): Promise<MoonSettings> =>
-  readJson<MoonSettings>(await fetch(`${modulePath(channelId)}/unavailable-texts`));
+export const fetchMoonSettings = async (channelId: string, signal?: AbortSignal): Promise<MoonSettings> =>
+  readJson<MoonSettings>(await fetch(`${modulePath(channelId)}/unavailable-texts`, signal ? { signal } : undefined));
 
 export const saveMoonSettings = async (
   channelId: string,

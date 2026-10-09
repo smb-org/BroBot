@@ -1,20 +1,17 @@
 import { hashKey, type InvalidateQueryFilters, type QueryClient, type QueryKey } from "@tanstack/react-query";
 
 interface RefreshState {
-  dirty: boolean;
+  queued: boolean;
+  promise: Promise<void>;
 }
 
 // Per-client, per-key state; a WeakMap keeps separate clients (and tests) isolated.
 const running = new WeakMap<QueryClient, Map<string, RefreshState>>();
 
-/**
- * Single-flight refresh with one trailing run per exact query key. The first call cancels the
- * query (cold requests included, so a late older response cannot satisfy the invalidation
- * without a new fetch) and invalidates it. Calls made while it runs only mark it dirty; once it
- * settles, exactly one more invalidation runs without cancelling, so a stream of hints can never
- * starve the refetch.
- */
-export const refreshQuery = async (
+const hasQueuedRefresh = (state: RefreshState): boolean => state.queued;
+
+/** Coalesces refresh requests for one query key and runs one trailing refresh when hints arrive mid-flight. */
+export const refreshQuery = (
   queryClient: QueryClient,
   queryKey: QueryKey,
   refetchType: InvalidateQueryFilters["refetchType"] = "active",
@@ -24,23 +21,24 @@ export const refreshQuery = async (
     states = new Map();
     running.set(queryClient, states);
   }
+
   const id = hashKey(queryKey);
   const current = states.get(id);
   if (current !== undefined) {
-    current.dirty = true;
-    return;
+    current.queued = true;
+    return current.promise;
   }
-  const state: RefreshState = { dirty: false };
+
+  const state: RefreshState = { queued: false, promise: Promise.resolve() };
   states.set(id, state);
-  const invalidate = (): Promise<void> => queryClient.invalidateQueries({ queryKey, exact: true, refetchType });
-  try {
+  state.promise = (async () => {
     await queryClient.cancelQueries({ queryKey, exact: true });
-    await invalidate();
-    while (state.dirty) {
-      state.dirty = false;
-      await invalidate();
-    }
-  } finally {
+    do {
+      state.queued = false;
+      await queryClient.invalidateQueries({ queryKey, exact: true, refetchType });
+    } while (hasQueuedRefresh(state));
+  })().finally(() => {
     states.delete(id);
-  }
+  });
+  return state.promise;
 };
