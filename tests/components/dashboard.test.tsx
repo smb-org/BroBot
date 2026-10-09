@@ -2773,6 +2773,40 @@ describe("Dashboard skeleton", () => {
     expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/overview")).toHaveLength(2);
   });
 
+  it("refreshes a warm cached overview after a module-list toggle so the detail page mounts", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "broadcaster" as const };
+    let enabled = false;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (url.pathname === "/api/channels/kanal-a/overview") {
+        return jsonResponse({ ...overview(channel), activeModules: enabled ? [{ moduleId: "text_commands", settings: "{}" }] : [] });
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
+        return jsonResponse({ modules: [{ id: "text_commands", enabled, settings: "{}" }] });
+      }
+      if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
+      if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
+        enabled = true;
+        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" } });
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    // Production cache lifetime: the overview stays cached (and fresh for 30 s) while inactive.
+    render(<DashboardApp />, undefined, { gcTime: 600_000 });
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    navigateToPath("/channels/kanal-a/modules");
+    const listSwitch = await screen.findByRole("switch", { name: "Textbefehle" });
+    fireEvent.click(listSwitch);
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Textbefehle" })).toBeChecked());
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Textbefehle" })).toBeEnabled());
+
+    navigateToPath("/channels/kanal-a/modules/text_commands");
+    expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
+  });
+
   it("doesn't let a late reload response overwrite a newer module toggle", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "manager" as const };
     let modulesCalls = 0;

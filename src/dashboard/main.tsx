@@ -1539,6 +1539,17 @@ export const DashboardApp = (): ReactElement => {
     await queryClient.invalidateQueries(filter);
   };
 
+  // Single path after every successful module enable/disable (list toggle and header switch).
+  // The overview carries activeModules, so it must be refetched even while its observer is
+  // inactive (refetchType "all"); a plain invalidate would leave it stale for staleTime.
+  const reloadAfterModuleToggle = async (): Promise<void> => {
+    if (route.kind !== "channel" && route.kind !== "module") return;
+    await Promise.all([
+      reloadModules(),
+      queryClient.invalidateQueries({ queryKey: queryKeys.channel(route.channelId, "overview"), exact: true, refetchType: "all" }),
+    ]);
+  };
+
   const reloadOverview = async (): Promise<void> => {
     if (route.kind !== "module" && !(route.kind === "channel" && route.section === "overview")) return;
     const filter = { queryKey: queryKeys.channel(route.channelId, "overview"), exact: true } as const;
@@ -1665,8 +1676,7 @@ export const DashboardApp = (): ReactElement => {
     setHeaderModuleBusyKeys((current) => new Set(current).add(targetKey));
     try {
       await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);
-      await reloadModules();
-      await reloadOverview();
+      await reloadAfterModuleToggle();
     } catch (error) {
       notify({ tone: "error", message: error instanceof PanelApiError
         ? apiErrorText(error.code, dashboardTexts().errors.changeFailed)
@@ -1996,7 +2006,7 @@ export const DashboardApp = (): ReactElement => {
               window.history.replaceState(window.history.state, "", path);
             }} />
           : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadModules} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadAfterModuleToggle} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && selectedChannel !== null ? <UiLoadState
           status={overviewPageStatus}
           minHeight={720}
