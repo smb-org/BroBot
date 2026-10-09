@@ -105,10 +105,10 @@ typography:
     letterSpacing: "normal"
   spaltenkopf:
     fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "10px"
+    fontSize: "11px"
     fontWeight: 600
     lineHeight: 1.5
-    letterSpacing: "0.06em"
+    letterSpacing: "normal"
   zahl:
     fontFamily: "IBM Plex Mono, ui-monospace, monospace"
     fontSize: "12px"
