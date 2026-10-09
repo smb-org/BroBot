@@ -631,15 +631,16 @@ describe("Dashboard skeleton", () => {
     expect(eventRequests).toBe(2);
   });
 
-  it("keeps the list further down and shows only the notice", async () => {
+  it("refreshes while the reader is down without moving the displayed events", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":8}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let eventRequests = 0;
+    let serverEntries = [alt];
     vi.stubGlobal("WebSocket", TestWebSocket);
     stubEventFeedFetch(() => {
       eventRequests += 1;
-      return jsonResponse({ entries: [alt], nextCursor: null });
+      return jsonResponse({ entries: serverEntries, nextCursor: null });
     }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
@@ -650,207 +651,25 @@ describe("Dashboard skeleton", () => {
     if (feed === null) throw new Error("Ereignis-Feed fehlt");
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: -200 }) });
     Object.defineProperty(window, "scrollY", { configurable: true, value: 400 });
+    fireEvent.scroll(window);
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
+    serverEntries = [neu, alt];
     socket.receive(JSON.stringify({ version: 1, id: "message-lower", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
     expect(await screen.findByRole("button", { name: "1 neue Ereignisse" })).toBeInTheDocument();
-    // Outwait the realtime batch delay: a hint must not trigger a fetch while the reader is further down.
+    // The query refreshes while the rows the reader is looking at stay frozen.
     await new Promise((resolve) => { setTimeout(resolve, 400); });
     expect(screen.queryByText("Raid von unbekannt mit 8 Zuschauern")).not.toBeInTheDocument();
-    expect(eventRequests).toBe(1);
+    expect(eventRequests).toBe(2);
     expect(screen.getAllByRole("row")).toHaveLength(2);
-  });
 
-  describe("deferred event hints", () => {
-    const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
-    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":11}', actorUserId: null, actorLogin: null, actorDisplayName: null };
-    const hint = (id: string): string => JSON.stringify({ version: 1, id, createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } });
-    /** Moves the reader away from or back to the start of the feed. */
-    let feedTop = 0;
-    const readAt = (position: "top" | "down"): void => {
-      feedTop = position === "top" ? 0 : -200;
-      Object.defineProperty(window, "scrollY", { configurable: true, value: position === "top" ? 0 : 400 });
-    };
-    const mountEvents = (respond: (url: URL, count: number) => Response | Promise<Response>, path = "/channels/kanal-a/events") => {
-      const channel = healthyChannel("kanal-a", "Alpha");
-      let count = 0;
-      Object.defineProperty(window, "scrollTo", { configurable: true, value: vi.fn() });
-      vi.stubGlobal("WebSocket", TestWebSocket);
-      stubEventFeedFetch((url) => { count += 1; return respond(url, count); }, channel);
-      window.history.replaceState({}, "", path);
-      readAt("top");
-      const rendered = render(<DashboardApp />, undefined, { gcTime: 600_000 });
-      return { requests: () => count, rendered };
-    };
-    const patchFeed = (): void => {
-      const feed = document.querySelector(".event-feed");
-      if (feed === null) throw new Error("Ereignis-Feed fehlt");
-      Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: feedTop }) });
-    };
-    const settle = async (): Promise<void> => { await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 400); }); }); };
-
-    it("fetches held hints when the reader scrolls back to the top by hand", async () => {
-      const { requests } = mountEvents((_url, count) => jsonResponse({ entries: count === 1 ? [alt] : [neu, alt], nextCursor: null }));
-      expect(await screen.findByText("alt")).toBeInTheDocument();
-      patchFeed();
-      readAt("down");
-      const socket = TestWebSocket.instances[0];
-      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
-      socket.open();
-      socket.receive(hint("held-1"));
-      await screen.findByRole("button", { name: "1 neue Ereignisse" });
-      await settle();
-      expect(requests()).toBe(1);
-
-      readAt("top");
-      fireEvent.scroll(window);
-      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
-      expect(requests()).toBe(2);
-    });
-
-    it("fetches once when the notice is clicked while a batch from the top is still queued", async () => {
-      const { requests } = mountEvents((_url, count) => jsonResponse({ entries: count === 1 ? [alt] : [neu, alt], nextCursor: null }));
-      expect(await screen.findByText("alt")).toBeInTheDocument();
-      patchFeed();
-      const socket = TestWebSocket.instances[0];
-      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
-      socket.open();
-      socket.receive(hint("queued-1"));
-      readAt("down");
-      socket.receive(hint("queued-2"));
-      fireEvent.click(await screen.findByRole("button", { name: "1 neue Ereignisse" }));
-      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
-      await settle();
-      expect(requests()).toBe(2);
-    });
-
-    it("keeps a hint that arrived during an older fetch across a filter round trip", async () => {
-      let releaseOlder: () => void = () => undefined;
-      const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
-      const { requests } = mountEvents(async (url, count) => {
-        if (count === 2) {
-          await olderGate;
-          return jsonResponse({ entries: [alt], nextCursor: null });
-        }
-        return jsonResponse({ entries: url.searchParams.has("tone") || count === 1 ? (count === 1 ? [alt] : []) : [neu, alt], nextCursor: null });
-      });
-      expect(await screen.findByText("alt")).toBeInTheDocument();
-      patchFeed();
-      const socket = TestWebSocket.instances[0];
-      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
-      socket.open();
-      socket.receive(hint("round-1"));
-      await waitFor(() => expect(requests()).toBe(2));
-      readAt("down");
-      socket.receive(hint("round-2"));
-      await screen.findByRole("button", { name: "1 neue Ereignisse" });
-      releaseOlder();
-      await settle();
-
-      navigateToPath("/channels/kanal-a/events?tone=warning");
-      await settle();
-      navigateToPath("/channels/kanal-a/events");
-      readAt("top");
-      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
-      expect(requests()).toBeGreaterThanOrEqual(2);
-    });
-
-    it("keeps hints held when a later page of the full refetch fails", async () => {
-      let phase: "initial" | "failing" | "healthy" = "initial";
-      const { requests } = mountEvents((url) => {
-        if (!url.searchParams.has("cursor")) return jsonResponse({ entries: phase === "initial" ? [alt] : [neu, alt], nextCursor: "cursor-1" });
-        return phase === "failing" ? jsonResponse({}, 500) : jsonResponse({ entries: [{ ...alt, eventId: "event-older", code: "older" }], nextCursor: null });
-      });
-      expect(await screen.findByText("alt")).toBeInTheDocument();
-      patchFeed();
-      Object.defineProperty(window, "innerHeight", { configurable: true, value: 100 });
-      Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, value: 1000 });
-      Object.defineProperty(window, "scrollY", { configurable: true, value: 900 });
-      fireEvent.scroll(window);
-      expect(await screen.findByText("older")).toBeInTheDocument();
-      expect(requests()).toBe(2);
-      readAt("down");
-      const socket = TestWebSocket.instances[0];
-      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
-      socket.open();
-      socket.receive(hint("pages-1"));
-      await screen.findByRole("button", { name: "1 neue Ereignisse" });
-
-      phase = "failing";
-      readAt("top");
-      fireEvent.scroll(window);
-      await waitFor(() => expect(requests()).toBe(4));
-      await settle();
-      expect(requests()).toBe(4);
-      expect(screen.queryByText("Raid von unbekannt mit 11 Zuschauern")).not.toBeInTheDocument();
-
-      phase = "healthy";
-      fireEvent.scroll(window);
-      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
-      await settle();
-      expect(requests()).toBe(6);
-    });
-
-    it("does not start a queued refresh while the reader has scrolled away", async () => {
-      let releaseOlder: () => void = () => undefined;
-      const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
-      const { requests } = mountEvents(async (_url, count) => {
-        if (count === 2) {
-          await olderGate;
-          return jsonResponse({ entries: [alt], nextCursor: null });
-        }
-        return jsonResponse({ entries: count === 1 ? [alt] : [neu, alt], nextCursor: null });
-      });
-      expect(await screen.findByText("alt")).toBeInTheDocument();
-      patchFeed();
-      const socket = TestWebSocket.instances[0];
-      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
-      socket.open();
-      socket.receive(hint("away-1"));
-      await waitFor(() => expect(requests()).toBe(2));
-      socket.receive(hint("away-2"));
-      await settle();
-      readAt("down");
-      releaseOlder();
-      await settle();
-      expect(requests()).toBe(2);
-
-      readAt("top");
-      fireEvent.scroll(window);
-      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
-      await settle();
-      expect(requests()).toBe(3);
-    });
-
-    it("skips the queued refresh when a retry already satisfied it", async () => {
-      let releaseFirstAttempt: () => void = () => undefined;
-      const gate = new Promise<void>((resolve) => { releaseFirstAttempt = resolve; });
-      const { requests, rendered } = mountEvents(async (_url, count) => {
-        if (count === 2) {
-          await gate;
-          return jsonResponse({}, 500);
-        }
-        return jsonResponse({ entries: count === 1 ? [alt] : [neu, alt], nextCursor: null });
-      });
-      expect(await screen.findByText("alt")).toBeInTheDocument();
-      patchFeed();
-      const defaults = rendered.queryClient.getDefaultOptions();
-      rendered.queryClient.setDefaultOptions({ ...defaults, queries: { ...defaults.queries, retry: 1, retryDelay: 0 } });
-      rendered.rerender(<DashboardApp />);
-      const socket = TestWebSocket.instances[0];
-      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
-      socket.open();
-      socket.receive(hint("retry-1"));
-      await waitFor(() => expect(requests()).toBe(2));
-      socket.receive(hint("retry-2"));
-      await settle();
-      releaseFirstAttempt();
-      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
-      await settle();
-      expect(requests()).toBe(3);
-    });
+    Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0 }) });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+    fireEvent.scroll(window);
+    expect(await screen.findByText("Raid von unbekannt mit 8 Zuschauern")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /neue Ereignisse/u })).not.toBeInTheDocument();
   });
 
   it("jumps to the top via the notice and then loads more", async () => {
@@ -874,6 +693,7 @@ describe("Dashboard skeleton", () => {
     if (feed === null) throw new Error("Ereignis-Feed fehlt");
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: -200 }) });
     Object.defineProperty(window, "scrollY", { configurable: true, value: 400 });
+    fireEvent.scroll(window);
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
@@ -1277,17 +1097,16 @@ describe("Dashboard skeleton", () => {
 
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     const herkunftGroup = screen.getByRole("group", { name: "Herkunft" });
-    const tonGroup = screen.getByRole("group", { name: "Ton" });
-    const module = screen.getByRole("combobox", { name: "Modul" });
-    const person = screen.getByRole("textbox", { name: "Person" });
+    let tonGroup = screen.getByRole("group", { name: "Ton" });
+    let module = screen.getByRole("combobox", { name: "Modul" });
+    let person = screen.getByRole("textbox", { name: "Person" });
     expect(herkunftGroup).toBeInTheDocument();
     expect(module).toBeInTheDocument();
     expect(tonGroup).toBeInTheDocument();
     expect(person).toBeInTheDocument();
 
     fireEvent.click(within(herkunftGroup).getByRole("radio", { name: "Kanalereignisse" }));
-    await waitFor(() => expect(screen.queryByText("Befehl !hilfe ausgeführt")).not.toBeInTheDocument());
-    expect(screen.getByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
+    expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     expect(screen.getByText(/Aktive Filter:/)).toHaveTextContent("Kanalereignisse");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Filter zurücksetzen" })[0] as HTMLElement);
@@ -1295,19 +1114,24 @@ describe("Dashboard skeleton", () => {
     // the reset above -- so its options can briefly be empty; wait for them
     // rather than opening the dropdown mid-fetch.
     await waitFor(() => { expect(screen.getByRole("option", { name: "Textbefehle", hidden: true })).toBeInTheDocument(); });
+    module = screen.getByRole("combobox", { name: "Modul" });
     fireEvent.click(module);
     fireEvent.click(screen.getByRole("option", { name: "Textbefehle", hidden: true }));
+    tonGroup = screen.getByRole("group", { name: "Ton" });
     fireEvent.click(within(tonGroup).getByRole("radio", { name: "Fehler" }));
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
     expect(screen.queryByText("Raid von unbekannt mit 21 Zuschauern")).not.toBeInTheDocument();
+    person = screen.getByRole("textbox", { name: "Person" });
     fireEvent.change(person, { target: { value: "person-a" } });
     expect((await screen.findAllByText("Alice")).length).toBeGreaterThan(0);
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("actor")).toBe("person-a"));
 
+    module = screen.getByRole("combobox", { name: "Modul" });
     fireEvent.click(module);
     fireEvent.click(screen.getByRole("option", { name: "Werbung", hidden: true }));
     expect(await screen.findByText("Keine Ereignisse passen zu den Filtern.")).toBeInTheDocument();
     await waitFor(() => { expect(screen.getByRole("option", { name: "Alle Module", hidden: true })).toBeInTheDocument(); });
+    module = screen.getByRole("combobox", { name: "Modul" });
     fireEvent.click(module);
     fireEvent.click(screen.getByRole("option", { name: "Alle Module", hidden: true }));
     await waitFor(() => {

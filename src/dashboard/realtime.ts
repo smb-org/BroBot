@@ -26,7 +26,6 @@ export type RealtimeFeedStatus = "connecting" | "connected" | "reconnecting" | "
 
 export interface RealtimeFeedState {
   status: RealtimeFeedStatus;
-  pendingCount: number;
   jumpToBeginning: () => void;
 }
 
@@ -353,37 +352,23 @@ export const useRealtimeVariableUpdates = ({
 export const useRealtimeEventFeed = ({
   channelId,
   filters,
-  atBeginning,
   refresh,
+  refreshOnReturn,
   scrollToBeginning,
   onRealtimeMessage,
   onEventHint,
-  markDirty,
-  refreshIfDirty,
 }: {
   channelId: string;
   filters: PanelEventFilters;
-  atBeginning: () => boolean;
   refresh: () => void;
-  /** Records that the current query has hinted events it has not fetched yet. Survives the notice. */
-  markDirty?: () => void;
-  /** Fetches once if the current query is dirty; called whenever the reader is at the start. */
-  refreshIfDirty?: () => void;
+  refreshOnReturn?: () => void;
   scrollToBeginning: () => void;
   onRealtimeMessage?: (message: RealtimeMessage) => void;
   /** Called for every event_log.new message, before the current filters are applied. */
   onEventHint?: () => void;
 }): RealtimeFeedState => {
   const currentFilterKey = filterKey(filters);
-  const currentIdentityKey = `${channelId}\u001f${currentFilterKey}`;
   const [status, setStatus] = useState<RealtimeFeedStatus>("connecting");
-  const [pendingState, setPendingState] = useState({ identityKey: currentIdentityKey, count: 0 });
-  if (pendingState.identityKey !== currentIdentityKey) {
-    // Identity changed: drop the old notice state during render so returning to it cannot resurrect the count.
-    setPendingState({ identityKey: currentIdentityKey, count: 0 });
-  }
-  const pendingCount = pendingState.identityKey === currentIdentityKey ? pendingState.count : 0;
-  const currentIdentityKeyRef = useRef(currentIdentityKey);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectGraceTimerRef = useRef<number | null>(null);
@@ -393,74 +378,34 @@ export const useRealtimeEventFeed = ({
   const fatalProtocolErrorRef = useRef(false);
   const seenMessageIdsRef = useRef(new Set<string>());
   const refreshRef = useRef(refresh);
-  const atBeginningRef = useRef(atBeginning);
+  const refreshOnReturnRef = useRef(refreshOnReturn);
   const scrollToBeginningRef = useRef(scrollToBeginning);
   const onRealtimeMessageRef = useRef(onRealtimeMessage);
   const onEventHintRef = useRef(onEventHint);
-  const markDirtyRef = useRef(markDirty);
-  const refreshIfDirtyRef = useRef(refreshIfDirty);
   const filtersRef = useRef(filters);
 
   useEffect(() => {
     onEventHintRef.current = onEventHint;
-    markDirtyRef.current = markDirty;
-    refreshIfDirtyRef.current = refreshIfDirty;
     refreshRef.current = refresh;
-    atBeginningRef.current = atBeginning;
+    refreshOnReturnRef.current = refreshOnReturn;
     scrollToBeginningRef.current = scrollToBeginning;
     onRealtimeMessageRef.current = onRealtimeMessage;
     filtersRef.current = filters;
-    currentIdentityKeyRef.current = currentIdentityKey;
-  }, [atBeginning, currentIdentityKey, filters, markDirty, onEventHint, onRealtimeMessage, refresh, refreshIfDirty, scrollToBeginning]);
-
-  const countNotice = useCallback((hints: number): void => {
-    const identityKey = currentIdentityKeyRef.current;
-    setPendingState((current) => current.identityKey === identityKey
-      ? { ...current, count: current.count + hints }
-      : { identityKey, count: hints });
-  }, []);
+  }, [filters, onEventHint, onRealtimeMessage, refresh, refreshOnReturn, scrollToBeginning]);
 
   const scheduleBatch = useCallback((): void => {
     if (batchTimerRef.current !== null) return;
     batchTimerRef.current = window.setTimeout(() => {
       batchTimerRef.current = null;
-      // The reader may have scrolled away meanwhile: keep the hint pending instead of shifting the list.
-      if (atBeginningRef.current()) (refreshIfDirtyRef.current ?? refreshRef.current)();
-      else setPendingState((current) => current.identityKey === currentIdentityKeyRef.current && current.count > 0
-        ? current
-        : { identityKey: currentIdentityKeyRef.current, count: 1 });
+      refreshRef.current();
     }, BATCH_DELAY_MS);
-  }, []);
-
-  /** The reader is at the start: fetch once if hints are held back, dropping any queued batch. */
-  const catchUp = useCallback((): void => {
-    if (batchTimerRef.current !== null) {
-      window.clearTimeout(batchTimerRef.current);
-      batchTimerRef.current = null;
-    }
-    setPendingState((current) => current.count === 0 ? current : { ...current, count: 0 });
-    (refreshIfDirtyRef.current ?? refreshRef.current)();
   }, []);
 
   const jumpToBeginning = useCallback((): void => {
     scrollToBeginningRef.current();
-    catchUp();
-  }, [catchUp]);
-
-  useEffect(() => {
-    const onScroll = (): void => {
-      if (refreshIfDirtyRef.current !== undefined && atBeginningRef.current()) catchUp();
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => { window.removeEventListener("scroll", onScroll); };
-  }, [catchUp]);
-
-  useEffect(() => {
-    // After a channel/filter switch the parent's query effect must run first; mount is covered by refetch-on-mount.
-    let cancelled = false;
-    queueMicrotask(() => { if (!cancelled && atBeginningRef.current()) refreshIfDirtyRef.current?.(); });
-    return () => { cancelled = true; };
-  }, [currentIdentityKey]);
+    if (refreshOnReturnRef.current === undefined) refreshRef.current();
+    else refreshOnReturnRef.current();
+  }, []);
 
   useEffect(() => {
     if (batchTimerRef.current !== null) {
@@ -526,15 +471,7 @@ export const useRealtimeEventFeed = ({
       if (parsed.message.type !== "event_log.new") return;
       onEventHintRef.current?.();
       const hints = parsed.message.payload.entries.filter((hint) => realtimeHintMatchesFilters(hint, filtersRef.current));
-      if (hints.length > 0) {
-        markDirtyRef.current?.();
-        if (atBeginningRef.current()) {
-          scheduleBatch();
-        } else {
-          // Reading further down: only count; fetching would shift the list. Reaching the top fetches.
-          countNotice(hints.length);
-        }
-      }
+      if (hints.length > 0) scheduleBatch();
     };
 
     const handleClose = (event: CloseEvent): void => {
@@ -601,7 +538,7 @@ export const useRealtimeEventFeed = ({
         // The socket may already be closed.
       }
     };
-  }, [channelId, countNotice, scheduleBatch]);
+  }, [channelId, scheduleBatch]);
 
-  return { status, pendingCount, jumpToBeginning };
+  return { status, jumpToBeginning };
 };

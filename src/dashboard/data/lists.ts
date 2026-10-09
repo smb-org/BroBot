@@ -1,9 +1,8 @@
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { fetchAuditLog, fetchEvents, fetchMembers, fetchSystemOverview } from "../api";
 import type { PanelAuditFilters, PanelEventFilters } from "../../panel-contract";
 import { dashboardDataKeys } from "./keys";
-import { trackFetch } from "./refresh";
 
 export const useMembersQuery = (channelId: string) => useInfiniteQuery({
   queryKey: dashboardDataKeys.members(channelId),
@@ -26,20 +25,17 @@ export const useAuditQuery = (channelId: string, filters: PanelAuditFilters) => 
 });
 
 export const useEventsQuery = (channelId: string, filters: PanelEventFilters) => {
-  const queryClient = useQueryClient();
   const queryKey = dashboardDataKeys.events(channelId, filters);
   return useInfiniteQuery({
-  queryKey,
-  // ponytail: revalidate on every mount; central socket invalidation replaces this in #387
-  refetchOnMount: "always",
-  initialPageParam: null as string | null,
-  queryFn: ({ pageParam, signal }) => pageParam === null
-    ? trackFetch(queryClient, queryKey, () => fetchEvents(channelId, pageParam, signal, filters))
-    : fetchEvents(channelId, pageParam, signal, filters),
-  getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  placeholderData: (previousData, previousQuery) =>
-    previousQuery?.queryKey[1] === channelId ? previousData : undefined,
-  refetchOnWindowFocus: false,
+    queryKey,
+    // The event feed revalidates on every activation; central socket invalidation replaces this in #387.
+    refetchOnMount: "always",
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) => fetchEvents(channelId, pageParam, signal, filters),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    // Filters own separate displayed snapshots; do not borrow another filter's cached rows while loading.
+    placeholderData: () => undefined,
+    refetchOnWindowFocus: false,
   });
 };
 

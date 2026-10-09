@@ -673,21 +673,42 @@ test("the new-events notice stays visible while reading older events", async ({ 
     Object.defineProperty(window, "__layoutEventSockets", { value: sockets, configurable: true });
     Object.defineProperty(window, "WebSocket", { value: MockWebSocket, writable: true, configurable: true });
   });
-  await installChannelMocks(page, {}, { events: fullEventPage });
+  const now = new Date().toISOString();
+  const newEvent = {
+    eventId: "new-event",
+    createdAt: now,
+    moduleId: "channel_events",
+    triggerId: "new-event-trigger",
+    code: "channel_events.message_removed",
+    detail: "{}",
+    actorUserId: "operator",
+    actorLogin: "operator",
+    actorDisplayName: "Operator",
+  };
+  const events = { entries: [...fullEventPage.entries], nextCursor: fullEventPage.nextCursor };
+  await installChannelMocks(page, {}, { events });
   await page.goto(`/channels/${channelId}/events`);
   await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
   await expect.poll(() => page.evaluate(() => (window as Window & { __layoutEventSockets?: Array<{ open: () => void }> }).__layoutEventSockets?.length ?? 0)).toBeGreaterThan(0);
-  await page.evaluate(() => { window.scrollTo(0, 1200); });
-  await page.evaluate(() => {
+  const displayedRows = await page.locator(".event-table tbody tr").allTextContents();
+  await page.evaluate(async () => {
+    window.scrollTo(0, 1200);
+    await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  events.entries.unshift(newEvent);
+  const refreshResponse = page.waitForResponse((response) => response.url().includes(`/api/channels/${channelId}/events`));
+  await page.evaluate((timestamp) => {
     const sockets = (window as Window & { __layoutEventSockets?: Array<{ open: () => void; receive: (data: string) => void }> }).__layoutEventSockets ?? [];
     sockets.forEach((socket) => { socket.open(); });
-    const now = new Date().toISOString();
-    const envelope = JSON.stringify({ version: 1, id: "layout-new-event", createdAt: now, channelId: "stable-host-layout", type: "event_log.new", payload: { entries: [{ eventId: "new-event", createdAt: now, moduleId: "channel_events", code: "channel_events.message_removed", actorUserId: null }] } });
+    const envelope = JSON.stringify({ version: 1, id: "layout-new-event", createdAt: timestamp, channelId: "stable-host-layout", type: "event_log.new", payload: { entries: [{ eventId: "new-event", createdAt: timestamp, moduleId: "channel_events", code: "channel_events.message_removed", actorUserId: null }] } });
     sockets.forEach((socket) => { socket.receive(envelope); });
-  });
+  }, now);
+  await refreshResponse;
   const notice = page.locator(".realtime-feed__notice");
   await expect(notice).toBeVisible();
   await expect(notice).toBeInViewport();
+  expect(await page.locator(".event-table tbody tr").allTextContents()).toEqual(displayedRows);
   const noticeBox = await notice.boundingBox();
   expect(noticeBox?.y).toBeGreaterThanOrEqual(0);
   expect(noticeBox?.y).toBeLessThan(120);

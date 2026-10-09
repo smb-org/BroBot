@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,7 +7,6 @@ import { EventsPage } from "../../src/dashboard/events/EventsPage";
 import { emptyEventFilter } from "../../src/dashboard/events/model";
 import type { PanelEventEntry, PanelEventsResponse } from "../../src/panel-contract";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
-import { useRealtimeEventFeed } from "../../src/dashboard/realtime";
 import { dashboardAuthenticationRequiredEvent } from "../../src/dashboard/data/events";
 import { renderWithQuery } from "../query-test-utils";
 
@@ -99,9 +98,39 @@ const emitEventHint = (socket: TestEventsWebSocket, id: string, event: PanelEven
   }));
 };
 
+const positionSpies = new Set<() => void>();
+
+const positionEventReader = (container: HTMLElement) => {
+  const feed = container.querySelector<HTMLElement>(".event-feed");
+  if (feed === null) throw new Error("Event feed is missing.");
+  let scrollY = 700;
+  Object.defineProperty(window, "scrollY", { configurable: true, get: () => scrollY });
+  Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, get: () => 5_000 });
+  const feedRectSpy = vi.spyOn(feed, "getBoundingClientRect").mockImplementation(() => ({ top: scrollY === 500 ? 0 : -200 }) as DOMRect);
+  const scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {
+    scrollY = 500;
+    window.dispatchEvent(new Event("scroll"));
+  });
+  positionSpies.add(() => { feedRectSpy.mockRestore(); scrollToSpy.mockRestore(); });
+  return {
+    away: (): void => {
+      scrollY = 700;
+      window.dispatchEvent(new Event("scroll"));
+    },
+    top: (): void => {
+      scrollY = 500;
+      window.dispatchEvent(new Event("scroll"));
+    },
+  };
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  for (const restore of positionSpies) restore();
+  positionSpies.clear();
+  Object.defineProperty(window, "scrollY", { configurable: true, writable: true, value: 0 });
+  Reflect.deleteProperty(document.documentElement, "scrollHeight");
   TestEventsWebSocket.reset();
   // `dashboardLanguage()` reads `navigator.language`; reset it to the suite
   // default (`tests/setup.ts`) so an English test doesn't leak into the next.
@@ -148,7 +177,7 @@ describe("EventsPage failure cause icon", () => {
     expect(FakeWebSocket.instances[0]?.close).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the old rows busy during a filter change and restores cached rows immediately", async () => {
+  it("does not show another filter's rows while the selected query loads", async () => {
     const initialEntry = entry({ eventId: "all-events" });
     const filteredEntry = entry({ eventId: "channel-events", code: "channel_events.chat.sub", detail: "{\"person\":\"new-subscriber\",\"tier\":\"1000\"}" });
     let releaseFilteredResponse: (response: Response) => void = () => { throw new Error("The filtered request has not started."); };
@@ -182,14 +211,8 @@ describe("EventsPage failure cause icon", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change filter" }));
     expect(screen.queryByRole("region", { name: "Detail" })).not.toBeInTheDocument();
 
-    const busyRows = await waitFor(() => {
-      const busy = view.container.querySelector(".event-feed [aria-busy='true']");
-      expect(busy).toBeInTheDocument();
-      expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
-      expect(view.container.querySelectorAll(".event-table tbody tr")).toHaveLength(1);
-      return busy;
-    });
-    expect(busyRows).toHaveClass("stale");
+    expect(screen.queryByText("Chat-Nachricht fehlgeschlagen")).not.toBeInTheDocument();
+    expect(view.container.querySelectorAll(".event-table tbody tr")).toHaveLength(0);
 
     releaseFilteredResponse(new Response(JSON.stringify({ entries: [filteredEntry], nextCursor: null }), {
       status: 200,
@@ -320,41 +343,6 @@ describe("EventsPage failure cause icon", () => {
     rendered.unmount();
   });
 
-  it("drops pending new-event notices when the filter changes and does not restore them on return", () => {
-    vi.stubGlobal("WebSocket", TestEventsWebSocket);
-    const filtersA = { ...emptyEventFilter, module: "channel_events" };
-    const filtersB = { ...emptyEventFilter, module: "other_module" };
-    const { result, rerender, unmount } = renderHook(
-      ({ filters }) => useRealtimeEventFeed({
-        channelId: "kanal-a",
-        filters,
-        atBeginning: () => false,
-        refresh: () => undefined,
-        scrollToBeginning: () => undefined,
-      }),
-      { initialProps: { filters: filtersA } },
-    );
-    const socket = TestEventsWebSocket.instances[0];
-    if (socket === undefined) throw new Error("Realtime socket was not created.");
-    socket.open();
-    act(() => {
-      socket.receive(JSON.stringify({
-        version: 1,
-        id: "pending-hint-message",
-        createdAt: "2026-05-01T10:00:00.000Z",
-        channelId: "kanal-a",
-        type: "event_log.new",
-        payload: { entries: [{ eventId: "e1", createdAt: "2026-05-01T10:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", actorUserId: null }] },
-      }));
-    });
-    expect(result.current.pendingCount).toBe(1);
-    rerender({ filters: filtersB });
-    expect(result.current.pendingCount).toBe(0);
-    rerender({ filters: filtersA });
-    expect(result.current.pendingCount).toBe(0);
-    unmount();
-  });
-
   it("invalidates again when a second realtime hint arrives during a delayed refresh", async () => {
     const initialEntry = entry({ eventId: "initial-event" });
     const firstHint = entry({
@@ -434,21 +422,105 @@ describe("EventsPage failure cause icon", () => {
     rendered.unmount();
   });
 
-  it("retries a cancelled dirty event refresh when the reader returns to the top", async () => {
-    const cachedEntry = entry({ eventId: "cached-event" });
-    const hintedEntry = entry({ eventId: "hinted-event", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"cancelled","viewers":1}' });
-    let firstPageRequests = 0;
-    const response = (entries: PanelEventEntry[], nextCursor: string | null = null) => new Response(JSON.stringify({ entries, nextCursor }), {
+  it.each(["hint", "retry", "reconnect", "automatic refetch"] as const)(
+    "keeps event rows fixed while scrolled away when %s delivers newer data",
+    async (cause) => {
+      const oldEntry = entry({ eventId: "frozen-old" });
+      const newEntry = entry({
+        eventId: "frozen-new",
+        createdAt: "2026-09-22T10:01:00.000Z",
+        moduleId: "channel_events",
+        code: "channel_events.raid.incoming",
+        detail: '{"source":"frozen","viewers":2}',
+      });
+      const additionalEntry = entry({
+        eventId: "frozen-added",
+        createdAt: "2026-09-22T10:00:30.000Z",
+        moduleId: "channel_events",
+        code: "channel_events.raid.incoming",
+        detail: '{"source":"alsofrozen","viewers":1}',
+      });
+      const response = (entries: readonly PanelEventEntry[]) => new Response(JSON.stringify({ entries, nextCursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+      let serverEntries: readonly PanelEventEntry[] = [oldEntry];
+      let rejectNextRequest = false;
+      const fetcher = vi.fn((): Promise<Response> => {
+        if (rejectNextRequest) {
+          rejectNextRequest = false;
+          return Promise.reject(new Error("temporary network failure"));
+        }
+        return Promise.resolve(response(serverEntries));
+      });
+      vi.stubGlobal("fetch", fetcher);
+      vi.stubGlobal("WebSocket", TestEventsWebSocket);
+      const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+      const rendered = renderWithQuery(
+        <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+        undefined,
+        {
+          gcTime: 600_000,
+          staleTime: 30_000,
+          initialData: [{ queryKey, data: { pages: [{ entries: [oldEntry], nextCursor: null }], pageParams: [null] } }],
+        },
+      );
+      await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+      const position = positionEventReader(rendered.container);
+      act(() => { position.away(); });
+      const socket = TestEventsWebSocket.instances[0];
+      if (socket === undefined) throw new Error("Realtime socket was not created.");
+      socket.open();
+      serverEntries = [newEntry, additionalEntry, oldEntry];
+      fetcher.mockClear();
+
+      if (cause === "hint") {
+        emitEventHint(socket, "frozen-hint", newEntry);
+        await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      } else if (cause === "retry") {
+        const query = rendered.queryClient.getQueryCache().find({ queryKey });
+        if (query === undefined) throw new Error("Events query was not created.");
+        query.setOptions({ ...query.options, retry: 1, retryDelay: 0 });
+        rejectNextRequest = true;
+        await act(async () => { await rendered.queryClient.invalidateQueries({ queryKey, exact: true }); });
+      } else if (cause === "reconnect") {
+        socket.close();
+        socket.open();
+        await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      } else {
+        await act(async () => { await rendered.queryClient.invalidateQueries({ queryKey, exact: true }); });
+      }
+
+      await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+      expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+      expect(screen.queryByText(/Raid von frozen/u)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Raid von alsofrozen/u)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /2 neue Ereignisse/u })).toBeVisible();
+      rendered.unmount();
+    },
+  );
+
+  it.each(["notice click", "manual scroll"] as const)("shows refreshed events at the top by %s", async (action) => {
+    const oldEntry = entry({ eventId: "top-old" });
+    const newEntry = entry({
+      eventId: "top-new",
+      createdAt: "2026-09-22T10:01:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"topjump","viewers":2}',
+    });
+    const additionalEntry = entry({
+      eventId: "top-added",
+      createdAt: "2026-09-22T10:00:30.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"alsojump","viewers":1}',
+    });
+    let serverEntries: readonly PanelEventEntry[] = [oldEntry];
+    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ entries: serverEntries, nextCursor: null }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
-    });
-    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
-      if (requestUrl(input).searchParams.has("cursor")) return Promise.resolve(response([]));
-      firstPageRequests += 1;
-      if (firstPageRequests === 1) return Promise.resolve(response([cachedEntry], "cursor-1"));
-      if (firstPageRequests === 2) return new Promise<Response>(() => undefined);
-      return Promise.resolve(response([hintedEntry, cachedEntry], "cursor-1"));
-    });
+    })));
     vi.stubGlobal("fetch", fetcher);
     vi.stubGlobal("WebSocket", TestEventsWebSocket);
     const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
@@ -458,42 +530,63 @@ describe("EventsPage failure cause icon", () => {
       {
         gcTime: 600_000,
         staleTime: 30_000,
-        initialData: [{ queryKey, data: { pages: [{ entries: [cachedEntry], nextCursor: "cursor-1" }], pageParams: [null] } }],
+        initialData: [{ queryKey, data: { pages: [{ entries: [oldEntry], nextCursor: null }], pageParams: [null] } }],
       },
     );
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
     fetcher.mockClear();
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    serverEntries = [newEntry, additionalEntry, oldEntry];
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
-    emitEventHint(socket, "cancelled-refresh-hint", hintedEntry);
+    emitEventHint(socket, `top-hint-${action}`, newEntry);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
-    await act(async () => { await rendered.queryClient.cancelQueries({ queryKey, exact: true }); });
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const refreshedEvents = rendered.queryClient.getQueryData<{ pages: { entries: PanelEventEntry[] }[] }>(queryKey);
+    expect(refreshedEvents?.pages.flatMap((page) => page.entries).map((event) => event.eventId)).toEqual([
+      "top-new",
+      "top-added",
+      "top-old",
+    ]);
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(screen.queryByText(/Raid von topjump/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raid von alsojump/u)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /2 neue Ereignisse/u })).toBeVisible();
 
-    act(() => { window.dispatchEvent(new Event("scroll")); });
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText(/Raid von cancelled/u)).toBeVisible();
+    if (action === "notice click") fireEvent.click(screen.getByRole("button", { name: /2 neue Ereignisse/u }));
+    else act(() => { position.top(); });
+
+    expect(await screen.findByText(/Raid von topjump/u)).toBeVisible();
+    expect(await screen.findByText(/Raid von alsojump/u)).toBeVisible();
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(rendered.container.querySelector(".realtime-feed__notice-slot")).toHaveAttribute("data-pending", "false");
     rendered.unmount();
   });
 
-  it("does not let a paginated success settle a cancelled dirty first-page refresh", async () => {
-    const cachedEntry = entry({ eventId: "cached-event" });
-    const olderEntry = entry({ eventId: "older-event", createdAt: "2026-09-21T10:00:00.000Z" });
-    const hintedEntry = entry({ eventId: "hinted-event", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"pagination","viewers":1}' });
-    let firstPageRequests = 0;
-    const response = (entries: PanelEventEntry[], nextCursor: string | null = null) => new Response(JSON.stringify({ entries, nextCursor }), {
+  it("appends loaded older event rows without moving the frozen rows", async () => {
+    const newest = entry({ eventId: "page-newest", createdAt: "2026-09-22T10:00:00.000Z" });
+    const older = entry({ eventId: "page-older", createdAt: "2026-09-22T09:00:00.000Z" });
+    const oldest = entry({
+      eventId: "page-oldest",
+      createdAt: "2026-09-22T08:00:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"oldestpage","viewers":1}',
+    });
+    const response = (entries: readonly PanelEventEntry[], nextCursor: string | null) => new Response(JSON.stringify({ entries, nextCursor }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
-      if (requestUrl(input).searchParams.has("cursor")) return Promise.resolve(response([olderEntry]));
-      firstPageRequests += 1;
-      if (firstPageRequests === 1) return Promise.resolve(response([cachedEntry], "cursor-1"));
-      if (firstPageRequests === 2) return new Promise<Response>(() => undefined);
-      return Promise.resolve(response([hintedEntry, cachedEntry], "cursor-1"));
-    });
+    const fetcher = vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      requestUrl(input).searchParams.get("cursor") === "cursor-2"
+        ? response([oldest], null)
+        : requestUrl(input).searchParams.get("cursor") === "cursor-1"
+          ? response([older], "cursor-2")
+          : response([newest], "cursor-1"),
+    ));
     vi.stubGlobal("fetch", fetcher);
-    vi.stubGlobal("WebSocket", TestEventsWebSocket);
     const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
     const rendered = renderWithQuery(
       <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
@@ -501,79 +594,80 @@ describe("EventsPage failure cause icon", () => {
       {
         gcTime: 600_000,
         staleTime: 30_000,
-        initialData: [{ queryKey, data: { pages: [{ entries: [cachedEntry], nextCursor: "cursor-1" }], pageParams: [null] } }],
+        initialData: [{
+          queryKey,
+          data: {
+            pages: [{ entries: [newest], nextCursor: "cursor-1" }, { entries: [older], nextCursor: "cursor-2" }],
+            pageParams: [null, "cursor-1"],
+          },
+        }],
       },
     );
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
-    fetcher.mockClear();
-    const socket = TestEventsWebSocket.instances[0];
-    if (socket === undefined) throw new Error("Realtime socket was not created.");
-    socket.open();
-    emitEventHint(socket, "cancelled-pagination-hint", hintedEntry);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
-    await act(async () => { await rendered.queryClient.cancelQueries({ queryKey, exact: true }); });
-    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
-    expect(screen.getByRole("button", { name: "Ältere Ereignisse laden" })).toBeEnabled();
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    const before = Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent);
 
     fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
-    expect(requestUrl(fetcher.mock.calls[1]?.[0] as RequestInfo | URL).searchParams.get("cursor")).toBe("cursor-1");
-    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
-
-    act(() => { window.dispatchEvent(new Event("scroll")); });
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(4));
-    expect(requestUrl(fetcher.mock.calls[2]?.[0] as RequestInfo | URL).searchParams.has("cursor")).toBe(false);
-    expect(requestUrl(fetcher.mock.calls[3]?.[0] as RequestInfo | URL).searchParams.get("cursor")).toBe("cursor-1");
-    expect(await screen.findByText(/Raid von pagination/u)).toBeVisible();
+    expect(await screen.findByText(/Raid von oldestpage/u)).toBeInTheDocument();
+    const after = Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent);
+    expect(after.slice(0, before.length)).toEqual(before);
+    expect(after).toHaveLength(before.length + 1);
     rendered.unmount();
   });
 
-  it("skips the batch refresh when a retry started after the hint already covered it", async () => {
-    const cachedEntry = entry({ eventId: "cached-event" });
-    const hintedEntry = entry({ eventId: "hinted-event", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"retry","viewers":1}' });
-    let initialRequest = true;
-    const response = (entries: PanelEventEntry[]) => new Response(JSON.stringify({ entries, nextCursor: null }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-    const fetcher = vi.fn((): Promise<Response> => {
-      if (initialRequest) {
-        initialRequest = false;
-        return Promise.resolve(response([cachedEntry]));
-      }
-      if (fetcher.mock.calls.length === 1) return Promise.reject(new Error("temporary network failure"));
-      return Promise.resolve(response([hintedEntry, cachedEntry]));
+  it("shows a filter's refreshed cached data when returning to that filter while scrolled away", async () => {
+    const filtersA = { ...emptyEventFilter, module: "channel_events" };
+    const filtersB = { ...emptyEventFilter, module: "host" };
+    const oldRaid = entry({ eventId: "roundtrip-old", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"oldroundtrip","viewers":1}' });
+    const newRaid = entry({ eventId: "roundtrip-new", createdAt: "2026-09-22T10:01:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"newroundtrip","viewers":2}' });
+    const hostEntry = entry({ eventId: "roundtrip-host" });
+    let serverHasNewRaid = false;
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const module = requestUrl(input).searchParams.get("module");
+      const entries = module === "channel_events"
+        ? serverHasNewRaid ? [newRaid, oldRaid] : [oldRaid]
+        : [hostEntry];
+      return Promise.resolve(new Response(JSON.stringify({ entries, nextCursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
     });
     vi.stubGlobal("fetch", fetcher);
     vi.stubGlobal("WebSocket", TestEventsWebSocket);
-    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
-    const rendered = renderWithQuery(
-      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
-      undefined,
-      {
-        gcTime: 600_000,
-        staleTime: 30_000,
-        initialData: [{ queryKey, data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] } }],
-      },
-    );
+    function Harness() {
+      const [showHost, setShowHost] = useState(false);
+      const filters = showHost ? filtersB : filtersA;
+      return <>
+        <button type="button" onClick={() => { setShowHost(!showHost); }}>Toggle filter</button>
+        <EventsPage channelId="kanal-a" filters={filters} moduleOptions={[]} onFiltersChange={() => undefined} />
+      </>;
+    }
+    const rendered = renderWithQuery(<UiProvider><Harness /></UiProvider>, undefined, {
+      gcTime: 600_000,
+      staleTime: 30_000,
+      initialData: [
+        { queryKey: dashboardDataKeys.events("kanal-a", filtersA), data: { pages: [{ entries: [oldRaid], nextCursor: null }], pageParams: [null] } },
+        { queryKey: dashboardDataKeys.events("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
+      ],
+    });
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
-    fetcher.mockClear();
-    const query = rendered.queryClient.getQueryCache().find({ queryKey });
-    if (query === undefined) throw new Error("Events query was not created.");
-    query.setOptions({ ...query.options, retry: 1, retryDelay: 20 });
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    TestEventsWebSocket.instances[0]?.open();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    serverHasNewRaid = true;
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
-    socket.open();
+    emitEventHint(socket, "roundtrip-hint", newRaid);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
 
-    void rendered.queryClient.invalidateQueries({ queryKey, exact: true });
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
-    emitEventHint(socket, "retry-covered-hint", hintedEntry);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
-    await new Promise((resolve) => setTimeout(resolve, 180));
-
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(await screen.findByText(/Raid von retry/u)).toBeVisible();
+    expect(await screen.findByText(/Raid von newroundtrip/u)).toBeVisible();
+    expect(screen.queryByText("Chat-Nachricht fehlgeschlagen")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /neue Ereignisse/u })).not.toBeInTheDocument();
     rendered.unmount();
   });
 

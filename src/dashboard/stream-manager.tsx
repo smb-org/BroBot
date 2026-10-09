@@ -273,9 +273,8 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
       notify({ tone: "error", message: texts.events.connectionLost });
     }
   }, [channelId, texts.events.connectionLost]);
-  const atBeginning = useCallback((): boolean => true, []);
   const scrollToBeginning = useCallback((): void => undefined, []);
-  useRealtimeEventFeed({ channelId, filters: emptyEventFilter, atBeginning, refresh: () => { void refreshFirstPage(); }, scrollToBeginning });
+  useRealtimeEventFeed({ channelId, filters: emptyEventFilter, refresh: () => { void refreshFirstPage(); }, scrollToBeginning });
 
   useEffect(() => {
     const controller = new AbortController();
