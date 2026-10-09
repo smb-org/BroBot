@@ -279,7 +279,7 @@ describe("EventsPage failure cause icon", () => {
     rendered.unmount();
   });
 
-  it("drops pending new-event notices when the filter changes and does not restore them on return", async () => {
+  it("drops pending new-event notices when the filter changes and does not restore them on return", () => {
     vi.stubGlobal("WebSocket", TestEventsWebSocket);
     const filtersA = { ...emptyEventFilter, module: "channel_events" };
     const filtersB = { ...emptyEventFilter, module: "other_module" };
