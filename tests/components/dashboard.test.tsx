@@ -789,7 +789,7 @@ describe("Dashboard skeleton", () => {
     expect(eventRequests).toBe(2);
   });
 
-  it("refreshes page one after loading older events without reloading the tail", async () => {
+  it("refreshes the infinite event query after loading older events", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let releaseSecondPage: ((response: Response) => void) | undefined;
     let firstPageRequests = 0;
@@ -812,14 +812,19 @@ describe("Dashboard skeleton", () => {
       entries: [{ eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null }],
       nextCursor: null,
     };
+    let cursorRequests = 0;
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
       if (url.pathname === "/api/channels/kanal-a/events") {
-        return url.searchParams.has("cursor")
-          ? new Promise<Response>((resolve) => { releaseSecondPage = resolve; })
-          : Promise.resolve(jsonResponse({
+        if (url.searchParams.has("cursor")) {
+          cursorRequests += 1;
+          return cursorRequests === 1
+            ? new Promise<Response>((resolve) => { releaseSecondPage = resolve; })
+            : Promise.resolve(jsonResponse(secondPage));
+        }
+        return Promise.resolve(jsonResponse({
             ...firstPage,
             entries: firstPageRequests++ === 0 ? firstPage.entries : [liveEntry, ...firstPage.entries],
           }));
@@ -857,8 +862,9 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText("alt")).toBeInTheDocument();
     await waitFor(() => {
       const requests = fetcher.mock.calls.map(([input]) => requestUrl(input)).filter((url) => url.pathname.endsWith("/events"));
-      expect(requests).toHaveLength(3);
+      expect(requests).toHaveLength(4);
       expect(requests[2]?.searchParams.has("cursor")).toBe(false);
+      expect(requests[3]?.searchParams.get("cursor")).toBe("cursor-1");
     });
   });
 
@@ -3028,6 +3034,27 @@ describe("Dashboard skeleton", () => {
     });
   });
 
+  it("offers a Retry action after the initial System query fails", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let systemRequests = 0;
+    const fetcher = stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/system") {
+        systemRequests += 1;
+        return systemRequests === 1
+          ? jsonResponse({ error: "internal_error" }, 500)
+          : jsonResponse(system);
+      }
+    }, [channel]);
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Erneut versuchen" }));
+    await waitFor(() => expect(document.querySelector(".ui-load-state[data-status='success']")).toBeInTheDocument());
+    expect(systemRequests).toBe(2);
+    expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/system")).toHaveLength(2);
+  });
+
   it("updates stored stream status from the panel realtime socket", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
@@ -3795,6 +3822,45 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(screen.getAllByText(/Letzte Prüfung:/).length).toBeGreaterThanOrEqual(1));
     expect(screen.getByRole("article", { name: "Moderatorstatus" })).toHaveAttribute("data-status", "healthy");
     expect(screen.getAllByText(/Letzte Prüfung:/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("resets a moderator check when leaving and returning to its route", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      role: "broadcaster",
+      moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
+    };
+    let resolveCheck!: (response: Response) => void;
+    const check = new Promise<Response>((resolve) => { resolveCheck = resolve; });
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/system") return Promise.resolve(jsonResponse(system));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/moderator-status") return check;
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "Moderatorstatus prüfen" }));
+    expect(await screen.findByRole("button", { name: "Prüfung läuft …" })).toBeDisabled();
+
+    navigateToPath("/channels/kanal-a/system");
+    await screen.findByRole("heading", { name: "System", level: 1 });
+    resolveCheck(jsonResponse({
+      moderator: { isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null },
+      nextAllowedAt: "2026-09-18T04:05:00.000Z",
+    }));
+    await act(async () => { await new Promise<void>((resolve) => { window.setTimeout(resolve, 0); }); });
+
+    navigateToPath("/channels/kanal-a");
+    const checkButton = await screen.findByRole("button", { name: /Moderatorstatus prüfen|Prüfung läuft/u });
+    expect(checkButton).toBeEnabled();
+    expect(checkButton).toHaveAccessibleName("Moderatorstatus prüfen");
   });
 
   it("reactivates the moderator check after the lockout period expires", async () => {

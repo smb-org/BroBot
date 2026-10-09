@@ -148,6 +148,8 @@ export type { EmptyStateProps, EmptyStateAction } from "./EmptyState";
 
 export { ErrorPanel } from "./ErrorPanel";
 export type { ErrorPanelProps, ErrorPanelAction } from "./ErrorPanel";
+export { QueryErrorState } from "./QueryErrorState";
+export type { QueryErrorStateProps } from "./QueryErrorState";
 
 export { BlockingState } from "./BlockingState";
 export type { BlockingStateProps, BlockingStateAction } from "./BlockingState";

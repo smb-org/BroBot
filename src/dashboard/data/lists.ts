@@ -9,6 +9,8 @@ export const useMembersQuery = (channelId: string) => useInfiniteQuery({
   initialPageParam: null as string | null,
   queryFn: ({ pageParam, signal }) => fetchMembers(channelId, pageParam, signal),
   getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  placeholderData: (previousData, previousQuery) =>
+    previousQuery?.queryKey[1] === channelId ? previousData : undefined,
   refetchOnWindowFocus: false,
 });
 
@@ -17,6 +19,8 @@ export const useAuditQuery = (channelId: string, filters: PanelAuditFilters) => 
   initialPageParam: null as string | null,
   queryFn: ({ pageParam, signal }) => fetchAuditLog(channelId, pageParam, signal, filters),
   getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  placeholderData: (previousData, previousQuery) =>
+    previousQuery?.queryKey[1] === channelId ? previousData : undefined,
   refetchOnWindowFocus: false,
 });
 
@@ -25,6 +29,8 @@ export const useEventsQuery = (channelId: string, filters: PanelEventFilters) =>
   initialPageParam: null as string | null,
   queryFn: ({ pageParam, signal }) => fetchEvents(channelId, pageParam, signal, filters),
   getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  placeholderData: (previousData, previousQuery) =>
+    previousQuery?.queryKey[1] === channelId ? previousData : undefined,
   refetchOnWindowFocus: false,
 });
 

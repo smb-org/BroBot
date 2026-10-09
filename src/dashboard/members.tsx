@@ -8,7 +8,7 @@ import { apiErrorText, dashboardCommonTexts, dashboardTexts, formatDate } from "
 import { ModuleHeading } from "./module-panels";
 import { MemberAvatar } from "./member-avatar";
 import { MemberGrantEditor } from "./member-grant-editor";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, useDraftGuard, useInspectorSelection } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, QueryErrorState, useDraftGuard, useInspectorSelection } from "./ui";
 import { dashboardDataKeys } from "./data/keys";
 import { useMembersQuery } from "./data/lists";
 import {
@@ -281,7 +281,10 @@ const MemberInspector = ({
   );
 };
 
-export const MembersPage = ({
+export const MembersPage = (properties: MembersPageProperties): ReactElement =>
+  <MembersPageContent key={properties.channelId} {...properties} />;
+
+const MembersPageContent = ({
   channelId,
   ownRole,
   onAuthenticationRequired,
@@ -317,7 +320,7 @@ export const MembersPage = ({
   const [grantOpen, setGrantOpen] = useState(false);
   const grantButtonRef = useRef<HTMLButtonElement | null>(null);
   const [roleDraft, setRoleDraft] = useState<{ userId: string; role: ChannelRole } | null>(null);
-  const { selectedKey: selectedUserId, select: selectMember, rowRef, close: closeSelection } = useInspectorSelection<string>();
+  const { selectedKey: selectedUserId, select: selectMember, rowRef, close: closeSelection } = useInspectorSelection<string>(channelId);
 
   useEffect(() => {
     if (selectedUserId !== null && !members.some((member) => member.userId === selectedUserId)) closeSelection();
@@ -421,7 +424,12 @@ export const MembersPage = ({
                 minHeight={320}
                 loading={<MemberListSkeleton />}
                 empty={members.length > 0 ? <p className="empty-state">{dashboardCommonTexts().noMatches}</p> : <MemberList members={members} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
-                error={<MemberListSkeleton />}
+                error={<QueryErrorState
+                  title={dashboardTexts().errors.dataLoadFailed}
+                  reason={error ?? texts.load}
+                  retryLabel={dashboardCommonTexts().retry}
+                  onRetry={() => { void membersQuery.refetch(); }}
+                />}
               >{members.length === 0 ? null : <MemberList members={visibleMembers} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>
               </div>
               {members.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={members.length} loadedLabel={texts.loaded}>

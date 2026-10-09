@@ -6,7 +6,7 @@ import { MODULES } from "../../modules/registry";
 import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
 import { ModuleHeading } from "../module-panels";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, QueryErrorState, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import { PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useAuditQuery } from "../data/lists";
@@ -146,6 +146,7 @@ interface AuditPageProperties {
 export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProperties): ReactElement => {
   const query = useAuditQuery(channelId, filters);
   const queryKey = dashboardDataKeys.audit(channelId, filters);
+  const identityKey = JSON.stringify(queryKey);
   useEffect(() => {
     if (!query.isError) return;
     const fallback = dashboardTexts().errors.dataLoadFailed;
@@ -159,7 +160,7 @@ export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProp
     ? apiErrorText(query.error.code, dashboardTexts().errors.dataLoadFailed)
     : query.isError ? dashboardTexts().errors.dataLoadFailed : null;
   return <AuditPageContent
-    key={JSON.stringify(queryKey)}
+    identityKey={identityKey}
     entries={entries}
     nextCursor={query.isPlaceholderData ? null : nextCursor}
     filters={filters}
@@ -169,10 +170,12 @@ export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProp
     error={error}
     loadingNextPage={query.isFetchingNextPage}
     onNextPage={() => { void query.fetchNextPage(); }}
+    onRetry={() => { void query.refetch(); }}
   />;
 };
 
-const AuditPageContent = ({ entries, nextCursor, filters, onFiltersChange, loading, fetching, error, onNextPage, loadingNextPage }: {
+const AuditPageContent = ({ identityKey, entries, nextCursor, filters, onFiltersChange, loading, fetching, error, onNextPage, onRetry, loadingNextPage }: {
+  identityKey: string;
   entries: readonly PanelAuditEntry[];
   nextCursor: string | null;
   filters: PanelAuditFilters;
@@ -181,10 +184,11 @@ const AuditPageContent = ({ entries, nextCursor, filters, onFiltersChange, loadi
   fetching: boolean;
   error: string | null;
   onNextPage: () => void;
+  onRetry: () => void;
   loadingNextPage: boolean;
 }): ReactElement => {
   const texts = dashboardTexts();
-  const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>();
+  const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>(identityKey);
   const selectedAudit = entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
   const moduleCatalog = useModuleFieldCatalog(selectedAudit);
   const selectedDiffRows = selectedAudit === null ? [] : auditDiffRows(selectedAudit.before, selectedAudit.after);
@@ -214,10 +218,10 @@ const AuditPageContent = ({ entries, nextCursor, filters, onFiltersChange, loadi
               empty={filterActive
                 ? <EmptyState title={texts.audit.noMatches} description={texts.audit.activeFilters} action={{ label: texts.audit.resetFilters, onClick: () => { onFiltersChange(emptyAuditFilter); } }} />
                 : <p className="empty-state">{texts.audit.empty}</p>}
-              error={<EmptyState title={texts.audit.loadError} description={error ?? texts.audit.load} />}
+              error={<QueryErrorState title={texts.audit.loadError} reason={error ?? texts.audit.load} retryLabel={dashboardCommonTexts().retry} onRetry={onRetry} />}
             >
               {entries.length > 0 ? <>
-              <div className={fetching ? "stale" : undefined} aria-busy={fetching}>
+              <div key={identityKey} className={fetching ? "stale" : undefined} aria-busy={fetching}>
                 {dayGroups.map((day) => (
                   <section key={day.key} className="event-day">
                     <h3 className="event-day__heading">{day.label}</h3>

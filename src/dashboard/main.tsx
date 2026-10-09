@@ -48,7 +48,7 @@ import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, QueryErrorState, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
@@ -1040,23 +1040,88 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
   );
 };
 
-interface SystemPageProperties {
-  system: PanelSystemResponse | undefined;
-  error: boolean;
-  loadedAt: number | undefined;
+interface ChannelOverviewRouteProperties {
+  routeKey: string;
+  overview: PanelChannelOverview;
+  loadedAt?: number | undefined;
+  onNavigate: (route: DashboardRoute) => void;
+  modules: PanelModuleState[];
+  modulesLoaded: boolean;
+  channelsLoadedAt: number;
+  onAuthenticationRequired: () => void;
+  onLocationChanged: (channelId: string, location: NonNullable<PanelChannelOverview["location"]> | null) => void;
 }
 
-const SystemPage = ({ system, error, loadedAt }: SystemPageProperties): ReactElement => {
+const ChannelOverviewRoute = ({ routeKey, overview, loadedAt, onNavigate, modules, modulesLoaded, channelsLoadedAt, onAuthenticationRequired, onLocationChanged }: ChannelOverviewRouteProperties): ReactElement => {
+  const queryClient = useQueryClient();
+  const [moderatorCheck, setModeratorCheck] = useState<ModeratorCheckState>(idleModeratorCheck);
+  const generationRef = useRef(0);
+  useLayoutEffect(() => {
+    generationRef.current += 1;
+    const generation = generationRef.current;
+    return () => {
+      if (generationRef.current === generation) generationRef.current += 1;
+    };
+  }, [routeKey]);
+
+  const handleModeratorStatusCheck = async (): Promise<void> => {
+    const channelId = overview.channelId;
+    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "overview" });
+    const generation = generationRef.current;
+    setModeratorCheck({ status: "loading", error: null, nextAllowedAt: null });
+    try {
+      const response = await refreshModeratorStatus(channelId);
+      if (generationRef.current !== generation || window.location.pathname !== routePath) return;
+      queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
+        current?.channelId !== channelId ? current : mergeModeratorStatus(current, response.moderator),
+      { ...(loadedAt === undefined ? {} : { updatedAt: loadedAt }) });
+      queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
+        ...current,
+        channels: current.channels.map((channel) => channel.channelId !== channelId ? channel : mergeModeratorStatus(channel, response.moderator)),
+      }, { updatedAt: channelsLoadedAt });
+      setModeratorCheck({ status: "idle", error: null, nextAllowedAt: response.nextAllowedAt });
+    } catch (error: unknown) {
+      if (generationRef.current !== generation || window.location.pathname !== routePath) return;
+      setModeratorCheck({ status: "error", error: errorMessage(error), nextAllowedAt: nextAllowedAtFromError(error) });
+      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
+    }
+  };
+
+  return <ChannelOverviewPage
+    overview={overview}
+    loadedAt={loadedAt}
+    moderatorCheck={moderatorCheck}
+    onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }}
+    onNavigate={onNavigate}
+    modules={modules}
+    modulesLoaded={modulesLoaded}
+    onLocationChanged={onLocationChanged}
+  />;
+};
+
+interface SystemPageProperties {
+  system: PanelSystemResponse | undefined;
+  error: string | null;
+  loadedAt: number | undefined;
+  onRetry: () => void;
+}
+
+const SystemPage = ({ system, error, loadedAt, onRetry }: SystemPageProperties): ReactElement => {
   const texts = dashboardTexts();
   return (
     <>
       <ModuleHeading kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
       <UiLoadState
-        status={system !== undefined ? "success" : error ? "error" : "loading"}
+        status={system !== undefined ? "success" : error !== null ? "error" : "loading"}
         minHeight={720}
         loading={<Skeleton rows={8} height={58} />}
         empty={<Skeleton rows={8} height={58} />}
-        error={<Skeleton rows={8} height={58} />}
+        error={<QueryErrorState
+          title={texts.errors.dataLoadFailed}
+          reason={error ?? texts.system.loadState}
+          retryLabel={dashboardCommonTexts().retry}
+          onRetry={onRetry}
+        />}
       >
         {system === undefined ? null : <>
           <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
@@ -1160,9 +1225,6 @@ export const DashboardApp = (): ReactElement => {
   const systemQuery = useSystemQuery(systemChannelId ?? "", !authenticationRequired && systemChannelId !== null);
   const [, setFreshnessTick] = useState(0);
   const routeKey = dashboardRoutePath(route);
-  const [moderatorCheckState, setModeratorCheckState] = useState<{ routeKey: string; value: ModeratorCheckState }>(() => ({ routeKey, value: idleModeratorCheck() }));
-  const moderatorCheck = moderatorCheckState.routeKey === routeKey ? moderatorCheckState.value : idleModeratorCheck();
-  const setModeratorCheck = (value: ModeratorCheckState): void => { setModeratorCheckState({ routeKey, value }); };
   const [loggingOut, setLoggingOut] = useState(false);
   const [headerModuleBusyKeys, setHeaderModuleBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
   const headerModuleBusy = route.kind === "module" && headerModuleBusyKeys.has(`${route.channelId}:${route.moduleId}`);
@@ -1243,7 +1305,6 @@ export const DashboardApp = (): ReactElement => {
   const clearProtectedState = (): void => {
     setAuthenticationRequired(true);
     queryClient.clear();
-    setModeratorCheck(idleModeratorCheck());
     navigate({ kind: "overview" });
   };
 
@@ -1259,29 +1320,6 @@ export const DashboardApp = (): ReactElement => {
     if (channel === undefined) return;
     replaceDashboardRoute({ kind: "channel", channelId: channel.channelId, section: "overview" });
   }, [channels.data, channels.status, route.kind]);
-
-  const handleModeratorStatusCheck = async (): Promise<void> => {
-    if (route.kind !== "channel" || route.section !== "overview") return;
-    const channelId = route.channelId;
-    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "overview" });
-    setModeratorCheck({ status: "loading", error: null, nextAllowedAt: null });
-    try {
-      const response = await refreshModeratorStatus(channelId);
-      if (window.location.pathname !== routePath) return;
-      queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
-        current?.channelId !== channelId ? current : mergeModeratorStatus(current, response.moderator),
-      { updatedAt: overviewQuery.dataUpdatedAt });
-      queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
-        ...current,
-        channels: current.channels.map((channel) => channel.channelId !== channelId ? channel : mergeModeratorStatus(channel, response.moderator)),
-      }, { updatedAt: channelsQuery.dataUpdatedAt });
-      setModeratorCheck({ status: "idle", error: null, nextAllowedAt: response.nextAllowedAt });
-    } catch (error: unknown) {
-      if (window.location.pathname !== routePath) return;
-      setModeratorCheck({ status: "error", error: errorMessage(error), nextAllowedAt: nextAllowedAtFromError(error) });
-      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-    }
-  };
 
   const reloadModules = useCallback(async (): Promise<void> => {
     if (route.kind !== "channel" && route.kind !== "module") return;
@@ -1614,15 +1652,26 @@ export const DashboardApp = (): ReactElement => {
           loading={<Skeleton rows={12} height={58} />}
           empty={<Skeleton rows={12} height={58} />}
           error={<Skeleton rows={12} height={58} />}
-        >{overviewMatchesRoute && overview.data !== null && overviewModulesLoaded ? <ChannelOverviewPage key={overview.data.channelId} overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []} modulesLoaded={overviewModulesLoaded} onLocationChanged={(channelId, location) => {
-          queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
-            ...current,
-            channels: current.channels.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),
-          }, { updatedAt: channelsQuery.dataUpdatedAt });
-          queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
-            current?.channelId !== channelId ? current : { ...current, location },
-          { updatedAt: overviewQuery.dataUpdatedAt });
-        }} /> : null}</UiLoadState> : null}
+        >{overviewMatchesRoute && overview.data !== null && overviewModulesLoaded ? <ChannelOverviewRoute
+          key={routeKey}
+          routeKey={routeKey}
+          overview={overview.data}
+          loadedAt={overview.loadedAt}
+          onNavigate={navigate}
+          modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []}
+          modulesLoaded={overviewModulesLoaded}
+          channelsLoadedAt={channelsQuery.dataUpdatedAt}
+          onAuthenticationRequired={clearProtectedState}
+          onLocationChanged={(channelId, location) => {
+            queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
+              ...current,
+              channels: current.channels.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),
+            }, { updatedAt: channelsQuery.dataUpdatedAt });
+            queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
+              current?.channelId !== channelId ? current : { ...current, location },
+            { updatedAt: overviewQuery.dataUpdatedAt });
+          }}
+        /> : null}</UiLoadState> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection({ channelId: route.channelId, moduleId: "text_commands", value: name }); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onOpenOverlay={(overlayId, initialVariable, initialOverlayName) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId, ...(initialVariable === undefined ? {} : { initialVariable }), ...(overlayId === "new" && initialOverlayName !== undefined ? { initialOverlayName } : {}) }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "overlays" && selectedChannel !== null
@@ -1641,7 +1690,13 @@ export const DashboardApp = (): ReactElement => {
           empty={<Skeleton rows={8} height={58} />}
           error={<Skeleton rows={8} height={58} />}
         >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId ? { initialSelection: pendingModuleSelection.value } : {})} /> : null}</UiLoadState> : null}
-        {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage key={route.channelId} system={systemQuery.data} error={systemQuery.isError} loadedAt={systemQuery.dataUpdatedAt > 0 ? systemQuery.dataUpdatedAt : undefined} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage
+          key={route.channelId}
+          system={systemQuery.data}
+          error={systemQuery.isError ? errorMessage(systemQuery.error) : null}
+          loadedAt={systemQuery.dataUpdatedAt > 0 ? systemQuery.dataUpdatedAt : undefined}
+          onRetry={() => { void systemQuery.refetch(); }}
+        /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} channelId={route.channelId} filters={auditFilters} onFiltersChange={updateAuditFilters} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} /> : null}
         <ChannelSpotlight

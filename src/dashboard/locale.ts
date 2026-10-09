@@ -28,6 +28,7 @@ export interface DashboardCommonTexts {
   activeFilters: string;
   of: string;
   reset: string;
+  retry: string;
   loaded: string;
   dismissNotification: string;
   invalidFieldCount: (count: number) => string;
@@ -61,6 +62,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     activeFilters: "Aktive Filter:",
     of: "von",
     reset: "Zurücksetzen",
+    retry: "Erneut versuchen",
     loaded: "geladen",
     dismissNotification: "Benachrichtigung schließen",
     invalidFieldCount: (count) => `${String(count)} ${count === 1 ? "Feld" : "Felder"} fehlerhaft`,
@@ -94,6 +96,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     activeFilters: "Active filters:",
     of: "of",
     reset: "Reset",
+    retry: "Retry",
     loaded: "loaded",
     dismissNotification: "Dismiss notification",
     invalidFieldCount: (count) => `${String(count)} invalid ${count === 1 ? "field" : "fields"}`,

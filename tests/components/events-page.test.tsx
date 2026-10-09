@@ -7,6 +7,7 @@ import { EventsPage } from "../../src/dashboard/events/EventsPage";
 import { emptyEventFilter } from "../../src/dashboard/events/model";
 import type { PanelEventEntry, PanelEventsResponse } from "../../src/panel-contract";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
+import { dashboardAuthenticationRequiredEvent } from "../../src/dashboard/data/events";
 import { renderWithQuery } from "../query-test-utils";
 
 const entry = (overrides: Partial<PanelEventEntry>): PanelEventEntry => ({
@@ -50,9 +51,46 @@ const renderPage = (entries: readonly PanelEventEntry[], filters = emptyEventFil
  *  label match on the language-fixed prefix. */
 const causeButtonName = /^(Ursache anzeigen|Show cause):/;
 
+class TestEventsWebSocket {
+  static instances: TestEventsWebSocket[] = [];
+  private readonly listeners = new Map<string, Set<(event: Event) => void>>();
+
+  constructor() {
+    TestEventsWebSocket.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    if (typeof listener !== "function") return;
+    const callbacks = this.listeners.get(type) ?? new Set<(event: Event) => void>();
+    callbacks.add(listener);
+    this.listeners.set(type, callbacks);
+  }
+
+  private emit(type: string, event: Event): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+
+  open(): void {
+    this.emit("open", new Event("open"));
+  }
+
+  receive(data: string): void {
+    this.emit("message", new MessageEvent("message", { data }));
+  }
+
+  close(): void {
+    this.emit("close", new CloseEvent("close", { code: 1000, reason: "Leaving test" }));
+  }
+
+  static reset(): void {
+    TestEventsWebSocket.instances = [];
+  }
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  TestEventsWebSocket.reset();
   // `dashboardLanguage()` reads `navigator.language`; reset it to the suite
   // default (`tests/setup.ts`) so an English test doesn't leak into the next.
   Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
@@ -151,6 +189,113 @@ describe("EventsPage failure cause icon", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change filter" }));
     expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
     expect(fetcher).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+
+  it("serializes realtime refreshes with pagination and keeps refreshed events", async () => {
+    const firstEntry = entry({ eventId: "first-page", code: "host.chat.failed" });
+    const liveEntry = entry({
+      eventId: "live-event",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"freshraid","viewers":2}',
+    });
+    const olderEntry = entry({ eventId: "older-page", code: "host.chat.failed", createdAt: "2026-09-21T10:00:00.000Z" });
+    let releaseRefresh: ((response: Response) => void) | undefined;
+    let releaseNextPage: ((response: Response) => void) | undefined;
+    let firstPageRequests = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (url.searchParams.has("cursor")) {
+        return new Promise<Response>((resolve) => { releaseNextPage = resolve; });
+      }
+      firstPageRequests += 1;
+      if (firstPageRequests === 1) {
+        return Promise.resolve(new Response(JSON.stringify({ entries: [firstEntry], nextCursor: "cursor-1" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      return new Promise<Response>((resolve) => { releaseRefresh = resolve; });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+
+    const view = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      { gcTime: 600_000 },
+    );
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "live-event-message",
+      createdAt: liveEntry.createdAt,
+      channelId: "kanal-a",
+      type: "event_log.new",
+      payload: { entries: [{ eventId: liveEntry.eventId, createdAt: liveEntry.createdAt, moduleId: liveEntry.moduleId, code: liveEntry.code, actorUserId: null }] },
+    }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+
+    const refreshRows = view.container.querySelector(".event-feed [aria-busy]");
+    const refreshBusyState = refreshRows?.getAttribute("aria-busy");
+    fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
+    const paginationStarted = releaseNextPage !== undefined;
+    releaseRefresh?.(new Response(JSON.stringify({ entries: [liveEntry, firstEntry], nextCursor: "cursor-1" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    if (paginationStarted) {
+      releaseNextPage?.(new Response(JSON.stringify({ entries: [olderEntry], nextCursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
+
+    await waitFor(() => expect(screen.getByText("Raid von freshraid mit 2 Zuschauern")).toBeVisible());
+    expect(refreshBusyState).toBe("true");
+    view.unmount();
+  });
+
+  it("dispatches the shared authentication-required event when a realtime refresh returns 401", async () => {
+    const initialEntry = entry({ eventId: "cached-event" });
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (url.pathname.endsWith("/events") && fetcher.mock.calls.length === 1) {
+        return Promise.resolve(new Response(JSON.stringify({ entries: [initialEntry], nextCursor: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ error: "session_expired" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const onAuthenticationRequired = vi.fn();
+    window.addEventListener(dashboardAuthenticationRequiredEvent, onAuthenticationRequired);
+
+    const view = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+    );
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    TestEventsWebSocket.instances[0]?.open();
+    TestEventsWebSocket.instances[0]?.receive(JSON.stringify({
+      version: 1,
+      id: "expired-event-message",
+      createdAt: "2026-09-22T10:00:00.000Z",
+      channelId: "kanal-a",
+      type: "event_log.new",
+      payload: { entries: [{ eventId: "new-event", createdAt: "2026-09-22T10:00:00.000Z", moduleId: "host", code: "host.chat.failed", actorUserId: null }] },
+    }));
+
+    await waitFor(() => expect(onAuthenticationRequired).toHaveBeenCalledTimes(1));
+    window.removeEventListener(dashboardAuthenticationRequiredEvent, onAuthenticationRequired);
     view.unmount();
   });
 

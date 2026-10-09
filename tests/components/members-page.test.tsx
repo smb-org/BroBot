@@ -71,6 +71,25 @@ describe("members list permissions", () => {
     });
   });
 
+  it("shows a Retry action after the initial member query fails", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "internal_error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ members: [member()], nextCursor: null, broadcasterCount: 1, viewerUserId: "viewer" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    renderWithQuery(<UiProvider><MembersPage channelId="channel-a" ownRole="manager" onAuthenticationRequired={() => undefined} /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Erneut versuchen" }));
+    expect(await screen.findByText("Chat helper")).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("filters loaded members immediately and explains the protected last broadcaster", () => {
     renderMembers("manager", {
       members: [member({ userId: "broadcaster", login: "owner", displayName: "Channel owner", role: "broadcaster" }), member()],

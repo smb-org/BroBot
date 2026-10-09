@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type RefCallback } from "react";
-import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
-
-import type { PanelEventEntry, PanelEventFilters, PanelEventsResponse, PanelModuleState } from "../../panel-contract";
+import type { PanelEventEntry, PanelEventFilters, PanelModuleState } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatClockTime, formatNumber, formatTimestamp } from "../locale";
 import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedState, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
-import { fetchEvents, PanelApiError } from "../api";
+import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, QueryErrorState, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
+import { PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useEventsQuery } from "../data/lists";
 import {
@@ -240,46 +238,38 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   onFiltersChange: (filters: PanelEventFilters) => void;
 }): ReactElement => {
   const query = useEventsQuery(channelId, filters);
-  const queryClient = useQueryClient();
   const queryKey = useMemo(() => dashboardDataKeys.events(channelId, filters), [channelId, filters]);
-  const refreshGeneration = useRef(0);
-  const refreshController = useRef<AbortController | null>(null);
-  useEffect(() => () => {
-    refreshGeneration.current += 1;
-    refreshController.current?.abort();
-  }, []);
-  const refreshFirstPage = useCallback(async (): Promise<void> => {
-    const queryFilter = { queryKey, exact: true } as const;
-    const generation = refreshGeneration.current + 1;
-    refreshGeneration.current = generation;
-    refreshController.current?.abort();
-    const controller = new AbortController();
-    refreshController.current = controller;
-    await queryClient.cancelQueries(queryFilter);
-    if (refreshGeneration.current !== generation) return;
-    try {
-      const response = await fetchEvents(channelId, null, controller.signal, filters);
-      if (refreshGeneration.current !== generation) return;
-      queryClient.setQueryData<InfiniteData<PanelEventsResponse, string | null>>(queryKey, (current) => {
-        const firstPage = current?.pages[0];
-        if (current === undefined) return { pages: [response], pageParams: [null] };
-        if (firstPage === undefined) return current;
-        return {
-          ...current,
-          pages: [{ ...firstPage, entries: mergeEventEntries(firstPage.entries, response.entries) }, ...current.pages.slice(1)],
-        };
-      });
-    } catch (error: unknown) {
-      if (refreshGeneration.current !== generation || (error instanceof DOMException && error.name === "AbortError")) return;
-      const fallback = dashboardTexts().errors.dataLoadFailed;
-      const message = error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
-      notify({ tone: "error", message });
-      if (queryClient.getQueryData(queryKey) === undefined) void queryClient.invalidateQueries(queryFilter);
-      throw error;
-    } finally {
-      if (refreshController.current === controller) refreshController.current = null;
-    }
-  }, [channelId, filters, queryClient, queryKey]);
+  const identityKey = JSON.stringify(queryKey);
+  const paginationRequest = useRef<{ identityKey: string; promise: Promise<unknown> } | null>(null);
+  const refreshRequest = useRef<{ identityKey: string; promise: Promise<void> } | null>(null);
+  const refreshFirstPage = useCallback((): Promise<void> => {
+    const activeRefresh = refreshRequest.current;
+    if (activeRefresh?.identityKey === identityKey) return activeRefresh.promise;
+    const refresh = (async (): Promise<void> => {
+      const activePagination = paginationRequest.current;
+      if (activePagination?.identityKey === identityKey) await activePagination.promise.catch(() => undefined);
+      const result = await query.refetch({ cancelRefetch: false, throwOnError: true });
+      if (result.isError) throw result.error;
+    })();
+    const request = { identityKey, promise: refresh };
+    refreshRequest.current = request;
+    void refresh.then(
+      () => { if (refreshRequest.current === request) refreshRequest.current = null; },
+      () => { if (refreshRequest.current === request) refreshRequest.current = null; },
+    );
+    return refresh;
+  }, [identityKey, query]);
+  const loadNextPage = useCallback((): void => {
+    if (query.isFetching || query.isPlaceholderData || !query.hasNextPage ||
+        refreshRequest.current?.identityKey === identityKey || paginationRequest.current?.identityKey === identityKey) return;
+    const promise = query.fetchNextPage({ cancelRefetch: false });
+    const request = { identityKey, promise };
+    paginationRequest.current = request;
+    void promise.then(
+      () => { if (paginationRequest.current === request) paginationRequest.current = null; },
+      () => { if (paginationRequest.current === request) paginationRequest.current = null; },
+    );
+  }, [identityKey, query]);
   useEffect(() => {
     if (!query.isError) return;
     const fallback = dashboardTexts().errors.dataLoadFailed;
@@ -293,7 +283,7 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     ? apiErrorText(query.error.code, dashboardTexts().errors.dataLoadFailed)
     : query.isError ? dashboardTexts().errors.dataLoadFailed : null;
   return <EventsPageContent
-    identityKey={JSON.stringify(queryKey)}
+    identityKey={identityKey}
     channelId={channelId}
     filters={filters}
     moduleOptions={moduleOptions}
@@ -305,7 +295,7 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     error={error}
     loadingNextPage={query.isFetchingNextPage}
     onRefreshFirstPage={refreshFirstPage}
-    onNextPage={() => { void query.fetchNextPage(); }}
+    onNextPage={loadNextPage}
   />;
 };
 
@@ -434,10 +424,11 @@ const EventsPageFilterState = ({
                   action={{ label: texts.events.resetFilters, onClick: () => { onFiltersChange(emptyEventFilter); } }}
                 />
               ) : <p className="empty-state">{texts.events.none}</p>}
-              error={<EmptyState
+              error={<QueryErrorState
                 title={texts.events.connectionLost}
-                description={error ?? texts.events.load}
-                action={{ label: texts.events.retry, onClick: () => { void onRefreshFirstPage().catch(() => undefined); } }}
+                reason={error ?? texts.events.load}
+                retryLabel={dashboardCommonTexts().retry}
+                onRetry={() => { void onRefreshFirstPage().catch(() => undefined); }}
               />}
             >
               <>
