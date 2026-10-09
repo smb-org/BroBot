@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MembersPage } from "../../src/dashboard/members";
@@ -87,6 +87,51 @@ describe("members list permissions", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Erneut versuchen" }));
     expect(await screen.findByText("Chat helper")).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps cached members visible and offers Retry after a background failure", async () => {
+    const cachedMember = member();
+    const refreshedMember = member({ userId: "operator-2", displayName: "New helper" });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "internal_error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ members: [refreshedMember], nextCursor: null, broadcasterCount: 1, viewerUserId: "viewer" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = renderWithQuery(
+      <UiProvider><MembersPage channelId="channel-a" ownRole="manager" onAuthenticationRequired={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{
+          queryKey: dashboardDataKeys.members("channel-a"),
+          data: { pages: [{ members: [cachedMember], nextCursor: null, broadcasterCount: 1, viewerUserId: "viewer" }], pageParams: [null] },
+        }],
+      },
+    );
+
+    expect(screen.getByText("Chat helper")).toBeVisible();
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.members("channel-a"), exact: true });
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(rendered.queryClient.getQueryState(dashboardDataKeys.members("channel-a"))?.status).toBe("error");
+    expect(screen.getByText("Chat helper")).toBeVisible();
+    await waitFor(() => expect(rendered.container.querySelector(".list-toolbar__status")?.textContent).toContain("Erneut versuchen"));
+    const retry = screen.getByRole("button", { name: "Erneut versuchen" });
+    expect(retry).toBeVisible();
+    fireEvent.click(retry);
+
+    expect(await screen.findByText("New helper")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Erneut versuchen" })).not.toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 

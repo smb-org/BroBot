@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type RefCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { PanelEventEntry, PanelEventFilters, PanelModuleState } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatClockTime, formatNumber, formatTimestamp } from "../locale";
@@ -76,11 +77,13 @@ const EventFilterBar = ({
   moduleOptions,
   loadedCount,
   onChange,
+  queryError,
 }: {
   filters: PanelEventFilters;
   moduleOptions: readonly PanelModuleState[];
   loadedCount: number;
   onChange: (filters: PanelEventFilters) => void;
+  queryError?: { message: string; retryLabel: string; onRetry: () => void };
 }): ReactElement => {
   const texts = dashboardTexts();
   const [personDraft, setPersonDraft] = useState(filters.person ?? "");
@@ -176,6 +179,7 @@ const EventFilterBar = ({
       />
     </>}
     usage={{ count: loadedCount, loaded: true, copy: { countSuffix: "", filteredInfix: common.of, filteredSuffix: "", limitInfix: common.of, limitSuffix: "", loadedSuffix: common.loaded } }}
+    {...(queryError === undefined ? {} : { queryError })}
     {...(activeFilter.length === 0 ? {} : { activeFilters: activeFilter.join(" · "), activeFiltersLabel: texts.events.activeFilters, resetLabel: texts.events.resetFilters, onReset: () => { setPersonDraft(""); onChange(emptyEventFilter); } })}
   />;
 };
@@ -238,38 +242,16 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   onFiltersChange: (filters: PanelEventFilters) => void;
 }): ReactElement => {
   const query = useEventsQuery(channelId, filters);
+  const queryClient = useQueryClient();
   const queryKey = useMemo(() => dashboardDataKeys.events(channelId, filters), [channelId, filters]);
   const identityKey = JSON.stringify(queryKey);
-  const paginationRequest = useRef<{ identityKey: string; promise: Promise<unknown> } | null>(null);
-  const refreshRequest = useRef<{ identityKey: string; promise: Promise<void> } | null>(null);
-  const refreshFirstPage = useCallback((): Promise<void> => {
-    const activeRefresh = refreshRequest.current;
-    if (activeRefresh?.identityKey === identityKey) return activeRefresh.promise;
-    const refresh = (async (): Promise<void> => {
-      const activePagination = paginationRequest.current;
-      if (activePagination?.identityKey === identityKey) await activePagination.promise.catch(() => undefined);
-      const result = await query.refetch({ cancelRefetch: false, throwOnError: true });
-      if (result.isError) throw result.error;
-    })();
-    const request = { identityKey, promise: refresh };
-    refreshRequest.current = request;
-    void refresh.then(
-      () => { if (refreshRequest.current === request) refreshRequest.current = null; },
-      () => { if (refreshRequest.current === request) refreshRequest.current = null; },
-    );
-    return refresh;
-  }, [identityKey, query]);
+  const invalidateEvents = useCallback((): void => {
+    void queryClient.invalidateQueries({ queryKey, exact: true });
+  }, [queryClient, queryKey]);
   const loadNextPage = useCallback((): void => {
-    if (query.isFetching || query.isPlaceholderData || !query.hasNextPage ||
-        refreshRequest.current?.identityKey === identityKey || paginationRequest.current?.identityKey === identityKey) return;
-    const promise = query.fetchNextPage({ cancelRefetch: false });
-    const request = { identityKey, promise };
-    paginationRequest.current = request;
-    void promise.then(
-      () => { if (paginationRequest.current === request) paginationRequest.current = null; },
-      () => { if (paginationRequest.current === request) paginationRequest.current = null; },
-    );
-  }, [identityKey, query]);
+    if (query.isFetching || query.isPlaceholderData || !query.hasNextPage) return;
+    void query.fetchNextPage({ cancelRefetch: false });
+  }, [query]);
   useEffect(() => {
     if (!query.isError) return;
     const fallback = dashboardTexts().errors.dataLoadFailed;
@@ -294,7 +276,7 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     fetching={query.isFetching && !query.isFetchingNextPage}
     error={error}
     loadingNextPage={query.isFetchingNextPage}
-    onRefreshFirstPage={refreshFirstPage}
+    onRefresh={invalidateEvents}
     onNextPage={loadNextPage}
   />;
 };
@@ -310,13 +292,13 @@ interface EventsPageContentProperties {
   filters: PanelEventFilters;
   moduleOptions: readonly PanelModuleState[];
   onFiltersChange: (filters: PanelEventFilters) => void;
-  onRefreshFirstPage: () => Promise<void>;
+  onRefresh: () => void;
   onNextPage: () => void;
   loadingNextPage: boolean;
 }
 
 const EventsPageContent = (properties: EventsPageContentProperties): ReactElement => {
-  const { identityKey, channelId, filters, onRefreshFirstPage, ...contentProperties } = properties;
+  const { identityKey, channelId, filters, onRefresh, ...contentProperties } = properties;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const setFeedRef = useCallback<RefCallback<HTMLDivElement>>((feed) => { feedRef.current = feed; }, []);
   const atBeginning = useCallback((): boolean => {
@@ -335,14 +317,14 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
     channelId,
     filters,
     atBeginning,
-    refreshFirstPage: onRefreshFirstPage,
+    refresh: onRefresh,
     scrollToBeginning,
   });
   return <EventsPageFilterState
     {...contentProperties}
     identityKey={identityKey}
     filters={filters}
-    onRefreshFirstPage={onRefreshFirstPage}
+    onRefresh={onRefresh}
     feedRef={setFeedRef}
     realtime={realtime}
   />;
@@ -358,7 +340,7 @@ const EventsPageFilterState = ({
   filters,
   moduleOptions,
   onFiltersChange,
-  onRefreshFirstPage,
+  onRefresh,
   onNextPage,
   loadingNextPage,
   feedRef,
@@ -395,7 +377,17 @@ const EventsPageFilterState = ({
         list={
           <section className="content-section" aria-label={texts.events.log}>
             <div className="section-heading"><h2>{texts.events.log}</h2></div>
-            <EventFilterBar filters={filters} moduleOptions={moduleOptions} loadedCount={eventEntries.length} onChange={onFiltersChange} />
+            <EventFilterBar
+              filters={filters}
+              moduleOptions={moduleOptions}
+              loadedCount={eventEntries.length}
+              onChange={onFiltersChange}
+              {...(error === null || entries.length === 0 ? {} : { queryError: {
+                message: error,
+                retryLabel: dashboardCommonTexts().retry,
+                onRetry: onRefresh,
+              } })}
+            />
             <div className="realtime-feed__notice-slot" data-pending={realtime.pendingCount > 0}>
               {realtime.pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
             </div>
@@ -428,7 +420,7 @@ const EventsPageFilterState = ({
                 title={texts.events.connectionLost}
                 reason={error ?? texts.events.load}
                 retryLabel={dashboardCommonTexts().retry}
-                onRetry={() => { void onRefreshFirstPage().catch(() => undefined); }}
+                onRetry={onRefresh}
               />}
             >
               <>

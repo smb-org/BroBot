@@ -6,7 +6,7 @@ import { MODULES } from "../../modules/registry";
 import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
 import { ModuleHeading } from "../module-panels";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, QueryErrorState, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, QueryErrorState, QueryStatusRow, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import { PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useAuditQuery } from "../data/lists";
@@ -208,6 +208,11 @@ const AuditPageContent = ({ identityKey, entries, nextCursor, filters, onFilters
         list={
           <section className="content-section" aria-label={texts.audit.title}>
             <AuditFilterBar filters={filters} onChange={onFiltersChange} />
+            <QueryStatusRow
+              message={error !== null && entries.length > 0 ? error : null}
+              retryLabel={dashboardCommonTexts().retry}
+              onRetry={onRetry}
+            />
             <UiLoadState
               status={loading
                 ? "loading"

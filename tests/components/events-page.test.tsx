@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -190,6 +190,118 @@ describe("EventsPage failure cause icon", () => {
     expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
     expect(fetcher).toHaveBeenCalledTimes(2);
     view.unmount();
+  });
+
+  it("keeps cached events visible and offers Retry after a background failure", async () => {
+    const cachedEntry = entry({ eventId: "cached-event" });
+    const refreshedEntry = entry({
+      eventId: "recovered-event",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"recoveredraid","viewers":2}',
+    });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "internal_error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [refreshedEntry], nextCursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{
+          queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter),
+          data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] },
+        }],
+      },
+    );
+
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter), exact: true });
+    });
+
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(rendered.container.querySelector(".list-toolbar__query-error")).not.toBeEmptyDOMElement();
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+
+    expect(await screen.findByText("Raid von recoveredraid mit 2 Zuschauern")).toBeVisible();
+    expect(rendered.container.querySelector(".list-toolbar__query-error")).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates again when a second realtime hint arrives during a delayed refresh", async () => {
+    const initialEntry = entry({ eventId: "initial-event" });
+    const firstHint = entry({
+      eventId: "first-hint-event",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"firsthint","viewers":1}',
+    });
+    const secondHint = entry({
+      eventId: "second-hint-event",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"secondhint","viewers":2}',
+    });
+    const refreshResponses: Array<(response: Response) => void> = [];
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => { refreshResponses.push(resolve); }));
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{
+          queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter),
+          data: { pages: [{ entries: [initialEntry], nextCursor: null }], pageParams: [null] },
+        }],
+      },
+    );
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    const sendHint = (id: string, event: PanelEventEntry): void => {
+      socket.receive(JSON.stringify({
+        version: 1,
+        id,
+        createdAt: event.createdAt,
+        channelId: "kanal-a",
+        type: "event_log.new",
+        payload: { entries: [{ eventId: event.eventId, createdAt: event.createdAt, moduleId: event.moduleId, code: event.code, actorUserId: null }] },
+      }));
+    };
+
+    sendHint("first-hint-message", firstHint);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    sendHint("second-hint-message", secondHint);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+
+    refreshResponses[0]?.(new Response(JSON.stringify({ entries: [initialEntry, firstHint], nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    refreshResponses[1]?.(new Response(JSON.stringify({ entries: [initialEntry, firstHint, secondHint], nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+
+    expect(await screen.findByText(/Raid von firsthint/u)).toBeVisible();
+    expect(await screen.findByText(/Raid von secondhint/u)).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    rendered.unmount();
   });
 
   it("serializes realtime refreshes with pagination and keeps refreshed events", async () => {

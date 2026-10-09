@@ -19,6 +19,12 @@ export interface ListToolbarUsage {
   };
 }
 
+export interface ListToolbarQueryError {
+  message: string;
+  retryLabel: string;
+  onRetry: () => void;
+}
+
 export interface ListToolbarProperties {
   language?: DashboardLanguage;
   searchLabel: string;
@@ -37,6 +43,7 @@ export interface ListToolbarProperties {
     reason?: string;
   };
   usage?: ListToolbarUsage;
+  queryError?: ListToolbarQueryError;
   activeFilters?: string;
   activeFiltersLabel?: string;
   resetLabel?: string;
@@ -74,6 +81,7 @@ export function ListToolbar({
   filtersLabel,
   create,
   usage,
+  queryError,
   activeFilters,
   activeFiltersLabel,
   resetLabel,
@@ -118,25 +126,38 @@ export function ListToolbar({
           </div>
         )}
       </div>
-      <div className="list-toolbar__status">
-        <span className={`list-toolbar__usage${warning ? " list-toolbar__usage--warning" : ""}`} aria-live="polite">
-          {usage === undefined ? null : usageText(usage, language)}
-        </span>
-        <div className="list-toolbar__status-right">
-          {hasActiveFilters ? (
-            <span className="list-toolbar__active-filters" title={`${activeFiltersLabel ?? ""} ${activeFilterText}`.trim()}>
-              {activeFiltersLabel === undefined ? activeFilterText : `${activeFiltersLabel} ${activeFilterText}`}
-            </span>
-          ) : createReason === undefined ? null : (
-            <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
-          )}
-          {hasActiveFilters && onReset !== undefined && resetLabel !== undefined ? (
-            <button className="list-toolbar__reset" type="button" onClick={onReset}>{resetLabel}</button>
-          ) : null}
-          {hasActiveFilters && createReason !== undefined ? (
-            <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
-          ) : null}
-        </div>
+      <div className={`list-toolbar__status${queryError === undefined ? "" : " list-toolbar__status--error"}`}>
+        {queryError === undefined ? <>
+          <span className={`list-toolbar__usage${warning ? " list-toolbar__usage--warning" : ""}`} aria-live="polite">
+            {usage === undefined ? null : usageText(usage, language)}
+          </span>
+          <div className="list-toolbar__status-right">
+            {hasActiveFilters ? (
+              <span className="list-toolbar__active-filters" title={`${activeFiltersLabel ?? ""} ${activeFilterText}`.trim()}>
+                {activeFiltersLabel === undefined ? activeFilterText : `${activeFiltersLabel} ${activeFilterText}`}
+              </span>
+            ) : createReason === undefined ? null : (
+              <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
+            )}
+            {hasActiveFilters && onReset !== undefined && resetLabel !== undefined ? (
+              <button className="list-toolbar__reset" type="button" onClick={onReset}>{resetLabel}</button>
+            ) : null}
+            {hasActiveFilters && createReason !== undefined ? (
+              <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
+            ) : null}
+          </div>
+        </> : <>
+          <span className="list-toolbar__query-error" role="alert">{queryError.message}</span>
+          <div className="list-toolbar__status-right">
+            {createReason === undefined ? null : (
+              <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
+            )}
+            {hasActiveFilters && onReset !== undefined && resetLabel !== undefined ? (
+              <button className="list-toolbar__reset" type="button" onClick={onReset}>{resetLabel}</button>
+            ) : null}
+            <button className="list-toolbar__reset" type="button" onClick={queryError.onRetry}>{queryError.retryLabel}</button>
+          </div>
+        </>}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -151,6 +151,50 @@ describe("AuditPage diff list", () => {
     const retry = await screen.findByRole("button", { name: "Erneut versuchen" });
     fireEvent.click(retry);
     expect(await screen.findByText("Noch keine Audit-Einträge gespeichert.")).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps cached audit rows visible and offers Retry after a background failure", async () => {
+    const cachedEntry = entry({});
+    const refreshedEntry = entry({ auditId: "audit-recovered", actorDisplayName: "Bea", subjectDisplayName: "Cara" });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "internal_error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [refreshedEntry], nextCursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = renderWithQuery(
+      <UiProvider><AuditPage channelId="channel-a" filters={emptyAuditFilter} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{
+          queryKey: dashboardDataKeys.audit("channel-a", emptyAuditFilter),
+          data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] },
+        }],
+      },
+    );
+
+    expect(screen.getByRole("button", { name: /Alice.*Bob/u })).toBeVisible();
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.audit("channel-a", emptyAuditFilter), exact: true });
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(rendered.queryClient.getQueryState(dashboardDataKeys.audit("channel-a", emptyAuditFilter))?.status).toBe("error");
+    expect(screen.getByRole("button", { name: /Alice.*Bob/u })).toBeVisible();
+    await waitFor(() => expect(rendered.container.querySelector(".query-status-row")?.textContent).toContain("Erneut versuchen"));
+    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+
+    expect(await screen.findByRole("button", { name: /Bea.*Cara/u })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Erneut versuchen" })).not.toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

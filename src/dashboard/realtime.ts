@@ -354,19 +354,23 @@ export const useRealtimeEventFeed = ({
   channelId,
   filters,
   atBeginning,
-  refreshFirstPage,
+  refresh,
   scrollToBeginning,
   onRealtimeMessage,
 }: {
   channelId: string;
   filters: PanelEventFilters;
   atBeginning: () => boolean;
-  refreshFirstPage: () => Promise<void>;
+  refresh: () => void;
   scrollToBeginning: () => void;
   onRealtimeMessage?: (message: RealtimeMessage) => void;
 }): RealtimeFeedState => {
+  const currentFilterKey = filterKey(filters);
+  const currentIdentityKey = `${channelId}\u001f${currentFilterKey}`;
   const [status, setStatus] = useState<RealtimeFeedStatus>("connecting");
-  const [pendingCount, setPendingCount] = useState(0);
+  const [pendingState, setPendingState] = useState({ identityKey: currentIdentityKey, count: 0 });
+  const pendingCount = pendingState.identityKey === currentIdentityKey ? pendingState.count : 0;
+  const currentIdentityKeyRef = useRef(currentIdentityKey);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectGraceTimerRef = useRef<number | null>(null);
@@ -375,83 +379,40 @@ export const useRealtimeEventFeed = ({
   const hasConnectedRef = useRef(false);
   const fatalProtocolErrorRef = useRef(false);
   const seenMessageIdsRef = useRef(new Set<string>());
-  const pendingEventIdsRef = useRef(new Set<string>());
-  const refreshFirstPageRef = useRef(refreshFirstPage);
+  const refreshRef = useRef(refresh);
   const atBeginningRef = useRef(atBeginning);
   const scrollToBeginningRef = useRef(scrollToBeginning);
   const onRealtimeMessageRef = useRef(onRealtimeMessage);
   const filtersRef = useRef(filters);
-  const refreshPendingRef = useRef<(ids: ReadonlySet<string>) => void>(() => undefined);
 
   useEffect(() => {
-    refreshFirstPageRef.current = refreshFirstPage;
+    refreshRef.current = refresh;
     atBeginningRef.current = atBeginning;
     scrollToBeginningRef.current = scrollToBeginning;
     onRealtimeMessageRef.current = onRealtimeMessage;
     filtersRef.current = filters;
-  }, [atBeginning, filters, onRealtimeMessage, refreshFirstPage, scrollToBeginning]);
-
-  const updatePendingCount = useCallback((): void => {
-    setPendingCount(pendingEventIdsRef.current.size);
-  }, []);
-
-  const clearPending = useCallback((ids?: ReadonlySet<string>): void => {
-    if (ids === undefined) pendingEventIdsRef.current.clear();
-    else for (const id of ids) pendingEventIdsRef.current.delete(id);
-    updatePendingCount();
-  }, [updatePendingCount]);
-
-  const refreshPending = useCallback((ids: ReadonlySet<string>): void => {
-    void refreshFirstPageRef.current().then(() => {
-      clearPending(ids);
-      if (pendingEventIdsRef.current.size > 0 && atBeginningRef.current() && batchTimerRef.current === null) {
-        batchTimerRef.current = window.setTimeout(() => {
-          batchTimerRef.current = null;
-          const remaining = new Set(pendingEventIdsRef.current);
-          if (remaining.size > 0 && atBeginningRef.current()) refreshPendingRef.current(remaining);
-        }, BATCH_DELAY_MS);
-      }
-    }).catch(() => {
-      updatePendingCount();
-    });
-  }, [clearPending, updatePendingCount]);
-
-  useEffect(() => {
-    refreshPendingRef.current = refreshPending;
-  }, [refreshPending]);
-
-  const flushPending = useCallback((): void => {
-    const ids = new Set(pendingEventIdsRef.current);
-    if (ids.size === 0) return;
-    if (atBeginningRef.current()) {
-      refreshPending(ids);
-    } else {
-      updatePendingCount();
-    }
-  }, [refreshPending, updatePendingCount]);
+    currentIdentityKeyRef.current = currentIdentityKey;
+  }, [atBeginning, currentIdentityKey, filters, onRealtimeMessage, refresh, scrollToBeginning]);
 
   const scheduleBatch = useCallback((): void => {
     if (batchTimerRef.current !== null) return;
     batchTimerRef.current = window.setTimeout(() => {
       batchTimerRef.current = null;
-      flushPending();
+      refreshRef.current();
     }, BATCH_DELAY_MS);
-  }, [flushPending]);
+  }, []);
 
   const jumpToBeginning = useCallback((): void => {
     scrollToBeginningRef.current();
-    const ids = new Set(pendingEventIdsRef.current);
-    if (ids.size > 0) refreshPending(ids);
-  }, [refreshPending]);
+    setPendingState({ identityKey: currentIdentityKeyRef.current, count: 0 });
+  }, []);
 
-  const currentFilterKey = filterKey(filters);
   useEffect(() => {
-    clearPending();
     if (batchTimerRef.current !== null) {
       window.clearTimeout(batchTimerRef.current);
       batchTimerRef.current = null;
     }
-  }, [clearPending, currentFilterKey]);
+  }, [channelId, currentFilterKey]);
 
   useEffect(() => {
     let disposed = false;
@@ -460,7 +421,6 @@ export const useRealtimeEventFeed = ({
     hasConnectedRef.current = false;
     fatalProtocolErrorRef.current = false;
     seenMessageIdsRef.current.clear();
-    clearPending();
 
     const clearReconnectTimers = (): void => {
       if (reconnectTimerRef.current !== null) {
@@ -510,9 +470,13 @@ export const useRealtimeEventFeed = ({
       relayRealtimeMessage(parsed.message);
       if (parsed.message.type !== "event_log.new") return;
       const hints = parsed.message.payload.entries.filter((hint) => realtimeHintMatchesFilters(hint, filtersRef.current));
-      for (const hint of hints) pendingEventIdsRef.current.add(hint.eventId);
       if (hints.length > 0) {
-        updatePendingCount();
+        if (!atBeginningRef.current()) {
+          const identityKey = currentIdentityKeyRef.current;
+          setPendingState((current) => current.identityKey === identityKey
+            ? { ...current, count: current.count + hints.length }
+            : { identityKey, count: hints.length });
+        }
         scheduleBatch();
       }
     };
@@ -544,14 +508,7 @@ export const useRealtimeEventFeed = ({
       }
       setStatus("connected");
       if (isReconnection) {
-        const ids = new Set(pendingEventIdsRef.current);
-        void refreshFirstPageRef.current()
-          .then(() => {
-            clearPending(ids);
-          })
-          .catch(() => {
-            updatePendingCount();
-          });
+        refreshRef.current();
       }
     };
 
@@ -588,7 +545,7 @@ export const useRealtimeEventFeed = ({
         // The socket may already be closed.
       }
     };
-  }, [channelId, clearPending, scheduleBatch, updatePendingCount]);
+  }, [channelId, scheduleBatch]);
 
   return { status, pendingCount, jumpToBeginning };
 };

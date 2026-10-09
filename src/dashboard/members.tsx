@@ -416,6 +416,11 @@ const MembersPageContent = ({
                   ...(query.length > 0 ? { filteredCount: visibleMembers.length } : { loaded: true }),
                   copy: { countSuffix: texts.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: texts.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: "", loadedSuffix: dashboardCommonTexts().loaded },
                 }}
+                {...(error === null || members.length === 0 ? {} : { queryError: {
+                  message: error,
+                  retryLabel: dashboardCommonTexts().retry,
+                  onRetry: () => { void membersQuery.refetch(); },
+                } })}
                 {...(query.length === 0 ? {} : { activeFilters: `${texts.searchMembers}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
               />
               <div className={fetching ? "stale" : undefined} aria-busy={fetching}>

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { dashboardRoutePath, parseDashboardRoute } from "../../src/dashboard/router";
+import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { queryKeys } from "../../src/dashboard/data/keys";
 import { renderWithQuery as render } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
@@ -3051,6 +3052,43 @@ describe("Dashboard skeleton", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Erneut versuchen" }));
     await waitFor(() => expect(document.querySelector(".ui-load-state[data-status='success']")).toBeInTheDocument());
+    expect(systemRequests).toBe(2);
+    expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/system")).toHaveLength(2);
+  });
+
+  it("keeps cached System data visible and offers Retry after a background failure", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let systemRequests = 0;
+    const fetcher = stubDashboardFetch((url) => {
+      if (url.pathname !== "/api/channels/kanal-a/system") return undefined;
+      systemRequests += 1;
+      return systemRequests === 1
+        ? jsonResponse({ error: "internal_error" }, 500)
+        : jsonResponse(systemFor("recovered-system"));
+    }, [channel]);
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    const rendered = render(<DashboardApp />, undefined, {
+      gcTime: 600_000,
+      staleTime: 30_000,
+      initialData: [{ queryKey: dashboardDataKeys.system("kanal-a"), data: system }],
+    });
+    await screen.findByRole("heading", { name: "System", level: 1 });
+
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.system("kanal-a"), exact: true });
+    });
+
+    expect(rendered.container.querySelector(".state-list")).toBeInTheDocument();
+    expect(rendered.container.querySelector(".query-status-row__message")).not.toBeEmptyDOMElement();
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+
+    await waitFor(() => {
+      expect(rendered.queryClient.getQueryData(dashboardDataKeys.system("kanal-a"))).toMatchObject({
+        bot: { reason: "recovered-system" },
+      });
+    });
+    expect(rendered.container.querySelector(".query-status-row__message")).toBeNull();
     expect(systemRequests).toBe(2);
     expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/system")).toHaveLength(2);
   });
