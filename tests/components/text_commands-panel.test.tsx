@@ -1100,7 +1100,7 @@ describe("Text command editor", () => {
   });
 
   describe("obsolete editor continuations", () => {
-    const setup = (hold: "POST" | "DELETE" | "GET") => {
+    const setup = (hold: "POST" | "PATCH" | "DELETE" | "GET", onCloseInspector?: () => void) => {
       let rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] }), makeCommand({ name: "gamma", text: "Antwort C", aliases: [] })];
       let release: () => void = () => undefined;
       const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -1128,7 +1128,7 @@ describe("Text command editor", () => {
         }
         return baseFetch(input, init);
       }));
-      renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, {
+      renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" {...(onCloseInspector === undefined ? {} : { onCloseInspector })} /></UiProvider>, undefined, {
         gcTime: 600_000,
         staleTime: 600_000,
       });
@@ -1183,6 +1183,21 @@ describe("Text command editor", () => {
       await settle();
       expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("gamma");
       expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf C");
+    });
+
+    it("does not run a held save-and-switch navigation after the panel unmounted", async () => {
+      const onCloseInspector = vi.fn();
+      const release = setup("PATCH", onCloseInspector);
+      await selectCommand("hallo");
+      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf" } });
+      fireEvent.keyDown(editor(), { key: "Escape" });
+      fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
+      await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+
+      cleanup();
+      release();
+      await settle();
+      expect(onCloseInspector).not.toHaveBeenCalled();
     });
 
     it("keeps a newly selected command when a deletion's revalidation finishes late", async () => {

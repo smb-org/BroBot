@@ -94,6 +94,8 @@ export const refetchModuleQueryData = <Value,>(
     if (fn === undefined) throw new Error("Module query has no registered reader.");
     // Deliberately outside the query cache's fetch: cancelQueries reverts a cache
     // fetch to its cached data, which would look like a successful reload.
+    // Cancel earlier cache reads first so none can commit after this reload publishes.
+    await queryClient.cancelQueries({ queryKey, exact: true });
     const order = readOrderFor(queryClient, queryKey);
     const seq = ++order.nextSeq;
     const value = await fn(new AbortController().signal);

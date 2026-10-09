@@ -59,11 +59,15 @@ export const useDraftGuard = (
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+      pending.current = null;
+    };
   }, []);
   const switching = useRef(false);
 
   const resolve = useCallback((): void => {
+    if (!mounted.current) return;
     const pendingNavigation = pending.current;
     pending.current = null;
     setConfirmOpen(false);
@@ -71,7 +75,7 @@ export const useDraftGuard = (
   }, []);
 
   const completeSwitch = useCallback((): boolean => {
-    if (!switching.current || pending.current === null) return false;
+    if (!mounted.current || !switching.current || pending.current === null) return false;
     switching.current = false;
     resolve();
     return true;

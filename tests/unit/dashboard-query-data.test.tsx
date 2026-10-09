@@ -240,10 +240,42 @@ describe("dashboard query data layer", () => {
     // The older background read finishes while the reload is still in flight.
     releases.get(2)?.();
     await background;
-    expect(view.queryClient.getQueryData(key)).toBe("revision-2");
+    // The reload cancelled the older cache read, so it cannot commit revision 2.
+    expect(view.queryClient.getQueryData(key)).toBe("revision-1");
     releases.get(3)?.();
 
     await expect(reload).resolves.toBe("revision-3");
+    expect(view.queryClient.getQueryData(key)).toBe("revision-3");
+  });
+
+  it("keeps a reload's revision when an older background read resolves in the same turn", async () => {
+    let readCount = 0;
+    const releases = new Map<number, () => void>();
+
+    function RevisionProbe() {
+      const query = useModuleQuery<string>(channelId, "text_commands", "commands", async () => {
+        readCount += 1;
+        const mine = readCount;
+        if (mine >= 2) await new Promise<void>((resolve) => { releases.set(mine, resolve); });
+        return `revision-${String(mine)}`;
+      });
+      return <p>{query.data ?? "loading"}</p>;
+    }
+
+    const view = renderWithQuery(<RevisionProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
+    expect(await screen.findByText("revision-1")).toBeInTheDocument();
+    const key = moduleQueryKey(channelId, "text_commands", "commands");
+
+    const background = view.queryClient.refetchQueries({ queryKey: key, exact: true });
+    await waitFor(() => expect(readCount).toBe(2));
+    const reload = refetchModuleQueryData<string>(view.queryClient, channelId, "text_commands", "commands");
+    await waitFor(() => expect(readCount).toBe(3));
+
+    releases.get(2)?.();
+    releases.get(3)?.();
+    await expect(reload).resolves.toBe("revision-3");
+    await background;
+    await new Promise((resolve) => { setTimeout(resolve, 20); });
     expect(view.queryClient.getQueryData(key)).toBe("revision-3");
   });
 
