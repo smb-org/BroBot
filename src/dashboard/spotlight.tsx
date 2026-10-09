@@ -6,17 +6,18 @@ import type { TextCommand } from "../modules/text_commands/contracts";
 import { loadTextCommands } from "../modules/text_commands/panel/service";
 import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelModuleState } from "../panel-contract";
-import { createClip, fetchChannelVariables, sendManualShoutout, setChannelModuleEnabled, startCommercial, type PanelChannelVariable } from "./api";
+import { PanelApiError, createClip, fetchChannelVariables, sendManualShoutout, setChannelModuleEnabled, startCommercial, type PanelChannelVariable } from "./api";
+import { dispatchDashboardAuthenticationRequired } from "./data/events";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
-import { channelVariablesTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
+import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { ModuleIcon, NavigationIcon } from "./module-panels";
 import { dashboardNavEntries, navPageGroupHeading, registeredModuleNavEntries } from "./nav-pages";
 import { dashboardRoutePath, dashboardRouteRequiresBot, type DashboardRoute } from "./router";
 import { readRecentTargets, rememberRecentTarget, RECENT_TARGET_LIMIT } from "./spotlight-recents";
-import { Spotlight, type SpotlightItem } from "./ui";
+import { notify, Spotlight, type SpotlightItem } from "./ui";
 
 const SHOUTOUT_KEYWORD = "shoutout";
 
@@ -222,7 +223,12 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
     if (channelId === null) return;
     try {
       await setChannelModuleEnabled(channelId, "ads", enabled);
-    } catch {
+    } catch (error) {
+      // Same reporting as the other module toggles; a 401 also needs the
+      // sign-in recovery that the QueryCache would trigger for queries.
+      const fallback = dashboardTexts().errors.changeFailed;
+      notify({ tone: "error", message: error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback });
+      if (error instanceof PanelApiError && error.status === 401) dispatchDashboardAuthenticationRequired();
       return;
     }
     await refreshAfterModuleToggle(queryClient, channelId);
