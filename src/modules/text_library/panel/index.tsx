@@ -268,7 +268,11 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   )) &&
     (data?.usages[draft.name] ?? []).some((usage) => usage.kind !== "command");
 
+  // Bumped on every editor switch; an obsolete save/delete must not touch the newer editor.
+  const editorSwitch = useRef(0);
+
   const openCreateNow = (): void => {
+    editorSwitch.current += 1;
     const categoryId = data?.categories[0]?.id ?? "";
     const initial = newDraft(categoryId);
     setSelectedName(null);
@@ -278,6 +282,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   };
 
   const closeEditorNow = (): void => {
+    editorSwitch.current += 1;
     setSelectedName(null);
     setDraft(null);
     setBaselineDraft(null);
@@ -285,6 +290,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   };
 
   const selectBlockNow = (block: TextBlock): void => {
+    editorSwitch.current += 1;
     setSelectedName(block.name);
     setDraft(draftFromBlock(block));
     setBaselineDraft(draftFromBlock(block));
@@ -294,6 +300,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   const saveDraft = async (): Promise<string | null> => {
     if (draft === null || !valid || !canManage) return labels.saveError;
     setPending(true);
+    const startedSwitch = editorSwitch.current;
     try {
       const payload = {
         ...draft,
@@ -310,6 +317,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
               : library.blocks.map((block) => block.name === result.name ? result : block),
           };
         }, data));
+      if (editorSwitch.current !== startedSwitch) return null;
       setSelectedName(saved.name);
       setDraft(draftFromBlock(saved));
       setBaselineDraft(draftFromBlock(saved));
@@ -348,6 +356,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     setPending(true);
     try {
       const deletedName = selectedName;
+      const startedSwitch = editorSwitch.current;
       await write(revision, (baselineRevision) => {
         if (baselineRevision === null) throw new Error("A text block revision is required for deletion.");
         return deleteTextBlock(channelId, deletedName, baselineRevision);
@@ -356,6 +365,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         Reflect.deleteProperty(usages, deletedName);
         return { ...library, blocks: library.blocks.filter((block) => block.name !== deletedName), usages };
       }, data));
+      if (editorSwitch.current !== startedSwitch) return;
       setSelectedName(null);
       setDraft(null);
       setBaselineDraft(null);

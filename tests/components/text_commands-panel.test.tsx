@@ -1060,6 +1060,45 @@ describe("Text command editor", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Serverstand"));
   });
 
+  it("keeps a newer selection and its draft when a renamed command's refresh is delayed", async () => {
+    let rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] })];
+    let holdGet = false;
+    let releaseGet: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { releaseGet = resolve; });
+    const baseFetch = panelFetch({
+      commands: () => rows,
+      onMutation: (method, _path, body) => {
+        if (method === "PATCH" && typeof body === "object" && body !== null) {
+          const { name } = body as { name: string };
+          rows = rows.map((row) => row.name === "hallo" ? { ...row, name, revision: 2 } : row);
+          holdGet = true;
+        }
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (holdGet && url.pathname.endsWith("/commands") && (init?.method ?? "GET") === "GET") await gate;
+      return baseFetch(input, init);
+    }));
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, {
+      gcTime: 600_000,
+      staleTime: 600_000,
+    });
+
+    await selectCommand("hallo");
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "hallo2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await selectCommand("beta");
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf B" } });
+
+    releaseGet();
+    await screen.findByText("!hallo2");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("beta");
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf B");
+  });
+
   it("keeps the draft and conflict after a failed server reload, then retries against the refreshed revision", async () => {
     let rows = [makeCommand()];
     let failCommandReload = false;
