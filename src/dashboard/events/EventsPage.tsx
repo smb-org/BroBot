@@ -10,7 +10,7 @@ import { Icon } from "../ui/Icon";
 import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, QueryErrorState, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import { PanelApiError } from "../api";
 import { refreshQuery } from "../data/refresh";
-import { dashboardDataKeys } from "../data/keys";
+import { dashboardDataKeys, queryKeys } from "../data/keys";
 import { useEventsQuery } from "../data/lists";
 import {
   actorLabel,
@@ -249,6 +249,10 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   const invalidateEvents = useCallback((): void => {
     void refreshQuery(queryClient, queryKey);
   }, [queryClient, queryKey]);
+  // Mark every cached event filter of this channel stale, so an inactive filter cannot stay "fresh" after a hint.
+  const markEventsStale = useCallback((): void => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.channel(channelId, "events"), refetchType: "none" });
+  }, [queryClient, channelId]);
   const loadNextPage = useCallback((): void => {
     if (query.isFetching || query.isPlaceholderData || !query.hasNextPage) return;
     void query.fetchNextPage({ cancelRefetch: false });
@@ -278,6 +282,7 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     error={error}
     loadingNextPage={query.isFetchingNextPage}
     onRefresh={invalidateEvents}
+    onEventHint={markEventsStale}
     onNextPage={loadNextPage}
   />;
 };
@@ -294,12 +299,13 @@ interface EventsPageContentProperties {
   moduleOptions: readonly PanelModuleState[];
   onFiltersChange: (filters: PanelEventFilters) => void;
   onRefresh: () => void;
+  onEventHint: () => void;
   onNextPage: () => void;
   loadingNextPage: boolean;
 }
 
 const EventsPageContent = (properties: EventsPageContentProperties): ReactElement => {
-  const { identityKey, channelId, filters, onRefresh, ...contentProperties } = properties;
+  const { identityKey, channelId, filters, onRefresh, onEventHint, ...contentProperties } = properties;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const setFeedRef = useCallback<RefCallback<HTMLDivElement>>((feed) => { feedRef.current = feed; }, []);
   const atBeginning = useCallback((): boolean => {
@@ -319,6 +325,7 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
     filters,
     atBeginning,
     refresh: onRefresh,
+    onEventHint,
     scrollToBeginning,
   });
   return <EventsPageFilterState
@@ -346,7 +353,7 @@ const EventsPageFilterState = ({
   loadingNextPage,
   feedRef,
   realtime,
-}: Omit<EventsPageContentProperties, "channelId"> & {
+}: Omit<EventsPageContentProperties, "channelId" | "onEventHint"> & {
   feedRef: RefCallback<HTMLDivElement>;
   realtime: RealtimeFeedState;
 }): ReactElement => {

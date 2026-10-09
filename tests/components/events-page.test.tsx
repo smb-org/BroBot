@@ -363,12 +363,15 @@ describe("EventsPage failure cause icon", () => {
     sendHint("first-hint-message", firstHint);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     sendHint("second-hint-message", secondHint);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    // The second hint only marks a trailing refresh; it starts once the first one settles.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(fetcher).toHaveBeenCalledTimes(1);
 
     refreshResponses[0]?.(new Response(JSON.stringify({ entries: [initialEntry, firstHint], nextCursor: null }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
     refreshResponses[1]?.(new Response(JSON.stringify({ entries: [initialEntry, firstHint, secondHint], nextCursor: null }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -377,6 +380,126 @@ describe("EventsPage failure cause icon", () => {
     expect(await screen.findByText(/Raid von firsthint/u)).toBeVisible();
     expect(await screen.findByText(/Raid von secondhint/u)).toBeVisible();
     expect(fetcher).toHaveBeenCalledTimes(2);
+    rendered.unmount();
+  });
+
+  it("updates three cached pages during a hint storm with at most one refresh in flight", async () => {
+    vi.useFakeTimers();
+    try {
+      const raid = (id: string, source: string, minute: number) => entry({
+        eventId: id,
+        moduleId: "channel_events",
+        code: "channel_events.raid.incoming",
+        detail: `{"source":"${source}","viewers":1}`,
+        createdAt: `2026-09-22T10:0${String(minute)}:00.000Z`,
+      });
+      const live = raid("live", "stormraid", 9);
+      const pageEntries = [raid("p1", "pageone", 3), raid("p2", "pagetwo", 2), raid("p3", "pagethree", 1)];
+      const nextCursors: Array<string | null> = ["c1", "c2", null];
+      let serverHasLive = false;
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+        const cursor = requestUrl(input).searchParams.get("cursor");
+        const index = cursor === null ? 0 : cursor === "c1" ? 1 : 2;
+        const entries = index === 0 && serverHasLive ? [live, pageEntries[0] as PanelEventEntry] : [pageEntries[index] as PanelEventEntry];
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => {
+            inFlight -= 1;
+            resolve(new Response(JSON.stringify({ entries, nextCursor: nextCursors[index] }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }));
+          }, 80);
+        });
+      });
+      vi.stubGlobal("fetch", fetcher);
+      vi.stubGlobal("WebSocket", TestEventsWebSocket);
+      const rendered = renderWithQuery(
+        <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+        undefined,
+        {
+          gcTime: 600_000,
+          staleTime: 30_000,
+          initialData: [{
+            queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter),
+            data: {
+              pages: pageEntries.map((page, index) => ({ entries: [page], nextCursor: nextCursors[index] ?? null })),
+              pageParams: [null, "c1", "c2"],
+            },
+          }],
+        },
+      );
+      const socket = TestEventsWebSocket.instances[0];
+      if (socket === undefined) throw new Error("Realtime socket was not created.");
+      socket.open();
+      serverHasLive = true;
+      for (let index = 0; index < 12; index += 1) {
+        socket.receive(JSON.stringify({
+          version: 1,
+          id: `storm-${String(index)}`,
+          createdAt: live.createdAt,
+          channelId: "kanal-a",
+          type: "event_log.new",
+          payload: { entries: [{ eventId: live.eventId, createdAt: live.createdAt, moduleId: live.moduleId, code: live.code, actorUserId: null }] },
+        }));
+        await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+      }
+      // Hints are still arriving (faster than a full refetch) and the rows are already fresh.
+      expect(screen.getByText(/Raid von stormraid/u)).toBeVisible();
+      expect(maxInFlight).toBeLessThanOrEqual(1);
+      rendered.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refetches a cached inactive filter that a hint matched while another filter was shown", async () => {
+    const filtersA = { ...emptyEventFilter, module: "channel_events" };
+    const filtersB = { ...emptyEventFilter, module: "host" };
+    const oldRaid = entry({ eventId: "old", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"oldraid","viewers":1}' });
+    const newRaid = entry({ eventId: "new", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"source":"newraid","viewers":2}' });
+    const hostEntry = entry({ eventId: "host-one" });
+    const fetcher = vi.fn((input: RequestInfo | URL) => Promise.resolve(new Response(JSON.stringify({
+      entries: requestUrl(input).searchParams.get("module") === "channel_events" ? [newRaid, oldRaid] : [hostEntry],
+      nextCursor: null,
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    function Harness() {
+      const [showB, setShowB] = useState(false);
+      const filters = showB ? filtersB : filtersA;
+      return <>
+        <button type="button" onClick={() => { setShowB(!showB); }}>Toggle filter</button>
+        <EventsPage channelId="kanal-a" filters={filters} moduleOptions={[]} onFiltersChange={() => undefined} />
+      </>;
+    }
+    const rendered = renderWithQuery(<UiProvider><Harness /></UiProvider>, undefined, {
+      gcTime: 600_000,
+      staleTime: 30_000,
+      initialData: [
+        { queryKey: dashboardDataKeys.events("kanal-a", filtersA), data: { pages: [{ entries: [oldRaid], nextCursor: null }], pageParams: [null] } },
+        { queryKey: dashboardDataKeys.events("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
+      ],
+    });
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "only-a-hint",
+      createdAt: newRaid.createdAt,
+      channelId: "kanal-a",
+      type: "event_log.new",
+      payload: { entries: [{ eventId: newRaid.eventId, createdAt: newRaid.createdAt, moduleId: newRaid.moduleId, code: newRaid.code, actorUserId: null }] },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(fetcher).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
+    expect(await screen.findByText(/Raid von newraid/u)).toBeVisible();
     rendered.unmount();
   });
 
