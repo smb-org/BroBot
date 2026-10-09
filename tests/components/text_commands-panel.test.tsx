@@ -1060,6 +1060,58 @@ describe("Text command editor", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Serverstand"));
   });
 
+  it("keeps the draft and conflict after a failed server reload, then retries against the refreshed revision", async () => {
+    let rows = [makeCommand()];
+    let failCommandReload = false;
+    const submittedRevisions: number[] = [];
+    const baseFetch = panelFetch({
+      commands: () => rows,
+      onMutation: (_method, _path, body) => {
+        const revision = typeof body === "object" && body !== null ? (body as { revision?: unknown }).revision : undefined;
+        if (typeof revision === "number") submittedRevisions.push(revision);
+        return submittedRevisions.length === 1
+          ? jsonResponse({ error: "command_changed_concurrently" }, 409)
+          : jsonResponse({ warnings: [] });
+      },
+    });
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/commands") && (init?.method ?? "GET") === "GET" && failCommandReload) {
+        return Promise.resolve(jsonResponse({ error: "temporarily_unavailable" }, 503));
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, {
+      gcTime: 600_000,
+      staleTime: 600_000,
+    });
+    await selectCommand();
+    const response = screen.getByRole("textbox", { name: "Antwort" });
+    fireEvent.change(response, { target: { value: "Mein Entwurf" } });
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await waitFor(() => expect(submittedRevisions).toEqual([1]));
+    expect(await screen.findByText(/Inzwischen von jemand anderem geändert\./u)).toBeInTheDocument();
+
+    failCommandReload = true;
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand laden" }));
+
+    expect(await screen.findByText(/Der Serverstand konnte nicht geladen werden\./u)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Mein Entwurf");
+    expect(screen.getByText(/Inzwischen von jemand anderem geändert\./u)).toBeInTheDocument();
+    expect(within(editor()).getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
+
+    failCommandReload = false;
+    rows = [makeCommand({ text: "Serverstand", revision: 2 })];
+    fireEvent.click(within(editor()).getByRole("button", { name: "Erneut versuchen" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Serverstand"));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Nach erneutem Laden" } });
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await waitFor(() => expect(submittedRevisions).toEqual([1, 2]));
+  });
+
   it("maps command_already_exists and both command_alias_conflict fields to field errors", async () => {
     let error: unknown = { error: "command_already_exists" };
     const fetcher = panelFetch({

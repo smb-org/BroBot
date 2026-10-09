@@ -715,17 +715,22 @@ describe("Module panel loader", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent("Fixture wurde inzwischen geändert. Moduleinstellungen konnten nicht geladen werden.");
     expect(message).toHaveValue("Keep this draft {viewer}");
+    expect(within(screen.getByRole("region", { name: "Fixture-Einstellungen" })).getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
   });
 
   it("discards to the last server response after a successful settings save", async () => {
     const canonicalSettings = { ...editorFixtureSettings, handle: "server-canonical" };
+    let serverSettings = editorFixtureSettings;
+    let serverRevision = 1;
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
       if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
+        serverSettings = canonicalSettings;
+        serverRevision = 2;
         return Promise.resolve(Response.json({ settings: canonicalSettings, revision: 2, warnings: [] }));
       }
-      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }));
+      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: serverSettings, revision: serverRevision, variables: [] }));
       return Promise.resolve(Response.json({}));
     });
     renderSettingsFixture(fetcher);

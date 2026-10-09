@@ -303,12 +303,11 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         ? createTextBlock(channelId, payload)
         : saveTextBlock(channelId, { ...payload, revision: baselineRevision }), (current, result) => updateLibraryCache(current, (library) => {
           const existing = library.blocks.find((block) => block.name === result.name);
-          const committed = existing !== undefined && existing.revision > result.revision ? existing : result;
           return {
             ...library,
             blocks: existing === undefined
-              ? [...library.blocks, committed]
-              : library.blocks.map((block) => block.name === result.name ? committed : block),
+              ? [...library.blocks, result]
+              : library.blocks.map((block) => block.name === result.name ? result : block),
           };
         }, data));
       setSelectedName(saved.name);

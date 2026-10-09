@@ -95,4 +95,38 @@ describe("API source panel query lifecycle", () => {
       revision: 2,
     });
   });
+
+  it("accepts a recreated source with a lower revision after a warm-cache refresh", async () => {
+    let serverSource = makeSource({
+      url: "https://api.example.test/deleted-generation",
+      expression: "$.deleted",
+      revision: 4,
+    });
+    const fetcher = sourceFetch(() => [serverSource]);
+    const view = renderPanel(fetcher);
+    expect(await screen.findByRole("button", { name: "sunset" })).toBeInTheDocument();
+
+    serverSource = makeSource({
+      url: "https://recreated.example.test/recreated-generation",
+      expression: "$.recreated",
+      revision: 1,
+      updatedAt: "2026-10-03T12:00:00.000Z",
+    });
+    await act(async () => {
+      await view.queryClient.refetchQueries({
+        queryKey: moduleQueryKey("kanal-a", "api_source", "sources"),
+        exact: true,
+      });
+    });
+    expect(await screen.findByText("recreated.example.test")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "sunset" }));
+
+    expect(await screen.findByRole("textbox", { name: "HTTPS URL" })).toHaveValue(
+      "https://recreated.example.test/recreated-generation",
+    );
+    expect(screen.getByRole("textbox", { name: "JSONata expression (optional)" })).toHaveValue("$.recreated");
+    expect(view.queryClient.getQueryData<ApiSource[]>(moduleQueryKey("kanal-a", "api_source", "sources"))?.[0])
+      .toMatchObject({ revision: 1, expression: "$.recreated" });
+  });
 });

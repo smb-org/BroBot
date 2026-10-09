@@ -16,7 +16,7 @@ import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredTemplatePickerGroup } from "../../../dashboard/ui";
 import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, saveTextCommand, searchTextGames, textBlockNamesForPicker, toggleTextCommand, type TextCommandChannelVariable } from "./service";
-import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import type { TextCommandPanelData } from "./service";
 import { textCommandsTexts } from "./locale";
 import { convertLeadingSlashCommand, parseLeadingSlashCommand, SLASH_COMMAND_NAMES } from "./slash-command";
@@ -243,6 +243,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [fieldError, setFieldError] = useState<{ field: "name" | "aliases"; message: string; invalidAlias?: string } | null>(null);
   const [concurrentConflict, setConcurrentConflict] = useState(false);
+  const [reloadError, setReloadError] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [attemptedSave, setAttemptedSave] = useState(false);
@@ -447,7 +448,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const setDraftField = <Key extends keyof CommandDraft>(key: Key, value: CommandDraft[Key]): void => {
     if (key === "minimumTier") setMinimumTierExplicit(true);
     setValue((current) => ({ ...current, [key]: value }));
-    setSaved(false); setConcurrentConflict(false);
+    setSaved(false); setConcurrentConflict(false); setReloadError(false);
     if (key === "name" || key === "aliases") setFieldError(null);
   };
   const variableActionEditor = draft.kind === "text" || draft.kind === "timeout" ? <Switch
@@ -493,7 +494,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
               },
               minimumTier: minimumTierAfterVariableOperation(current.minimumTier, nextOperation, minimumTierExplicit),
             }));
-            setSaved(false); setConcurrentConflict(false);
+            setSaved(false); setConcurrentConflict(false); setReloadError(false);
           }}
         />
         <div aria-hidden={variableAction.operation === "set_argument"} style={{ visibility: variableAction.operation === "set_argument" ? "hidden" : "visible" }}>
@@ -572,7 +573,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         reason: savedDraft.timeoutAction.reason,
       },
     };
-    setPending(true); setDeleteError(undefined); setFieldError(null); setConcurrentConflict(false); setSaved(false);
+    setPending(true); setDeleteError(undefined); setFieldError(null); setConcurrentConflict(false); setReloadError(false); setSaved(false);
     try {
       const baselineRevision = isCreate ? null : draftRevision.current;
       const result = await onWrite(
@@ -649,7 +650,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         ...(isCreate && kind === "shoutout" ? { minimumTier: "moderator" as const } : {}),
       };
     });
-    setSaved(false); setConcurrentConflict(false);
+    setSaved(false); setConcurrentConflict(false); setReloadError(false);
   };
 
   const handleSave = async (): Promise<void> => {
@@ -658,13 +659,18 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   };
 
   const reloadServer = async (): Promise<void> => {
-    const data = await onRefresh(undefined, true);
-    const latest = data.find((item) => item.name === command?.name || item.name === normalizedName);
-    if (latest === undefined) { onClose(); return; }
-    accept(draftFromCommand(latest));
-    draftRevision.current = latest.revision;
-    setActive(latest.enabled);
-    setConcurrentConflict(false); setFieldError(null); setDeleteError(undefined); setServerWarnings([]);
+    setReloadError(false);
+    try {
+      const data = await onRefresh(undefined, true);
+      const latest = data.find((item) => item.name === command?.name || item.name === normalizedName);
+      if (latest === undefined) { onClose(); return; }
+      accept(draftFromCommand(latest));
+      draftRevision.current = latest.revision;
+      setActive(latest.enabled);
+      setConcurrentConflict(false); setFieldError(null); setDeleteError(undefined); setServerWarnings([]);
+    } catch {
+      setReloadError(true);
+    }
   };
 
   const toggleActive = async (next: boolean): Promise<void> => {
@@ -1018,7 +1024,11 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       onInvalidSave={() => { setAttemptedSave(true); }}
       warnings={warnings}
       warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${labels.saved} ${items.join(" ")}` : items.join(" ")}
-      {...(concurrentConflict ? { conflict: { message: labels.conflictMessage, reloadLabel: labels.reload, onReload: () => { void reloadServer(); } } } : {})}
+      {...(concurrentConflict ? { conflict: {
+        message: reloadError ? `${labels.conflictMessage} ${labels.reloadError}` : labels.conflictMessage,
+        reloadLabel: reloadError ? labels.retry : labels.reload,
+        onReload: () => { void reloadServer(); },
+      } } : {})}
       onSave={() => { void handleSave(); }}
       onDiscard={() => { reset(); setAttemptedSave(false); setSaved(false); setFieldError(null); setDeleteError(undefined); setServerWarnings([]); }}
       saveLabel={isCreate ? labels.create : labels.save}
@@ -1107,9 +1117,8 @@ const TextCommandsPanelContent = ({
   const refresh = useCallback(async (selectAfter?: string, force = false): Promise<TextCommand[]> => {
     const cached = queryClient.getQueryData<TextCommandPanelData>(moduleQueryKey(channelId, "text_commands", "commands"));
     const data = force || cached === undefined
-      ? (await refetchCommands()).data
+      ? await refetchModuleQueryData(refetchCommands)
       : cached;
-    if (data === undefined) throw new Error("Command data is unavailable after refresh.");
     if (selectAfter !== undefined && data.commands.some((item) => item.name === selectAfter)) {
       setCreateOpen(false);
       selectName(selectAfter);

@@ -16,10 +16,8 @@ function MoonSettingsPanelContent({ channelId, language, canManage }: ModulePane
   const canEdit = canManage ?? false;
   const queryClient = useDashboardQueryClient();
   const settingsQuery = useModuleQuery(channelId, "moon", "unavailable-texts", (signal) => fetchMoonSettings(channelId, signal));
-  const [draft, setDraft] = useState<{ baseRevision: number; value: MoonSettings; saved: boolean } | null>(null);
-  const settings = draft !== null && (!draft.saved || (settingsQuery.data?.revision ?? 0) < draft.value.revision)
-    ? draft.value
-    : settingsQuery.data ?? null;
+  const [draft, setDraft] = useState<{ baseRevision: number; value: MoonSettings } | null>(null);
+  const settings = draft?.value ?? settingsQuery.data ?? null;
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -28,13 +26,10 @@ function MoonSettingsPanelContent({ channelId, language, canManage }: ModulePane
 
   const updateErrors = (languageKey: "de" | "en", value: string): void => {
     if (settings === null) return;
-    const baseRevision = draft !== null && !draft.saved
-      ? draft.baseRevision
-      : Math.max(settingsQuery.data?.revision ?? 0, settings.revision);
+    const baseRevision = draft?.baseRevision ?? settings.revision;
     setDraft({
       baseRevision,
       value: { ...settings, errorTexts: { ...settings.errorTexts, [languageKey]: value } },
-      saved: false,
     });
   };
 
@@ -42,15 +37,15 @@ function MoonSettingsPanelContent({ channelId, language, canManage }: ModulePane
     if (settings === null || !canEdit) return;
     setBusy(true);
     try {
-      const baselineRevision = draft !== null && !draft.saved ? draft.baseRevision : settings.revision;
-      const next = await runModuleQueryWrite(queryClient, channelId, "moon", "unavailable-texts", (revision) => {
+      const baselineRevision = draft?.baseRevision ?? settings.revision;
+      await runModuleQueryWrite(queryClient, channelId, "moon", "unavailable-texts", (revision) => {
         if (revision === null) throw new Error("A moon settings revision is required.");
         return saveMoonSettings(channelId, { revision, errorTexts: settings.errorTexts });
       }, {
         baselineRevision,
         updateCache: (_current, result) => result,
       });
-      setDraft({ baseRevision: next.revision, value: next, saved: true });
+      setDraft(null);
       notify({ tone: "success", message: labels.saved });
     } catch (saveFailure: unknown) {
       notify({ tone: "error", message: saveFailure instanceof Error && "code" in saveFailure && saveFailure.code === "moon_settings_conflict"

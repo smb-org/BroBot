@@ -5,8 +5,8 @@ import type { ModulePanelProperties } from "../modules/contract";
 import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
-import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
-import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
+import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
@@ -240,28 +240,31 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       canManageContent={canManageContent}
       definition={loaded.definition}
       copy={copy}
+      retryLabel={dashboardCommonTexts(language).retry}
       channelVariables={loaded.variables}
       initial={loaded.settings}
       initialRevision={loaded.revision}
       {...(onSaved === undefined ? {} : { onSaved })}
       onReload={async () => {
-        const result = await settingsQuery.refetch();
-        if (result.isSuccess) {
+        try {
+          await refetchModuleQueryData(() => settingsQuery.refetch());
           setGeneration((current) => current + 1);
           return true;
+        } catch {
+          return false;
         }
-        return false;
       }}
     />
   </LoadState>;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, channelVariables, initial, initialRevision, onSaved, onReload }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, retryLabel, channelVariables, initial, initialRevision, onSaved, onReload }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   definition: SettingsEditorDefinition<Record<string, unknown>>;
   copy: SettingsEditorDefinition<Record<string, unknown>>["locales"]["de"];
+  retryLabel: string;
   channelVariables: readonly PanelChannelVariable[];
   initial: Record<string, unknown>;
   initialRevision: number;
@@ -272,9 +275,8 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   const [value, setValue] = useState(initial);
   const [baseline, setBaseline] = useState({ settings: initial, revision: initialRevision });
   const [dirty, setDirty] = useState(false);
-  const usesNewerInitial = !dirty && initialRevision > baseline.revision;
-  const currentValue = usesNewerInitial ? initial : value;
-  const currentBaseline = usesNewerInitial ? { settings: initial, revision: initialRevision } : baseline;
+  const currentValue = dirty ? value : initial;
+  const currentBaseline = dirty ? baseline : { settings: initial, revision: initialRevision };
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -320,7 +322,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       sectionId={sectionId}
       settings={currentValue}
       onChange={(key, next) => {
-        if (usesNewerInitial) setBaseline(currentBaseline);
+        if (!dirty) setBaseline(currentBaseline);
         setValue({ ...currentValue, [key]: next });
         setTouchedFields((current) => new Set(current).add(key));
         setDirty(true); setSaved(false); setConflict(false); setError(undefined);
@@ -494,7 +496,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       message: error === undefined
         ? copy.conflictMessage
         : `${copy.conflictMessage} ${dashboardTexts().module.settingsLoadError}`,
-      reloadLabel: copy.reloadLabel,
+      reloadLabel: error === undefined ? copy.reloadLabel : retryLabel,
       onReload: () => {
         setError(undefined);
         void onReload().then((succeeded) => {

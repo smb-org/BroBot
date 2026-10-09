@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient, type QueryClient, type QueryObserverResult } from "@tanstack/react-query";
 
 import { queryKeys } from "./keys";
 
@@ -19,57 +19,39 @@ export interface ModuleQueryWriteOptions<Value> {
 
 export type ModuleQueryWriteFunction<Value> = (baselineRevision: ModuleQueryRevision) => Promise<Value>;
 
+type ModuleQueryRefetchResult<Value> = Pick<QueryObserverResult<Value>, "data" | "error" | "isError" | "isSuccess">;
+type ModuleQueryRefetch<Value> = () => Promise<ModuleQueryRefetchResult<Value>>;
+
+const writeGenerations = new WeakMap<QueryClient, Map<string, number>>();
+
+const generationKey = (queryKey: readonly unknown[]): string => JSON.stringify(queryKey);
+
+const writeGenerationFor = (queryClient: QueryClient, queryKey: readonly unknown[]): number =>
+  writeGenerations.get(queryClient)?.get(generationKey(queryKey)) ?? 0;
+
+const commitWriteGeneration = (queryClient: QueryClient, queryKey: readonly unknown[]): number => {
+  let generations = writeGenerations.get(queryClient);
+  if (generations === undefined) {
+    generations = new Map();
+    writeGenerations.set(queryClient, generations);
+  }
+  const key = generationKey(queryKey);
+  const generation = (generations.get(key) ?? 0) + 1;
+  generations.set(key, generation);
+  return generation;
+};
+
+/** Return data only when the refetch itself succeeded; cached data survives failed refetches. */
+export const refetchModuleQueryData = async <Value,>(refetch: ModuleQueryRefetch<Value>): Promise<Value> => {
+  const result = await refetch();
+  if (!result.isSuccess || result.isError || result.data === undefined) {
+    throw result.error ?? new Error("Module query refetch failed.");
+  }
+  return result.data;
+};
+
 export const moduleQueryKey = (channelId: string, moduleId: string, part: string) =>
   queryKeys.channel(channelId, `modules/${moduleId}/${part}`);
-
-const revisionOf = (value: unknown): number | null => {
-  if (typeof value !== "object" || value === null || !("revision" in value)) return null;
-  const revision: unknown = Reflect.get(value, "revision");
-  return typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 0 ? revision : null;
-};
-
-const identityOf = (value: unknown): string | null => {
-  if (typeof value !== "object" || value === null) return null;
-  for (const key of ["id", "name", "key"]) {
-    const identity: unknown = Reflect.get(value, key);
-    if (typeof identity === "string") return `${key}:${identity}`;
-  }
-  return null;
-};
-
-const preserveNewerRevisions = <Value,>(current: Value | undefined, next: Value): Value => {
-  const currentRevision = revisionOf(current);
-  const nextRevision = revisionOf(next);
-  if (currentRevision !== null && nextRevision !== null) {
-    return nextRevision < currentRevision ? current as Value : next;
-  }
-
-  if (Array.isArray(current) && Array.isArray(next)) {
-    const currentByIdentity = new Map(current.flatMap((entry: unknown) => {
-      const identity = identityOf(entry);
-      return identity === null ? [] : [[identity, entry] as const];
-    }));
-    return next.map((entry: unknown) => {
-      const identity = identityOf(entry);
-      return identity === null ? entry : preserveNewerRevisions(currentByIdentity.get(identity), entry);
-    }) as Value;
-  }
-
-  if (typeof current === "object" && current !== null && typeof next === "object" && next !== null &&
-      !Array.isArray(current) && !Array.isArray(next)) {
-    const currentRecord = current as Record<string, unknown>;
-    const nextRecord = next as Record<string, unknown>;
-    const merged = { ...nextRecord };
-    for (const [key, nextValue] of Object.entries(nextRecord)) {
-      if (Object.hasOwn(currentRecord, key)) {
-        merged[key] = preserveNewerRevisions(currentRecord[key], nextValue);
-      }
-    }
-    return merged as Value;
-  }
-
-  return next;
-};
 
 export const useModuleQuery = <Value,>(
   channelId: string,
@@ -82,8 +64,20 @@ export const useModuleQuery = <Value,>(
   return useQuery({
     queryKey,
     queryFn: async ({ signal }) => {
-      const result = await fn(signal);
-      return preserveNewerRevisions(queryClient.getQueryData<Value>(queryKey), result);
+      let readGeneration = writeGenerationFor(queryClient, queryKey);
+      for (;;) {
+        const result = await fn(signal);
+        const latestGeneration = writeGenerationFor(queryClient, queryKey);
+        if (readGeneration >= latestGeneration) return result;
+
+        const current = queryClient.getQueryData<Value>(queryKey);
+        if (current !== undefined) return current;
+        if (signal.aborted) throw signal.reason ?? new Error("Module query read was cancelled.");
+
+        // A dependent resource may not have been cached when the write committed.
+        // Start a fresh read at the committed generation instead of accepting this one.
+        readGeneration = latestGeneration;
+      }
     },
     placeholderData: (previousData, previousQuery) => {
       const previousKey = previousQuery?.queryKey;
@@ -128,8 +122,9 @@ export const runModuleQueryWrite = async <Value,>(
   }
 
   await Promise.all(filters.map((filter) => queryClient.cancelQueries(filter)));
+  filters.forEach((filter) => { commitWriteGeneration(queryClient, filter.queryKey); });
   queryClient.setQueryData(primaryFilter.queryKey, (current: unknown) =>
-    preserveNewerRevisions(current, options.updateCache(current, result)));
+    options.updateCache(current, result));
   await Promise.all(filters.map((filter) => queryClient.invalidateQueries({ ...filter, refetchType: "none" })));
   await Promise.allSettled(filters.map((filter) => queryClient.refetchQueries(filter, { throwOnError: true })));
   return result;

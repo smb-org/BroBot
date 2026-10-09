@@ -170,6 +170,59 @@ describe("text library", () => {
     expect(screen.getByRole("button", { name: /\{cached_text\}/u })).toBeInTheDocument();
   });
 
+  it("accepts a committed block from a recreated resource generation", async () => {
+    const timestamp = new Date(NOW).toISOString();
+    let block = {
+      channelId: CHANNEL_ID,
+      name: "welcome",
+      categoryId: "social",
+      games: [] as TwitchGame[],
+      variants: [variant("default", "Old generation")],
+      revision: 4,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ timeZone: DEFAULT_CHANNEL_TIME_ZONE, revision: 1 }));
+      if (url.pathname.endsWith("/template-preview")) return Promise.resolve(jsonResponse({ text: "", diagnostics: [] }));
+      if (url.pathname.endsWith("/blocks/welcome") && init?.method === "PATCH") {
+        block = {
+          ...block,
+          variants: [variant("default", "New generation")],
+          revision: 1,
+          updatedAt: new Date(NOW + 1_000).toISOString(),
+        };
+        return Promise.resolve(jsonResponse({ block }));
+      }
+      if (url.pathname.endsWith("/library")) return Promise.resolve(jsonResponse({
+        blocks: [block],
+        categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: timestamp, updatedAt: timestamp }],
+        settings: { revision: 1, graphRevision: 1, updatedAt: timestamp },
+        usages: { welcome: [] },
+        reservedNames: ["user"],
+      }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    renderWithQuery(
+      <MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>,
+      undefined,
+      { gcTime: 600_000 },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Client draft" } });
+    fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("New generation"));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: /\{welcome\}/u }));
+
+    expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("New generation");
+  });
+
   it("retries a failed library read", async () => {
     const timestamp = new Date(NOW).toISOString();
     stubTextLibraryPanelApi({

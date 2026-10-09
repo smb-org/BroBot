@@ -157,66 +157,31 @@ describe("dashboard query data layer", () => {
     view.unmount();
   });
 
-  it("keeps a higher cached module revision when a later read returns older data", async () => {
+  it("accepts a recreated resource revision after a committed write", async () => {
     let readCount = 0;
     function RevisionProbe() {
-      const query = useModuleQuery(channelId, "sun", "error-texts", () => {
+      const query = useModuleQuery(channelId, "api_source", "sources", () => {
         readCount += 1;
-        return Promise.resolve(readCount === 1 ? { revision: 2, value: "new" } : { revision: 1, value: "old" });
+        return Promise.resolve({ sources: [{ name: "sunset", revision: readCount === 1 ? 4 : 1 }] });
       });
-      return <><p>{query.data?.value ?? "loading"}</p><button onClick={() => { void query.refetch(); }}>Refresh</button></>;
+      return <p>{query.data?.sources[0]?.revision ?? "loading"}</p>;
     }
-    const view = renderWithQuery(<RevisionProbe />, {}, { gcTime: 600_000, staleTime: 0 });
+    const view = renderWithQuery(<RevisionProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
 
-    await waitFor(() => expect(view.container).toHaveTextContent("new"));
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-
-    await waitFor(() => expect(readCount).toBe(2));
-    await waitFor(() => expect(view.container).toHaveTextContent("new"));
-    expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "sun", "error-texts"))).toEqual({ revision: 2, value: "new" });
-  });
-
-  it("preserves newer revisions inside module list responses", async () => {
-    let readCount = 0;
-    function RevisionListProbe() {
-      const query = useModuleQuery(channelId, "faq", "panel", () => {
-        readCount += 1;
-        return Promise.resolve(readCount === 1
-          ? { entries: [{ id: "entry-a", revision: 2, answer: "new" }] }
-          : { entries: [{ id: "entry-a", revision: 1, answer: "old" }, { id: "entry-b", revision: 1, answer: "other" }] });
+    await waitFor(() => expect(view.container).toHaveTextContent("4"));
+    const key = moduleQueryKey(channelId, "api_source", "sources");
+    await act(async () => {
+      await runModuleQueryWrite(view.queryClient, channelId, "api_source", "sources", () => Promise.resolve({
+        sources: [{ name: "sunset", revision: 1 }],
+      }), {
+        baselineRevision: 4,
+        updateCache: (_current, result) => result,
       });
-      return <p>{query.data?.entries.map((entry) => entry.answer).join(",") ?? "loading"}</p>;
-    }
-
-    const view = renderWithQuery(<RevisionListProbe />, {}, { gcTime: 600_000, staleTime: 0 });
-    expect(await screen.findByText("new")).toBeInTheDocument();
-    const key = moduleQueryKey(channelId, "faq", "panel");
-    await act(async () => { await view.queryClient.refetchQueries({ queryKey: key, exact: true }); });
-
-    expect(view.queryClient.getQueryData(key)).toEqual({
-      entries: [
-        { id: "entry-a", revision: 2, answer: "new" },
-        { id: "entry-b", revision: 1, answer: "other" },
-      ],
     });
+
+    expect(readCount).toBe(2);
+    expect(view.queryClient.getQueryData(key)).toEqual({ sources: [{ name: "sunset", revision: 1 }] });
     view.unmount();
-  });
-
-  it("checks the latest cached module revision after a read resolves", async () => {
-    let resolveRead: ((value: { revision: number; value: string }) => void) | undefined;
-    function RevisionProbe() {
-      const query = useModuleQuery(channelId, "sun", "error-texts", () => new Promise<{ revision: number; value: string }>((resolve) => { resolveRead = resolve; }));
-      return <p>{query.data?.value ?? "loading"}</p>;
-    }
-    const view = renderWithQuery(<RevisionProbe />, {}, { gcTime: 600_000, staleTime: 0 });
-    const key = moduleQueryKey(channelId, "sun", "error-texts");
-
-    await waitFor(() => expect(resolveRead).toBeDefined());
-    act(() => { view.queryClient.setQueryData(key, { revision: 2, value: "new" }); });
-    act(() => { resolveRead?.({ revision: 1, value: "old" }); });
-
-    await waitFor(() => expect(view.queryClient.getQueryData(key)).toEqual({ revision: 2, value: "new" }));
-    expect(view.container).toHaveTextContent("new");
   });
 
   it("invalidates dependent module reads after a write", async () => {
