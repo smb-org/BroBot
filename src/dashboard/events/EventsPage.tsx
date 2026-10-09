@@ -400,7 +400,16 @@ const EventsPageFilterState = ({
   const texts = dashboardTexts();
   const [snapshot, setSnapshot] = useState(() => ({ entries, pageCount: pages.length }));
   const [followIdentityQuery, setFollowIdentityQuery] = useState(fetching || queryStale);
-  const followsQuery = readerAtTop || followIdentityQuery;
+  const [wasReaderAtTop, setWasReaderAtTop] = useState(readerAtTop);
+  let followsIdentityQuery = followIdentityQuery;
+  if (readerAtTop && !wasReaderAtTop) {
+    setWasReaderAtTop(true);
+  } else if (!readerAtTop && wasReaderAtTop) {
+    setWasReaderAtTop(false);
+    followsIdentityQuery = false;
+    if (followIdentityQuery) setFollowIdentityQuery(false);
+  }
+  const followsQuery = readerAtTop || followsIdentityQuery;
   if (followsQuery) {
     if (snapshot.entries !== entries || snapshot.pageCount !== pages.length) {
       setSnapshot({ entries, pageCount: pages.length });
@@ -497,6 +506,12 @@ const EventsPageFilterState = ({
                     <section key={day.key} className="event-day">
                       <h3 className="event-day__heading">{day.label}</h3>
                       <table className="table event-table">
+                        <colgroup>
+                          <col className="event-table__column--event" />
+                          <col className="event-table__column--module" />
+                          <col className="event-table__column--actor" />
+                          <col className="event-table__column--time" />
+                        </colgroup>
                         <thead><tr><th scope="col">{texts.events.event}</th><th scope="col">{texts.events.module}</th><th scope="col">{texts.events.who}</th><th scope="col">{texts.events.time}</th></tr></thead>
                         <tbody>{day.groups.map((group) => {
                           const entry = group.representative;
@@ -506,7 +521,7 @@ const EventsPageFilterState = ({
                             <td>
                               <span className="event-label event-table__primary">
                                 <EventChipPair code={entry.code} detail={eventDetail(entry.detail, entry.code)} texts={texts} />
-                                <span className={`event-table__text${eventMetadata(entry.code) === null ? " mono" : ""}`}>{eventLabel}</span>
+                                <span className={`event-table__text${eventMetadata(entry.code) === null ? " mono" : ""}`} title={eventLabel}>{eventLabel}</span>
                                 {cause === null ? null : (
                                   <Popover triggerLabel={texts.events.showCause(eventLabel)} icon="cause">
                                     <span className="event-cause">
@@ -523,7 +538,7 @@ const EventsPageFilterState = ({
                               <span className="event-table__mobile-meta muted">
                                 <span className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</span>
                                 <span aria-hidden="true">·</span>
-                                <span>{actorCell(entry, texts)}</span>
+                                <span title={actorLabel(entry, texts)}>{actorCell(entry, texts)}</span>
                                 <span aria-hidden="true">·</span>
                                 <time className="mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time>
                               </span>

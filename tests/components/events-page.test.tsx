@@ -260,6 +260,53 @@ describe("EventsPage failure cause icon", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("freezes cached rows as soon as the reader leaves the top during activation refresh", async () => {
+    const cachedEntry = entry({ eventId: "activation-cached" });
+    const refreshedEntry = entry({
+      eventId: "activation-new",
+      createdAt: "2026-09-22T10:01:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"activationraid","viewers":2}',
+    });
+    let releaseRefresh: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => { releaseRefresh = resolve; }));
+    vi.stubGlobal("fetch", fetcher);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{
+          queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter),
+          data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] },
+        }],
+      },
+    );
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+
+    act(() => {
+      releaseRefresh?.(new Response(JSON.stringify({ entries: [refreshedEntry, cachedEntry], nextCursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(screen.queryByText(/Raid von activationraid/u)).not.toBeInTheDocument();
+    const notice = screen.getByRole("button", { name: /1 neue Ereignisse/u });
+    expect(notice).toBeVisible();
+
+    fireEvent.click(notice);
+    expect(await screen.findByText(/Raid von activationraid/u)).toBeVisible();
+    expect(rendered.container.querySelector(".realtime-feed__notice-slot")).toHaveAttribute("data-pending", "false");
+    rendered.unmount();
+  });
+
   it("keeps cached events visible and offers Retry after a background failure", async () => {
     const cachedEntry = entry({ eventId: "cached-event" });
     const refreshedEntry = entry({
@@ -665,6 +712,10 @@ describe("EventsPage failure cause icon", () => {
     await new Promise((resolve) => setTimeout(resolve, 150));
     fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
 
+    await waitFor(() => {
+      const data = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelEventEntry[] }> }>(dashboardDataKeys.events("kanal-a", filtersA));
+      expect(data?.pages[0]?.entries[0]?.eventId).toBe("roundtrip-new");
+    });
     expect(await screen.findByText(/Raid von newroundtrip/u)).toBeVisible();
     expect(screen.queryByText("Chat-Nachricht fehlgeschlagen")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /neue Ereignisse/u })).not.toBeInTheDocument();

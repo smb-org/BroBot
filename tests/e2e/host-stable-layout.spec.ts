@@ -54,6 +54,7 @@ interface ChannelMockData {
   membersNextStatus?: number;
   audit?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
   events?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
+  eventsNext?: { entries: readonly Record<string, unknown>[]; nextCursor: string | null };
   variables?: { variables: readonly Record<string, unknown>[]; count: number; maximum: number };
   overlays?: { overlays: readonly Record<string, unknown>[]; maximum: number; elementMaximum: number };
   legacyTokens?: { tokens: readonly Record<string, unknown>[]; nextOffset: number | null };
@@ -139,7 +140,9 @@ const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: C
       const gate = gates.events;
       gate?.started();
       if (gate !== undefined) await gate.wait;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data.events ?? { entries: [], nextCursor: null }) });
+      const isNextPage = new URL(route.request().url()).searchParams.has("cursor");
+      const response = isNextPage ? data.eventsNext : data.events;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response ?? { entries: [], nextCursor: null }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/shoutout` && route.request().method() === "POST") {
@@ -712,6 +715,59 @@ test("the new-events notice stays visible while reading older events", async ({ 
   const noticeBox = await notice.boundingBox();
   expect(noticeBox?.y).toBeGreaterThanOrEqual(0);
   expect(noticeBox?.y).toBeLessThan(120);
+});
+
+test("event rows keep their cell geometry after loading older events at desktop and mobile widths", async ({ page }) => {
+  const widths = [1280, 390, 320];
+  const longActor = "A Very Long Actor Display Name That Used To Expand Its Table Column";
+  const firstPage = {
+    entries: fullEventPage.entries.map((entry, index) => ({
+      ...entry,
+      createdAt: `2026-09-20T23:${String(59 - index).padStart(2, "0")}:00.000Z`,
+    })),
+    nextCursor: "events-next",
+  };
+  const olderPage = {
+    entries: [{
+      eventId: "event-older-page",
+      triggerId: "event-older-page-trigger",
+      createdAt: "2026-09-20T22:59:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.message_removed",
+      detail: "{}",
+      actorUserId: "long-actor",
+      actorLogin: "long-actor",
+      actorDisplayName: longActor,
+    }],
+    nextCursor: null,
+  };
+
+  for (const width of widths) {
+    await page.unrouteAll();
+    await page.setViewportSize({ width, height: 900 });
+    await installChannelMocks(page, {}, { events: firstPage, eventsNext: olderPage });
+    await page.goto(`/channels/${channelId}/events`);
+    await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
+    const existingRow = page.locator(".event-table tbody tr").first();
+    const before = await existingRow.evaluate((row) => [row, ...Array.from(row.children)].map((element) => {
+      const rect = element.getBoundingClientRect();
+      const round = (value: number): number => Math.round(value * 100) / 100;
+      return [round(rect.x + window.scrollX), round(rect.y + window.scrollY), round(rect.width), round(rect.height)];
+    }));
+
+    await page.getByRole("button", { name: "Load older events" }).click();
+    await expect(page.locator(".event-table tbody tr")).toHaveCount(51);
+    const after = await existingRow.evaluate((row) => [row, ...Array.from(row.children)].map((element) => {
+      const rect = element.getBoundingClientRect();
+      const round = (value: number): number => Math.round(value * 100) / 100;
+      return [round(rect.x + window.scrollX), round(rect.y + window.scrollY), round(rect.width), round(rect.height)];
+    }));
+    expect(after).toEqual(before);
+    const olderActorCell = page.locator(".event-table tbody tr").last().locator("td").nth(2);
+    await expect(olderActorCell).toHaveAttribute("title", longActor);
+    await expect(olderActorCell).toHaveCSS("text-overflow", "ellipsis");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
 });
 
 test("a keyboard-focused immediate-action control scrolls fully into view at 390px", async ({ page }) => {
