@@ -756,6 +756,101 @@ describe("Dashboard skeleton", () => {
       expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
       expect(requests()).toBeGreaterThanOrEqual(2);
     });
+
+    it("keeps hints held when a later page of the full refetch fails", async () => {
+      let phase: "initial" | "failing" | "healthy" = "initial";
+      const { requests } = mountEvents((url) => {
+        if (!url.searchParams.has("cursor")) return jsonResponse({ entries: phase === "initial" ? [alt] : [neu, alt], nextCursor: "cursor-1" });
+        return phase === "failing" ? jsonResponse({}, 500) : jsonResponse({ entries: [{ ...alt, eventId: "event-older", code: "older" }], nextCursor: null });
+      });
+      expect(await screen.findByText("alt")).toBeInTheDocument();
+      patchFeed();
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 100 });
+      Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, value: 1000 });
+      Object.defineProperty(window, "scrollY", { configurable: true, value: 900 });
+      fireEvent.scroll(window);
+      expect(await screen.findByText("older")).toBeInTheDocument();
+      expect(requests()).toBe(2);
+      readAt("down");
+      const socket = TestWebSocket.instances[0];
+      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+      socket.open();
+      socket.receive(hint("pages-1"));
+      await screen.findByRole("button", { name: "1 neue Ereignisse" });
+
+      phase = "failing";
+      readAt("top");
+      fireEvent.scroll(window);
+      await waitFor(() => expect(requests()).toBe(4));
+      await settle();
+      expect(requests()).toBe(4);
+      expect(screen.queryByText("Raid von unbekannt mit 11 Zuschauern")).not.toBeInTheDocument();
+
+      phase = "healthy";
+      fireEvent.scroll(window);
+      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
+      await settle();
+      expect(requests()).toBe(6);
+    });
+
+    it("does not start a queued refresh while the reader has scrolled away", async () => {
+      let releaseOlder: () => void = () => undefined;
+      const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
+      const { requests } = mountEvents(async (_url, count) => {
+        if (count === 2) {
+          await olderGate;
+          return jsonResponse({ entries: [alt], nextCursor: null });
+        }
+        return jsonResponse({ entries: count === 1 ? [alt] : [neu, alt], nextCursor: null });
+      });
+      expect(await screen.findByText("alt")).toBeInTheDocument();
+      patchFeed();
+      const socket = TestWebSocket.instances[0];
+      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+      socket.open();
+      socket.receive(hint("away-1"));
+      await waitFor(() => expect(requests()).toBe(2));
+      socket.receive(hint("away-2"));
+      await settle();
+      readAt("down");
+      releaseOlder();
+      await settle();
+      expect(requests()).toBe(2);
+
+      readAt("top");
+      fireEvent.scroll(window);
+      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
+      await settle();
+      expect(requests()).toBe(3);
+    });
+
+    it("skips the queued refresh when a retry already satisfied it", async () => {
+      let releaseFirstAttempt: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => { releaseFirstAttempt = resolve; });
+      const { requests, rendered } = mountEvents(async (_url, count) => {
+        if (count === 2) {
+          await gate;
+          return jsonResponse({}, 500);
+        }
+        return jsonResponse({ entries: count === 1 ? [alt] : [neu, alt], nextCursor: null });
+      });
+      expect(await screen.findByText("alt")).toBeInTheDocument();
+      patchFeed();
+      const defaults = rendered.queryClient.getDefaultOptions();
+      rendered.queryClient.setDefaultOptions({ ...defaults, queries: { ...defaults.queries, retry: 1, retryDelay: 0 } });
+      rendered.rerender(<DashboardApp />);
+      const socket = TestWebSocket.instances[0];
+      if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+      socket.open();
+      socket.receive(hint("retry-1"));
+      await waitFor(() => expect(requests()).toBe(2));
+      socket.receive(hint("retry-2"));
+      await settle();
+      releaseFirstAttempt();
+      expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
+      await settle();
+      expect(requests()).toBe(3);
+    });
   });
 
   it("jumps to the top via the notice and then loads more", async () => {

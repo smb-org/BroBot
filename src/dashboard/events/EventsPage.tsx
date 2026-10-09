@@ -246,15 +246,18 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   const queryClient = useQueryClient();
   const queryKey = useMemo(() => dashboardDataKeys.events(channelId, filters), [channelId, filters]);
   const identityKey = JSON.stringify(queryKey);
+  // Set by the content once it can measure the feed; queued refreshes only run while the reader is at the start.
+  const atTopRef = useRef<() => boolean>(() => true);
+  const readerAtTop = useCallback((): boolean => atTopRef.current(), []);
   const invalidateEvents = useCallback((): void => {
-    void refreshQuery(queryClient, queryKey);
-  }, [queryClient, queryKey]);
+    void refreshQuery(queryClient, queryKey, "active", readerAtTop);
+  }, [queryClient, queryKey, readerAtTop]);
   // Mark every cached event filter of this channel stale, so an inactive filter cannot stay "fresh" after a hint.
   const markEventsStale = useCallback((): void => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.channel(channelId, "events"), refetchType: "none" });
   }, [queryClient, channelId]);
   const markDirtyKey = useCallback((): void => { markDirty(queryClient, queryKey); }, [queryClient, queryKey]);
-  const refreshDirtyKey = useCallback((): void => { refreshIfDirty(queryClient, queryKey); }, [queryClient, queryKey]);
+  const refreshDirtyKey = useCallback((): void => { refreshIfDirty(queryClient, queryKey, readerAtTop); }, [queryClient, queryKey, readerAtTop]);
   const loadNextPage = useCallback((): void => {
     if (query.isFetching || query.isPlaceholderData || !query.hasNextPage) return;
     void query.fetchNextPage({ cancelRefetch: false });
@@ -285,6 +288,7 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     loadingNextPage={query.isFetchingNextPage}
     onRefresh={invalidateEvents}
     onEventHint={markEventsStale}
+    atTopRef={atTopRef}
     onMarkDirty={markDirtyKey}
     onRefreshIfDirty={refreshDirtyKey}
     onNextPage={loadNextPage}
@@ -304,6 +308,7 @@ interface EventsPageContentProperties {
   onFiltersChange: (filters: PanelEventFilters) => void;
   onRefresh: () => void;
   onEventHint: () => void;
+  atTopRef: { current: () => boolean };
   onMarkDirty: () => void;
   onRefreshIfDirty: () => void;
   onNextPage: () => void;
@@ -311,7 +316,7 @@ interface EventsPageContentProperties {
 }
 
 const EventsPageContent = (properties: EventsPageContentProperties): ReactElement => {
-  const { identityKey, channelId, filters, onRefresh, onEventHint, onMarkDirty, onRefreshIfDirty, ...contentProperties } = properties;
+  const { identityKey, channelId, filters, onRefresh, onEventHint, atTopRef, onMarkDirty, onRefreshIfDirty, ...contentProperties } = properties;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const setFeedRef = useCallback<RefCallback<HTMLDivElement>>((feed) => { feedRef.current = feed; }, []);
   const atBeginning = useCallback((): boolean => {
@@ -320,6 +325,9 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
     const feedStart = feed.getBoundingClientRect().top + window.scrollY;
     return window.scrollY <= feedStart + 8;
   }, []);
+  useEffect(() => {
+    atTopRef.current = atBeginning;
+  }, [atBeginning, atTopRef]);
   const scrollToBeginning = useCallback((): void => {
     const feed = feedRef.current;
     if (feed === null) return;
@@ -361,7 +369,7 @@ const EventsPageFilterState = ({
   loadingNextPage,
   feedRef,
   realtime,
-}: Omit<EventsPageContentProperties, "channelId" | "onEventHint" | "onMarkDirty" | "onRefreshIfDirty"> & {
+}: Omit<EventsPageContentProperties, "channelId" | "onEventHint" | "atTopRef" | "onMarkDirty" | "onRefreshIfDirty"> & {
   feedRef: RefCallback<HTMLDivElement>;
   realtime: RealtimeFeedState;
 }): ReactElement => {
