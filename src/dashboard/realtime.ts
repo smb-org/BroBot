@@ -369,6 +369,10 @@ export const useRealtimeEventFeed = ({
   const currentIdentityKey = `${channelId}\u001f${currentFilterKey}`;
   const [status, setStatus] = useState<RealtimeFeedStatus>("connecting");
   const [pendingState, setPendingState] = useState({ identityKey: currentIdentityKey, count: 0 });
+  if (pendingState.identityKey !== currentIdentityKey) {
+    // Identity changed: drop the old notice state during render so returning to it cannot resurrect the count.
+    setPendingState({ identityKey: currentIdentityKey, count: 0 });
+  }
   const pendingCount = pendingState.identityKey === currentIdentityKey ? pendingState.count : 0;
   const currentIdentityKeyRef = useRef(currentIdentityKey);
   const socketRef = useRef<WebSocket | null>(null);

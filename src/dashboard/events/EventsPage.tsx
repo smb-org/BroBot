@@ -9,6 +9,7 @@ import { useRealtimeEventFeed, type RealtimeFeedState, type RealtimeFeedStatus a
 import { Icon } from "../ui/Icon";
 import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, QueryErrorState, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import { PanelApiError } from "../api";
+import { refreshQuery } from "../data/refresh";
 import { dashboardDataKeys } from "../data/keys";
 import { useEventsQuery } from "../data/lists";
 import {
@@ -246,7 +247,7 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   const queryKey = useMemo(() => dashboardDataKeys.events(channelId, filters), [channelId, filters]);
   const identityKey = JSON.stringify(queryKey);
   const invalidateEvents = useCallback((): void => {
-    void queryClient.invalidateQueries({ queryKey, exact: true });
+    void refreshQuery(queryClient, queryKey);
   }, [queryClient, queryKey]);
   const loadNextPage = useCallback((): void => {
     if (query.isFetching || query.isPlaceholderData || !query.hasNextPage) return;

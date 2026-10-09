@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,7 @@ import { EventsPage } from "../../src/dashboard/events/EventsPage";
 import { emptyEventFilter } from "../../src/dashboard/events/model";
 import type { PanelEventEntry, PanelEventsResponse } from "../../src/panel-contract";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
+import { useRealtimeEventFeed } from "../../src/dashboard/realtime";
 import { dashboardAuthenticationRequiredEvent } from "../../src/dashboard/data/events";
 import { renderWithQuery } from "../query-test-utils";
 
@@ -236,6 +237,81 @@ describe("EventsPage failure cause icon", () => {
     expect(await screen.findByText("Raid von recoveredraid mit 2 Zuschauern")).toBeVisible();
     expect(rendered.container.querySelector(".list-toolbar__query-error")).toBeNull();
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("refetches when a realtime hint arrives during an uncached first load", async () => {
+    const initialEntry = entry({ eventId: "initial-event" });
+    const hinted = entry({
+      eventId: "hinted-event",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"coldhint","viewers":1}',
+    });
+    const responses: Array<(response: Response) => void> = [];
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => { responses.push(resolve); }));
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      { gcTime: 600_000 },
+    );
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "cold-hint-message",
+      createdAt: hinted.createdAt,
+      channelId: "kanal-a",
+      type: "event_log.new",
+      payload: { entries: [{ eventId: hinted.eventId, createdAt: hinted.createdAt, moduleId: hinted.moduleId, code: hinted.code, actorUserId: null }] },
+    }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    const json = (entries: PanelEventEntry[]) => new Response(JSON.stringify({ entries, nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    responses[0]?.(json([initialEntry]));
+    responses[1]?.(json([initialEntry, hinted]));
+    expect(await screen.findByText(/Raid von coldhint/u)).toBeVisible();
+    rendered.unmount();
+  });
+
+  it("drops pending new-event notices when the filter changes and does not restore them on return", async () => {
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const filtersA = { ...emptyEventFilter, module: "channel_events" };
+    const filtersB = { ...emptyEventFilter, module: "other_module" };
+    const { result, rerender, unmount } = renderHook(
+      ({ filters }) => useRealtimeEventFeed({
+        channelId: "kanal-a",
+        filters,
+        atBeginning: () => false,
+        refresh: () => undefined,
+        scrollToBeginning: () => undefined,
+      }),
+      { initialProps: { filters: filtersA } },
+    );
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    act(() => {
+      socket.receive(JSON.stringify({
+        version: 1,
+        id: "pending-hint-message",
+        createdAt: "2026-05-01T10:00:00.000Z",
+        channelId: "kanal-a",
+        type: "event_log.new",
+        payload: { entries: [{ eventId: "e1", createdAt: "2026-05-01T10:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", actorUserId: null }] },
+      }));
+    });
+    expect(result.current.pendingCount).toBe(1);
+    rerender({ filters: filtersB });
+    expect(result.current.pendingCount).toBe(0);
+    rerender({ filters: filtersA });
+    expect(result.current.pendingCount).toBe(0);
+    unmount();
   });
 
   it("invalidates again when a second realtime hint arrives during a delayed refresh", async () => {
