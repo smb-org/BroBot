@@ -144,6 +144,44 @@ describe("dashboard query data layer", () => {
     await toggle;
   });
 
+  it("resolves a reload with the fresh server value even when the key's queries are cancelled", async () => {
+    let readCount = 0;
+    let releaseReload: (() => void) | undefined;
+    let failReload = false;
+    const reloadReleased = new Promise<void>((resolve) => { releaseReload = resolve; });
+
+    function RevisionProbe() {
+      const query = useModuleQuery<string>(channelId, "text_commands", "commands", async () => {
+        readCount += 1;
+        if (readCount === 2) {
+          await reloadReleased;
+          if (failReload) throw new Error("server unreachable");
+        }
+        return `revision-${String(readCount)}`;
+      });
+      return <p>{query.data ?? "loading"}</p>;
+    }
+
+    const view = renderWithQuery(<RevisionProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
+    expect(await screen.findByText("revision-1")).toBeInTheDocument();
+    const key = moduleQueryKey(channelId, "text_commands", "commands");
+
+    const reload = refetchModuleQueryData<string>(view.queryClient, channelId, "text_commands", "commands");
+    await waitFor(() => expect(readCount).toBe(2));
+    await view.queryClient.cancelQueries({ queryKey: key, exact: true });
+    releaseReload?.();
+
+    await expect(reload).resolves.toBe("revision-2");
+    expect(view.queryClient.getQueryData(key)).toBe("revision-2");
+
+    // A failed read rejects so the caller keeps its draft and conflict state.
+    readCount = 1;
+    failReload = true;
+    await expect(refetchModuleQueryData<string>(view.queryClient, channelId, "text_commands", "commands"))
+      .rejects.toThrow("server unreachable");
+    expect(view.queryClient.getQueryData(key)).toBe("revision-2");
+  });
+
   it("restarts a cancelled cold read when the module write fails", async () => {
     let markReadStarted: (() => void) | undefined;
     let oldSignal: AbortSignal | undefined;

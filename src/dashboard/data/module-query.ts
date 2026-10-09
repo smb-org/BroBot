@@ -79,8 +79,8 @@ const readModuleData = async <Value,>(
 
 /**
  * Explicit "reload server state", queued behind pending writes. Resolves only with
- * the value this very read produced; a failure or cancellation throws so callers
- * keep their draft. Never infer success from cached query data.
+ * the value this very read produced; a failure throws so callers keep their draft.
+ * Never infer success from cached query data.
  */
 export const refetchModuleQueryData = <Value,>(
   queryClient: QueryClient,
@@ -89,14 +89,16 @@ export const refetchModuleQueryData = <Value,>(
   part: string,
 ): Promise<Value> => {
   const queryKey = moduleQueryKey(channelId, moduleId, part);
-  return enqueue(queryClient, queryKey, () => {
+  return enqueue(queryClient, queryKey, async () => {
     const fn = readers.get(queryClient)?.get(hashKey(queryKey)) as ModuleQueryFunction<Value> | undefined;
     if (fn === undefined) throw new Error("Module query has no registered reader.");
-    return queryClient.query({
-      queryKey,
-      queryFn: ({ signal }) => readModuleData(queryClient, queryKey, fn, signal),
-      staleTime: 0,
-    });
+    // Deliberately outside the query cache's fetch: cancelQueries reverts a cache
+    // fetch to its cached data, which would look like a successful reload.
+    const value = await fn(new AbortController().signal);
+    // Older background reads must not overwrite this fresher value.
+    commitWriteGeneration(queryClient, queryKey);
+    queryClient.setQueryData(queryKey, value);
+    return value;
   });
 };
 
