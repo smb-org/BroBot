@@ -118,7 +118,7 @@ h1, h2, h3, p { margin-top: 0; }
 h1 { margin-bottom: 0; font-size: 22px; font-weight: 600; letter-spacing: -.015em; line-height: 1.25; }
 h2 { margin-bottom: 0; font-size: 15px; font-weight: 600; }
 h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
-.muted { color: var(--text-2); font-size: 12.5px; }
+.muted { color: var(--text-2); font-size: 13px; }
 .loading-line { color: var(--text-2); font-size: 13px; }
 
 /* ── Regions instead of cards ──────────────────────────── Spacing and a hairline separate sections; no border, gradient, or shadow. */
@@ -128,12 +128,12 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .module-chat-commands__list { display: grid; gap: var(--s4); margin: 0; padding: 0; list-style: none; }
 .module-chat-command { display: grid; gap: var(--s2); min-width: 0; padding-bottom: var(--s4); border-bottom: 1px solid var(--line); }
 .module-chat-command > .number { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
-.module-chat-command__description, .module-chat-command__threshold { margin: 0; color: var(--text-2); font-size: 12.5px; }
+.module-chat-command__description, .module-chat-command__threshold { margin: 0; color: var(--text-2); font-size: 13px; }
 .module-chat-command__arguments { display: grid; gap: var(--s2); }
 .module-chat-command__arguments h3 { color: var(--text-2); font-size: 12px; }
 .module-chat-command__arguments dl { display: grid; gap: var(--s2); margin: 0; }
 .module-chat-command__arguments dl > div { display: grid; grid-template-columns: minmax(5rem, auto) minmax(0, 1fr); gap: var(--s2); }
-.module-chat-command__arguments dt, .module-chat-command__arguments dd { margin: 0; color: var(--text-2); font-size: 12.5px; }
+.module-chat-command__arguments dt, .module-chat-command__arguments dd { margin: 0; color: var(--text-2); font-size: 13px; }
 .module-chat-command__arguments dd { overflow-wrap: anywhere; }
 .module-chat-command__threshold span { color: var(--text-3); }
 .section-heading {
@@ -236,14 +236,14 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .button--secondary { margin-top: var(--s4); }
 .button--quiet {
   width: auto; border-color: transparent; background: none;
-  color: var(--text-2); font-size: 12.5px;
+  color: var(--text-2); font-size: 13px;
 }
 .button--quiet:hover {
   color: var(--error); border-color: rgba(226, 86, 77, .45); background: var(--error-surface);
 }
 .button--quiet:disabled:hover { color: var(--text-2); border-color: transparent; background: none; }
 
-.moderator-check-time { font-size: 11.5px; }
+.moderator-check-time { font-size: 11px; }
 
 /* Keep the last known value still instead of showing a shimmer. Peripheral motion beside a running stream looks like a state change, the most costly misread here. */
 .stale { opacity: .55; }
@@ -265,10 +265,10 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
   padding: var(--s3) var(--s4); background: var(--surface-raised);
 }
 .inspector-result > .avatar-row { flex: 1; }
-.inspector-result span { color: var(--text-3); font-size: 12.5px; }
+.inspector-result span { color: var(--text-3); font-size: 13px; }
 .inspector-result label:not([class*="mantine-"]) { display: grid; gap: var(--s1); }
 .member-grant-editor__result { display: grid; gap: var(--s4); margin-top: var(--s4); }
-.member-grant-editor__result span { color: var(--text-3); font-size: 12.5px; }
+.member-grant-editor__result span { color: var(--text-3); font-size: 13px; }
 
 .inspector-form label .muted,
 .content-section label .muted,
@@ -477,7 +477,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .text-library__settings-body { display: grid; gap: var(--s4); margin-top: var(--s4); }
 .text-library__category-row, .text-library__category-create, .text-library__timezone { display: grid; gap: var(--s2); align-items: end; padding-bottom: var(--s3); border-bottom: 1px solid var(--line); }
 .text-library__category-row .config-field, .text-library__category-create .config-field, .text-library__timezone .config-field { min-width: 0; }
-details { margin-top: var(--s2); color: var(--text-2); font-size: 12.5px; }
+details { margin-top: var(--s2); color: var(--text-2); font-size: 13px; }
 summary { cursor: pointer; }
 summary:hover { color: var(--text); }
 pre {
@@ -494,7 +494,7 @@ pre {
   border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface-raised);
 }
 .auth-card h1 { margin: 0 0 var(--s3); font-size: 22px; }
-.auth-card p { margin-bottom: var(--s6); color: var(--text-2); font-size: 13.5px; }
+.auth-card p { margin-bottom: var(--s6); color: var(--text-2); font-size: 13px; }
 
 /* ── Narrow layout ────────────────────────────────────── Structural, not fluid: the layout changes while font sizes stay fixed. */
 
@@ -680,7 +680,7 @@ pre {
 .list-row__icon { color: var(--text-2); }
 .list-row__copy { display: grid; min-width: 0; gap: var(--s1); }
 .list-row__title { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.list-row__description { overflow: hidden; color: var(--text-2); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.list-row__description { overflow: hidden; color: var(--text-2); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .list-row__status { justify-self: end; }
 .list-row__action { display: flex; flex: none; align-items: center; }
 .switch-locked-reason { max-width: 16rem; margin-top: var(--s1); color: var(--text-3); font-size: 11px; line-height: 1.1; }
@@ -714,7 +714,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .command-panel .table thead th:nth-child(4) { white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
 .command-panel .table .minimum-tier-select { width: 100%; min-width: 0; }
 .command-panel .table .minimum-tier-select input { width: 100%; min-width: 0; }
-.command-inspector__meta { display: none; margin-left: auto; font-size: 11.5px; }
+.command-inspector__meta { display: none; margin-left: auto; font-size: 11px; }
 .command-panel .table tbody tr[tabindex] { cursor: pointer; }
 .command-panel .table tbody tr[tabindex]:hover { background: var(--surface-raised); }
 .command-panel .table tbody tr:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
