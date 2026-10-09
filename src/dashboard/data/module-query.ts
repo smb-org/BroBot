@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, useQueryClient, type QueryClient, type QueryObserverResult } from "@tanstack/react-query";
+import { hashKey, keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "./keys";
 
@@ -19,9 +19,6 @@ export interface ModuleQueryWriteOptions<Value> {
 
 export type ModuleQueryWriteFunction<Value> = (baselineRevision: ModuleQueryRevision) => Promise<Value>;
 
-type ModuleQueryRefetchResult<Value> = Pick<QueryObserverResult<Value>, "data" | "error" | "isError" | "isSuccess">;
-type ModuleQueryRefetch<Value> = () => Promise<ModuleQueryRefetchResult<Value>>;
-
 const writeGenerations = new WeakMap<QueryClient, Map<string, number>>();
 
 const generationKey = (queryKey: readonly unknown[]): string => JSON.stringify(queryKey);
@@ -41,13 +38,66 @@ const commitWriteGeneration = (queryClient: QueryClient, queryKey: readonly unkn
   return generation;
 };
 
-/** Return data only when the refetch itself succeeded; cached data survives failed refetches. */
-export const refetchModuleQueryData = async <Value,>(refetch: ModuleQueryRefetch<Value>): Promise<Value> => {
-  const result = await refetch();
-  if (!result.isSuccess || result.isError || result.data === undefined) {
-    throw result.error ?? new Error("Module query refetch failed.");
+const readers = new WeakMap<QueryClient, Map<string, ModuleQueryFunction<unknown>>>();
+const queues = new WeakMap<QueryClient, Map<string, Promise<unknown>>>();
+
+/** Run operations for one query key strictly one after another, whatever each one's outcome. */
+const enqueue = <Result,>(queryClient: QueryClient, queryKey: readonly unknown[], task: () => Promise<Result>): Promise<Result> => {
+  let chains = queues.get(queryClient);
+  if (chains === undefined) {
+    chains = new Map();
+    queues.set(queryClient, chains);
   }
-  return result.data;
+  const key = hashKey(queryKey);
+  const run = (chains.get(key) ?? Promise.resolve()).then(task, task);
+  chains.set(key, run.catch(() => undefined));
+  return run;
+};
+
+/** Read through `fn`, discarding results that started before the latest committed write. */
+const readModuleData = async <Value,>(
+  queryClient: QueryClient,
+  queryKey: readonly unknown[],
+  fn: ModuleQueryFunction<Value>,
+  signal: AbortSignal,
+): Promise<Value> => {
+  let readGeneration = writeGenerationFor(queryClient, queryKey);
+  for (;;) {
+    const result = await fn(signal);
+    const latestGeneration = writeGenerationFor(queryClient, queryKey);
+    if (readGeneration >= latestGeneration) return result;
+
+    const current = queryClient.getQueryData<Value>(queryKey);
+    if (current !== undefined) return current;
+    if (signal.aborted) throw signal.reason ?? new Error("Module query read was cancelled.");
+
+    // A dependent resource may not have been cached when the write committed.
+    // Start a fresh read at the committed generation instead of accepting this one.
+    readGeneration = latestGeneration;
+  }
+};
+
+/**
+ * Explicit "reload server state", queued behind pending writes. Resolves only with
+ * the value this very read produced; a failure or cancellation throws so callers
+ * keep their draft. Never infer success from cached query data.
+ */
+export const refetchModuleQueryData = <Value,>(
+  queryClient: QueryClient,
+  channelId: string,
+  moduleId: string,
+  part: string,
+): Promise<Value> => {
+  const queryKey = moduleQueryKey(channelId, moduleId, part);
+  return enqueue(queryClient, queryKey, () => {
+    const fn = readers.get(queryClient)?.get(hashKey(queryKey)) as ModuleQueryFunction<Value> | undefined;
+    if (fn === undefined) throw new Error("Module query has no registered reader.");
+    return queryClient.query({
+      queryKey,
+      queryFn: ({ signal }) => readModuleData(queryClient, queryKey, fn, signal),
+      staleTime: 0,
+    });
+  });
 };
 
 export const moduleQueryKey = (channelId: string, moduleId: string, part: string) =>
@@ -61,24 +111,15 @@ export const useModuleQuery = <Value,>(
 ) => {
   const queryClient = useQueryClient();
   const queryKey = moduleQueryKey(channelId, moduleId, part);
+  let registry = readers.get(queryClient);
+  if (registry === undefined) {
+    registry = new Map();
+    readers.set(queryClient, registry);
+  }
+  registry.set(hashKey(queryKey), fn);
   return useQuery({
     queryKey,
-    queryFn: async ({ signal }) => {
-      let readGeneration = writeGenerationFor(queryClient, queryKey);
-      for (;;) {
-        const result = await fn(signal);
-        const latestGeneration = writeGenerationFor(queryClient, queryKey);
-        if (readGeneration >= latestGeneration) return result;
-
-        const current = queryClient.getQueryData<Value>(queryKey);
-        if (current !== undefined) return current;
-        if (signal.aborted) throw signal.reason ?? new Error("Module query read was cancelled.");
-
-        // A dependent resource may not have been cached when the write committed.
-        // Start a fresh read at the committed generation instead of accepting this one.
-        readGeneration = latestGeneration;
-      }
-    },
+    queryFn: ({ signal }) => readModuleData(queryClient, queryKey, fn, signal),
     placeholderData: (previousData, previousQuery) => {
       const previousKey = previousQuery?.queryKey;
       const resource = `modules/${moduleId}/${part}`;
@@ -101,7 +142,7 @@ export const runModuleQueryWrite = async <Value,>(
   part: string,
   write: ModuleQueryWriteFunction<Value>,
   options: ModuleQueryWriteOptions<Value>,
-): Promise<Value> => {
+): Promise<Value> => enqueue(queryClient, moduleQueryKey(channelId, moduleId, part), async () => {
   const primaryFilter = { queryKey: moduleQueryKey(channelId, moduleId, part), exact: true } as const;
   const filters = [
     primaryFilter,
@@ -128,4 +169,4 @@ export const runModuleQueryWrite = async <Value,>(
   await Promise.all(filters.map((filter) => queryClient.invalidateQueries({ ...filter, refetchType: "none" })));
   await Promise.allSettled(filters.map((filter) => queryClient.refetchQueries(filter, { throwOnError: true })));
   return result;
-};
+});

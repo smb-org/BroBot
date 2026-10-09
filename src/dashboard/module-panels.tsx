@@ -199,6 +199,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   onSaved?: () => void;
 }): ReactElement => {
   const [generation, setGeneration] = useState(0);
+  const queryClient = useDashboardQueryClient();
   const settingsQuery = useModuleQuery(channelId, module.id, "settings", async (signal) => {
     if (module.settingsEditor === undefined) throw new Error("Module settings editor is unavailable.");
     const [definition, response] = await Promise.all([
@@ -247,7 +248,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       {...(onSaved === undefined ? {} : { onSaved })}
       onReload={async () => {
         try {
-          await refetchModuleQueryData(() => settingsQuery.refetch());
+          await refetchModuleQueryData(queryClient, channelId, module.id, "settings");
           setGeneration((current) => current + 1);
           return true;
         } catch {

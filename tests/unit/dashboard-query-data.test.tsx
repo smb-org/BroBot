@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PanelApiError } from "../../src/dashboard/api";
 import { createDashboardQueryClient } from "../../src/dashboard/data/client";
-import { moduleQueryKey, runModuleQueryWrite, useModuleQuery } from "../../src/dashboard/data";
+import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useModuleQuery } from "../../src/dashboard/data";
 import { queryKeys } from "../../src/dashboard/data/keys";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
@@ -84,6 +84,64 @@ describe("dashboard query data layer", () => {
     expect(await screen.findByText("revision-2")).toBeInTheDocument();
     await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "faq", "panel"))).toBe("revision-2"));
     expect(oldSignal?.aborted).toBe(true);
+  });
+
+  it("applies late write responses in request order so a deleted entry stays deleted", async () => {
+    let readCount = 0;
+    let releaseMove: (() => void) | undefined;
+    const moveReleased = new Promise<void>((resolve) => { releaseMove = resolve; });
+
+    function ListProbe() {
+      const query = useModuleQuery<string[]>(channelId, "faq", "panel", () => {
+        readCount += 1;
+        return readCount === 1 ? Promise.resolve(["a", "b", "c"]) : Promise.reject(new Error("revalidation failed"));
+      });
+      return <p>{query.data?.join(",") ?? "loading"}</p>;
+    }
+
+    const view = renderWithQuery(<ListProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
+    expect(await screen.findByText("a,b,c")).toBeInTheDocument();
+
+    const move = runModuleQueryWrite(view.queryClient, channelId, "faq", "panel",
+      async () => { await moveReleased; return ["b", "a", "c"]; },
+      { baselineRevision: 1, updateCache: (_current, result: string[]) => result });
+    const remove = runModuleQueryWrite(view.queryClient, channelId, "faq", "panel",
+      () => Promise.resolve("c"),
+      { baselineRevision: 1, updateCache: (current, id: string) => (current as string[]).filter((item) => item !== id) });
+    // Without a queue the delete would finish while the move response is still held back.
+    await new Promise((resolve) => { setTimeout(resolve, 30); });
+    releaseMove?.();
+    await Promise.all([move, remove]);
+
+    expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "faq", "panel"))).toEqual(["b", "a"]);
+  });
+
+  it("never accepts cached data for a reload that a write would have cancelled", async () => {
+    let readCount = 0;
+    let releaseReload: (() => void) | undefined;
+    const reloadReleased = new Promise<void>((resolve) => { releaseReload = resolve; });
+
+    function CommandsProbe() {
+      const query = useModuleQuery<string>(channelId, "text_commands", "commands", async () => {
+        readCount += 1;
+        if (readCount === 2) await reloadReleased;
+        return `server-${String(readCount)}`;
+      });
+      return <p>{query.data ?? "loading"}</p>;
+    }
+
+    const view = renderWithQuery(<CommandsProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
+    expect(await screen.findByText("server-1")).toBeInTheDocument();
+
+    const reload = refetchModuleQueryData<string>(view.queryClient, channelId, "text_commands", "commands");
+    await waitFor(() => expect(readCount).toBe(2));
+    const toggle = runModuleQueryWrite(view.queryClient, channelId, "text_commands", "commands",
+      () => Promise.resolve("toggled"),
+      { baselineRevision: 1, updateCache: (current) => current });
+    releaseReload?.();
+
+    await expect(reload).resolves.toBe("server-2");
+    await toggle;
   });
 
   it("restarts a cancelled cold read when the module write fails", async () => {

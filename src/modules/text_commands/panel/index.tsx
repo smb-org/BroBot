@@ -1117,14 +1117,14 @@ const TextCommandsPanelContent = ({
   const refresh = useCallback(async (selectAfter?: string, force = false): Promise<TextCommand[]> => {
     const cached = queryClient.getQueryData<TextCommandPanelData>(moduleQueryKey(channelId, "text_commands", "commands"));
     const data = force || cached === undefined
-      ? await refetchModuleQueryData(refetchCommands)
+      ? await refetchModuleQueryData<TextCommandPanelData>(queryClient, channelId, "text_commands", "commands")
       : cached;
     if (selectAfter !== undefined && data.commands.some((item) => item.name === selectAfter)) {
       setCreateOpen(false);
       selectName(selectAfter);
     }
     return data.commands;
-  }, [channelId, queryClient, refetchCommands, selectName]);
+  }, [channelId, queryClient, selectName]);
 
   const write = useCallback(<Value,>(
     baselineRevision: number | null,
