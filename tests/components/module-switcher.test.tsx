@@ -76,10 +76,14 @@ describe("Module navigation in the sidebar", () => {
   it("switches straight from the sidebar to the selected module's detail page", async () => {
     renderModulePage(moduleStates, [channel, secondChannel]);
 
+    await screen.findByRole("heading", { name: "Textbefehle", level: 1 });
+    const pageHeader = document.querySelector(".main-content .page-header");
+    expect(pageHeader).not.toBeNull();
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
     fireEvent.click(await within(nav).findByRole("link", { name: "Werbung · Läuft" }));
 
     expect(await screen.findByRole("heading", { name: "Werbung", level: 1 })).toBeInTheDocument();
+    expect(document.querySelector(".main-content .page-header")).toBe(pageHeader);
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/ads");
   });
 

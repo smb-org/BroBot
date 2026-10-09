@@ -1120,6 +1120,7 @@ export const DashboardApp = (): ReactElement => {
   const latestStreamByChannel = useRef(new Map<string, ChannelStreamVersion>());
   const channelsQuery = useQuery<PanelChannelsResponse>({
     queryKey: queryKeys.channels(),
+    refetchOnWindowFocus: false,
     queryFn: async ({ signal }) => {
       const response = await fetchChannels(signal);
       return {
@@ -1146,6 +1147,7 @@ export const DashboardApp = (): ReactElement => {
   const overviewChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
   const overviewQuery = useQuery<PanelChannelOverview>({
     queryKey: queryKeys.channel(overviewChannelId ?? "", "overview"),
+    refetchOnWindowFocus: false,
     queryFn: async ({ signal }) => {
       if (overviewChannelId === null) throw new Error("An overview query needs a channel ID.");
       const response = await fetchChannelOverview(overviewChannelId, signal);
@@ -1177,11 +1179,12 @@ export const DashboardApp = (): ReactElement => {
   const [loadingNextMembersPage, setLoadingNextMembersPage] = useState(false);
   const membersRequest = useRef<MembersRequestState>({ controller: null, generation: 0 });
   const [loggingOut, setLoggingOut] = useState(false);
-  const [headerModuleBusy, setHeaderModuleBusy] = useState(false);
+  const [headerModuleBusyKey, setHeaderModuleBusyKey] = useState<string | null>(null);
+  const headerModuleBusy = route.kind === "module" && headerModuleBusyKey === `${route.channelId}:${route.moduleId}`;
   // Spotlight (#164): set right before navigating to a module so its panel
   // can pre-select something on mount (e.g. a text command by name). Not
   // part of the route/URL -- see the deep-link discussion in that commit.
-  const [pendingModuleSelection, setPendingModuleSelection] = useState<string | null>(null);
+  const [pendingModuleSelection, setPendingModuleSelection] = useState<{ channelId: string; moduleId: string; value: string } | null>(null);
   // Same deep-link pattern, for Spotlight jumping straight to a channel
   // variable's inspector (#208) instead of just opening the variables page.
   const [pendingVariableSelection, setPendingVariableSelection] = useState<{ channelId: string; name: string } | null>(null);
@@ -1600,11 +1603,13 @@ export const DashboardApp = (): ReactElement => {
           ? [{ expiresAt, loadedAt: overview.loadedAt, channelId: overview.data?.channelId ?? "" }]
           : [];
       })),
-    ...(system.data === null ? [] : [system.data.tokens.botExpiresAt, system.data.tokens.loginExpiresAt]
+    ...(route.kind !== "channel" || route.section !== "system" || route.channelId !== systemChannelId || system.data === null
+      ? []
+      : [system.data.tokens.botExpiresAt, system.data.tokens.loginExpiresAt]
       .flatMap((value) => {
         const expiresAt = parseDashboardDate(value);
         return system.loadedAt !== undefined && expiresAt !== null && expiresAt > system.loadedAt
-          ? [{ expiresAt, loadedAt: system.loadedAt, channelId: systemChannelId ?? "" }]
+          ? [{ expiresAt, loadedAt: system.loadedAt, channelId: route.channelId }]
           : [];
       })),
   ];
@@ -1637,10 +1642,11 @@ export const DashboardApp = (): ReactElement => {
   const toggleHeaderModule = async (): Promise<void> => {
     if (route.kind !== "module") return;
     const targetModuleId = route.moduleId;
+    const targetKey = `${route.channelId}:${targetModuleId}`;
     const state = (selectedChannel?.modules ?? modules.data?.modules ?? []).find((module) => module.id === targetModuleId);
     if (state === undefined || state.mandatory === true || targetModuleId === "channel_events" ||
-        (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusy) return;
-    setHeaderModuleBusy(true);
+        (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusyKey === targetKey) return;
+    setHeaderModuleBusyKey(targetKey);
     try {
       await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);
       await reloadModules();
@@ -1651,7 +1657,7 @@ export const DashboardApp = (): ReactElement => {
         : dashboardTexts().errors.changeFailed });
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {
-      setHeaderModuleBusy(false);
+      setHeaderModuleBusyKey((current) => current === targetKey ? null : current);
     }
   };
 
@@ -1711,6 +1717,7 @@ export const DashboardApp = (): ReactElement => {
   const modulesQuery = useQuery<PanelModulesResponse>({
     queryKey: queryKeys.channel(modulesChannelId ?? "", "modules"),
     enabled: !authenticationRequired && modulesChannelId !== null,
+    refetchOnWindowFocus: false,
     placeholderData: (previousData, previousQuery) =>
       previousQuery?.queryKey[1] === modulesChannelId ? previousData : undefined,
   });
@@ -1960,7 +1967,7 @@ export const DashboardApp = (): ReactElement => {
           { updatedAt: overviewQuery.dataUpdatedAt });
         }} /> : null}</UiLoadState> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading" || members.status === "idle"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
-        {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection(name); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onOpenOverlay={(overlayId, initialVariable, initialOverlayName) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId, ...(initialVariable === undefined ? {} : { initialVariable }), ...(overlayId === "new" && initialOverlayName !== undefined ? { initialOverlayName } : {}) }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection({ channelId: route.channelId, moduleId: "text_commands", value: name }); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onOpenOverlay={(overlayId, initialVariable, initialOverlayName) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId, ...(initialVariable === undefined ? {} : { initialVariable }), ...(overlayId === "new" && initialOverlayName !== undefined ? { initialOverlayName } : {}) }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "overlays" && selectedChannel !== null
           ? route.editorOverlayId === undefined
             ? <OverlaysPage key={dashboardRoutePath(route)} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenEditor={(overlayId) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId }); }} {...(route.overlayId === undefined ? {} : { initialSelection: route.overlayId })} />
@@ -1976,7 +1983,7 @@ export const DashboardApp = (): ReactElement => {
           loading={<Skeleton rows={8} height={58} />}
           empty={<Skeleton rows={8} height={58} />}
           error={<Skeleton rows={8} height={58} />}
-        >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection === null ? {} : { initialSelection: pendingModuleSelection })} /> : null}</UiLoadState> : null}
+        >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId ? { initialSelection: pendingModuleSelection.value } : {})} /> : null}</UiLoadState> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} filters={auditFilters} onFiltersChange={updateAuditFilters} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={eventsChannelId === route.channelId ? events : idleState<PanelEventsResponse>()} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
@@ -1991,7 +1998,9 @@ export const DashboardApp = (): ReactElement => {
           streamState={spotlightStreamState}
           modules={spotlightModules}
           onNavigate={navigate}
-          onOpenCommand={setPendingModuleSelection}
+          onOpenCommand={(name) => {
+            if (spotlightChannel !== null) setPendingModuleSelection({ channelId: spotlightChannel.channelId, moduleId: "text_commands", value: name });
+          }}
           onOpenVariable={(channelId, name) => { setPendingVariableSelection({ channelId, name }); }}
         />
           </div>

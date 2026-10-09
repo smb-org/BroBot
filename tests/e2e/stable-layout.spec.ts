@@ -137,7 +137,10 @@ test("returning from a module keeps the overview loaded at the same header posit
     moderator: { isModerator: true, checkedAt: "2026-10-08T08:00:00.000Z", reason: null },
     chatSubscription: { status: "enabled", subscriptionId: "subscription-stable", reason: null, updatedAt: "2026-10-08T08:00:00.000Z" },
     chatSubscriptionNeeded: false,
-    modules: [{ id: "text_commands", enabled: true, settings: "{}" }],
+    modules: [
+      { id: "text_commands", enabled: true, settings: "{}" },
+      { id: "ads", enabled: true, settings: "{}" },
+    ],
     tokens: {
       botExpiresAt: "2099-10-08T08:00:00.000Z",
       loginStatus: "connected",
@@ -170,7 +173,10 @@ test("returning from a module keeps the overview loaded at the same header posit
       if (overviewRequests > 1) await new Promise((resolve) => setTimeout(resolve, 750));
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
         ...channel,
-        activeModules: [{ moduleId: "text_commands", settings: "{}" }],
+        activeModules: [
+          { moduleId: "text_commands", settings: "{}" },
+          { moduleId: "ads", settings: "{}" },
+        ],
       }) });
       return;
     }
@@ -191,6 +197,22 @@ test("returning from a module keeps the overview loaded at the same header posit
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ variables: [] }) });
       return;
     }
+    if (pathname === "/api/channels/stable-channel/modules/ads/settings") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        settings: { automatic: "Ad break", manual: "Manual ad break", prewarning: false, leadSeconds: 60, prewarningText: "Ad break in {ads.seconds} seconds." },
+        revision: 1,
+        variables: [],
+      }) });
+      return;
+    }
+    if (pathname === "/api/channels/stable-channel/modules/ads/schedule") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: 0, snoozeRefreshAt: null },
+        snoozeScopeAvailable: true,
+        recentAdBreaks: [],
+      }) });
+      return;
+    }
     if (pathname === "/api/channels/stable-channel/events") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], nextCursor: null }) });
       return;
@@ -209,6 +231,15 @@ test("returning from a module keeps the overview loaded at the same header posit
   await page.locator('a[href="/channels/stable-channel/modules/text_commands"]').click();
   await expect(page).toHaveURL("/channels/stable-channel/modules/text_commands");
   await expect(page.getByRole("heading", { name: "Text commands", level: 1 })).toBeVisible();
+  const moduleHeader = page.locator(".main-content .page-header");
+  const moduleHeaderHandle = await moduleHeader.elementHandle();
+  const moduleHeaderY = await moduleHeader.evaluate((element) => element.getBoundingClientRect().y);
+
+  await page.locator('a[href="/channels/stable-channel/modules/ads"]').click();
+  await expect(page).toHaveURL("/channels/stable-channel/modules/ads");
+  await expect(page.getByRole("heading", { name: "Ad breaks", level: 1 })).toBeVisible();
+  expect(await moduleHeaderHandle.evaluate((element) => element.isConnected)).toBe(true);
+  expect(await moduleHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(moduleHeaderY);
 
   await page.locator('a[href="/channels/stable-channel"]').click();
   await expect(page).toHaveURL("/channels/stable-channel");
