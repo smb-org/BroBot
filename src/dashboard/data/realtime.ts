@@ -134,23 +134,16 @@ export const invalidateDashboardRealtimeMessage = (
       break;
     default: {
       switch (message.type) {
-        case "modul.chat_voting.opened":
-        case "modul.chat_voting.tally":
+        case "modul.chat_voting.changed":
           invalidate(queryClient, queryKeys.module(channelId, "chat_voting", "panel"));
           break;
-        case "modul.belabox.state_changed":
-        case "modul.belabox.sample":
+        case "modul.belabox.changed":
           // Refresh only live data parts; stream history keys are selected dynamically by the panel.
           invalidateBelaboxLiveQueries(queryClient, channelId);
           break;
-        case "modul.votekick.opened":
+        case "modul.votekick.changed":
           invalidate(queryClient, queryKeys.module(channelId, "votekick", "panel"));
-          // Chat voting also reads channel-wide ballot availability from the shared ballot.
-          invalidate(queryClient, queryKeys.module(channelId, "chat_voting", "panel"));
-          break;
-        case "modul.votekick.tally":
-          invalidate(queryClient, queryKeys.module(channelId, "votekick", "panel"));
-          if (message.payload.status !== "running") {
+          if (message.payload.part === "availability") {
             // Chat voting also reads channel-wide ballot availability from the shared ballot.
             invalidate(queryClient, queryKeys.module(channelId, "chat_voting", "panel"));
           }

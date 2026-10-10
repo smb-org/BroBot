@@ -154,11 +154,11 @@ describe("BELABOX panel", () => {
     expect(mocks.loadBelaboxHistory).not.toHaveBeenCalled();
     act(() => invalidateDashboardRealtimeMessage(view.queryClient, {
       version: 1,
-      id: "belabox-state-changed",
+      id: "belabox-live-changed",
       createdAt: "2026-10-09T08:00:00.000Z",
       channelId: "channel-a",
-      type: "modul.belabox.state_changed",
-      payload: { reason: "stream.state.changed" },
+      type: "modul.belabox.changed",
+      payload: { part: "live" },
     }));
 
     await waitFor(() => {

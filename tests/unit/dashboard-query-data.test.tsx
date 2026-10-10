@@ -154,11 +154,11 @@ describe("dashboard query data layer", () => {
     expect(await screen.findByText("1")).toBeInTheDocument();
     const message = {
       version: 1 as const,
-      id: "chat-vote-tally",
+      id: "chat-vote-change",
       createdAt: "2026-10-09T08:00:00.000Z",
       channelId,
-      type: "modul.chat_voting.tally" as const,
-      payload: {},
+      type: "modul.chat_voting.changed" as const,
+      payload: { part: "panel" as const },
     };
 
     invalidateDashboardRealtimeMessage(view.queryClient, message);
@@ -187,11 +187,11 @@ describe("dashboard query data layer", () => {
     expect(await screen.findByText("1")).toBeInTheDocument();
     const message = {
       version: 1 as const,
-      id: "chat-vote-tally-0",
+      id: "chat-vote-change-0",
       createdAt: "2026-10-09T08:00:00.000Z",
       channelId,
-      type: "modul.chat_voting.tally" as const,
-      payload: {},
+      type: "modul.chat_voting.changed" as const,
+      payload: { part: "panel" as const },
     };
 
     for (let index = 0; index < 20; index += 1) {

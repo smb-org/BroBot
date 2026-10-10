@@ -195,10 +195,9 @@ describe("Votekick routes", () => {
     expect(publish).toHaveBeenCalledOnce();
     const publishedMessage = publish.mock.calls[0]?.[0]?.[0];
     expect(publishedMessage).toMatchObject({
-      type: "modul.votekick.tally",
+      type: "modul.votekick.changed",
       channelId: "channel-a",
-      overlayIds: [],
-      payload: { votekickId: id, status: "passed" },
+      payload: { part: "panel" },
     });
   });
 

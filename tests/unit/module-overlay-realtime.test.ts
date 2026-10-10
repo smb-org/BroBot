@@ -180,7 +180,7 @@ describe("module overlay realtime routing", () => {
     expect(result).toEqual({ outcome: "no_recipients" });
   });
 
-  it("still prepares panel state hints when a poll module has no overlay recipient", async () => {
+  it("keeps module overlay payloads out of panel sockets", async () => {
     const chatVoting: BotModule = {
       id: "chat_voting",
       navigationCategory: "chat",
@@ -198,9 +198,6 @@ describe("module overlay realtime routing", () => {
       [chatVoting],
     );
 
-    expect(result).toMatchObject({
-      outcome: "ready",
-      message: { type: "modul.chat_voting.tally", overlayIds: [] },
-    });
+    expect(result).toEqual({ outcome: "no_recipients" });
   });
 });

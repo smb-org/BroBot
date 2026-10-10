@@ -4,7 +4,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { PanelChannelControl, PanelChannelControls } from "../panel-contract";
 import type { RealtimeEnvelope, RealtimeEventLogHint, RealtimeMessage } from "../realtime-contract";
 import type { AdsSchedule } from "../modules/ads/contracts";
-import { REALTIME_PROTOCOL, isPanelModuleRealtimeMessageType } from "../realtime-contract";
+import { REALTIME_PROTOCOL, isPanelModuleRealtimeMessageType, isPanelModuleRealtimePayload } from "../realtime-contract";
 import {
   invalidateDashboardChannelQueries,
   invalidateDashboardRealtimeMessage,
@@ -93,7 +93,7 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
   }
   if (!isKnownEnvelope(parsed)) return { kind: "ignored" };
   if (isPanelModuleRealtimeMessageType(parsed.type)) {
-    return isRecord(parsed.payload)
+    return isPanelModuleRealtimePayload(parsed.type, parsed.payload)
       ? { kind: "message", message: parsed as RealtimeMessage }
       : { kind: "ignored" };
   }

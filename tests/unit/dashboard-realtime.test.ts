@@ -38,12 +38,22 @@ describe("dashboard realtime messages", () => {
       id: "module-sample-1",
       createdAt: "2026-10-09T08:00:00.000Z",
       channelId: "channel-a",
-      type: "modul.belabox.sample",
-      payload: { at: "2026-10-09T08:00:00.000Z", connected: true },
+      type: "modul.belabox.changed",
+      payload: { part: "live" },
     }), "channel-a");
 
     expect(result.kind).toBe("message");
-    if (result.kind === "message") expect(result.message.type).toBe("modul.belabox.sample");
+    if (result.kind === "message") expect(result.message.type).toBe("modul.belabox.changed");
+
+    const secretPayload = parseRealtimeMessage(JSON.stringify({
+      version: 1,
+      id: "module-sample-secret",
+      createdAt: "2026-10-09T08:00:00.000Z",
+      channelId: "channel-a",
+      type: "modul.belabox.changed",
+      payload: { part: "live", statsUrl: "https://secret.invalid", publisherKey: "secret" },
+    }), "channel-a");
+    expect(secretPayload.kind).not.toBe("message");
   });
 
   it("invalidates event and originating module queries for event hints", () => {
@@ -90,7 +100,7 @@ describe("dashboard realtime messages", () => {
     });
 
     for (let index = 0; index < 20; index += 1) {
-      invalidateDashboardRealtimeMessage(queryClient, moduleHint("modul.chat_voting.tally", { voteId: "vote-a" }));
+      invalidateDashboardRealtimeMessage(queryClient, moduleHint("modul.chat_voting.changed", { part: "panel" }));
       invalidateDashboardRealtimeMessage(queryClient, moduleHint("event_log.new", {
         entries: [{
           eventId: `event-${String(index)}`,
@@ -137,7 +147,7 @@ describe("dashboard realtime messages", () => {
     expect(queryClient.getQueryState(ads)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(belabox)?.isInvalidated).toBe(false);
 
-    invalidateDashboardRealtimeMessage(queryClient, moduleHint("modul.belabox.sample", { at: "2026-10-09T08:00:00.000Z" }));
+    invalidateDashboardRealtimeMessage(queryClient, moduleHint("modul.belabox.changed", { part: "live" }));
     expect(queryClient.getQueryState(belabox)?.isInvalidated).toBe(true);
   });
 
@@ -174,15 +184,13 @@ describe("dashboard realtime messages", () => {
 
   it("invalidates the right module cache for each panel live-state hint", () => {
     const hints = [
-      { moduleId: "chat_voting", type: "modul.chat_voting.opened", parts: ["panel"] },
-      { moduleId: "chat_voting", type: "modul.chat_voting.tally", parts: ["panel"] },
-      { moduleId: "belabox", type: "modul.belabox.state_changed", parts: ["status", "streams", "history-live", "history-stream-42"] },
-      { moduleId: "belabox", type: "modul.belabox.sample", parts: ["status", "streams", "history-live", "history-stream-42"] },
-      { moduleId: "votekick", type: "modul.votekick.opened", parts: ["panel"] },
-      { moduleId: "votekick", type: "modul.votekick.tally", parts: ["panel"] },
+      { moduleId: "chat_voting", type: "modul.chat_voting.changed", payload: { part: "panel" }, parts: ["panel"] },
+      { moduleId: "belabox", type: "modul.belabox.changed", payload: { part: "live" }, parts: ["status", "streams", "history-live", "history-stream-42"] },
+      { moduleId: "votekick", type: "modul.votekick.changed", payload: { part: "panel" }, parts: ["panel"] },
+      { moduleId: "votekick", type: "modul.votekick.changed", payload: { part: "availability" }, parts: ["panel"] },
     ] as const;
 
-    for (const { moduleId, type, parts } of hints) {
+    for (const { moduleId, type, payload, parts } of hints) {
       const queryClient = new QueryClient();
       const relevant = parts.map((part) => moduleQueryKey(channelId, moduleId, part));
       const settings = moduleQueryKey(channelId, moduleId, "settings");
@@ -195,7 +203,7 @@ describe("dashboard realtime messages", () => {
         createdAt: "2026-10-09T08:00:00.000Z",
         channelId,
         type,
-        payload: {},
+        payload,
       }), channelId);
       expect(parsed.kind).toBe("message");
       if (parsed.kind === "message") invalidateDashboardRealtimeMessage(queryClient, parsed.message);
@@ -208,9 +216,8 @@ describe("dashboard realtime messages", () => {
 
   it("refreshes chat voting when a shared votekick ballot opens or closes", () => {
     const hints = [
-      { type: "modul.votekick.opened", payload: { votekickId: "kick-a" }, refreshChatVoting: true },
-      { type: "modul.votekick.tally", payload: { status: "running" }, refreshChatVoting: false },
-      { type: "modul.votekick.tally", payload: { status: "cancelled" }, refreshChatVoting: true },
+      { type: "modul.votekick.changed", payload: { part: "availability" }, refreshChatVoting: true },
+      { type: "modul.votekick.changed", payload: { part: "panel" }, refreshChatVoting: false },
     ] as const;
 
     for (const hint of hints) {

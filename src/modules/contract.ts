@@ -5,6 +5,7 @@ import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariable
 import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 import type { ModerationResult, ModerationTimeoutExpectation } from "./contracts/moderation";
+import type { PanelModuleHintPart } from "../realtime-contract";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 export { CHAT_OUTPUT_TARGETS } from "../contracts/values";
 export type { ChatOutputTarget } from "../contracts/values";
@@ -565,6 +566,8 @@ export interface ModuleExecutionContext {
   authorizeMutation: AuthorizeModuleMutation;
   /** Ephemeral ballot access bound to the event channel and executing module. */
   ballots: ModuleBallotAccess;
+  /** Publishes a bounded panel invalidation after a module commits visible state. */
+  publishModulePanelHint?: (part: PanelModuleHintPart) => Promise<void>;
   /** Lazily reads the current channel's public blocked terms with the bot moderator token. */
   readChannelBlockedTerms?: () => Promise<readonly string[] | null>;
   /** Lazily resolves the connected bot identity so modules can ignore its own chat messages. */
@@ -659,6 +662,8 @@ export interface ModuleAlarmContext {
     elementKind: string,
     payload: Readonly<Record<string, unknown>>,
   ) => Promise<void>;
+  /** Publishes a bounded panel invalidation independently of overlay payloads. */
+  publishModulePanelHint?: (part: PanelModuleHintPart) => Promise<void>;
   /** Sends scheduled automated output through the shared channel limit with an occurrence claim. */
   sendChat: (
     text: string,
@@ -1174,6 +1179,8 @@ export interface ModuleRouteVariables {
     payload: Readonly<Record<string, unknown>>,
     recipientConfig?: { field: string; value: string },
   ) => Promise<void>;
+  /** Publishes a bounded panel invalidation independently of overlay payloads. */
+  publishModulePanelHint?: (channelId: string, moduleId: string, part: PanelModuleHintPart) => Promise<void>;
   publishOverlayHostEvent: (channelId: string, event: ModuleOverlayHostEvent) => Promise<void>;
   writeModuleDiagnostics: (
     db: D1Database,

@@ -1159,36 +1159,46 @@ describe("ChannelObject realtime path", () => {
     expect(panel.send.mock.calls).toHaveLength(0);
   });
 
-  it("routes panel-enabled module messages to channel members and their overlays", async () => {
+  it("routes bounded module panel hints separately from module overlay messages", async () => {
     const overlay = overlaySocketFor({
       v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a", expiresAt: null,
     });
     const panel = socketFor(validPrincipal());
     const object = objectFor([overlay, panel]);
-    const panelMessageTypes = [
+    const panelMessages = [
+      { type: "modul.chat_voting.changed", payload: { part: "panel" } },
+      { type: "modul.belabox.changed", payload: { part: "live" } },
+      { type: "modul.votekick.changed", payload: { part: "availability" } },
+    ];
+    const overlayMessageTypes = [
       "modul.chat_voting.opened",
       "modul.chat_voting.tally",
       "modul.belabox.state_changed",
       "modul.belabox.sample",
       "modul.votekick.opened",
       "modul.votekick.tally",
+      "modul.text_library.blocks_updated",
     ];
-    const messages = [...panelMessageTypes, "modul.text_library.blocks_updated"].map((type, index) => ({
+    const messages = [
+      ...panelMessages,
+      ...overlayMessageTypes.map((type) => ({ type, payload: { messageType: type } })),
+    ].map(({ type, payload }, index) => ({
       version: 1,
       id: `module-message-${String(index)}`,
       createdAt: "2026-10-09T08:00:00.000Z",
       channelId: "kanal-a",
       type,
-      payload: { messageType: type },
       overlayIds: ["overlay-a"],
+      payload,
     } as unknown as RealtimeMessage));
 
     await object.publish(messages);
 
-    expect(panel.send.mock.calls.map(([serialized]) => typeOfSerializedMessage(serialized))).toEqual(panelMessageTypes);
+    expect(panel.send.mock.calls.map(([serialized]) => typeOfSerializedMessage(serialized))).toEqual(
+      panelMessages.map(({ type }) => type),
+    );
     expect(overlay.send.mock.calls.map(([serialized]) => typeOfSerializedMessage(serialized))).toEqual([
-      ...panelMessageTypes,
-      "modul.text_library.blocks_updated",
+      ...overlayMessageTypes,
     ]);
   });
 

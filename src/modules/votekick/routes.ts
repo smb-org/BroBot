@@ -51,6 +51,8 @@ votekickRoutes.post("/votekicks/:id/cancel", async (context) => {
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);
   if (results.at(0)?.meta.changes !== 1) return context.json({ error: "votekick_not_running" }, 409);
+  try { await context.get("publishModulePanelHint")?.(channelId, VOTEKICK_MODULE_ID, "availability"); }
+  catch { /* Panel refresh hints are best-effort. */ }
   try {
     const ballots = context.get("ballots")(channelId);
     const snapshot = await ballots.close(id);
@@ -111,6 +113,8 @@ votekickRoutes.post("/votekicks/:id/lift", async (context) => {
         AND target_user_id IS NOT NULL ${authorization.sql}`,
   ).bind(now, channelId, id, ...authorization.values).run();
   if (update.meta.changes === 0) return context.json({ error: "votekick_timeout_unavailable" }, 409);
+  try { await context.get("publishModulePanelHint")?.(channelId, VOTEKICK_MODULE_ID, "panel"); }
+  catch { /* Panel refresh hints are best-effort. */ }
   try {
     const lifted = await repository.byId(channelId, id);
     if (lifted !== null) {

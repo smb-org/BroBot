@@ -21,6 +21,16 @@ export const REALTIME_MESSAGE_TYPES = [
 export type FixedRealtimeMessageType = (typeof REALTIME_MESSAGE_TYPES)[number];
 export type ModuleOverlayRealtimeMessageType = `modul.${string}.${string}`;
 
+export type PanelModuleHintPart = "panel" | "live" | "availability";
+
+export interface PanelModuleRealtimePayloads {
+  "modul.chat_voting.changed": { part: "panel" };
+  "modul.belabox.changed": { part: "live" };
+  "modul.votekick.changed": { part: "panel" | "availability" };
+}
+
+export type PanelModuleRealtimeMessageType = keyof PanelModuleRealtimePayloads;
+
 export interface ModuleOverlayRealtimePayloads {
   "modul.text_library.blocks_updated": { blockName: string };
   "modul.text_library.state_changed": {
@@ -39,13 +49,6 @@ export type KnownModuleOverlayRealtimeMessageType = keyof ModuleOverlayRealtimeP
   | `modul.votekick.${string}`
   | `modul.text_commands.${string}`;
 export type RealtimeMessageType = FixedRealtimeMessageType | KnownModuleOverlayRealtimeMessageType;
-export type PanelModuleRealtimeMessageType =
-  | "modul.chat_voting.opened"
-  | "modul.chat_voting.tally"
-  | "modul.belabox.state_changed"
-  | "modul.belabox.sample"
-  | "modul.votekick.opened"
-  | "modul.votekick.tally";
 
 type ModuleOverlayPayload<Type extends ModuleOverlayRealtimeMessageType> = Type extends `modul.text_library.${string}`
   ? Type extends keyof ModuleOverlayRealtimePayloads ? ModuleOverlayRealtimePayloads[Type] : never
@@ -106,9 +109,21 @@ export type ModuleOverlayRealtimeEnvelope<Type extends ModuleOverlayRealtimeMess
   }
 }[Type];
 
+export type PanelModuleRealtimeEnvelope<Type extends PanelModuleRealtimeMessageType = PanelModuleRealtimeMessageType> = {
+  [EnvelopeType in Type]: {
+    version: RealtimeProtocolVersion;
+    id: string;
+    createdAt: string;
+    channelId: string;
+    type: EnvelopeType;
+    payload: PanelModuleRealtimePayloads[EnvelopeType];
+  }
+}[Type];
+
 export type RealtimeEnvelope<Type extends RealtimeMessageType = RealtimeMessageType> =
   Type extends FixedRealtimeMessageType ? FixedRealtimeEnvelope<Type>
-    : Type extends ModuleOverlayRealtimeMessageType ? ModuleOverlayRealtimeEnvelope<Type>
+    : Type extends PanelModuleRealtimeMessageType ? PanelModuleRealtimeEnvelope<Type>
+      : Type extends ModuleOverlayRealtimeMessageType ? ModuleOverlayRealtimeEnvelope<Type>
       : never;
 
 /**
@@ -118,32 +133,42 @@ export type RealtimeEnvelope<Type extends RealtimeMessageType = RealtimeMessageT
  * type-checks here. Other modules keep the broad, undiscriminated envelope for now.
  */
 type AnyModuleOverlayRealtimeEnvelope =
-  | ModuleOverlayRealtimeEnvelope<Exclude<KnownModuleOverlayRealtimeMessageType, keyof ModuleOverlayRealtimePayloads>>
+  | ModuleOverlayRealtimeEnvelope<Exclude<KnownModuleOverlayRealtimeMessageType, keyof ModuleOverlayRealtimePayloads | PanelModuleRealtimeMessageType>>
   | ModuleOverlayRealtimeEnvelope<keyof ModuleOverlayRealtimePayloads>;
 
 export type RealtimeMessage = { [Type in FixedRealtimeMessageType]: FixedRealtimeEnvelope<Type> }[FixedRealtimeMessageType]
-  | AnyModuleOverlayRealtimeEnvelope;
+  | AnyModuleOverlayRealtimeEnvelope
+  | PanelModuleRealtimeEnvelope;
 
 export const isModuleOverlayRealtimeMessageType = (type: string): type is ModuleOverlayRealtimeMessageType =>
   /^modul\.[a-z][a-z0-9_]*\.[a-z][a-z0-9_-]*$/u.test(type);
 
-/** Only module actions that update panel-owned live state are relayed to panel sockets. */
+/** Bounded panel-only invalidation hints; module overlay payloads stay overlay-only. */
 const PANEL_MODULE_REALTIME_MESSAGE_TYPES = new Set<PanelModuleRealtimeMessageType>([
-  "modul.chat_voting.opened",
-  "modul.chat_voting.tally",
-  "modul.belabox.state_changed",
-  "modul.belabox.sample",
-  "modul.votekick.opened",
-  "modul.votekick.tally",
+  "modul.chat_voting.changed",
+  "modul.belabox.changed",
+  "modul.votekick.changed",
 ]);
 
 export const isPanelModuleRealtimeMessageType = (
   type: string,
 ): type is PanelModuleRealtimeMessageType => PANEL_MODULE_REALTIME_MESSAGE_TYPES.has(type as PanelModuleRealtimeMessageType);
 
+export const isPanelModuleRealtimePayload = (type: string, payload: unknown): boolean => {
+  if (!isPanelModuleRealtimeMessageType(type) || typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return false;
+  }
+  const values = payload as Readonly<Record<string, unknown>>;
+  if (Object.keys(values).length !== 1 || !Object.hasOwn(values, "part")) return false;
+  if (type === "modul.chat_voting.changed") return values.part === "panel";
+  if (type === "modul.belabox.changed") return values.part === "live";
+  return values.part === "panel" || values.part === "availability";
+};
+
 export const isModuleOverlayRealtimeEnvelope = (
   message: RealtimeMessage,
-): message is AnyModuleOverlayRealtimeEnvelope => isModuleOverlayRealtimeMessageType(message.type);
+): message is AnyModuleOverlayRealtimeEnvelope =>
+  isModuleOverlayRealtimeMessageType(message.type) && !isPanelModuleRealtimeMessageType(message.type);
 
 export type RealtimeRecipientKind = "panel" | "overlay";
 
@@ -159,7 +184,7 @@ export const REALTIME_RECIPIENTS = {
 
 export const realtimeRecipients = (type: RealtimeMessageType | ModuleOverlayRealtimeMessageType): readonly RealtimeRecipientKind[] =>
   isModuleOverlayRealtimeMessageType(type)
-    ? isPanelModuleRealtimeMessageType(type) ? ["panel", "overlay"] : ["overlay"]
+    ? isPanelModuleRealtimeMessageType(type) ? ["panel"] : ["overlay"]
     : REALTIME_RECIPIENTS[type];
 
 export type RealtimePanelPrincipal = {

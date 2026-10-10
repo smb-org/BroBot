@@ -30,6 +30,7 @@ import { findChannelVariable } from "../db/channel-variables";
 import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from "../server-timing";
 import { publishOverlayChanged, publishOverlayHostEvent as publishOverlayHostEventHint, publishRealtimeMessages } from "../realtime";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
+import { publishModulePanelHint } from "../module-panel-realtime";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
 import { readChannelVariables } from "../db/channel-variables";
 import { readChannelLocation } from "../db/channel-settings";
@@ -57,6 +58,7 @@ interface ModuleRouteEnvironment {
     | "notifyScheduleInputsChanged" | "validateTemplateContentMutation"
     | "resolveTextBlockConditions"
     | "publishModuleOverlayMessage"
+    | "publishModulePanelHint"
     | "publishOverlayHostEvent"
     | "templateUsageSources" | "listRegisteredTemplateVariables"
     | "liftModerationBan"
@@ -309,6 +311,8 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
       console.warn("Module overlay update could not be sent.", error);
     }
   });
+  context.set("publishModulePanelHint", (channelId, moduleId, part) =>
+    publishModulePanelHint(context.env.CHANNEL, channelId, moduleId, part));
   context.set("publishOverlayHostEvent", async (channelId: string, event: ModuleOverlayHostEvent) => {
     await publishOverlayHostEventHint(context.env.CHANNEL, context.env.DB, channelId, event);
   });

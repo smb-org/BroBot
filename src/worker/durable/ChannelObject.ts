@@ -46,6 +46,7 @@ import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
+import { modulePanelHintMessage } from "../module-panel-realtime";
 import { createModuleSecretAccess } from "../module-secrets";
 import { sendChatMessage } from "../chat";
 import { sendModerationBan } from "../moderation";
@@ -1330,6 +1331,15 @@ export class ChannelObject extends DurableObject<Env> {
           payload,
         });
         if (prepared.outcome === "ready") await this.publish([prepared.message]);
+      },
+      publishModulePanelHint: async (part) => {
+        const message = modulePanelHintMessage(channelId, moduleId, part);
+        if (message === null) return;
+        try {
+          await this.publish([message]);
+        } catch {
+          console.warn("Module panel update could not be sent.");
+        }
       },
       sendChat: async (text, idempotencyKey, attributions = [], stillValid, target = "source_only") => {
         const suppression = { reason: null as string | null };
