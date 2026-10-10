@@ -3,7 +3,7 @@ import { useCallback, useState, type ReactElement } from "react";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { Button, Led, LoadState, notify } from "../../../dashboard/ui";
 import { dashboardTexts } from "../../../dashboard/locale";
-import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useManualQueryFailure, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import type { ModuleImmediateActionProperties } from "../../contract";
 import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved";
@@ -37,14 +37,14 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
   });
   const state = stateQuery.data ?? null;
   const templates = templatesQuery.data ?? null;
-  const [templateFailureData, setTemplateFailureData] = useState<ChatVoteTemplateListState | null | "none">("none");
-  const [currentFailureData, setCurrentFailureData] = useState<ChatVotingPanelState | null | "none">("none");
+  const { clear: clearTemplateFailure, failedAt: templateFailedAt, markFailed: markTemplateFailure } = useManualQueryFailure();
+  const { clear: clearCurrentFailure, failedAt: currentFailedAt, markFailed: markCurrentFailure } = useManualQueryFailure();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
   const vote = state?.vote ?? null;
   const running = vote?.status === "open";
-  const templateError = templatesQuery.isError || (templateFailureData !== "none" && templateFailureData === templates);
-  const currentLoadError = stateQuery.isError || (currentFailureData !== "none" && currentFailureData === state);
+  const templateError = templatesQuery.isError || (templateFailedAt !== null && templateFailedAt === templatesQuery.dataUpdatedAt);
+  const currentLoadError = stateQuery.isError || (currentFailedAt !== null && currentFailedAt === stateQuery.dataUpdatedAt);
   const lockReason = availabilityReason ?? (currentLoadError
     ? labels.liveLoadError
     : state === null ? labels.loading : running ? labels.runningLocked : state.hasOpenBallot ? labels.votekickLocked : null);
@@ -52,23 +52,23 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
   const refreshTemplates = useCallback(async (): Promise<void> => {
     try {
       await refetchModuleQueryData<ChatVoteTemplateListState>(queryClient, channelId, "chat_voting", "templates");
-      setTemplateFailureData("none");
+      clearTemplateFailure();
     } catch (failure: unknown) {
       if (isAbortedRequest(failure)) return;
-      setTemplateFailureData(templates);
+      markTemplateFailure(queryClient.getQueryState(moduleQueryKey(channelId, "chat_voting", "templates"))?.dataUpdatedAt ?? templatesQuery.dataUpdatedAt);
     }
-  }, [channelId, queryClient, templates]);
+  }, [channelId, clearTemplateFailure, markTemplateFailure, queryClient, templatesQuery.dataUpdatedAt]);
 
   const refreshVote = useCallback(async (): Promise<void> => {
     try {
       await refetchModuleQueryData<ChatVotingPanelState>(queryClient, channelId, "chat_voting", "panel");
-      setCurrentFailureData("none");
+      clearCurrentFailure();
     } catch (failure: unknown) {
       if (isAbortedRequest(failure)) return;
       // Keep the last known live state visible while the template list loads independently.
-      setCurrentFailureData(state);
+      markCurrentFailure(queryClient.getQueryState(moduleQueryKey(channelId, "chat_voting", "panel"))?.dataUpdatedAt ?? stateQuery.dataUpdatedAt);
     }
-  }, [channelId, queryClient, state]);
+  }, [channelId, clearCurrentFailure, markCurrentFailure, queryClient, stateQuery.dataUpdatedAt]);
 
   const start = async (template: NonNullable<ChatVoteTemplateListState>["templates"][number]): Promise<void> => {
     if (lockReason !== null || pendingId !== null) return;

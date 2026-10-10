@@ -15,7 +15,7 @@ import { approveChatVotingTerm, closeChatVoting, deleteChatVoteTemplate, laterUs
 import type { ChatVoteTemplateListState } from "./service";
 import { compactDateRange, timeText } from "./date-range";
 import { ChatVotingLiveBlock } from "./live-block";
-import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useManualQueryFailure, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 
 type ListMode = "saved" | "recent";
@@ -78,9 +78,9 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   const templateList = templatesQuery.data ?? null;
   const recentState = recentQuery.data ?? null;
   const recentVotes = recentState?.votes ?? null;
-  const [voteFailureData, setVoteFailureData] = useState<ChatVotingPanelState | null | "none">("none");
-  const [templateFailureData, setTemplateFailureData] = useState<ChatVoteTemplateListState | null | "none">("none");
-  const [recentFailureData, setRecentFailureData] = useState<{ votes: readonly ChatVote[] } | null | "none">("none");
+  const { clear: clearVoteFailure, failedAt: voteFailedAt, markFailed: markVoteFailure } = useManualQueryFailure();
+  const { clear: clearTemplateFailure, failedAt: templateFailedAt, markFailed: markTemplateFailure } = useManualQueryFailure();
+  const { clear: clearRecentFailure, failedAt: recentFailedAt, markFailed: markRecentFailure } = useManualQueryFailure();
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [templateSnapshot, setTemplateSnapshot] = useState<ChatVoteTemplate | null>(null);
   const [templateInspectorKey, setTemplateInspectorKey] = useState<string | null>(null);
@@ -139,32 +139,32 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   const refreshVote = useCallback(async (): Promise<void> => {
     try {
       await refetchModuleQueryData<ChatVotingPanelState>(queryClient, channelId, "chat_voting", "panel");
-      setVoteFailureData("none");
+      clearVoteFailure();
     } catch (failure: unknown) {
       if (isAbortedRequest(failure)) return;
-      setVoteFailureData(voteState);
+      markVoteFailure(queryClient.getQueryState(moduleQueryKey(channelId, "chat_voting", "panel"))?.dataUpdatedAt ?? stateQuery.dataUpdatedAt);
     }
-  }, [channelId, queryClient, voteState]);
+  }, [channelId, clearVoteFailure, markVoteFailure, queryClient, stateQuery.dataUpdatedAt]);
 
   const refreshTemplates = useCallback(async (): Promise<void> => {
     try {
       await refetchModuleQueryData<ChatVoteTemplateListState>(queryClient, channelId, "chat_voting", "templates");
-      setTemplateFailureData("none");
+      clearTemplateFailure();
     } catch (failure: unknown) {
       if (isAbortedRequest(failure)) return;
-      setTemplateFailureData(templateList);
+      markTemplateFailure(queryClient.getQueryState(moduleQueryKey(channelId, "chat_voting", "templates"))?.dataUpdatedAt ?? templatesQuery.dataUpdatedAt);
     }
-  }, [channelId, queryClient, templateList]);
+  }, [channelId, clearTemplateFailure, markTemplateFailure, queryClient, templatesQuery.dataUpdatedAt]);
 
   const refreshRecent = useCallback(async (): Promise<void> => {
     try {
       await refetchModuleQueryData<{ votes: readonly ChatVote[] }>(queryClient, channelId, "chat_voting", "recent");
-      setRecentFailureData("none");
+      clearRecentFailure();
     } catch (failure: unknown) {
       if (isAbortedRequest(failure)) return;
-      setRecentFailureData(recentState);
+      markRecentFailure(queryClient.getQueryState(moduleQueryKey(channelId, "chat_voting", "recent"))?.dataUpdatedAt ?? recentQuery.dataUpdatedAt);
     }
-  }, [channelId, queryClient, recentState]);
+  }, [channelId, clearRecentFailure, markRecentFailure, queryClient, recentQuery.dataUpdatedAt]);
 
   useEffect(() => {
     const resize = (): void => {
@@ -197,9 +197,9 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     previousVote.current = current === null ? null : { id: current.id, status: current.status, title: current.title };
   }, [labels, mode, refreshRecent, voteState]);
 
-  const voteError = stateQuery.isError || (voteFailureData !== "none" && voteFailureData === voteState);
-  const templateError = templatesQuery.isError || (templateFailureData !== "none" && templateFailureData === templateList);
-  const recentError = recentQuery.isError || (recentFailureData !== "none" && recentFailureData === recentState);
+  const voteError = stateQuery.isError || (voteFailedAt !== null && voteFailedAt === stateQuery.dataUpdatedAt);
+  const templateError = templatesQuery.isError || (templateFailedAt !== null && templateFailedAt === templatesQuery.dataUpdatedAt);
+  const recentError = recentQuery.isError || (recentFailedAt !== null && recentFailedAt === recentQuery.dataUpdatedAt);
   const activeLockReason = lockReason(voteState, canOperate, labels,
     voteError ? labels.liveLoadError : voteState === null ? labels.loading : null);
   const selectedTemplate = mode === "saved"

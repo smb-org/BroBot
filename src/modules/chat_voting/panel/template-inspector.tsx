@@ -70,6 +70,9 @@ export function ChatVoteTemplateInspector({
   const draftValue = useRef(draft.value);
   const baselineDraft = useRef(initialDraft);
   const baseRevision = useRef(template.revision);
+  const draftGeneration = useRef(0);
+  const reloadGeneration = useRef(0);
+  const reloadPending = useRef(false);
   const [durationMode, setDurationMode] = useState(() => durationPreset(draft.value.durationSeconds));
   const [customDurationSelected, setCustomDurationSelected] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -102,7 +105,14 @@ export function ChatVoteTemplateInspector({
     return () => window.clearTimeout(timer);
   }, [customDurationSelected, draft.value.durationSeconds, durationMode]);
 
+  const invalidateReload = (): void => {
+    reloadGeneration.current += 1;
+    reloadPending.current = false;
+  };
+
   const updateDraft = (update: Partial<ChatVoteTemplateDraft>): void => {
+    draftGeneration.current += 1;
+    invalidateReload();
     const next = { ...draftValue.current, ...update };
     draftValue.current = next;
     draft.setValue(next);
@@ -181,6 +191,8 @@ export function ChatVoteTemplateInspector({
     return result === null ? saveError ?? labels.saveError : null;
   };
   const resetDraft = (): void => {
+    draftGeneration.current += 1;
+    invalidateReload();
     draft.accept(baselineDraft.current);
     draftValue.current = baselineDraft.current;
     setSaveError(undefined);
@@ -191,6 +203,8 @@ export function ChatVoteTemplateInspector({
   const draftGuard = useDraftGuard(dirty, saveForGuard, resetDraft);
 
   const acceptTemplate = (accepted: ChatVoteTemplate): void => {
+    draftGeneration.current += 1;
+    invalidateReload();
     const nextDraft = draftFromTemplate(accepted);
     draftValue.current = nextDraft;
     baselineDraft.current = nextDraft;
@@ -225,13 +239,21 @@ export function ChatVoteTemplateInspector({
   useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
 
   const reloadConflict = async (): Promise<void> => {
+    if (reloadPending.current) return;
+    reloadPending.current = true;
+    const requestGeneration = ++reloadGeneration.current;
+    const requestDraftGeneration = draftGeneration.current;
+    const isCurrentRequest = (): boolean => reloadGeneration.current === requestGeneration
+      && draftGeneration.current === requestDraftGeneration;
     try {
       const latest = (await loadChatVoteTemplates(channelId)).templates.find((entry) => entry.id === template.id);
+      if (!isCurrentRequest()) return;
       if (latest === undefined) {
         setSaveError(labels.conflictReloadMissing);
         return;
       }
       const nextDraft = draftFromTemplate(latest);
+      draftGeneration.current += 1;
       baseRevision.current = latest.revision;
       baselineDraft.current = nextDraft;
       draftValue.current = nextDraft;
@@ -242,7 +264,9 @@ export function ChatVoteTemplateInspector({
       setSaved(false);
       onTemplateSaved(latest);
     } catch {
-      setSaveError(labels.conflictReloadError);
+      if (isCurrentRequest()) setSaveError(labels.conflictReloadError);
+    } finally {
+      if (reloadGeneration.current === requestGeneration) reloadPending.current = false;
     }
   };
 

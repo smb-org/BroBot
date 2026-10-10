@@ -142,6 +142,7 @@ describe("saved chat voting panel", () => {
   afterEach(() => {
     cleanup();
     setDashboardRealtimeStatus("fictional-channel", "offline");
+    setDashboardRealtimeStatus("channel-a", "offline");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: initialWidth });
     window.sessionStorage.clear();
     vi.unstubAllGlobals();
@@ -183,6 +184,86 @@ describe("saved chat voting panel", () => {
     await refresh();
     expect((await screen.findAllByText("The vote could not be loaded.")).length).toBeGreaterThan(0);
     expect(toastsSnapshot().filter((toast) => toast.tone === "error")).toHaveLength(0);
+  });
+
+  it("clears a failed manual live-state retry after an identical successful revision refresh", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let unavailable = false;
+    let currentCalls = 0;
+    let revisions: Readonly<Record<string, number>> = {};
+    const view = mount(fetchHarness({
+      getRevisions: () => revisions,
+      getCurrent: () => {
+        currentCalls += 1;
+        if (unavailable) throw new Error("state unavailable");
+        return currentState();
+      },
+    }));
+    const start = await screen.findByRole("button", { name: "Start vote" });
+    const key = { queryKey: moduleQueryKey("fictional-channel", "chat_voting", "panel"), exact: true };
+    const loadedState = view.queryClient.getQueryData(key.queryKey);
+    expect(loadedState).toBeDefined();
+
+    unavailable = true;
+    await act(async () => { await view.queryClient.refetchQueries(key, { throwOnError: true }).catch(() => undefined); });
+    await waitFor(() => expect(view.container.querySelector(".ui-load-state__retry")).toBeVisible());
+    const retry = view.container.querySelector(".ui-load-state__retry");
+    if (!(retry instanceof HTMLButtonElement)) throw new Error("The live-state retry button is missing.");
+    fireEvent.click(retry);
+    await waitFor(() => expect(currentCalls).toBe(3));
+    await waitFor(() => expect(start).toBeDisabled());
+
+    unavailable = false;
+    await new Promise((resolve) => window.setTimeout(resolve, 5));
+    revisions = { "module:chat_voting:panel": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
+    await waitFor(() => expect(currentCalls).toBe(4));
+    await waitFor(() => expect(start).toBeEnabled());
+    expect(view.queryClient.getQueryData(key.queryKey)).toBe(loadedState);
+  });
+
+  it("unlocks immediate start after an identical successful live-state refresh", async () => {
+    let unavailable = false;
+    let currentCalls = 0;
+    let revisions: Readonly<Record<string, number>> = {};
+    const savedTemplate = template({ channelId: "channel-a" });
+    setDashboardRealtimeStatus("channel-a", "connected");
+    vi.stubGlobal("fetch", vi.fn<typeof globalThis.fetch>((input) => {
+      const path = input instanceof Request
+        ? new URL(input.url).pathname
+        : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path.endsWith("/revisions")) return Promise.resolve(jsonResponse({ revisions }));
+      if (path.endsWith("/current")) {
+        currentCalls += 1;
+        if (unavailable) throw new Error("state unavailable");
+        return Promise.resolve(jsonResponse(currentState()));
+      }
+      if (path.endsWith("/templates")) return Promise.resolve(jsonResponse({ templates: [savedTemplate], count: 1, maximum: 100 }));
+      return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
+    }));
+    const view = render(<UiProvider><ChatVotingImmediateAction channelId="channel-a" canManage availabilityReason={null} /></UiProvider>);
+    const start = await screen.findByRole("button", { name: /Dinner/u });
+    await waitFor(() => expect(start).toBeEnabled());
+    const key = { queryKey: moduleQueryKey("channel-a", "chat_voting", "panel"), exact: true };
+    const loadedState = view.queryClient.getQueryData(key.queryKey);
+
+    unavailable = true;
+    await act(async () => { await view.queryClient.refetchQueries(key, { throwOnError: true }).catch(() => undefined); });
+    await waitFor(() => expect(view.container.querySelector(".chat-voting-immediate__live-state .ui-load-state__retry")).toBeVisible());
+    const retry = view.container.querySelector(".chat-voting-immediate__live-state .ui-load-state__retry");
+    if (!(retry instanceof HTMLButtonElement)) throw new Error("The immediate-action retry button is missing.");
+    fireEvent.click(retry);
+    await waitFor(() => expect(currentCalls).toBe(3));
+    await waitFor(() => expect(start).toBeDisabled());
+
+    unavailable = false;
+    await new Promise((resolve) => window.setTimeout(resolve, 5));
+    revisions = { "module:chat_voting:panel": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "channel-a"); });
+    await waitFor(() => expect(currentCalls).toBe(4));
+    await waitFor(() => expect(start).toBeEnabled());
+    expect(view.queryClient.getQueryData(key.queryKey)).toBe(loadedState);
   });
 
   it("keeps canceled reads silent and reports later query failures inline", async () => {
@@ -731,6 +812,45 @@ describe("saved chat voting panel", () => {
     await waitFor(() => expect(screen.getByRole("radio", { name: "5 min" })).toBeChecked());
     expect(seconds).toHaveValue("300");
     expect(seconds).toBeDisabled();
+  });
+
+  it("ignores a conflict reload after Discard and subsequent edits", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const latest = template({ title: "Changed elsewhere", revision: 2 });
+    let templateCalls = 0;
+    let reloadStarted: () => void = () => undefined;
+    const reloadRequested = new Promise<void>((resolve) => { reloadStarted = resolve; });
+    let resolveReload!: (entries: ChatVoteTemplate[]) => void;
+    const pendingReload = new Promise<ChatVoteTemplate[]>((resolve) => { resolveReload = resolve; });
+    const view = mount(fetchHarness({
+      getTemplates: () => {
+        templateCalls += 1;
+        if (templateCalls >= 3) {
+          reloadStarted();
+          return pendingReload;
+        }
+        return [template()];
+      },
+      onPatch: () => jsonResponse({ error: "chat_vote_template_conflict" }, 409),
+    }));
+    const question = await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.change(question, { target: { value: "First unsaved edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const reload = await screen.findByRole("button", { name: "Reload" });
+    await waitFor(() => expect(templateCalls).toBe(2));
+
+    fireEvent.click(reload);
+    await reloadRequested;
+    fireEvent.click(reload);
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(question).toHaveValue("Dinner"));
+    fireEvent.change(question, { target: { value: "New edit after discard" } });
+
+    resolveReload([latest]);
+    await waitFor(() => expect(question).toHaveValue("New edit after discard"));
+    expect(templateCalls).toBe(3);
+    expect(screen.queryByRole("button", { name: "Reload" })).not.toBeInTheDocument();
+    expect(view.container.querySelector(".ui-save-bar__status")).toHaveTextContent("Unsaved changes");
   });
 
   it("opens a read-only inspector for recent results and offers repeat", async () => {
