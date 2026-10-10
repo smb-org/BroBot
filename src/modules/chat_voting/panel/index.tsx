@@ -1,405 +1,521 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 
-import { Button, Field, Led, LoadState, notify, NumberField, SegmentedControl, Select, Skeleton, Switch } from "../../../dashboard/ui";
+import { PanelApiError } from "../../../contracts/panel-error";
+import { Button, EmptyState, Icon, ListDetail, ListRow, ListToolbar, LoadState, QueryErrorState, SegmentedControl, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
-import { CHAT_VOTING_MAX_TEXT_TERMS, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
-import type { ChatVotePreset, ChatVotingTextMode } from "../contracts";
-import { CHAT_VOTING_LABEL_MAX_LENGTH, isValidVoteTitle, rankVoteTerms, validateVoteLabels, voteLabelLength } from "../domain";
-import { compactDateRange, dateText, timeText } from "./date-range";
-import { chatVotingPanelTexts } from "./locale-panel";
+import { CHAT_VOTE_TEMPLATE_MAXIMUM, type ChatVote, type ChatVoteTemplate } from "../contracts";
+import { rankVoteTerms, templateStartProblem } from "../domain";
+import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved";
+import { ChatVoteTemplateList } from "./template-list";
+import { ChatVoteTemplateInspector } from "./template-inspector";
+import { useChatVoteTemplateAutosave } from "./use-template-autosave";
 import type { ChatVotingPanelState } from "./service";
-import { approveChatVotingTerm, closeChatVoting, loadChatVotingState, startChatVoting } from "./service";
+import { approveChatVotingTerm, closeChatVoting, createChatVoteTemplate, deleteChatVoteTemplate, loadChatVotingState, loadChatVoteTemplates, loadRecentChatVotes, startChatVoting } from "./service";
+import type { ChatVoteTemplateListState } from "./service";
+import { compactDateRange, timeText } from "./date-range";
+import { ChatVotingLiveBlock } from "./live-block";
 
-type DurationPreset = "open" | "one" | "two" | "five" | "custom";
+type ListMode = "saved" | "recent";
+type Announcement = { key: number; text: string };
 
-const durationPresetFor = (seconds: number): DurationPreset =>
-  seconds === 0 ? "open" : seconds === 60 ? "one" : seconds === 120 ? "two" : seconds === 300 ? "five" : "custom";
+const voteTotal = (vote: ChatVote): number => vote.kind === "free_text"
+  ? vote.voterCount ?? (vote.textResults ?? []).reduce((sum, term) => sum + term.count, 0)
+  : vote.voterCount ?? (vote.counts ?? []).reduce((sum, count) => sum + count, 0);
 
-const secondsForDurationPreset = (preset: DurationPreset, customSeconds: number | ""): number | "" =>
-  preset === "open" ? 0 : preset === "one" ? 60 : preset === "two" ? 120 : preset === "five" ? 300 : customSeconds;
-
-const keysForPreset = (preset: ChatVotePreset, optionCount: number): string[] => {
-  if (preset === "free_text") return [];
-  if (preset === "digit_01") return ["0", "1"];
-  if (preset === "digit_12") return ["1", "2"];
-  const count = preset === "yes_no" ? 2 : preset === "scale_5" ? 5 : optionCount;
-  return Array.from({ length: count }, (_unused, index) => String(index + 1));
+const winnerFor = (vote: ChatVote, labels: ReturnType<typeof chatVotingSavedPanelTexts>): string => {
+  if (vote.kind === "free_text") {
+    const leader = rankVoteTerms((vote.textResults ?? []).filter((term) => term.approved), 1)[0];
+    if (leader === undefined) return labels.noWinner;
+    const total = (vote.textResults ?? []).reduce((sum, term) => sum + term.count, 0);
+    return labels.winner(leader.term, total === 0 ? 0 : Math.round(leader.count * 100 / total));
+  }
+  const counts = vote.counts ?? [];
+  const maximum = Math.max(0, ...counts);
+  if (maximum === 0) return labels.noWinner;
+  const index = counts.findIndex((count) => count === maximum);
+  const answer = vote.labels[index] ?? String(index + 1);
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  return labels.winner(answer, total === 0 ? 0 : Math.round(maximum * 100 / total));
 };
 
-interface VoteDraft {
-  channelId: string;
-  question: string;
-  optionCount: number | "";
-  answerLabels: string[];
-  freeText: boolean;
-  textMode: ChatVotingTextMode;
-  durationPreset: DurationPreset;
-  customDurationSeconds: number | "";
-}
-
-const createVoteDraft = (channelId: string, defaultDurationSeconds: number): VoteDraft => {
-  const durationPreset = durationPresetFor(defaultDurationSeconds);
-  return {
-    channelId,
-    question: "",
-    optionCount: 0,
-    answerLabels: [],
-    freeText: false,
-    textMode: "first_word",
-    durationPreset,
-    customDurationSeconds: durationPreset === "custom" ? defaultDurationSeconds : 60,
-  };
+const lockReason = (
+  state: ChatVotingPanelState | null,
+  canOperate: boolean,
+  labels: ReturnType<typeof chatVotingSavedPanelTexts>,
+  unavailableReason: string | null,
+): string | null => {
+  if (!canOperate) return labels.operatorLocked;
+  if (unavailableReason !== null) return unavailableReason;
+  if (state === null) return labels.loading;
+  if (state.vote?.status === "open") return labels.runningLocked;
+  if (state.hasOpenBallot) return labels.votekickLocked;
+  return null;
 };
 
-export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true }: ModulePanelProperties): ReactElement => {
-  const labels = chatVotingPanelTexts(language);
-  const [state, setState] = useState<ChatVotingPanelState | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [loadErrorNotified, setLoadErrorNotified] = useState(false);
+export const ChatVotingPanel = (properties: ModulePanelProperties): ReactElement =>
+  <ChatVotingPanelForChannel key={properties.channelId} {...properties} />;
+
+const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = true }: ModulePanelProperties): ReactElement => {
+  const labels = chatVotingSavedPanelTexts(language);
+  const [voteState, setVoteState] = useState<ChatVotingPanelState | null>(null);
+  const [voteError, setVoteError] = useState(false);
+  const [templateList, setTemplateList] = useState<ChatVoteTemplateListState | null>(null);
+  const [templateError, setTemplateError] = useState(false);
+  const [recentVotes, setRecentVotes] = useState<readonly ChatVote[] | null>(null);
+  const [recentError, setRecentError] = useState(false);
+  const [mode, setMode] = useState<ListMode>("saved");
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [selectedRecentId, setSelectedRecentId] = useState<string | null>(null);
+  const [selectionCleared, setSelectionCleared] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [draftState, setDraftState] = useState<VoteDraft | null>(null);
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const announcementSequence = useRef(0);
+  const previousVote = useRef<{ id: string; status: "open" | "closed"; title: string | null } | null>(null);
+  const [wide, setWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1280);
+  const templates = useMemo(() => templateList?.templates ?? [], [templateList]);
+  const voteRef = useRef(voteState);
+  const templateListRef = useRef(templateList);
+  const recentVotesRef = useRef(recentVotes);
+  useEffect(() => { voteRef.current = voteState; }, [voteState]);
+  useEffect(() => { templateListRef.current = templateList; }, [templateList]);
+  useEffect(() => { recentVotesRef.current = recentVotes; }, [recentVotes]);
 
-  const refresh = useCallback(async (): Promise<void> => {
+  const replaceTemplate = useCallback((updated: ChatVoteTemplate): void => {
+    setTemplateList((current) => current === null ? current : {
+      ...current,
+      templates: current.templates.map((template) => template.id === updated.id ? updated : template),
+    });
+  }, []);
+  const autosave = useChatVoteTemplateAutosave(channelId, templates, language, replaceTemplate);
+
+  const refreshVote = useCallback(async (): Promise<void> => {
     try {
       const next = await loadChatVotingState(channelId);
-      setState(next);
-      setDraftState((current) => current?.channelId === channelId
-        ? current
-        : createVoteDraft(channelId, next.defaultDurationSeconds));
-      setLoadFailed(false);
-      setLoadErrorNotified(false);
+      setVoteState(next);
+      setVoteError(false);
     } catch {
-      setLoadFailed(true);
-      if (!loadErrorNotified) {
-        setLoadErrorNotified(true);
-        notify({ tone: "error", message: labels.loadError });
-      }
+      setVoteError(true);
+      if (voteRef.current === null) notify({ tone: "error", message: labels.liveLoadError });
     }
-  }, [channelId, labels.loadError, loadErrorNotified]);
+  }, [channelId, labels.liveLoadError]);
 
-  useEffect(() => { void Promise.resolve().then(() => refresh()); }, [refresh]);
+  const refreshTemplates = useCallback(async (): Promise<void> => {
+    try {
+      const next = await loadChatVoteTemplates(channelId);
+      setTemplateList(next);
+      setTemplateError(false);
+    } catch {
+      setTemplateError(true);
+      if (templateListRef.current === null) notify({ tone: "error", message: labels.templatesError });
+    }
+  }, [channelId, labels.templatesError]);
+
+  const refreshRecent = useCallback(async (): Promise<void> => {
+    try {
+      const next = await loadRecentChatVotes(channelId);
+      setRecentVotes(next.votes);
+      setRecentError(false);
+    } catch {
+      setRecentError(true);
+      if (recentVotesRef.current === null) notify({ tone: "error", message: labels.recentError });
+    }
+  }, [channelId, labels.recentError]);
 
   useEffect(() => {
-    const poll = (): void => { if (document.visibilityState === "visible") void refresh(); };
+    const resize = (): void => { setWide(window.innerWidth >= 1280); };
+    window.addEventListener("resize", resize);
+    return () => { window.removeEventListener("resize", resize); };
+  }, []);
+
+  useEffect(() => {
+    previousVote.current = null;
+    const initialLoad = window.setTimeout(() => {
+      void refreshVote();
+      void refreshTemplates();
+    }, 0);
+    const poll = (): void => {
+      if (document.visibilityState === "visible") void refreshVote();
+    };
     const timer = window.setInterval(poll, 2_000);
     document.addEventListener("visibilitychange", poll);
     return () => {
+      window.clearTimeout(initialLoad);
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", poll);
     };
-  }, [refresh]);
+  }, [channelId, refreshTemplates, refreshVote]);
 
-  const draft = draftState?.channelId === channelId
-    ? draftState
-    : createVoteDraft(channelId, state?.defaultDurationSeconds ?? 0);
-  const updateDraft = (update: Partial<VoteDraft>): void => {
-    setDraftState((current) => ({
-      ...(current?.channelId === channelId ? current : createVoteDraft(channelId, state?.defaultDurationSeconds ?? 0)),
-      ...update,
-    }));
+  useEffect(() => {
+    if (voteState === null) return;
+    const current = voteState.vote;
+    const previous = previousVote.current;
+    if (previous === null && current?.status === "open") {
+      announcementSequence.current += 1;
+      setAnnouncement({ key: announcementSequence.current, text: labels.startAnnouncement(current.title || labels.untitled) });
+    } else if (previous !== null && previous.status !== "open" && current?.status === "open") {
+      announcementSequence.current += 1;
+      setAnnouncement({ key: announcementSequence.current, text: labels.startAnnouncement(current.title || labels.untitled) });
+    } else if (previous?.status === "open" && current?.status !== "open") {
+      announcementSequence.current += 1;
+      setAnnouncement({ key: announcementSequence.current, text: labels.endAnnouncement(previous.title || labels.untitled) });
+    }
+    previousVote.current = current === null ? null : { id: current.id, status: current.status, title: current.title };
+  }, [labels, voteState]);
+
+  const activeLockReason = lockReason(voteState, canOperate, labels,
+    voteError ? labels.liveLoadError : voteState === null ? labels.loading : null);
+  const selectedTemplate = mode === "saved"
+    ? templates.find((template) => template.id === selectedTemplateId) ?? (wide && !selectionCleared ? templates[0] ?? null : null)
+    : null;
+  const selectedRecent = mode === "recent"
+    ? recentVotes?.find((vote) => vote.id === selectedRecentId) ?? (wide && !selectionCleared ? recentVotes?.[0] ?? null : null)
+    : null;
+  const count = templateList?.count ?? templates.length;
+  const defaultDuration = voteState?.defaultDurationSeconds ?? 120;
+  const reusableBlank = templates.find((template) => template.title === "" && template.shortcut === null &&
+    template.labels.length === 0 && template.freeTextMode === null && template.legacyAlias === null &&
+    template.durationSeconds === defaultDuration && template.revision === 1 && template.updatedAt === template.createdAt);
+  const createBlocked = count >= CHAT_VOTE_TEMPLATE_MAXIMUM && reusableBlank === undefined;
+
+  const selectTemplate = async (template: ChatVoteTemplate): Promise<void> => {
+    if (selectedTemplate !== null && !await autosave.flush(selectedTemplate.id)) return;
+    setSelectionCleared(false);
+    setSelectedRecentId(null);
+    setSelectedTemplateId(template.id);
   };
-  const answerCount = typeof draft.optionCount === "number" ? draft.optionCount : -1;
-  const validOptionCount = draft.freeText || answerCount === 0 || answerCount >= 2 && answerCount <= 9;
-  const effectiveDraftLabels = answerCount >= 2 && answerCount <= 9
-    ? Array.from({ length: answerCount }, (_unused, index) => draft.answerLabels[index]?.trim() || String(index + 1))
-    : language === "de" ? ["Ja", "Nein"] : ["Yes", "No"];
-  const validLabels = draft.freeText || answerCount === 0 || validateVoteLabels(effectiveDraftLabels, answerCount, answerCount);
-  const validQuestion = isValidVoteTitle(draft.question);
 
-  const start = async (): Promise<void> => {
-    const durationSeconds = secondsForDurationPreset(draft.durationPreset, draft.customDurationSeconds);
-    const minimumDurationSeconds = draft.durationPreset === "open" ? 0 : 1;
-    if (durationSeconds === "" || !Number.isSafeInteger(durationSeconds) || durationSeconds < minimumDurationSeconds || durationSeconds > 14_400 ||
-        !validOptionCount || !validLabels || !validQuestion) return;
+  const selectRecent = async (vote: ChatVote): Promise<void> => {
+    if (selectedTemplate !== null && !await autosave.flush(selectedTemplate.id)) return;
+    setSelectionCleared(false);
+    setSelectedTemplateId(null);
+    setSelectedRecentId(vote.id);
+  };
+
+  const closeInspector = async (): Promise<void> => {
+    if (selectedTemplate !== null && !await autosave.flush(selectedTemplate.id)) return;
+    setSelectionCleared(true);
+    setSelectedTemplateId(null);
+    setSelectedRecentId(null);
+  };
+
+  const changeMode = async (value: string): Promise<void> => {
+    if (selectedTemplate !== null && !await autosave.flush(selectedTemplate.id)) return;
+    const next = value as ListMode;
+    if (next === "recent" && recentVotes === null && !recentError) void refreshRecent();
+    setSelectionCleared(false);
+    setMode(next);
+    setSelectedTemplateId(null);
+    setSelectedRecentId(null);
+  };
+
+  const createTemplate = async (): Promise<void> => {
+    if (busy) return;
+    if (selectedTemplate !== null && !await autosave.flush(selectedTemplate.id)) return;
+    if (reusableBlank !== undefined) {
+      setSelectionCleared(false);
+      setSelectedRecentId(null);
+      setSelectedTemplateId(reusableBlank.id);
+      return;
+    }
+    if (count >= CHAT_VOTE_TEMPLATE_MAXIMUM) return;
     setBusy(true);
     try {
-      const kind = draft.freeText ? "free_text" : answerCount === 0 ? "yes_no" : "options";
-      await startChatVoting(channelId, {
-        kind,
-        ...(kind === "free_text" ? {} : { labels: effectiveDraftLabels }),
-        ...(kind === "options" ? { optionCount: answerCount } : {}),
-        durationSeconds,
-        ...(draft.question.trim().length === 0 ? {} : { title: draft.question.trim() }),
-        ...(draft.freeText ? { textMode: draft.textMode } : {}),
-      });
-      await refresh();
+      const created = await createChatVoteTemplate(channelId);
+      setTemplateList((current) => ({
+        templates: [created, ...(current?.templates ?? [])],
+        count: (current?.count ?? 0) + 1,
+        maximum: current?.maximum ?? CHAT_VOTE_TEMPLATE_MAXIMUM,
+      }));
+      autosave.reset(created);
+      setMode("saved");
+      setSelectedRecentId(null);
+      setSelectedTemplateId(created.id);
+      setSelectionCleared(false);
     } catch (error: unknown) {
-      notify({ tone: "error", message: error instanceof Error && "code" in error && error.code === "chat_voting_busy" ? labels.busy : labels.startError });
+      const message = error instanceof PanelApiError && error.code === "chat_vote_template_limit"
+        ? labels.templateLimit : labels.newTemplateError;
+      notify({ tone: "error", message });
     } finally {
       setBusy(false);
     }
   };
 
-  const close = async (): Promise<void> => {
+  const startTemplate = async (template: ChatVoteTemplate): Promise<void> => {
+    if (pendingTemplateId !== null || activeLockReason !== null) return;
+    setPendingTemplateId(template.id);
+    try {
+      if (!await autosave.flush(template.id)) return;
+      const draft = autosave.draftFor(template);
+      const problem = templateStartProblem({ labels: draft.labels, freeTextMode: draft.freeTextMode, durationSeconds: draft.durationSeconds });
+      if (problem !== null) return;
+      const started = await startChatVoting(channelId, { templateId: template.id });
+      replaceTemplate({ ...template, lastUsedAt: started.openedAt });
+      void refreshVote();
+    } catch (error: unknown) {
+      const message = error instanceof PanelApiError && error.code === "chat_voting_busy"
+        ? labels.runningLocked
+        : error instanceof PanelApiError && error.code === "chat_vote_template_invalid"
+          ? labels.problem(error.details !== null && typeof error.details === "object" && "problem" in error.details && error.details.problem === "duration" ? "duration" : "answers")
+          : labels.startError;
+      notify({ tone: "error", message });
+    } finally {
+      setPendingTemplateId(null);
+    }
+  };
+
+  const startRecent = async (vote: ChatVote): Promise<void> => {
+    if (busy || activeLockReason !== null) return;
+    setBusy(true);
+    try {
+      await startChatVoting(channelId, {
+        kind: vote.kind,
+        ...(vote.kind === "free_text" ? {} : { optionCount: vote.optionCount, labels: vote.labels }),
+        ...(vote.kind === "free_text" ? { textMode: vote.textMode ?? "first_word" } : {}),
+        durationSeconds: vote.requestedDurationSeconds ?? 0,
+        ...(vote.title === null ? {} : { title: vote.title }),
+      });
+      void refreshVote();
+    } catch {
+      notify({ tone: "error", message: labels.startError });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeVote = async (): Promise<void> => {
+    if (busy || !canOperate) return;
     setBusy(true);
     try {
       await closeChatVoting(channelId);
-      await refresh();
+      await refreshVote();
     } catch {
-      notify({ tone: "error", message: labels.closeError });
+      notify({ tone: "error", message: labels.endError });
     } finally {
       setBusy(false);
     }
   };
 
   const approveTerm = async (pollId: string, term: string): Promise<void> => {
+    if (busy || !canOperate) return;
     setBusy(true);
     try {
       await approveChatVotingTerm(channelId, pollId, term);
       notify({ tone: "success", message: labels.approvalSaved });
-      await refresh();
+      await refreshVote();
     } catch (error: unknown) {
-      const unavailable = error instanceof Error && "code" in error && error.code === "chat_voting_blocked_terms_unavailable";
-      notify({ tone: "error", message: unavailable ? labels.termsUnavailable : labels.approvalFailed });
+      const message = error instanceof PanelApiError && error.code === "chat_voting_blocked_terms_unavailable"
+        ? labels.termsUnavailable : labels.approvalFailed;
+      notify({ tone: "error", message });
     } finally {
       setBusy(false);
     }
   };
 
-  if (state === null) return <section className="module-stack chat-voting-panel" aria-label={labels.title}>
-    <LoadState
-      status={loadFailed ? "error" : "loading"}
-      minHeight="calc(var(--s10) * 8)"
-      loading={<Skeleton rows={8} height={34} />}
-      empty={<p className="empty-state">{labels.noVote}</p>}
-      error={<div />}
-    >{null}</LoadState>
+  const removeTemplate = async (template: ChatVoteTemplate): Promise<void> => {
+    try {
+      await deleteChatVoteTemplate(channelId, template);
+      const position = templates.findIndex((entry) => entry.id === template.id);
+      const next = templates[position + 1] ?? templates[position - 1] ?? null;
+      setTemplateList((current) => current === null ? current : {
+        ...current,
+        templates: current.templates.filter((entry) => entry.id !== template.id),
+        count: Math.max(0, current.count - 1),
+      });
+      autosave.clear(template.id);
+      setSelectedTemplateId(next?.id ?? null);
+      setSelectionCleared(next === null);
+    } catch {
+      notify({ tone: "error", message: labels.deleteError });
+      throw new Error(labels.deleteError);
+    }
+  };
+
+  const presetAnswers = (template: ChatVoteTemplate, values: readonly string[]): void => {
+    const previous = autosave.draftFor(template).labels;
+    const next = [...values];
+    autosave.change(template, { labels: next });
+    notify({
+      tone: "info",
+      message: labels.answersReplaced,
+      action: { label: labels.undo, onClick: () => { autosave.change(template, { labels: previous }); } },
+    });
+  };
+
+  const liveStatus = voteState === null
+    ? voteError ? "error" : "loading"
+    : "success";
+  const listStatus = mode === "saved"
+    ? templateList === null ? templateError ? "error" : "loading" : templates.length === 0 ? "empty" : "success"
+    : recentVotes === null ? recentError ? "error" : "loading" : recentVotes.length === 0 ? "empty" : "success";
+
+  const liveLoading = <div className="chat-voting-live__load-text">{labels.loading}</div>;
+  const liveEmpty = <div className="chat-voting-live__empty"><EmptyState title={labels.noVoteYet} description="" /></div>;
+  const liveError = <QueryErrorState title={labels.liveLoadError} reason={labels.liveLoadError} retryLabel={labels.retry} onRetry={() => { void refreshVote(); }} />;
+  const loadListStatus = listStatus;
+  const listLoading = <div className="chat-voting-list__load-text">{labels.loading}</div>;
+  const emptySaved = <EmptyState title={labels.emptySaved} description={labels.emptySavedDescription} action={{ label: labels.create, onClick: () => { void createTemplate(); } }} />;
+  const emptyRecent = <EmptyState title={labels.emptyRecent} description="" />;
+  const listError = mode === "saved"
+    ? <QueryErrorState title={labels.templatesError} reason={labels.templatesError} retryLabel={labels.retry} onRetry={() => { void refreshTemplates(); }} />
+    : <QueryErrorState title={labels.recentError} reason={labels.recentError} retryLabel={labels.retry} onRetry={() => { void refreshRecent(); }} />;
+
+  const templateInspector = selectedTemplate === null ? null : <ChatVoteTemplateInspector
+    key={selectedTemplate.id}
+    template={selectedTemplate}
+    draft={autosave.draftFor(selectedTemplate)}
+    language={language}
+    saveState={autosave.stateFor(selectedTemplate)}
+    shortcutError={autosave.shortcutErrorFor(selectedTemplate)}
+    isRunning={voteState?.vote?.status === "open" && selectedTemplate.lastUsedAt === voteState.vote.openedAt}
+    startLockReason={activeLockReason}
+    startBusy={pendingTemplateId === selectedTemplate.id}
+    saveTime={timeText(selectedTemplate.updatedAt, language)}
+    onPresetAnswers={(values) => { presetAnswers(selectedTemplate, values); }}
+    onClose={() => { void closeInspector(); }}
+    onChange={(update) => { autosave.change(selectedTemplate, update); }}
+    onStart={() => { void startTemplate(selectedTemplate); }}
+    onRetrySave={() => { void autosave.flush(selectedTemplate.id); }}
+    onDelete={() => removeTemplate(selectedTemplate)}
+  />;
+
+  const recentInspector = selectedRecent === null ? null : <section className="command-inspector sub-inspector chat-voting-recent-inspector" aria-label={labels.recent}>
+    <div className="section-heading">
+      <h3>{selectedRecent.title || labels.untitled}</h3>
+      <button className="button button--quiet inspector-close" type="button" aria-label={labels.cancel} onClick={() => { void closeInspector(); }}><Icon name="close" size={20} /></button>
+    </div>
+    <InspectorSectionView title={labels.answers}>
+      {selectedRecent.kind === "free_text"
+        ? rankVoteTerms((selectedRecent.textResults ?? []).filter((term) => term.approved)).map((term) => {
+          const total = (selectedRecent.textResults ?? []).reduce((sum, item) => sum + item.count, 0);
+          const percent = total === 0 ? 0 : Math.round(term.count * 100 / total);
+          return <ResultBar key={term.term} label={term.term} count={term.count} percent={percent} leader={false} />;
+        })
+        : (selectedRecent.labels).map((answer, index) => {
+          const counts = selectedRecent.counts ?? [];
+          const total = counts.reduce((sum, value) => sum + value, 0);
+          const amount = counts[index] ?? 0;
+          const percent = total === 0 ? 0 : Math.round(amount * 100 / total);
+          return <ResultBar key={String(index)} label={answer} count={amount} percent={percent} leader={amount === Math.max(0, ...counts)} />;
+        })}
+    </InspectorSectionView>
+    {(() => {
+      const [started, ended] = compactDateRange(selectedRecent.openedAt, selectedRecent.closedAt ?? selectedRecent.closesAt, language, labels.nextDay);
+      return <p className="chat-voting-recent-inspector__meta">{labels.closeReason(selectedRecent.closeReason)} · {started} – {ended}</p>;
+    })()}
+    <div className="chat-voting-recent-inspector__footer">
+      <Button variant="neutral" disabled={activeLockReason !== null || busy} onClick={() => { void startRecent(selectedRecent); }}>{labels.repeat}</Button>
+      {activeLockReason ? <span className="chat-voting-editor__start-reason">{activeLockReason}</span> : null}
+    </div>
   </section>;
 
-  const vote = state.vote;
-  const running = vote?.status === "open";
-  const closed = vote?.status === "closed";
-  const counts = state.counts ?? vote?.counts ?? [];
-  const total = counts.reduce((sum, count) => sum + count, 0);
-  const terms = state.terms ?? vote?.textResults ?? [];
-  const textTotal = terms.reduce((sum, entry) => sum + entry.count, 0);
-  const moreTerms = state.moreTerms ?? vote?.moreTerms ?? 0;
-  const activeBallot = running || state.hasOpenBallot;
-  const configurationDisabled = busy || activeBallot || !canOperate;
-  const durationSeconds = secondsForDurationPreset(draft.durationPreset, draft.customDurationSeconds);
-  const minimumDurationSeconds = draft.durationPreset === "open" ? 0 : 1;
-  const validDuration = typeof durationSeconds === "number" && Number.isSafeInteger(durationSeconds) && durationSeconds >= minimumDurationSeconds && durationSeconds <= 14_400;
-  const validConfiguration = validOptionCount && validDuration && validLabels && validQuestion;
-  const actionHint = !canOperate ? labels.roleDisabledReason : activeBallot ? labels.startDisabledReason
-    : !validDuration ? labels.invalidDuration
-      : !validOptionCount ? labels.invalidOptionCount
-        : !validLabels ? labels.invalidLabels : null;
-  const loadStateProps = {
-    minHeight: "calc(var(--s10) * 8)",
-    loading: <Skeleton rows={8} height={34} />,
-    empty: <p className="empty-state">{labels.noVote}</p>,
-    error: <p className="form-error" role="alert">{labels.loadError}</p>,
-  } as const;
-  const resultCount = vote === null ? 0 : closed ? vote.voterCount ?? (vote.preset === "free_text" ? textTotal : total)
-    : vote.preset === "free_text" ? textTotal : total;
-  const resultRange = closed ? compactDateRange(vote.openedAt, vote.closedAt ?? vote.closesAt, language, labels.nextDay) : null;
-  const resultFrom = vote === null ? "" : resultRange?.[0] ?? dateText(vote.openedAt, language);
-  const resultTo = closed ? resultRange?.[1] ?? dateText(vote.closedAt ?? vote.closesAt, language) : null;
-  const resultMetadata = vote === null ? null : labels.resultMeta(resultCount, resultFrom, resultTo, vote.preset === "free_text" ? moreTerms : undefined);
-  const leaderIndex = total === 0 ? -1 : counts.findIndex((count) => count === Math.max(...counts));
-  const rankedTerms = rankVoteTerms(terms, CHAT_VOTING_MAX_TEXT_TERMS);
-  const termLeader = rankedTerms[0];
-  const headerStatus = vote === null ? labels.readyStatus : running ? labels.runningStatus : labels.closedStatus;
+  const inspector = mode === "saved" ? templateInspector : recentInspector;
 
   return <section className="module-stack chat-voting-panel" aria-label={labels.title}>
-    <LoadState status="success" {...loadStateProps}>
-      <section className="config-section" aria-label={labels.title}>
-        <div className="section-heading">
-          <h2>{labels.title}</h2>
-          <div className="chat-voting-panel__status" data-testid="chat-voting-header-status">
-            <Led status={running ? "green" : "off"} word={headerStatus} />
-            <span className="muted chat-voting-panel__status-detail" data-testid="chat-voting-header-detail"
-              aria-hidden={!running}
-              title={running ? vote.requestedDurationSeconds === null ? labels.openStatus : labels.ends(timeText(vote.closesAt, language)) : ""}>
-              {running ? `· ${vote.requestedDurationSeconds === null ? labels.openStatus : labels.ends(timeText(vote.closesAt, language))}` : ""}
-            </span>
-          </div>
-        </div>
+    <div className={voteError && voteState !== null ? "stale" : undefined}>
+      <LoadState
+        status={liveStatus}
+        minHeight={260}
+        loading={liveLoading}
+        empty={liveEmpty}
+        error={liveError}
+      >
+        <ChatVotingLiveBlock
+          state={voteState}
+          language={language}
+          busy={busy}
+          canOperate={canOperate}
+          onClose={() => { void closeVote(); }}
+          onApprove={(pollId, term) => { void approveTerm(pollId, term); }}
+        />
+      </LoadState>
+    </div>
 
-        <div className="chat-voting-panel__body">
-          <div className="chat-voting-setup">
-            <h3 className="chat-voting-column-heading">{labels.newVote}</h3>
-            <Field
-              id="chat-voting-question"
-              label={labels.question}
-              value={draft.question}
-              maxLength={CHAT_VOTING_TITLE_MAX_LENGTH}
-              countLength={voteLabelLength}
-              countLabel={labels.questionCount}
-              disabled={configurationDisabled}
-              onChange={(value) => updateDraft({ question: value })}
-            />
-
-            <Switch
-              label={labels.freeText}
-              hint={labels.freeTextHint}
-              checked={draft.freeText}
-              disabled={configurationDisabled}
-              onChange={(freeText) => updateDraft({ freeText })}
-            />
-
-            {draft.freeText ? <SegmentedControl
-              label={labels.textMode}
-              hint={labels.freeTextHint}
-              value={draft.textMode}
-              disabled={configurationDisabled}
-              onChange={(value) => updateDraft({ textMode: value as ChatVotingTextMode })}
-              options={[
-                { value: "first_word", label: labels.firstWord },
-                { value: "whole_message", label: labels.wholeMessage },
-              ]}
-            /> : <>
-              <NumberField
-                id="chat-voting-option-count"
-                label={labels.optionCount}
-                hint={labels.optionCountHint}
-                value={draft.optionCount}
-                min={0}
-                max={9}
-                step={1}
-                {...(!validOptionCount ? { error: labels.invalidOptionCount } : {})}
-                increaseLabel={labels.increaseOptionCount}
-                decreaseLabel={labels.decreaseOptionCount}
-                disabled={configurationDisabled}
-                onChange={(optionCount) => updateDraft({
-                  optionCount,
-                  answerLabels: typeof optionCount === "number"
-                    ? Array.from({ length: optionCount }, (_unused, index) => draft.answerLabels[index] ?? "")
-                    : draft.answerLabels,
-                })}
-              />
-              {answerCount === 0 ? <p className="muted">{labels.yesNoDefaultHint}</p> : null}
-              {answerCount > 0 && answerCount <= 9 ? <div className="chat-voting-labels-group">
-                <h3>{labels.labelsHeading}</h3>
-                <div className="chat-voting-labels chat-voting-labels--options">
-                  {Array.from({ length: answerCount }, (_unused, index) => {
-                    const answerNumber = String(index + 1);
-                    const fieldLabel = labels.labelFieldName(answerNumber);
-                    return <Field
-                      key={`answer-${answerNumber}`}
-                      id={`chat-voting-label-${answerNumber}`}
-                      label={fieldLabel}
-                      ariaLabel={fieldLabel}
-                      labelHidden
-                      leftLabel={answerNumber}
-                      value={draft.answerLabels[index] ?? ""}
-                      placeholder={answerNumber}
-                      maxLength={CHAT_VOTING_LABEL_MAX_LENGTH}
-                      countLabel={labels.labelCount}
-                      countLength={voteLabelLength}
-                      disabled={configurationDisabled}
-                      onChange={(value) => {
-                        const answerLabels = [...draft.answerLabels];
-                        answerLabels[index] = value;
-                        updateDraft({ answerLabels });
-                      }}
-                    />;
-                  })}
-                </div>
-              </div> : null}
-            </>}
-
-            <div className={`chat-voting-duration-row${draft.durationPreset === "custom" ? " chat-voting-duration-row--custom" : ""}`}>
-              <Select
-                id="chat-voting-duration"
-                label={labels.duration}
-                value={draft.durationPreset}
-                {...(draft.durationPreset === "open" ? { hint: labels.openDurationHint } : {})}
-                disabled={configurationDisabled}
-                onChange={(value) => {
-                  if (value === null) return;
-                  updateDraft({ durationPreset: value as DurationPreset });
-                }}
-                options={[
-                  { value: "open", label: labels.openDuration },
-                  { value: "one", label: labels.oneMinute },
-                  { value: "two", label: labels.twoMinutes },
-                  { value: "five", label: labels.fiveMinutes },
-                  { value: "custom", label: labels.customDuration },
-                ]}
-              />
-              {draft.durationPreset === "custom" ? <NumberField
-                id="chat-voting-duration-seconds"
-                label={labels.customDurationSeconds}
-                hint={labels.durationRange}
-                value={draft.customDurationSeconds}
-                min={1}
-                max={14_400}
-                step={30}
-                unit="s"
-                {...(!running && !validDuration ? { error: labels.invalidDuration } : {})}
-                increaseLabel={labels.increaseDuration}
-                decreaseLabel={labels.decreaseDuration}
-                disabled={configurationDisabled}
-                onChange={(value) => {
-                  updateDraft({ customDurationSeconds: value });
-                }}
-              /> : null}
-            </div>
-
-            <Button
-              className="chat-voting-action"
-              variant="primary"
-              danger={running}
-              {...(running ? { icon: "close" as const } : {})}
-              disabled={running ? busy || !canOperate : configurationDisabled || !validConfiguration}
-              onClick={() => { void (running ? close() : start()); }}>
-              {running ? labels.stop : labels.start}
-            </Button>
-            <p className="chat-voting-hint" data-testid="chat-voting-hint-slot" title={actionHint ?? ""} aria-live="polite">{actionHint}</p>
-          </div>
-
-          <div className="chat-voting-result">
-            <div className="chat-voting-result__heading">
-              <h3>{labels.result}</h3>
-              {resultMetadata === null ? null : <span className="number chat-voting-result__meta" title={resultMetadata}>{resultMetadata}</span>}
-            </div>
-            <p className="chat-voting-result__question" title={vote?.title ?? ""} aria-hidden={vote?.title == null || vote.title.length === 0}>
-              {vote?.title ?? ""}
-            </p>
-            {vote === null ? <p className="empty-state chat-voting-result__empty">{labels.noVote}</p>
-              : vote.preset === "free_text" ? <div className="chat-voting-results" aria-label={labels.results}>
-                {Array.from({ length: 5 }, (_unused, index) => {
-                  const entry = rankedTerms[index];
-                  if (entry === undefined) return <div className="chat-voting-results__row chat-voting-results__term-row chat-voting-results__empty-slot" key={`${vote.id}-empty-${String(index)}`} role="group" aria-label={labels.emptySlot}>
-                    <span className="chat-voting-results__label">{labels.emptySlot}</span>
-                    <span className="chat-voting-results__track" aria-hidden="true"><span /></span>
-                    <span className="number">{labels.emptySlot}</span>
-                    <span className="number">{labels.emptySlot}</span>
-                    <span className="chat-voting-results__approval" aria-hidden="true" />
-                  </div>;
-                  const percent = textTotal === 0 ? 0 : Math.round(entry.count * 100 / textTotal);
-                  const leading = entry.term === termLeader?.term;
-                  return <div className="chat-voting-results__row chat-voting-results__term-row" data-leading={leading || undefined} key={`${vote.id}-${entry.term}`} role="group" aria-label={labels.resultBar(entry.term, entry.count, percent)}>
-                    <span className="chat-voting-results__label" title={entry.term}>{entry.term}</span>
-                    <span className="chat-voting-results__track" aria-hidden="true"><span style={{ width: `${String(percent)}%` }} /></span>
-                    <span className="number">{String(entry.count)}</span>
-                    <span className="number">{String(percent)}%</span>
-                    <span className="chat-voting-results__approval">
-                      {entry.approved
-                        ? <span className="muted" title={labels.approved}>{labels.approvedShort}</span>
-                        : <Button size="compact" disabled={busy || !canOperate || !running} ariaLabel={labels.approveTerm(entry.term)} title={labels.approveTerm(entry.term)} onClick={() => { void approveTerm(vote.id, entry.term); }}>{labels.approve}</Button>}
-                    </span>
-                  </div>;
-                })}
-              </div> : <div className="chat-voting-results" aria-label={labels.results}>
-                {vote.labels.map((label, index) => {
-                  const count = counts[index] ?? 0;
-                  const percent = total === 0 ? 0 : Math.round(count * 100 / total);
-                  return <div className="chat-voting-results__row" data-leading={index === leaderIndex || undefined} key={`${vote.id}-${String(index)}`} role="group" aria-label={labels.resultBar(label, count, percent)}>
-                    <span className="number chat-voting-results__key">{keysForPreset(vote.preset, vote.optionCount)[index] ?? String(index + 1)}</span>
-                    <span className="chat-voting-results__label">{label}</span>
-                    <span className="chat-voting-results__track" aria-hidden="true"><span style={{ width: `${String(percent)}%` }} /></span>
-                    <span className="number">{String(count)}</span>
-                    <span className="number">{String(percent)}%</span>
-                  </div>;
-                })}
-              </div>}
-          </div>
-        </div>
+    <ListDetail list={
+      <section className="chat-voting-list" aria-label={labels.title}>
+        <ListToolbar
+          filters={<SegmentedControl
+            label={labels.title}
+            value={mode}
+            onChange={(value) => { void changeMode(value); }}
+            options={[{ value: "saved", label: labels.saved }, { value: "recent", label: labels.recent }]}
+            size="form"
+          />}
+          filtersLabel={labels.title}
+          create={{
+            label: labels.create,
+            disabled: createBlocked || busy,
+            ...(createBlocked ? { reason: labels.templateLimit } : {}),
+            onClick: () => { void createTemplate(); },
+          }}
+          usage={{
+            count,
+            maximum: CHAT_VOTE_TEMPLATE_MAXIMUM,
+            copy: { countSuffix: "", filteredInfix: "", filteredSuffix: "", limitInfix: "/", limitSuffix: "", loadedSuffix: "" },
+          }}
+          activeFilters={activeLockReason ?? ""}
+        />
+        <LoadState
+          status={loadListStatus}
+          minHeight={320}
+          loading={listLoading}
+          empty={mode === "saved" ? emptySaved : emptyRecent}
+          error={listError}
+        >
+          {mode === "saved" ? <div className={templateError ? "stale" : undefined}><ChatVoteTemplateList
+            templates={templates}
+            selectedId={selectedTemplate?.id ?? null}
+            vote={voteState?.vote ?? null}
+            startsLockedReason={activeLockReason}
+            canOperate={canOperate}
+            pendingId={pendingTemplateId}
+            labels={labels}
+            durationText={(seconds) => chatVoteDurationText(seconds, language)}
+            onSelect={(template) => { void selectTemplate(template); }}
+            onStart={(template) => { void startTemplate(template); }}
+          /></div> : <div className={recentError ? "stale" : undefined}><div className="chat-voting-recent-list">
+            {(recentVotes ?? []).map((vote) => {
+              const title = vote.title || labels.untitled;
+              const time = timeText(vote.closedAt ?? vote.openedAt, language);
+              const total = voteTotal(vote);
+              const winner = winnerFor(vote, labels);
+              return <ListRow
+                key={vote.id}
+                href={"#recent-" + encodeURIComponent(vote.id)}
+                onNavigate={() => { void selectRecent(vote); }}
+                title={title}
+                description={<span><span className="mono">{time} · {String(total)}</span> {labels.voteWord} · {winner}</span>}
+                selected={vote.id === selectedRecent?.id}
+                status={null}
+                action={<Button
+                  icon="player-play"
+                  iconOnly
+                  size="compact"
+                  ariaLabel={labels.repeat + ": " + title}
+                  title={activeLockReason ?? labels.repeat}
+                  disabled={activeLockReason !== null || busy}
+                  onClick={() => { void startRecent(vote); }}
+                />}
+              />;
+            })}
+          </div></div>}
+        </LoadState>
       </section>
-    </LoadState>
+    } inspector={inspector} onCloseInspector={() => { void closeInspector(); }} />
+
+    <div className="sr-only" aria-live="polite" key={announcement?.key ?? 0}>{announcement?.text ?? ""}</div>
   </section>;
 };
+
+const InspectorSectionView = ({ title, children }: { title: string; children: ReactNode }): ReactElement =>
+  <section className="inspector-content-section"><h3 className="inspector-content-section__heading">{title}</h3><div className="inspector-content-section__body">{children}</div></section>;
+
+const ResultBar = ({ label, count, percent, leader }: { label: string; count: number; percent: number; leader: boolean }): ReactElement =>
+  <div className="chat-voting-results__row" data-leading={leader || undefined} role="group" aria-label={label + ": " + String(count) + ", " + String(percent) + "%"}>
+    <span className="chat-voting-results__label" title={label}>{label}</span>
+    <span className="chat-voting-results__track" aria-hidden="true"><span style={{ width: String(percent) + "%" }} /></span>
+    <span className="number">{String(count)}</span>
+    <span className="number">{String(percent)}%</span>
+  </div>;
 
 export default ChatVotingPanel;

@@ -9,7 +9,7 @@ import {
   configuredLabels,
   isBlockedFreeTextVote,
   isValidVoteLabel,
-  isValidVoteLabelSetting,
+  isValidTemplateShortcut,
   isValidVoteTitle,
   labelsForVote,
   normalizeBlockedVoteTerm,
@@ -28,10 +28,10 @@ describe("chat voting command and result domain", () => {
     ["!vote help", { kind: "help" }],
     ["!vote end", { kind: "end" }],
     ["!vote again", { kind: "again" }],
-    ["!vote yesno", { kind: "start", voteKind: "yes_no", preset: "yes_no", optionCount: 2, title: null }],
-    ["!vote scale", { kind: "start", voteKind: "options", preset: "scale_5", optionCount: 5, title: null }],
-    ["!vote 01", { kind: "start", voteKind: "yes_no", preset: "digit_01", optionCount: 2, title: null }],
-    ["!vote 12", { kind: "start", voteKind: "yes_no", preset: "digit_12", optionCount: 2, title: null }],
+    ["!vote yesno", { kind: "legacyAlias", alias: "yesno", title: null }],
+    ["!vote scale", { kind: "legacyAlias", alias: "scale", title: null }],
+    ["!vote 01", { kind: "legacyAlias", alias: "zeroOne", title: null }],
+    ["!vote 12", { kind: "legacyAlias", alias: "oneTwo", title: null }],
     ["!vote 2", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, title: null }],
     ["!vote 3", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 3, title: null }],
     ["!vote 4", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 4, title: null }],
@@ -44,7 +44,7 @@ describe("chat voting command and result domain", () => {
     ["!vote text word", { kind: "start", voteKind: "free_text", preset: "free_text", optionCount: 0, title: null, textMode: "first_word" }],
     ["!vote text message", { kind: "start", voteKind: "free_text", preset: "free_text", optionCount: 0, title: null, textMode: "whole_message" }],
     ["!vote text message Which message wins?", { kind: "start", voteKind: "free_text", preset: "free_text", optionCount: 0, title: "Which message wins?", textMode: "whole_message" }],
-    ["!vote yesno  Pizza today?  ", { kind: "start", voteKind: "yes_no", preset: "yes_no", optionCount: 2, title: "Pizza today?" }],
+    ["!vote yesno  Pizza today?  ", { kind: "legacyAlias", alias: "yesno", title: "Pizza today?" }],
     ["!vote 3 Who wins?", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 3, title: "Who wins?" }],
     ["!vote Pizza or Burger?", { kind: "start", voteKind: "yes_no", preset: "yes_no", optionCount: 2, title: "Pizza or Burger?" }],
     ["!vote Dinner? | Pizza | Burger", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, labels: ["Pizza", "Burger"], title: "Dinner?" }],
@@ -52,8 +52,8 @@ describe("chat voting command and result domain", () => {
     ["!vote Dinner? | Pizza | Burger | 2m", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, labels: ["Pizza", "Burger"], title: "Dinner?", durationSeconds: 120 }],
     ["!vote Dinner? | Pizza | Burger | 1h", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, labels: ["Pizza", "Burger"], title: "Dinner?", durationSeconds: 3600 }],
     ["!vote 2 Pizzas? | A | B", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, labels: ["A", "B"], title: "2 Pizzas?" }],
-    ["!vote UnknownToken", { kind: "help" }],
-    ["!vote 10", { kind: "help" }],
+    ["!vote UnknownToken", { kind: "template", shortcut: "unknowntoken" }],
+    ["!vote 10", { kind: "template", shortcut: "10" }],
     ["!vote Question | A | B", { kind: "invalid", problem: "question" }],
     ["!vote Question? | A", { kind: "invalid", problem: "answerCount" }],
     ["!vote Question? | Same | same!", { kind: "invalid", problem: "labels" }],
@@ -88,19 +88,12 @@ describe("chat voting command and result domain", () => {
       .toBe("Results for “Pizza?”: Yes: 8 · No: 4");
   });
 
-  it("uses channel-language defaults and complete configured labels", () => {
+  it("uses channel-language defaults after customizable defaults move to templates", () => {
     expect(labelsForVote(DEFAULT_CHAT_VOTING_SETTINGS, "yes_no", 2, "de")).toEqual(["Ja", "Nein"]);
     expect(labelsForVote(DEFAULT_CHAT_VOTING_SETTINGS, "digit_01", 2, "de")).toEqual(["Nein", "Ja"]);
     expect(labelsForVote(DEFAULT_CHAT_VOTING_SETTINGS, "digit_01", 2, "en")).toEqual(["No", "Yes"]);
     expect(labelsForVote(DEFAULT_CHAT_VOTING_SETTINGS, "digit_12", 2, "de")).toEqual(["1", "2"]);
-    expect(labelsForVote({ ...DEFAULT_CHAT_VOTING_SETTINGS, zeroOneLabels: "Nope|Sure", oneTwoLabels: "One|Two" }, "digit_01", 2, "en"))
-      .toEqual(["Nope", "Sure"]);
-    expect(labelsForVote({ ...DEFAULT_CHAT_VOTING_SETTINGS, scaleLabels: "Low|Medium|High|Great|Perfect" }, "scale_5", 5, "en"))
-      .toEqual(["Low", "Medium", "High", "Great", "Perfect"]);
-    expect(labelsForVote({ ...DEFAULT_CHAT_VOTING_SETTINGS, optionLabels: "Red|Blue|Green" }, "options_n", 2, "en"))
-      .toEqual(["Red", "Blue"]);
-    expect(labelsForVote({ ...DEFAULT_CHAT_VOTING_SETTINGS, optionLabels: "Red|Blue|Green" }, "options_n", 4, "en"))
-      .toEqual(["Red", "Blue", "Green", "4"]);
+    expect(labelsForVote(DEFAULT_CHAT_VOTING_SETTINGS, "options_n", 3, "en")).toEqual(["1", "2", "3"]);
   });
 
   it("validates per-vote labels against the selected option count", () => {
@@ -124,35 +117,25 @@ describe("chat voting command and result domain", () => {
     expect(configuredLabels(["😀".repeat(33), "No"], 2)).toBeNull();
   });
 
-  it("accepts empty labels as defaults and rejects malformed custom labels", () => {
-    expect(isValidVoteLabelSetting("", "yesNoLabels")).toBe(true);
-    expect(isValidVoteLabelSetting("  ", "scaleLabels")).toBe(true);
-    expect(isValidVoteLabelSetting("", "optionLabels")).toBe(true);
-    expect(isValidVoteLabelSetting("Ja|Nein", "yesNoLabels")).toBe(true);
-    expect(isValidVoteLabelSetting("Ja|ja!", "yesNoLabels")).toBe(false);
-    expect(isValidVoteLabelSetting("Nein|Ja", "zeroOneLabels")).toBe(true);
-    expect(isValidVoteLabelSetting("1|2", "oneTwoLabels")).toBe(true);
-    expect(isValidVoteLabelSetting("No|Yes|Maybe", "zeroOneLabels")).toBe(false);
-    expect(isValidVoteLabelSetting("Ja|", "yesNoLabels")).toBe(false);
-    expect(isValidVoteLabelSetting("Ja|Nein|Vielleicht", "yesNoLabels")).toBe(false);
-    expect(isValidVoteLabelSetting("1|2|3|4|5", "scaleLabels")).toBe(true);
-    expect(isValidVoteLabelSetting("1|2|3", "scaleLabels")).toBe(false);
-    expect(isValidVoteLabelSetting("A|B|C", "optionLabels")).toBe(true);
-    expect(isValidVoteLabelSetting("A", "optionLabels")).toBe(false);
-    expect(isValidVoteLabelSetting(`${"x".repeat(33)}|No`, "yesNoLabels")).toBe(false);
+  it("validates chat shortcuts against the client-side grammar and reserved words", () => {
+    expect(isValidTemplateShortcut("essen")).toBe(true);
+    expect(isValidTemplateShortcut("pizza_today-2")).toBe(true);
+    expect(isValidTemplateShortcut("yesno")).toBe(false);
+    expect(isValidTemplateShortcut("2essen")).toBe(false);
+    expect(isValidTemplateShortcut("a".repeat(25))).toBe(false);
+    expect(isValidTemplateShortcut(null)).toBe(true);
   });
 
   it.each(["!vote 01", "!vote 12"])("ignores label words in a yes/no vote started by %s", (text) => {
     const command = parseVoteCommand(text);
-    if (command?.kind !== "start") throw new Error("Expected a start command.");
-    expect(command.voteKind).toBe("yes_no");
-    expect(voteChoiceFromMessage("Yes", command.voteKind, command.optionCount, ["No", "Yes"])).toBeNull();
-    expect(voteChoiceFromMessage("2", command.voteKind, command.optionCount, ["No", "Yes"])).toEqual({ choice: 2, source: "number" });
+    if (command?.kind !== "legacyAlias") throw new Error("Expected a legacy alias command.");
+    expect(command.title).toBeNull();
+    expect(voteChoiceFromMessage("Yes", "yes_no", 2, ["No", "Yes"])).toBeNull();
+    expect(voteChoiceFromMessage("2", "yes_no", 2, ["No", "Yes"])).toEqual({ choice: 2, source: "number" });
   });
 
   it("falls back to plain numbers when configured option labels collide with key numbers", () => {
-    expect(labelsForVote({ ...DEFAULT_CHAT_VOTING_SETTINGS, optionLabels: "Pizza|3" }, "options_n", 3, "en"))
-      .toEqual(["1", "2", "3"]);
+    expect(labelsForVote(DEFAULT_CHAT_VOTING_SETTINGS, "options_n", 3, "en")).toEqual(["1", "2", "3"]);
   });
 
   it("trims numeric choices and matches option words only by exact normalized labels", () => {

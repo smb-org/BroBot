@@ -27,11 +27,11 @@ export interface ListToolbarQueryError {
 
 export interface ListToolbarProperties {
   language?: DashboardLanguage;
-  searchLabel: string;
-  searchPlaceholder: string;
-  searchClearLabel: string;
-  searchValue: string;
-  onSearchChange: (value: string) => void;
+  searchLabel?: string;
+  searchPlaceholder?: string;
+  searchClearLabel?: string;
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
   onSearchKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
   filters?: ReactNode;
   filtersLabel?: string;
@@ -93,11 +93,13 @@ export function ListToolbar({
   const activeFilterText = activeFilters?.trim() ?? "";
   const hasActiveFilters = activeFilterText.length > 0;
   const warning = usage?.maximum !== undefined && usage.maximum > 0 && usage.count >= usage.maximum * 0.9;
+  const hasSearch = searchLabel !== undefined && searchPlaceholder !== undefined && searchClearLabel !== undefined &&
+    searchValue !== undefined && onSearchChange !== undefined;
 
   return (
     <div className={["list-toolbar", className].filter(Boolean).join(" ")}>
-      <div className="list-toolbar__row">
-        <div className="list-toolbar__search">
+      <div className={`list-toolbar__row${hasSearch ? "" : " list-toolbar__row--no-search"}`}>
+        {hasSearch ? <div className="list-toolbar__search">
           <Field
             variant="search"
             label={searchLabel}
@@ -107,7 +109,7 @@ export function ListToolbar({
             onChange={onSearchChange}
             {...(onSearchKeyDown === undefined ? {} : { onKeyDown: onSearchKeyDown })}
           />
-        </div>
+        </div> : null}
         {filters === undefined ? null : (
           <div className="list-toolbar__filters" role="group" aria-label={filtersLabel}>
             {filters}
@@ -128,7 +130,7 @@ export function ListToolbar({
       </div>
       <div className={`list-toolbar__status${queryError === undefined ? "" : " list-toolbar__status--error"}`}>
         {queryError === undefined ? <>
-          <span className={`list-toolbar__usage${warning ? " list-toolbar__usage--warning" : ""}`} aria-live="polite">
+          <span className={`list-toolbar__usage${warning ? " list-toolbar__usage--warning" : ""}`}>
             {usage === undefined ? null : usageText(usage, language)}
           </span>
           <div className="list-toolbar__status-right">

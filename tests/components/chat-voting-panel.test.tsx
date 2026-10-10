@@ -2,21 +2,47 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { ChatVotingPanel } from "../../src/modules/chat_voting/panel";
-import type { ChatVotePreset } from "../../src/modules/chat_voting/contracts";
+import type { ChatVote, ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
+import type { ChatVotingPanelState } from "../../src/modules/chat_voting/panel/service";
 import { jsonResponse } from "../unit/fixtures";
 
-const defaultLabels: Record<ChatVotePreset, string[]> = {
-  yes_no: ["Yes", "No"],
-  digit_01: ["No", "Yes"],
-  digit_12: ["1", "2"],
-  scale_5: ["1", "2", "3", "4", "5"],
-  options_n: Array.from({ length: 9 }, (_unused, index) => `Option ${String(index + 1)}`),
-  free_text: [],
+const template = (overrides: Partial<ChatVoteTemplate> = {}): ChatVoteTemplate => ({
+  id: "template-dinner",
+  channelId: "fictional-channel",
+  shortcut: null,
+  title: "Dinner",
+  labels: ["Pizza", "Burger"],
+  freeTextMode: null,
+  durationSeconds: 120,
+  revision: 1,
+  legacyAlias: null,
+  lastUsedAt: null,
+  createdAt: "2026-10-04T10:00:00.000Z",
+  updatedAt: "2026-10-04T10:00:00.000Z",
+  ...overrides,
+});
+
+const runningVote: ChatVote = {
+  id: "poll-running",
+  channelId: "fictional-channel",
+  kind: "options",
+  optionCount: 2,
+  labels: ["Pizza", "Burger"],
+  title: "Dinner",
+  status: "open",
+  openedAt: "2026-10-04T10:00:00.000Z",
+  closesAt: "2026-10-04T10:02:00.000Z",
+  requestedDurationSeconds: 120,
+  closedAt: null,
+  closeReason: "timer",
+  counts: null,
+  voterCount: null,
 };
 
-const currentState = (overrides: Record<string, unknown> = {}) => ({
+const currentState = (overrides: Partial<ChatVotingPanelState> = {}): ChatVotingPanelState => ({
   vote: null,
   counts: null,
   revision: 0,
@@ -24,325 +50,192 @@ const currentState = (overrides: Record<string, unknown> = {}) => ({
   moreTerms: null,
   hasOpenBallot: false,
   defaultDurationSeconds: 120,
-  defaultLabels,
   ...overrides,
 });
 
-const openVote = {
-  id: "chat-started-poll",
-  channelId: "fictional-channel",
-  preset: "yes_no",
-  optionCount: 2,
-  labels: ["Pizza", "Burger"],
-  status: "open",
-  openedAt: "2026-10-04T10:00:00.000Z",
-  closesAt: "2026-10-04T14:00:00.000Z",
-  requestedDurationSeconds: null,
-  closedAt: null,
-  closeReason: "limit",
-  counts: null,
-  voterCount: null,
-} as const;
+interface FetchHarnessOptions {
+  templates?: ChatVoteTemplate[];
+  current?: ChatVotingPanelState;
+  recent?: ChatVote[];
+  getTemplates?: () => ChatVoteTemplate[];
+  onPatch?: (templateId: string, body: Record<string, unknown>) => Response;
+  onStart?: (body: Record<string, unknown>) => Response;
+  onDelete?: (templateId: string) => Response;
+}
 
-const fetchFor = (
-  readCurrent: () => unknown = () => currentState(),
-  onStart: (body: unknown) => unknown = () => ({ vote: openVote }),
-  onClose: () => void = () => {},
-) => vi.fn<typeof fetch>((input, init) => {
-  const path = input instanceof Request
-    ? new URL(input.url).pathname
-    : new URL(String(input), "https://brobot.example").pathname;
-  if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-  if (path.endsWith("/start")) {
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
-    return Promise.resolve(jsonResponse(onStart(body)));
-  }
-  if (path.endsWith("/close")) {
-    onClose();
-    return Promise.resolve(jsonResponse({ closing: true, pollId: openVote.id }));
-  }
-  if (path.endsWith("/approve-term")) return Promise.resolve(jsonResponse({ terms: [], moreTerms: 0, revision: 2 }));
-  return Promise.resolve(jsonResponse(readCurrent()));
-});
-
-const selectOption = async (label: string, option: string): Promise<void> => {
-  const combobox = screen.getByRole("combobox", { name: label });
-  fireEvent.click(combobox);
-  const listbox = await waitFor(() => {
-    const id = combobox.getAttribute("aria-controls");
-    const controlledListbox = id === null ? null : document.getElementById(id);
-    if (controlledListbox === null) throw new Error("The Select listbox has not mounted.");
-    return controlledListbox;
+const fetchHarness = (options: FetchHarnessOptions = {}) => {
+  let templates = [...(options.templates ?? [template()])];
+  const fetch = vi.fn<typeof globalThis.fetch>((input, init) => {
+    const path = input instanceof Request
+      ? new URL(input.url).pathname
+      : new URL(String(input), "https://brobot.example").pathname;
+    const method = init?.method ?? "GET";
+    if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+    if (path.endsWith("/current")) return Promise.resolve(jsonResponse(options.current ?? currentState()));
+    if (path.endsWith("/templates") && method === "GET") {
+      const listed = options.getTemplates?.() ?? templates;
+      return Promise.resolve(jsonResponse({ templates: listed, count: listed.length, maximum: 100 }));
+    }
+    if (path.endsWith("/recent")) return Promise.resolve(jsonResponse({ votes: options.recent ?? [] }));
+    if (path.endsWith("/start")) {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+      return Promise.resolve(options.onStart?.(body) ?? jsonResponse({ vote: runningVote }));
+    }
+    if (path.endsWith("/close")) return Promise.resolve(jsonResponse({ closing: true, pollId: runningVote.id }));
+    if (path.endsWith("/approve-term")) return Promise.resolve(jsonResponse({ terms: [], moreTerms: 0, revision: 2 }));
+    const templatePath = /\/templates\/([^/]+)$/u.exec(path);
+    if (templatePath !== null) {
+      const templateId = decodeURIComponent(templatePath[1] ?? "");
+      if (method === "PATCH") {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+        if (options.onPatch !== undefined) return Promise.resolve(options.onPatch(templateId, body));
+        const current = templates.find((entry) => entry.id === templateId);
+        if (current === undefined) return Promise.resolve(jsonResponse({ error: "chat_vote_template_missing" }, 404));
+        const updated = { ...current, ...body, revision: current.revision + 1, updatedAt: "2026-10-04T10:01:00.000Z" };
+        templates = templates.map((entry) => entry.id === templateId ? updated : entry);
+        return Promise.resolve(jsonResponse({ template: updated }));
+      }
+      if (method === "DELETE") return Promise.resolve(options.onDelete?.(templateId) ?? jsonResponse({ ok: true }));
+    }
+    return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
-  const optionLabel = within(listbox).getAllByText(option, { exact: true })
-    .find((candidate) => candidate.closest("[data-combobox-option]") !== null);
-  const optionElement = optionLabel?.closest("[data-combobox-option]");
-  if (optionElement === null || optionElement === undefined) throw new Error(`The Select option ${option} is missing.`);
-  fireEvent.click(optionElement);
+  return fetch;
 };
 
-describe("chat voting live panel", () => {
+const mount = (fetch: typeof globalThis.fetch, language: "de" | "en" = "en") => {
+  vi.stubGlobal("fetch", fetch);
+  return render(<UiProvider><ToastHost /><ChatVotingPanel channelId="fictional-channel" language={language} /></UiProvider>);
+};
+
+describe("saved chat voting panel", () => {
+  const initialWidth = window.innerWidth;
+
   afterEach(() => {
     cleanup();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: initialWidth });
     vi.unstubAllGlobals();
+    for (const toast of toastsSnapshot()) dismissToast(toast.id);
   });
 
-  it("explains how to start a vote when there is no result yet", async () => {
-    vi.stubGlobal("fetch", fetchFor());
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    expect(await screen.findByText("No vote yet. Start one in chat with !vote yesno [question].")).toBeInTheDocument();
+  it("shows the saved-vote empty state and the create action", async () => {
+    const view = mount(fetchHarness({ templates: [] }));
+    expect(await screen.findByText("No saved votes yet")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Create vote" })).not.toHaveLength(0);
+    expect(view.container.querySelector(".chat-voting-live")).toBeInTheDocument();
   });
 
-  it("has no type selector and offers yes/no, answer labels, free text, and duration controls", async () => {
-    vi.stubGlobal("fetch", fetchFor());
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    expect(await screen.findByRole("textbox", { name: "Question" })).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Vote type" })).not.toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "Number of answers" })).toHaveValue("0");
-    expect(screen.queryByRole("textbox", { name: "Label for option 1" })).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Duration" })).toBeInTheDocument();
-    expect(screen.queryByRole("spinbutton", { name: "Seconds" })).not.toBeInTheDocument();
-
-    const optionCount = screen.getByRole("spinbutton", { name: "Number of answers" });
-    fireEvent.change(optionCount, { target: { value: "2" } });
-    expect(screen.getByRole("textbox", { name: "Label for option 1" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("switch", { name: "Free text" }));
-    expect(screen.getByRole("radiogroup", { name: "Counting mode" })).toBeInTheDocument();
-    expect(screen.getByRole("radiogroup", { name: "Counting mode" })).toHaveTextContent("Whole message");
-    expect(screen.queryByRole("spinbutton", { name: "Number of answers" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "Label for option 1" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("switch", { name: "Free text" }));
-    expect(screen.getByRole("spinbutton", { name: "Number of answers" })).toHaveValue("2");
-
-    await selectOption("Duration", "Custom …");
-    expect(screen.getByRole("spinbutton", { name: "Seconds" })).toBeInTheDocument();
+  it("replaces answers with a quick template and restores the old answers from the toast", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    mount(fetchHarness());
+    const pizza = await screen.findByRole("textbox", { name: "Answer 1" });
+    expect(pizza).toHaveValue("Pizza");
+    fireEvent.click(screen.getByRole("button", { name: "1–5" }));
+    expect(await screen.findByRole("textbox", { name: "Answer 5" })).toHaveValue("5");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByRole("textbox", { name: "Answer 1" })).toHaveValue("Pizza");
+    expect(screen.getByRole("textbox", { name: "Answer 2" })).toHaveValue("Burger");
+    dismissToast(toastsSnapshot().at(-1)?.id ?? -1);
   });
 
-  it("sends edited answer labels for this vote", async () => {
-    let startPayload: unknown;
-    let started = false;
-    vi.stubGlobal("fetch", fetchFor(
-      () => currentState(started ? { vote: { ...openVote, labels: ["Pizza", "Burger"] }, counts: [0, 0] } : {}),
-      (body) => { startPayload = body; started = true; return { vote: { ...openVote, labels: ["Pizza", "Burger"] } }; },
-    ));
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    const count = await screen.findByRole("spinbutton", { name: "Number of answers" });
-    fireEvent.change(count, { target: { value: "2" } });
-    const yes = await screen.findByRole("textbox", { name: "Label for option 1" });
-    const no = screen.getByRole("textbox", { name: "Label for option 2" });
-    fireEvent.change(yes, { target: { value: "Pizza" } });
-    fireEvent.change(no, { target: { value: "Burger" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
-
-    await waitFor(() => expect(startPayload).toEqual({ kind: "options", optionCount: 2, labels: ["Pizza", "Burger"], durationSeconds: 120 }));
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("Pizza"));
-    expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Burger");
+  it("keeps an invalid shortcut local while autosaving other fields", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let saved: Record<string, unknown> | null = null;
+    const view = mount(fetchHarness({ onPatch: (_id, body) => { saved = body; return jsonResponse({ template: { ...template({ title: "Lunch?", revision: 2 }), shortcut: null } }); } }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Question" }), { target: { value: "Lunch?" } });
+    const shortcut = screen.getByRole("textbox", { name: "Shortcut" });
+    fireEvent.change(shortcut, { target: { value: "Bad!" } });
+    expect(shortcut).toBeInvalid();
+    await waitFor(() => expect(saved).not.toBeNull(), { timeout: 2_000 });
+    expect(saved).toMatchObject({ title: "Lunch?", shortcut: null, labels: ["Pizza", "Burger"] });
+    expect(view.container).toHaveTextContent("Use a–z first");
   });
 
-  it("sends a trimmed question and enforces its 80-code-point limit", async () => {
-    let startPayload: unknown;
-    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
-      startPayload = body;
-      return { vote: openVote };
-    }));
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
+  it("reloads on a revision conflict and preserves the focused field caret when its value is unchanged", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let requested = false;
+    const latest = template({ title: "Lunch?", revision: 2 });
+    const fetch = fetchHarness({
+      templates: [template()],
+      getTemplates: () => requested ? [latest] : [template()],
+      onPatch: () => { requested = true; return jsonResponse({ error: "chat_vote_template_conflict" }, 409); },
+    });
+    const view = mount(fetch);
     const question = await screen.findByRole("textbox", { name: "Question" });
-    fireEvent.change(question, { target: { value: "  Pizza today?  " } });
-    expect(screen.getByRole("button", { name: "Start vote" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
-    await waitFor(() => expect(startPayload).toMatchObject({ title: "Pizza today?" }));
+    if (!(question instanceof HTMLInputElement)) throw new Error("The question field is not an input.");
+    question.focus();
+    fireEvent.change(question, { target: { value: "Lunch?" } });
+    const setSelectionRange = Reflect.get(question, "setSelectionRange");
+    if (typeof setSelectionRange !== "function") throw new Error("The question field cannot select text.");
+    Reflect.apply(setSelectionRange, question, [2, 4]);
+    await waitFor(() => expect(requested).toBe(true), { timeout: 2_000 });
+    await screen.findByText("“Lunch?” changed elsewhere and was reloaded.");
+    await waitFor(() => expect(document.activeElement).toBe(question));
+    expect(question).toHaveValue("Lunch?");
+    expect(question).toHaveProperty("selectionStart", 2);
+    expect(view.container).toHaveTextContent("Changed elsewhere – reloaded");
+  });
 
-    cleanup();
-    startPayload = undefined;
-    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
-      startPayload = body;
-      return { vote: openVote };
+  it("confirms deletion and removes the saved row", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let deletedId = "";
+    mount(fetchHarness({ onDelete: (id) => { deletedId = id; return jsonResponse({ ok: true }); } }));
+    await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.click(screen.getByRole("button", { name: "Delete vote" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Delete “Dinner”?");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete vote" }));
+    await waitFor(() => expect(deletedId).toBe("template-dinner"));
+    await waitFor(() => expect(screen.queryByText("Dinner", { selector: ".list-row__title" })).not.toBeInTheDocument());
+  });
+
+  it("shows the shared start lock reason in the inspector footer", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    mount(fetchHarness({
+      templates: [template({ lastUsedAt: runningVote.openedAt })],
+      current: currentState({ vote: runningVote, counts: [3, 1], hasOpenBallot: true }),
     }));
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-    const emojiQuestion = "😀".repeat(81);
-    const emojiField = await screen.findByRole("textbox", { name: "Question" });
-    fireEvent.change(emojiField, { target: { value: emojiQuestion } });
-    expect(screen.getAllByText("81/80").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Start vote" })).toBeDisabled();
-    expect(startPayload).toBeUndefined();
-  });
-
-  it("keeps the draft question separate from a running vote", async () => {
-    const titledVote = { ...openVote, title: "Pizza today?" };
-    vi.stubGlobal("fetch", fetchFor(() => currentState({ vote: titledVote, counts: [4, 2], hasOpenBallot: true })));
-    const { container } = render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    const question = await screen.findByText("Pizza today?", { selector: ".chat-voting-result__question" });
-    expect(question.compareDocumentPosition(container.querySelector(".chat-voting-results") as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("");
-  });
-
-  it("keeps the one draft intact after start, end, and a component re-render", async () => {
-    let started = false;
-    let closed = false;
-    const startedVote = { ...openVote, title: "Started question?" };
-    const readCurrent = () => currentState(started ? {
-      vote: closed ? { ...startedVote, status: "closed", closedAt: "2026-10-04T10:03:00.000Z" } : startedVote,
-      counts: [0, 0],
-    } : {});
-    vi.stubGlobal("fetch", fetchFor(
-      readCurrent,
-      () => { started = true; return { vote: startedVote }; },
-      () => { closed = true; },
-    ));
-    const view = render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    fireEvent.change(await screen.findByRole("textbox", { name: "Question" }), { target: { value: "Draft question?" } });
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Number of answers" }), { target: { value: "2" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Label for option 1" }), { target: { value: "Coffee" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Label for option 2" }), { target: { value: "Tea" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
-
-    await screen.findByRole("button", { name: "End vote" });
-    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Draft question?");
-    expect(screen.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("Coffee");
-    expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Tea");
-    fireEvent.click(screen.getByRole("button", { name: "End vote" }));
-
-    await screen.findByRole("button", { name: "Start vote" });
-    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Draft question?");
-    expect(screen.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("Coffee");
-    expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Tea");
-    view.rerender(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Draft question?");
-    expect(screen.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("Coffee");
-    expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Tea");
-  });
-
-  it("uses localized yes/no defaults when there are no answer labels", async () => {
-    let startPayload: unknown;
-    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
-      startPayload = body;
-      return { vote: openVote };
-    }));
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    await screen.findByRole("button", { name: "Start vote" });
-    expect(screen.getByText("With no answers, chat votes with 1 for yes and 2 for no.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
-
-    await waitFor(() => expect(startPayload).toEqual({ kind: "yes_no", labels: ["Yes", "No"], durationSeconds: 120 }));
-  });
-
-  it("starts free-text voting when the hidden answer count is invalid", async () => {
-    let startPayload: unknown;
-    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
-      startPayload = body;
-      return { vote: openVote };
-    }));
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    const answerCount = await screen.findByRole("spinbutton", { name: "Number of answers" });
-    fireEvent.change(answerCount, { target: { value: "1" } });
-    expect(screen.getByRole("button", { name: "Start vote" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("switch", { name: "Free text" }));
-    expect(screen.queryByRole("spinbutton", { name: "Number of answers" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start vote" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
-
-    await waitFor(() => expect(startPayload).toEqual({ kind: "free_text", durationSeconds: 120, textMode: "first_word" }));
-  });
-
-  it("counts emoji labels in code points in the field and start validation", async () => {
-    let startPayload: unknown;
-    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
-      startPayload = body;
-      return { vote: openVote };
-    }));
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    const count = await screen.findByRole("spinbutton", { name: "Number of answers" });
-    fireEvent.change(count, { target: { value: "2" } });
-    const emojiLabel = "😀".repeat(17);
-    fireEvent.change(await screen.findByRole("textbox", { name: "Label for option 1" }), { target: { value: emojiLabel } });
-    expect(screen.getByText("17/32")).toBeInTheDocument();
-    const start = screen.getByRole("button", { name: "Start vote" });
-    expect(start).toBeEnabled();
-    fireEvent.click(start);
-    await waitFor(() => expect(startPayload).toMatchObject({ labels: [emojiLabel, "2"] }));
-  });
-
-  it("shows invalid duration and option-count reasons in the fixed hint and field", async () => {
-    vi.stubGlobal("fetch", fetchFor());
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    await screen.findByRole("button", { name: "Start vote" });
-    const optionCount = screen.getByRole("spinbutton", { name: "Number of answers" });
-    fireEvent.change(optionCount, { target: { value: "1" } });
-    const hint = screen.getByTestId("chat-voting-hint-slot");
-    expect(hint).toHaveTextContent("Enter 0 or a number from 2 to 9.");
-    expect(optionCount.closest(".ui-number-field__stepper")).toHaveTextContent("Enter 0 or a number from 2 to 9.");
-    expect(screen.getByRole("button", { name: "Start vote" })).toBeDisabled();
-
-    await selectOption("Duration", "Custom …");
-    const duration = screen.getByRole("spinbutton", { name: "Seconds" });
-    fireEvent.change(duration, { target: { value: "" } });
-    expect(hint).toHaveTextContent("Enter a duration from 1 to 14,400 seconds.");
-    expect(duration.closest(".ui-number-field__stepper")).toHaveTextContent("Enter a duration from 1 to 14,400 seconds.");
-    expect(screen.getByRole("button", { name: "Start vote" })).toBeDisabled();
-  });
-
-  it("locks the configuration to the running vote and keeps the stop action available", async () => {
-    vi.stubGlobal("fetch", fetchFor(() => currentState({ vote: openVote, counts: [4, 2], hasOpenBallot: true })));
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    expect(await screen.findByRole("textbox", { name: "Question" })).toHaveValue("");
-    expect(screen.getByRole("spinbutton", { name: "Number of answers" })).toBeDisabled();
+    const start = await screen.findByRole("button", { name: "Start vote" });
+    expect(start).toBeDisabled();
+    expect(screen.getByText("A vote is running", { selector: ".chat-voting-editor__start-reason" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "End vote" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "End vote" })).toHaveAttribute("style");
-    expect(screen.getByTestId("chat-voting-hint-slot")).toHaveTextContent("Locked while a vote or votekick is running.");
   });
 
-  it("keeps five free-text result rows, including empty slots", async () => {
-    const vote = {
-      ...openVote,
-      preset: "free_text",
-      optionCount: 0,
-      labels: [],
-      textMode: "first_word",
-      status: "open",
-      counts: [],
-      textResults: null,
-      moreTerms: null,
+  it("opens a read-only inspector for recent results and offers repeat", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const recentVote: ChatVote = {
+      ...runningVote,
+      id: "poll-finished",
+      status: "closed",
+      openedAt: "2026-10-04T10:00:00.000Z",
+      closedAt: "2026-10-04T10:02:00.000Z",
+      closeReason: "timer",
+      counts: [3, 1],
+      voterCount: 4,
     };
-    vi.stubGlobal("fetch", fetchFor(() => currentState({ vote, terms: [], moreTerms: 0, hasOpenBallot: true })));
-    const { container } = render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    expect(await screen.findByRole("button", { name: "End vote" })).toBeInTheDocument();
-    expect(container.querySelectorAll(".chat-voting-results__term-row")).toHaveLength(5);
-    expect(container.querySelectorAll(".chat-voting-results__empty-slot")).toHaveLength(5);
-    expect(container.querySelector(".chat-voting-result__meta")).toHaveTextContent("0 votes · since");
-    expect(screen.queryByText("More terms: —")).not.toBeInTheDocument();
+    mount(fetchHarness({ recent: [recentVote] }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Recent" }));
+    expect(await screen.findByRole("button", { name: "Again" })).toBeInTheDocument();
+    expect(screen.getByText("Pizza", { selector: ".chat-voting-results__label" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Again" })).toBeEnabled();
   });
 
-  it("sends failed start actions to a persistent error toast", async () => {
-    const previousIds = new Set(toastsSnapshot().map((toast) => toast.id));
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
-      const path = input instanceof Request
-        ? new URL(input.url).pathname
-        : new URL(String(input), "https://brobot.example").pathname;
-      return Promise.resolve(path === "/api/csrf"
-        ? jsonResponse({ token: "csrf-token" })
-        : path.endsWith("/start")
-          ? jsonResponse({ error: "start_failed" }, 500)
-          : jsonResponse(currentState()));
-    }));
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+  it("keeps the saved order fixed in the session after a template starts", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const templates = [template(), template({ id: "template-breakfast", title: "Breakfast", shortcut: "morgen" })];
+    let started = false;
+    mount(fetchHarness({ templates, onStart: () => { started = true; return jsonResponse({ vote: runningVote }); } }));
+    const play = await screen.findByRole("button", { name: "Start “Dinner”" });
+    fireEvent.click(play);
+    await waitFor(() => expect(started).toBe(true));
+    const titles = [...document.querySelectorAll(".chat-voting-template-list .list-row__title")].map((element) => element.textContent);
+    expect(titles).toEqual(["Dinner", "Breakfast"]);
+  });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Start vote" }));
-    await waitFor(() => expect(toastsSnapshot().some((toast) => !previousIds.has(toast.id) && toast.message === "The vote could not be started.")).toBe(true));
-    expect(screen.getByTestId("chat-voting-hint-slot")).not.toHaveTextContent("The vote could not be started.");
-    const errorToasts = toastsSnapshot().filter((toast) => !previousIds.has(toast.id));
-    for (const toast of errorToasts) dismissToast(toast.id);
+  it("opens the inspector below 1280px only after a row is selected", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1100 });
+    mount(fetchHarness());
+    expect(await screen.findByText("Dinner", { selector: ".list-row__title" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Question" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: /Dinner/u }));
+    expect(await screen.findByRole("textbox", { name: "Question" })).toBeInTheDocument();
   });
 });

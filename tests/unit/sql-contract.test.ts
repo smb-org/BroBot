@@ -28,7 +28,7 @@ import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
-import { chatVoteSelectColumns } from "../../src/modules/chat_voting/repository";
+import { chatVoteSelectColumns, chatVoteTemplateSelectColumns } from "../../src/modules/chat_voting/repository";
 import {
   belaboxExpectedOpenStreamSetGuard,
   belaboxHistoryModuleRevisionGuard,
@@ -116,6 +116,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["textBlockSelectColumns", textBlockSelectColumns],
   ["textBlockCategorySelectColumns", textBlockCategorySelectColumns],
   ["chatVoteSelectColumns", chatVoteSelectColumns],
+  ["chatVoteTemplateSelectColumns", chatVoteTemplateSelectColumns],
   ["belaboxHistoryStatusGuard", belaboxHistoryStatusGuard],
   ["belaboxHistoryModuleRevisionGuard", belaboxHistoryModuleRevisionGuard],
   ["belaboxStreamStateSnapshotGuard", belaboxStreamStateSnapshotGuard],
@@ -191,9 +192,9 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(50);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(42);
-      expect(objects).toHaveLength(93);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(51);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(44);
+      expect(objects).toHaveLength(96);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

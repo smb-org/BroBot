@@ -4,7 +4,7 @@ import { createChatVotingRepository } from "./repository";
 import { CHAT_VOTING_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
 import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage } from "./service";
-import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "./contracts";
+import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema } from "./contracts";
 import { chatVotingOverlayElements } from "./overlay/element";
 import { chatVotingOverlayLabels } from "./overlay/locale";
 import { chatVotingRoutes } from "./routes";
@@ -70,7 +70,7 @@ const initialTallyState = async (
     pollId: vote.id,
     status: vote.status,
     title: vote.title,
-    preset: vote.preset,
+    preset: chatVotingPresetForKind(vote.kind),
     optionCount: vote.optionCount,
     textMode: vote.textMode ?? null,
     labels: [...vote.labels],
@@ -108,6 +108,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   },
   routes: chatVotingRoutes,
   panel: () => import("./panel"),
+  immediateActions: { requires: [], load: () => import("./panel/immediate-actions") },
   settingsEditor: () => import("./panel/settings-editor"),
   eventSubTypes: ["channel.chat.message"],
   alarms: [chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition],

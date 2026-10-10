@@ -23,6 +23,6 @@ describe("chat voting module", () => {
     expect(questionArgument?.name).toBe("question");
     expect(questionArgument?.hint.de).toMatch(/\S/u);
     expect(questionArgument?.hint.en).toMatch(/\S/u);
-    expect(parseVoteCommand(`${command.name} yesno`)).toMatchObject({ kind: "start", preset: "yes_no" });
+    expect(parseVoteCommand(`${command.name} yesno`)).toMatchObject({ kind: "legacyAlias", alias: "yesno" });
   });
 });

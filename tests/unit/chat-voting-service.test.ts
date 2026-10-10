@@ -5,17 +5,16 @@ import {
   DEFAULT_CHAT_VOTING_SETTINGS,
   type ChatVote,
   type ChatVoteDraft,
+  type ChatVoteTemplate,
   type ChatVotingSettings,
 } from "../../src/modules/chat_voting/contracts";
-import type { ChatVotingRepository } from "../../src/modules/chat_voting/repository";
+import type { ChatVoteTemplateRepository, ChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { processChatVotingMessage, requestChatVoteClose, startChatVote } from "../../src/modules/chat_voting/service";
 
 const openVote: ChatVote = {
   id: "fictional-poll",
   channelId: "fictional-channel",
   kind: "yes_no",
-  preset: "yes_no",
-  legacyWritten: false,
   optionCount: 2,
   labels: ["Yes", "No"],
   title: null,
@@ -32,7 +31,6 @@ const openVote: ChatVote = {
 const openTextVote: ChatVote = {
   ...openVote,
   kind: "free_text",
-  preset: "free_text",
   optionCount: 0,
   labels: [],
   title: null,
@@ -40,14 +38,43 @@ const openTextVote: ChatVote = {
   termFilterReady: true,
 };
 
+const savedTemplate: ChatVoteTemplate = {
+  id: "saved-template",
+  channelId: "fictional-channel",
+  shortcut: "essen",
+  title: "Dinner",
+  labels: ["Pizza", "Burger"],
+  freeTextMode: null,
+  durationSeconds: 300,
+  revision: 1,
+  legacyAlias: null,
+  lastUsedAt: null,
+  createdAt: "2026-10-04T10:00:00.000Z",
+  updatedAt: "2026-10-04T10:00:00.000Z",
+};
+
+const templateRepositoryWith = (overrides: Partial<ChatVoteTemplateRepository> = {}): ChatVoteTemplateRepository => ({
+  templates: vi.fn(() => Promise.resolve([])),
+  template: vi.fn(() => Promise.resolve(null)),
+  templateByShortcut: vi.fn(() => Promise.resolve(null)),
+  templateByLegacyAlias: vi.fn(() => Promise.resolve(null)),
+  createTemplate: vi.fn(() => Promise.resolve("created" as const)),
+  saveTemplate: vi.fn(() => Promise.resolve("saved" as const)),
+  deleteTemplate: vi.fn(() => Promise.resolve("missing" as const)),
+  markTemplateUsed: vi.fn(() => Promise.resolve()),
+  ...overrides,
+});
+
 const repositoryWith = (overrides: Partial<ChatVotingRepository> = {}): ChatVotingRepository => ({
   open: vi.fn(() => Promise.resolve(null)),
   latest: vi.fn(() => Promise.resolve(null)),
+  recent: vi.fn(() => Promise.resolve([])),
   byId: vi.fn(() => Promise.resolve(null)),
   approveTerm: vi.fn(() => Promise.resolve({ authorized: true, changed: true })),
   insertOpen: vi.fn(() => Promise.resolve(true)),
   requestManualClose: vi.fn(() => Promise.resolve(true)),
   finish: vi.fn(() => Promise.resolve(true)),
+  templates: templateRepositoryWith(),
   ...overrides,
 });
 
@@ -99,6 +126,86 @@ describe("chat voting event service", () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it("starts a saved shortcut, snapshots its values, and records the start time", async () => {
+    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve(true));
+    const markTemplateUsed = vi.fn(() => Promise.resolve());
+    const templates = templateRepositoryWith({
+      templateByShortcut: vi.fn(() => Promise.resolve(savedTemplate)),
+      markTemplateUsed,
+    });
+    const repository = repositoryWith({ insertOpen, templates });
+    const context = executionContext();
+
+    const result = await processChatVotingMessage(eventWithText("!vote essen", ["moderator"]), repository, context);
+
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "options", labels: ["Pizza", "Burger"], title: "Dinner", requestedDurationSeconds: 300,
+    }), undefined);
+    const inserted = insertOpen.mock.calls[0]?.[0];
+    expect(markTemplateUsed).toHaveBeenCalledWith("fictional-channel", "saved-template", inserted?.openedAt);
+    const [action] = result.actions;
+    if (action?.kind !== "overlay") throw new Error("The saved vote did not open its overlay.");
+    expect(action).toMatchObject({ type: "opened", elementKind: "chat_voting.tally" });
+    const pollId = action.payload.pollId;
+    if (typeof pollId !== "string") throw new Error("The opened vote has no overlay identifier.");
+    expect(pollId.length).toBeGreaterThan(0);
+  });
+
+  it("replies with an unknown-shortcut message and starts nothing", async () => {
+    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const result = await processChatVotingMessage(
+      eventWithText("!vote missing", ["moderator"]),
+      repositoryWith({ insertOpen }),
+      executionContext(),
+    );
+
+    expect(result.actions).toEqual([{ kind: "chat", text: "Unknown vote shortcut: !vote missing.", automated: false }]);
+    expect(insertOpen).not.toHaveBeenCalled();
+  });
+
+  it("resolves a migrated alias and applies its question only to this start", async () => {
+    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const markTemplateUsed = vi.fn(() => Promise.resolve());
+    const aliasLookup = vi.fn(() => Promise.resolve({ ...savedTemplate, shortcut: "janein", legacyAlias: "yesno" as const }));
+    const templates = templateRepositoryWith({ templateByLegacyAlias: aliasLookup, markTemplateUsed });
+    const repository = repositoryWith({ insertOpen, templates });
+    const context = executionContext();
+
+    await processChatVotingMessage(eventWithText("!vote yesno Pizza tonight?", ["moderator"]), repository, context);
+
+    expect(aliasLookup).toHaveBeenCalledWith("fictional-channel", "yesno");
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Pizza tonight?", labels: ["Pizza", "Burger"] }), undefined);
+    expect(markTemplateUsed).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["!vote yesno", "yes_no", ["Yes", "No"]],
+    ["!vote 01", "options", ["No", "Yes"]],
+    ["!vote 12", "options", ["1", "2"]],
+    ["!vote scale", "options", ["1", "2", "3", "4", "5"]],
+  ] as const)("uses the language defaults for an unmigrated alias %s", async (text, kind, labels) => {
+    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve(true));
+    const repository = repositoryWith({ insertOpen });
+
+    await processChatVotingMessage(eventWithText(text, ["moderator"]), repository, executionContext());
+
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ kind, labels }), undefined);
+  });
+
+  it("uses the shared start-problem reason for an invalid saved template", async () => {
+    const invalid = { ...savedTemplate, labels: ["Only one"] };
+    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const templates = templateRepositoryWith({ templateByShortcut: vi.fn(() => Promise.resolve(invalid)) });
+    const result = await processChatVotingMessage(
+      eventWithText("!vote essen", ["moderator"]), repositoryWith({ insertOpen, templates }), executionContext(),
+    );
+
+    expect(result.actions).toEqual([{
+      kind: "chat", text: "“Dinner” cannot start: It needs two to nine unique answers.", automated: false,
+    }]);
+    expect(insertOpen).not.toHaveBeenCalled();
+  });
+
   it("does not mutate a ballot for non-choice chat when no vote is running", async () => {
     const open = vi.fn(() => Promise.resolve(null));
     const repository = repositoryWith({ open });
@@ -145,7 +252,6 @@ describe("chat voting event service", () => {
     const optionsVote: ChatVote = {
       ...openVote,
       kind: "options",
-      preset: "options_n",
       labels: ["Pizza", "Burger"],
     };
     const repository = repositoryWith({ open: vi.fn(() => Promise.resolve(optionsVote)) });
@@ -161,22 +267,19 @@ describe("chat voting event service", () => {
     );
   });
 
-  it("routes a legacy open vote through the existing close alarm on its first chat event", async () => {
-    const legacyVote = { ...openVote, legacyWritten: true };
+  it("continues the current kind-based open vote without reading legacy columns", async () => {
     const requestManualClose = vi.fn(() => Promise.resolve(true));
     const repository = repositoryWith({
-      open: vi.fn(() => Promise.resolve(legacyVote)),
-      byId: vi.fn(() => Promise.resolve(legacyVote)),
+      open: vi.fn(() => Promise.resolve(openVote)),
       requestManualClose,
     });
     const context = executionContext();
 
     const result = await processChatVotingMessage(eventWithText("1"), repository, context);
 
-    expect(result.actions).toEqual([]);
-    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", legacyVote.id, undefined, true);
-    expect(context.scheduleAlarm).toHaveBeenCalledWith("close", legacyVote.id, Date.now(), 1);
-    expect(context.ballots.cast).not.toHaveBeenCalled();
+    expect(result.actions).toHaveLength(1);
+    expect(requestManualClose).not.toHaveBeenCalled();
+    expect(context.ballots.cast).toHaveBeenCalledWith(openVote.id, "fictional-voter-1", 1, undefined);
   });
 
   it("normalizes a free-text vote and publishes the bounded term tally", async () => {
@@ -235,7 +338,7 @@ describe("chat voting event service", () => {
       blockedTerms: ["pogchamp", "badterm", "shoot*"],
     });
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({
-      preset: "free_text",
+      kind: "free_text",
       optionCount: 0,
       textMode: "whole_message",
       termFilterReady: true,
@@ -249,7 +352,7 @@ describe("chat voting event service", () => {
 
     const result = await processChatVotingMessage(eventWithText("!vote yesno Pizza today?", ["moderator"]), repository, context);
 
-    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Pizza today?", preset: "yes_no" }), undefined);
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Pizza today?", kind: "yes_no" }), undefined);
     expect(result.actions).toHaveLength(1);
     const [action] = result.actions;
     if (action?.kind !== "overlay") throw new Error("A successful vote start should open the overlay.");
@@ -259,9 +362,9 @@ describe("chat voting event service", () => {
     expect(context.scheduleAlarm).toHaveBeenCalledWith("announce_start", expect.stringMatching(/^start:/u), Date.now(), 0);
   });
 
-  it("falls back to unique numeric labels when configured labels collide with appended numbers", async () => {
+  it("uses numeric option labels now that customizable defaults live in templates", async () => {
     const insertOpen = vi.fn(() => Promise.resolve(true));
-    const event = { ...eventWithText("!vote 3", ["moderator"]), settings: { ...DEFAULT_CHAT_VOTING_SETTINGS, optionLabels: "Pizza|3" } };
+    const event = eventWithText("!vote 3", ["moderator"]);
 
     await processChatVotingMessage(event, repositoryWith({ insertOpen }), executionContext());
 
@@ -325,7 +428,7 @@ describe("chat voting event service", () => {
 
     const result = await startChatVote(repository, {
       channelId: "fictional-channel",
-      preset: "yes_no",
+      kind: "yes_no",
       optionCount: 2,
       durationSeconds: 0,
       settings: DEFAULT_CHAT_VOTING_SETTINGS,
@@ -337,7 +440,7 @@ describe("chat voting event service", () => {
     expect(ballots.open).toHaveBeenCalledWith(expect.any(String), 2, effectiveOpenedAt + 24 * 60 * 60 * 1_000 - 60_000, undefined, undefined);
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining<Partial<ChatVoteDraft>>({
       channelId: "fictional-channel",
-      preset: "yes_no",
+      kind: "yes_no",
       closeReason: "limit",
       requestedDurationSeconds: null,
     }), undefined);
@@ -351,7 +454,7 @@ describe("chat voting event service", () => {
 
     const result = await startChatVote(repository, {
       channelId: "fictional-channel",
-      preset: "yes_no",
+      kind: "yes_no",
       optionCount: 2,
       durationSeconds: 0,
       settings: DEFAULT_CHAT_VOTING_SETTINGS,
@@ -369,7 +472,7 @@ describe("chat voting event service", () => {
 
     const result = await startChatVote(repository, {
       channelId: "fictional-channel",
-      preset: "yes_no",
+      kind: "yes_no",
       optionCount: 2,
       durationSeconds: 90,
       settings: DEFAULT_CHAT_VOTING_SETTINGS,
@@ -391,7 +494,7 @@ describe("chat voting event service", () => {
 
     await startChatVote(repository, {
       channelId: "fictional-channel",
-      preset: "free_text",
+      kind: "free_text",
       optionCount: 0,
       durationSeconds: 0,
       textMode: "first_word",
@@ -401,7 +504,7 @@ describe("chat voting event service", () => {
     }, ballots, vi.fn(() => Promise.resolve()));
 
     expect(ballots.open).toHaveBeenCalledWith(expect.any(String), 0, expect.any(Number), undefined, { blockedTerms: null });
-    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ preset: "free_text", termFilterReady: false }), undefined);
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ kind: "free_text", termFilterReady: false }), undefined);
   });
 
   it("finishes a free-text vote with constraint-valid empty results when scheduling fails", async () => {
@@ -413,7 +516,7 @@ describe("chat voting event service", () => {
 
     await expect(startChatVote(repository, {
       channelId: "fictional-channel",
-      preset: "free_text",
+      kind: "free_text",
       optionCount: 0,
       durationSeconds: 0,
       textMode: "whole_message",
@@ -459,7 +562,7 @@ describe("chat voting event service", () => {
 
     const allowed = await processChatVotingMessage(eventWithText("!vote end", ["moderator"]), repository, context);
     expect(allowed.actions).toEqual([{ kind: "chat", text: "The vote is closing.", automated: false }]);
-    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined, false);
+    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined);
     expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), 1);
   });
 
@@ -479,8 +582,8 @@ describe("chat voting event service", () => {
       .resolves.toMatchObject({ closeReason: "manual" });
 
     expect(requestManualClose).toHaveBeenCalledTimes(2);
-    expect(requestManualClose).toHaveBeenNthCalledWith(1, "fictional-channel", "fictional-poll", undefined, false);
-    expect(requestManualClose).toHaveBeenNthCalledWith(2, "fictional-channel", "fictional-poll", undefined, false);
+    expect(requestManualClose).toHaveBeenNthCalledWith(1, "fictional-channel", "fictional-poll", undefined);
+    expect(requestManualClose).toHaveBeenNthCalledWith(2, "fictional-channel", "fictional-poll", undefined);
     expect(scheduleClose).toHaveBeenCalledTimes(2);
     for (const [pollId, deadline, revision] of scheduleClose.mock.calls) {
       expect(pollId).toBe("fictional-poll");

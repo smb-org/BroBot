@@ -1,16 +1,16 @@
 import type { BallotTermCount, ModuleEvent, ModuleExecutionContext, ModuleMutationAuthorization, ModuleResult } from "../contract";
 import type { ModuleLanguage, ModuleAlarmContext } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey, chatVotingStartAnnouncementPollId } from "./contracts";
-import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVotingKind, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
-import { configuredLabels, formatFreeTextVoteResult, formatVoteOptions, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, normalizeVoteTitle, parseVoteCommand, voteChoiceFromMessage, voteCloseDeadline, voteLabelLength } from "./domain";
+import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVoteTemplate, ChatVotingKind, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
+import { chatVoteTemplateConfiguration, configuredLabels, formatFreeTextVoteResult, formatVoteOptions, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, normalizeVoteTitle, parseVoteCommand, templateStartProblem, voteChoiceFromMessage, voteCloseDeadline, voteLabelLength } from "./domain";
 import type { ChatVotingRepository } from "./repository";
+import type { VoteCommand } from "./domain";
 import { chatVotingChatText, chatVotingDurationText, DEFAULT_CHAT_VOTING_START_DURATION_SUFFIX, LEGACY_CHAT_VOTING_START_TEXT, LEGACY_CHAT_VOTING_START_TEXT_EN } from "./contracts/chat-defaults";
 import { createChatVotingRepository } from "./repository";
 
 export interface StartChatVoteInput {
   channelId: string;
-  kind?: ChatVotingKind;
-  preset: ChatVotePreset;
+  kind: ChatVotingKind;
   optionCount: number;
   durationSeconds: number;
   labels?: readonly string[];
@@ -28,7 +28,7 @@ export type VoteStartResult =
   | { status: "busy" };
 
 export const chatVotingTemplateValues = (
-  vote: Pick<ChatVote, "title" | "preset" | "optionCount" | "labels" | "textMode" | "requestedDurationSeconds">,
+  vote: Pick<ChatVote, "title" | "kind" | "optionCount" | "labels" | "textMode" | "requestedDurationSeconds">,
   language: ModuleLanguage,
   result?: string,
 ): Record<string, string> => ({
@@ -45,8 +45,7 @@ export const startChatVote = async (
   scheduleClose: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
   scheduleStartAnnouncement?: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
 ): Promise<VoteStartResult> => {
-  const kind = input.kind ?? (input.preset === "free_text" ? "free_text"
-    : input.preset === "yes_no" ? "yes_no" : "options");
+  const kind = input.kind;
   const expectedOptionCount = kind === "free_text" ? 0 : kind === "yes_no" ? 2 : null;
   if (!Number.isInteger(input.optionCount) || input.optionCount < 0 || input.optionCount > 9 ||
       expectedOptionCount !== null && input.optionCount !== expectedOptionCount ||
@@ -54,7 +53,7 @@ export const startChatVote = async (
     throw new RangeError("The selected voting preset has an invalid option count.");
   }
   const voteLabels = input.labels === undefined
-    ? labelsForVote(input.settings, input.preset, input.optionCount, input.language)
+    ? labelsForVote(input.settings, chatVotingPresetForKind(kind), input.optionCount, input.language)
     : kind === "free_text" ? null : configuredLabels(input.labels, input.optionCount);
   if (voteLabels === null) throw new RangeError("The selected voting preset has invalid labels.");
   const title = normalizeVoteTitle(input.title ?? "");
@@ -69,13 +68,10 @@ export const startChatVote = async (
     ? Math.max(requestedOpenedAt, latestOpenedAt + 1)
     : requestedOpenedAt;
   const deadline = voteCloseDeadline(openedAt, input.durationSeconds);
-  const preset = chatVotingPresetForKind(kind);
   const vote: ChatVoteDraft = {
     id: crypto.randomUUID(),
     channelId: input.channelId,
     kind,
-    preset,
-    legacyWritten: false,
     optionCount: input.optionCount,
     labels: voteLabels,
     title,
@@ -116,7 +112,7 @@ export const startChatVote = async (
   } catch (error: unknown) {
     const closedSnapshot = await ballots.close(vote.id).catch(() => null);
     if (inserted) {
-      const textResults = vote.preset === "free_text" ? closedSnapshot?.terms ?? [] : null;
+      const textResults = vote.kind === "free_text" ? closedSnapshot?.terms ?? [] : null;
       const finished = await repository.finish(
         input.channelId,
         vote.id,
@@ -125,7 +121,7 @@ export const startChatVote = async (
         Array.from({ length: vote.optionCount }, () => 0),
         textResults,
         closedSnapshot?.more ?? 0,
-        vote.preset === "free_text"
+        vote.kind === "free_text"
           ? closedSnapshot?.termFilterReady ?? vote.termFilterReady ?? false
           : null,
       ).catch(() => false);
@@ -143,13 +139,13 @@ export const requestChatVoteClose = async (
   channelId: string,
   scheduleClose: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
   authorization?: ModuleMutationAuthorization,
-  options: { pollId?: string; legacyOnly?: boolean } = {},
+  options: { pollId?: string } = {},
 ): Promise<ChatVote | null> => {
   const vote = options.pollId === undefined
     ? await repository.open(channelId)
     : await repository.byId(channelId, options.pollId);
-  if (vote === null || vote.status !== "open" || options.legacyOnly === true && !vote.legacyWritten) return null;
-  const requested = await repository.requestManualClose(channelId, vote.id, authorization, options.legacyOnly ?? false);
+  if (vote === null || vote.status !== "open") return null;
+  const requested = await repository.requestManualClose(channelId, vote.id, authorization);
   if (!requested) return null;
   await scheduleClose(vote.id, Date.now(), 1);
   return { ...vote, closeReason: "manual" };
@@ -204,13 +200,6 @@ export const processChatVotingMessage = async (
   const text = messageText(event);
 
   const openVote = await repository.open(event.channelId);
-  if (openVote?.legacyWritten === true) {
-    await requestChatVoteClose(repository, event.channelId, closeAlarmScheduler(context), undefined, {
-      pollId: openVote.id,
-      legacyOnly: true,
-    });
-    return { actions: [], diagnostics: [] };
-  }
   if (text === null || text.length === 0) return { actions: [], diagnostics: [] };
 
   const command = parseVoteCommand(text);
@@ -241,7 +230,46 @@ export const processChatVotingMessage = async (
       };
     }
 
-    let startCommand = command;
+    let startCommand: Extract<VoteCommand, { kind: "start" }> | null = command.kind === "start" ? command : null;
+    let templateToMarkUsed: ChatVoteTemplate | null = null;
+    if (command.kind === "template") {
+      const template = await repository.templates.templateByShortcut(event.channelId, command.shortcut);
+      if (template === null) {
+        return { actions: [directChat(chatVotingChatText(language, "unknownShortcut", undefined, undefined, undefined, command.shortcut))], diagnostics: [] };
+      }
+      const problem = templateStartProblem(template);
+      if (problem !== null) {
+        return { actions: [directChat(chatVotingChatText(language, "templateStartProblem", undefined, undefined, undefined, template.title, undefined, problem))], diagnostics: [] };
+      }
+      const configuration = chatVoteTemplateConfiguration(template);
+      startCommand = { ...configuration, kind: "start", preset: chatVotingPresetForKind(configuration.voteKind) };
+      templateToMarkUsed = template;
+    }
+    if (command.kind === "legacyAlias") {
+      const template = await repository.templates.templateByLegacyAlias(event.channelId, command.alias);
+      if (template !== null) {
+        const problem = templateStartProblem(template);
+        if (problem !== null) {
+          return { actions: [directChat(chatVotingChatText(language, "templateStartProblem", undefined, undefined, undefined, template.title, undefined, problem))], diagnostics: [] };
+        }
+        const configuration = chatVoteTemplateConfiguration(template, command.title);
+        startCommand = { ...configuration, kind: "start", preset: chatVotingPresetForKind(configuration.voteKind) };
+        templateToMarkUsed = template;
+      } else {
+        const preset: ChatVotePreset = command.alias === "scale" ? "scale_5"
+          : command.alias === "zeroOne" ? "digit_01" : command.alias === "oneTwo" ? "digit_12" : "yes_no";
+        const voteKind: ChatVotingKind = preset === "yes_no" ? "yes_no" : "options";
+        const optionCount = preset === "scale_5" ? 5 : 2;
+        startCommand = {
+          kind: "start",
+          voteKind,
+          preset,
+          optionCount,
+          labels: labelsForVote(event.settings, preset, optionCount, language),
+          title: command.title,
+        };
+      }
+    }
     if (command.kind === "again") {
       const previous = await repository.latest(event.channelId);
       if (previous === null || previous.status !== "closed") {
@@ -259,7 +287,7 @@ export const processChatVotingMessage = async (
         durationSeconds: previous.requestedDurationSeconds ?? 0,
       };
     }
-    if (startCommand.kind !== "start") return { actions: [], diagnostics: [] };
+    if (startCommand === null) return { actions: [], diagnostics: [] };
 
     try {
       let blockedTerms: readonly string[] | null = null;
@@ -270,7 +298,6 @@ export const processChatVotingMessage = async (
       const result = await startChatVote(repository, {
         channelId: event.channelId,
         kind: startCommand.voteKind,
-        preset: startCommand.preset,
         optionCount: startCommand.optionCount,
         durationSeconds: startCommand.durationSeconds ?? event.settings.autoCloseSeconds,
         ...(startCommand.labels === undefined ? {} : { labels: startCommand.labels }),
@@ -282,6 +309,9 @@ export const processChatVotingMessage = async (
       }, context.ballots, closeAlarmScheduler(context), startAnnouncementScheduler(context));
       if (result.status === "busy") {
         return { actions: [directChat(chatVotingChatText(language, "busy"))], diagnostics: [] };
+      }
+      if (templateToMarkUsed !== null) {
+        await repository.templates.markTemplateUsed(event.channelId, templateToMarkUsed.id, result.vote.openedAt);
       }
       return {
         actions: [
@@ -317,7 +347,7 @@ export const processChatVotingMessage = async (
           closesAt: vote.closesAt,
           requestedDurationSeconds: vote.requestedDurationSeconds,
           kind: vote.kind,
-          preset: vote.preset,
+          preset: chatVotingPresetForKind(vote.kind),
           optionCount: vote.optionCount,
           title: vote.title,
           textMode: vote.textMode ?? null,
@@ -495,12 +525,12 @@ export const closeChatVoteFromAlarm = async (
       ...(closed.more === undefined ? {} : { more: closed.more }),
       ...(closed.termFilterReady === undefined ? {} : { termFilterReady: closed.termFilterReady }),
     };
-    snapshot ??= vote.preset === "free_text"
+    snapshot ??= vote.kind === "free_text"
       ? { counts: [], revision: 0, terms: [], more: 0 }
       : { counts: [...(vote.counts ?? Array.from({ length: vote.optionCount }, () => 0))], revision: 0 };
     await context.storage.put(storageKey, snapshot);
   }
-  snapshot ??= vote.preset === "free_text"
+  snapshot ??= vote.kind === "free_text"
     ? { counts: [...(vote.counts ?? [])], revision: 0, terms: [...(vote.textResults ?? [])], more: vote.moreTerms ?? 0 }
     : { counts: [...(vote.counts ?? Array.from({ length: vote.optionCount }, () => 0))], revision: 0 };
 
@@ -543,7 +573,7 @@ export const closeChatVoteFromAlarm = async (
   const settings = await alarmSettings(context);
   if (settings.announceResult) {
     const language = await context.channelLanguage();
-    const result = closedVote.preset === "free_text"
+    const result = closedVote.kind === "free_text"
       ? formatFreeTextVoteResult(
         closedVote.textResults ?? snapshot.terms ?? [],
         closedVote.moreTerms ?? snapshot.more ?? 0,

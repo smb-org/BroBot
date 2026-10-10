@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { ChatVote, ChatVoteCloseReason, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "../contracts";
+import type { ChatVote, ChatVoteCloseReason, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "../contracts";
 
 export interface ChatVotingPanelState {
   vote: ChatVote | null;
@@ -9,6 +9,16 @@ export interface ChatVotingPanelState {
   moreTerms: number | null;
   hasOpenBallot: boolean;
   defaultDurationSeconds: number;
+}
+
+export interface ChatVoteTemplateListState {
+  templates: readonly ChatVoteTemplate[];
+  count: number;
+  maximum: number;
+}
+
+export interface ChatVoteRecentState {
+  votes: readonly ChatVote[];
 }
 
 const readJson = async <Value>(response: Response): Promise<Value> => {
@@ -43,7 +53,11 @@ export interface StartChatVotingOptions {
   title?: string;
 }
 
-export const startChatVoting = async (channelId: string, options: StartChatVotingOptions): Promise<ChatVote> => {
+export interface StartChatVoteTemplateOptions {
+  templateId: string;
+}
+
+export const startChatVoting = async (channelId: string, options: StartChatVotingOptions | StartChatVoteTemplateOptions): Promise<ChatVote> => {
   const token = await csrfHeader();
   return (await readJson<{ vote: ChatVote }>(await fetch(route(channelId, "/start"), {
     method: "POST",
@@ -52,6 +66,45 @@ export const startChatVoting = async (channelId: string, options: StartChatVotin
       ...options,
     }),
 }))).vote;
+};
+
+export const loadChatVoteTemplates = async (channelId: string): Promise<ChatVoteTemplateListState> =>
+  readJson<ChatVoteTemplateListState>(await fetch(route(channelId, "/templates")));
+
+export const loadRecentChatVotes = async (channelId: string): Promise<ChatVoteRecentState> =>
+  readJson<ChatVoteRecentState>(await fetch(route(channelId, "/recent")));
+
+export const createChatVoteTemplate = async (channelId: string): Promise<ChatVoteTemplate> => {
+  const token = await csrfHeader();
+  return (await readJson<{ template: ChatVoteTemplate }>(await fetch(route(channelId, "/templates"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: "{}",
+  }))).template;
+};
+
+export const saveChatVoteTemplate = async (
+  channelId: string,
+  template: ChatVoteTemplate,
+  draft: ChatVoteTemplateDraft,
+  keepalive = false,
+): Promise<ChatVoteTemplate> => {
+  const token = await csrfHeader();
+  return (await readJson<{ template: ChatVoteTemplate }>(await fetch(route(channelId, `/templates/${encodeURIComponent(template.id)}`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: JSON.stringify({ ...draft, revision: template.revision }),
+    keepalive,
+  }))).template;
+};
+
+export const deleteChatVoteTemplate = async (channelId: string, template: ChatVoteTemplate): Promise<void> => {
+  const token = await csrfHeader();
+  await readJson<{ ok: true }>(await fetch(route(channelId, `/templates/${encodeURIComponent(template.id)}`), {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: JSON.stringify({ revision: template.revision }),
+  }));
 };
 
 export const approveChatVotingTerm = async (channelId: string, pollId: string, term: string): Promise<void> => {

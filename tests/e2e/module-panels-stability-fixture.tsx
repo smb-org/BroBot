@@ -5,6 +5,7 @@ import { UiProvider } from "../../src/dashboard/ui";
 import ApiSourcePanel from "../../src/modules/api_source/panel";
 import BelaboxPanel from "../../src/modules/belabox/panel";
 import BelaboxStatusAction from "../../src/modules/belabox/panel/immediate-actions";
+import ChatVotingImmediateAction from "../../src/modules/chat_voting/panel/immediate-actions";
 import { ChatVotingPanel } from "../../src/modules/chat_voting/panel";
 import FaqPanel from "../../src/modules/faq/panel";
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
@@ -20,8 +21,9 @@ const panelName = query.get("panel");
 
 const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId} language={language} canManage />
   : panelName === "belabox" ? <BelaboxPanel channelId={channelId} language={language} canManage />
-    : panelName === "belabox-action" ? <BelaboxStatusAction channelId={channelId} canManage availabilityReason={null} />
+  : panelName === "belabox-action" ? <BelaboxStatusAction channelId={channelId} canManage availabilityReason={null} />
     : panelName === "chat_voting" ? <ChatVotingPanel channelId={channelId} language={language} canOperate />
+      : panelName === "chat_voting-action" ? <ChatVotingImmediateAction channelId={channelId} canManage availabilityReason={null} />
       : panelName === "faq" ? <FaqPanel channelId={channelId} language={language} />
         : panelName === "text_commands" ? <TextCommandsPanel channelId={channelId} language={language} />
           : panelName === "text_library" ? <TextLibraryPanel channelId={channelId} language={language} canManage />
@@ -32,7 +34,7 @@ const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId}
 createRoot(document.getElementById("root") as HTMLElement).render(
   <DashboardDataProvider>
     <UiProvider>
-      <main className="main-content" style={{ width: "min(960px, 100%)", padding: "16px" }}>
+      <main className="main-content" style={{ width: "min(1400px, 100%)", padding: "16px" }}>
         {panel}
       </main>
     </UiProvider>
