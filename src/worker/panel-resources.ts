@@ -152,7 +152,6 @@ const reconcileClaimedChannels = async (
       const channelId = claim.channelIds[next++];
       if (channelId === undefined) continue;
       const useLocalReconciliation = channelId === localChannelId && reconcileLocal !== undefined;
-      if (useLocalReconciliation) localChannelWasReconciled = true;
       try {
         await reconcileChannelResources(
           env,
@@ -160,6 +159,7 @@ const reconcileClaimedChannels = async (
           claim.claimToken,
           useLocalReconciliation ? reconcileLocal : undefined,
         );
+        if (useLocalReconciliation) localChannelWasReconciled = true;
       } catch (error: unknown) {
         // Keep the lease after a failed delivery. A later drain can reclaim
         // it after expiry without duplicating an in-flight Durable Object call.
@@ -232,9 +232,9 @@ export const notifyCommittedResources = async (
   if (channelId !== undefined && reconcileLocal !== undefined && !localChannelWasReconciled) {
     let revisions: PanelResourceRevisionVector = {};
     try {
-      // DO-only commits have no D1 queue row. Always reconcile locally when
-      // this call did not claim the channel: a D1 row may be leased by a drain
-      // that captured an older revision and will compare-and-delete it later.
+      // DO-only commits have no D1 queue row. Also recover a claimed local
+      // delivery that failed before reconciliation completed; its D1 row may
+      // stay leased, but local revisions still need to reach connected panels.
       revisions = await readPanelResourceRevisions(env.DB, channelId);
     } catch (error: unknown) {
       // Local DO revisions are independent of D1 and still need a same-DO

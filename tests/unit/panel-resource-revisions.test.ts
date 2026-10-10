@@ -17,7 +17,7 @@ import { moduleRouter } from "../../src/worker/panel/module-routes";
 import { platformRouter } from "../../src/worker/platform/routes";
 import { app } from "../../src/worker/worker-app";
 import { createSessionCookie } from "../../src/worker/auth/session";
-import { notifyCommittedResources, panelResourceChangedMessage, PANEL_RESOURCE_NOTIFIER_COVERAGE, readCompletePanelResourceRevisions, readPanelResourceRevisions } from "../../src/worker/panel-resources";
+import { notifyCommittedResources, panelResourceChangedMessage, PANEL_RESOURCE_NOTIFIER_COVERAGE, readCompletePanelResourceRevisions, readPanelResourceRevisions, type PanelResourceRevisionVector } from "../../src/worker/panel-resources";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -640,6 +640,52 @@ describe("panel resource revisions", () => {
       expect(reconcilePanelResources).toHaveBeenCalledTimes(2);
       expect((await database.prepare("SELECT COUNT(*) AS count FROM panel_resource_pending").first<{ count: number }>())?.count)
         .toBe(0);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("recovers a local DO-only revision when a claimed D1 revision read fails", async () => {
+    const database = new TestD1Database();
+    let failRevisionRead = true;
+    const d1Binding = {
+      prepare: (sql: string) => {
+        if (failRevisionRead && /SELECT resource, revision[\s\S]*FROM panel_resource_revisions/u.test(sql)) {
+          failRevisionRead = false;
+          throw new Error("temporary panel resource revision read failure");
+        }
+        return database.prepare(sql);
+      },
+      batch: database.batch.bind(database),
+    } as unknown as D1Database;
+    const doOnlyRevision = { "module:chat_voting:panel": 1 };
+    const deliveredRevisions: PanelResourceRevisionVector[] = [];
+    const reconcileLocal = vi.fn((d1Revisions: PanelResourceRevisionVector): Promise<void> => {
+      deliveredRevisions.push({ ...d1Revisions, ...doOnlyRevision });
+      return Promise.resolve();
+    });
+    const env = {
+      DB: d1Binding,
+      CHANNEL: { idFromName: (channelId: string) => channelId, get: vi.fn() },
+    } as unknown as Env;
+
+    try {
+      await addChannel(database, "claimed-local-read-failure");
+      await database.prepare("UPDATE channels SET display_name = 'Changed' WHERE channel_id = ?")
+        .bind("claimed-local-read-failure").run();
+
+      await notifyCommittedResources(env, "claimed-local-read-failure", reconcileLocal);
+
+      expect(failRevisionRead).toBe(false);
+      expect(reconcileLocal).toHaveBeenCalledTimes(1);
+      expect(deliveredRevisions).toHaveLength(1);
+      expect(deliveredRevisions[0]?.["channel.overview"]).toBeGreaterThan(0);
+      expect(deliveredRevisions[0]?.["module:chat_voting:panel"]).toBe(1);
+      const pending = await database.prepare(
+        "SELECT claimed_until, claim_token FROM panel_resource_pending WHERE channel_id = ? LIMIT 1",
+      ).bind("claimed-local-read-failure").first<{ claimed_until: number; claim_token: string }>();
+      expect(pending?.claimed_until).toBeGreaterThan(Date.now());
+      expect(pending?.claim_token).toEqual(expect.any(String));
     } finally {
       database.close();
     }
