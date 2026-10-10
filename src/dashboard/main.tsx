@@ -47,7 +47,7 @@ import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration } fro
 import { MODULES } from "../modules/registry";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
-import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading } from "./nav-pages";
+import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading, visibleModuleNavigationIds } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
 import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
@@ -245,7 +245,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
 
   useEffect(() => {
     if (moduleStates === null) return;
-    const enabledModuleIds = moduleStates.filter((module) => module.enabled).map((module) => module.id);
+    const enabledModuleIds = [...visibleModuleNavigationIds(moduleStates)];
     if (enabledModuleIds.length === 0) return;
 
     let cancelled = false;
@@ -1714,15 +1714,17 @@ export const DashboardApp = (): ReactElement => {
             }} />
           : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={() => reloadAfterModuleToggle(route.channelId)} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && selectedChannel !== null ? <UiLoadState
-          variant="panel-720"
-          status={overviewPageStatus}
-          loading={<Skeleton rows={8} height={58} />}
-          empty={<Skeleton rows={8} height={58} />}
-          error={<Skeleton rows={8} height={58} />}
-        >{overviewMatchesRoute && overview.data !== null ? <Suspense fallback={<div className="module-view-fallback" aria-hidden="true"><Skeleton rows={3} height={58} /></div>}>
-          <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId ? { initialSelection: pendingModuleSelection.value } : {})} />
-        </Suspense> : null}</UiLoadState> : null}
+        <div className="module-route-layout">
+          <Suspense fallback={<div className="module-view-fallback" aria-hidden="true"><Skeleton rows={3} height={58} /></div>}>
+            {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && selectedChannel !== null ? <UiLoadState
+              variant="panel-720"
+              status={overviewPageStatus}
+              loading={<Skeleton rows={8} height={58} />}
+              empty={<Skeleton rows={8} height={58} />}
+              error={<Skeleton rows={8} height={58} />}
+            >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} suspendPanelUntilReady {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId ? { initialSelection: pendingModuleSelection.value } : {})} /> : null}</UiLoadState> : null}
+          </Suspense>
+        </div>
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage
           key={route.channelId}
           system={systemQuery.data}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { enabledModuleNavigationGroups } from "../../src/dashboard/nav-pages";
+import { enabledModuleNavigationGroups, visibleModuleNavigationIds } from "../../src/dashboard/nav-pages";
 import { MODULES } from "../../src/modules/registry";
 
 describe("module sidebar categories", () => {
@@ -25,13 +25,14 @@ describe("module sidebar categories", () => {
   });
 
   it("hides disabled modules and modules blocked by missing scopes", () => {
-    const groups = enabledModuleNavigationGroups(
-      MODULES,
-      MODULES.map(({ id }) => ({
+    const states = MODULES.map(({ id }) => ({
         id,
         enabled: id !== "faq",
         ...(id === "ads" ? { missingBroadcasterScopes: ["channel:read:ads"] } : {}),
-      })),
+      }));
+    const groups = enabledModuleNavigationGroups(
+      MODULES,
+      states,
       "channel-a",
       "de",
       (moduleId) => `Generic ${moduleId}`,
@@ -41,5 +42,6 @@ describe("module sidebar categories", () => {
     expect(moduleIds).not.toContain("faq");
     expect(moduleIds).not.toContain("ads");
     expect(moduleIds).toContain("timers");
+    expect(new Set(moduleIds)).toEqual(visibleModuleNavigationIds(states));
   });
 });

@@ -102,7 +102,7 @@ describe("Ad settings editor declaration", () => {
     cleanup();
     renderAds(adsFetch(), "operator");
     expect(await screen.findByText("Nur Broadcaster und Verwalter dürfen Ansagen-Einstellungen ändern.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Werbeplan aktualisieren" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Werbeplan aktualisieren" })).toBeDisabled();
     expect(screen.getByText("Nur Broadcaster und Verwalter dürfen den Werbeplan aktualisieren.")).toBeInTheDocument();
     const properties = document.querySelector("dl.ui-settings-editor__properties");
     expect(properties).not.toBeNull();
@@ -115,9 +115,15 @@ describe("Ad settings editor declaration", () => {
   it("keeps snooze as an immediate panel action above the declaration editor", async () => {
     const fetcher = adsFetch();
     renderAds(fetcher);
-    const editor = await screen.findByRole("region", { name: "Ansagen-Einstellungen" });
-    const view = editor.closest(".module-view");
-    expect(view?.firstElementChild).toHaveAttribute("aria-label", "Ansagen");
+    await screen.findByRole("region", { name: "Ansagen-Einstellungen" });
+    await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ });
+    const view = document.querySelector(".module-view");
+    const panel = view?.querySelector(":scope > section[aria-label='Ansagen']");
+    const editor = view?.querySelector("section[aria-label='Ansagen-Einstellungen']");
+    if (panel === null || panel === undefined || editor === null || editor === undefined) {
+      throw new Error("The ads panel and settings editor should both be mounted.");
+    }
+    expect(panel.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     const editorLoadState = view?.lastElementChild;
     expect(editorLoadState).toHaveClass("ui-load-state");
     expect(editorLoadState?.firstElementChild?.firstElementChild).toBe(editor);

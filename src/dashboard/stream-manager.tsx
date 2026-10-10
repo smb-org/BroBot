@@ -1,11 +1,11 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type LazyExoticComponent, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactElement } from "react";
 
 import type { ChannelStreamState } from "../contracts/values";
 import { canManage } from "../contracts/values";
 import type { PanelChannelOverview, PanelModuleState } from "../panel-contract";
 import type { ModuleImmediateActionProperties } from "../modules/contract";
 import { MODULES } from "../modules/registry";
-import { dashboardLanguage, dashboardTexts, eventText, formatNumber, formatStreamManagerFeedTime, formatTimestamp, immediateActionUnavailableReasonText } from "./locale";
+import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, formatStreamManagerFeedTime, formatTimestamp, immediateActionUnavailableReasonText } from "./locale";
 import { channelPanelTexts } from "./labels";
 import { eventCause, eventDetail, eventMetadata } from "./events/model";
 import { emptyEventFilter } from "./events/model";
@@ -19,6 +19,7 @@ import { collectChannelNoticeFacts, type ChannelNoticeFact } from "./channel-hea
 import { moduleName } from "./module-labels";
 import { loadModuleImmediateActions } from "./module-panel-loaders";
 import { StateRow } from "./module-panels";
+import { RetryableLazy } from "./RetryableLazy";
 
 export const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, urgent, onCheck, notifyFailure = true, actionLabel, checkingLabel, lockedReason }: {
   canCheck: boolean;
@@ -185,17 +186,27 @@ export const ChannelNotices = ({
   );
 };
 
-const lazyActions = new Map<string, LazyExoticComponent<ComponentType<ModuleImmediateActionProperties>>>();
 const immediateActionModules = MODULES.filter((module) => module.immediateActions !== undefined);
 
-const getLazyImmediateAction = (moduleId: string): LazyExoticComponent<ComponentType<ModuleImmediateActionProperties>> | null => {
-  const module = MODULES.find((entry) => entry.id === moduleId);
-  if (module?.immediateActions === undefined) return null;
-  const cached = lazyActions.get(moduleId);
-  if (cached !== undefined) return cached;
-  const component = lazy(() => loadModuleImmediateActions(moduleId) as Promise<{ default: ComponentType<ModuleImmediateActionProperties> }>);
-  lazyActions.set(moduleId, component);
-  return component;
+const ImmediateActionCard = ({ moduleId, channelId, streamState, canManage, availabilityReason }: {
+  moduleId: string;
+  channelId: string;
+  streamState: ChannelStreamState | null;
+  canManage: boolean;
+  availabilityReason: string | null;
+}): ReactElement => {
+  const loadAction = useCallback(() => loadModuleImmediateActions(moduleId) as Promise<{ default: ComponentType<ModuleImmediateActionProperties> }>, [moduleId]);
+  const texts = dashboardTexts();
+  return <RetryableLazy
+    instanceKey={`${moduleId}:immediateActions`}
+    load={loadAction}
+    properties={{ channelId, streamState, canManage, availabilityReason }}
+    loadingFallback={<div className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>}
+    renderError={(retry) => <div className="stream-manager-action stream-manager-action--loading" role="alert">
+      <p>{texts.module.componentLoadError}</p>
+      <Button size="compact" variant="neutral" onClick={retry}>{dashboardCommonTexts().retry}</Button>
+    </div>}
+  />;
 };
 
 /**
@@ -209,13 +220,11 @@ export const ImmediateActions = ({ channelId, streamState, canManage = false, mo
   const moduleCards = MODULES.flatMap((module) => {
     const state = modulesById.get(module.id);
     if (state === undefined || !state.enabled || module.immediateActions === undefined) return [];
-    const ActionCard = getLazyImmediateAction(module.id);
-    if (ActionCard === null) return [];
     const availability = evaluateImmediateActionAvailability(module.immediateActions.requires, streamState);
     const availabilityReason = availability.reason === null
       ? null
       : immediateActionUnavailableReasonText(availability.reason);
-    return [{ id: module.id, ActionCard, availabilityReason }];
+    return [{ id: module.id, availabilityReason }];
   });
   return (
     <section className="content-section" aria-label={texts.streamManager.immediateActions}>
@@ -232,10 +241,8 @@ export const ImmediateActions = ({ channelId, streamState, canManage = false, mo
           event.currentTarget.scrollBy({ left: event.key === "ArrowRight" ? 316 : -316, behavior: "smooth" });
         }}
       >
-        {modulesLoaded ? moduleCards.map(({ id, ActionCard, availabilityReason }) => (
-          <Suspense key={id} fallback={<div className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>}>
-            <ActionCard channelId={channelId} streamState={streamState ?? null} canManage={canManage} availabilityReason={availabilityReason} />
-          </Suspense>
+        {modulesLoaded ? moduleCards.map(({ id, availabilityReason }) => (
+          <ImmediateActionCard key={id} moduleId={id} channelId={channelId} streamState={streamState ?? null} canManage={canManage} availabilityReason={availabilityReason} />
         )) : immediateActionModules.map((module) => (
           <div key={module.id} className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>
         ))}

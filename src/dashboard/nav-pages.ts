@@ -63,6 +63,20 @@ export interface ModuleSidebarGroup {
   entries: readonly ModuleSidebarEntry[];
 }
 
+export interface ModuleNavigationState {
+  id: string;
+  enabled: boolean;
+  missingBroadcasterScopes?: readonly string[];
+}
+
+/** Module pages are readable by every channel role; only disabled or scope-blocked modules leave the sidebar. */
+export const moduleNavigationIsVisible = (state: ModuleNavigationState): boolean =>
+  state.enabled && !modulePermissionsAreMissing(state);
+
+/** Shared visibility predicate for sidebar entries and their idle chunk preloads. */
+export const visibleModuleNavigationIds = (moduleStates: readonly ModuleNavigationState[]): ReadonlySet<string> =>
+  new Set(moduleStates.filter(moduleNavigationIsVisible).map((state) => state.id));
+
 /** Converts module-owned navigation declarations into host routes and labels. */
 export const registeredModuleNavEntries = (
   modules: readonly Pick<BotModule, "id" | "navigationCategory" | "navigationEntries">[],
@@ -83,14 +97,12 @@ export const registeredModuleNavEntries = (
 /** Enabled, permitted modules grouped in contract category order for the sidebar. */
 export const enabledModuleNavigationGroups = (
   modules: readonly Pick<BotModule, "id" | "navigationCategory" | "navigationEntries">[],
-  moduleStates: readonly { id: string; enabled: boolean; missingBroadcasterScopes?: readonly string[] }[],
+  moduleStates: readonly ModuleNavigationState[],
   channelId: string,
   language: ModuleLanguage,
   fallbackLabel: (moduleId: string) => string,
 ): readonly ModuleSidebarGroup[] => {
-  const enabledModuleIds = new Set(moduleStates
-    .filter((state) => state.enabled && !modulePermissionsAreMissing(state))
-    .map((state) => state.id));
+  const enabledModuleIds = visibleModuleNavigationIds(moduleStates);
   const registeredEntries = registeredModuleNavEntries(modules, channelId, language);
 
   return MODULE_NAVIGATION_CATEGORIES.flatMap((category) => {
