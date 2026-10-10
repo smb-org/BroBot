@@ -452,7 +452,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         </>}
         create={{ label: labels.addBlock, onClick: openCreate, disabled: true, ...(!canManage ? { reason: labels.managementLocked } : {}) }}
       />
-      <LoadState status={libraryQuery.isError ? "error" : "loading"} minHeight="calc(var(--s10) * 30)"
+      <LoadState variant="panel" status={libraryQuery.isError ? "error" : "loading"} minHeight="calc(var(--s10) * 30)"
         loading={<Skeleton rows={8} height={34} />}
         empty={<div />}
         error={<p>{labels.loadError}</p>}
@@ -479,6 +479,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
 
   return (
     <LoadState
+      variant="panel"
       status="success"
       minHeight="calc(var(--s10) * 30)"
       loading={<Skeleton rows={8} height={34} />}

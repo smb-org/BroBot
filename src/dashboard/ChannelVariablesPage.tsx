@@ -338,6 +338,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
     />
     <LoadState
+      variant="panel"
       status={listStatus}
       minHeight={360}
       loading={<Skeleton rows={8} height={34} />}

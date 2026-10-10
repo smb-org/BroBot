@@ -189,7 +189,7 @@ describe("AuditPage diff list", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(rendered.queryClient.getQueryState(dashboardDataKeys.audit("channel-a", emptyAuditFilter))?.status).toBe("error");
     expect(screen.getByRole("button", { name: /Alice.*Bob/u })).toBeVisible();
-    await waitFor(() => expect(rendered.container.querySelector(".query-error-state--status-row")?.textContent).toContain("Erneut versuchen"));
+    await waitFor(() => expect(rendered.container.querySelector(".ui-load-state--status-row .ui-load-state__inline-message")).not.toBeNull());
     expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
 

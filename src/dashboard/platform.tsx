@@ -281,6 +281,7 @@ const ChannelInspector = ({
       </>}
       <InspectorSection title={texts.members}>
         <LoadStateView
+          variant="panel"
           status={members.data === null ? members.status === "error" ? "error" : "loading" : members.data.members.length === 0 ? "empty" : "success"}
           minHeight={220}
           loading={<PlatformMembersSkeleton />}
@@ -469,6 +470,7 @@ const PlatformAudit = ({
     <section className="config-section" aria-label={texts.audit}>
       <div className="section-heading"><h2>{texts.audit}</h2></div>
       <LoadStateView
+        variant="panel"
         status={status}
         minHeight={280}
         loading={<Skeleton rows={6} height={34} />}
@@ -609,6 +611,7 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
                 <div>
                   <InspectorHeading level="h2" title={texts.channelOverview} />
                   <LoadStateView
+                    variant="panel"
                     status={overviewStatus}
                     minHeight={360}
                     loading={<Skeleton rows={6} height={34} />}

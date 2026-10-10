@@ -211,16 +211,19 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
     : dashboardTexts().module.settingsLoadError;
   if (loaded === undefined) {
     return <LoadState
+      variant="panel"
       status={settingsQuery.isPending || settingsQuery.isFetching ? "loading" : "error"}
       minHeight="calc(var(--s10) * 8)"
       loading={<Skeleton rows={3} height={34} />}
       empty={null}
       error={<p className="muted" role="alert">{loadError}</p>}
       queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}
+      refreshError={false}
     >{null}</LoadState>;
   }
   const copy = loaded.definition.locales[language];
   return <LoadState
+    variant="panel"
     status="success"
     minHeight="calc(var(--s10) * 8)"
     loading={<Skeleton rows={3} height={34} />}

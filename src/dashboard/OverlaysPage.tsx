@@ -689,6 +689,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
     />
     <LoadState
+      variant="panel"
       status={loading && overlays.length === 0 ? "loading" : loadFailed && overlays.length === 0 ? "error" : visibleOverlays.length === 0 ? "empty" : "success"}
       minHeight={360}
       loading={<Skeleton rows={6} height={34} />}
@@ -723,6 +724,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         <p className="muted">{labels.legacyDescription}</p>
         <div className="overlay-legacy-links__reason-slot">{manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}</div>
         <LoadState
+          variant="panel"
           status={legacyTokensQuery.isPending && legacyTokens.length === 0 ? "loading" : legacyTokensQuery.isError && legacyTokens.length === 0 ? "error" : legacyTokens.length === 0 ? "empty" : "success"}
           minHeight={260}
           loading={<Skeleton rows={4} height={58} />}
@@ -772,8 +774,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   </SubInspector> : selectedId === null ? null : <SubInspector ariaLabel={labels.title} title={selected?.name ?? labels.title}
     identifier={selected?.id} closeLabel={labels.close} onClose={closeInspector}>
     <LoadState
+      variant="panel"
       status={selectedOverlay === null ? selectedOverlayQuery.isPending ? "loading" : selectedOverlayLoadFailed ? "error" : "loading" : "success"}
-      minHeight="calc(var(--s10) * 24)"
+      minHeight="calc(var(--s10) * 25)"
       loading={<div aria-label={labels.loading}><Skeleton rows={6} height={34} /></div>}
       empty={<div />}
       error={<p role="alert">{labels.loadError}</p>}

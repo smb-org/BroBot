@@ -7,7 +7,7 @@ import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedState, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type ListToolbarQueryError, type SelectOption } from "../ui";
+import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type QueryError, type SelectOption } from "../ui";
 import { PanelApiError } from "../api";
 import { refreshQuery } from "../data/refresh";
 import { dashboardDataKeys } from "../data/keys";
@@ -125,7 +125,7 @@ const EventFilterBar = ({
   moduleOptions: readonly PanelModuleState[];
   loadedCount: number;
   onChange: (filters: PanelEventFilters) => void;
-  queryError?: ListToolbarQueryError;
+  queryError?: QueryError;
 }): ReactElement => {
   const texts = dashboardTexts();
   const [personDraft, setPersonDraft] = useState(filters.person ?? "");
@@ -505,6 +505,7 @@ const EventsPageFilterState = ({
                 : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
             </div>
             <UiLoadState
+              variant="panel"
               status={loading && eventEntries.length === 0
                 ? "loading"
                 : error !== null && eventEntries.length === 0 ? "error"

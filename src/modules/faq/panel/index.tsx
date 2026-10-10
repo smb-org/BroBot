@@ -213,7 +213,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       <InspectorSection title={labels.title}>
         <Button variant="primary" disabled={!canManage} onClick={openCreate}>{labels.add}</Button>
         {canManage ? null : <p className="lock-reason">{labels.roleLocked}</p>}
-        <LoadState status={listStatus} minHeight="calc(var(--s10) * 18)"
+        <LoadState variant="panel" status={listStatus} minHeight="calc(var(--s10) * 18)"
           loading={<Skeleton rows={7} height={34} />}
           empty={<p className="muted">{labels.noEntries}</p>}
           error={<p className="muted">{labels.loadError}</p>}

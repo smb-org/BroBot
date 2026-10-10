@@ -167,6 +167,7 @@ export const ChannelLocationField = ({
             </Button>
           </div>
           <LoadState
+            variant="panel"
             status={resultsStatus}
             minHeight={178}
             loading={<Skeleton rows={3} height={54} />}

@@ -104,7 +104,7 @@ export const AdsPanel = ({ channelId, language = "de", canManage = false }: { ch
         style={{ height: "var(--s6)", overflow: "hidden", margin: 0 }} aria-live="polite">
         {canManage ? "" : labels.refreshReadOnly}
       </p>
-      <LoadState status={loadStatus} minHeight="calc(var(--s10) * 24)"
+      <LoadState variant="panel" status={loadStatus} minHeight="calc(var(--s10) * 24)"
         loading={<div className="module-stack" aria-label={labels.loading}>
           <Skeleton rows={4} height={34} />
           <Skeleton rows={3} height={34} />

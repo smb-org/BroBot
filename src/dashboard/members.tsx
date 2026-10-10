@@ -425,6 +425,7 @@ const MembersPageContent = ({
               />
               <div className={fetching ? "stale" : undefined} aria-busy={fetching}>
               <LoadState
+                variant="panel"
                 status={members.length > 0 ? visibleMembers.length === 0 ? "empty" : "success" : error !== null ? "error" : loading ? "loading" : "empty"}
                 minHeight={320}
                 loading={<MemberListSkeleton />}

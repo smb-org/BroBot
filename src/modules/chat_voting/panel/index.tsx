@@ -157,6 +157,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
 
   if (state === null) return <section className="module-stack chat-voting-panel" aria-label={labels.title}>
     <LoadState
+      variant="panel"
       status={stateQuery.isError ? "error" : "loading"}
       minHeight="calc(var(--s10) * 8)"
       loading={<Skeleton rows={8} height={34} />}
@@ -184,6 +185,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
       : !validOptionCount ? labels.invalidOptionCount
         : !validLabels ? labels.invalidLabels : null;
   const loadStateProps = {
+    variant: "panel" as const,
     minHeight: "calc(var(--s10) * 8)",
     loading: <Skeleton rows={8} height={34} />,
     empty: <p className="empty-state">{labels.noVote}</p>,

@@ -57,6 +57,7 @@ function MoonSettingsPanelContent({ channelId, language, canManage }: ModulePane
 
   return (
     <LoadState
+      variant="panel"
       status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
       minHeight="calc(var(--s10) * 12)"
       loading={<Skeleton rows={3} height={34} />}

@@ -797,8 +797,9 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       ...(settingsIssue === undefined ? {} : { issue: settingsIssue }),
       content: <>
         <LoadState
+          variant="compact"
           status={registeredVariablesQuery.data === undefined ? registeredVariablesQuery.isPending ? "loading" : "error" : "success"}
-          minHeight="var(--s6)"
+          minHeight="calc(var(--s6) + var(--s10))"
           loading={<div />}
           empty={<div />}
           error={<p className="muted" role="alert" style={{ height: "var(--s6)", overflow: "hidden", margin: 0, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{labels.templateVariablesLoadError}</p>}
@@ -1243,7 +1244,7 @@ const TextCommandsPanelContent = ({
       }}
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); } })}
     />
-    <LoadState status={listStatus} minHeight="calc(var(--s10) * 15)"
+    <LoadState variant="panel" status={listStatus} minHeight="calc(var(--s10) * 15)"
       loading={<Skeleton rows={8} height={34} />}
       empty={<p className="empty-state">{commands.length > 0 ? common.noMatches : labels.empty}</p>}
       error={<p className="muted">{labels.loadError}</p>}

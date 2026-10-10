@@ -159,6 +159,7 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
         />
         {!showResults ? null : <div className="ui-game-picker__results-slot">
           <LoadState
+            variant="panel"
             status={searchStatus}
             minHeight={220}
             loading={<div role="status"><Skeleton rows={3} height={54} /><span className="sr-only">{messages.loading}</span></div>}

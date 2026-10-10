@@ -14,6 +14,7 @@ describe("LoadState retry layout", () => {
     const { container, rerender } = render(
       <UiProvider>
         <LoadState
+          variant="panel"
           status="success"
           minHeight={minHeight}
           loading={<div />}
@@ -38,6 +39,7 @@ describe("LoadState retry layout", () => {
     rerender(
       <UiProvider>
         <LoadState
+          variant="panel"
           status="success"
           minHeight={minHeight}
           loading={<div />}
@@ -53,13 +55,14 @@ describe("LoadState retry layout", () => {
 
     expect(root?.style.minHeight).toBe("calc(var(--ui-load-state-content-min-height) + var(--s10))");
     expect(content?.style.minHeight).toBe(minHeight);
-    expect(container.querySelector(".query-error-state__message")).toHaveTextContent("Unable to load.");
+    expect(container.querySelector(".ui-load-state__inline-message")).toHaveTextContent("Unable to load.");
     fireEvent.click(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u }));
     expect(queryError.onRetry).toHaveBeenCalledOnce();
 
     rerender(
       <UiProvider>
         <LoadState
+          variant="panel"
           status="error"
           minHeight={minHeight}
           loading={<div />}
@@ -78,5 +81,62 @@ describe("LoadState retry layout", () => {
     expect(content?.style.minHeight).toBe(minHeight);
     expect(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u })).toBeVisible();
     expect(screen.getByText("Data could not be loaded.")).toBeVisible();
+  });
+
+  it("keeps initial errors compact inside a caller-sized reserved box", () => {
+    const minHeight = "calc(var(--s6) + var(--s10))";
+    const queryError = { message: "Template variables could not be loaded.", onRetry: vi.fn() };
+    const { container, rerender } = render(
+      <UiProvider>
+        <LoadState
+          variant="compact"
+          status="loading"
+          minHeight={minHeight}
+          loading={<div />}
+          empty={<div />}
+          error={<div />}
+          queryError={queryError}
+        >{null}</LoadState>
+      </UiProvider>,
+    );
+
+    const root = container.querySelector<HTMLElement>(".ui-load-state");
+    expect(root?.style.minHeight).toBe(minHeight);
+    expect(root?.querySelector(".ui-load-state__content")).toBeInTheDocument();
+
+    rerender(
+      <UiProvider>
+        <LoadState
+          variant="compact"
+          status="error"
+          minHeight={minHeight}
+          loading={<div />}
+          empty={<div />}
+          error={<div />}
+          queryError={queryError}
+        >{null}</LoadState>
+      </UiProvider>,
+    );
+
+    expect(root?.style.minHeight).toBe(minHeight);
+    expect(root?.querySelector(".ui-load-state__inline-error")).toBeInTheDocument();
+    expect(root?.querySelector(".ui-error-panel")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u }));
+    expect(queryError.onRetry).toHaveBeenCalledOnce();
+
+    rerender(
+      <UiProvider>
+        <LoadState
+          variant="compact"
+          status="success"
+          minHeight={minHeight}
+          loading={<div />}
+          empty={<div />}
+          error={<div />}
+          queryError={queryError}
+        >{null}</LoadState>
+      </UiProvider>,
+    );
+    expect(root?.style.minHeight).toBe(minHeight);
   });
 });

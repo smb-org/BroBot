@@ -224,7 +224,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
 
   return <section className="module-stack" aria-label={labels.title}>
     <InspectorSection title={labels.connection}>
-      <LoadState status={connectionStatus} minHeight="calc(var(--s10) * 8)"
+      <LoadState variant="panel" status={connectionStatus} minHeight="calc(var(--s10) * 8)"
         loading={<Skeleton rows={5} height={34} />}
         empty={<p className="muted">{labels.notConfigured}</p>}
         error={<p className="muted">{labels.refreshFailed}</p>}>

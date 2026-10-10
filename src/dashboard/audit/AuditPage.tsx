@@ -6,7 +6,7 @@ import { MODULES } from "../../modules/registry";
 import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
 import { ModuleHeading } from "../module-panels";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, QueryErrorState, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import { PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useAuditQuery } from "../data/lists";
@@ -208,12 +208,18 @@ const AuditPageContent = ({ identityKey, entries, nextCursor, filters, onFilters
         list={
           <section className="content-section" aria-label={texts.audit.title}>
             <AuditFilterBar filters={filters} onChange={onFiltersChange} />
-            <QueryErrorState
-              mode="refresh"
-              placement="status-row"
-              error={error !== null && entries.length > 0 ? { title: texts.audit.loadError, message: error, onRetry } : null}
-            />
             <UiLoadState
+              variant="compact"
+              className="ui-load-state--status-row"
+              status={error !== null && entries.length > 0 ? "error" : "success"}
+              minHeight={20}
+              loading={null}
+              empty={null}
+              error={null}
+              {...(error !== null && entries.length > 0 ? { queryError: { title: texts.audit.loadError, message: error, onRetry } } : {})}
+            >{null}</UiLoadState>
+            <UiLoadState
+              variant="panel"
               status={loading
                 ? "loading"
                 : error !== null && entries.length === 0 ? "error"
