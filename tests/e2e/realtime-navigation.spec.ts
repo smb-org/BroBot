@@ -25,11 +25,17 @@ const channel = {
     pause: { active: false, until: null, mode: null },
   },
   lastError: null,
+  modules: [
+    { id: "text_commands", enabled: true, settings: "{}" },
+    { id: "chat_voting", enabled: true, settings: "{}" },
+  ],
 };
 
 const installSocketCounter = async (page: Page): Promise<void> => {
   await page.addInitScript(() => {
     type TrackedSocket = EventTarget & { url: string; readyState: number };
+    const browser = window as Window & { __realtimePanelAutoOpen?: boolean };
+    browser.__realtimePanelAutoOpen = true;
     const sockets: TrackedSocket[] = [];
     class MockWebSocket extends EventTarget {
       static readonly CONNECTING = 0;
@@ -43,6 +49,12 @@ const installSocketCounter = async (page: Page): Promise<void> => {
         super();
         this.url = String(url);
         sockets.push(this);
+        queueMicrotask(() => {
+          if (browser.__realtimePanelAutoOpen === true && this.readyState === MockWebSocket.CONNECTING) {
+            this.readyState = MockWebSocket.OPEN;
+            this.dispatchEvent(new Event("open"));
+          }
+        });
       }
 
       close(): void {
@@ -57,7 +69,9 @@ const installSocketCounter = async (page: Page): Promise<void> => {
   });
 };
 
-const installApiMocks = async (page: Page): Promise<void> => {
+const installApiMocks = async (page: Page): Promise<{ chatVotingReads: () => number; revisionReads: () => number }> => {
+  let chatVotingReads = 0;
+  let revisionReads = 0;
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
@@ -65,7 +79,9 @@ const installApiMocks = async (page: Page): Promise<void> => {
       return;
     }
     if (pathname === `/api/channels/${channelId}/overview`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...channel, activeModules: [{ moduleId: "text_commands", settings: "{}" }] }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...channel, activeModules: [
+        { moduleId: "text_commands", settings: "{}" }, { moduleId: "chat_voting", settings: "{}" },
+      ] }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/settings`) {
@@ -73,7 +89,23 @@ const installApiMocks = async (page: Page): Promise<void> => {
       return;
     }
     if (pathname === `/api/channels/${channelId}/modules`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: [
+        { id: "text_commands", enabled: true, settings: "{}" }, { id: "chat_voting", enabled: true, settings: "{}" },
+      ] }) });
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/revisions`) {
+      revisionReads += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ revisions: {} }) });
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/modules/chat_voting/current`) {
+      chatVotingReads += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        vote: null, counts: null, revision: 0, terms: null, moreTerms: null, hasOpenBallot: false,
+        defaultDurationSeconds: 120,
+        defaultLabels: { yes_no: ["Yes", "No"], digit_01: ["No", "Yes"], digit_12: ["1", "2"], scale_5: ["1", "2", "3", "4", "5"], options_n: Array.from({ length: 9 }, (_unused, index) => `Option ${String(index + 1)}`), free_text: [] },
+      }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/modules/text_commands/commands`) {
@@ -94,6 +126,7 @@ const installApiMocks = async (page: Page): Promise<void> => {
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
   });
+  return { chatVotingReads: () => chatVotingReads, revisionReads: () => revisionReads };
 };
 
 const panelSocketPaths = async (page: Page): Promise<string[]> => page.evaluate(() => {
@@ -105,7 +138,7 @@ const panelSocketPaths = async (page: Page): Promise<string[]> => page.evaluate(
 
 test("keeps one channel socket while navigating between dashboard views", async ({ page }) => {
   await installSocketCounter(page);
-  await installApiMocks(page);
+  const apiReads = await installApiMocks(page);
   await page.goto(`/channels/${channelId}`);
   await expect(page.getByRole("heading", { name: channel.displayName, level: 1 })).toBeVisible();
   await expect.poll(() => panelSocketPaths(page)).toEqual([`/ws/channels/${channelId}`]);
@@ -124,4 +157,22 @@ test("keeps one channel socket while navigating between dashboard views", async 
   await expect(page).toHaveURL(`/channels/${channelId}/modules/text_commands`);
   await expect(page.locator("h1")).toBeVisible();
   expect(await panelSocketPaths(page)).toEqual([`/ws/channels/${channelId}`]);
+
+  await page.locator(`a[href="/channels/${channelId}/modules/chat_voting"]`).click();
+  await expect(page).toHaveURL(`/channels/${channelId}/modules/chat_voting`);
+  await expect(page.getByRole("heading", { name: "Chat voting", level: 1 })).toBeVisible();
+  await expect.poll(() => apiReads.chatVotingReads()).toBeGreaterThan(0);
+  await expect.poll(() => apiReads.revisionReads()).toBe(1);
+  const connectedReads = apiReads.chatVotingReads();
+  expect(connectedReads).toBeGreaterThan(0);
+  await page.waitForTimeout(2_200);
+  expect(apiReads.chatVotingReads()).toBe(connectedReads);
+  expect(await panelSocketPaths(page)).toEqual([`/ws/channels/${channelId}`]);
+
+  await page.evaluate(() => {
+    (window as Window & { __realtimePanelAutoOpen?: boolean }).__realtimePanelAutoOpen = false;
+    const sockets = (window as Window & { __realtimePanelSockets?: Array<{ close: () => void }> }).__realtimePanelSockets ?? [];
+    sockets[0]?.close();
+  });
+  await expect.poll(() => apiReads.chatVotingReads(), { timeout: 5_000 }).toBeGreaterThan(connectedReads);
 });

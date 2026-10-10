@@ -6,8 +6,7 @@ import { UiProvider } from "../../src/dashboard/ui";
 import { toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
-import { invalidateDashboardRealtimeMessage, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
-import type { RealtimeMessage } from "../../src/realtime-contract";
+import { reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { renderWithQuery } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -28,10 +27,14 @@ const requestPath = (input: RequestInfo | URL): string => input instanceof Reque
   ? new URL(input.url).pathname
   : input instanceof URL ? input.pathname : new URL(input, "https://brobot.example").pathname;
 
-const renderAds = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof renderWithQuery> => {
+const renderAds = (
+  fetcher: typeof fetch,
+  ownRole: "manager" | "operator" = "manager",
+  channelId = "kanal-a",
+): ReturnType<typeof renderWithQuery> => {
   vi.stubGlobal("fetch", fetcher);
   return renderWithQuery(<UiProvider><ModulePage
-    channelId="kanal-a"
+    channelId={channelId}
     moduleId="ads"
     ownRole={ownRole}
     modules={[{ id: "ads", enabled: true, settings: "{}" }]}
@@ -192,7 +195,8 @@ describe("Ad settings editor declaration", () => {
     expect(screen.getByText(/11:00/)).toBeInTheDocument();
   });
 
-  it("updates the cached schedule and its as-of label from panel realtime", async () => {
+  it("updates the cached schedule after its resource revision advances", async () => {
+    const channelId = "ads-revisions-a";
     const original = {
       ...schedule,
       schedule: { ...schedule.schedule, nextAdAt: "2026-09-24T17:00:00.000Z", duration: 60 },
@@ -200,15 +204,18 @@ describe("Ad settings editor declaration", () => {
     };
     const formatter = new Intl.DateTimeFormat("de-DE", { dateStyle: "short", timeStyle: "short" });
     let serverSchedule = original;
+    let revision = 1;
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path === `/api/channels/${channelId}/revisions`) return Promise.resolve(jsonResponse({ revisions: { "module:ads:schedule": revision } }));
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
       if (path.endsWith("/schedule")) return Promise.resolve(jsonResponse(serverSchedule));
       if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(jsonResponse(serverSchedule));
       return Promise.resolve(jsonResponse({}, 404));
     });
-    const rendered = renderAds(fetcher);
+    const rendered = renderAds(fetcher, "manager", channelId);
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(rendered.queryClient, channelId); });
 
     expect(await screen.findByText(`Stand ${formatter.format(new Date(original.asOf))}`)).toBeInTheDocument();
     serverSchedule = {
@@ -216,25 +223,22 @@ describe("Ad settings editor declaration", () => {
       schedule: { ...original.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 1 },
       asOf: "2026-09-24T13:00:00.000Z",
     };
-    invalidateDashboardRealtimeMessage(rendered.queryClient, {
-      version: 1,
-      id: "ads-schedule-2",
-      createdAt: "2026-09-24T13:00:00.000Z",
-      channelId: "kanal-a",
-      type: "ads.schedule.updated",
-      payload: { schedule: serverSchedule.schedule, asOf: serverSchedule.asOf },
-    } satisfies RealtimeMessage);
+    revision = 2;
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(rendered.queryClient, channelId); });
 
     expect(await screen.findByText(`Stand ${formatter.format(new Date("2026-09-24T13:00:00.000Z"))}`)).toBeInTheDocument();
-    expect(rendered.queryClient.getQueryState(moduleQueryKey("kanal-a", "ads", "schedule"))?.isInvalidated).toBe(false);
+    expect(rendered.queryClient.getQueryState(moduleQueryKey(channelId, "ads", "schedule"))?.isInvalidated).toBe(false);
   });
 
-  it("keeps the newest realtime schedule when it arrives before the initial response", async () => {
+  it("keeps the newest schedule when its revision advances before the initial response", async () => {
+    const channelId = "ads-revisions-b";
     const formatter = new Intl.DateTimeFormat("de-DE", { dateStyle: "short", timeStyle: "short" });
     let serverSchedule = { ...schedule, asOf: "2026-09-24T12:00:00.000Z" };
     let scheduleCalls = 0;
+    let revision = 1;
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path === `/api/channels/${channelId}/revisions`) return Promise.resolve(jsonResponse({ revisions: { "module:ads:schedule": revision } }));
       if (path.endsWith("/schedule")) {
         scheduleCalls += 1;
         return Promise.resolve(jsonResponse(scheduleCalls === 1 ? { ...serverSchedule, asOf: "2026-09-24T12:00:00.000Z" } : serverSchedule));
@@ -244,8 +248,9 @@ describe("Ad settings editor declaration", () => {
       if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(jsonResponse(serverSchedule));
       return Promise.resolve(jsonResponse({}, 404));
     });
-    const rendered = renderAds(fetcher);
+    const rendered = renderAds(fetcher, "manager", channelId);
     await waitFor(() => { expect(scheduleCalls).toBe(1); });
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(rendered.queryClient, channelId); });
 
     const newerAsOf = "2026-09-24T13:00:00.000Z";
     serverSchedule = {
@@ -253,14 +258,8 @@ describe("Ad settings editor declaration", () => {
       schedule: { ...schedule.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 0 },
       asOf: newerAsOf,
     };
-    invalidateDashboardRealtimeMessage(rendered.queryClient, {
-      version: 1,
-      id: "ads-schedule-early",
-      createdAt: newerAsOf,
-      channelId: "kanal-a",
-      type: "ads.schedule.updated",
-      payload: { schedule: serverSchedule.schedule, asOf: newerAsOf },
-    } satisfies RealtimeMessage);
+    revision = 2;
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(rendered.queryClient, channelId); });
 
     expect(await screen.findByText(`Stand ${formatter.format(new Date(newerAsOf))}`)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Snooze · 0 verfügbar/ })).toBeDisabled();

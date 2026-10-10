@@ -192,13 +192,11 @@ describe("Votekick routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(publish).toHaveBeenCalledOnce();
-    const publishedMessage = publish.mock.calls[0]?.[0]?.[0];
-    expect(publishedMessage).toMatchObject({
-      type: "modul.votekick.changed",
-      channelId: "channel-a",
-      payload: { part: "panel" },
-    });
+    expect(publish).not.toHaveBeenCalled();
+    const revision = await database.prepare(
+      "SELECT revision FROM panel_resource_revisions WHERE channel_id = 'channel-a' AND resource = 'module:votekick:panel'",
+    ).first<{ revision: number }>();
+    expect(revision?.revision).toBeGreaterThan(0);
   });
 
   it("reconciles a running votekick through its alarm handler on panel access", async () => {

@@ -12,6 +12,8 @@ import { dashboardAuthenticationRequiredEvent } from "../../src/dashboard/data/e
 import { renderWithQuery as renderWithQueryBase, type DashboardQueryTestOptions } from "../query-test-utils";
 import { useRealtimePanelMessages } from "../../src/dashboard/realtime";
 
+let activePanelRevisions: Record<string, number> = {};
+
 const RealtimeShell = ({ children }: { children: ReactNode }) => {
   useRealtimePanelMessages("kanal-a", true);
   return <>{children}</>;
@@ -21,7 +23,25 @@ const renderWithQuery = (
   ui: ReactElement,
   options?: Omit<RenderOptions, "wrapper">,
   queryOptions: DashboardQueryTestOptions = {},
-) => renderWithQueryBase(<RealtimeShell>{ui}</RealtimeShell>, options, queryOptions);
+): ReturnType<typeof renderWithQueryBase> => {
+  activePanelRevisions = { ...(queryOptions.panelRevisions ?? {}) };
+  const rendered = renderWithQueryBase(<RealtimeShell>{ui}</RealtimeShell>, options, {
+    ...queryOptions,
+    panelRevisions: activePanelRevisions,
+  });
+  const previousFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = requestUrl(input);
+    if (/^\/api\/channels\/[^/]+\/revisions$/u.test(url.pathname)) {
+      return Promise.resolve(new Response(JSON.stringify({ revisions: activePanelRevisions }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
+    return previousFetch(input, init);
+  }));
+  return rendered;
+};
 
 const entry = (overrides: Partial<PanelEventEntry>): PanelEventEntry => ({
   eventId: "event-1",
@@ -88,6 +108,10 @@ class TestEventsWebSocket {
   }
 
   receive(data: string): void {
+    const message = JSON.parse(data) as { type?: unknown };
+    if (message.type === "event_log.new") {
+      activePanelRevisions["channel.events"] = (activePanelRevisions["channel.events"] ?? 0) + 1;
+    }
     this.emit("message", new MessageEvent("message", { data }));
   }
 
@@ -140,6 +164,7 @@ const positionEventReader = (container: HTMLElement) => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  activePanelRevisions = {};
   for (const restore of positionSpies) restore();
   positionSpies.clear();
   Object.defineProperty(window, "scrollY", { configurable: true, writable: true, value: 0 });
@@ -208,6 +233,7 @@ describe("EventsPage failure cause icon", () => {
       {
         gcTime: 600_000,
         staleTime: 0,
+        panelRevisions: { "channel.events": 1 },
         initialData: [{
           queryKey: dashboardDataKeys.events("kanal-a", filters),
           data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] },
@@ -535,6 +561,7 @@ describe("EventsPage failure cause icon", () => {
       {
         gcTime: 600_000,
         staleTime: 30_000,
+        panelRevisions: { "channel.events": 1 },
         initialData: [{
           queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter),
           data: { pages: [{ entries: [initialEntry], nextCursor: null }], pageParams: [null] },
@@ -1137,7 +1164,7 @@ describe("EventsPage failure cause icon", () => {
     const view = renderWithQuery(
       <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
       undefined,
-      { gcTime: 600_000 },
+      { gcTime: 600_000, panelRevisions: { "channel.events": 1 } },
     );
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
     const socket = TestEventsWebSocket.instances[0];

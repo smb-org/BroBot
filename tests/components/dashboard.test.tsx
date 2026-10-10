@@ -8,7 +8,7 @@ import { emptyEventFilter } from "../../src/dashboard/events/model";
 import { WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
 import { UiProvider } from "../../src/dashboard/ui";
 import { queryKeys } from "../../src/dashboard/data/keys";
-import { renderWithQuery as render } from "../query-test-utils";
+import { renderWithQuery as renderWithQueryBase, type DashboardQueryTestOptions } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
 const moderator = {
@@ -73,12 +73,38 @@ const audit = { entries: [], nextCursor: null };
 
 type DashboardRoute = (url: URL) => Response | Promise<Response> | undefined;
 
+let activePanelRevisions: Record<string, number> = {};
+
+const render = (
+  ui: Parameters<typeof renderWithQueryBase>[0],
+  options?: Parameters<typeof renderWithQueryBase>[1],
+  queryOptions: DashboardQueryTestOptions = {},
+): ReturnType<typeof renderWithQueryBase> => {
+  activePanelRevisions = { ...(queryOptions.panelRevisions ?? {}) };
+  const rendered = renderWithQueryBase(ui, options, {
+    ...queryOptions,
+    panelRevisions: activePanelRevisions,
+  });
+  const previousFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = requestUrl(input);
+    if (/^\/api\/channels\/[^/]+\/revisions$/u.test(url.pathname)) {
+      return Promise.resolve(jsonResponse({ revisions: activePanelRevisions }));
+    }
+    return previousFetch(input, init);
+  }));
+  return rendered;
+};
+
 const stubDashboardFetch = (
   route: DashboardRoute,
   channels: Array<{ bot?: unknown }> = [healthyChannel("kanal-a", "Alpha")],
 ) => {
   const fetcher = vi.fn((input: RequestInfo | URL) => {
     const url = requestUrl(input);
+    if (/^\/api\/channels\/[^/]+\/revisions$/u.test(url.pathname)) {
+      return jsonResponse({ revisions: activePanelRevisions });
+    }
     if (url.pathname === "/api/channels") {
       return jsonResponse({ channels, bot: channels[0]?.bot });
     }
@@ -181,6 +207,14 @@ class TestWebSocket {
   }
 
   receive(data: string): void {
+    const message = JSON.parse(data) as { type?: unknown };
+    if (message.type === "event_log.new") {
+      activePanelRevisions["channel.events"] = (activePanelRevisions["channel.events"] ?? 0) + 1;
+    } else if (message.type === "stream.state.changed") {
+      for (const resource of ["channel.overview", "channels", "module:belabox:live"]) {
+        activePanelRevisions[resource] = (activePanelRevisions[resource] ?? 0) + 1;
+      }
+    }
     this.emit("message", new MessageEvent("message", { data }));
   }
 
@@ -197,6 +231,7 @@ class TestWebSocket {
 
 describe("Dashboard skeleton", () => {
   beforeEach(() => {
+    activePanelRevisions = {};
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1440 });
     window.history.replaceState({}, "", "/");
     Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
@@ -205,6 +240,7 @@ describe("Dashboard skeleton", () => {
 
   afterEach(() => {
     cleanup();
+    activePanelRevisions = {};
     TestWebSocket.reset();
     vi.unstubAllGlobals();
     vi.useRealTimers();
@@ -613,7 +649,7 @@ describe("Dashboard skeleton", () => {
     }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
-    render(<DashboardApp />);
+    render(<DashboardApp />, undefined, { panelRevisions: { "channel.events": 1 } });
 
     expect(await screen.findByText("Raid von raider_b mit 1 Zuschauern")).toBeInTheDocument();
     const initialRequest = fetcher.mock.calls.map(([input]) => requestUrl(input)).find((url) => url.pathname.endsWith("/events"));
@@ -648,7 +684,7 @@ describe("Dashboard skeleton", () => {
     }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
-    render(<DashboardApp />);
+    render(<DashboardApp />, undefined, { panelRevisions: { "channel.events": 1 } });
 
     expect(await screen.findByText("alt")).toBeInTheDocument();
     const feed = document.querySelector(".event-feed");
@@ -663,7 +699,7 @@ describe("Dashboard skeleton", () => {
     serverEntries = [neu, alt];
     socket.receive(JSON.stringify({ version: 1, id: "message-lower", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
-    expect(await screen.findByRole("button", { name: "1 neue Ereignisse" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "1 neue Ereignisse" }, { timeout: 2_000 })).toBeInTheDocument();
     // The query refreshes while the rows the reader is looking at stay frozen.
     await new Promise((resolve) => { setTimeout(resolve, 400); });
     expect(screen.queryByText("Raid von unbekannt mit 8 Zuschauern")).not.toBeInTheDocument();
@@ -792,7 +828,7 @@ describe("Dashboard skeleton", () => {
     }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
-    render(<DashboardApp />);
+    render(<DashboardApp />, undefined, { panelRevisions: { "channel.events": 1 } });
 
     expect(await screen.findByText("alt")).toBeInTheDocument();
     const socket = TestWebSocket.instances[0];
@@ -2392,7 +2428,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
-    render(<DashboardApp />);
+    render(<DashboardApp />, undefined, { panelRevisions: { "channel.overview": 1 } });
     await screen.findByRole("button", { name: "Automatische Aktionen fortsetzen" });
     await waitFor(() => { expect(TestWebSocket.instances).toHaveLength(1); });
     TestWebSocket.instances[0]?.open();
@@ -2479,7 +2515,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("button", { name: "Stummschaltung aufheben" })).toBeInTheDocument();
   });
 
-  it("polls shell queries while realtime is offline and stops polling after connect", async () => {
+  it("polls shell queries while realtime is offline and stops polling while connected", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
     const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [] };
@@ -2568,7 +2604,7 @@ describe("Dashboard skeleton", () => {
     }));
     window.history.replaceState({}, "", "/channels/kanal-a");
 
-    render(<DashboardApp />);
+    render(<DashboardApp />, undefined, { panelRevisions: { "channel.overview": 1 } });
     await flushQueryUpdates();
     expect(channelCalls).toBe(1);
     expect(overviewCalls).toBe(1);
@@ -3343,13 +3379,13 @@ describe("Dashboard skeleton", () => {
     }));
     window.history.replaceState({}, "", "/channels/kanal-a");
 
-    render(<DashboardApp />);
+    render(<DashboardApp />, undefined, { panelRevisions: { "channel.overview": 1 } });
     expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
     await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
-    await waitFor(() => expect(channelsCalls).toBe(2));
+    await waitFor(() => expect(channelsCalls).toBe(1));
 
     const changedAt = relativeIso(1_000);
     serverChannel = {
@@ -3380,11 +3416,12 @@ describe("Dashboard skeleton", () => {
         },
       },
     }));
+    await waitFor(() => expect(channelsCalls).toBe(2));
     await act(async () => {
       resolveDelayedChannels?.(jsonResponse({ channels: [channel], bot: channel.bot }));
       await delayedChannels;
     });
-    await waitFor(() => expect(channelsCalls).toBe(3));
+    await waitFor(() => expect(channelsCalls).toBe(2));
     expect(await screen.findByText(/^Live ·/)).toBeInTheDocument();
 
     expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
@@ -3505,7 +3542,7 @@ describe("Dashboard skeleton", () => {
     }, [initialChannel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
-    render(<DashboardApp />);
+    render(<DashboardApp />, undefined, { panelRevisions: { "channel.overview": 1 } });
 
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
     await waitFor(() => expect(overviewCalls).toBe(1));

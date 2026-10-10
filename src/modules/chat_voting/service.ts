@@ -27,12 +27,6 @@ export type VoteStartResult =
   | { status: "started"; vote: ChatVoteDraft }
   | { status: "busy" };
 
-const publishChatVotingPanelHint = async (
-  context: Pick<ModuleExecutionContext | ModuleAlarmContext, "publishModulePanelHint">,
-): Promise<void> => {
-  try { await context.publishModulePanelHint?.("panel"); } catch { /* Panel refresh hints are best-effort. */ }
-};
-
 export const chatVotingTemplateValues = (
   vote: Pick<ChatVote, "title" | "preset" | "optionCount" | "labels" | "textMode" | "requestedDurationSeconds">,
   language: ModuleLanguage,
@@ -289,7 +283,6 @@ export const processChatVotingMessage = async (
       if (result.status === "busy") {
         return { actions: [directChat(chatVotingChatText(language, "busy"))], diagnostics: [] };
       }
-      await publishChatVotingPanelHint(context);
       return {
         actions: [
           { kind: "overlay", type: "opened", elementKind: CHAT_VOTING_ELEMENT_KIND, payload: { pollId: result.vote.id } },
@@ -313,7 +306,6 @@ export const processChatVotingMessage = async (
     if (result.status !== "counted" && result.status !== "changed" && result.status !== "overflow") {
       return { actions: [], diagnostics: [] };
     }
-    await publishChatVotingPanelHint(context);
     return {
       actions: [{
         kind: "overlay",
@@ -346,7 +338,6 @@ export const processChatVotingMessage = async (
   const result = await context.ballots.cast(vote.id, userId, choice.choice,
     choice.source === "word" ? { onlyIfNew: true } : undefined);
   if (result.status !== "counted" && result.status !== "changed") return { actions: [], diagnostics: [] };
-  await publishChatVotingPanelHint(context);
   return {
     actions: [{
       kind: "overlay",
@@ -528,7 +519,6 @@ export const closeChatVoteFromAlarm = async (
   const closedVote = await repository.byId(context.channelId, pollId);
   if (closedVote === null || closedVote.status !== "closed") throw new Error("The chat vote could not be closed.");
 
-  await publishChatVotingPanelHint(context);
   await context.publishModuleOverlayMessage("tally", CHAT_VOTING_ELEMENT_KIND, {
     pollId,
     openedAt: closedVote.openedAt,

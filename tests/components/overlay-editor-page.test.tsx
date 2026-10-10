@@ -1028,7 +1028,7 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Kanalvariablen", level: 1 })).toBeInTheDocument();
-    fireEvent.click(screen.getByText("{var.score}"));
+    fireEvent.click(await screen.findByText("{var.score}"));
     fireEvent.click(await screen.findByRole("button", { name: "In Overlay verwenden" }));
     fireEvent.click(await screen.findByRole("button", { name: "Editor öffnen" }));
     expect(await screen.findByRole("heading", { name: "Overlay score", level: 1 })).toBeInTheDocument();

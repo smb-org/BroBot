@@ -7,7 +7,7 @@ import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store
 import { renderWithQuery as render } from "../query-test-utils";
 import BelaboxPanel from "../../src/modules/belabox/panel";
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
-import { invalidateDashboardRealtimeMessage, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
+import { reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 
 const mocks = vi.hoisted(() => ({
   loadBelaboxStatus: vi.fn(),
@@ -43,6 +43,7 @@ describe("BELABOX panel", () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     setDashboardRealtimeStatus("kanal-a", "offline");
     for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.resetAllMocks();
@@ -138,7 +139,7 @@ describe("BELABOX panel", () => {
     expect(mocks.loadBelaboxStreams).not.toHaveBeenCalled();
   });
 
-  it("refreshes status and history after a Belabox realtime hint", async () => {
+  it("refreshes status and history after the Belabox resource revision advances", async () => {
     mocks.loadBelaboxStatus
       .mockResolvedValueOnce({
         configured: true, updatedAt: null, mode: "on_demand", sample: null, errorCode: null,
@@ -148,18 +149,17 @@ describe("BELABOX panel", () => {
         configured: true, updatedAt: null, mode: "interval", sample: null, errorCode: null,
         polling: true, pollingDesired: true, intervalSeconds: 15, streamId: "stream-42", belaboxStreamId: "stream-42",
       });
+    let revision = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: { "module:belabox:live": revision } }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }))));
     const view = render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
 
     await waitFor(() => { expect(mocks.loadBelaboxStatus).toHaveBeenCalledOnce(); });
     expect(mocks.loadBelaboxHistory).not.toHaveBeenCalled();
-    act(() => invalidateDashboardRealtimeMessage(view.queryClient, {
-      version: 1,
-      id: "belabox-live-changed",
-      createdAt: "2026-10-09T08:00:00.000Z",
-      channelId: "channel-a",
-      type: "modul.belabox.changed",
-      payload: { part: "live" },
-    }));
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "channel-a"); });
+    revision = 1;
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "channel-a"); });
 
     await waitFor(() => {
       expect(mocks.loadBelaboxStatus).toHaveBeenCalledTimes(2);

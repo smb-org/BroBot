@@ -44,21 +44,13 @@ const votekickOverlayAction = (type: "opened" | "tally", payload: Readonly<Recor
 });
 
 const publishVotekickOverlayState = async (
-  context: Pick<ModuleAlarmContext, "publishModuleOverlayMessage" | "publishModulePanelHint">,
+  context: Pick<ModuleAlarmContext, "publishModuleOverlayMessage">,
   votekick: Votekick,
 ): Promise<void> => {
-  await publishVotekickPanelHint(context, "availability");
   if (typeof context.publishModuleOverlayMessage !== "function") return;
   try {
     await context.publishModuleOverlayMessage("tally", VOTEKICK_ELEMENT_KIND, votekickOverlayPayload(votekick));
   } catch { /* Overlay presentation must never hold up moderation or alarm cleanup. */ }
-};
-
-const publishVotekickPanelHint = async (
-  context: { publishModulePanelHint?: ModuleExecutionContext["publishModulePanelHint"] },
-  part: "panel" | "availability",
-): Promise<void> => {
-  try { await context.publishModulePanelHint?.(part); } catch { /* Panel refresh hints are best-effort. */ }
 };
 
 const chatAction = (text: string, target: VotekickSettings["chatTarget"], automated = false): ModuleAction | null =>
@@ -140,7 +132,6 @@ const preparePass = async (
 
 type VotekickFinalizeAccess = {
   ballots: ModuleExecutionContext["ballots"];
-  publishModulePanelHint?: ModuleExecutionContext["publishModulePanelHint"];
   channelLanguage: ModuleExecutionContext["channelLanguage"];
   secureRandomInteger: ModuleExecutionContext["secureRandomInteger"];
   renderTemplate: (
@@ -165,7 +156,6 @@ const finalizeVotekick = async (
   const [yesVotes, noVotes] = snapshotCounts(finalized);
   if (finalized.outcome === "open") {
     await repository.updateCounts(channelId, running.id, yesVotes, noVotes, finalized.revision);
-    await publishVotekickPanelHint(access, "panel");
     return { outcome: "open", claimed: false, counts: [yesVotes, noVotes], revision: finalized.revision };
   }
   if (finalized.outcome === "not_open") {
@@ -381,7 +371,6 @@ const commandResult = async (
     }
     ballotOpened = false;
     alarmScheduled = false;
-    await publishVotekickPanelHint(context, "availability");
     return {
       actions: [
         votekickOverlayAction("opened", { votekickId: id }),
@@ -416,7 +405,6 @@ const commandResult = async (
         liftedAt: null,
       }
       : null;
-    if (failed !== null) await publishVotekickPanelHint(context, "availability");
     return {
       actions: failed === null ? [] : [votekickOverlayAction("tally", votekickOverlayPayload(failed))],
       diagnostics: rejection("lookup_failure").diagnostics,
@@ -442,14 +430,10 @@ export const processVotekickMessage = async (
       if (!attempt.claimed) {
         let finalized: Votekick | null = null;
         try { finalized = await repository.byId(event.channelId, running.id); } catch { /* The other claimant owns moderation. */ }
-        if (finalized !== null && finalized.status !== "running") {
-          await publishVotekickPanelHint(context, "availability");
-        }
         return { actions: finalized === null ? [] : [votekickOverlayAction("tally", votekickOverlayPayload(finalized))], diagnostics: [] };
       }
       await bestEffortClose(context, running.id);
       await bestEffortClear(context, `close:${running.id}`);
-      await publishVotekickPanelHint(context, "availability");
       return {
         actions: [attempt.prepared.action, votekickOverlayAction("tally", votekickOverlayPayload(attempt.votekick))],
         diagnostics: [...attempt.prepared.diagnostics],
@@ -461,7 +445,6 @@ export const processVotekickMessage = async (
       else await context.scheduleAlarm("close", `close:${running.id}`, Date.now());
       let expired: Votekick | null = null;
       try { expired = await repository.byId(event.channelId, running.id); } catch { /* Overlay presentation is best-effort. */ }
-      if (expired !== null && expired.status !== "running") await publishVotekickPanelHint(context, "availability");
       return { actions: expired === null ? [] : [votekickOverlayAction("tally", votekickOverlayPayload(expired))], diagnostics: [] };
     }
     return null;

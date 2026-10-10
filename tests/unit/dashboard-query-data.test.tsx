@@ -8,7 +8,7 @@ import { createDashboardQueryClient } from "../../src/dashboard/data/client";
 import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useModuleQuery } from "../../src/dashboard/data";
 import { queryKeys } from "../../src/dashboard/data/keys";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
-import { setDashboardRealtimeStatus, useDashboardRealtimeStatus, invalidateDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import { reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus, useDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { useOverlayQuery } from "../../src/dashboard/data/lists";
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
 import { emptyAuditFilter } from "../../src/dashboard/audit/model";
@@ -152,19 +152,18 @@ describe("dashboard query data layer", () => {
 
     const view = renderWithQuery(<ModuleProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
     expect(await screen.findByText("1")).toBeInTheDocument();
-    const message = {
-      version: 1 as const,
-      id: "chat-vote-change",
-      createdAt: "2026-10-09T08:00:00.000Z",
-      channelId,
-      type: "modul.chat_voting.changed" as const,
-      payload: { part: "panel" as const },
-    };
-
-    invalidateDashboardRealtimeMessage(view.queryClient, message);
+    let revision = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: { "module:chat_voting:panel": revision } }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }))));
+    await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
+    revision = 1;
+    await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
     await refreshStarted;
-    invalidateDashboardRealtimeMessage(view.queryClient, { ...message, id: "chat-vote-tally-2" });
-    invalidateDashboardRealtimeMessage(view.queryClient, { ...message, id: "chat-vote-tally-3" });
+    revision = 2;
+    await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
+    revision = 3;
+    await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
     expect(readCount).toBe(2);
 
     releaseRefresh?.();
@@ -185,18 +184,16 @@ describe("dashboard query data layer", () => {
 
     const view = renderWithQuery(<ModuleProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
     expect(await screen.findByText("1")).toBeInTheDocument();
-    const message = {
-      version: 1 as const,
-      id: "chat-vote-change-0",
-      createdAt: "2026-10-09T08:00:00.000Z",
-      channelId,
-      type: "modul.chat_voting.changed" as const,
-      payload: { part: "panel" as const },
-    };
+    let revision = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: { "module:chat_voting:panel": revision } }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }))));
+    await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
 
     for (let index = 0; index < 20; index += 1) {
       await new Promise((resolve) => { setTimeout(resolve, 50); });
-      invalidateDashboardRealtimeMessage(view.queryClient, { ...message, id: `chat-vote-tally-${String(index + 1)}` });
+      revision += 1;
+      await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
     }
     await new Promise((resolve) => { setTimeout(resolve, 300); });
 

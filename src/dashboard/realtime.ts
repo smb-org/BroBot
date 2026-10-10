@@ -3,11 +3,11 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import type { PanelChannelControl, PanelChannelControls } from "../panel-contract";
 import type { RealtimeEnvelope, RealtimeEventLogHint, RealtimeMessage } from "../realtime-contract";
-import type { AdsSchedule } from "../modules/ads/contracts";
-import { REALTIME_PROTOCOL, isPanelModuleRealtimeMessageType, isPanelModuleRealtimePayload } from "../realtime-contract";
+import { REALTIME_PROTOCOL } from "../realtime-contract";
 import {
   invalidateDashboardChannelQueries,
-  invalidateDashboardRealtimeMessage,
+  reconcileDashboardRealtimeMessage,
+  reconcileDashboardPanelResourceRevisions,
   setDashboardRealtimeStatus,
   useDashboardRealtimeStatus,
 } from "./data/realtime";
@@ -41,14 +41,6 @@ const isHint = (value: unknown): value is RealtimeEventLogHint => {
     (value.actorUserId === null || typeof value.actorUserId === "string");
 };
 
-const isAdSchedule = (value: unknown): value is AdsSchedule => isRecord(value) &&
-  (value.nextAdAt === null || typeof value.nextAdAt === "string") &&
-  (value.duration === null || typeof value.duration === "number") &&
-  (value.lastAdAt === null || typeof value.lastAdAt === "string") &&
-  (value.prerollFreeTime === null || typeof value.prerollFreeTime === "number") &&
-  (value.snoozeCount === null || typeof value.snoozeCount === "number") &&
-  (value.snoozeRefreshAt === null || typeof value.snoozeRefreshAt === "string");
-
 const isPanelChannelControl = (value: unknown): value is PanelChannelControl =>
   isRecord(value) && typeof value.active === "boolean" &&
   (value.pending === undefined || typeof value.pending === "boolean") &&
@@ -75,10 +67,9 @@ const isKnownEnvelope = (value: Record<string, unknown>): value is Record<string
   typeof value.id === "string" && value.id.length > 0 &&
   typeof value.createdAt === "string" && value.createdAt.length > 0 &&
   typeof value.channelId === "string" && value.channelId.length > 0 &&
-  (value.type === "system.hello" || value.type === "event_log.new" ||
+  (value.type === "system.hello" || value.type === "panel.resources.changed" || value.type === "event_log.new" ||
     value.type === "variables.changed" || value.type === "overlay.changed" ||
-    value.type === "ads.schedule.updated" || value.type === "stream.state.changed" ||
-    typeof value.type === "string" && isPanelModuleRealtimeMessageType(value.type));
+    value.type === "stream.state.changed");
 
 export const parseRealtimeMessage = (raw: string, channelId: string): RealtimeParseResult => {
   let parsed: unknown;
@@ -92,15 +83,20 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
     return { kind: "foreign-channel" };
   }
   if (!isKnownEnvelope(parsed)) return { kind: "ignored" };
-  if (isPanelModuleRealtimeMessageType(parsed.type)) {
-    return isPanelModuleRealtimePayload(parsed.type, parsed.payload)
-      ? { kind: "message", message: parsed as RealtimeMessage }
-      : { kind: "ignored" };
-  }
   if (parsed.type === "system.hello") {
     return parsed.payload !== null && isRecord(parsed.payload) && Object.keys(parsed.payload).length === 0
       ? { kind: "message", message: parsed as RealtimeEnvelope<"system.hello"> }
       : { kind: "ignored" };
+  }
+  if (parsed.type === "panel.resources.changed") {
+    if (!isRecord(parsed.payload) || !Array.isArray(parsed.payload.resources) ||
+        parsed.payload.resources.length > 128 || !parsed.payload.resources.every((resource) =>
+          typeof resource === "string" && resource.length > 0 && resource.length <= 128) ||
+        !isRecord(parsed.payload.revisions) || Object.keys(parsed.payload.revisions).length > 128 ||
+        !Object.entries(parsed.payload.revisions).every(([resource, revision]) =>
+          resource.length > 0 && resource.length <= 128 && typeof revision === "number" &&
+          Number.isSafeInteger(revision) && revision >= 0)) return { kind: "ignored" };
+    return { kind: "message", message: parsed as RealtimeEnvelope<"panel.resources.changed"> };
   }
   if (parsed.type === "variables.changed") {
     return isVariablesChangedPayload(parsed.payload)
@@ -111,12 +107,6 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
     return isRecord(parsed.payload) && typeof parsed.payload.overlayId === "string" && parsed.payload.overlayId.length > 0 &&
       typeof parsed.payload.revision === "number" && Number.isSafeInteger(parsed.payload.revision)
       ? { kind: "message", message: parsed as RealtimeEnvelope<"overlay.changed"> }
-      : { kind: "ignored" };
-  }
-  if (parsed.type === "ads.schedule.updated") {
-    return isRecord(parsed.payload) && isAdSchedule(parsed.payload.schedule) &&
-      typeof parsed.payload.asOf === "string" && parsed.payload.asOf.length > 0
-      ? { kind: "message", message: parsed as RealtimeEnvelope<"ads.schedule.updated"> }
       : { kind: "ignored" };
   }
   if (parsed.type === "stream.state.changed") {
@@ -202,9 +192,11 @@ const connectPanelSocket = (channelId: string, connection: PanelSocketConnection
     connection.socket = socket;
     socket.addEventListener("open", () => {
       if (connection.disposed) return;
-      invalidateDashboardChannelQueries(connection.queryClient, channelId);
+      const reconnected = connection.reconnectAttempt > 0;
       connection.reconnectAttempt = 0;
       setDashboardRealtimeStatus(channelId, "connected");
+      if (reconnected) invalidateDashboardChannelQueries(connection.queryClient, channelId);
+      void reconcileDashboardPanelResourceRevisions(connection.queryClient, channelId);
     });
     socket.addEventListener("message", (event: MessageEvent<unknown>) => {
       if (typeof event.data !== "string") return;
@@ -215,7 +207,7 @@ const connectPanelSocket = (channelId: string, connection: PanelSocketConnection
       }
       if (parsed.kind !== "message" || connection.seenMessageIds.has(parsed.message.id)) return;
       connection.seenMessageIds.add(parsed.message.id);
-      invalidateDashboardRealtimeMessage(connection.queryClient, parsed.message);
+      void reconcileDashboardRealtimeMessage(connection.queryClient, parsed.message);
     });
     socket.addEventListener("close", (event: CloseEvent) => {
       if (connection.disposed) return;
@@ -287,7 +279,17 @@ export const useRealtimePanelMessages = (channelId: string | null, enabled: bool
       return;
     }
     activeChannelId.current = channelId;
-    return acquirePanelSocket(channelId, queryClient);
+    const refreshOnFocus = (): void => {
+      if (document.visibilityState === "visible") {
+        void reconcileDashboardPanelResourceRevisions(queryClient, channelId);
+      }
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    const release = acquirePanelSocket(channelId, queryClient);
+    return () => {
+      window.removeEventListener("focus", refreshOnFocus);
+      release();
+    };
   }, [channelId, enabled, queryClient]);
 };
 

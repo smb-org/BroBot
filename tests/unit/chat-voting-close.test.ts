@@ -57,11 +57,6 @@ describe("chat voting close service", () => {
     });
     const read = vi.fn<() => Promise<BallotSnapshot | null>>(() => { order.push("read"); return Promise.resolve(snapshot); });
     const close = vi.fn<() => Promise<BallotSnapshot | null>>(() => { order.push("close"); return Promise.resolve(snapshot); });
-    const publishModulePanelHint = vi.fn((part: string) => {
-      order.push("panel-hint");
-      void part;
-      return Promise.resolve();
-    });
     const publishModuleOverlayMessage = vi.fn<ModuleAlarmContext["publishModuleOverlayMessage"]>(
       () => { order.push("overlay"); return Promise.resolve(); },
     );
@@ -88,7 +83,6 @@ describe("chat voting close service", () => {
       clear: vi.fn(),
       renderTemplate: vi.fn(() => Promise.resolve({ text: "Yes: 7 (70%) · No: 3 (30%)" })),
       publishModuleOverlayMessage,
-      publishModulePanelHint,
       sendChat: vi.fn((...args: Parameters<ModuleAlarmContext["sendChat"]>) => {
         void args;
         order.push("chat");
@@ -100,7 +94,7 @@ describe("chat voting close service", () => {
       streamStartedAt: vi.fn(() => Promise.resolve({ streamId: null, startedAt: null })),
       channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
     } as unknown as ModuleAlarmContext;
-    return { context, values, close, read, publishModuleOverlayMessage, publishModulePanelHint, sendChat, storagePut };
+    return { context, values, close, read, publishModuleOverlayMessage, sendChat, storagePut };
   };
 
   it("coalesces concurrent manual-close requests onto the same alarm key", async () => {
@@ -243,7 +237,7 @@ describe("chat voting close service", () => {
     }));
     const finalSnapshot = { counts: [], revision: 201, terms, more: 0, termFilterReady: true };
     const order: string[] = [];
-    const { context, read, close, publishModuleOverlayMessage, publishModulePanelHint } = createAlarmContext(order);
+    const { context, read, close, publishModuleOverlayMessage } = createAlarmContext(order);
     read.mockResolvedValue(finalSnapshot);
     close.mockResolvedValue(finalSnapshot);
     const overlayOutcomes: string[] = [];
@@ -261,8 +255,6 @@ describe("chat voting close service", () => {
     await closeChatVoteFromAlarm(context, repository, "fictional-poll");
 
     expect(overlayOutcomes).toEqual(["rejected"]);
-    expect(publishModulePanelHint).toHaveBeenCalledWith("panel");
-    expect(order.indexOf("panel-hint")).toBeLessThan(order.indexOf("overlay"));
   });
 
   it("includes a vote question in the default result announcement and closed overlay state", async () => {

@@ -8,10 +8,12 @@ import { panelRouter } from "./panel/routes";
 import { realtimeRouter } from "./realtime";
 import { scheduled } from "./scheduled";
 import { serverTimingMiddleware } from "./server-timing";
+import { notifyCommittedResources, PANEL_RESOURCE_NOTIFIER_COVERAGE } from "./panel-resources";
 
 export { ChannelObject } from "./durable/ChannelObject";
 
 const app = new Hono<{ Bindings: Env }>();
+const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 const overlayContentSecurityPolicy = (publicOrigin: string): string => {
   const publicUrl = new URL(publicOrigin);
@@ -76,6 +78,32 @@ const overlayApiPreflight = (): Response => addWildcardCors(
 );
 
 app.use("/api/*", serverTimingMiddleware);
+app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes, async (context, next) => {
+  try {
+    await next();
+  } finally {
+    const channelId = context.req.param("channelId");
+    if (channelId.length > 0) {
+      await notifyCommittedResources(context.env, channelId);
+    }
+  }
+});
+app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.platformRoutes, async (context, next) => {
+  try {
+    await next();
+  } finally {
+    if (mutatingMethods.has(context.req.method.toUpperCase())) {
+      await notifyCommittedResources(context.env);
+    }
+  }
+});
+app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.authRoutes, async (context, next) => {
+  try {
+    await next();
+  } finally {
+    await notifyCommittedResources(context.env);
+  }
+});
 app.route("/", authRouter);
 app.route("/", platformRouter);
 app.route("/", panelRouter);

@@ -37,7 +37,6 @@ import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, Mo
 import { BroadcasterConsentAction, ChannelNotices, ImmediateActions, ModeratorCheckAction, WarningsAndErrorsFeed } from "./stream-manager";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
 import { useSystemQuery } from "./data/lists";
-import { useDashboardRealtimeStatus } from "./data/realtime";
 import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
@@ -58,6 +57,7 @@ import { OverlaysPage } from "./OverlaysPage";
 import { OverlayEditorPage } from "./OverlayEditorPage";
 import { emptyAuditFilter, auditFilterIsActive } from "./audit/model";
 import { useRealtimePanelMessages } from "./realtime";
+import { useDashboardRealtimeStatus } from "./data/realtime";
 import { channelSettingsTexts } from "./channel-settings-locale";
 import { ChannelTimeZoneField } from "./ChannelTimeZoneField";
 import { ChannelLocationField } from "./ChannelLocationField";
@@ -1223,6 +1223,7 @@ export const DashboardApp = (): ReactElement => {
   const [route, navigate] = useDashboardRoute();
   const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
   const realtimeStatus = useDashboardRealtimeStatus(realtimeChannelId ?? "");
+  const offlineRefetchInterval = realtimeStatus === "connected" ? false : 180_000;
   const routeRef = useRef(route);
   useLayoutEffect(() => { routeRef.current = route; }, [route]);
   const queryClient = useQueryClient();
@@ -1237,7 +1238,6 @@ export const DashboardApp = (): ReactElement => {
   const channelsQuery = useQuery<PanelChannelsResponse>({
     queryKey: queryKeys.channels(),
     refetchOnWindowFocus: false,
-    refetchInterval: realtimeStatus === "connected" ? false : 180_000,
     queryFn: async ({ signal }) => {
       const response = await fetchChannels(signal);
       return {
@@ -1247,6 +1247,7 @@ export const DashboardApp = (): ReactElement => {
         ),
       };
     },
+    refetchInterval: offlineRefetchInterval,
     enabled: !authenticationRequired,
   });
   const channelsResponse = channelsQuery.data;
@@ -1270,12 +1271,12 @@ export const DashboardApp = (): ReactElement => {
   const overviewQuery = useQuery<PanelChannelOverview>({
     queryKey: queryKeys.channel(overviewChannelId ?? "", "overview"),
     refetchOnWindowFocus: false,
-    refetchInterval: realtimeStatus === "connected" ? false : 180_000,
     queryFn: async ({ signal }) => {
       if (overviewChannelId === null) throw new Error("An overview query needs a channel ID.");
       const response = await fetchChannelOverview(overviewChannelId, signal);
       return mergeAndRememberChannelStreamVersion(response, latestStreamByChannel.current);
     },
+    refetchInterval: overviewChannelId === null ? false : offlineRefetchInterval,
     enabled: !authenticationRequired && overviewChannelId !== null &&
       (route.kind === "module" || (route.kind === "channel" && route.section === "overview")),
     placeholderData: (previousData, previousQuery) =>
@@ -1287,7 +1288,7 @@ export const DashboardApp = (): ReactElement => {
   const systemQuery = useSystemQuery(
     systemChannelId ?? "",
     !authenticationRequired && systemChannelId !== null,
-    realtimeStatus === "connected" ? false : 180_000,
+    systemChannelId === null ? false : offlineRefetchInterval,
   );
   const [, setFreshnessTick] = useState(0);
   const routeKey = dashboardRoutePath(route);

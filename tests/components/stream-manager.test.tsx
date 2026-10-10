@@ -8,7 +8,7 @@ import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { PanelChannelOverview } from "../../src/panel-contract";
 import { ChannelNotices, ImmediateActions, WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
-import { invalidateDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import { reconcileDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { jsonResponse } from "../unit/fixtures";
 import { renderWithQuery as render } from "../query-test-utils";
@@ -451,7 +451,11 @@ describe("Stream Manager warnings and errors feed", () => {
     };
     let requests = 0;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      if (requestUrl(input).pathname === "/api/channels/kanal-a/events") {
+      const pathname = requestUrl(input).pathname;
+      if (pathname === "/api/channels/kanal-a/revisions") {
+        return Promise.resolve(jsonResponse({ revisions: { "channel.events": 1, "module:host:data": 1 } }));
+      }
+      if (pathname === "/api/channels/kanal-a/events") {
         requests += 1;
         const next = {
           eventId: "realtime-error",
@@ -472,14 +476,14 @@ describe("Stream Manager warnings and errors feed", () => {
     const rendered = renderWithMantine(<WarningsAndErrorsFeed channelId="kanal-a" />);
 
     expect(await screen.findByText("Werbeeinblendung nicht gestartet: Stream ist offline")).toBeInTheDocument();
-    act(() => invalidateDashboardRealtimeMessage(rendered.queryClient, {
+    await act(async () => { await reconcileDashboardRealtimeMessage(rendered.queryClient, {
       version: 1,
       id: "hint-1",
       createdAt: "2026-09-22T10:01:00.000Z",
       channelId: "kanal-a",
       type: "event_log.new",
       payload: { entries: [{ eventId: "realtime-error", createdAt: "2026-09-22T10:01:00.000Z", moduleId: "host", code: "host.action.failed", actorUserId: null }] },
-    } satisfies RealtimeMessage));
+    } satisfies RealtimeMessage); });
 
     expect(await screen.findByText("Aktion fehlgeschlagen")).toBeInTheDocument();
     expect(requests).toBe(2);

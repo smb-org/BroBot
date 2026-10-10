@@ -1,5 +1,4 @@
 import type { ChannelRole, ChannelStreamState } from "./contracts/values";
-import type { AdsSchedule } from "./modules/ads/contracts";
 import type { PanelChannelControls } from "./panel-contract";
 
 /** The only protocol version used on the wire. */
@@ -12,24 +11,14 @@ export const OVERLAY_ACCESS_BOUND_CLOSE_REASON = "Overlay access bound";
 
 export const REALTIME_MESSAGE_TYPES = [
   "system.hello",
+  "panel.resources.changed",
   "event_log.new",
   "variables.changed",
   "overlay.changed",
-  "ads.schedule.updated",
   "stream.state.changed",
 ] as const;
 export type FixedRealtimeMessageType = (typeof REALTIME_MESSAGE_TYPES)[number];
 export type ModuleOverlayRealtimeMessageType = `modul.${string}.${string}`;
-
-export type PanelModuleHintPart = "panel" | "live" | "availability";
-
-export interface PanelModuleRealtimePayloads {
-  "modul.chat_voting.changed": { part: "panel" };
-  "modul.belabox.changed": { part: "live" };
-  "modul.votekick.changed": { part: "panel" | "availability" };
-}
-
-export type PanelModuleRealtimeMessageType = keyof PanelModuleRealtimePayloads;
 
 export interface ModuleOverlayRealtimePayloads {
   "modul.text_library.blocks_updated": { blockName: string };
@@ -64,6 +53,10 @@ export interface RealtimeEventLogHint {
 
 export interface RealtimePayloads {
   "system.hello": Record<string, never>;
+  "panel.resources.changed": {
+    resources: readonly string[];
+    revisions: Readonly<Record<string, number>>;
+  };
   "event_log.new": {
     entries: readonly RealtimeEventLogHint[];
   };
@@ -77,7 +70,6 @@ export interface RealtimePayloads {
     overlayId: string;
     revision: number;
   };
-  "ads.schedule.updated": { schedule: AdsSchedule; asOf: string };
   "stream.state.changed": {
     state: ChannelStreamState;
     startedAt: string | null;
@@ -109,21 +101,9 @@ export type ModuleOverlayRealtimeEnvelope<Type extends ModuleOverlayRealtimeMess
   }
 }[Type];
 
-export type PanelModuleRealtimeEnvelope<Type extends PanelModuleRealtimeMessageType = PanelModuleRealtimeMessageType> = {
-  [EnvelopeType in Type]: {
-    version: RealtimeProtocolVersion;
-    id: string;
-    createdAt: string;
-    channelId: string;
-    type: EnvelopeType;
-    payload: PanelModuleRealtimePayloads[EnvelopeType];
-  }
-}[Type];
-
 export type RealtimeEnvelope<Type extends RealtimeMessageType = RealtimeMessageType> =
   Type extends FixedRealtimeMessageType ? FixedRealtimeEnvelope<Type>
-    : Type extends PanelModuleRealtimeMessageType ? PanelModuleRealtimeEnvelope<Type>
-      : Type extends ModuleOverlayRealtimeMessageType ? ModuleOverlayRealtimeEnvelope<Type>
+    : Type extends ModuleOverlayRealtimeMessageType ? ModuleOverlayRealtimeEnvelope<Type>
       : never;
 
 /**
@@ -133,59 +113,34 @@ export type RealtimeEnvelope<Type extends RealtimeMessageType = RealtimeMessageT
  * type-checks here. Other modules keep the broad, undiscriminated envelope for now.
  */
 type AnyModuleOverlayRealtimeEnvelope =
-  | ModuleOverlayRealtimeEnvelope<Exclude<KnownModuleOverlayRealtimeMessageType, keyof ModuleOverlayRealtimePayloads | PanelModuleRealtimeMessageType>>
+  | ModuleOverlayRealtimeEnvelope<Exclude<KnownModuleOverlayRealtimeMessageType, keyof ModuleOverlayRealtimePayloads>>
   | ModuleOverlayRealtimeEnvelope<keyof ModuleOverlayRealtimePayloads>;
 
 export type RealtimeMessage = { [Type in FixedRealtimeMessageType]: FixedRealtimeEnvelope<Type> }[FixedRealtimeMessageType]
-  | AnyModuleOverlayRealtimeEnvelope
-  | PanelModuleRealtimeEnvelope;
+  | AnyModuleOverlayRealtimeEnvelope;
 
 export const isModuleOverlayRealtimeMessageType = (type: string): type is ModuleOverlayRealtimeMessageType =>
   /^modul\.[a-z][a-z0-9_]*\.[a-z][a-z0-9_-]*$/u.test(type);
 
-/** Bounded panel-only invalidation hints; module overlay payloads stay overlay-only. */
-const PANEL_MODULE_REALTIME_MESSAGE_TYPES = new Set<PanelModuleRealtimeMessageType>([
-  "modul.chat_voting.changed",
-  "modul.belabox.changed",
-  "modul.votekick.changed",
-]);
-
-export const isPanelModuleRealtimeMessageType = (
-  type: string,
-): type is PanelModuleRealtimeMessageType => PANEL_MODULE_REALTIME_MESSAGE_TYPES.has(type as PanelModuleRealtimeMessageType);
-
-export const isPanelModuleRealtimePayload = (type: string, payload: unknown): boolean => {
-  if (!isPanelModuleRealtimeMessageType(type) || typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    return false;
-  }
-  const values = payload as Readonly<Record<string, unknown>>;
-  if (Object.keys(values).length !== 1 || !Object.hasOwn(values, "part")) return false;
-  if (type === "modul.chat_voting.changed") return values.part === "panel";
-  if (type === "modul.belabox.changed") return values.part === "live";
-  return values.part === "panel" || values.part === "availability";
-};
-
 export const isModuleOverlayRealtimeEnvelope = (
   message: RealtimeMessage,
 ): message is AnyModuleOverlayRealtimeEnvelope =>
-  isModuleOverlayRealtimeMessageType(message.type) && !isPanelModuleRealtimeMessageType(message.type);
+  isModuleOverlayRealtimeMessageType(message.type);
 
 export type RealtimeRecipientKind = "panel" | "overlay";
 
 /** Every wire type is explicitly limited to the clients allowed to receive it. */
 export const REALTIME_RECIPIENTS = {
   "system.hello": ["panel", "overlay"],
+  "panel.resources.changed": ["panel"],
   "event_log.new": ["panel"],
   "variables.changed": ["panel", "overlay"],
   "overlay.changed": ["panel", "overlay"],
-  "ads.schedule.updated": ["panel"],
   "stream.state.changed": ["panel"],
 } as const satisfies Record<FixedRealtimeMessageType, readonly RealtimeRecipientKind[]>;
 
 export const realtimeRecipients = (type: RealtimeMessageType | ModuleOverlayRealtimeMessageType): readonly RealtimeRecipientKind[] =>
-  isModuleOverlayRealtimeMessageType(type)
-    ? isPanelModuleRealtimeMessageType(type) ? ["panel"] : ["overlay"]
-    : REALTIME_RECIPIENTS[type];
+  isModuleOverlayRealtimeMessageType(type) ? ["overlay"] : REALTIME_RECIPIENTS[type];
 
 export type RealtimePanelPrincipal = {
   v: RealtimeProtocolVersion;

@@ -151,7 +151,7 @@ describe("worker skeleton", () => {
     it("checks the schema by highest migration number, not by application order", async () => {
       const database = (env as unknown as { DB: D1Database }).DB;
       const status = async () => (await exports.default.fetch(new Request("http://localhost/healthz"))).status;
-      const sentinel: string = "0046_chat_voting_kind.sql";
+      const sentinel: string = "0047_panel_resource_revisions.sql";
       const original = (await database.prepare("SELECT name FROM d1_migrations WHERE name LIKE '0040_%' OR name = ?")
         .bind(sentinel).all<{ name: string }>()).results.map((row) => row.name);
       const reinsert = async (names: string[]): Promise<void> => {
@@ -162,7 +162,7 @@ describe("worker skeleton", () => {
         }
       };
       try {
-        // 0040 applied last (highest id) but the highest number is still 0046.
+        // 0040 applied last (highest id) but the highest number is still 0047.
         await reinsert(original.filter((name) => name === sentinel).concat(original.filter((name) => name !== sentinel)));
         expect(await status()).toBe(200);
 

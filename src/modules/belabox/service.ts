@@ -64,10 +64,6 @@ const LIVE_BUFFER_MAX_POINTS = 120;
 const FETCH_FAILURE_THRESHOLD = 3;
 const INFRASTRUCTURE_RETRY_MAX_MS = 60_000;
 
-const publishBelaboxPanelHint = async (context: Pick<ModuleAlarmContext, "publishModulePanelHint">): Promise<void> => {
-  try { await context.publishModulePanelHint?.("live"); } catch { /* Panel refresh hints are best-effort. */ }
-};
-
 /** Sets fresh chat templates to the channel language whenever BELABOX is enabled. */
 export const belaboxAlertDefaultsOnEnable = async (
   context: ModuleEnableContext,
@@ -296,7 +292,6 @@ const stopPolling = async (
       ...(prerequisites.secretUnavailable ? { errorCode: BELABOX_SECRET_UNAVAILABLE_STATUS_CODE } : {}),
     },
   );
-  if (current) await publishBelaboxPanelHint(context);
   if (current && hadVisibleState && prerequisites.streamState === "offline") {
     try {
       await context.publishModuleOverlayMessage("state_changed", "belabox.status", {
@@ -640,7 +635,6 @@ const sendPendingAlert = async (
           latest.alertState.pendingChat.episodeStartedAt !== output.episodeStartedAt) return;
       const next = settleAlertChat(latest.alertState, { sent: result.sent, retryable: result.retryable }, Date.now());
       if (await writeBelaboxAlertState(context.DB, context.channelId, next, latest.revision) !== null) {
-        await publishBelaboxPanelHint(context);
         return;
       }
     }
@@ -729,7 +723,6 @@ const runBelaboxPoll = async (
           currentStatus.revision,
           prerequisites.streamSnapshot,
         );
-        if (cleared) await publishBelaboxPanelHint(context);
         if (!cleared) await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
       }
       return;
@@ -737,7 +730,7 @@ const runBelaboxPoll = async (
     const prerequisites = await alarmPrerequisites(context, requiredMode);
     delay = retryDelay(prerequisites.settings);
     if (prerequisites.secretReadFailed) {
-      const current = await finalizeAndResetBelaboxHistory(
+      await finalizeAndResetBelaboxHistory(
         context.DB,
         context.channelId,
         new Date().toISOString(),
@@ -749,7 +742,6 @@ const runBelaboxPoll = async (
           maxBaselineAgeMs: (prerequisites.historyIntervalSeconds ?? 0) * 2_000,
         },
       );
-      if (current) await publishBelaboxPanelHint(context);
       if (reason !== "on_demand") await reschedulePollAfterFailure(context, deadline, delay);
       return reason === "alarm" ? undefined : { ok: false, reason: "network" };
     }
@@ -760,12 +752,10 @@ const runBelaboxPoll = async (
     }
     pollMode = prerequisites.settings.mode;
     if (pollMode === "interval") {
-      let panelStateChanged = false;
       if (prerequisites.moduleRevision !== null) {
-        panelStateChanged = await reopenCurrentBelaboxStream(context.DB, context.channelId, prerequisites.moduleRevision);
+        await reopenCurrentBelaboxStream(context.DB, context.channelId, prerequisites.moduleRevision);
       }
-      panelStateChanged = await markBelaboxPollingStarted(context.DB, context.channelId) || panelStateChanged;
-      if (panelStateChanged) await publishBelaboxPanelHint(context);
+      await markBelaboxPollingStarted(context.DB, context.channelId);
     }
     const originSession = streamSessionFromSnapshot(prerequisites.streamSnapshot);
     const result = await fetchRelaySample(
@@ -782,11 +772,10 @@ const runBelaboxPoll = async (
       originSession,
       pollMode,
     );
-    if (stored.kind === "stored") await publishBelaboxPanelHint(context);
 
     const latest = await alarmPrerequisites(context, requiredMode);
     if (latest.secretReadFailed) {
-      const current = await finalizeAndResetBelaboxHistory(
+      await finalizeAndResetBelaboxHistory(
         context.DB,
         context.channelId,
         new Date().toISOString(),
@@ -798,7 +787,6 @@ const runBelaboxPoll = async (
           maxBaselineAgeMs: (latest.historyIntervalSeconds ?? 0) * 2_000,
         },
       );
-      if (current) await publishBelaboxPanelHint(context);
       if (pollMode === "interval") await reschedulePollAfterFailure(context, deadline, retryDelay(latest.settings));
       return reason === "alarm" ? undefined : { ok: false, reason: "network" };
     }
@@ -820,7 +808,6 @@ const runBelaboxPoll = async (
           maxBaselineAgeMs: (latest.historyIntervalSeconds ?? 0) * 2_000,
         },
       );
-      if (current) await publishBelaboxPanelHint(context);
       await ensureLifecycleRevision(context, current);
       if (current && pollMode === "interval") await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
       return reason === "alarm" ? undefined : { ok: false, reason: "stream_changed" };
@@ -842,7 +829,6 @@ const runBelaboxPoll = async (
           maxBaselineAgeMs: (latest.historyIntervalSeconds ?? 0) * 2_000,
         },
       );
-      if (current) await publishBelaboxPanelHint(context);
       await ensureLifecycleRevision(context, current);
       if (current && pollMode === "interval") await context.schedule(BELABOX_POLL_ALARM_KEY, Date.now());
       return reason === "alarm" ? undefined : { ok: false, reason: "not_configured" };

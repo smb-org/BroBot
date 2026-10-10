@@ -61,6 +61,7 @@ import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { getChannelModuleForChannel } from "../db/channel-modules";
 import { measureServerTiming, scheduleBackgroundWork } from "../server-timing";
 import { DEFAULT_CHANNEL_TIME_ZONE, validChannelTimeZone } from "../../modules/contract";
+import { readCompletePanelResourceRevisions } from "../panel-resources";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -226,6 +227,15 @@ const isChannelControlKind = (value: string): value is ChannelControlKind =>
   value === "mute" || value === "pause";
 
 export const panelRouter = new Hono<PanelEnvironment>();
+
+panelRouter.get(
+  "/api/channels/:channelId/revisions",
+  requireChannelAuthorization(),
+  async (context) => {
+    const channelId = context.req.param("channelId");
+    return context.json({ revisions: await readCompletePanelResourceRevisions(context.env, channelId) });
+  },
+);
 
 panelRouter.route("/", memberRouter);
 panelRouter.route("/", moduleRouter);

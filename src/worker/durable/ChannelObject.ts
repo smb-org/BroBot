@@ -46,7 +46,12 @@ import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
-import { modulePanelHintMessage } from "../module-panel-realtime";
+import {
+  notifyCommittedResources,
+  panelResourceChangedMessage,
+  readPanelResourceRevisions,
+  type PanelResourceRevisionVector,
+} from "../panel-resources";
 import { createModuleSecretAccess } from "../module-secrets";
 import { sendChatMessage } from "../chat";
 import { sendModerationBan } from "../moderation";
@@ -102,6 +107,7 @@ const D1_IN_PARAMETER_LIMIT = 100;
 const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
+const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
@@ -123,6 +129,7 @@ const TWITCH_RETRY_AFTER_KEY = "twitch:retry_after";
 const AD_COUNTDOWN_REFRESH_ATTEMPT_KEY = "ads:countdown_refresh_attempt";
 const AD_COUNTDOWN_REFRESH_DEADLINE_KEY = "ads:countdown_refresh_deadline";
 const AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY = "ads:countdown_refresh_retry_count";
+const PANEL_PUBLISHED_REVISIONS_KEY = "panel:published_resource_revisions";
 const OVERLAY_STREAM_DETAILS_CACHE_KEY = "overlay:stream_details";
 const CHANNEL_GAME_ID_CACHE_KEY = "channel:game_id";
 // A failed lookup retries almost immediately instead of sitting on the full
@@ -131,6 +138,16 @@ const CHANNEL_GAME_ID_CACHE_KEY = "channel:game_id";
 const CHANNEL_GAME_ID_FAILURE_CACHE_TTL_MS = 5_000;
 const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
 const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
+
+const bumpDurablePanelResources = async (
+  transaction: Pick<DurableObjectTransaction, "get" | "put">,
+  resources: readonly string[],
+): Promise<void> => {
+  const revisions = await transaction.get<PanelResourceRevisionVector>(PANEL_DURABLE_REVISIONS_KEY) ?? {};
+  const next = { ...revisions };
+  for (const resource of new Set(resources)) next[resource] = (next[resource] ?? 0) + 1;
+  await transaction.put(PANEL_DURABLE_REVISIONS_KEY, next);
+};
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
 const AD_COUNTDOWN_REFRESH_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
 const ALARM_HANDLER_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
@@ -636,6 +653,7 @@ export class ChannelObject extends DurableObject<Env> {
         const previousCountdownState = previous === undefined ? null : adCountdownStateForSchedule(previous.schedule, previous.asOf);
         await transaction.put(AD_SCHEDULE_GENERATION_KEY, currentGeneration + 1);
         await transaction.put(AD_SCHEDULE_CACHE_KEY, cache);
+        await bumpDurablePanelResources(transaction, ["module:ads:schedule"]);
         return {
           changed: previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule),
           countdownChanged: previousCountdownState === null ||
@@ -646,11 +664,14 @@ export class ChannelObject extends DurableObject<Env> {
         };
       });
       if (change === null) return null;
+      await this.notifyCommittedPanelResources();
       if (reconcileAlarm) await this.reconcileAdPrewarning(schedule, grantedScopes);
       try {
         await writeAdCountdownState(this.env.DB, channelId, countdownState, asOf);
       } catch (error: unknown) {
         console.warn("Ad countdown state snapshot could not be stored.", error);
+      } finally {
+        await this.notifyCommittedPanelResources();
       }
       if (change.changed) await this.notifyScheduleInputsChanged("event_times");
       await this.reconcileAdCountdownRefresh(schedule);
@@ -668,14 +689,6 @@ export class ChannelObject extends DurableObject<Env> {
           console.warn("Ad countdown overlay update could not be sent.", error);
         }
       }
-      await this.publish([{
-        version: 1,
-        id: crypto.randomUUID(),
-        createdAt: asOf,
-        channelId,
-        type: "ads.schedule.updated",
-        payload: { schedule, asOf },
-      }]);
       return change.changed;
     });
   }
@@ -1287,8 +1300,22 @@ export class ChannelObject extends DurableObject<Env> {
       },
       storage: {
         get: (key: string) => this.ctx.storage.get(`${storagePrefix}${key}`),
-        put: (key: string, value: unknown) => this.ctx.storage.put(`${storagePrefix}${key}`, value),
-        delete: (key: string) => this.ctx.storage.delete(`${storagePrefix}${key}`),
+        put: async (key: string, value: unknown) => {
+          await this.ctx.storage.transaction(async (transaction) => {
+            await transaction.put(`${storagePrefix}${key}`, value);
+            await bumpDurablePanelResources(transaction, [`module:${moduleId}:data`]);
+          });
+          await this.notifyCommittedPanelResources();
+        },
+        delete: async (key: string) => {
+          const deleted = await this.ctx.storage.transaction(async (transaction) => {
+            const removed = await transaction.delete(`${storagePrefix}${key}`);
+            if (removed) await bumpDurablePanelResources(transaction, [`module:${moduleId}:data`]);
+            return removed;
+          });
+          if (deleted) await this.notifyCommittedPanelResources();
+          return deleted;
+        },
       },
       schedule: async (key, deadline, ownerRevision) => {
         const scheduledRegistration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === key);
@@ -1331,15 +1358,6 @@ export class ChannelObject extends DurableObject<Env> {
           payload,
         });
         if (prepared.outcome === "ready") await this.publish([prepared.message]);
-      },
-      publishModulePanelHint: async (part) => {
-        const message = modulePanelHintMessage(channelId, moduleId, part);
-        if (message === null) return;
-        try {
-          await this.publish([message]);
-        } catch {
-          console.warn("Module panel update could not be sent.");
-        }
       },
       sendChat: async (text, idempotencyKey, attributions = [], stillValid, target = "source_only") => {
         const suppression = { reason: null as string | null };
@@ -1562,7 +1580,11 @@ export class ChannelObject extends DurableObject<Env> {
       undefined,
       invocation,
     );
-    return await this.runModuleAlarmHandler(moduleId, handlerKey, execute);
+    try {
+      return await this.runModuleAlarmHandler(moduleId, handlerKey, execute);
+    } finally {
+      await this.notifyCommittedPanelResources();
+    }
   }
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
@@ -1570,8 +1592,8 @@ export class ChannelObject extends DurableObject<Env> {
       open: (ballotId, optionCount, expiresAt, rule, termFilter) => this.openBallot(moduleId, ballotId, optionCount, expiresAt, rule, termFilter),
       cast: (ballotId, userId, choice, options) => this.castBallot(moduleId, ballotId, userId, choice, options),
       castTerm: (ballotId, userId, term, matchText) => this.castBallotTerm(moduleId, ballotId, userId, term, matchText),
-      setBlockedTerms: (ballotId, terms) => setStoredBallotBlockedTerms(this.ctx.storage, moduleId, ballotId, terms),
-      approveTerm: (ballotId, term) => approveStoredBallotTerm(this.ctx.storage, moduleId, ballotId, term),
+      setBlockedTerms: (ballotId, terms) => setStoredBallotBlockedTerms(this.ballotStorage(moduleId), moduleId, ballotId, terms),
+      approveTerm: (ballotId, term) => approveStoredBallotTerm(this.ballotStorage(moduleId), moduleId, ballotId, term),
       read: (ballotId) => this.readBallot(moduleId, ballotId),
       close: (ballotId) => this.closeBallot(moduleId, ballotId),
       finalize: (ballotId) => this.finalizeBallot(moduleId, ballotId),
@@ -1592,7 +1614,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (channelId === null) throw new Error("Ballots require a named Durable Object.");
     const requestedAlarmKey = ballotExpiryAlarmKey(moduleId, ballotId);
     const result = await openStoredBallot(
-      this.ctx.storage,
+      this.ballotStorage(moduleId),
       moduleId,
       ballotId,
       optionCount,
@@ -1613,6 +1635,9 @@ export class ChannelObject extends DurableObject<Env> {
       },
       termFilter,
     );
+    if (result.status === "opened" || result.activeBallot !== undefined) {
+      await this.notifyCommittedPanelResources();
+    }
     if (result.status === "opened") {
       return { status: "opened" };
     }
@@ -1628,7 +1653,11 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<BallotCastResult> {
     const channelId = this.ownChannelId();
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
-    return await castStoredBallot(this.ctx.storage, channelId, moduleId, ballotId, userId, choice, options);
+    const result = await castStoredBallot(this.ballotStorage(moduleId), channelId, moduleId, ballotId, userId, choice, options);
+    if (result.status === "counted" || result.status === "changed") {
+      await this.notifyCommittedPanelResources();
+    }
+    return result;
   }
 
   public async castBallotTerm(
@@ -1640,7 +1669,11 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<BallotCastResult> {
     const channelId = this.ownChannelId();
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
-    return await castStoredBallotTerm(this.ctx.storage, channelId, moduleId, ballotId, userId, term, matchText);
+    const result = await castStoredBallotTerm(this.ballotStorage(moduleId), channelId, moduleId, ballotId, userId, term, matchText);
+    if (result.status === "counted" || result.status === "changed" || result.status === "overflow") {
+      await this.notifyCommittedPanelResources();
+    }
+    return result;
   }
 
   public async setBlockedTerms(
@@ -1648,7 +1681,9 @@ export class ChannelObject extends DurableObject<Env> {
     ballotId: string,
     blockedTerms: readonly string[],
   ): Promise<BallotSnapshot | null> {
-    return await setStoredBallotBlockedTerms(this.ctx.storage, moduleId, ballotId, blockedTerms);
+    const snapshot = await setStoredBallotBlockedTerms(this.ballotStorage(moduleId), moduleId, ballotId, blockedTerms);
+    if (snapshot !== null) await this.notifyCommittedPanelResources();
+    return snapshot;
   }
 
   public async approveTerm(
@@ -1666,11 +1701,15 @@ export class ChannelObject extends DurableObject<Env> {
         WHERE channel_id = ? AND poll_id = ? AND term = ?`,
     ).bind(channelId, ballotId, term).first<{ approved: number }>();
     if (approval === null) return { status: "not_open", snapshot: null };
-    return await approveStoredBallotTerm(this.ctx.storage, moduleId, ballotId, term);
+    const result = await approveStoredBallotTerm(this.ballotStorage(moduleId), moduleId, ballotId, term);
+    if (result.status === "approved" && result.snapshot !== null) {
+      await this.notifyCommittedPanelResources();
+    }
+    return result;
   }
 
   public async readBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
-    return await readStoredBallot(this.ctx.storage, moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
+    const snapshot = await readStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
         ballotExpiryAlarmKey(finalizedModuleId, finalizedBallotId),
@@ -1678,10 +1717,14 @@ export class ChannelObject extends DurableObject<Env> {
         hardDeleteAt,
       );
     });
+    if (snapshot?.outcome !== undefined) {
+      await this.notifyCommittedPanelResources();
+    }
+    return snapshot;
   }
 
   public async hasOpenBallot(): Promise<boolean> {
-    return await hasOpenStoredBallot(this.ctx.storage, async (transaction, moduleId, ballotId, hardDeleteAt) => {
+    const hasOpen = await hasOpenStoredBallot(this.ballotStorage(CHAT_VOTING_MODULE_ID), async (transaction, moduleId, ballotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
         ballotExpiryAlarmKey(moduleId, ballotId),
@@ -1689,16 +1732,19 @@ export class ChannelObject extends DurableObject<Env> {
         hardDeleteAt,
       );
     });
+    if (!hasOpen) await this.notifyCommittedPanelResources();
+    return hasOpen;
   }
 
   public async closeBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
-    const result = await closeStoredBallot(this.ctx.storage, moduleId, ballotId);
+    const result = await closeStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId);
+    if (result !== null) await this.notifyCommittedPanelResources();
     await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
     return result;
   }
 
   public async finalizeBallot(moduleId: string, ballotId: string): Promise<BallotFinalizeResult> {
-    return await finalizeStoredBallot(this.ctx.storage, moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
+    const result = await finalizeStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
         ballotExpiryAlarmKey(finalizedModuleId, finalizedBallotId),
@@ -1706,6 +1752,10 @@ export class ChannelObject extends DurableObject<Env> {
         hardDeleteAt,
       );
     });
+    if (result.outcome !== "not_open" && result.outcome !== "open") {
+      await this.notifyCommittedPanelResources();
+    }
+    return result;
   }
 
   public async acknowledgeClosedBallot(moduleId: string, ballotId: string): Promise<void> {
@@ -1716,7 +1766,7 @@ export class ChannelObject extends DurableObject<Env> {
     const identity = ballotIdentityFromExpiryAlarmKey(key);
     if (identity === null) return;
     const nextExpiry = await expireStoredBallot(
-      this.ctx.storage,
+      this.ballotStorage(identity.moduleId),
       identity.moduleId,
       identity.ballotId,
       async (transaction, moduleId, ballotId, hardDeleteAt) => {
@@ -1725,6 +1775,7 @@ export class ChannelObject extends DurableObject<Env> {
         );
       },
     );
+    if (nextExpiry === null) await this.notifyCommittedPanelResources();
     if (nextExpiry !== null) {
       await this.scheduleAlarmEntry(key, BALLOT_EXPIRY_ALARM_HANDLER, nextExpiry);
     }
@@ -1733,8 +1784,105 @@ export class ChannelObject extends DurableObject<Env> {
   private async hardDeleteBallot(key: string): Promise<void> {
     const identity = ballotIdentityFromExpiryAlarmKey(key);
     if (identity === null) return;
-    const retryAt = await hardDeleteFinalizedStoredBallot(this.ctx.storage, identity.moduleId, identity.ballotId);
+    const retryAt = await hardDeleteFinalizedStoredBallot(this.ballotStorage(identity.moduleId), identity.moduleId, identity.ballotId);
     if (retryAt !== null) await this.scheduleAlarmEntry(key, BALLOT_HARD_DELETE_ALARM_HANDLER, retryAt);
+  }
+
+  private ballotPanelResources(moduleId: string): string[] {
+    return [...new Set([`module:${moduleId}:panel`, "module:chat_voting:panel"])];
+  }
+
+  /** Wraps ballot storage transactions so the vector commits with ballot state. */
+  private ballotStorage(moduleId: string): Pick<DurableObjectStorage, "get" | "list" | "put" | "delete" | "transaction"> {
+    const storage = this.ctx.storage;
+    const transaction = <Value>(
+      operation: (transaction: DurableObjectTransaction) => Promise<Value>,
+    ): Promise<Value> => storage.transaction(async (underlying) => {
+      const changedResources = new Set<string>();
+      const recordWrite = (keyArgument: unknown): void => {
+        const keys = typeof keyArgument === "string" ? [keyArgument]
+          : Array.isArray(keyArgument) ? keyArgument.filter((key): key is string => typeof key === "string")
+            : typeof keyArgument === "object" && keyArgument !== null ? Object.keys(keyArgument) : [];
+        for (const key of keys) {
+          if (key === "ballot:active") {
+            this.ballotPanelResources(moduleId).forEach((resource) => changedResources.add(resource));
+            continue;
+          }
+          const match = /^ballot:(?:closed:)?([A-Za-z0-9_-]{1,128}):/u.exec(key);
+          if (match?.[1] !== undefined) this.ballotPanelResources(match[1]).forEach((resource) => changedResources.add(resource));
+        }
+      };
+      const monitored = new Proxy(underlying, {
+        get: (target, property, receiver) => {
+          if (property === "put" || property === "delete") {
+            const method = Reflect.get(target, property, target) as (...args: unknown[]) => unknown;
+            return (...args: unknown[]): unknown => {
+              recordWrite(args[0]);
+              return Reflect.apply(method, target, args);
+            };
+          }
+          const value: unknown = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) as unknown : value;
+        },
+      });
+      const result = await operation(monitored);
+      if (changedResources.size > 0) await bumpDurablePanelResources(underlying, [...changedResources]);
+      return result;
+    });
+    return {
+      get: storage.get.bind(storage),
+      list: storage.list.bind(storage),
+      put: storage.put.bind(storage),
+      delete: storage.delete.bind(storage),
+      transaction,
+    };
+  }
+
+  private async notifyCommittedPanelResources(): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    await notifyCommittedResources(this.env, channelId, (revisions) => this.reconcilePanelResources(revisions));
+  }
+
+  public async getPanelResourceRevisions(): Promise<PanelResourceRevisionVector> {
+    return await this.ctx.storage.get<PanelResourceRevisionVector>(PANEL_DURABLE_REVISIONS_KEY) ?? {};
+  }
+
+  /** Delivers only advanced, data-free resources to panel principals in this channel. */
+  public async reconcilePanelResources(revisions: PanelResourceRevisionVector): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const durableRevisions = await this.getPanelResourceRevisions();
+    const combinedRevisions = { ...revisions };
+    for (const [resource, revision] of Object.entries(durableRevisions)) {
+      combinedRevisions[resource] = (combinedRevisions[resource] ?? 0) + revision;
+    }
+    const channelRevisionTotal = Object.entries(combinedRevisions)
+      .filter(([resource]) => resource !== "channel.all")
+      .reduce((sum, [, revision]) => Math.min(Number.MAX_SAFE_INTEGER, sum + revision), 0);
+    const previous = await this.ctx.storage.get<PanelResourceRevisionVector>(PANEL_PUBLISHED_REVISIONS_KEY) ?? {};
+    const advanced = Object.entries(combinedRevisions)
+      .filter(([resource, revision]) => revision > (previous[resource] ?? 0))
+      .sort(([left], [right]) => left.localeCompare(right));
+    if (advanced.length === 0) return;
+    const next = Object.fromEntries(advanced);
+    const overflow = advanced.length > 128;
+    // Large batches carry one bounded wake-up hint; the authenticated GET
+    // still returns the exact per-resource vector for client invalidation.
+    const resources = overflow ? ["channel.all"] : advanced.map(([resource]) => resource);
+    const messageRevisions = overflow
+      ? { "channel.all": channelRevisionTotal }
+      : next;
+    const message = panelResourceChangedMessage(channelId, resources, messageRevisions);
+    await this.publish([message]);
+    await this.ctx.storage.transaction(async (transaction) => {
+      const latest = await transaction.get<PanelResourceRevisionVector>(PANEL_PUBLISHED_REVISIONS_KEY) ?? {};
+      const published = { ...latest };
+      for (const [resource, revision] of Object.entries(combinedRevisions)) {
+        published[resource] = Math.max(published[resource] ?? 0, revision);
+      }
+      await transaction.put(PANEL_PUBLISHED_REVISIONS_KEY, published);
+    });
   }
 
   private async writeBallotAlarmInTransaction(
@@ -2114,6 +2262,14 @@ export class ChannelObject extends DurableObject<Env> {
       closeSocket(pair[1], OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
     } else {
       pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hello")));
+      if (principal.kind === "panel") {
+        try {
+          const revisions = await readPanelResourceRevisions(this.env.DB, ownChannelId);
+          await this.reconcilePanelResources(revisions);
+        } catch (error: unknown) {
+          console.warn("Panel resource revision snapshot could not be sent.", error);
+        }
+      }
     }
     return new Response(null, {
       status: 101,
@@ -2133,6 +2289,7 @@ export class ChannelObject extends DurableObject<Env> {
     }
     const now = Date.now();
     const ordinarySockets = messages.some((message) => message.type !== "overlay.changed" &&
+      message.type !== "panel.resources.changed" &&
       !isModuleOverlayRealtimeEnvelope(message))
       ? this.ctx.getWebSockets()
       : [];
@@ -2162,11 +2319,10 @@ export class ChannelObject extends DurableObject<Env> {
           ...this.ctx.getWebSockets("kind:panel"),
           ...(overlaySocketsById.get(envelope.payload.overlayId) ?? []),
         ]
+        : envelope.type === "panel.resources.changed"
+          ? this.ctx.getWebSockets("kind:panel")
         : isModuleOverlayRealtimeEnvelope(envelope)
-          ? [
-            ...this.ctx.getWebSockets("kind:panel"),
-            ...new Set((envelope.overlayIds ?? []).flatMap((overlayId) => overlaySocketsById.get(overlayId) ?? [])),
-          ]
+          ? [...new Set((envelope.overlayIds ?? []).flatMap((overlayId) => overlaySocketsById.get(overlayId) ?? []))]
           : ordinarySockets,
     }));
     for (const message of serialized) {
@@ -2465,9 +2621,13 @@ export class ChannelObject extends DurableObject<Env> {
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
     const externalFetchBudget = createModuleExternalFetchBudget();
-    await this.pruneRevokedTokenMarkers(now);
-    await this.stopSecurityAlarmIfIdle();
-    await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers(MODULES, externalFetchBudget));
+    try {
+      await this.pruneRevokedTokenMarkers(now);
+      await this.stopSecurityAlarmIfIdle();
+      await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers(MODULES, externalFetchBudget));
+    } finally {
+      await this.notifyCommittedPanelResources();
+    }
   }
 
   override webSocketMessage(webSocket: WebSocket, message: string | ArrayBuffer): void {

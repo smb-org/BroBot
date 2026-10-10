@@ -133,7 +133,6 @@ const alarmContext = (
   const cleared: string[] = [];
   const diagnostics: Array<{ code: string; detail?: Readonly<Record<string, unknown>> }> = [];
   const overlayMessages: Array<{ type: string; elementKind: string; payload: Readonly<Record<string, unknown>> }> = [];
-  const panelHints: string[] = [];
   let currentDeadline: number | null = null;
   const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(async (_text, _idempotencyKey, _attributions, stillValid) => {
     if (stillValid !== undefined && !await stillValid()) return { sent: false, reason: "stale_before_send", retryable: false };
@@ -168,12 +167,8 @@ const alarmContext = (
       overlayMessages.push({ type, elementKind, payload });
       return Promise.resolve();
     },
-    publishModulePanelHint: (part: string) => {
-      panelHints.push(part);
-      return Promise.resolve();
-    },
   } as unknown as ModuleAlarmContext;
-  return { context, scheduled, cleared, diagnostics, overlayMessages, panelHints, sendChat };
+  return { context, scheduled, cleared, diagnostics, overlayMessages, sendChat };
 };
 
 const pollOnDemand = async (context: ModuleAlarmContext, fetcher: typeof fetch = fetch): Promise<BelaboxPollRoutineResult> => {
@@ -1265,7 +1260,7 @@ describe("BELABOX polling", () => {
 
   it("keeps relay fetch failures out of chat and raises the notice phase on failure three", async () => {
     await insertModule(database, { ...BELABOX_DEFAULT_SETTINGS, mode: "interval", intervalSeconds: 5, chatEnabled: true });
-    const { context, sendChat, panelHints } = alarmContext(database);
+    const { context, sendChat } = alarmContext(database);
     await handleBelaboxPollAlarm(
       context,
       "poll",
@@ -1284,7 +1279,6 @@ describe("BELABOX polling", () => {
     }
 
     expect(sendChat).not.toHaveBeenCalled();
-    expect(panelHints).toEqual(["live", "live", "live", "live", "live"]);
     expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
       sample: { connected: true },
       errorCode: "network",

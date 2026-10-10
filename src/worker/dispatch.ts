@@ -11,7 +11,6 @@ import { fetchTwitchUserByLogin, sendShoutout } from "./shoutout";
 import { isTwitchChannelModerator, sendModerationBan } from "./moderation";
 import { publishRealtimeMessages, publishVariablesChanged } from "./realtime";
 import { prepareModuleOverlayHostEventMessages, prepareModuleOverlayRealtimeMessage } from "./module-overlay-realtime";
-import { publishModulePanelHint } from "./module-panel-realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
 import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
@@ -960,12 +959,6 @@ export const dispatchEventSubNotification = async (
             DB: environment.DB,
             authorizeMutation: authorizeModuleMutation,
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
-            publishModulePanelHint: (part) => publishModulePanelHint(
-              environment.CHANNEL,
-              event.channelId,
-              module.id,
-              part,
-            ),
             readChannelBlockedTerms: channelBlockedTerms,
             botUserId,
             lookupUserByLogin: async (login) => {

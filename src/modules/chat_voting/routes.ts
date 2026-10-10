@@ -31,14 +31,6 @@ const channelLanguage = async (db: D1Database, channelId: string): Promise<"de" 
 
 export const chatVotingRoutes = new Hono<ModuleRouteEnvironment>();
 
-const publishChatVotingPanelHint = async (
-  context: { get: (key: "publishModulePanelHint") => ModuleRouteEnvironment["Variables"]["publishModulePanelHint"] },
-  channelId: string,
-): Promise<void> => {
-  try { await context.get("publishModulePanelHint")?.(channelId, CHAT_VOTING_MODULE_ID, "panel"); }
-  catch { /* Panel refresh hints are best-effort. */ }
-};
-
 chatVotingRoutes.get("/current", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const repository = createChatVotingRepository(context.env.DB);
@@ -172,7 +164,6 @@ chatVotingRoutes.post("/start", async (context) => {
   }
   if (result.status === "busy") return context.json({ error: "chat_voting_busy" }, 409);
 
-  await publishChatVotingPanelHint(context, channelId);
   await context.get("writeModuleAudit")({
     channelId,
     moduleId: CHAT_VOTING_MODULE_ID,
@@ -230,7 +221,6 @@ chatVotingRoutes.post("/approve-term", async (context) => {
   };
 
   const publishTally = async (snapshot: BallotSnapshot): Promise<void> => {
-    await publishChatVotingPanelHint(context, channelId);
     await context.get("publishModuleOverlayMessage")(
       channelId,
       CHAT_VOTING_MODULE_ID,
@@ -290,7 +280,6 @@ chatVotingRoutes.post("/approve-term", async (context) => {
   if (!persisted.authorized) return context.json({ error: "chat_voting_not_authorized" }, 403);
   if (!persisted.changed) return context.json({ error: "chat_voting_not_running" }, 409);
 
-  await publishChatVotingPanelHint(context, channelId);
   const filtered = await ballots.setBlockedTerms(vote.id, blockedTerms);
   if (filtered === null) return context.json({ error: "chat_voting_not_running" }, 409);
   // A refresh can remove previously counted terms. Publish that durable state

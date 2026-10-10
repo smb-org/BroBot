@@ -6,7 +6,7 @@ import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
-import { invalidateDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import { reconcileDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { jsonResponse } from "../unit/fixtures";
 import { renderWithQuery as render } from "../query-test-utils";
@@ -328,9 +328,11 @@ describe("Channel variables page", () => {
 
   it("revalidates variables from the shared query after a realtime hint", async () => {
     let variableRequestCount = 0;
+    const revisions = { "channel.variables": 1 };
     const fetcher = vi.fn<typeof fetch>();
     fetcher.mockImplementation((input) => {
       const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/revisions")) return Promise.resolve(jsonResponse({ revisions }));
       if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
       variableRequestCount++;
       return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
@@ -341,7 +343,7 @@ describe("Channel variables page", () => {
     await screen.findByRole("table");
     expect(variableRequestCount).toBe(1);
 
-    invalidateDashboardRealtimeMessage(rendered.queryClient, {
+    await reconcileDashboardRealtimeMessage(rendered.queryClient, {
       version: 1,
       id: "variables-changed-1",
       createdAt: "2026-09-24T12:00:00.000Z",

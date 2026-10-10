@@ -284,6 +284,7 @@ const objectFor = (
     bind: vi.fn(() => prepared),
     all: vi.fn().mockResolvedValue({ results: [] }),
     first: vi.fn().mockResolvedValue({ token_id: "token-1", overlay_id: null }),
+    run: vi.fn().mockResolvedValue({ success: true }),
   };
   const getWebSockets = vi.fn((tag?: string) => tag === undefined
     ? sockets
@@ -1159,17 +1160,12 @@ describe("ChannelObject realtime path", () => {
     expect(panel.send.mock.calls).toHaveLength(0);
   });
 
-  it("routes bounded module panel hints separately from module overlay messages", async () => {
+  it("keeps module overlay messages off panel sockets", async () => {
     const overlay = overlaySocketFor({
       v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a", expiresAt: null,
     });
     const panel = socketFor(validPrincipal());
     const object = objectFor([overlay, panel]);
-    const panelMessages = [
-      { type: "modul.chat_voting.changed", payload: { part: "panel" } },
-      { type: "modul.belabox.changed", payload: { part: "live" } },
-      { type: "modul.votekick.changed", payload: { part: "availability" } },
-    ];
     const overlayMessageTypes = [
       "modul.chat_voting.opened",
       "modul.chat_voting.tally",
@@ -1179,24 +1175,19 @@ describe("ChannelObject realtime path", () => {
       "modul.votekick.tally",
       "modul.text_library.blocks_updated",
     ];
-    const messages = [
-      ...panelMessages,
-      ...overlayMessageTypes.map((type) => ({ type, payload: { messageType: type } })),
-    ].map(({ type, payload }, index) => ({
+    const messages = overlayMessageTypes.map((type, index) => ({
       version: 1,
       id: `module-message-${String(index)}`,
       createdAt: "2026-10-09T08:00:00.000Z",
       channelId: "kanal-a",
       type,
       overlayIds: ["overlay-a"],
-      payload,
+      payload: { messageType: type },
     } as unknown as RealtimeMessage));
 
     await object.publish(messages);
 
-    expect(panel.send.mock.calls.map(([serialized]) => typeOfSerializedMessage(serialized))).toEqual(
-      panelMessages.map(({ type }) => type),
-    );
+    expect(panel.send.mock.calls).toHaveLength(0);
     expect(overlay.send.mock.calls.map(([serialized]) => typeOfSerializedMessage(serialized))).toEqual([
       ...overlayMessageTypes,
     ]);
@@ -1241,7 +1232,7 @@ describe("ChannelObject realtime path", () => {
     expect(panel.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual(["overlay.changed"]);
   });
 
-  it("coalesces ad-schedule refreshes and pushes panel-only updates while reconciling alarms", async () => {
+  it("coalesces ad-schedule refreshes and publishes a revision hint without a custom panel message", async () => {
     const panel = socketFor(validPrincipal());
     const overlay = overlaySocketFor({ v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-1", expiresAt: null });
     const object = objectFor([panel, overlay]);
@@ -1257,8 +1248,10 @@ describe("ChannelObject realtime path", () => {
     expect(first).toEqual(coalesced);
     expect(first.changed).toBe(true);
     expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(1);
-    expect(panel.send.mock.calls).toHaveLength(1);
-    expect(typeOfSerializedMessage(panel.send.mock.calls[0]?.[0] ?? "")).toBe("ads.schedule.updated");
+    expect(panel.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual(["panel.resources.changed"]);
+    expect(JSON.parse(panel.send.mock.calls[0]?.[0] ?? "null")).toMatchObject({
+      payload: { resources: ["module:ads:schedule"] },
+    });
     expect(overlay.send.mock.calls).toHaveLength(0);
 
     mocks.getAdSchedule.mockResolvedValueOnce({ fetched: true, reason: null, detail: {}, schedule });
@@ -1266,8 +1259,9 @@ describe("ChannelObject realtime path", () => {
     expect(second.changed).toBe(false);
     expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(2);
     expect(panel.send.mock.calls).toHaveLength(2);
-    const updated = JSON.parse(panel.send.mock.calls[1]?.[0] ?? "{}") as { payload?: { asOf?: string } };
-    expect(updated.payload?.asOf).toBe(second.cache?.asOf);
+    expect(JSON.parse(panel.send.mock.calls[1]?.[0] ?? "null")).toMatchObject({
+      payload: { resources: ["module:ads:schedule"], revisions: { "module:ads:schedule": 2 } },
+    });
     expect(overlay.send.mock.calls).toHaveLength(0);
   });
 
@@ -1842,10 +1836,12 @@ describe("ChannelObject realtime path", () => {
     const object = objectFor([]);
 
     await expect(object.openBallot("chat_voting", "poll-a", 3, 20_000)).resolves.toEqual({ status: "opened" });
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:chat_voting:panel": 1 });
     await expect(object.openBallot("votekick", "kick-a", 2, 20_000)).resolves.toEqual({
       status: "busy",
       moduleId: "chat_voting",
     });
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:chat_voting:panel": 1 });
   });
 
   it("reports whether a shared ballot is open without requiring its module id", async () => {
@@ -1901,6 +1897,7 @@ describe("ChannelObject realtime path", () => {
     await expect(object.openBallot("chat_voting", "poll-a", 3, 30_000)).rejects.toThrow("storage interrupted");
 
     expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey]).toEqual(originalEntry);
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:chat_voting:panel": 1 });
     expect(storage.setAlarm).not.toHaveBeenCalled();
     expect(storage.deleteAlarm).not.toHaveBeenCalled();
   });
@@ -1943,6 +1940,7 @@ describe("ChannelObject realtime path", () => {
       counts: [],
       revision: 0,
     });
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:chat_voting:panel": 3 });
   });
 
   it("stores only hashed term voters, applies blocked filters, and approves terms for one ballot", async () => {
@@ -2368,8 +2366,10 @@ describe("ChannelObject realtime path", () => {
     const first = await object.refreshAdScheduleForCountdown();
     expect(first).toMatchObject({ reason: null, cache: { schedule } });
     expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:ads:schedule": 1 });
 
     await object.storeAdSchedule(schedule, "2026-09-25T11:00:00.000Z");
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:ads:schedule": 2 });
     await expect(object.refreshAdScheduleForCountdown()).resolves.toBeNull();
     expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
     expect(storageOf(object).values.get("ads:countdown_refresh_attempt")).toBe(Date.now());

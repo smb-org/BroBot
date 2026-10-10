@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 test.use({ locale: "en-US" });
 
 const channelId = "stable-host-layout";
+let panelRevisions: Record<string, number> = {};
 const channel = {
   channelId,
   login: "stable-channel",
@@ -66,8 +67,13 @@ interface ChannelMockData {
 }
 
 const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: ChannelMockData = {}): Promise<void> => {
+  panelRevisions = {};
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
+    if (pathname === `/api/channels/${channelId}/revisions`) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ revisions: panelRevisions }) });
+      return;
+    }
     if (pathname === "/api/channels") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: data.channelList ?? [channel], bot: channel.bot }) });
       return;
@@ -717,6 +723,7 @@ test("the new-events notice stays visible while reading older events", async ({ 
   });
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   events.entries.unshift(newEvent);
+  panelRevisions["channel.events"] = 1;
   const refreshResponse = page.waitForResponse((response) => response.url().includes(`/api/channels/${channelId}/events`));
   await page.evaluate((timestamp) => {
     const sockets = (window as Window & { __layoutEventSockets?: Array<{ open: () => void; receive: (data: string) => void }> }).__layoutEventSockets ?? [];

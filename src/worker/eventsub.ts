@@ -6,6 +6,7 @@ import { confirmLoginIdentityAuthorization } from "./login-maintenance";
 import { dispatchEventSubNotification } from "./dispatch";
 import { refreshAdPrewarning, isAdPrewarningTrigger } from "./ad-prewarning";
 import { eventSubDefinitionForCondition } from "./eventsub-subscriptions";
+import { notifyCommittedResources } from "./panel-resources";
 import type { EventSubSubscriptionType } from "../contracts/values";
 import {
   hasEventSubMessage,
@@ -204,6 +205,14 @@ const notificationTarget = (body: Record<string, unknown>): {
   };
 };
 
+/** Resolves the channel from the registered subscription condition for the worker notifier. */
+export const eventSubChannelIdForNotification = (value: unknown, now = new Date().toISOString()): string | null => {
+  if (!isRecord(value)) return null;
+  const target = notificationTarget(value);
+  if (target !== null) return target.channelId;
+  return subscriptionRecord(value, now)?.channelId ?? null;
+};
+
 const confirmRevocationAuthorization = async (
   env: Env,
   revocation: EventSubRevocationRecord,
@@ -267,47 +276,60 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   }
 
   const now = new Date().toISOString();
+  const notifierChannelId = eventSubChannelIdForNotification(body, now);
   const revocation = messageType === "revocation" ? subscriptionRecord(body, now) : null;
-  if (messageType === "revocation" && revocation === null) return response("Invalid revocation.", 400);
+  if (messageType === "revocation" && (revocation === null || notifierChannelId !== revocation.channelId)) {
+    return response("Invalid revocation.", 400);
+  }
 
-  if (revocation !== null) {
-    if (await hasEventSubMessage(context.env.DB, messageId)) return response(null, 204);
-    const authorizationConfirmedRevoked = await confirmRevocationAuthorization(context.env, revocation, now);
-    const isNew = await rememberEventSubMessageAndRevocation(
-      context.env.DB,
-      messageId,
-      now,
-      revocation,
-      authorizationConfirmedRevoked,
-    );
-    if (!isNew) return response(null, 204);
-    return response(null, 204);
+  if (messageType === "revocation" && revocation !== null && notifierChannelId !== null) {
+    try {
+      if (await hasEventSubMessage(context.env.DB, messageId)) return response(null, 204);
+      const authorizationConfirmedRevoked = await confirmRevocationAuthorization(context.env, revocation, now);
+      const isNew = await rememberEventSubMessageAndRevocation(
+        context.env.DB,
+        messageId,
+        now,
+        revocation,
+        authorizationConfirmedRevoked,
+      );
+      if (!isNew) return response(null, 204);
+      return response(null, 204);
+    } finally {
+      await notifyCommittedResources(context.env, revocation.channelId);
+    }
   }
 
   const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
   if (!isNew) return response(null, 204);
 
   const target = notificationTarget(body);
-  if (target === null) return response("Invalid EventSub notification.", 400);
+  if (target === null || notifierChannelId === null || target.channelId !== notifierChannelId) {
+    return response("Invalid EventSub notification.", 400);
+  }
 
   // Deliberately awaited instead of run in the background: a chat call is
   // short, and this keeps the outcome visible in tests. If dispatch later
   // takes longer, it belongs after the response.
-  await dispatchEventSubNotification(context.env, {
-    channelId: target.channelId,
-    subscriptionType: target.subscriptionType,
-    subscriptionVariant: target.subscriptionVariant,
-    triggerId: messageId,
-    payload: target.payload,
-    receivedAt: now,
-    eventSubTimestamp: timestamp,
-  });
-  if (isAdPrewarningTrigger(target.subscriptionType)) {
-    try {
-      await refreshAdPrewarning(context.env, target.channelId, messageId, now);
-    } catch (error: unknown) {
-      console.error("Ad prewarning could not be refreshed.", error);
+  try {
+    await dispatchEventSubNotification(context.env, {
+      channelId: target.channelId,
+      subscriptionType: target.subscriptionType,
+      subscriptionVariant: target.subscriptionVariant,
+      triggerId: messageId,
+      payload: target.payload,
+      receivedAt: now,
+      eventSubTimestamp: timestamp,
+    });
+    if (isAdPrewarningTrigger(target.subscriptionType)) {
+      try {
+        await refreshAdPrewarning(context.env, target.channelId, messageId, now);
+      } catch (error: unknown) {
+        console.error("Ad prewarning could not be refreshed.", error);
+      }
     }
+    return response(null, 204);
+  } finally {
+    await notifyCommittedResources(context.env, notifierChannelId);
   }
-  return response(null, 204);
 });

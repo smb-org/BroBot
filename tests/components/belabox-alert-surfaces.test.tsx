@@ -7,7 +7,7 @@ import type { BelaboxStatusResponse } from "../../src/modules/belabox/contracts"
 import BelaboxPanel from "../../src/modules/belabox/panel/index";
 import BelaboxStatusAction from "../../src/modules/belabox/panel/immediate-actions";
 import { UiProvider } from "../../src/dashboard/ui";
-import { invalidateDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import { reconcileDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { renderWithQuery as render } from "../query-test-utils";
 
@@ -53,14 +53,20 @@ describe("BELABOX alert surfaces", () => {
   });
 
   it("reloads status when stream availability changes from offline to live", async () => {
-    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json(status)));
+    let statusReads = 0;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/revisions")) return Promise.resolve(Response.json({ revisions: { "module:belabox:live": 1 } }));
+      statusReads += 1;
+      return Promise.resolve(Response.json(status));
+    });
     vi.stubGlobal("fetch", fetcher);
     const view = renderWithUi(<BelaboxStatusAction channelId="channel-a" canManage availabilityReason="Stream is offline." />);
 
     expect(await screen.findByTestId("belabox-immediate-status-slot")).toHaveTextContent("Stream is offline.");
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(statusReads).toBe(1);
     view.rerender(<UiProvider><BelaboxStatusAction channelId="channel-a" canManage availabilityReason={null} /></UiProvider>);
-    invalidateDashboardRealtimeMessage(view.queryClient, {
+    await reconcileDashboardRealtimeMessage(view.queryClient, {
       version: 1,
       id: "stream-now-live",
       createdAt: new Date().toISOString(),
@@ -69,7 +75,7 @@ describe("BELABOX alert surfaces", () => {
       payload: { state: "online", startedAt: new Date().toISOString(), changedAt: new Date().toISOString() },
     } satisfies RealtimeMessage);
 
-    await waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(2); });
+    await waitFor(() => { expect(statusReads).toBe(2); });
     expect(await screen.findByTestId("belabox-immediate-status-slot")).toHaveTextContent(/BELABOX encoder disconnected|BELABOX-Encoder getrennt/u);
   });
 

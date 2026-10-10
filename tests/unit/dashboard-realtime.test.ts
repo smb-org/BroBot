@@ -6,7 +6,8 @@ import { dashboardDataKeys, queryKeys } from "../../src/dashboard/data/keys";
 import {
   getDashboardRealtimeStatus,
   invalidateDashboardChannelQueries,
-  invalidateDashboardRealtimeMessage,
+  reconcileDashboardRealtimeMessage,
+  reconcileDashboardPanelResourceRevisions,
   setDashboardRealtimeStatus,
 } from "../../src/dashboard/data/realtime";
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
@@ -29,10 +30,11 @@ const addQuery = (queryClient: QueryClient, key: readonly unknown[]): void => {
 afterEach(() => {
   setDashboardRealtimeStatus(channelId, "offline");
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("dashboard realtime messages", () => {
-  it("accepts module state hints for panel query invalidation", () => {
+  it("ignores legacy module panel hints", () => {
     const result = parseRealtimeMessage(JSON.stringify({
       version: 1,
       id: "module-sample-1",
@@ -42,8 +44,7 @@ describe("dashboard realtime messages", () => {
       payload: { part: "live" },
     }), "channel-a");
 
-    expect(result.kind).toBe("message");
-    if (result.kind === "message") expect(result.message.type).toBe("modul.belabox.changed");
+    expect(result.kind).toBe("ignored");
 
     const secretPayload = parseRealtimeMessage(JSON.stringify({
       version: 1,
@@ -54,27 +55,6 @@ describe("dashboard realtime messages", () => {
       payload: { part: "live", statsUrl: "https://secret.invalid", publisherKey: "secret" },
     }), "channel-a");
     expect(secretPayload.kind).not.toBe("message");
-  });
-
-  it("invalidates event and originating module queries for event hints", () => {
-    const queryClient = new QueryClient();
-    const events = dashboardDataKeys.events(channelId, { origin: null, module: null, tone: null, person: null });
-    const chatVoting = moduleQueryKey(channelId, "chat_voting", "panel");
-    const belabox = moduleQueryKey(channelId, "belabox", "status");
-    const unrelated = moduleQueryKey(channelId, "ads", "schedule");
-    [events, chatVoting, belabox, unrelated].forEach((key) => { addQuery(queryClient, key); });
-
-    invalidateDashboardRealtimeMessage(queryClient, moduleHint("event_log.new", {
-      entries: [
-        { eventId: "event-1", createdAt: "2026-10-09T08:00:00.000Z", moduleId: "chat_voting", code: "chat_voting.started", actorUserId: null },
-        { eventId: "event-2", createdAt: "2026-10-09T08:00:00.000Z", moduleId: "belabox", code: "belabox.sample", actorUserId: null },
-      ],
-    }));
-
-    expect(queryClient.getQueryState(events)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(chatVoting)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(belabox)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(unrelated)?.isInvalidated).toBe(false);
   });
 
   it("bounds sustained module hints and does not refresh module settings", async () => {
@@ -98,10 +78,17 @@ describe("dashboard realtime messages", () => {
       });
       return observer.subscribe(() => undefined);
     });
+    const revisions: Record<string, number> = { "channel.events": 0, "module:chat_voting:data": 0 };
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
+    await reconcileDashboardPanelResourceRevisions(queryClient, channelId);
 
     for (let index = 0; index < 20; index += 1) {
-      invalidateDashboardRealtimeMessage(queryClient, moduleHint("modul.chat_voting.changed", { part: "panel" }));
-      invalidateDashboardRealtimeMessage(queryClient, moduleHint("event_log.new", {
+      revisions["channel.events"] = (revisions["channel.events"] ?? 0) + 1;
+      revisions["module:chat_voting:data"] = (revisions["module:chat_voting:data"] ?? 0) + 1;
+      await reconcileDashboardRealtimeMessage(queryClient, moduleHint("event_log.new", {
         entries: [{
           eventId: `event-${String(index)}`,
           createdAt: "2026-10-09T08:00:00.000Z",
@@ -120,35 +107,6 @@ describe("dashboard realtime messages", () => {
 
     subscriptions.forEach((unsubscribe) => { unsubscribe(); });
     queryClient.clear();
-  });
-
-  it("maps variables, overlays, ad schedules, and module hints to their channel data keys", () => {
-    const queryClient = new QueryClient();
-    const variables = dashboardDataKeys.variables(channelId);
-    const overlays = dashboardDataKeys.overlays(channelId);
-    const overlay = dashboardDataKeys.overlay(channelId, "overlay-a");
-    const textCommands = moduleQueryKey(channelId, "text_commands", "template-variables");
-    const ads = moduleQueryKey(channelId, "ads", "schedule");
-    const belabox = moduleQueryKey(channelId, "belabox", "status");
-    [variables, overlays, overlay, textCommands, ads, belabox].forEach((key) => { addQuery(queryClient, key); });
-
-    invalidateDashboardRealtimeMessage(queryClient, moduleHint("variables.changed", { set: [{ name: "score", value: 1 }], removed: [] }));
-    expect(queryClient.getQueryState(variables)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(overlays)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(overlay)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(textCommands)?.isInvalidated).toBe(true);
-    queryClient.setQueryData(belabox, { ready: true });
-
-    invalidateDashboardRealtimeMessage(queryClient, moduleHint("overlay.changed", { overlayId: "overlay-a", revision: 2 }));
-    expect(queryClient.getQueryState(overlays)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(overlay)?.isInvalidated).toBe(true);
-
-    invalidateDashboardRealtimeMessage(queryClient, moduleHint("ads.schedule.updated", { asOf: "2026-10-09T08:00:00.000Z" }));
-    expect(queryClient.getQueryState(ads)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(belabox)?.isInvalidated).toBe(false);
-
-    invalidateDashboardRealtimeMessage(queryClient, moduleHint("modul.belabox.changed", { part: "live" }));
-    expect(queryClient.getQueryState(belabox)?.isInvalidated).toBe(true);
   });
 
   it("refreshes an overlay detail only once when its overlay list also changes", async () => {
@@ -171,8 +129,15 @@ describe("dashboard realtime messages", () => {
     });
     const unsubscribeList = listObserver.subscribe(() => undefined);
     const unsubscribeDetail = detailObserver.subscribe(() => undefined);
+    let overlayRevision = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: { "channel.overlays": overlayRevision } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
 
-    invalidateDashboardRealtimeMessage(queryClient, moduleHint("overlay.changed", { overlayId: "overlay-a", revision: 2 }));
+    await reconcileDashboardPanelResourceRevisions(queryClient, channelId);
+    overlayRevision = 1;
+    await reconcileDashboardRealtimeMessage(queryClient, moduleHint("overlay.changed", { overlayId: "overlay-a", revision: 2 }));
     await new Promise((resolve) => { setTimeout(resolve, 320); });
 
     expect(listReads).toBe(1);
@@ -182,65 +147,21 @@ describe("dashboard realtime messages", () => {
     queryClient.clear();
   });
 
-  it("invalidates the right module cache for each panel live-state hint", () => {
-    const hints = [
-      { moduleId: "chat_voting", type: "modul.chat_voting.changed", payload: { part: "panel" }, parts: ["panel"] },
-      { moduleId: "belabox", type: "modul.belabox.changed", payload: { part: "live" }, parts: ["status", "streams", "history-live", "history-stream-42"] },
-      { moduleId: "votekick", type: "modul.votekick.changed", payload: { part: "panel" }, parts: ["panel"] },
-      { moduleId: "votekick", type: "modul.votekick.changed", payload: { part: "availability" }, parts: ["panel"] },
-    ] as const;
-
-    for (const { moduleId, type, payload, parts } of hints) {
-      const queryClient = new QueryClient();
-      const relevant = parts.map((part) => moduleQueryKey(channelId, moduleId, part));
-      const settings = moduleQueryKey(channelId, moduleId, "settings");
-      const unrelated = moduleQueryKey(channelId, "ads", "schedule");
-      [...relevant, settings, unrelated].forEach((key) => { addQuery(queryClient, key); });
-
-      const parsed = parseRealtimeMessage(JSON.stringify({
-        version: 1,
-        id: `hint-${type}`,
-        createdAt: "2026-10-09T08:00:00.000Z",
-        channelId,
-        type,
-        payload,
-      }), channelId);
-      expect(parsed.kind).toBe("message");
-      if (parsed.kind === "message") invalidateDashboardRealtimeMessage(queryClient, parsed.message);
-
-      for (const key of relevant) expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
-      expect(queryClient.getQueryState(settings)?.isInvalidated).toBe(false);
-      expect(queryClient.getQueryState(unrelated)?.isInvalidated).toBe(false);
-    }
-  });
-
-  it("refreshes chat voting when a shared votekick ballot opens or closes", () => {
-    const hints = [
-      { type: "modul.votekick.changed", payload: { part: "availability" }, refreshChatVoting: true },
-      { type: "modul.votekick.changed", payload: { part: "panel" }, refreshChatVoting: false },
-    ] as const;
-
-    for (const hint of hints) {
-      const queryClient = new QueryClient();
-      const chatVoting = moduleQueryKey(channelId, "chat_voting", "panel");
-      const votekick = moduleQueryKey(channelId, "votekick", "panel");
-      [chatVoting, votekick].forEach((key) => { addQuery(queryClient, key); });
-
-      invalidateDashboardRealtimeMessage(queryClient, moduleHint(hint.type, hint.payload));
-
-      expect(queryClient.getQueryState(votekick)?.isInvalidated).toBe(true);
-      expect(queryClient.getQueryState(chatVoting)?.isInvalidated).toBe(hint.refreshChatVoting);
-    }
-  });
-
-  it("invalidates channel queries on stream changes and reconnect", () => {
+  it("compares exact channel resources on hints and invalidates channel queries on reconnect", async () => {
     const queryClient = new QueryClient();
     const overview = queryKeys.channel(channelId, "overview");
     const system = queryKeys.channel(channelId, "system");
     const channels = queryKeys.channels();
     [overview, system, channels].forEach((key) => { addQuery(queryClient, key); });
 
-    invalidateDashboardRealtimeMessage(queryClient, moduleHint("stream.state.changed", {
+    let revisions: Readonly<Record<string, number>> = { "channel.overview": 0, "channel.system": 0, channels: 0 };
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
+    await reconcileDashboardPanelResourceRevisions(queryClient, channelId);
+    revisions = { "channel.overview": 1, "channel.system": 1, channels: 1 };
+    await reconcileDashboardRealtimeMessage(queryClient, moduleHint("stream.state.changed", {
       state: "online", startedAt: "2026-10-09T08:00:00.000Z", changedAt: "2026-10-09T08:00:00.000Z",
     }));
     expect(queryClient.getQueryState(overview)?.isInvalidated).toBe(true);
@@ -251,12 +172,244 @@ describe("dashboard realtime messages", () => {
     invalidateDashboardChannelQueries(queryClient, channelId);
     expect(queryClient.getQueryState(overview)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(system)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(channels)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(channels)?.isInvalidated).toBe(false);
   });
 
   it("tracks connection state per channel for conditional fallback queries", () => {
     setDashboardRealtimeStatus(channelId, "connected");
     expect(getDashboardRealtimeStatus(channelId)).toBe("connected");
     expect(getDashboardRealtimeStatus("channel-b")).toBe("offline");
+  });
+
+  it("refreshes a second client from revisions and repairs a lost hint on focus", async () => {
+    const sharedChannel = "revision-two-client";
+    const writer = new QueryClient();
+    const reader = new QueryClient();
+    const writerEvents = queryKeys.channel(sharedChannel, "events", { origin: "twitch" });
+    const readerEvents = queryKeys.channel(sharedChannel, "events", { origin: "twitch" });
+    const readerAudit = queryKeys.channel(sharedChannel, "audit-log", { person: "user-1" });
+    const otherChannelEvents = queryKeys.channel("revision-other-channel", "events");
+    [writerEvents].forEach((key) => { addQuery(writer, key); });
+    [readerEvents, readerAudit, otherChannelEvents].forEach((key) => { addQuery(reader, key); });
+    const vectors = new Map<string, Readonly<Record<string, number>>>([[sharedChannel, {}]]);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), "https://brobot.example");
+      const requestedChannel = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+      return Promise.resolve(new Response(JSON.stringify({ revisions: vectors.get(requestedChannel) ?? {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+
+    await Promise.all([
+      reconcileDashboardPanelResourceRevisions(writer, sharedChannel),
+      reconcileDashboardPanelResourceRevisions(reader, sharedChannel),
+    ]);
+    vectors.set(sharedChannel, { "channel.events": 1, "channel.audit": 1 });
+    const hint: RealtimeMessage = {
+      version: 1,
+      id: "revision-two-client-hint",
+      createdAt: "2026-10-10T08:00:00.000Z",
+      channelId: sharedChannel,
+      type: "panel.resources.changed",
+      payload: {
+        resources: ["channel.all"],
+        revisions: { "channel.all": 2 },
+      },
+    };
+    const parsedHint = parseRealtimeMessage(JSON.stringify(hint), sharedChannel);
+    expect(parsedHint.kind).toBe("message");
+    if (parsedHint.kind === "message") await reconcileDashboardRealtimeMessage(reader, parsedHint.message);
+    expect(reader.getQueryState(readerEvents)?.isInvalidated).toBe(true);
+    expect(reader.getQueryState(readerAudit)?.isInvalidated).toBe(true);
+    expect(reader.getQueryState(otherChannelEvents)?.isInvalidated).toBe(false);
+
+    reader.setQueryData(readerEvents, { refreshed: true });
+    reader.setQueryData(readerAudit, { refreshed: true });
+    vectors.set(sharedChannel, { "channel.events": 2, "channel.audit": 1 });
+    await reconcileDashboardPanelResourceRevisions(reader, sharedChannel);
+    expect(reader.getQueryState(readerEvents)?.isInvalidated).toBe(true);
+    expect(reader.getQueryState(readerAudit)?.isInvalidated).toBe(false);
+    writer.clear();
+    reader.clear();
+  });
+
+  it("rechecks the revision vector when another hint arrives during an in-flight read", async () => {
+    const revisionChannel = "revision-overlap";
+    const reader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const panel = moduleQueryKey(revisionChannel, "chat_voting", "panel");
+    let panelReads = 0;
+    reader.setQueryData(panel, { revision: 0 });
+    const observer = new QueryObserver(reader, {
+      queryKey: panel,
+      queryFn: () => { panelReads += 1; return Promise.resolve({ revision: panelReads }); },
+      staleTime: Infinity,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    let releaseFirst: ((response: Response) => void) | undefined;
+    const firstResponse = new Promise<Response>((resolve) => { releaseFirst = resolve; });
+    let vector: Readonly<Record<string, number>> = {};
+    let revisionReads = 0;
+    vi.stubGlobal("fetch", vi.fn(() => {
+      revisionReads += 1;
+      if (revisionReads === 1) return firstResponse;
+      return Promise.resolve(new Response(JSON.stringify({ revisions: vector }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+
+    const first = reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    await vi.waitFor(() => { expect(revisionReads).toBe(1); });
+    vector = { "module:chat_voting:panel": 1 };
+    const second = reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    releaseFirst?.(new Response(JSON.stringify({ revisions: {} }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    await Promise.all([first, second]);
+    expect(revisionReads).toBe(2);
+    await vi.waitFor(() => { expect(panelReads).toBe(1); });
+    unsubscribe();
+    reader.clear();
+  });
+
+  it("refreshes overlapping resource mappings once per query", async () => {
+    const revisionChannel = "revision-overlapping-resources";
+    const reader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const affectedKeys = [
+      queryKeys.channel(revisionChannel, "overview"),
+      dashboardDataKeys.overlays(revisionChannel),
+      moduleQueryKey(revisionChannel, "api_source", "sources"),
+    ] as const;
+    const refetches = affectedKeys.map(() => 0);
+    const unsubscribers = affectedKeys.map((queryKey, index) => {
+      reader.setQueryData(queryKey, { ready: true });
+      return new QueryObserver(reader, {
+        queryKey,
+        queryFn: () => {
+          refetches[index] = (refetches[index] ?? 0) + 1;
+          return Promise.resolve({ ready: true });
+        },
+        staleTime: Infinity,
+      }).subscribe(() => undefined);
+    });
+    let vector: Readonly<Record<string, number>> = {};
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: vector }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
+
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    vector = {
+      "channel.overview": 1,
+      "channel.modules": 1,
+      "channel.overlays": 1,
+      "channel.overlay-accesses": 1,
+      "channel.library": 1,
+      "api.cache": 1,
+    };
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    await vi.waitFor(() => { expect(refetches).toEqual([1, 1, 1]); });
+    await new Promise((resolve) => { setTimeout(resolve, 1_100); });
+    expect(refetches).toEqual([1, 1, 1]);
+
+    unsubscribers.forEach((unsubscribe) => { unsubscribe(); });
+    reader.clear();
+  });
+
+  it.each([
+    ["channel.overview", "overview"],
+    ["channel.system", "system"],
+    ["channel.settings", "settings"],
+    ["channel.members", "members"],
+    ["channel.modules", "modules"],
+    ["channel.events", "events"],
+    ["channel.audit", "audit-log"],
+    ["channel.variables", "variables"],
+    ["channel.overlays", "overlays"],
+    ["channel.overlay-accesses", "overlay-access-list"],
+    ["channel.library", "library-catalog"],
+    ["weather.cache", "weather-library"],
+    ["api.cache", "api-source-cache"],
+    ["module:chat_voting:panel", "chat-voting"],
+    ["module:votekick:panel", "votekick"],
+    ["module:belabox:live", "belabox"],
+    ["module:chat_voting:data", "module-data"],
+    ["module:ads:schedule", "ads"],
+    ["channels", "channel-list"],
+  ] as const)("maps revision %s to its query area", async (resource, area) => {
+    const revisionChannel = `revision-${area}`;
+    const writer = new QueryClient();
+    const reader = new QueryClient();
+    const affectedKeys: Record<typeof area, readonly (readonly unknown[])[]> = {
+      overview: [queryKeys.channel(revisionChannel, "overview")],
+      system: [dashboardDataKeys.system(revisionChannel)],
+      settings: [queryKeys.channel(revisionChannel, "settings")],
+      members: [dashboardDataKeys.members(revisionChannel)],
+      modules: [queryKeys.channel(revisionChannel, "modules"), queryKeys.channel(revisionChannel, "overview")],
+      events: [queryKeys.channel(revisionChannel, "events", { module: "chat_voting" })],
+      "audit-log": [dashboardDataKeys.audit(revisionChannel, { person: "user-1", area: null })],
+      variables: [
+        dashboardDataKeys.variables(revisionChannel),
+        moduleQueryKey(revisionChannel, "text_commands", "commands"),
+        moduleQueryKey(revisionChannel, "chat_voting", "settings"),
+      ],
+      overlays: [dashboardDataKeys.overlays(revisionChannel), dashboardDataKeys.overlay(revisionChannel, "overlay-a")],
+      "overlay-access-list": [
+        dashboardDataKeys.overlays(revisionChannel),
+        dashboardDataKeys.overlayAccesses(revisionChannel, "overlay-a"),
+        dashboardDataKeys.legacyOverlayTokens(revisionChannel),
+      ],
+      "library-catalog": [
+        moduleQueryKey(revisionChannel, "text_library", "library"),
+        moduleQueryKey(revisionChannel, "timers", "panel"),
+        moduleQueryKey(revisionChannel, "faq", "panel"),
+        moduleQueryKey(revisionChannel, "text_commands", "template-variables"),
+        moduleQueryKey(revisionChannel, "api_source", "sources"),
+      ],
+      "weather-library": [moduleQueryKey(revisionChannel, "text_library", "library")],
+      "api-source-cache": [moduleQueryKey(revisionChannel, "api_source", "sources")],
+      "chat-voting": [moduleQueryKey(revisionChannel, "chat_voting", "panel")],
+      votekick: [moduleQueryKey(revisionChannel, "votekick", "panel")],
+      belabox: [moduleQueryKey(revisionChannel, "belabox", "streams")],
+      "module-data": [moduleQueryKey(revisionChannel, "chat_voting", "panel")],
+      ads: [moduleQueryKey(revisionChannel, "ads", "schedule")],
+      "channel-list": [queryKeys.channels()],
+    };
+    const affected = affectedKeys[area];
+    const unrelated = queryKeys.channel(`other-${revisionChannel}`, "unrelated");
+    affected.forEach((key) => { addQuery(writer, key); addQuery(reader, key); });
+    addQuery(writer, unrelated);
+    addQuery(reader, unrelated);
+    const readerRefetches = affected.map(() => 0);
+    const observers = affected.map((queryKey, index) => new QueryObserver(reader, {
+      queryKey,
+      queryFn: () => {
+        readerRefetches[index] = (readerRefetches[index] ?? 0) + 1;
+        return Promise.resolve({ ready: true });
+      },
+      staleTime: Infinity,
+    }));
+    const unsubscribers = observers.map((observer) => observer.subscribe(() => undefined));
+    const vectors = new Map<string, Readonly<Record<string, number>>>([[revisionChannel, {}]]);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: vectors.get(revisionChannel) }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
+
+    await Promise.all([
+      reconcileDashboardPanelResourceRevisions(writer, revisionChannel),
+      reconcileDashboardPanelResourceRevisions(reader, revisionChannel),
+    ]);
+    vectors.set(revisionChannel, { [resource]: 1 });
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    await vi.waitFor(() => { expect(readerRefetches).toEqual(Array.from({ length: affected.length }, () => 1)); });
+
+    expect(writer.getQueryState(affected[0] ?? [])?.isInvalidated).toBe(false);
+    expect(reader.getQueryState(unrelated)?.isInvalidated).toBe(false);
+    unsubscribers.forEach((unsubscribe) => { unsubscribe(); });
+    writer.clear();
+    reader.clear();
   });
 });

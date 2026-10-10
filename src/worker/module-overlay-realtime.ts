@@ -1,5 +1,5 @@
 import type { BotModule, ModuleAction, ModuleOverlayHostEvent } from "../modules/contract";
-import { isPanelModuleRealtimeMessageType, type ModuleOverlayRealtimeEnvelope } from "../realtime-contract";
+import type { ModuleOverlayRealtimeEnvelope } from "../realtime-contract";
 import { MODULES } from "../modules/registry";
 
 const OVERLAY_PAYLOAD_MAXIMUM_BYTES = 4_096;
@@ -74,7 +74,7 @@ export const prepareModuleOverlayRealtimeMessage = async (
       ORDER BY element.overlay_id`,
   ).bind(channelId, action.elementKind, ...recipientBindings, mandatory ? 1 : 0, moduleId).all<{ overlay_id: string }>();
   const overlayIds = [...new Set(recipients.results.map(({ overlay_id }) => overlay_id))];
-  if (overlayIds.length === 0 && !isPanelModuleRealtimeMessageType(`modul.${moduleId}.${action.type}`)) {
+  if (overlayIds.length === 0) {
     return { outcome: "no_recipients" };
   }
 

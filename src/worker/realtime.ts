@@ -17,6 +17,7 @@ import {
 import { getOverlayBindingForToken } from "./auth/overlay-token-repository";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "./realtime-protocol";
 import type { ApiErrorCode } from "../contracts/values";
+import { notifyCommittedResources } from "./panel-resources";
 
 interface RealtimeRouteEnvironment {
   Bindings: Env;
@@ -130,6 +131,7 @@ realtimeRouter.get("/ws/overlay", async (context) => {
     token,
     pepper: context.env.OVERLAY_TOKEN_PEPPER,
     now: new Date().toISOString(),
+    onCommittedTouch: (channelId) => notifyCommittedResources(context.env, channelId),
   });
   if (record === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
 

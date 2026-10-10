@@ -36,6 +36,8 @@ export const dashboardDataKeys = {
   variables: (channelId: string) => queryKeys.channel(channelId, "variables"),
   overlays: (channelId: string) => queryKeys.channel(channelId, "overlays"),
   overlay: (channelId: string, overlayId: string) => queryKeys.channel(channelId, "overlays", { overlayId }),
+  overlayAccesses: (channelId: string, overlayId: string) => queryKeys.channel(channelId, "overlay-accesses", { overlayId }),
+  legacyOverlayTokens: (channelId: string) => queryKeys.channel(channelId, "legacy-overlay-tokens"),
   audit: (channelId: string, filters: PanelAuditFilters) => queryKeys.channel(channelId, "audit-log", {
     person: filters.person,
     area: filters.area,
