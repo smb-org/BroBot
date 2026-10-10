@@ -3,6 +3,7 @@ import { useId, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { formatNumber, type DashboardLanguage } from "../locale";
 import { Button } from "./Button";
 import { Field } from "./Field";
+import { QueryErrorState, type QueryError } from "./QueryErrorState";
 
 export interface ListToolbarUsage {
   count: number;
@@ -19,11 +20,7 @@ export interface ListToolbarUsage {
   };
 }
 
-export interface ListToolbarQueryError {
-  message: string;
-  retryLabel: string;
-  onRetry: () => void;
-}
+export type ListToolbarQueryError = QueryError;
 
 export interface ListToolbarProperties {
   language?: DashboardLanguage;
@@ -146,18 +143,19 @@ export function ListToolbar({
               <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
             ) : null}
           </div>
-        </> : <>
-          <span className="list-toolbar__query-error" role="alert">{queryError.message}</span>
-          <div className="list-toolbar__status-right">
+        </> : <QueryErrorState
+          mode="refresh"
+          placement="toolbar"
+          error={queryError}
+          trailing={<div className="list-toolbar__status-right">
             {createReason === undefined ? null : (
               <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
             )}
             {hasActiveFilters && onReset !== undefined && resetLabel !== undefined ? (
               <button className="list-toolbar__reset" type="button" onClick={onReset}>{resetLabel}</button>
             ) : null}
-            <button className="list-toolbar__reset" type="button" onClick={queryError.onRetry}>{queryError.retryLabel}</button>
-          </div>
-        </>}
+          </div>}
+        />}
       </div>
     </div>
   );

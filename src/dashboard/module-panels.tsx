@@ -206,19 +206,17 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
     return { definition: definition.default, settings: response.settings, revision: response.revision, variables: response.variables };
   });
   const loaded = settingsQuery.data;
+  const loadError = settingsQuery.error instanceof PanelApiError
+    ? apiErrorText(settingsQuery.error.code, dashboardTexts().module.settingsLoadError)
+    : dashboardTexts().module.settingsLoadError;
   if (loaded === undefined) {
-    const loadError = settingsQuery.error instanceof PanelApiError
-      ? apiErrorText(settingsQuery.error.code, dashboardTexts().module.settingsLoadError)
-      : settingsQuery.error === null
-        ? null
-        : dashboardTexts().module.settingsLoadError;
     return <LoadState
       status={settingsQuery.isPending || settingsQuery.isFetching ? "loading" : "error"}
       minHeight="calc(var(--s10) * 8)"
       loading={<Skeleton rows={3} height={34} />}
       empty={null}
-      error={<p className="muted" role="alert">{loadError ?? dashboardTexts().module.settingsLoadError}</p>}
-      onRetry={() => { void settingsQuery.refetch(); }}
+      error={<p className="muted" role="alert">{loadError}</p>}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}
     >{null}</LoadState>;
   }
   const copy = loaded.definition.locales[language];
@@ -228,8 +226,8 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
     loading={<Skeleton rows={3} height={34} />}
     empty={null}
     error={<p className="muted" role="alert">{dashboardTexts().module.settingsLoadError}</p>}
+    queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}
     refreshError={settingsQuery.isRefetchError}
-    onRetry={() => { void settingsQuery.refetch(); }}
   >
     <LoadedModuleSettingsEditor
       key={`${module.id}-${String(generation)}`}

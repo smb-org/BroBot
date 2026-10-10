@@ -456,7 +456,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         loading={<Skeleton rows={8} height={34} />}
         empty={<div />}
         error={<p>{labels.loadError}</p>}
-        onRetry={() => { void libraryQuery.refetch(); }}
+        queryError={{ message: labels.loadError, onRetry: () => { void libraryQuery.refetch(); } }}
         refreshError={libraryQuery.isRefetchError}
       >{null}</LoadState>
     </section>
@@ -484,7 +484,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
       loading={<Skeleton rows={8} height={34} />}
       empty={<div />}
       error={<p>{labels.loadError}</p>}
-      onRetry={() => { void libraryQuery.refetch(); }}
+      queryError={{ message: labels.loadError, onRetry: () => { void libraryQuery.refetch(); } }}
       refreshError={libraryQuery.isRefetchError}
     >
     <section className="module-stack text-library" aria-label={labels.library} style={{ minHeight: "calc(var(--s10) * 30)" }}>

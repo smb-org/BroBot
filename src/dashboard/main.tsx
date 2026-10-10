@@ -48,7 +48,7 @@ import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, QueryErrorState, QueryStatusRow, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, QueryErrorState, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
@@ -1164,24 +1164,20 @@ const SystemPage = ({ system, error, loadedAt, onRetry }: SystemPageProperties):
   return (
     <>
       <ModuleHeading kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
+      <QueryErrorState
+        mode="refresh"
+        placement="status-row"
+        error={system !== undefined && error !== null ? { title: texts.errors.dataLoadFailed, message: error, onRetry } : null}
+      />
       <UiLoadState
         status={system !== undefined ? "success" : error !== null ? "error" : "loading"}
         minHeight={720}
         loading={<Skeleton rows={8} height={58} />}
         empty={<Skeleton rows={8} height={58} />}
-        error={<QueryErrorState
-          title={texts.errors.dataLoadFailed}
-          reason={error ?? texts.system.loadState}
-          retryLabel={dashboardCommonTexts().retry}
-          onRetry={onRetry}
-        />}
+        error={<p role="alert">{error ?? texts.system.loadState}</p>}
+        queryError={{ title: texts.errors.dataLoadFailed, message: error ?? texts.system.loadState, onRetry }}
       >
         {system === undefined ? null : <>
-          <QueryStatusRow
-            message={error}
-            retryLabel={dashboardCommonTexts().retry}
-            onRetry={onRetry}
-          />
           <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
           <BotPermissionsInspector permissions={system.botPermissions} />
           <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />

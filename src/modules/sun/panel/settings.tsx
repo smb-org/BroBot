@@ -69,7 +69,7 @@ function SunSettingsPanelContent({
       loading={<Skeleton rows={3} height={34} />}
       empty={<div />}
       error={<p>{labels.loadFailed}</p>}
-      onRetry={() => { void settingsQuery.refetch(); }}
+      queryError={{ message: labels.loadFailed, onRetry: () => { void settingsQuery.refetch(); } }}
       refreshError={settingsQuery.isRefetchError}
     >
     <div className="module-stack sun-settings" aria-label={labels.errorTexts}>

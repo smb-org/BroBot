@@ -237,6 +237,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const maximum = overlaysQuery.data?.maximum ?? 20;
   const loading = overlaysQuery.isPending;
   const loadFailed = overlaysQuery.isError;
+  const overlaysLoadError = overlaysQuery.error instanceof PanelApiError
+    ? apiErrorText(overlaysQuery.error.code, labels.loadError)
+    : labels.loadError;
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -292,7 +295,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     setSetupCopiedSnippet(null);
     selectedIdRef.current = nextId;
     setSelectedId(nextId);
-  }, [invalidateSecret]);
+  }, [invalidateSecret, setRevokeTarget, setReplaceTarget]);
   const secretContextIsCurrent = (version: number, overlayId: string, requestedChannelId: string): boolean =>
     pageActiveRef.current && secretVersion.current === version && selectedIdRef.current === overlayId &&
     channelIdRef.current === requestedChannelId && permissionRef.current;
@@ -316,6 +319,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const selected = useMemo(() => overlays.find((overlay) => overlay.id === selectedId) ?? null, [overlays, selectedId]);
   const refetchOverlays = overlaysQuery.refetch;
   const selectedOverlay = selectedOverlayQuery.data?.overlay ?? null;
+  const selectedOverlayLoadError = selectedOverlayQuery.error instanceof PanelApiError
+    ? apiErrorText(selectedOverlayQuery.error.code, labels.loadError)
+    : labels.loadError;
   const selectedOverlayLoadFailed = selectedOverlayError !== null;
   const accesses = selectedOverlayAccessesQuery.data?.accesses ?? [];
   const legacyTokens = legacyTokensQuery.data?.pages.flatMap((page) => page.tokens) ?? [];
@@ -332,9 +338,10 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       }
     } catch (caught) {
       if (!isActive()) return;
-      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
+      const loadErrorFallback = overlaysTexts(dashboardLanguage()).loadError;
+      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, loadErrorFallback) : loadErrorFallback });
     }
-  }, [changeSelection, initialSelection, labels.loadError, refetchOverlays]);
+  }, [changeSelection, initialSelection, refetchOverlays]);
 
   useEffect(() => {
     let active = true;
@@ -675,6 +682,10 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       onSearchChange={setSearch}
       create={{ label: labels.create, onClick: beginCreate, disabled: !canManage || pending || overlays.length >= maximum, ...(createReason === undefined ? {} : { reason: createReason }) }}
       usage={{ count: overlays.length, maximum, ...(query.length === 0 ? {} : { filteredCount: visibleOverlays.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: labels.limitSuffix, loadedSuffix: dashboardCommonTexts().loaded } }}
+      {...(loadFailed && overlays.length > 0 ? { queryError: {
+        message: overlaysLoadError,
+        onRetry: () => { void overlaysQuery.refetch({ throwOnError: true }).catch(() => undefined); },
+      } } : {})}
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
     />
     <LoadState
@@ -683,6 +694,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       loading={<Skeleton rows={6} height={34} />}
       empty={<p className="empty-state">{overlays.length === 0 ? labels.empty : dashboardCommonTexts().noMatches}</p>}
       error={<Skeleton rows={6} height={34} />}
+      queryError={{ message: overlaysLoadError, onRetry: () => { void overlaysQuery.refetch({ throwOnError: true }).catch(() => undefined); } }}
     >
       <div className={`table-wrap overlays-table-wrap${selectedId !== null || creating ? " overlays-table-wrap--inspector-open" : ""}`}>
         <table className="table overlays-table">
@@ -765,7 +777,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       loading={<div aria-label={labels.loading}><Skeleton rows={6} height={34} /></div>}
       empty={<div />}
       error={<p role="alert">{labels.loadError}</p>}
-      onRetry={() => { void selectedOverlayQuery.refetch({ throwOnError: true }).catch(() => undefined); }}
+      queryError={{ message: selectedOverlayLoadError, onRetry: () => { void selectedOverlayQuery.refetch({ throwOnError: true }).catch(() => undefined); } }}
       refreshError={selectedOverlay !== null && selectedOverlayLoadFailed}
     >
     {selectedOverlay === null ? null : <div className="overlay-inspector">

@@ -3265,7 +3265,7 @@ describe("Dashboard skeleton", () => {
     });
 
     expect(rendered.container.querySelector(".state-list")).toBeInTheDocument();
-    expect(rendered.container.querySelector(".query-status-row__message")).not.toBeEmptyDOMElement();
+    expect(rendered.container.querySelector(".query-error-state--status-row .query-error-state__message")).not.toBeEmptyDOMElement();
     fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
 
     await waitFor(() => {
@@ -3273,7 +3273,7 @@ describe("Dashboard skeleton", () => {
         bot: { reason: "recovered-system" },
       });
     });
-    expect(rendered.container.querySelector(".query-status-row__message")).toBeNull();
+    expect(rendered.container.querySelector(".query-error-state--status-row .query-error-state__message")).toBeNull();
     expect(systemRequests).toBe(2);
     expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/system")).toHaveLength(2);
   });

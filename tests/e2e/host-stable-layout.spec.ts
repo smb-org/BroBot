@@ -577,19 +577,18 @@ test("the channel-variable limit and create controls stay above a full list", as
 
   await page.goto(`/channels/${channelId}/variables`);
   await variablesStarted;
-  const limitSlotBefore = await measureBox(page, ".channel-variables-limit-slot");
   const toolbarBefore = await measureBox(page, ".list-toolbar");
   const createActionBefore = await measureBox(page, ".list-toolbar__create");
   const usageBefore = await measureBox(page, ".list-toolbar__status");
   releaseVariables();
   await expect(page.locator(".channel-variables-table tbody tr")).toHaveCount(25);
-  expect(await measureBox(page, ".channel-variables-limit-slot")).toEqual(limitSlotBefore);
   expect(await measureBox(page, ".list-toolbar")).toEqual(toolbarBefore);
   expect(await measureBox(page, ".list-toolbar__create")).toEqual(createActionBefore);
   expect(await measureBox(page, ".list-toolbar__status")).toEqual(usageBefore);
   await expect(page.locator(".list-toolbar__status")).toContainText("25 of 25 variables used");
   await expect(page.getByRole("button", { name: "Create variable" })).toBeDisabled();
-  expect(limitSlotBefore[1] + limitSlotBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".ui-load-state"))[1]);
+  const statusBox = await measureBox(page, ".list-toolbar__status");
+  expect(statusBox[1] + statusBox[3]).toBeLessThanOrEqual((await measureBox(page, ".ui-load-state"))[1]);
 });
 
 test("a failed realtime variable refresh keeps rows visible and offers retry", async ({ page }) => {
@@ -651,7 +650,7 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
 
   await page.goto(`/channels/${channelId}/variables`);
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
-  const retrySlot = page.locator(".channel-variables-limit-slot");
+  const retrySlot = page.locator(".list-toolbar__status");
   const slotBeforeRefreshFailure = await retrySlot.boundingBox();
   const initialVariableRequestCount = variableRequestCount;
   await page.evaluate(() => {

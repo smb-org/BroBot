@@ -253,7 +253,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
           loading={<Skeleton rows={7} height={34} />}
           empty={<p className="muted">{labels.empty}</p>}
           error={<p className="muted">{labels.loadError}</p>}
-          onRetry={() => { void query.refetch(); }}
+          queryError={{ message: labels.loadError, onRetry: () => { void query.refetch(); } }}
           refreshError={query.isRefetchError}
         >
         <div className="state-list" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>

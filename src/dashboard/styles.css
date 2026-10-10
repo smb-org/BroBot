@@ -729,7 +729,6 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .table__answer--placeholder { color: var(--text-3); font-style: italic; }
 .channel-variables-limit-note { margin: -8px 0 0; }
 .channel-variable-legacy-slot { min-height: 18px; }
-.channel-variables-limit-slot { display: flex; height: 44px; min-height: 44px; align-items: center; }
 .channel-variable-legacy-slot { overflow: hidden; }
 .channel-variable-legacy-slot > p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .channel-variables-table-wrap { width: 100%; }
@@ -1244,8 +1243,6 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-load-state--retry { display: grid; grid-template-rows: minmax(var(--ui-load-state-content-min-height), 1fr) var(--s10); }
 .ui-load-state--retry > .ui-load-state__content { min-width: 0; min-height: 0; }
 .ui-load-state__retry-slot { display: flex; align-items: center; gap: var(--s2); min-width: 0; height: var(--s10); overflow: hidden; }
-.ui-load-state__refresh-error { min-width: 0; flex: 1; overflow: hidden; }
-.ui-load-state__refresh-error > * { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-textarea__suggestions-dropdown { display: grid; grid-template-rows: minmax(0, 1fr) auto; width: min(400px, calc(100vw - 24px)); min-width: 0; max-width: calc(100vw - 24px); max-height: none; overflow: hidden; padding: 8px; border: 1px solid var(--line-strong); border-radius: var(--r-container); background: var(--surface-raised); box-shadow: var(--mantine-shadow-xs); }
 .ui-textarea__suggestions { max-height: min(380px, 48vh); overflow: auto; overscroll-behavior: contain; }
 .ui-textarea__suggestions .mantine-Combobox-group { margin: 0; }
@@ -1469,15 +1466,21 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .list-toolbar__create { display: flex; justify-content: flex-end; }
 .list-toolbar__create .mantine-Button-root { box-sizing: border-box; height: 44px; min-height: 44px; white-space: nowrap; }
 .list-toolbar__status { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: var(--s2); box-sizing: border-box; height: 20px; min-height: 20px; margin-top: var(--s1); overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 20px; }
+.list-toolbar__status--error { display: flex; }
 .list-toolbar__usage, .list-toolbar__status-right { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list-toolbar__usage .mono { color: var(--text-2); font-weight: 600; }
 .list-toolbar__usage--warning { color: var(--warn); }
 .list-toolbar__usage--warning .mono { color: var(--warn); }
 .list-toolbar__status-right { display: flex; align-items: center; justify-content: flex-end; gap: var(--s2); }
 .list-toolbar__active-filters, .list-toolbar__reason { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.list-toolbar__query-error { min-width: 0; overflow: hidden; color: var(--error-text); text-overflow: ellipsis; white-space: nowrap; }
-.query-status-row { display: flex; height: 20px; min-height: 20px; align-items: center; justify-content: space-between; gap: var(--s2); margin-top: var(--s1); margin-bottom: var(--s4); overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 20px; }
-.query-status-row__message { min-width: 0; overflow: hidden; color: var(--error-text); text-overflow: ellipsis; white-space: nowrap; }
+.query-error-state--toolbar, .query-error-state--status-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--s2); overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 20px; }
+.query-error-state--toolbar { width: 100%; height: 20px; min-height: 20px; }
+.query-error-state--status-row { height: 20px; min-height: 20px; margin-top: var(--s1); margin-bottom: var(--s4); }
+.query-error-state--load-state { display: flex; width: 100%; min-width: 0; align-items: center; gap: var(--s2); }
+.query-error-state__message { min-width: 0; flex: 1; overflow: hidden; color: var(--error-text); text-overflow: ellipsis; white-space: nowrap; }
+.query-error-state__actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: var(--s2); }
+.query-error-state__retry { flex: none; padding: 0; border: 0; color: var(--brand-text); background: transparent; font: inherit; cursor: pointer; }
+.query-error-state__retry:hover { color: var(--text); text-decoration: underline; }
 .list-toolbar__reset { flex: none; padding: 0; border: 0; color: var(--brand-text); background: transparent; font: inherit; cursor: pointer; }
 .list-toolbar__reset:hover { color: var(--text); text-decoration: underline; }
 .list-toolbar__reason { color: var(--text-3); }

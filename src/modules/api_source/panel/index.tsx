@@ -157,7 +157,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
         loading={<Skeleton rows={4} height={34} />}
         empty={<p className="muted">{labels.empty}</p>}
         error={<p className="muted">{labels.loadFailed}</p>}
-        onRetry={() => { void query.refetch(); }}
+        queryError={{ message: labels.loadFailed, onRetry: () => { void query.refetch(); } }}
         refreshError={query.isRefetchError}
       >
         <ul className="api-source-panel__list" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", margin: 0, padding: 0, listStyle: "none" }}>

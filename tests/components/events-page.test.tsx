@@ -479,12 +479,12 @@ describe("EventsPage failure cause icon", () => {
 
     // The revalidation on mount fails; the cached rows stay.
     expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
-    await waitFor(() => { expect(rendered.container.querySelector(".list-toolbar__query-error")).not.toBeEmptyDOMElement(); });
+    await waitFor(() => { expect(rendered.container.querySelector(".query-error-state--toolbar .query-error-state__message")).not.toBeEmptyDOMElement(); });
     expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
 
     expect(await screen.findByText("Raid von recoveredraid mit 2 Zuschauern")).toBeVisible();
-    expect(rendered.container.querySelector(".list-toolbar__query-error")).toBeNull();
+    expect(rendered.container.querySelector(".query-error-state--toolbar .query-error-state__message")).toBeNull();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 

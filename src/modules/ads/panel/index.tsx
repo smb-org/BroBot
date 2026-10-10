@@ -112,7 +112,7 @@ export const AdsPanel = ({ channelId, language = "de", canManage = false }: { ch
         </div>}
         empty={<div style={{ minHeight: "calc(var(--s10) * 24)" }} />}
         error={<p role="alert">{loadError}</p>}
-        onRetry={() => { void scheduleQuery.refetch({ throwOnError: true }).catch(() => undefined); }}
+        queryError={{ message: loadError, onRetry: () => { void scheduleQuery.refetch({ throwOnError: true }).catch(() => undefined); } }}
         refreshError={schedule !== null && scheduleLoadFailed}>
       {schedule === null ? null : <>
       <section className="config-section" aria-label={labels.scheduleSection}>

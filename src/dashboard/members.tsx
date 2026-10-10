@@ -8,7 +8,7 @@ import { apiErrorText, dashboardCommonTexts, dashboardTexts, formatDate } from "
 import { ModuleHeading } from "./module-panels";
 import { MemberAvatar } from "./member-avatar";
 import { MemberGrantEditor } from "./member-grant-editor";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, QueryErrorState, useDraftGuard, useInspectorSelection } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, useDraftGuard, useInspectorSelection } from "./ui";
 import { dashboardDataKeys } from "./data/keys";
 import { useMembersQuery } from "./data/lists";
 import {
@@ -417,8 +417,8 @@ const MembersPageContent = ({
                   copy: { countSuffix: texts.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: texts.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: "", loadedSuffix: dashboardCommonTexts().loaded },
                 }}
                 {...(error === null || members.length === 0 ? {} : { queryError: {
+                  title: dashboardTexts().errors.dataLoadFailed,
                   message: error,
-                  retryLabel: dashboardCommonTexts().retry,
                   onRetry: () => { void membersQuery.refetch(); },
                 } })}
                 {...(query.length === 0 ? {} : { activeFilters: `${texts.searchMembers}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
@@ -429,12 +429,8 @@ const MembersPageContent = ({
                 minHeight={320}
                 loading={<MemberListSkeleton />}
                 empty={members.length > 0 ? <p className="empty-state">{dashboardCommonTexts().noMatches}</p> : <MemberList members={members} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
-                error={<QueryErrorState
-                  title={dashboardTexts().errors.dataLoadFailed}
-                  reason={error ?? texts.load}
-                  retryLabel={dashboardCommonTexts().retry}
-                  onRetry={() => { void membersQuery.refetch(); }}
-                />}
+                error={<p role="alert">{error ?? texts.load}</p>}
+                queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: error ?? texts.load, onRetry: () => { void membersQuery.refetch(); } }}
               >{members.length === 0 ? null : <MemberList members={visibleMembers} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>
               </div>
               {members.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={members.length} loadedLabel={texts.loaded}>

@@ -403,7 +403,8 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
     <LoadState status={visibleLoadError === null ? "loading" : "error"} minHeight="360px"
       loading={<p className="loading-line">{labels.editorLoading}</p>}
       empty={<span />}
-      error={<Button variant="neutral" onClick={reload}>{labels.editorConflictReload}</Button>}>
+      error={<p role="alert">{visibleLoadError ?? labels.editorLoadError}</p>}
+      queryError={{ message: visibleLoadError ?? labels.editorLoadError, onRetry: reload }}>
       {null}
     </LoadState>
   </section>;

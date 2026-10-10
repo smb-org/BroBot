@@ -290,7 +290,7 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
         loading={<Skeleton rows={3} height={44} />}
         empty={<p className="stream-manager-feed__empty">{texts.streamManager.feedEmpty}</p>}
         error={<p role="alert">{texts.events.connectionLost}</p>}
-        onRetry={() => { void query.refetch({ throwOnError: true }).catch(() => undefined); }}
+        queryError={{ message: texts.events.connectionLost, onRetry: () => { void query.refetch({ throwOnError: true }).catch(() => undefined); } }}
         refreshError={query.data !== undefined && queryFailed}
       >
         {entries.length === 0 ? null : <ul className="stream-manager-feed">
