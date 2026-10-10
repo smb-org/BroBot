@@ -346,7 +346,7 @@ describe("saved chat voting panel", () => {
     resolveCreate(jsonResponse({ template: template({ id: "created-template", title: "First title", revision: 1 }) }, 201));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Edit while saving"));
     expect(screen.getByRole("textbox", { name: "Question" })).toBe(question);
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
   });
 
   it("keeps quick-template changes local until Save", async () => {
@@ -497,6 +497,59 @@ describe("saved chat voting panel", () => {
     expect(question).toHaveValue("Lunch?");
     expect(question).toHaveProperty("selectionStart", 2);
     expect(view.container).not.toHaveTextContent("Changed elsewhere – reload");
+  });
+
+  it("ignores a delayed conflict reload after replacing the template inspector", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const first = template({ id: "template-a", title: "Template A" });
+    const second = template({ id: "template-b", title: "Template B" });
+    const latestFirst = { ...first, title: "Updated Template A", revision: 2 };
+    let deferNextRead = false;
+    let resolveReload: ((templates: ChatVoteTemplate[]) => void) | undefined;
+    const patches: { id: string; body: Record<string, unknown> }[] = [];
+    mount(fetchHarness({
+      templates: [first, second],
+      getTemplates: () => {
+        if (!deferNextRead) return [first, second];
+        deferNextRead = false;
+        return new Promise<ChatVoteTemplate[]>((resolve) => { resolveReload = resolve; });
+      },
+      onPatch: (id, body) => {
+        patches.push({ id, body });
+        if (patches.length === 1) return jsonResponse({ error: "chat_vote_template_conflict" }, 409);
+        return jsonResponse({ template: { ...second, title: String(body.title), revision: 2 } });
+      },
+    }));
+    const question = await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.change(question, { target: { value: "Unsaved Template A" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByRole("button", { name: "Reload" });
+
+    deferNextRead = true;
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(resolveReload).toBeTypeOf("function"));
+    if (resolveReload === undefined) throw new Error("The conflict reload did not start.");
+    const completeReload = resolveReload;
+    const secondLink = [...document.querySelectorAll<HTMLAnchorElement>(".chat-voting-template-list .list-row__link")]
+      .find((link) => link.textContent.includes("Template B"));
+    if (secondLink === undefined) throw new Error("Template B is missing from the saved list.");
+    fireEvent.click(secondLink);
+    const discardDialog = await screen.findByRole("dialog", { name: "Discard changes?" });
+    fireEvent.click(within(discardDialog).getByRole("button", { name: "Discard changes" }));
+    const secondQuestion = await screen.findByRole("textbox", { name: "Question" });
+    await waitFor(() => expect(secondQuestion).toHaveValue("Template B"));
+    fireEvent.change(secondQuestion, { target: { value: "Unsaved Template B" } });
+
+    await act(async () => {
+      completeReload([latestFirst, second]);
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(patches).toHaveLength(2));
+    expect(patches).toEqual([
+      { id: "template-a", body: { title: "Unsaved Template A", shortcut: null, labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120, revision: 1 } },
+      { id: "template-b", body: { title: "Unsaved Template B", shortcut: null, labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120, revision: 1 } },
+    ]);
   });
 
   it("confirms deletion and removes the saved row", async () => {

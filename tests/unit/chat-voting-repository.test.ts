@@ -71,6 +71,31 @@ describe("chat voting repository mutation guards", () => {
     }
   });
 
+  it("keeps template usage timestamps monotonic when an older start is recorded late", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await insertLoginIdentityAndSession(database, "fictional-operator");
+      await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const authorization = authorizeModuleMutation(
+        "fictional-channel",
+        { userId: "fictional-operator", sessionId: "session-fictional-operator" },
+        "2026-10-04T10:00:00.000Z",
+      );
+      const draft = { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 } as const;
+      await repository.templates.createTemplate("fictional-channel", "template-monotonic", draft, "2026-10-04T10:00:00.000Z", authorization);
+
+      await repository.templates.markTemplateUsed("fictional-channel", "template-monotonic", "2030-01-01T12:30:00.000Z");
+      await repository.templates.markTemplateUsed("fictional-channel", "template-monotonic", "2030-01-01T12:00:00.000Z");
+
+      await expect(repository.templates.template("fictional-channel", "template-monotonic"))
+        .resolves.toMatchObject({ lastUsedAt: "2030-01-01T12:30:00.000Z" });
+    } finally {
+      database.close();
+    }
+  });
+
   it("returns the PATCH acknowledgement from its UPDATE batch during a concurrent write", async () => {
     const database = new TestD1Database();
     try {

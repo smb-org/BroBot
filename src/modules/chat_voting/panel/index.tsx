@@ -10,7 +10,7 @@ import { ChatVoteTemplateList } from "./template-list";
 import { ChatVoteTemplateInspector } from "./template-inspector";
 import type { TemplateInspectorActions } from "./template-inspector";
 import type { ChatVotingPanelState } from "./service";
-import { approveChatVotingTerm, closeChatVoting, deleteChatVoteTemplate, loadChatVotingState, loadChatVoteTemplates, loadRecentChatVotes, mergeChatVoteTemplateLists, startChatVoting } from "./service";
+import { approveChatVotingTerm, closeChatVoting, deleteChatVoteTemplate, laterUsageTime, loadChatVotingState, loadChatVoteTemplates, loadRecentChatVotes, mergeChatVoteTemplateLists, startChatVoting } from "./service";
 import type { ChatVoteTemplateListState } from "./service";
 import { compactDateRange, timeText } from "./date-range";
 import { ChatVotingLiveBlock } from "./live-block";
@@ -20,14 +20,6 @@ import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 type ListMode = "saved" | "recent";
 type Announcement = { key: number; text: string };
 const EMPTY_TEMPLATES: readonly ChatVoteTemplate[] = [];
-const laterUsageTime = (current: string | null, incoming: string): string => {
-  if (current === null) return incoming;
-  const currentTime = Date.parse(current);
-  const incomingTime = Date.parse(incoming);
-  if (!Number.isFinite(currentTime)) return incoming;
-  if (!Number.isFinite(incomingTime)) return current;
-  return incomingTime > currentTime ? incoming : current;
-};
 const voteTotal = (vote: ChatVote): number => vote.kind === "free_text"
   ? vote.voterCount ?? (vote.textResults ?? []).reduce((sum, term) => sum + term.count, 0)
   : vote.voterCount ?? (vote.counts ?? []).reduce((sum, count) => sum + count, 0);
@@ -124,6 +116,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [templateSnapshot, setTemplateSnapshot] = useState<ChatVoteTemplate | null>(null);
   const [templateInspectorKey, setTemplateInspectorKey] = useState<string | null>(null);
+  const [templateInspectorGeneration, setTemplateInspectorGeneration] = useState(0);
   const [newTemplateDraft, setNewTemplateDraft] = useState<ChatVoteTemplate | null>(null);
   const [savedTemplateId, setSavedTemplateId] = useState<string | null>(null);
   const [selectedRecentId, setSelectedRecentId] = useState<string | null>(null);
@@ -135,6 +128,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   const selectedTemplateIdRef = useRef<string | null>(null);
   const templateSnapshotRef = useRef<ChatVoteTemplate | null>(null);
   const templateInspectorKeyRef = useRef<string | null>(null);
+  const templateInspectorGenerationRef = useRef(0);
   const selectionClearedRef = useRef(selectionCleared);
   const previousVote = useRef<{ id: string; status: "open" | "closed"; title: string | null } | null>(null);
   const newDraftSequence = useRef(0);
@@ -143,6 +137,11 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   const templates = templateList?.templates ?? EMPTY_TEMPLATES;
 
   const updateTemplateSelection = useCallback((id: string | null, snapshot: ChatVoteTemplate | null, inspectorKey = id): void => {
+    if (templateInspectorKeyRef.current !== inspectorKey) {
+      const generation = templateInspectorGenerationRef.current + 1;
+      templateInspectorGenerationRef.current = generation;
+      setTemplateInspectorGeneration(generation);
+    }
     selectedTemplateIdRef.current = id;
     templateSnapshotRef.current = snapshot;
     templateInspectorKeyRef.current = inspectorKey;
@@ -459,7 +458,8 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     }
   };
 
-  const onTemplateSaved = (template: ChatVoteTemplate): void => {
+  const onTemplateSaved = (template: ChatVoteTemplate, originGeneration: number): void => {
+    if (originGeneration !== templateInspectorGenerationRef.current) return;
     const inspectorKey = templateInspectorKeyRef.current ?? template.id;
     updateTemplateSelection(template.id, template, inspectorKey);
     setNewTemplateDraft(null);
@@ -507,7 +507,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     isRunning={voteState?.vote?.status === "open" && (templates.find((entry) => entry.id === selectedTemplate.id)?.lastUsedAt ?? selectedTemplate.lastUsedAt) === voteState.vote.openedAt}
     startLockReason={activeLockReason}
     onRegisterActions={registerInspectorActions}
-    onTemplateSaved={onTemplateSaved}
+    onTemplateSaved={(template) => { onTemplateSaved(template, templateInspectorGeneration); }}
     onClose={clearInspector}
     onDiscardNew={discardNewTemplate}
     onStart={startTemplate}

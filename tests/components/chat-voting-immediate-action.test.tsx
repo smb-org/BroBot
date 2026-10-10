@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { moduleQueryKey } from "../../src/dashboard/data/module-query";
 import { reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
@@ -91,6 +92,47 @@ describe("chat voting immediate action", () => {
     await waitFor(() => expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent(/Running|Läuft/u));
     const titles = [...document.querySelectorAll(".chat-voting-template-list .list-row__title")].map((element) => element.textContent);
     expect(titles).toEqual(["Alpha", "Zeta"]);
+  });
+
+  it("keeps a newer usage timestamp when an older immediate start completes late", async () => {
+    let resolveStart!: (response: Response) => void;
+    const pendingStart = new Promise<Response>((resolve) => { resolveStart = resolve; });
+    const template = {
+      id: "template-dinner", channelId: "channel-a", shortcut: null, title: "Dinner", labels: ["A", "B"],
+      freeTextMode: null, durationSeconds: 120, revision: 1, legacyAlias: null, lastUsedAt: null as string | null,
+      createdAt: "2026-10-04T10:00:00.000Z", updatedAt: "2026-10-04T10:00:00.000Z",
+    };
+    const oldVote = {
+      id: "poll-old", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["A", "B"],
+      title: "Dinner", status: "open", openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:02:00.000Z",
+      requestedDurationSeconds: 120, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request
+        ? new URL(input.url).pathname
+        : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (path.endsWith("/current")) return Promise.resolve(jsonResponse({ vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120 }));
+      if (path.endsWith("/templates")) return Promise.resolve(jsonResponse({ templates: [template], count: 1, maximum: 100 }));
+      if (path.endsWith("/start")) return pendingStart;
+      return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
+    }));
+    const view = render(<UiProvider><ChatVotingImmediateAction channelId="channel-a" canManage availabilityReason={null} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /Dinner/u }));
+    await waitFor(() => expect(resolveStart).toBeTypeOf("function"));
+
+    const newerUsageAt = "2030-01-01T12:30:00.000Z";
+    view.queryClient.setQueryData(moduleQueryKey("channel-a", "chat_voting", "templates"), {
+      templates: [{ ...template, lastUsedAt: newerUsageAt }], count: 1, maximum: 100,
+    });
+    await act(async () => {
+      resolveStart(jsonResponse({ vote: oldVote }));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      const cached = view.queryClient.getQueryData<{ templates: typeof template[] }>(moduleQueryKey("channel-a", "chat_voting", "templates"));
+      expect(cached?.templates[0]?.lastUsedAt).toBe(newerUsageAt);
+    });
   });
 
   it("ignores a late live response after a newer resource revision reports the vote ended", async () => {

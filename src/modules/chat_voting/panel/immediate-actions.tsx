@@ -2,12 +2,12 @@ import { useCallback, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { Button, Led, notify } from "../../../dashboard/ui";
-import { moduleQueryKey, refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import type { ModuleImmediateActionProperties } from "../../contract";
 import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved";
 import { ChatVoteTemplateList } from "./template-list";
-import { closeChatVoting, loadChatVotingState, loadChatVoteTemplates, mergeChatVoteTemplateLists, startChatVoting, type ChatVotingPanelState, type ChatVoteTemplateListState } from "./service";
+import { closeChatVoting, laterUsageTime, loadChatVotingState, loadChatVoteTemplates, mergeChatVoteTemplateLists, startChatVoting, type ChatVotingPanelState, type ChatVoteTemplateListState } from "./service";
 import { timeText } from "./date-range";
 
 const ChatVotingImmediateAction = (properties: ModuleImmediateActionProperties): ReactElement =>
@@ -68,16 +68,20 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
     if (lockReason !== null || pendingId !== null) return;
     setPendingId(template.id);
     try {
-      const started = await startChatVoting(channelId, { templateId: template.id });
-      queryClient.setQueryData<ChatVoteTemplateListState>(
-        moduleQueryKey(channelId, "chat_voting", "templates"),
-        (current) => current === undefined ? current : {
-          ...current,
-          templates: current.templates.map((entry) => entry.id === template.id
-            ? { ...entry, lastUsedAt: started.openedAt }
-            : entry),
-        },
-      );
+      await runModuleQueryWrite(queryClient, channelId, "chat_voting", "templates",
+        () => startChatVoting(channelId, { templateId: template.id }), {
+          baselineRevision: template.revision,
+          updateCache: (current, started) => {
+            if (current === undefined) return current;
+            const previous = current as ChatVoteTemplateListState;
+            return {
+              ...previous,
+              templates: previous.templates.map((entry) => entry.id === template.id
+                ? { ...entry, lastUsedAt: laterUsageTime(entry.lastUsedAt, started.openedAt) }
+                : entry),
+            };
+          },
+        });
       await refreshVote();
     } catch (error: unknown) {
       notify({ tone: "error", message: error instanceof PanelApiError && error.code === "chat_voting_busy" ? labels.runningLocked : labels.startError });

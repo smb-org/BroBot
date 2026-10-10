@@ -256,8 +256,13 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
   },
   async markTemplateUsed(channelId, id, usedAt) {
     await db.prepare(
-      "UPDATE chat_vote_templates SET last_used_at = ? WHERE channel_id = ? AND id = ?",
-    ).bind(usedAt, channelId, id).run();
+      `UPDATE chat_vote_templates
+          SET last_used_at = CASE
+            WHEN last_used_at IS NULL OR last_used_at < ? THEN ?
+            ELSE last_used_at
+          END
+        WHERE channel_id = ? AND id = ?`,
+    ).bind(usedAt, usedAt, channelId, id).run();
   },
 });
 

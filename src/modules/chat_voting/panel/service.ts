@@ -21,6 +21,16 @@ export interface ChatVoteRecentState {
   votes: readonly ChatVote[];
 }
 
+export const laterUsageTime = (current: string | null, incoming: string | null): string | null => {
+  if (current === null) return incoming;
+  if (incoming === null) return current;
+  const currentTime = Date.parse(current);
+  const incomingTime = Date.parse(incoming);
+  if (!Number.isFinite(currentTime)) return incoming;
+  if (!Number.isFinite(incomingTime)) return current;
+  return incomingTime > currentTime ? incoming : current;
+};
+
 export const mergeChatVoteTemplateLists = (
   previous: ChatVoteTemplateListState | null,
   latest: ChatVoteTemplateListState,
@@ -30,10 +40,7 @@ export const mergeChatVoteTemplateLists = (
   const ordered = previous.templates.flatMap((template) => {
     const refreshed = latestById.get(template.id);
     if (refreshed === undefined) return [];
-    const lastUsedAt = [template.lastUsedAt, refreshed.lastUsedAt]
-      .filter((value): value is string => value !== null)
-      .sort((left, right) => left.localeCompare(right))
-      .at(-1) ?? null;
+    const lastUsedAt = laterUsageTime(template.lastUsedAt, refreshed.lastUsedAt);
     return [{ ...refreshed, lastUsedAt }];
   });
   const included = new Set(ordered.map((template) => template.id));
