@@ -60,17 +60,17 @@ const currentState = (overrides: Partial<ChatVotingPanelState> = {}): ChatVoting
 interface FetchHarnessOptions {
   templates?: ChatVoteTemplate[];
   current?: ChatVotingPanelState;
-  getCurrent?: () => ChatVotingPanelState | Promise<ChatVotingPanelState>;
+  getCurrent?: (signal?: AbortSignal) => ChatVotingPanelState | Promise<ChatVotingPanelState>;
   recent?: ChatVote[];
-  getRecent?: () => ChatVote[] | Promise<ChatVote[]>;
-  getTemplates?: () => ChatVoteTemplate[] | Promise<ChatVoteTemplate[]>;
+  getRecent?: (signal?: AbortSignal) => ChatVote[] | Promise<ChatVote[]>;
+  getTemplates?: (signal?: AbortSignal) => ChatVoteTemplate[] | Promise<ChatVoteTemplate[]>;
   getRevisions?: () => Readonly<Record<string, number>>;
   csrfToken?: () => string;
   onCreate?: (body: Record<string, unknown>) => Response | Promise<Response>;
   onPatch?: (templateId: string, body: Record<string, unknown>, csrfToken: string) => Response | Promise<Response>;
-  onStart?: (body: Record<string, unknown>) => Response;
+  onStart?: (body: Record<string, unknown>) => Response | Promise<Response>;
   onClose?: () => void;
-  onDelete?: (templateId: string) => Response;
+  onDelete?: (templateId: string) => Response | Promise<Response>;
 }
 
 const fetchHarness = (options: FetchHarnessOptions = {}) => {
@@ -80,15 +80,16 @@ const fetchHarness = (options: FetchHarnessOptions = {}) => {
       ? new URL(input.url).pathname
       : new URL(String(input), "https://brobot.example").pathname;
     const method = init?.method ?? "GET";
+    const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
     if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: options.csrfToken?.() ?? "csrf-token" }));
     if (path.endsWith("/revisions")) return Promise.resolve(jsonResponse({ revisions: options.getRevisions?.() ?? {} }));
-    if (path.endsWith("/current")) return Promise.resolve(options.getCurrent?.() ?? options.current ?? currentState())
+    if (path.endsWith("/current")) return Promise.resolve(options.getCurrent?.(signal) ?? options.current ?? currentState())
       .then((current) => jsonResponse(current));
     if (path.endsWith("/templates") && method === "GET") {
-      const listed = options.getTemplates?.() ?? templates;
+      const listed = options.getTemplates?.(signal) ?? templates;
       return Promise.resolve(listed).then((entries) => jsonResponse({ templates: entries, count: entries.length, maximum: 100 }));
     }
-    if (path.endsWith("/recent")) return Promise.resolve(options.getRecent?.() ?? options.recent ?? [])
+    if (path.endsWith("/recent")) return Promise.resolve(options.getRecent?.(signal) ?? options.recent ?? [])
       .then((votes) => jsonResponse({ votes }));
     if (path.endsWith("/templates") && method === "POST") {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
@@ -178,6 +179,100 @@ describe("saved chat voting panel", () => {
     unavailable = true;
     await refresh();
     expect(toastsSnapshot().filter((toast) => toast.message === "The vote could not be loaded.")).toHaveLength(2);
+  });
+
+  it("does not notify or latch an outage when live, saved, or recent reads are canceled", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let phase: "initial" | "cancel" | "failure" = "initial";
+    const reads = { current: 0, templates: 0, recent: 0 };
+    const abortOnSignal = <Value,>(signal: AbortSignal | undefined): Promise<Value> => new Promise((_resolve, reject) => {
+      if (signal === undefined) {
+        reject(new Error("The query did not provide an abort signal."));
+        return;
+      }
+      const abort = (): void => { reject(new DOMException("Aborted", "AbortError")); };
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+    });
+    const read = <Value,>(resource: keyof typeof reads, signal: AbortSignal | undefined, value: Value): Value | Promise<Value> => {
+      const count = ++reads[resource];
+      if (phase === "cancel" && count > 1) return abortOnSignal<Value>(signal);
+      if (phase === "failure" && count > 2) throw new Error(`${resource} unavailable`);
+      return value;
+    };
+    const view = mount(fetchHarness({
+      getCurrent: (signal) => read("current", signal, currentState()),
+      getTemplates: (signal) => read("templates", signal, [template()]),
+      getRecent: (signal) => read("recent", signal, []),
+    }));
+    await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
+    await waitFor(() => expect(reads.recent).toBe(2));
+
+    phase = "cancel";
+    const previousReads = { ...reads };
+    const keys = ["panel", "templates", "recent"].map((part) => moduleQueryKey("fictional-channel", "chat_voting", part));
+    await act(async () => {
+      for (const queryKey of keys) void view.queryClient.refetchQueries({ queryKey, exact: true });
+      await waitFor(() => expect(reads).toEqual({
+        current: previousReads.current + 1,
+        templates: previousReads.templates + 1,
+        recent: previousReads.recent + 1,
+      }));
+    });
+    await act(async () => {
+      await Promise.all(keys.map((queryKey) => view.queryClient.cancelQueries({ queryKey, exact: true })));
+    });
+    expect(toastsSnapshot().filter((toast) => toast.tone === "error")).toHaveLength(0);
+
+    phase = "failure";
+    await act(async () => {
+      await Promise.all(keys.map((queryKey) => view.queryClient.refetchQueries({ queryKey, exact: true }, { throwOnError: true }).catch(() => undefined)));
+    });
+    expect(toastsSnapshot().map((toast) => toast.message)).toEqual(expect.arrayContaining([
+      "The vote could not be loaded.",
+      "Saved votes could not be loaded.",
+      "Recent votes could not be loaded.",
+    ]));
+  });
+
+  it("does not report a template read canceled by a successful save", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let templateReads = 0;
+    let canceledReads = 0;
+    let failNextRead = false;
+    const view = mount(fetchHarness({ getTemplates: (signal) => {
+      templateReads += 1;
+      if (templateReads === 2) return new Promise<ChatVoteTemplate[]>((_resolve, reject) => {
+        const abort = (): void => {
+          canceledReads += 1;
+          reject(new DOMException("Aborted", "AbortError"));
+        };
+        if (signal?.aborted) abort();
+        else signal?.addEventListener("abort", abort, { once: true });
+      });
+      if (failNextRead) {
+        failNextRead = false;
+        throw new Error("Saved votes are unavailable.");
+      }
+      return [template()];
+    } }));
+    await screen.findByRole("textbox", { name: "Question" });
+    const key = { queryKey: moduleQueryKey("fictional-channel", "chat_voting", "templates"), exact: true };
+    await act(async () => {
+      void view.queryClient.refetchQueries(key);
+      await waitFor(() => expect(templateReads).toBe(2));
+    });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Question" }), { target: { value: "Saved after cancel" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(templateReads).toBe(3));
+    await waitFor(() => expect(canceledReads).toBe(1));
+    expect(toastsSnapshot().some((toast) => toast.message === "Saved votes could not be loaded.")).toBe(false);
+
+    failNextRead = true;
+    await act(async () => { await view.queryClient.refetchQueries(key, { throwOnError: true }).catch(() => undefined); });
+    expect(toastsSnapshot().filter((toast) => toast.message === "Saved votes could not be loaded.")).toHaveLength(1);
   });
 
   it("refreshes the live, saved, recent, and immediate-action views from panel resource revisions", async () => {
@@ -417,6 +512,42 @@ describe("saved chat voting panel", () => {
     await waitFor(() => expect(screen.queryByText("Dinner", { selector: ".list-row__title" })).not.toBeInTheDocument());
   });
 
+  it("keeps a delayed deletion from switching away from another editor draft", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const templates = [
+      template({ id: "template-a", title: "Template A" }),
+      template({ id: "template-b", title: "Template B" }),
+      template({ id: "template-c", title: "Template C" }),
+    ];
+    let resolveDelete!: (response: Response) => void;
+    const pendingDelete = new Promise<Response>((resolve) => { resolveDelete = resolve; });
+    mount(fetchHarness({ templates, onDelete: () => pendingDelete }));
+    await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for “Template A”" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete vote", hidden: true }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete “Template A”?" });
+    const confirm = within(dialog).getByRole("button", { name: "Delete vote" });
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    fireEvent.click(confirm);
+    await waitFor(() => {
+      expect(confirm).toBeDisabled();
+      expect(cancel).toBeDisabled();
+    });
+
+    const templateCLink = [...document.querySelectorAll<HTMLAnchorElement>(".chat-voting-template-list .list-row__link")]
+      .find((link) => link.textContent.includes("Template C"));
+    if (templateCLink === undefined) throw new Error("Template C is missing from the saved list.");
+    fireEvent.click(templateCLink);
+    const question = await screen.findByRole("textbox", { name: "Question" });
+    await waitFor(() => expect(question).toHaveValue("Template C"));
+    fireEvent.change(question, { target: { value: "Unsaved draft on C" } });
+
+    resolveDelete(jsonResponse({ ok: true }));
+    await waitFor(() => expect(screen.queryByText("Template A", { selector: ".list-row__title" })).not.toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Unsaved draft on C");
+    expect(document.querySelector(".ui-save-bar__status")).toHaveTextContent("Unsaved changes");
+  });
+
   it("shows the shared start lock reason in the inspector footer", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     mount(fetchHarness({
@@ -476,6 +607,37 @@ describe("saved chat voting panel", () => {
     await waitFor(() => expect(templateCalls).toBe(3));
     await waitFor(() => expect(document.querySelector(".chat-voting-list .stale")).not.toBeInTheDocument());
     expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent("Updated dinner");
+  });
+
+  it("accepts a refreshed template snapshot after guarded reselection", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let revisions: Readonly<Record<string, number>> = {};
+    let started = false;
+    const refreshed = template({
+      title: "Updated by another moderator",
+      labels: ["Fresh yes", "Fresh no"],
+      durationSeconds: 300,
+      revision: 2,
+    });
+    const view = mount(fetchHarness({
+      getRevisions: () => revisions,
+      getTemplates: () => revisions["module:chat_voting:templates"] === undefined ? [template()] : [refreshed],
+      onStart: () => { started = true; return jsonResponse({ vote: runningVote }); },
+    }));
+    await screen.findByRole("textbox", { name: "Question" });
+    revisions = { "module:chat_voting:templates": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
+    await waitFor(() => expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent(refreshed.title));
+
+    fireEvent.click(screen.getByRole("link", { name: /Updated by another moderator/u }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue(refreshed.title));
+    expect(screen.getByRole("textbox", { name: "Answer 1" })).toHaveValue("Fresh yes");
+    expect(screen.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("300");
+    expect(screen.getByRole("radio", { name: "5 min" })).toBeChecked();
+    const start = screen.getByRole("button", { name: "Start vote" });
+    expect(start).toBeEnabled();
+    fireEvent.click(start);
+    await waitFor(() => expect(started).toBe(true));
   });
 
   it("can enter Custom duration from a preset and return to it after choosing another preset", async () => {
@@ -551,6 +713,49 @@ describe("saved chat voting panel", () => {
     expect(document.querySelector(".chat-voting-template-list .list-row:first-child .list-row__action button")).toBeNull();
     const titles = [...document.querySelectorAll(".chat-voting-template-list .list-row__title")].map((element) => element.textContent);
     expect(titles).toEqual(["Dinner", "Breakfast"]);
+  });
+
+  it("merges a delayed template start into the latest revision without regressing usage time", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let revisions: Readonly<Record<string, number>> = {};
+    let serverTemplate = template();
+    let markStartRequested!: () => void;
+    const startRequested = new Promise<void>((resolve) => { markStartRequested = resolve; });
+    let resolveStart!: (response: Response) => void;
+    const pendingStart = new Promise<Response>((resolve) => { resolveStart = resolve; });
+    const refreshed = template({
+      title: "Updated during start",
+      labels: ["Newest yes", "Newest no"],
+      durationSeconds: 300,
+      revision: 2,
+      lastUsedAt: "2030-01-01T12:30:00.000Z",
+    });
+    const view = mount(fetchHarness({
+      getRevisions: () => revisions,
+      getTemplates: () => [serverTemplate],
+      onStart: () => { markStartRequested(); return pendingStart; },
+    }));
+    await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
+    await startRequested;
+
+    serverTemplate = refreshed;
+    revisions = { "module:chat_voting:templates": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
+    await waitFor(() => expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent(refreshed.title));
+
+    const startedVote = { ...runningVote, openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:05:00.000Z" };
+    resolveStart(jsonResponse({ vote: startedVote }));
+    await waitFor(() => {
+      const templates = view.queryClient.getQueryData<{ templates: ChatVoteTemplate[] }>(moduleQueryKey("fictional-channel", "chat_voting", "templates"))?.templates;
+      expect(templates?.[0]).toMatchObject({
+        title: "Updated during start",
+        labels: ["Newest yes", "Newest no"],
+        durationSeconds: 300,
+        revision: 2,
+        lastUsedAt: "2030-01-01T12:30:00.000Z",
+      });
+    });
   });
 
   it("refreshes template usage from resource revisions after a vote starts in chat", async () => {

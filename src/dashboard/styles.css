@@ -420,7 +420,11 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-recent-list .list-row__description { font-size: 12px; }
 .chat-voting-template-list__incomplete { color: var(--text-3); font-size: 12px; white-space: nowrap; }
 .chat-voting-panel .list-row--selected .list-row__link { box-shadow: inset 2px 0 0 var(--brand-text); background: var(--tint-1); }
-.chat-voting-template-inspector > .section-heading h3 { font-size: 15px; }
+.chat-voting-template-inspector > .inspector-section__heading h3 { font-size: 15px; }
+.chat-voting-template-inspector > .inspector-section__heading { align-items: center; gap: 4px; }
+.chat-voting-template-inspector > .inspector-section__heading h3 { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-voting-template-inspector__header-actions { display: flex; flex: none; align-items: center; margin-left: auto; }
+.chat-voting-template-inspector__header-actions .ui-button { width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
 .chat-voting-template-inspector .inspector-content-section__heading { margin-bottom: var(--s2); padding-bottom: 0; border-bottom: 0; }
 .chat-voting-editor__running-note { box-sizing: border-box; height: 16px; min-height: 16px; max-height: 16px; margin: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-voting-editor__ghost-answers { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: var(--s2); min-height: 88px; color: var(--text-3); }
@@ -460,6 +464,17 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-template-inspector .chat-voting-editor__footer .ui-save-bar { height: 64px; min-height: 64px; margin-top: 0; border-top: 0; }
 .chat-voting-template-inspector .ui-save-bar__buttons { gap: 4px; }
 .chat-voting-template-inspector .ui-save-bar__buttons > .mantine-Button-root { padding-inline: 12px; }
+@container inspector (max-width: 480px) {
+  .chat-voting-template-inspector .chat-voting-editor__footer .ui-save-bar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 18px 44px;
+    gap: 0;
+    padding-block: 1px;
+  }
+  .chat-voting-template-inspector .ui-save-bar__status { grid-column: 1; grid-row: 1; }
+  .chat-voting-template-inspector .ui-save-bar__message { flex: 1 1 auto; }
+  .chat-voting-template-inspector .ui-save-bar__actions { grid-column: 1; grid-row: 2; width: 100%; justify-content: flex-end; }
+}
 .chat-voting-editor__start-reason { display: block; box-sizing: border-box; min-width: 0; min-height: 16px; max-height: 16px; margin: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-voting-template-inspector .inspector-content-section .ui-segmented-control__label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .chat-voting-template-inspector .chat-voting-editor__start-button { flex: none; white-space: nowrap; }

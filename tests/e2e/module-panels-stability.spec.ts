@@ -31,7 +31,7 @@ const box = async (locator: Locator): Promise<{ x: number; y: number; width: num
 const gotoPanel = async (page: Page, panel: string, language?: "de" | "en", realtime = false): Promise<void> => {
   const languageQuery = language === undefined ? "" : `&lang=${language}`;
   const realtimeQuery = realtime ? "&realtime=1" : "";
-  await page.goto(`/tests/e2e/module-panels-stability-fixture.html?panel=${panel}${languageQuery}${realtimeQuery}`);
+    await page.goto(`/tests/e2e/module-panels-stability-fixture.html?panel=${panel}${languageQuery}${realtimeQuery}`);
 };
 
 const installChatVotingRealtime = async (page: Page) => {
@@ -940,6 +940,34 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
     await row.click();
     const inspector = page.locator(".chat-voting-template-inspector");
     await expect(inspector).toContainText("Wer streamt morgen?");
+    const header = inspector.locator(".inspector-section__heading");
+    const menuButton = header.getByRole("button", { name: /Aktionen für/u });
+    const closeButton = header.locator(".inspector-close");
+    await expect(menuButton).toBeVisible();
+    await expect(closeButton).toBeVisible();
+    const headerControlGeometry = await header.evaluate((element) => {
+      const menu = element.querySelector<HTMLElement>("button:not(.inspector-close)");
+      const close = element.querySelector<HTMLElement>(".inspector-close");
+      if (menu === null || close === null) throw new Error("The inspector header controls are missing.");
+      const menuBounds = menu.getBoundingClientRect();
+      const closeBounds = close.getBoundingClientRect();
+      const headerBounds = element.getBoundingClientRect();
+      return {
+        menuWidth: menuBounds.width,
+        menuHeight: menuBounds.height,
+        closeWidth: closeBounds.width,
+        closeHeight: closeBounds.height,
+        controlsGap: closeBounds.left - menuBounds.right,
+        rightInset: headerBounds.right - closeBounds.right,
+      };
+    });
+    expect(headerControlGeometry.menuWidth).toBe(44);
+    expect(headerControlGeometry.menuHeight).toBe(44);
+    expect(headerControlGeometry.closeWidth).toBe(44);
+    expect(headerControlGeometry.closeHeight).toBe(44);
+    expect(headerControlGeometry.controlsGap).toBeGreaterThanOrEqual(0);
+    expect(headerControlGeometry.controlsGap).toBeLessThanOrEqual(4.5);
+    expect(headerControlGeometry.rightInset).toBeLessThanOrEqual(1);
     const startButton = inspector.getByRole("button", { name: "Abstimmung starten", exact: true });
     const saveButton = inspector.getByRole("button", { name: "Speichern", exact: true });
     const discardButton = inspector.getByRole("button", { name: "Verwerfen", exact: true });
@@ -976,6 +1004,7 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
     await expectFooterActionsVisible();
     const statusCopy = inspector.locator(".ui-save-bar__message-copy");
     await expect(statusCopy).toHaveAttribute("title", "Änderungen ausstehend");
+    const inspectorContainerWidth = await inspector.evaluate((element) => Number.parseFloat(getComputedStyle(element).width));
     const statusTextMetrics = await statusCopy.evaluate((element) => {
       const font = getComputedStyle(element, "::before").font;
       const canvas = document.createElement("canvas");
@@ -983,9 +1012,18 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
       if (context === null) throw new Error("The status text measurement canvas is unavailable.");
       context.font = font;
       const measured = context.measureText(element.getAttribute("data-text") ?? "").width;
-      return { fits: measured <= element.clientWidth + 1, available: element.clientWidth, measured, text: element.getAttribute("data-text") };
+      return {
+        fits: measured <= element.clientWidth + 1,
+        hasFontSafetyMargin: element.clientWidth >= measured * 1.2,
+        available: element.clientWidth,
+        measured,
+        text: element.getAttribute("data-text"),
+      };
     });
     expect(statusTextMetrics.fits, JSON.stringify({ width, ...statusTextMetrics })).toBe(true);
+    if (inspectorContainerWidth <= 480) {
+      expect(statusTextMetrics.hasFontSafetyMargin, JSON.stringify({ width, inspectorContainerWidth, ...statusTextMetrics })).toBe(true);
+    }
     await discardButton.click();
     const inspectorLayout = await page.evaluate(() => {
       const root = document.querySelector(".chat-voting-template-inspector");

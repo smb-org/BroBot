@@ -13,6 +13,7 @@ import type { ChatVoteTemplateListState } from "./service";
 export interface TemplateInspectorActions {
   guardSwitch: (proceed: () => void, cancel?: () => void) => void;
   start: () => Promise<void>;
+  acceptTemplate: (template: ChatVoteTemplate) => void;
 }
 
 export interface ChatVoteTemplateInspectorProperties {
@@ -78,6 +79,8 @@ export function ChatVoteTemplateInspector({
   const [serverShortcutError, setServerShortcutError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
   const dirty = isNew || draft.dirty;
   const startProblem = templateStartProblem(draft.value);
   const shortcutError = serverShortcutError ?? (draft.value.shortcut === null ? null
@@ -187,6 +190,20 @@ export function ChatVoteTemplateInspector({
   };
   const draftGuard = useDraftGuard(dirty, saveForGuard, resetDraft);
 
+  const acceptTemplate = (accepted: ChatVoteTemplate): void => {
+    const nextDraft = draftFromTemplate(accepted);
+    draftValue.current = nextDraft;
+    baselineDraft.current = nextDraft;
+    baseRevision.current = accepted.revision;
+    draft.accept(nextDraft);
+    setDurationMode(durationPreset(nextDraft.durationSeconds));
+    setCustomDurationSelected(false);
+    setSaved(false);
+    setSaveError(undefined);
+    setServerShortcutError(null);
+    setConflict(false);
+  };
+
   const start = async (): Promise<void> => {
     if (startLockReason !== null || invalidReason !== null || saving || starting || conflict) return;
     setStarting(true);
@@ -200,7 +217,7 @@ export function ChatVoteTemplateInspector({
     }
   };
 
-  const actions: TemplateInspectorActions = { guardSwitch: draftGuard.guardSwitch, start };
+  const actions: TemplateInspectorActions = { guardSwitch: draftGuard.guardSwitch, start, acceptTemplate };
   useLayoutEffect(() => {
     onRegisterActions(actions);
     return () => { onRegisterActions(null); };
@@ -244,14 +261,15 @@ export function ChatVoteTemplateInspector({
     <SubInspector
       ariaLabel={labels.question}
       title={labels.editTitle(title)}
-      {...(isNew ? {} : { meta: <ActionMenu
+      {...(isNew ? {} : { meta: <div className="chat-voting-template-inspector__header-actions"><ActionMenu
         label={labels.templateActions(title)}
+        size="md"
         items={[{
           label: labels.delete,
           danger: true,
           onSelect: () => { draftGuard.guardSwitch(() => { setDeleteOpen(true); }); },
         }]}
-      /> })}
+      /></div> })}
       closeLabel={labels.cancel}
       onClose={() => { draftGuard.guardSwitch(onClose); }}
       className="chat-voting-template-inspector"
@@ -453,8 +471,20 @@ export function ChatVoteTemplateInspector({
       description={labels.deleteDescription(title, isRunning, template.legacyAlias !== null)}
       confirmLabel={labels.confirmDelete}
       cancelLabel={labels.cancel}
-      onConfirm={() => { void onDelete(template).then(() => { setDeleteOpen(false); }).catch(() => undefined); }}
-      onCancel={() => { setDeleteOpen(false); }}
+      onConfirm={() => {
+        if (deletingRef.current) return;
+        deletingRef.current = true;
+        setDeleting(true);
+        void onDelete(template)
+          .then(() => { setDeleteOpen(false); })
+          .catch(() => undefined)
+          .finally(() => {
+            deletingRef.current = false;
+            setDeleting(false);
+          });
+      }}
+      onCancel={() => { if (!deletingRef.current) setDeleteOpen(false); }}
+      pending={deleting}
     />
   </>;
 }

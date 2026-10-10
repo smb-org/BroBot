@@ -20,6 +20,14 @@ import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 type ListMode = "saved" | "recent";
 type Announcement = { key: number; text: string };
 const EMPTY_TEMPLATES: readonly ChatVoteTemplate[] = [];
+const laterUsageTime = (current: string | null, incoming: string): string => {
+  if (current === null) return incoming;
+  const currentTime = Date.parse(current);
+  const incomingTime = Date.parse(incoming);
+  if (!Number.isFinite(currentTime)) return incoming;
+  if (!Number.isFinite(incomingTime)) return current;
+  return incomingTime > currentTime ? incoming : current;
+};
 const voteTotal = (vote: ChatVote): number => vote.kind === "free_text"
   ? vote.voterCount ?? (vote.textResults ?? []).reduce((sum, term) => sum + term.count, 0)
   : vote.voterCount ?? (vote.counts ?? []).reduce((sum, count) => sum + count, 0);
@@ -70,7 +78,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
       loadErrorsNotified.current.vote = false;
       return current;
     } catch (failure: unknown) {
-      if (!loadErrorsNotified.current.vote) {
+      if (!signal.aborted && !loadErrorsNotified.current.vote) {
         loadErrorsNotified.current.vote = true;
         notify({ tone: "error", message: labels.liveLoadError });
       }
@@ -86,7 +94,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
       loadErrorsNotified.current.templates = false;
       return current;
     } catch (failure: unknown) {
-      if (!loadErrorsNotified.current.templates) {
+      if (!signal.aborted && !loadErrorsNotified.current.templates) {
         loadErrorsNotified.current.templates = true;
         notify({ tone: "error", message: labels.templatesError });
       }
@@ -99,7 +107,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
       loadErrorsNotified.current.recent = false;
       return current;
     } catch (failure: unknown) {
-      if (!loadErrorsNotified.current.recent) {
+      if (!signal.aborted && !loadErrorsNotified.current.recent) {
         loadErrorsNotified.current.recent = true;
         notify({ tone: "error", message: labels.recentError });
       }
@@ -142,19 +150,6 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     setTemplateSnapshot(snapshot);
     setTemplateInspectorKey(inspectorKey);
   }, []);
-  const replaceTemplate = useCallback((updated: ChatVoteTemplate): void => {
-    queryClient.setQueryData<ChatVoteTemplateListState>(
-      moduleQueryKey(channelId, "chat_voting", "templates"),
-      (current) => current === undefined ? current : {
-        ...current,
-        templates: current.templates.map((template) => template.id === updated.id ? updated : template),
-      },
-    );
-    if (templateSnapshotRef.current?.id === updated.id) {
-      templateSnapshotRef.current = updated;
-      setTemplateSnapshot(updated);
-    }
-  }, [channelId, queryClient]);
   const requestInspectorSwitch = useCallback((proceed: () => void): void => {
     const guardSwitch = inspectorActions.current?.guardSwitch;
     if (guardSwitch === undefined) proceed();
@@ -263,13 +258,18 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
 
   const selectTemplate = (template: ChatVoteTemplate): void => {
     requestInspectorSwitch(() => {
+      const latest = queryClient.getQueryData<ChatVoteTemplateListState>(moduleQueryKey(channelId, "chat_voting", "templates"));
+      const selectedSnapshot = latest?.templates.find((entry) => entry.id === template.id) ?? template;
+      const reselecting = selectedTemplateIdRef.current === template.id;
+      const refreshed = reselecting && templateSnapshotRef.current?.revision !== selectedSnapshot.revision;
       selectionClearedRef.current = false;
       setSelectionCleared(false);
       setSelectedRecentId(null);
-      const inspectorKey = selectedTemplateIdRef.current === template.id
+      const inspectorKey = reselecting
         ? templateInspectorKeyRef.current ?? template.id
         : template.id;
-      updateTemplateSelection(template.id, template, inspectorKey);
+      updateTemplateSelection(template.id, selectedSnapshot, inspectorKey);
+      if (refreshed) inspectorActions.current?.acceptTemplate(selectedSnapshot);
       setNewTemplateDraft(null);
       setSavedTemplateId(null);
     });
@@ -338,8 +338,32 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     try {
       const problem = templateStartProblem(template);
       if (problem !== null) return;
-      const started = await startChatVoting(channelId, { templateId: template.id });
-      replaceTemplate({ ...template, lastUsedAt: started.openedAt });
+      const started = await runModuleQueryWrite(queryClient, channelId, "chat_voting", "templates",
+        () => startChatVoting(channelId, { templateId: template.id }), {
+          baselineRevision: template.revision,
+          updateCache: (current, vote) => {
+            if (current === undefined) return current;
+            const previous = current as ChatVoteTemplateListState;
+            const cachedTemplate = previous.templates.find((entry) => entry.id === template.id);
+            if (cachedTemplate === undefined) return previous;
+            const updated = { ...cachedTemplate, lastUsedAt: laterUsageTime(cachedTemplate.lastUsedAt, vote.openedAt) };
+            return {
+              ...previous,
+              templates: previous.templates.map((entry) => entry.id === template.id ? updated : entry),
+            };
+          },
+        });
+      const latest = queryClient.getQueryData<ChatVoteTemplateListState>(moduleQueryKey(channelId, "chat_voting", "templates"))
+        ?.templates.find((entry) => entry.id === template.id);
+      const selectedSnapshot = templateSnapshotRef.current;
+      if (selectedTemplateIdRef.current === template.id && selectedSnapshot?.id === template.id) {
+        const updatedSnapshot = {
+          ...selectedSnapshot,
+          lastUsedAt: laterUsageTime(selectedSnapshot.lastUsedAt, latest?.lastUsedAt ?? started.openedAt),
+        };
+        templateSnapshotRef.current = updatedSnapshot;
+        setTemplateSnapshot(updatedSnapshot);
+      }
       void refreshVote();
     } catch (error: unknown) {
       const message = error instanceof PanelApiError && error.code === "chat_voting_busy"
@@ -419,11 +443,16 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
           };
         },
       });
-      updateTemplateSelection(nextSelection.template?.id ?? null, nextSelection.template);
-      setNewTemplateDraft(null);
-      setSavedTemplateId(null);
-      selectionClearedRef.current = nextSelection.template === null;
-      setSelectionCleared(nextSelection.template === null);
+      if (selectedTemplateIdRef.current === template.id) {
+        requestInspectorSwitch(() => {
+          if (selectedTemplateIdRef.current !== template.id) return;
+          updateTemplateSelection(nextSelection.template?.id ?? null, nextSelection.template);
+          setNewTemplateDraft(null);
+          setSavedTemplateId(null);
+          selectionClearedRef.current = nextSelection.template === null;
+          setSelectionCleared(nextSelection.template === null);
+        });
+      }
     } catch {
       notify({ tone: "error", message: labels.deleteError });
       throw new Error(labels.deleteError);
