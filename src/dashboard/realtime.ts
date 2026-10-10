@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import type { PanelChannelControl, PanelChannelControls } from "../panel-contract";
@@ -274,9 +274,19 @@ const acquirePanelSocket = (channelId: string, queryClient: QueryClient): (() =>
 /** The dashboard shell owns the channel socket, independent of the active page. */
 export const useRealtimePanelMessages = (channelId: string | null, enabled: boolean): void => {
   const queryClient = useQueryClient();
+  const activeChannelId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!enabled || channelId === null) return;
+    if (!enabled || channelId === null) {
+      const channelToDispose = channelId ?? activeChannelId.current;
+      if (channelToDispose !== null) {
+        const connection = panelSocketConnections.get(channelToDispose);
+        if (connection !== undefined && connection.references === 0) disposePanelSocket(channelToDispose, connection);
+      }
+      activeChannelId.current = null;
+      return;
+    }
+    activeChannelId.current = channelId;
     return acquirePanelSocket(channelId, queryClient);
   }, [channelId, enabled, queryClient]);
 };

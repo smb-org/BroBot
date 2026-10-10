@@ -201,6 +201,54 @@ describe("Overlay composition editor", () => {
     expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("24");
   });
 
+  it("initializes once when variables update continuously during a slow module read", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    let moduleReadCount = 0;
+    let resolveModules: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") {
+        return Promise.resolve(jsonResponse({ overlay: initialOverlay }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules") {
+        moduleReadCount += 1;
+        return new Promise<Response>((resolve) => { resolveModules = resolve; });
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables") {
+        return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a"
+      overlayId="overlay-a"
+      canManage
+      language="en"
+      onBack={vi.fn()}
+      onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    for (let index = 0; index < 6; index += 1) {
+      act(() => {
+        view.queryClient.setQueryData(dashboardDataKeys.variables("kanal-a"), {
+          variables: [{ ...variable, value: index }], count: 1, maximum: 25,
+        });
+      });
+      if (index < 5) await new Promise<void>((resolve) => { window.setTimeout(resolve, 1_000); });
+    }
+
+    expect(screen.queryByRole("heading", { name: "Gameplay", level: 1 })).not.toBeInTheDocument();
+    expect(moduleReadCount).toBe(1);
+    act(() => {
+      resolveModules?.(jsonResponse({ modules: [] }));
+    });
+
+    await screen.findByRole("heading", { name: "Gameplay", level: 1 });
+    expect(moduleReadCount).toBe(1);
+    view.unmount();
+  }, 15_000);
+
   it("adds enabled module elements with their declared default size", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     let savedOverlay = { ...initialOverlay, elements: [] as typeof initialOverlay.elements };

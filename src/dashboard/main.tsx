@@ -1227,6 +1227,7 @@ export const DashboardApp = (): ReactElement => {
   useLayoutEffect(() => { routeRef.current = route; }, [route]);
   const queryClient = useQueryClient();
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const requestLogin = useCallback((): void => { setAuthenticationRequired(true); }, []);
   useEffect(() => {
     window.addEventListener(dashboardAuthenticationRequiredEvent, requestLogin);
@@ -1256,6 +1257,8 @@ export const DashboardApp = (): ReactElement => {
   const selectedChannel = (route.kind !== "channel" && route.kind !== "module") || channels.data === null
     ? null
     : channels.data.find((channel) => channel.channelId === route.channelId) ?? null;
+  const realtimeEnabled = realtimeChannelId !== null && selectedChannel !== null &&
+    !authenticationRequired && !loggingOut;
   const viewerUserId = channelsResponse?.viewerUserId ?? null;
   const isPlatform = channelsResponse?.platformAdmin ?? false;
   const viewerIsBot = channelsResponse?.viewerIsBot ?? false;
@@ -1279,7 +1282,7 @@ export const DashboardApp = (): ReactElement => {
       previousQuery?.queryKey[1] === overviewChannelId ? previousData : undefined,
   });
   const overview = loadStateFromQuery(overviewQuery);
-  useRealtimePanelMessages(realtimeChannelId, realtimeChannelId !== null);
+  useRealtimePanelMessages(realtimeChannelId, realtimeEnabled);
   const systemChannelId = route.kind === "channel" && route.section === "system" ? route.channelId : null;
   const systemQuery = useSystemQuery(
     systemChannelId ?? "",
@@ -1288,7 +1291,6 @@ export const DashboardApp = (): ReactElement => {
   );
   const [, setFreshnessTick] = useState(0);
   const routeKey = dashboardRoutePath(route);
-  const [loggingOut, setLoggingOut] = useState(false);
   const [headerModuleBusyKeys, setHeaderModuleBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
   const headerModuleBusy = route.kind === "module" && headerModuleBusyKeys.has(`${route.channelId}:${route.moduleId}`);
   // Spotlight (#164): set right before navigating to a module so its panel

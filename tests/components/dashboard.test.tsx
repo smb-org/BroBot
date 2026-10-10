@@ -4446,6 +4446,65 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByRole("heading", { name: "Alpha", level: 1 })).not.toBeInTheDocument();
   });
 
+  it("cancels a pending socket reconnect after any query requires sign-in", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let resolveEvents: ((response: Response) => void) | undefined;
+    const fetcher = stubEventFeedFetch(() => new Promise<Response>((resolve) => { resolveEvents = resolve; }), channel);
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "Ereignisse", level: 1 });
+    await waitFor(() => expect(resolveEvents).toBeTypeOf("function"));
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.close(1006, "network interruption");
+
+    await act(async () => {
+      resolveEvents?.(jsonResponse({ error: "session_required" }, 401));
+      await Promise.resolve();
+    });
+    expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname.endsWith("/events"))).toBe(true);
+    await screen.findByRole("heading", { name: "Anmeldung erforderlich", level: 1 });
+    await new Promise<void>((resolve) => { window.setTimeout(resolve, 350); });
+
+    expect(TestWebSocket.instances).toHaveLength(1);
+  });
+
+  it("closes the channel socket when guarded logout leaves a dirty editor route mounted", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const overlay = {
+      id: "overlay-a", channelId: "kanal-a", name: "Gameplay", width: 1280, height: 720, css: "", revision: 1,
+      createdAt: "2026-09-24T10:00:00.000Z", updatedAt: "2026-09-24T10:00:00.000Z",
+      elements: [{ id: "element-a", kind: "variable", label: "Score", variableName: "score", text: "Score: {value}", config: {}, x: 24, y: 32, scalePercent: 100, z: 0, inComposition: true }],
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return jsonResponse({ overlay });
+      if (url.pathname === "/api/channels/kanal-a/variables") return jsonResponse({ variables: [], count: 0, maximum: 25 });
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
+      if (url.pathname === "/auth/logout" && init?.method === "POST") return new Response(null, { status: 204 });
+      return jsonResponse({}, 404);
+    }));
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "Gameplay", level: 1 });
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "X (px)" }), { target: { value: "25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Abmelden" }));
+
+    await screen.findByRole("heading", { name: "Anmeldung erforderlich", level: 1 });
+
+    expect(window.location.pathname).toBe("/channels/kanal-a/overlays/overlay-a");
+    expect(socket.readyState).toBe(3);
+  });
+
   it("stays signed in and reports the error when logout is rejected with 403", async () => {
     // 403 means the CSRF token didn't match — the worker did not revoke the
     // session. Redirecting to sign-in here would report a logout that never
