@@ -355,8 +355,6 @@ form.content-section { display: grid; gap: var(--s4); }
 .module-view-fallback { min-height: calc(var(--s10) * 8); }
 .module-view-fallback--rows { display: grid; grid-template-rows: repeat(3, 58px); align-content: start; gap: var(--s3); }
 .module-view-fallback__row { border-radius: var(--r-control); background: var(--surface); }
-.module-view-fallback--error { display: grid; align-content: center; justify-items: start; gap: var(--s2); }
-.module-view-fallback--error p { margin: 0; }
 .chat-voting-panel { width: min(var(--dashboard-content-width), 100%); }
 .chat-voting-panel__status { display: flex; align-items: center; gap: var(--s2); width: min(15rem, 48%); min-width: 0; }
 .chat-voting-panel__status-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

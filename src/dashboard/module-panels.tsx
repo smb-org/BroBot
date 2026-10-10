@@ -14,7 +14,7 @@ import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { Button, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Skeleton, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Skeleton, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -598,10 +598,14 @@ const MountedModuleView = ({ module, channelId, canManage, canOperate, botIsMode
         <span className="module-view-fallback__row" />
         <span className="module-view-fallback__row" />
       </div>}
-      renderError={(retry) => <div className="module-view-fallback module-view-fallback--error" role="alert">
-        <p>{dashboardTexts().module.componentLoadError}</p>
-        <Button size="compact" variant="neutral" onClick={retry}>{dashboardCommonTexts().retry}</Button>
-      </div>}
+      renderError={(retry) => <LoadState
+        variant="panel-320"
+        status="error"
+        loading={null}
+        empty={null}
+        error={null}
+        queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
+      >{null}</LoadState>}
     />}
     {module.settingsEditorPlacement === "before-panel" ? null : settingsEditor}
   </div>;
