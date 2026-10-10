@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { Button, ConfirmDialog, Field, InspectorActions, InspectorFieldRow, InspectorSection, LoadState, notify, Skeleton } from "../../../dashboard/ui";
@@ -7,6 +7,8 @@ import type { BelaboxHistoryPoint, BelaboxStatusResponse, BelaboxStreamSummary }
 import { belaboxReasonText, belaboxPanelTexts } from "./locale";
 import { BelaboxHistorySection } from "./history-chart";
 import { loadBelaboxHistory, loadBelaboxStatus, loadBelaboxStreams, removeBelaboxStatsUrl, replaceBelaboxStatsUrl, retryBelaboxPolling, testBelaboxConnection } from "./service";
+import { moduleQueryKey, refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 
 const errorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;
 const IDLE_STATUS_REFRESH_MS = 60_000;
@@ -16,97 +18,78 @@ const statusTimestamp = (value: string, locale: string): string => {
   return Number.isNaN(date.valueOf()) ? "" : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
 
-export default function BelaboxPanel({ channelId, language = "de", canManage = false, settingsRefreshToken = 0 }: ModulePanelProperties): ReactElement {
+export default function BelaboxPanel({ channelId, language = "de", canManage = false }: ModulePanelProperties): ReactElement {
   const labels = belaboxPanelTexts(language);
-  const [status, setStatus] = useState<BelaboxStatusResponse | null>(null);
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const queryClient = useDashboardQueryClient();
+  const loadErrorNotified = useRef(false);
+  const suppressLoadErrorNotification = useRef(false);
+  const readStatus = useCallback(async (signal: AbortSignal): Promise<BelaboxStatusResponse> => {
+    try {
+      const response = await loadBelaboxStatus(channelId, signal);
+      loadErrorNotified.current = false;
+      return response;
+    } catch (failure: unknown) {
+      if (!suppressLoadErrorNotification.current && !loadErrorNotified.current) {
+        loadErrorNotified.current = true;
+        notify({ tone: "error", message: labels.testFailed });
+      }
+      throw failure;
+    }
+  }, [channelId, labels.testFailed]);
+  const statusQuery = useModuleQuery(channelId, "belabox", "status", readStatus, {
+    refetchInterval: realtimeStatus === "connected" ? false : (query) => {
+      const current = query.state.data;
+      return current?.pollingDesired === true
+        ? Math.max(5, current.intervalSeconds) * 1_000
+        : IDLE_STATUS_REFRESH_MS;
+    },
+  });
+  const status = statusQuery.data ?? null;
   const [url, setUrl] = useState("");
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const loadFailed = statusQuery.isError;
   const [testOutcome, setTestOutcome] = useState<string | null>(null);
-  const [history, setHistory] = useState<BelaboxHistoryPoint[]>([]);
-  const [streams, setStreams] = useState<BelaboxStreamSummary[]>([]);
   const [historyRange, setHistoryRange] = useState<"live" | "stream">("live");
   const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
   const pollingInactive = status?.pollingDesired === true && !status.polling;
-  const statusRefreshInterval = status === null
-    ? null
-    : status.pollingDesired ? Math.max(5, status.intervalSeconds) * 1_000 : IDLE_STATUS_REFRESH_MS;
 
   const refresh = useCallback(async (): Promise<void> => {
-    setStatus(await loadBelaboxStatus(channelId));
-  }, [channelId]);
-
-  useEffect(() => {
-    let active = true;
-    loadBelaboxStatus(channelId).then((next) => {
-      if (active) {
-        setStatus(next);
-        setLoadFailed(false);
-      }
-    }).catch(() => {
-      if (active) {
-        setLoadFailed(true);
-        notify({ tone: "error", message: labels.testFailed });
-      }
-    });
-    return () => { active = false; };
-  }, [channelId, labels.testFailed, settingsRefreshToken]);
-
-  useEffect(() => {
-    if (statusRefreshInterval === null) return;
-    const timer = window.setInterval(() => {
-      void refresh().catch(() => undefined);
-    }, statusRefreshInterval);
-    return () => window.clearInterval(timer);
-  }, [refresh, statusRefreshInterval]);
+    suppressLoadErrorNotification.current = true;
+    try {
+      await refetchModuleQueryData<BelaboxStatusResponse>(queryClient, channelId, "belabox", "status");
+    } catch (failure: unknown) {
+      loadErrorNotified.current = true;
+      throw failure;
+    } finally {
+      suppressLoadErrorNotification.current = false;
+    }
+  }, [channelId, queryClient]);
 
   useEffect(() => {
     if (pollingInactive) notify({ tone: "error", message: labels.pollingInactive });
   }, [labels.pollingInactive, pollingInactive]);
 
-  useEffect(() => {
-    if (status?.mode !== "interval") return;
-    let active = true;
-    const refresh = async (): Promise<void> => {
-      try {
-        const next = await loadBelaboxStreams(channelId);
-        if (active) {
-          setStreams(next);
-          setSelectedStreamId((current) => {
-            if (current !== null && next.some((stream) => stream.streamId === current)) return current;
-            if (status.belaboxStreamId !== null && next.some((stream) => stream.streamId === status.belaboxStreamId)) {
-              return status.belaboxStreamId;
-            }
-            return next[0]?.streamId ?? null;
-          });
-        }
-      } catch {
-        // Keep the last known list if a background refresh fails.
-      }
-    };
-    void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 60_000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [channelId, status?.belaboxStreamId, status?.mode]);
-
-  useEffect(() => {
-    if (status?.mode !== "interval") return;
-    let active = true;
-    const refresh = async (): Promise<void> => {
-      try {
-        const streamId = historyRange === "stream" ? selectedStreamId ?? status.belaboxStreamId ?? undefined : undefined;
-        const next = await loadBelaboxHistory(channelId, historyRange, streamId);
-        if (active) setHistory(next);
-      } catch {
-        // Preserve existing points while the next scheduled refresh retries.
-      }
-    };
-    void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 15_000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [channelId, historyRange, selectedStreamId, status?.belaboxStreamId, status?.mode]);
+  const streamsQuery = useModuleQuery(channelId, "belabox", "streams", (signal) => loadBelaboxStreams(channelId, signal), {
+    enabled: status?.mode === "interval",
+    refetchInterval: realtimeStatus === "connected" ? false : 60_000,
+  });
+  const streams: readonly BelaboxStreamSummary[] = streamsQuery.data ?? [];
+  const currentStreamId = selectedStreamId !== null && streams.some((stream) => stream.streamId === selectedStreamId)
+    ? selectedStreamId
+    : status?.belaboxStreamId !== null && status?.belaboxStreamId !== undefined && streams.some((stream) => stream.streamId === status.belaboxStreamId)
+      ? status.belaboxStreamId
+      : streams[0]?.streamId ?? null;
+  const streamId = historyRange === "stream" ? currentStreamId ?? undefined : undefined;
+  const historyPart = historyRange === "live" ? "history-live" : `history-stream-${streamId ?? "latest"}`;
+  const historyQuery = useModuleQuery(channelId, "belabox", historyPart,
+    (signal) => loadBelaboxHistory(channelId, historyRange, streamId, signal), {
+      enabled: status?.mode === "interval",
+      refetchInterval: realtimeStatus === "connected" ? false : 15_000,
+    });
+  const history: readonly BelaboxHistoryPoint[] = historyQuery.data ?? [];
 
   const save = async (): Promise<void> => {
     if (!canManage || busy || url.length === 0) return;
@@ -203,7 +186,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       return;
     }
     // The delete succeeded: reflect it locally, independent of the refresh below.
-    setStatus({
+    queryClient.setQueryData<BelaboxStatusResponse>(moduleQueryKey(channelId, "belabox", "status"), {
       configured: false,
       updatedAt: null,
       mode: status.mode,
@@ -298,7 +281,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       onConfirm={() => { void remove(); }} pending={busy} danger {...(removeError === null ? {} : { error: removeError })} />
     <BelaboxHistorySection labels={labels} locale={language === "de" ? "de-DE" : "en-US"}
       points={status?.mode === "interval" ? history : []} streams={status?.mode === "interval" ? streams : []}
-      selectedStreamId={selectedStreamId} range={historyRange}
+      selectedStreamId={currentStreamId} range={historyRange}
       onRangeChange={setHistoryRange} onStreamSelect={setSelectedStreamId} onDemand={status?.mode === "on_demand"} />
   </section>;
 }

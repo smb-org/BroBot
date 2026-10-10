@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { BotModule, ModuleChannelLocation, ModuleTemplateConditionContext, ModuleTemplateValueContext } from "../contract";
 import { validChannelTimeZone, type TemplateVariable } from "../contract";
 import { DEFAULT_WEATHER_ERROR_TEXTS, readWeatherSettings } from "./adapters/d1";
-import { fetchCachedWeather } from "./adapters/cache";
+import { fetchCachedWeather, readWeatherCache } from "./adapters/cache";
 import { geocodeWeatherPlace } from "./adapters/geocoding";
 import { weatherModuleCatalog, WEATHER_CONDITION_LABELS, WEATHER_TEMPLATE_VARIABLE_NAMES } from "./contracts/catalog";
 import type { WeatherCondition, WeatherSettings } from "./contracts";
@@ -87,7 +87,10 @@ const resolveConditions = async (
         : context.channelLocation(),
     ]);
     if (locationSetting === null || !validChannelTimeZone(locationSetting.timeZone)) return {};
-    const cached = await fetchCachedWeather(context.DB, settings.provider, locationSetting.latitude, locationSetting.longitude, context.now);
+    const cached = context.readOnly
+      ? await readWeatherCache(context.DB, settings.provider, locationSetting.latitude, locationSetting.longitude, context.now)
+      : await fetchCachedWeather(context.DB, settings.provider, locationSetting.latitude, locationSetting.longitude, context.now);
+    if (cached === null) return {};
     const condition: WeatherCondition = cached.weather.condition;
     context.addTemplateValueAttribution?.(settings.provider === "met_norway" ? "MET Norway" : "Open-Meteo");
     context.addTemplateConditionNextChangeAt?.(new Date(cached.expiresAt).toISOString());

@@ -1,5 +1,4 @@
 import type { ChannelRole, ChannelStreamState } from "./contracts/values";
-import type { AdsSchedule } from "./modules/ads/contracts";
 import type { PanelChannelControls } from "./panel-contract";
 
 /** The only protocol version used on the wire. */
@@ -12,10 +11,10 @@ export const OVERLAY_ACCESS_BOUND_CLOSE_REASON = "Overlay access bound";
 
 export const REALTIME_MESSAGE_TYPES = [
   "system.hello",
+  "panel.resources.changed",
   "event_log.new",
   "variables.changed",
   "overlay.changed",
-  "ads.schedule.updated",
   "stream.state.changed",
 ] as const;
 export type FixedRealtimeMessageType = (typeof REALTIME_MESSAGE_TYPES)[number];
@@ -34,6 +33,9 @@ export type KnownModuleOverlayRealtimeMessageType = keyof ModuleOverlayRealtimeP
   | `modul.channel_events.${string}`
   | `modul.raid.${string}`
   | `modul.sun.${string}`
+  | `modul.chat_voting.${string}`
+  | `modul.belabox.${string}`
+  | `modul.votekick.${string}`
   | `modul.text_commands.${string}`;
 export type RealtimeMessageType = FixedRealtimeMessageType | KnownModuleOverlayRealtimeMessageType;
 
@@ -51,6 +53,10 @@ export interface RealtimeEventLogHint {
 
 export interface RealtimePayloads {
   "system.hello": Record<string, never>;
+  "panel.resources.changed": {
+    resources: readonly string[];
+    revisions: Readonly<Record<string, number>>;
+  };
   "event_log.new": {
     entries: readonly RealtimeEventLogHint[];
   };
@@ -64,7 +70,6 @@ export interface RealtimePayloads {
     overlayId: string;
     revision: number;
   };
-  "ads.schedule.updated": { schedule: AdsSchedule; asOf: string };
   "stream.state.changed": {
     state: ChannelStreamState;
     startedAt: string | null;
@@ -119,17 +124,18 @@ export const isModuleOverlayRealtimeMessageType = (type: string): type is Module
 
 export const isModuleOverlayRealtimeEnvelope = (
   message: RealtimeMessage,
-): message is AnyModuleOverlayRealtimeEnvelope => isModuleOverlayRealtimeMessageType(message.type);
+): message is AnyModuleOverlayRealtimeEnvelope =>
+  isModuleOverlayRealtimeMessageType(message.type);
 
 export type RealtimeRecipientKind = "panel" | "overlay";
 
 /** Every wire type is explicitly limited to the clients allowed to receive it. */
 export const REALTIME_RECIPIENTS = {
   "system.hello": ["panel", "overlay"],
+  "panel.resources.changed": ["panel"],
   "event_log.new": ["panel"],
   "variables.changed": ["panel", "overlay"],
   "overlay.changed": ["panel", "overlay"],
-  "ads.schedule.updated": ["panel"],
   "stream.state.changed": ["panel"],
 } as const satisfies Record<FixedRealtimeMessageType, readonly RealtimeRecipientKind[]>;
 

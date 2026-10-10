@@ -50,17 +50,19 @@ export const readCachedApiPayload = async (
 
 export const storeCachedApiPayload = async (
   db: D1Database,
+  channelId: string,
   urlHash: string,
   payload: unknown,
   expiresAt: number,
   now: number,
 ): Promise<void> => {
   await db.prepare(
-    `INSERT INTO api_source_cache (url_hash, payload_json, expires_at, updated_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(url_hash) DO UPDATE SET payload_json = excluded.payload_json,
+    `INSERT INTO api_source_cache (url_hash, channel_id, payload_json, expires_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(url_hash) DO UPDATE SET channel_id = excluded.channel_id,
+       payload_json = excluded.payload_json,
        expires_at = excluded.expires_at, updated_at = excluded.updated_at`,
-  ).bind(urlHash, JSON.stringify(payload), new Date(expiresAt).toISOString(), new Date(now).toISOString()).run();
+  ).bind(urlHash, channelId, JSON.stringify(payload), new Date(expiresAt).toISOString(), new Date(now).toISOString()).run();
 };
 
 export const claimApiSourceQuota = async (

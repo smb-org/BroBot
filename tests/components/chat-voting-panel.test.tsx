@@ -1,13 +1,17 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { ChatVotingPanel } from "../../src/modules/chat_voting/panel";
+import ChatVotingImmediateAction from "../../src/modules/chat_voting/panel/immediate-actions";
 import type { ChatVote, ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import type { ChatVotingPanelState } from "../../src/modules/chat_voting/panel/service";
+import { moduleQueryKey } from "../../src/dashboard/data/module-query";
+import { reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const template = (overrides: Partial<ChatVoteTemplate> = {}): ChatVoteTemplate => ({
   id: "template-dinner",
@@ -60,6 +64,7 @@ interface FetchHarnessOptions {
   recent?: ChatVote[];
   getRecent?: () => ChatVote[] | Promise<ChatVote[]>;
   getTemplates?: () => ChatVoteTemplate[] | Promise<ChatVoteTemplate[]>;
+  getRevisions?: () => Readonly<Record<string, number>>;
   csrfToken?: () => string;
   onCreate?: (body: Record<string, unknown>) => Response | Promise<Response>;
   onPatch?: (templateId: string, body: Record<string, unknown>, csrfToken: string) => Response | Promise<Response>;
@@ -76,6 +81,7 @@ const fetchHarness = (options: FetchHarnessOptions = {}) => {
       : new URL(String(input), "https://brobot.example").pathname;
     const method = init?.method ?? "GET";
     if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: options.csrfToken?.() ?? "csrf-token" }));
+    if (path.endsWith("/revisions")) return Promise.resolve(jsonResponse({ revisions: options.getRevisions?.() ?? {} }));
     if (path.endsWith("/current")) return Promise.resolve(options.getCurrent?.() ?? options.current ?? currentState())
       .then((current) => jsonResponse(current));
     if (path.endsWith("/templates") && method === "GET") {
@@ -119,6 +125,7 @@ const fetchHarness = (options: FetchHarnessOptions = {}) => {
 };
 
 const mount = (fetch: typeof globalThis.fetch, language: "de" | "en" = "en") => {
+  setDashboardRealtimeStatus("fictional-channel", "connected");
   vi.stubGlobal("fetch", fetch);
   return render(<UiProvider><ToastHost /><ChatVotingPanel channelId="fictional-channel" language={language} /></UiProvider>);
 };
@@ -128,6 +135,7 @@ describe("saved chat voting panel", () => {
 
   afterEach(() => {
     cleanup();
+    setDashboardRealtimeStatus("fictional-channel", "offline");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: initialWidth });
     window.sessionStorage.clear();
     vi.unstubAllGlobals();
@@ -139,6 +147,84 @@ describe("saved chat voting panel", () => {
     expect(await screen.findByText("No saved votes yet")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Create vote" })).not.toHaveLength(0);
     expect(view.container.querySelector(".chat-voting-live")).toBeInTheDocument();
+  });
+
+  it("notifies once per live-state outage and again after the state recovers", async () => {
+    let unavailable = false;
+    const fetcher = fetchHarness({ getCurrent: () => {
+      if (unavailable) throw new Error("state unavailable");
+      return currentState();
+    } });
+    const view = mount(fetcher);
+    expect(await screen.findByText("No vote yet")).toBeInTheDocument();
+    const key = { queryKey: moduleQueryKey("fictional-channel", "chat_voting", "panel"), exact: true };
+    const refresh = async (): Promise<void> => {
+      await act(async () => { await view.queryClient.refetchQueries(key, { throwOnError: true }).catch(() => undefined); });
+    };
+
+    unavailable = true;
+    await refresh();
+    await refresh();
+    expect(view.queryClient.getQueryState(key.queryKey)?.status).toBe("error");
+    expect(toastsSnapshot().filter((toast) => toast.message === "The vote could not be loaded.")).toHaveLength(1);
+
+    unavailable = false;
+    await refresh();
+    unavailable = true;
+    await refresh();
+    expect(toastsSnapshot().filter((toast) => toast.message === "The vote could not be loaded.")).toHaveLength(2);
+  });
+
+  it("refreshes the live, saved, recent, and immediate-action views from panel resource revisions", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let current = currentState();
+    let templates: ChatVoteTemplate[] = [];
+    let recent: ChatVote[] = [];
+    let revisions: Readonly<Record<string, number>> = {};
+    const fetcher = fetchHarness({
+      getCurrent: () => current,
+      getTemplates: () => templates,
+      getRecent: () => recent,
+      getRevisions: () => revisions,
+    });
+    setDashboardRealtimeStatus("fictional-channel", "connected");
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><ToastHost />
+      <ChatVotingPanel channelId="fictional-channel" language="en" />
+      <ChatVotingImmediateAction channelId="fictional-channel" availabilityReason={null} />
+    </UiProvider>);
+
+    expect(await screen.findByText("No saved votes yet")).toBeInTheDocument();
+    const recentMode = screen.getAllByRole("radio", { name: "Recent" })[0];
+    if (recentMode === undefined) throw new Error("The Recent view control is missing.");
+    fireEvent.click(recentMode);
+    expect(await screen.findByText("No vote has run yet")).toBeInTheDocument();
+    const requestCount = (suffix: string): number => fetcher.mock.calls.filter(([input]) =>
+      new URL(input instanceof Request ? input.url : String(input), "https://brobot.example").pathname.endsWith(suffix)).length;
+    await waitFor(() => expect(requestCount("/recent")).toBeGreaterThan(0));
+    const currentReads = requestCount("/current");
+    const templateReads = requestCount("/templates");
+    const recentReads = requestCount("/recent");
+
+    current = currentState({ vote: runningVote, counts: [2, 1] });
+    templates = [template({ title: "Updated dinner", revision: 2 })];
+    recent = [{ ...runningVote, id: "poll-completed", title: "Completed dinner", status: "closed", closedAt: "2026-10-04T10:02:00.000Z", counts: [3, 1], voterCount: 4 }];
+    revisions = {
+      "module:chat_voting:panel": 1,
+      "module:chat_voting:templates": 1,
+      "module:chat_voting:recent": 1,
+    };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
+
+    await waitFor(() => expect(requestCount("/current")).toBeGreaterThan(currentReads));
+    await waitFor(() => expect(requestCount("/templates")).toBeGreaterThan(templateReads));
+    await waitFor(() => expect(requestCount("/recent")).toBeGreaterThan(recentReads));
+    await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey("fictional-channel", "chat_voting", "panel")))
+      .toMatchObject({ vote: { id: runningVote.id, status: "open" } }));
+    expect(view.container.querySelector(".chat-voting-live")).toHaveTextContent("Dinner");
+    expect(view.container.querySelector(".chat-voting-template-list")).toHaveTextContent("Updated dinner");
+    expect(view.container.querySelector(".chat-voting-immediate")).toHaveTextContent("Dinner");
+    expect(view.container.querySelector(".chat-voting-recent-list")).toHaveTextContent("Completed dinner");
   });
 
   it("keeps a new draft local and retains edits made while its first Save is pending", async () => {
@@ -337,18 +423,20 @@ describe("saved chat voting panel", () => {
     expect(screen.getByRole("button", { name: "End vote" })).toBeEnabled();
   });
 
-  it("ignores a slow live-state response after a newer poll has completed", async () => {
+  it("keeps the newest live state when revision invalidation supersedes an in-flight read", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let resolveFirst!: (state: ChatVotingPanelState) => void;
     const first = new Promise<ChatVotingPanelState>((resolve) => { resolveFirst = resolve; });
     let currentCalls = 0;
+    let revisions: Readonly<Record<string, number>> = {};
     const closedVote: ChatVote = { ...runningVote, status: "closed", closedAt: "2026-10-04T10:02:00.000Z" };
-    mount(fetchHarness({ getCurrent: () => {
+    const view = mount(fetchHarness({ getRevisions: () => revisions, getCurrent: () => {
       currentCalls += 1;
       return currentCalls === 1 ? first : currentState({ vote: closedVote });
     } }));
     await waitFor(() => expect(currentCalls).toBe(1));
-    document.dispatchEvent(new Event("visibilitychange"));
+    revisions = { "module:chat_voting:panel": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
     await waitFor(() => expect(currentCalls).toBe(2));
     const start = await screen.findByRole("button", { name: "Start vote" });
     await waitFor(() => expect(start).toBeEnabled());
@@ -358,78 +446,30 @@ describe("saved chat voting panel", () => {
     expect(screen.queryByRole("button", { name: "End vote" })).not.toBeInTheDocument();
   });
 
-  it("does not let an older template-usage response clear a newer running marker", async () => {
+  it("clears a stale template error after a later resource revision succeeds", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    const firstOpenedAt = "2026-10-04T10:00:00.000Z";
-    const secondOpenedAt = "2026-10-04T10:01:00.000Z";
-    let current = currentState();
-    let currentCalls = 0;
     let templateCalls = 0;
-    let resolveOldUsage!: (templates: ChatVoteTemplate[]) => void;
-    let resolveLatestUsage!: (templates: ChatVoteTemplate[]) => void;
-    const oldUsage = new Promise<ChatVoteTemplate[]>((resolve) => { resolveOldUsage = resolve; });
-    const latestUsage = new Promise<ChatVoteTemplate[]>((resolve) => { resolveLatestUsage = resolve; });
-    const fetch = fetchHarness({
-      getCurrent: () => { currentCalls += 1; return current; },
+    let revisions: Readonly<Record<string, number>> = {};
+    const view = mount(fetchHarness({
+      getRevisions: () => revisions,
       getTemplates: () => {
         templateCalls += 1;
-        if (templateCalls === 2) return oldUsage;
-        if (templateCalls === 3) return latestUsage;
-        return [template()];
-      },
-    });
-    mount(fetch);
-    await screen.findByRole("button", { name: "Start “Dinner”" });
-    const firstVote: ChatVote = { ...runningVote, id: "poll-first", openedAt: firstOpenedAt };
-    current = currentState({ vote: firstVote });
-    document.dispatchEvent(new Event("visibilitychange"));
-    await waitFor(() => expect(templateCalls).toBe(2));
-
-    current = currentState();
-    document.dispatchEvent(new Event("visibilitychange"));
-    await waitFor(() => expect(currentCalls).toBeGreaterThan(2));
-    const start = screen.getByRole("button", { name: "Start “Dinner”" });
-    await waitFor(() => expect(start).toBeEnabled());
-    const secondVote: ChatVote = { ...runningVote, id: "poll-second", openedAt: secondOpenedAt };
-    current = currentState({ vote: secondVote });
-    document.dispatchEvent(new Event("visibilitychange"));
-    await waitFor(() => expect(templateCalls).toBe(3));
-    resolveLatestUsage([template({ lastUsedAt: secondOpenedAt })]);
-    await waitFor(() => expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent("Running"));
-    resolveOldUsage([template({ lastUsedAt: firstOpenedAt })]);
-    await new Promise((resolve) => window.setTimeout(resolve, 20));
-    expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent("Running");
-  });
-
-  it("clears a usage-refresh error after a later usage refresh succeeds", async () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    let current = currentState();
-    let currentCalls = 0;
-    let templateCalls = 0;
-    const openedAt = "2026-10-04T10:00:00.000Z";
-    mount(fetchHarness({
-      getCurrent: () => { currentCalls += 1; return current; },
-      getTemplates: () => {
-        templateCalls += 1;
-        if (templateCalls === 2) return Promise.reject(new Error("temporary usage refresh failure"));
-        return [template({ lastUsedAt: templateCalls > 2 ? openedAt : null })];
+        if (templateCalls === 2) throw new Error("temporary template read failure");
+        return [template({ title: templateCalls > 2 ? "Updated dinner" : "Dinner" })];
       },
     }));
     await screen.findByRole("button", { name: "Start “Dinner”" });
     await waitFor(() => expect(templateCalls).toBe(1));
-    current = currentState({ vote: runningVote });
-    document.dispatchEvent(new Event("visibilitychange"));
-    await waitFor(() => expect(currentCalls).toBeGreaterThan(1));
+    revisions = { "module:chat_voting:templates": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
     await waitFor(() => expect(templateCalls).toBe(2));
     expect(document.querySelector(".chat-voting-list .stale")).toBeInTheDocument();
 
-    current = currentState();
-    document.dispatchEvent(new Event("visibilitychange"));
-    await waitFor(() => expect(currentCalls).toBeGreaterThan(2));
-    current = currentState({ vote: { ...runningVote, id: "poll-next", openedAt: "2026-10-04T10:01:00.000Z" } });
-    document.dispatchEvent(new Event("visibilitychange"));
+    revisions = { "module:chat_voting:templates": 2 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
     await waitFor(() => expect(templateCalls).toBe(3));
     await waitFor(() => expect(document.querySelector(".chat-voting-list .stale")).not.toBeInTheDocument());
+    expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent("Updated dinner");
   });
 
   it("can enter Custom duration from a preset and return to it after choosing another preset", async () => {
@@ -507,18 +547,19 @@ describe("saved chat voting panel", () => {
     expect(titles).toEqual(["Dinner", "Breakfast"]);
   });
 
-  it("refreshes template usage when polling observes a vote started from chat", async () => {
+  it("refreshes template usage from resource revisions after a vote starts in chat", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
     const closedVote = { ...runningVote, status: "closed" as const, closedAt: "2026-10-04T10:02:00.000Z" };
     let current = currentState({ vote: closedVote });
     let serverTemplate = template();
-    mount(fetchHarness({ getCurrent: () => current, getTemplates: () => [serverTemplate] }));
+    let revisions: Readonly<Record<string, number>> = {};
+    const view = mount(fetchHarness({ getRevisions: () => revisions, getCurrent: () => current, getTemplates: () => [serverTemplate] }));
     fireEvent.click(await screen.findByRole("link", { name: /Dinner/u }));
     await screen.findByRole("textbox", { name: "Question" });
     current = currentState({ vote: runningVote, counts: [0, 0] });
     serverTemplate = { ...serverTemplate, lastUsedAt: runningVote.openedAt };
-    document.dispatchEvent(new Event("visibilitychange"));
+    revisions = { "module:chat_voting:panel": 1, "module:chat_voting:templates": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
     await waitFor(() => expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent("Running"));
     expect(document.querySelector(".chat-voting-template-list .list-row__action button")).toBeNull();
     expect(screen.getByText("Changes apply from the next start.")).toBeInTheDocument();
@@ -526,7 +567,6 @@ describe("saved chat voting panel", () => {
 
   it("reloads Recent after a vote closes and each time the view is reopened", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
     const completedVote: ChatVote = {
       ...runningVote,
       id: "poll-completed",
@@ -537,7 +577,9 @@ describe("saved chat voting panel", () => {
     };
     let current = currentState();
     let recentRequests = 0;
-    mount(fetchHarness({
+    let revisions: Readonly<Record<string, number>> = {};
+    const view = mount(fetchHarness({
+      getRevisions: () => revisions,
       getCurrent: () => current,
       getRecent: () => { recentRequests += 1; return current.vote?.status === "closed" ? [completedVote] : []; },
       onClose: () => { current = currentState({ vote: completedVote }); },
@@ -546,7 +588,9 @@ describe("saved chat voting panel", () => {
     expect(await screen.findByText("No vote has run yet")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "Saved" }));
     current = currentState({ vote: runningVote });
-    document.dispatchEvent(new Event("visibilitychange"));
+    revisions = { "module:chat_voting:panel": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
+    await screen.findByRole("button", { name: "End vote" });
     fireEvent.click(await screen.findByRole("button", { name: "End vote" }));
     await waitFor(() => expect(current.vote?.status).toBe("closed"));
     fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
@@ -555,14 +599,15 @@ describe("saved chat voting panel", () => {
     expect(recentRequests).toBeGreaterThanOrEqual(2);
   });
 
-  it("refreshes an open Recent view when polling first sees a different closed vote", async () => {
+  it("refreshes an open Recent view when the recent resource revision changes", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
     const previousClosedVote: ChatVote = { ...runningVote, id: "poll-previous", status: "closed", closedAt: "2026-10-04T10:01:00.000Z" };
     const newlyClosedVote: ChatVote = { ...runningVote, id: "poll-new", title: "Lunch", status: "closed", closedAt: "2026-10-04T10:02:00.000Z" };
     let current = currentState();
     let recentRequests = 0;
-    mount(fetchHarness({
+    let revisions: Readonly<Record<string, number>> = {};
+    const view = mount(fetchHarness({
+      getRevisions: () => revisions,
       getCurrent: () => current,
       getRecent: () => {
         recentRequests += 1;
@@ -574,21 +619,23 @@ describe("saved chat voting panel", () => {
     expect(await screen.findByText("Dinner", { selector: ".list-row__title" })).toBeInTheDocument();
     const previousRequestCount = recentRequests;
     current = currentState({ vote: newlyClosedVote });
-    document.dispatchEvent(new Event("visibilitychange"));
+    revisions = { "module:chat_voting:panel": 1, "module:chat_voting:recent": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
     expect(await screen.findByText("Lunch", { selector: ".list-row__title" })).toBeInTheDocument();
     expect(recentRequests).toBeGreaterThan(previousRequestCount);
   });
 
   it("does not let an in-flight Recent response undo history invalidation", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
     const staleVote: ChatVote = { ...runningVote, id: "poll-stale", title: "Stale", status: "closed", closedAt: "2026-10-04T10:01:00.000Z" };
     const latestVote: ChatVote = { ...runningVote, id: "poll-latest", title: "Latest", status: "closed", closedAt: "2026-10-04T10:02:00.000Z" };
     let current = currentState();
     let recentRequests = 0;
+    let revisions: Readonly<Record<string, number>> = {};
     let resolveStale!: (votes: ChatVote[]) => void;
     const staleResponse = new Promise<ChatVote[]>((resolve) => { resolveStale = resolve; });
-    mount(fetchHarness({
+    const view = mount(fetchHarness({
+      getRevisions: () => revisions,
       getCurrent: () => current,
       getRecent: () => {
         recentRequests += 1;
@@ -599,7 +646,8 @@ describe("saved chat voting panel", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
     await waitFor(() => expect(recentRequests).toBe(1));
     current = currentState({ vote: latestVote });
-    document.dispatchEvent(new Event("visibilitychange"));
+    revisions = { "module:chat_voting:panel": 1, "module:chat_voting:recent": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
     expect(await screen.findByText("Latest", { selector: ".list-row__title" })).toBeInTheDocument();
     resolveStale([staleVote]);
     await new Promise((resolve) => window.setTimeout(resolve, 20));

@@ -4,7 +4,7 @@ import type { BotModule, ModuleExternalFetchBudget, ModuleTextBlockConditionDefi
 import { API_SOURCE_VALUE_VARIABLE, apiSourceModuleCatalog } from "./contracts";
 import type { ApiSource } from "./contracts";
 import { getApiSource, listApiSources } from "./adapters/d1";
-import { fetchCachedApiSourceJson } from "./adapters/fetch-json";
+import { fetchCachedApiSourceJson, readCachedApiSourceJson } from "./adapters/fetch-json";
 import { evaluateApiSourceExpression, formatApiSourceValue, parseApiSourceName } from "./domain";
 import { apiSourceRoutes } from "./routes";
 
@@ -23,6 +23,13 @@ const sourcePayload = (
   source: ApiSource,
   context: ModuleTemplateValueContext | ModuleTemplateConditionContext,
 ): Promise<unknown> => {
+  if ("readOnly" in context && context.readOnly) {
+    return readCachedApiSourceJson(context.DB, context.channelId, source.url, context.publicOrigin, context.now)
+      .then((cached) => {
+        if (cached === null) throw new Error("API source has no cached response.");
+        return cached;
+      });
+  }
   const budget = context.externalFetchBudget;
   if (budget === undefined) {
     return fetchCachedApiSourceJson(context.DB, context.channelId, source.url, context.publicOrigin, context.now, budget);

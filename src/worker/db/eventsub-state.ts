@@ -184,6 +184,19 @@ export const rememberEventSubMessageAndRevocation = async (
               AND user_id = ?
               AND status = 'revoked'`,
         ).bind(identity.userId),
+        db.prepare(
+          `INSERT INTO pending_realtime_user_revocations (user_id, requested_at, generation)
+           SELECT user_id, updated_at, 1
+             FROM twitch_login_identity
+            WHERE changes() = 1
+              AND user_id = ?
+              AND status = 'revoked'
+              AND reason = ?
+              AND updated_at = ?
+           ON CONFLICT(user_id) DO UPDATE SET
+             requested_at = excluded.requested_at,
+             generation = pending_realtime_user_revocations.generation + 1`,
+        ).bind(identity.userId, revocation.reason, revocation.updatedAt),
       ]
       : [];
   const results = await db.batch([message, storedRevocation, storedState, ...identityEffects]);

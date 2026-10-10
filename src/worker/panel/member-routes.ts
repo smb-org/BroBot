@@ -235,7 +235,7 @@ memberRouter.patch("/api/channels/:channelId/members/:userId", async (context) =
     actorGuard(requiredActorRoles(member.role, existing.role)),
   );
   if (!changed) return context.json({ error: "member_changed_concurrently" }, 409);
-  void revokeRealtimeUser(context.env.CHANNEL, channelId, userId);
+  await revokeRealtimeUser(context.env.CHANNEL, channelId, userId);
   return context.json({ member: memberResponse(member) });
 });
 
@@ -262,6 +262,6 @@ memberRouter.delete("/api/channels/:channelId/members/:userId", async (context) 
     actorGuard(requiredActorRoles(undefined, existing.role)),
   );
   if (!changed) return context.json({ error: "member_changed_concurrently" }, 409);
-  void revokeRealtimeUser(context.env.CHANNEL, channelId, userId);
+  await revokeRealtimeUser(context.env.CHANNEL, channelId, userId);
   return context.body(null, 204);
 });

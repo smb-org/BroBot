@@ -11,6 +11,7 @@ import { eventSubMessageCutoff } from "./eventsub";
 import { maintainStreamStates } from "./stream-state-lookup";
 import { purgeRevokedOverlayAccesses } from "./auth/overlay-access-repository";
 import { MODULES } from "../modules/registry";
+import { schedulePanelResourceBackgroundWork } from "./panel-resources";
 
 export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   _controller,
@@ -38,7 +39,14 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   if (new Date(now).getUTCHours() === EVENT_LOG_DAILY_TRIM_HOUR) {
     tasks.push(trimEventLogToLimit(env.DB), purgeRevokedOverlayAccesses(env.DB, now));
   }
-  const work = Promise.all(tasks).then(() => undefined);
-  executionContext.waitUntil(work);
-  await work;
+  const work = Promise.allSettled(tasks)
+    .then((results) => {
+      const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (rejected !== undefined) throw rejected.reason;
+    });
+  await schedulePanelResourceBackgroundWork(
+    env,
+    work,
+    () => executionContext,
+  );
 };

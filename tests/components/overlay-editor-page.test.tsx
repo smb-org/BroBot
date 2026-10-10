@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DashboardApp } from "../../src/dashboard/main";
 import { generateOverlayStyleBlock, OVERLAY_STYLE_BEGIN_MARKER, OVERLAY_STYLE_END_MARKER } from "../../src/dashboard/overlay-style-model";
 import { OverlayCanvas } from "../../src/overlay/canvas";
+import { OverlayEditorPage } from "../../src/dashboard/OverlayEditorPage";
+import { dashboardDataKeys } from "../../src/dashboard/data/keys";
+import { createDashboardQueryClient } from "../../src/dashboard/data/client";
+import { UiProvider } from "../../src/dashboard/ui";
 import { jsonResponse } from "../unit/fixtures";
 import { renderWithQuery as render } from "../query-test-utils";
 
@@ -63,6 +67,187 @@ describe("Overlay composition editor", () => {
     vi.unstubAllGlobals();
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
   });
+
+  it("waits for overlay revalidation before creating the editor session and preserves the draft", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const client = createDashboardQueryClient();
+    const overlayKey = dashboardDataKeys.overlay("kanal-a", "overlay-a");
+    const baseElement = initialOverlay.elements[0];
+    if (baseElement === undefined) throw new Error("Overlay test element is missing.");
+    client.setQueryData(overlayKey, { overlay: { ...initialOverlay, revision: 1, elements: [{ ...baseElement, x: 11 }] } });
+    let resolveFreshOverlay: ((response: Response) => void) | undefined;
+    let overlayReadCount = 0;
+    let savedBody: { baseRevision: number; elements: Array<{ x: number }> } | undefined;
+    const freshOverlay = { ...initialOverlay, revision: 2, elements: [{ ...baseElement, x: 42 }] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") {
+        overlayReadCount += 1;
+        if (overlayReadCount > 1) return Promise.reject(new Error("background revalidation failed"));
+        return new Promise<Response>((resolve) => { resolveFreshOverlay = resolve; });
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        savedBody = JSON.parse(init.body) as typeof savedBody;
+        return Promise.resolve(jsonResponse({ overlay: { ...freshOverlay, revision: 3 } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a"
+      overlayId="overlay-a"
+      canManage
+      language="en"
+      onBack={vi.fn()}
+      onOverlayCreated={vi.fn()}
+    /></UiProvider>, undefined, { queryClient: client, gcTime: 600_000 });
+
+    await waitFor(() => expect(resolveFreshOverlay).toBeTypeOf("function"));
+    expect(screen.queryByRole("heading", { name: "Gameplay", level: 1 })).not.toBeInTheDocument();
+    await act(async () => {
+      resolveFreshOverlay?.(jsonResponse({ overlay: freshOverlay }));
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const position = await screen.findByRole("spinbutton", { name: "X (px)" });
+    expect(position).toHaveValue("42");
+    fireEvent.change(position, { target: { value: "50" } });
+    await act(async () => {
+      await Promise.resolve();
+      client.setQueryData(overlayKey, { overlay: { ...freshOverlay, revision: 3, elements: [{ ...baseElement, x: 99 }] } });
+    });
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("50");
+
+    await act(async () => {
+      await client.refetchQueries({ queryKey: overlayKey, exact: true });
+    });
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("50");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(savedBody).toMatchObject({ baseRevision: 2, elements: [{ x: 50 }] }));
+    view.unmount();
+  });
+
+  it("creates the editor session after an initial overlay read recovers", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    let overlayAvailable = false;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") {
+        return overlayAvailable
+          ? Promise.resolve(jsonResponse({ overlay: initialOverlay }))
+          : Promise.reject(new Error("overlay read unavailable"));
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a"
+      overlayId="overlay-a"
+      canManage
+      language="en"
+      onBack={vi.fn()}
+      onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("button", { name: "Reload" })).toBeInTheDocument();
+    overlayAvailable = true;
+    await act(async () => {
+      await view.queryClient.refetchQueries({ queryKey: dashboardDataKeys.overlay("kanal-a", "overlay-a"), exact: true });
+    });
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("24");
+  });
+
+  it("creates the editor session after an initial variables read recovers", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    let variablesAvailable = false;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: initialOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") {
+        return variablesAvailable
+          ? Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }))
+          : Promise.reject(new Error("variables read unavailable"));
+      }
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a"
+      overlayId="overlay-a"
+      canManage
+      language="en"
+      onBack={vi.fn()}
+      onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("button", { name: "Reload" })).toBeInTheDocument();
+    variablesAvailable = true;
+    await act(async () => {
+      await view.queryClient.refetchQueries({ queryKey: dashboardDataKeys.variables("kanal-a"), exact: true });
+    });
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("24");
+  });
+
+  it("initializes once when variables update continuously during a slow module read", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    let moduleReadCount = 0;
+    let resolveModules: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") {
+        return Promise.resolve(jsonResponse({ overlay: initialOverlay }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules") {
+        moduleReadCount += 1;
+        return new Promise<Response>((resolve) => { resolveModules = resolve; });
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables") {
+        return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a"
+      overlayId="overlay-a"
+      canManage
+      language="en"
+      onBack={vi.fn()}
+      onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    for (let index = 0; index < 6; index += 1) {
+      act(() => {
+        view.queryClient.setQueryData(dashboardDataKeys.variables("kanal-a"), {
+          variables: [{ ...variable, value: index }], count: 1, maximum: 25,
+        });
+      });
+      if (index < 5) await new Promise<void>((resolve) => { window.setTimeout(resolve, 1_000); });
+    }
+
+    expect(screen.queryByRole("heading", { name: "Gameplay", level: 1 })).not.toBeInTheDocument();
+    expect(moduleReadCount).toBe(1);
+    act(() => {
+      resolveModules?.(jsonResponse({ modules: [] }));
+    });
+
+    await screen.findByRole("heading", { name: "Gameplay", level: 1 });
+    expect(moduleReadCount).toBe(1);
+    view.unmount();
+  }, 15_000);
 
   it("adds enabled module elements with their declared default size", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
@@ -843,7 +1028,7 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Kanalvariablen", level: 1 })).toBeInTheDocument();
-    fireEvent.click(screen.getByText("{var.score}"));
+    fireEvent.click(await screen.findByText("{var.score}"));
     fireEvent.click(await screen.findByRole("button", { name: "In Overlay verwenden" }));
     fireEvent.click(await screen.findByRole("button", { name: "Editor öffnen" }));
     expect(await screen.findByRole("heading", { name: "Overlay score", level: 1 })).toBeInTheDocument();

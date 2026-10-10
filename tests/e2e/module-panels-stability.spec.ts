@@ -28,9 +28,41 @@ const box = async (locator: Locator): Promise<{ x: number; y: number; width: num
   };
 };
 
-const gotoPanel = async (page: Page, panel: string, language?: "de" | "en"): Promise<void> => {
+const gotoPanel = async (page: Page, panel: string, language?: "de" | "en", realtime = false): Promise<void> => {
   const languageQuery = language === undefined ? "" : `&lang=${language}`;
-  await page.goto(`/tests/e2e/module-panels-stability-fixture.html?panel=${panel}${languageQuery}`);
+  const realtimeQuery = realtime ? "&realtime=1" : "";
+  await page.goto(`/tests/e2e/module-panels-stability-fixture.html?panel=${panel}${languageQuery}${realtimeQuery}`);
+};
+
+const installChatVotingRealtime = async (page: Page) => {
+  let revisions: Readonly<Record<string, number>> = {};
+  let sendHint: ((next: Readonly<Record<string, number>>) => void) | null = null;
+  let messageNumber = 0;
+  await page.routeWebSocket("**/ws/channels/channel-a", (socket) => {
+    socket.onMessage(() => undefined);
+    sendHint = (next) => {
+      revisions = next;
+      messageNumber += 1;
+      socket.send(JSON.stringify({
+        version: 1,
+        id: `chat-voting-revision-${String(messageNumber)}`,
+        createdAt: "2030-01-01T12:00:00.000Z",
+        channelId: "channel-a",
+        type: "panel.resources.changed",
+        payload: { resources: Object.keys(next), revisions: next },
+      }));
+    };
+  });
+  await page.route("**/api/channels/channel-a/revisions", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ revisions }) });
+  });
+  return {
+    waitForSocket: async () => expect.poll(() => sendHint !== null).toBe(true),
+    sendHint: (next: Readonly<Record<string, number>>) => {
+      if (sendHint === null) throw new Error("The chat voting realtime socket is not connected.");
+      sendHint(next);
+    },
+  };
 };
 
 test("API source editor and expression hint keep their boxes stable", async ({ page }) => {
@@ -217,6 +249,24 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
 });
 
 test("BELABOX immediate action keeps manual results separate from live notices", async ({ page }) => {
+  await page.addInitScript(() => {
+    class OfflineWebSocket extends EventTarget {
+      readyState = 0;
+      constructor(url: string, protocols?: string | string[]) {
+        super();
+        void url;
+        void protocols;
+        queueMicrotask(() => { this.close(1006, "Offline fallback test"); });
+      }
+      close(code = 1000, reason = "closed"): void {
+        if (this.readyState === 3) return;
+        this.readyState = 3;
+        this.dispatchEvent(new CloseEvent("close", { code, reason }));
+      }
+      send(data: string): void { void data; }
+    }
+    Object.defineProperty(window, "WebSocket", { value: OfflineWebSocket, writable: true, configurable: true });
+  });
   const connectedStatus = {
     configured: true, updatedAt: "2030-01-01T12:00:00.000Z",
     sample: { at: "2030-01-01T12:00:00.000Z", connected: true, bitrateKbps: 3200, rttMs: 41, latencyMs: 115, network: 2, droppedPackets: 0 },
@@ -820,78 +870,99 @@ test("chat voting immediate action fits the 192px card with two visible rows and
   expect(metrics.listScrolls).toBe(true);
 });
 
-test("slow chat voting polls apply an available response while a later request is pending", async ({ page }) => {
+test("chat voting panel applies resource revisions and ignores an older pending response", async ({ page }) => {
   let requests = 0;
   let startedFirst: () => void = () => undefined;
   let startedSecond: () => void = () => undefined;
   let releaseFirst: () => void = () => undefined;
-  let releaseSecond: () => void = () => undefined;
   const firstStarted = new Promise<void>((resolve) => { startedFirst = resolve; });
   const secondStarted = new Promise<void>((resolve) => { startedSecond = resolve; });
   const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-  const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const vote = {
+    id: "vote-revision-panel", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
+    title: "Revision update", status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:02:00.000Z",
+    requestedDurationSeconds: 120, closedAt: null, closeReason: null, counts: [2, 1], voterCount: 3,
+  };
+  const realtime = await installChatVotingRealtime(page);
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
     requests += 1;
-    if (requests === 1) { startedFirst(); await firstGate; }
-    else if (requests === 2) { startedSecond(); await secondGate; }
+    if (requests === 1) {
+      startedFirst();
+      await firstGate;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+      }) });
+      return;
+    }
+    if (requests === 2) startedSecond();
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote: null, counts: null, revision: requests, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+      vote, counts: vote.counts, revision: 2, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
     }) });
   });
   await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [], count: 0, maximum: 100 });
   await page.setViewportSize({ width: 390, height: 844 });
   try {
-    await gotoPanel(page, "chat_voting", "en");
+    await gotoPanel(page, "chat_voting", "en", true);
     await firstStarted;
-    await page.evaluate(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    await realtime.waitForSocket();
+    realtime.sendHint({ "module:chat_voting:panel": 1 });
     await secondStarted;
+    await expect(page.locator(".chat-voting-live__question")).toHaveText("Revision update");
     releaseFirst();
-    await expect(page.getByText("No vote yet", { exact: true })).toBeVisible();
-    releaseSecond();
-    await expect(page.getByText("No vote yet", { exact: true })).toBeVisible();
+    await expect(page.locator(".chat-voting-live__question")).toHaveText("Revision update");
   } finally {
     releaseFirst();
-    releaseSecond();
   }
 });
 
-test("slow immediate-action polls apply an available response while a later request is pending", async ({ page }) => {
+test("chat voting immediate action refreshes the live state from resource revisions", async ({ page }) => {
   let requests = 0;
   let startedFirst: () => void = () => undefined;
   let startedSecond: () => void = () => undefined;
   let releaseFirst: () => void = () => undefined;
-  let releaseSecond: () => void = () => undefined;
   const firstStarted = new Promise<void>((resolve) => { startedFirst = resolve; });
   const secondStarted = new Promise<void>((resolve) => { startedSecond = resolve; });
   const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-  const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
   const timestamp = "2030-01-01T12:00:00.000Z";
+  const vote = {
+    id: "vote-revision-card", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
+    title: "Revision card", status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
+    requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [1, 0], voterCount: 1,
+  };
   const template: ChatVoteTemplate = {
-    id: "template-slow-card", channelId: "channel-a", shortcut: "slow", title: "Slow card",
+    id: "template-revision-card", channelId: "channel-a", shortcut: "revision", title: "Revision card",
     labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
+  const realtime = await installChatVotingRealtime(page);
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
     requests += 1;
-    if (requests === 1) { startedFirst(); await firstGate; }
-    else if (requests === 2) { startedSecond(); await secondGate; }
+    if (requests === 1) {
+      startedFirst();
+      await firstGate;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+      }) });
+      return;
+    }
+    if (requests === 2) startedSecond();
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote: null, counts: null, revision: requests, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+      vote, counts: vote.counts, revision: 2, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
     }) });
   });
   await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
   try {
-    await gotoPanel(page, "chat_voting-action", "en");
+    await gotoPanel(page, "chat_voting-action", "en", true);
     await firstStarted;
-    await page.evaluate(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    await realtime.waitForSocket();
+    realtime.sendHint({ "module:chat_voting:panel": 1 });
     await secondStarted;
+    await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
     releaseFirst();
-    await expect(page.locator(".chat-voting-immediate__header")).toContainText("No vote is running");
-    releaseSecond();
-    await expect(page.locator(".chat-voting-immediate__header")).toContainText("No vote is running");
+    await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
   } finally {
     releaseFirst();
-    releaseSecond();
   }
 });
 
@@ -1338,11 +1409,16 @@ test("the mobile live state reserves the same height while loading, failed, empt
   let releaseFirstRequest: () => void = () => undefined;
   const firstRequestGate = new Promise<void>((resolve) => { releaseFirstRequest = resolve; });
   let currentRequests = 0;
+  const realtime = await installChatVotingRealtime(page);
   await routeJson(page, "/api/csrf", { token: "csrf" });
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
     currentRequests += 1;
     if (currentRequests === 1) {
       await firstRequestGate;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "unavailable" }) });
+      return;
+    }
+    if (currentRequests === 2) {
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "unavailable" }) });
       return;
     }
@@ -1362,7 +1438,8 @@ test("the mobile live state reserves the same height while loading, failed, empt
   });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await gotoPanel(page, "chat_voting", "en");
+  await gotoPanel(page, "chat_voting", "en", true);
+  await realtime.waitForSocket();
   const liveState = page.locator(".chat-voting-panel > div > .ui-load-state");
   await expect(liveState).toHaveAttribute("data-status", "loading");
   const loadingHeight = (await box(liveState)).height;

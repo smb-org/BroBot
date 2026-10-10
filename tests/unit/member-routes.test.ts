@@ -73,6 +73,10 @@ const insertBotIdentity = async (database: TestD1Database): Promise<void> => {
 
 const environmentFor = (database: TestD1Database): Env => ({
   DB: database as unknown as D1Database,
+  CHANNEL: {
+    idFromName: (channelId: string) => channelId,
+    get: () => ({ revokeUser: () => Promise.resolve() }),
+  },
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
   TWITCH_BOT_LOGIN: "brobot",
@@ -270,6 +274,29 @@ describe("Member management", () => {
       expect.objectContaining({ userId: "user-2", login: null, displayName: null, profileImageUrl: null }),
     ]);
     expect(removeResponse.status).toBe(204);
+  });
+
+  it("does not report a member removal complete until the socket revocation succeeds", async () => {
+    await setupChannel(database);
+    await insertMember(database, "kanal-a", "user-2", "operator");
+    const failingEnvironment = {
+      ...environment,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ revokeUser: () => Promise.reject(new Error("channel unavailable")) }),
+      },
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "DELETE"),
+      failingEnvironment,
+    );
+    const member = await database.prepare(
+      "SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-2").first();
+
+    expect(response.status).toBe(500);
+    expect(member).toBeNull();
   });
 
   it("returns the member list with unresolvable names even on a Helix error", async () => {

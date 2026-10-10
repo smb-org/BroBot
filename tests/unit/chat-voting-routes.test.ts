@@ -242,7 +242,7 @@ describe("chat voting routes", () => {
     await expect(response.json()).resolves.toMatchObject({ defaultDurationSeconds: 120 });
   });
 
-  it("does not read the retained legacy-written column when GET current finds an open vote", async () => {
+  it("returns a legacy-written open vote without scheduling a close alarm", async () => {
     const database = await createDatabase();
     await database.prepare("UPDATE chat_votes SET legacy_written = 1 WHERE channel_id = ? AND poll_id = ?")
       .bind(CHANNEL_ID, openTextVote.id).run();

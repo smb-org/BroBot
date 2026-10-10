@@ -3,10 +3,10 @@ import { Hono } from "hono";
 import type { AuditAction } from "../../contracts/values";
 import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTE_TEMPLATE_MAXIMUM, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
-import type { ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
+import type { ChatVotePreset, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, startChatVote } from "./service";
-import { chatVoteTemplateConfiguration, configuredLabels, isBlockedFreeTextVote, isValidTemplateShortcut, isValidVoteTitle, normalizeBlockedVoteTerm, normalizeVoteTitle, templateStartProblem, voteLabelLength } from "./domain";
+import { chatVoteTemplateConfiguration, configuredLabels, isBlockedFreeTextVote, isValidTemplateShortcut, isValidVoteTitle, labelsForVote, normalizeBlockedVoteTerm, normalizeVoteTitle, templateStartProblem, voteLabelLength } from "./domain";
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -73,17 +73,28 @@ export const chatVotingRoutes = new Hono<ModuleRouteEnvironment>();
 chatVotingRoutes.get("/current", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const repository = createChatVotingRepository(context.env.DB);
-  const settings = await getEnabledSettings(context.env.DB, channelId);
+  const [settings, language] = await Promise.all([
+    getEnabledSettings(context.env.DB, channelId),
+    channelLanguage(context.env.DB, channelId),
+  ]);
   const vote = await repository.latest(channelId);
   const effectiveSettings = settings ?? DEFAULT_CHAT_VOTING_SETTINGS;
+  const defaultLabels: Record<ChatVotePreset, string[]> = {
+    yes_no: labelsForVote(effectiveSettings, "yes_no", 2, language),
+    digit_01: labelsForVote(effectiveSettings, "digit_01", 2, language),
+    digit_12: labelsForVote(effectiveSettings, "digit_12", 2, language),
+    scale_5: labelsForVote(effectiveSettings, "scale_5", 5, language),
+    options_n: labelsForVote(effectiveSettings, "options_n", 9, language),
+    free_text: [],
+  };
   const ballots = context.get("ballots")(channelId);
   if (vote === null) {
-    const hasOpenBallot = await ballots.hasOpenBallot?.() ?? false;
-    return context.json({ vote: null, counts: null, revision: 0, terms: null, moreTerms: null, hasOpenBallot, defaultDurationSeconds: effectiveSettings.autoCloseSeconds });
+    const hasOpenBallot = await ballots.hasOpenBallotSnapshot?.() ?? false;
+    return context.json({ vote: null, counts: null, revision: 0, terms: null, moreTerms: null, hasOpenBallot, defaultDurationSeconds: effectiveSettings.autoCloseSeconds, defaultLabels });
   }
   const [snapshot, hasOpenBallot] = await Promise.all([
-    vote.status === "open" ? ballots.read(vote.id) : Promise.resolve(null),
-    ballots.hasOpenBallot?.() ?? Promise.resolve(false),
+    vote.status === "open" ? ballots.readSnapshot?.(vote.id) ?? Promise.resolve(null) : Promise.resolve(null),
+    ballots.hasOpenBallotSnapshot?.() ?? Promise.resolve(false),
   ]);
   return context.json({
     vote,
@@ -94,6 +105,7 @@ chatVotingRoutes.get("/current", async (context) => {
     termFilterReady: snapshot?.termFilterReady ?? vote.termFilterReady ?? false,
     hasOpenBallot,
     defaultDurationSeconds: effectiveSettings.autoCloseSeconds,
+    defaultLabels,
   });
 });
 

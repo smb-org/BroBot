@@ -483,10 +483,10 @@ const requestForRealtime = async (userId: string): Promise<Request> => {
 const allRoles: Record<ChannelRole, true> = { broadcaster: true, manager: true, operator: true };
 const allMessageTypes: Record<RealtimeMessageType, true> = {
   "system.hello": true,
+  "panel.resources.changed": true,
   "event_log.new": true,
   "variables.changed": true,
   "overlay.changed": true,
-  "ads.schedule.updated": true,
   "stream.state.changed": true,
   "modul.text_library.blocks_updated": true,
   "modul.text_library.state_changed": true,
@@ -847,15 +847,14 @@ describe("serialized contract shapes", () => {
       // and the assertion below freezes the spelling.
       expect(Object.keys(allRoles).sort((a, b) => a.localeCompare(b))).toEqual(["broadcaster", "manager", "operator"]);
       expect(Object.keys(allMessageTypes).sort((a, b) => a.localeCompare(b))).toEqual([
-        "ads.schedule.updated", "event_log.new", "modul.text_library.blocks_updated", "modul.text_library.state_changed",
-        "overlay.changed", "stream.state.changed", "system.hello", "variables.changed",
+        "event_log.new", "modul.text_library.blocks_updated", "modul.text_library.state_changed",
+        "overlay.changed", "panel.resources.changed", "stream.state.changed", "system.hello", "variables.changed",
       ]);
       expect(Object.keys(allRecipientKinds).sort((a, b) => a.localeCompare(b))).toEqual(["overlay", "panel"]);
       expect(Object.keys(REALTIME_RECIPIENTS).sort((a, b) => a.localeCompare(b))).toEqual([...REALTIME_MESSAGE_TYPES].sort((a, b) => a.localeCompare(b)));
       expect(REALTIME_RECIPIENTS["event_log.new"]).toEqual(["panel"]);
       expect(REALTIME_RECIPIENTS["variables.changed"]).toEqual(["panel", "overlay"]);
       expect(REALTIME_RECIPIENTS["overlay.changed"]).toEqual(["panel", "overlay"]);
-      expect(REALTIME_RECIPIENTS["ads.schedule.updated"]).toEqual(["panel"]);
       expect(REALTIME_RECIPIENTS["stream.state.changed"]).toEqual(["panel"]);
       expect(Object.keys(allChatStatus).sort((a, b) => a.localeCompare(b))).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
       expect(Object.keys(allActionKinds).sort((a, b) => a.localeCompare(b))).toEqual(["announcement", "ban", "chat", "overlay", "shoutout", "timeout"]);

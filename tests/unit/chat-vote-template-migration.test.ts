@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { templateStartProblem } from "../../src/modules/chat_voting/domain";
 
-const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0047_chat_vote_templates.sql"), "utf8");
+const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0052_chat_vote_templates.sql"), "utf8");
 
 const databaseWithLegacySettings = (): DatabaseSync => {
   const database = new DatabaseSync(":memory:");
@@ -18,6 +18,17 @@ const databaseWithLegacySettings = (): DatabaseSync => {
       enabled INTEGER NOT NULL,
       settings TEXT NOT NULL,
       UNIQUE (channel_id, module_id)
+    );
+    CREATE TABLE panel_resource_dependencies (
+      source_table TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      PRIMARY KEY (source_table, resource)
+    );
+    CREATE TABLE panel_resource_revisions (
+      channel_id TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      PRIMARY KEY (channel_id, resource)
     );
   `);
   const insertChannel = database.prepare("INSERT INTO channels (channel_id) VALUES (?)");
@@ -94,6 +105,28 @@ describe("chat vote template migration", () => {
         .get("configured", "zeroOne")).toEqual({ shortcut: "janein2", legacy_alias: "zeroOne" });
       expect(database.prepare("PRAGMA index_list(chat_vote_templates)").all().map((row) => (row as { name: string }).name))
         .toEqual(expect.arrayContaining(["chat_vote_templates_channel_shortcut_idx", "chat_vote_templates_channel_last_used_idx"]));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("registers template writes as chat-voting resource revisions", () => {
+    const database = databaseWithLegacySettings();
+    try {
+      expect(database.prepare("SELECT resource FROM panel_resource_dependencies WHERE source_table = 'chat_vote_templates'").all())
+        .toEqual([{ resource: "module:chat_voting:templates" }]);
+      expect(database.prepare("SELECT resource FROM panel_resource_dependencies WHERE source_table = 'chat_votes'").all())
+        .toEqual([{ resource: "module:chat_voting:recent" }]);
+
+      database.prepare("INSERT INTO chat_vote_templates (id, channel_id, created_at, updated_at) VALUES ('manual', 'configured', 'now', 'now')").run();
+      expect(database.prepare("SELECT revision FROM panel_resource_revisions WHERE channel_id = 'configured' AND resource = 'module:chat_voting:templates'").get())
+        .toEqual({ revision: 1 });
+      database.prepare("UPDATE chat_vote_templates SET title = 'Changed' WHERE id = 'manual' AND channel_id = 'configured'").run();
+      expect(database.prepare("SELECT revision FROM panel_resource_revisions WHERE channel_id = 'configured' AND resource = 'module:chat_voting:templates'").get())
+        .toEqual({ revision: 2 });
+      database.prepare("DELETE FROM chat_vote_templates WHERE id = 'manual' AND channel_id = 'configured'").run();
+      expect(database.prepare("SELECT revision FROM panel_resource_revisions WHERE channel_id = 'configured' AND resource = 'module:chat_voting:templates'").get())
+        .toEqual({ revision: 3 });
     } finally {
       database.close();
     }

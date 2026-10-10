@@ -89,6 +89,15 @@ const botRevocationBody = (subscriptionId: string): string => JSON.stringify({
   },
 });
 
+const loginRevocationBody = (userId: string, subscriptionId: string): string => JSON.stringify({
+  subscription: {
+    id: subscriptionId,
+    type: "channel.ad_break.begin",
+    status: "authorization_revoked",
+    condition: { broadcaster_user_id: userId },
+  },
+});
+
 const insertBotIdentity = async (database: TestD1Database, userId = "777"): Promise<void> => {
   const accessTokenCiphertext = await encryptJson({ token: "bot-access" }, parseKeyRing(encryptionKeys));
   const refreshTokenCiphertext = await encryptJson({ token: "bot-refresh" }, parseKeyRing(encryptionKeys));
@@ -142,12 +151,13 @@ const failingBatchDatabase = (database: TestD1Database): D1Database => ({
 describe("EventSub inbound", () => {
   let database: TestD1Database;
   const secret = secretRing(3);
-  const environment = () => ({
+  const environment = (channel?: Env["CHANNEL"]) => ({
     DB: database as unknown as D1Database,
     TWITCH_EVENTSUB_SECRET: secret,
     TWITCH_CLIENT_ID: "client-id",
     TWITCH_CLIENT_SECRET: "client-secret",
     TOKEN_ENCRYPTION_KEYS: encryptionKeys,
+    CHANNEL: channel,
   } as unknown as Env);
 
   beforeEach(() => {
@@ -464,6 +474,89 @@ describe("EventSub inbound", () => {
       "SELECT updated_at FROM eventsub_revocations WHERE subscription_id = 'subscription-dedupe'",
     ).first<{ updated_at: string }>();
     expect(row).toEqual(firstRow);
+  });
+
+  it("retries committed login socket revocation across affected channels without clearing a newer generation", async () => {
+    await insertChannel(database, "login-user-200");
+    await insertChannel(database, "login-member-channel");
+    await insertChannel(database, "login-audit-channel");
+    await insertLoginIdentityAndSession(database, "login-user-200", ["channel:read:ads"]);
+    const identityKeys = parseKeyRing(encryptionKeys);
+    const accessCiphertext = await encryptJson({ token: "login-access" }, identityKeys);
+    const refreshCiphertext = await encryptJson({ token: "login-refresh" }, identityKeys);
+    await database.prepare(
+      "UPDATE twitch_login_identity SET access_token_ciphertext = ?, refresh_token_ciphertext = ? WHERE user_id = 'login-user-200'",
+    ).bind(accessCiphertext, refreshCiphertext).run();
+    await database.prepare(
+      `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
+       VALUES ('login-member-channel', 'login-user-200', 'operator', '2026-09-19T00:00:00.000Z', '2026-09-19T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO audit_log (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES ('login-audit-entry', 'login-user-200', '2026-09-19T00:00:00.000Z', 'login-audit-channel', 'channel.updated', '{}', '{}')`,
+    ).run();
+    await database.prepare("DELETE FROM panel_resource_pending").run();
+    vi.stubGlobal("fetch", invalidTokenFetcher());
+    const reconciledChannels: string[] = [];
+    let newerGenerationAdded = false;
+    const revokeUser = vi.fn()
+      .mockRejectedValueOnce(new Error("channel close failed"))
+      .mockImplementation(async () => {
+        if (newerGenerationAdded) return;
+        newerGenerationAdded = true;
+        await database.prepare(
+          `INSERT INTO pending_realtime_user_revocations (user_id, requested_at, generation)
+           VALUES ('login-user-200', '2026-09-19T10:00:01.000Z', 1)
+           ON CONFLICT(user_id) DO UPDATE SET
+             requested_at = excluded.requested_at,
+             generation = pending_realtime_user_revocations.generation + 1`,
+        ).run();
+      });
+    const channel = {
+      idFromName: (channelId: string) => channelId,
+      get: (channelId: string) => ({
+        revokeUser,
+        reconcilePanelResources: () => { reconciledChannels.push(channelId); return Promise.resolve(); },
+      }),
+    } as unknown as Env["CHANNEL"];
+    const body = loginRevocationBody("login-user-200", "login-retry-close");
+
+    const first = await eventSubRouter.fetch(
+      signedRequest(secret, "revocation", body, "message-login-retry-close"),
+      environment(channel),
+    );
+
+    expect(first.status).toBe(500);
+    await expect(database.prepare(
+      "SELECT user_id FROM pending_realtime_user_revocations WHERE user_id = 'login-user-200'",
+    ).first()).resolves.toEqual({ user_id: "login-user-200" });
+
+    const second = await eventSubRouter.fetch(
+      signedRequest(secret, "revocation", body, "message-login-retry-close"),
+      environment(channel),
+    );
+
+    expect(second.status).toBe(204);
+    expect(revokeUser).toHaveBeenCalledTimes(2);
+    await expect(database.prepare(
+      "SELECT user_id, generation FROM pending_realtime_user_revocations WHERE user_id = 'login-user-200'",
+    ).first()).resolves.toEqual({ user_id: "login-user-200", generation: 2 });
+    expect(new Set(reconciledChannels)).toEqual(new Set([
+      "login-user-200",
+      "login-member-channel",
+      "login-audit-channel",
+    ]));
+
+    const third = await eventSubRouter.fetch(
+      signedRequest(secret, "revocation", body, "message-login-retry-close"),
+      environment(channel),
+    );
+
+    expect(third.status).toBe(204);
+    expect(revokeUser).toHaveBeenCalledTimes(3);
+    await expect(database.prepare(
+      "SELECT user_id FROM pending_realtime_user_revocations WHERE user_id = 'login-user-200'",
+    ).first()).resolves.toBeNull();
   });
 
   it("locks the bot identity on a confirmed revocation of the moderator subscription", async () => {

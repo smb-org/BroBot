@@ -1005,6 +1005,7 @@ export interface DashboardTexts {
     enable: string;
     cancel: string;
     failure: string;
+    refreshFailure: string;
   };
   /** ⌘K/Ctrl+K (#164): jumps to an entity, explicitly not a navigation
    *  replacement -- "raid" opens the module, "!clip" opens that text
@@ -1342,6 +1343,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       enable: "Aktivieren",
       cancel: "Abbrechen",
       failure: "Die Kanalsteuerung konnte nicht geändert werden.",
+      refreshFailure: "Die Kanalsteuerung wurde geändert, aber ihr Status konnte nicht aktualisiert werden.",
     },
     spotlight: {
       placeholder: "Suchen oder Aktion ausführen …",
@@ -1662,6 +1664,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       enable: "Enable",
       cancel: "Cancel",
       failure: "The channel control could not be changed.",
+      refreshFailure: "The channel control changed, but its status could not be refreshed.",
     },
     spotlight: {
       placeholder: "Search or run action …",

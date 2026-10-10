@@ -63,6 +63,7 @@ const LIVE_BUFFER_MS = 10 * 60_000;
 const LIVE_BUFFER_MAX_POINTS = 120;
 const FETCH_FAILURE_THRESHOLD = 3;
 const INFRASTRUCTURE_RETRY_MAX_MS = 60_000;
+const ON_DEMAND_FAILURE_RETRY_BASE_MS = 1_000;
 
 /** Sets fresh chat templates to the channel language whenever BELABOX is enabled. */
 export const belaboxAlertDefaultsOnEnable = async (
@@ -403,7 +404,9 @@ const storePollResult = async (
     const previousPhase = sameStream ? currentStatus?.fetchPhase ?? { consecutiveFailures: 0, failing: false }
       : { consecutiveFailures: 0, failing: false };
     const now = Date.now();
-    const phase = result.ok ? { consecutiveFailures: 0, failing: false } : failedPhase(previousPhase);
+    const phase = result.ok
+      ? { consecutiveFailures: 0, failing: false, lastAttemptAt: new Date(now).toISOString() }
+      : { ...failedPhase(previousPhase), lastAttemptAt: new Date(now).toISOString() };
     const alreadyClassified = sameStream && streamId !== null && currentStatus?.belaboxStreamId === streamId;
     // Persisted classification comes only from a connected sample (or an existing one);
     // the on-demand override below affects presentation only.
@@ -634,7 +637,9 @@ const sendPendingAlert = async (
       if (latest?.alertState.pendingChat?.idempotencyKind !== output.idempotencyKind ||
           latest.alertState.pendingChat.episodeStartedAt !== output.episodeStartedAt) return;
       const next = settleAlertChat(latest.alertState, { sent: result.sent, retryable: result.retryable }, Date.now());
-      if (await writeBelaboxAlertState(context.DB, context.channelId, next, latest.revision) !== null) return;
+      if (await writeBelaboxAlertState(context.DB, context.channelId, next, latest.revision) !== null) {
+        return;
+      }
     }
   }
 };
@@ -703,6 +708,19 @@ const runBelaboxPoll = async (
         belaboxStatusMatchesSession(cachedStatus, cachedSession) && Number.isFinite(age) && age >= 0 &&
         age < BELABOX_ON_DEMAND_CACHE_MS) {
       return { ok: true, sample: cachedStatus.sample };
+    }
+    const failureCount = cachedStatus?.fetchPhase.consecutiveFailures ?? 0;
+    const lastAttemptAt = cachedStatus?.fetchPhase.lastAttemptAt;
+    const failedAt = lastAttemptAt === undefined ? Number.NaN : Date.parse(lastAttemptAt);
+    if (cachedStatus?.errorCode !== null && cachedStatus?.errorCode !== undefined &&
+        cachedStatus.errorCode !== BELABOX_SECRET_UNAVAILABLE_STATUS_CODE &&
+        failureCount > 0 && Number.isFinite(failedAt)) {
+      const retryDelay = Math.min(
+        INFRASTRUCTURE_RETRY_MAX_MS,
+        ON_DEMAND_FAILURE_RETRY_BASE_MS * (2 ** Math.min(failureCount - 1, 6)),
+      );
+      const elapsed = Date.now() - failedAt;
+      if (elapsed >= 0 && elapsed < retryDelay) return { ok: false, reason: cachedStatus.errorCode };
     }
   }
 

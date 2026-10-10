@@ -74,7 +74,9 @@ export const prepareModuleOverlayRealtimeMessage = async (
       ORDER BY element.overlay_id`,
   ).bind(channelId, action.elementKind, ...recipientBindings, mandatory ? 1 : 0, moduleId).all<{ overlay_id: string }>();
   const overlayIds = [...new Set(recipients.results.map(({ overlay_id }) => overlay_id))];
-  if (overlayIds.length === 0) return { outcome: "no_recipients" };
+  if (overlayIds.length === 0) {
+    return { outcome: "no_recipients" };
+  }
 
   return {
     outcome: "ready",

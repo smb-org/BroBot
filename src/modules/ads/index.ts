@@ -67,6 +67,7 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   routes: adsRoutes,
   panel: () => import("./panel"),
   settingsEditor: () => import("./panel/settings-editor"),
+  settingsEditorRelatedParts: ["schedule"],
   overlayElements: adsOverlayElements.map((element) => element.kind === "ads.countdown"
     ? {
       ...element,

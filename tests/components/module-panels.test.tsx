@@ -58,7 +58,8 @@ const editorFixture = vi.hoisted(() => {
   return { definition, loader: vi.fn(() => Promise.resolve({ default: definition })) };
 });
 
-const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: ({ settingsRefreshToken }: { settingsRefreshToken?: number }) => <><p>Panel geladen</p><output data-testid="panel-settings-refresh">{String(settingsRefreshToken ?? 0)}</output></> })));
+const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
+const relatedPanelLoader = vi.hoisted(() => vi.fn());
 
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
@@ -104,9 +105,10 @@ vi.mock("../../src/modules/registry", () => ({
       settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
       defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
       templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },
-      panel: activeLoader,
+      panel: relatedPanelLoader,
       settingsEditor: editorFixture.loader,
       settingsEditorPlacement: "before-panel",
+      settingsEditorRelatedParts: ["panel"],
     },
     { id: "channel_events", mandatory: true, settingsSchema: {}, defaultSettings: {} },
   ],
@@ -115,8 +117,24 @@ vi.mock("../../src/modules/registry", () => ({
 import { UiProvider } from "../../src/dashboard/ui";
 import { ModuleNavigation, ModulePanelMount, ModulePage, ModuleWorkspace } from "../../src/dashboard/module-panels";
 import { moduleQueryKey } from "../../src/dashboard/data";
+import { useModuleQuery } from "../../src/dashboard/data";
 import { useDashboardRoute } from "../../src/dashboard/router";
 import { renderWithQuery } from "../query-test-utils";
+
+const ActivePanelProbe = ({ channelId }: { channelId: string }): ReactElement => {
+  const query = useModuleQuery(channelId, "editor-before-fixture", "panel", async (signal) => {
+    const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/editor-before-fixture/panel-state`, { signal });
+    const result: unknown = await response.json();
+    if (typeof result !== "object" || result === null) throw new Error("The panel response is invalid.");
+    if (!("revision" in result)) throw new Error("The panel response is missing its revision.");
+    const revision: unknown = result.revision;
+    if (typeof revision !== "number") throw new Error("The panel response is missing its revision.");
+    return { revision };
+  });
+  return <><p>Panel geladen</p><output data-testid="panel-settings-revision">{String(query.data?.revision ?? (query.isError ? `Error: ${String(query.error)}` : "Loading"))}</output></>;
+};
+
+relatedPanelLoader.mockImplementation(() => Promise.resolve({ default: ActivePanelProbe }));
 
 const renderWithMantine = (element: ReactElement, queryOptions: { gcTime?: number; staleTime?: number } = {}): ReturnType<typeof renderWithQuery> =>
   renderWithQuery(<UiProvider>{element}</UiProvider>, undefined, queryOptions);
@@ -796,14 +814,21 @@ describe("Module panel loader", () => {
     expect(settingsReads).toBe(2);
   });
 
-  it("notifies a mounted module panel after its sibling settings save succeeds", async () => {
+  it("refreshes related module data after its settings editor saves", async () => {
+    let panelRevision = 1;
+    let panelReads = 0;
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
       if (path.endsWith("/modules/editor-before-fixture/settings") && init?.method === "PATCH") {
+        panelRevision = 2;
         return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 2, warnings: [] }));
       }
       if (path.endsWith("/modules/editor-before-fixture/settings")) return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }));
+      if (path.endsWith("/modules/editor-before-fixture/panel-state")) {
+        panelReads += 1;
+        return Promise.resolve(Response.json({ revision: panelRevision }));
+      }
       return Promise.resolve(Response.json({}));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -817,11 +842,13 @@ describe("Module panel loader", () => {
       onToggle={vi.fn()}
     />);
 
-    expect(await screen.findByTestId("panel-settings-refresh")).toHaveTextContent("0");
+    await waitFor(() => expect(screen.getByTestId("panel-settings-revision")).toHaveTextContent("1"));
+    expect(panelReads).toBe(1);
     fireEvent.change(await screen.findByRole("textbox", { name: "Konto" }), { target: { value: "saved-handle" } });
     fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
 
-    await waitFor(() => { expect(screen.getByTestId("panel-settings-refresh")).toHaveTextContent("1"); });
+    await waitFor(() => { expect(screen.getByTestId("panel-settings-revision")).toHaveTextContent("2"); });
+    expect(panelReads).toBe(2);
   });
 
   it("disables switch cards while a settings save is pending", async () => {

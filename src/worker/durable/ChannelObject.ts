@@ -36,6 +36,17 @@ import type {
   ModuleScheduleInputChangeReason,
 } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
+import {
+  ACTIVE_CHATTER_EXPIRY_HANDLER,
+  AD_COUNTDOWN_REFRESH_HANDLER,
+  AD_PREWARNING_HANDLER,
+  CHANNEL_HOST_ALARM_HANDLER_KEYS,
+  MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER,
+  SECURITY_RETRY_HANDLER,
+  SECURITY_ROUND_HANDLER,
+  missingAlarmHandlerKeys,
+  moduleAlarmHandlerEntries,
+} from "./module-alarm-registry";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
 import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../../modules/ads/overlay/countdown-action";
@@ -46,6 +57,13 @@ import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
+import {
+  notifyCommittedResources,
+  panelResourceChangedMessage,
+  readPanelResourceRevisions,
+  type PanelResourceRevisionVector,
+  withCommittedPanelResourceDrain,
+} from "../panel-resources";
 import { createModuleSecretAccess } from "../module-secrets";
 import { sendChatMessage } from "../chat";
 import { sendModerationBan } from "../moderation";
@@ -80,9 +98,11 @@ import {
   expireStoredBallot,
   finalizeStoredBallot,
   hasOpenStoredBallot,
+  hasOpenStoredBallotSnapshot,
   hardDeleteFinalizedStoredBallot,
   openStoredBallot,
   readStoredBallot,
+  readStoredBallotSnapshot,
   setStoredBallotBlockedTerms,
 } from "./ballots";
 
@@ -101,12 +121,12 @@ const D1_IN_PARAMETER_LIMIT = 100;
 const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
+const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
 const ACTIVE_CHATTER_EXPIRY_KEY = "host:active_chatters_expiry";
-const ACTIVE_CHATTER_EXPIRY_HANDLER = "channel.active_chatters_expiry";
 const ACTIVE_CHATTER_RETENTION_MS = 60 * 60 * 1_000;
 const ACTIVE_CHATTER_KEY_ROTATION_MS = 24 * 60 * 60 * 1_000;
 const MODULE_ALARM_OWNER_REVISIONS_KEY = "module_alarm:owner_revisions";
@@ -122,6 +142,7 @@ const TWITCH_RETRY_AFTER_KEY = "twitch:retry_after";
 const AD_COUNTDOWN_REFRESH_ATTEMPT_KEY = "ads:countdown_refresh_attempt";
 const AD_COUNTDOWN_REFRESH_DEADLINE_KEY = "ads:countdown_refresh_deadline";
 const AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY = "ads:countdown_refresh_retry_count";
+const PANEL_PUBLISHED_REVISIONS_KEY = "panel:published_resource_revisions";
 const OVERLAY_STREAM_DETAILS_CACHE_KEY = "overlay:stream_details";
 const CHANNEL_GAME_ID_CACHE_KEY = "channel:game_id";
 // A failed lookup retries almost immediately instead of sitting on the full
@@ -130,6 +151,16 @@ const CHANNEL_GAME_ID_CACHE_KEY = "channel:game_id";
 const CHANNEL_GAME_ID_FAILURE_CACHE_TTL_MS = 5_000;
 const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
 const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
+
+const bumpDurablePanelResources = async (
+  transaction: Pick<DurableObjectTransaction, "get" | "put">,
+  resources: readonly string[],
+): Promise<void> => {
+  const revisions = await transaction.get<PanelResourceRevisionVector>(PANEL_DURABLE_REVISIONS_KEY) ?? {};
+  const next = { ...revisions };
+  for (const resource of new Set(resources)) next[resource] = (next[resource] ?? 0) + 1;
+  await transaction.put(PANEL_DURABLE_REVISIONS_KEY, next);
+};
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
 const AD_COUNTDOWN_REFRESH_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
 const ALARM_HANDLER_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
@@ -146,11 +177,6 @@ const AD_PREWARNING_RETRY_DELAYS_MS = [5_000, 10_000] as const;
 // claimed.
 const AD_PREWARNING_CLAIM_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ALARM_HANDLER_RECOVERY_DELAY_MS = 60_000;
-const SECURITY_ROUND_HANDLER = "channel.security_round";
-const SECURITY_RETRY_HANDLER = "channel.security_retry";
-const AD_PREWARNING_HANDLER = "channel.ad_prewarning";
-const AD_COUNTDOWN_REFRESH_HANDLER = "channel.ad_countdown_refresh";
-const MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER = "channel.module_schedule_inputs_changed";
 const MODULE_SCHEDULE_INPUTS_CHANGED_KEY = "host:schedule_inputs_changed";
 const LEGACY_ALARM_DEFINITIONS = [
   { key: SECURITY_DEADLINE_KEY, handler: SECURITY_ROUND_HANDLER, suppressedBy: SECURITY_RETRY_KEY },
@@ -635,6 +661,7 @@ export class ChannelObject extends DurableObject<Env> {
         const previousCountdownState = previous === undefined ? null : adCountdownStateForSchedule(previous.schedule, previous.asOf);
         await transaction.put(AD_SCHEDULE_GENERATION_KEY, currentGeneration + 1);
         await transaction.put(AD_SCHEDULE_CACHE_KEY, cache);
+        await bumpDurablePanelResources(transaction, ["module:ads:schedule"]);
         return {
           changed: previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule),
           countdownChanged: previousCountdownState === null ||
@@ -645,11 +672,14 @@ export class ChannelObject extends DurableObject<Env> {
         };
       });
       if (change === null) return null;
+      await this.notifyCommittedPanelResources();
       if (reconcileAlarm) await this.reconcileAdPrewarning(schedule, grantedScopes);
       try {
         await writeAdCountdownState(this.env.DB, channelId, countdownState, asOf);
       } catch (error: unknown) {
         console.warn("Ad countdown state snapshot could not be stored.", error);
+      } finally {
+        await this.notifyCommittedPanelResources();
       }
       if (change.changed) await this.notifyScheduleInputsChanged("event_times");
       await this.reconcileAdCountdownRefresh(schedule);
@@ -667,14 +697,6 @@ export class ChannelObject extends DurableObject<Env> {
           console.warn("Ad countdown overlay update could not be sent.", error);
         }
       }
-      await this.publish([{
-        version: 1,
-        id: crypto.randomUUID(),
-        createdAt: asOf,
-        channelId,
-        type: "ads.schedule.updated",
-        payload: { schedule, asOf },
-      }]);
       return change.changed;
     });
   }
@@ -960,7 +982,11 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async setTwitchRateLimitRetryAfter(retryAfter: number): Promise<void> {
-    await this.ctx.storage.put(TWITCH_RETRY_AFTER_KEY, retryAfter);
+    await this.ctx.storage.transaction(async (transaction) => {
+      await transaction.put(TWITCH_RETRY_AFTER_KEY, retryAfter);
+      await bumpDurablePanelResources(transaction, ["module:ads:schedule"]);
+    });
+    await this.notifyCommittedPanelResources();
   }
 
   private async hasAdCountdownOverlay(channelId: string): Promise<boolean> {
@@ -1286,8 +1312,22 @@ export class ChannelObject extends DurableObject<Env> {
       },
       storage: {
         get: (key: string) => this.ctx.storage.get(`${storagePrefix}${key}`),
-        put: (key: string, value: unknown) => this.ctx.storage.put(`${storagePrefix}${key}`, value),
-        delete: (key: string) => this.ctx.storage.delete(`${storagePrefix}${key}`),
+        put: async (key: string, value: unknown) => {
+          await this.ctx.storage.transaction(async (transaction) => {
+            await transaction.put(`${storagePrefix}${key}`, value);
+            await bumpDurablePanelResources(transaction, [`module:${moduleId}:data`]);
+          });
+          await this.notifyCommittedPanelResources();
+        },
+        delete: async (key: string) => {
+          const deleted = await this.ctx.storage.transaction(async (transaction) => {
+            const removed = await transaction.delete(`${storagePrefix}${key}`);
+            if (removed) await bumpDurablePanelResources(transaction, [`module:${moduleId}:data`]);
+            return removed;
+          });
+          if (deleted) await this.notifyCommittedPanelResources();
+          return deleted;
+        },
       },
       schedule: async (key, deadline, ownerRevision) => {
         const scheduledRegistration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === key);
@@ -1552,7 +1592,10 @@ export class ChannelObject extends DurableObject<Env> {
       undefined,
       invocation,
     );
-    return await this.runModuleAlarmHandler(moduleId, handlerKey, execute);
+    return await withCommittedPanelResourceDrain(
+      () => this.runModuleAlarmHandler(moduleId, handlerKey, execute),
+      () => this.notifyCommittedPanelResources(),
+    );
   }
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
@@ -1560,8 +1603,8 @@ export class ChannelObject extends DurableObject<Env> {
       open: (ballotId, optionCount, expiresAt, rule, termFilter) => this.openBallot(moduleId, ballotId, optionCount, expiresAt, rule, termFilter),
       cast: (ballotId, userId, choice, options) => this.castBallot(moduleId, ballotId, userId, choice, options),
       castTerm: (ballotId, userId, term, matchText) => this.castBallotTerm(moduleId, ballotId, userId, term, matchText),
-      setBlockedTerms: (ballotId, terms) => setStoredBallotBlockedTerms(this.ctx.storage, moduleId, ballotId, terms),
-      approveTerm: (ballotId, term) => approveStoredBallotTerm(this.ctx.storage, moduleId, ballotId, term),
+      setBlockedTerms: (ballotId, terms) => setStoredBallotBlockedTerms(this.ballotStorage(moduleId), moduleId, ballotId, terms),
+      approveTerm: (ballotId, term) => approveStoredBallotTerm(this.ballotStorage(moduleId), moduleId, ballotId, term),
       read: (ballotId) => this.readBallot(moduleId, ballotId),
       close: (ballotId) => this.closeBallot(moduleId, ballotId),
       finalize: (ballotId) => this.finalizeBallot(moduleId, ballotId),
@@ -1582,7 +1625,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (channelId === null) throw new Error("Ballots require a named Durable Object.");
     const requestedAlarmKey = ballotExpiryAlarmKey(moduleId, ballotId);
     const result = await openStoredBallot(
-      this.ctx.storage,
+      this.ballotStorage(moduleId),
       moduleId,
       ballotId,
       optionCount,
@@ -1603,6 +1646,9 @@ export class ChannelObject extends DurableObject<Env> {
       },
       termFilter,
     );
+    if (result.status === "opened" || result.activeBallot !== undefined) {
+      await this.notifyCommittedPanelResources();
+    }
     if (result.status === "opened") {
       return { status: "opened" };
     }
@@ -1618,7 +1664,11 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<BallotCastResult> {
     const channelId = this.ownChannelId();
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
-    return await castStoredBallot(this.ctx.storage, channelId, moduleId, ballotId, userId, choice, options);
+    const result = await castStoredBallot(this.ballotStorage(moduleId), channelId, moduleId, ballotId, userId, choice, options);
+    if (result.status === "counted" || result.status === "changed") {
+      await this.notifyCommittedPanelResources();
+    }
+    return result;
   }
 
   public async castBallotTerm(
@@ -1630,7 +1680,11 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<BallotCastResult> {
     const channelId = this.ownChannelId();
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
-    return await castStoredBallotTerm(this.ctx.storage, channelId, moduleId, ballotId, userId, term, matchText);
+    const result = await castStoredBallotTerm(this.ballotStorage(moduleId), channelId, moduleId, ballotId, userId, term, matchText);
+    if (result.status === "counted" || result.status === "changed" || result.status === "overflow") {
+      await this.notifyCommittedPanelResources();
+    }
+    return result;
   }
 
   public async setBlockedTerms(
@@ -1638,7 +1692,9 @@ export class ChannelObject extends DurableObject<Env> {
     ballotId: string,
     blockedTerms: readonly string[],
   ): Promise<BallotSnapshot | null> {
-    return await setStoredBallotBlockedTerms(this.ctx.storage, moduleId, ballotId, blockedTerms);
+    const snapshot = await setStoredBallotBlockedTerms(this.ballotStorage(moduleId), moduleId, ballotId, blockedTerms);
+    if (snapshot !== null) await this.notifyCommittedPanelResources();
+    return snapshot;
   }
 
   public async approveTerm(
@@ -1656,11 +1712,15 @@ export class ChannelObject extends DurableObject<Env> {
         WHERE channel_id = ? AND poll_id = ? AND term = ?`,
     ).bind(channelId, ballotId, term).first<{ approved: number }>();
     if (approval === null) return { status: "not_open", snapshot: null };
-    return await approveStoredBallotTerm(this.ctx.storage, moduleId, ballotId, term);
+    const result = await approveStoredBallotTerm(this.ballotStorage(moduleId), moduleId, ballotId, term);
+    if (result.status === "approved" && result.snapshot !== null) {
+      await this.notifyCommittedPanelResources();
+    }
+    return result;
   }
 
   public async readBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
-    return await readStoredBallot(this.ctx.storage, moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
+    const snapshot = await readStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
         ballotExpiryAlarmKey(finalizedModuleId, finalizedBallotId),
@@ -1668,10 +1728,18 @@ export class ChannelObject extends DurableObject<Env> {
         hardDeleteAt,
       );
     });
+    if (snapshot?.outcome !== undefined) {
+      await this.notifyCommittedPanelResources();
+    }
+    return snapshot;
+  }
+
+  public async readBallotSnapshot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
+    return await readStoredBallotSnapshot(this.ballotStorage(moduleId), moduleId, ballotId);
   }
 
   public async hasOpenBallot(): Promise<boolean> {
-    return await hasOpenStoredBallot(this.ctx.storage, async (transaction, moduleId, ballotId, hardDeleteAt) => {
+    const hasOpen = await hasOpenStoredBallot(this.ballotStorage(CHAT_VOTING_MODULE_ID), async (transaction, moduleId, ballotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
         ballotExpiryAlarmKey(moduleId, ballotId),
@@ -1679,16 +1747,23 @@ export class ChannelObject extends DurableObject<Env> {
         hardDeleteAt,
       );
     });
+    if (!hasOpen) await this.notifyCommittedPanelResources();
+    return hasOpen;
+  }
+
+  public async hasOpenBallotSnapshot(): Promise<boolean> {
+    return await hasOpenStoredBallotSnapshot(this.ballotStorage(CHAT_VOTING_MODULE_ID));
   }
 
   public async closeBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
-    const result = await closeStoredBallot(this.ctx.storage, moduleId, ballotId);
+    const result = await closeStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId);
+    if (result !== null) await this.notifyCommittedPanelResources();
     await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
     return result;
   }
 
   public async finalizeBallot(moduleId: string, ballotId: string): Promise<BallotFinalizeResult> {
-    return await finalizeStoredBallot(this.ctx.storage, moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
+    const result = await finalizeStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
         ballotExpiryAlarmKey(finalizedModuleId, finalizedBallotId),
@@ -1696,6 +1771,10 @@ export class ChannelObject extends DurableObject<Env> {
         hardDeleteAt,
       );
     });
+    if (result.outcome !== "not_open" && result.outcome !== "open") {
+      await this.notifyCommittedPanelResources();
+    }
+    return result;
   }
 
   public async acknowledgeClosedBallot(moduleId: string, ballotId: string): Promise<void> {
@@ -1706,7 +1785,7 @@ export class ChannelObject extends DurableObject<Env> {
     const identity = ballotIdentityFromExpiryAlarmKey(key);
     if (identity === null) return;
     const nextExpiry = await expireStoredBallot(
-      this.ctx.storage,
+      this.ballotStorage(identity.moduleId),
       identity.moduleId,
       identity.ballotId,
       async (transaction, moduleId, ballotId, hardDeleteAt) => {
@@ -1715,6 +1794,7 @@ export class ChannelObject extends DurableObject<Env> {
         );
       },
     );
+    if (nextExpiry === null) await this.notifyCommittedPanelResources();
     if (nextExpiry !== null) {
       await this.scheduleAlarmEntry(key, BALLOT_EXPIRY_ALARM_HANDLER, nextExpiry);
     }
@@ -1723,8 +1803,105 @@ export class ChannelObject extends DurableObject<Env> {
   private async hardDeleteBallot(key: string): Promise<void> {
     const identity = ballotIdentityFromExpiryAlarmKey(key);
     if (identity === null) return;
-    const retryAt = await hardDeleteFinalizedStoredBallot(this.ctx.storage, identity.moduleId, identity.ballotId);
+    const retryAt = await hardDeleteFinalizedStoredBallot(this.ballotStorage(identity.moduleId), identity.moduleId, identity.ballotId);
     if (retryAt !== null) await this.scheduleAlarmEntry(key, BALLOT_HARD_DELETE_ALARM_HANDLER, retryAt);
+  }
+
+  private ballotPanelResources(moduleId: string): string[] {
+    return [...new Set([`module:${moduleId}:panel`, "module:chat_voting:panel"])];
+  }
+
+  /** Wraps ballot storage transactions so the vector commits with ballot state. */
+  private ballotStorage(moduleId: string): Pick<DurableObjectStorage, "get" | "list" | "put" | "delete" | "transaction"> {
+    const storage = this.ctx.storage;
+    const transaction = <Value>(
+      operation: (transaction: DurableObjectTransaction) => Promise<Value>,
+    ): Promise<Value> => storage.transaction(async (underlying) => {
+      const changedResources = new Set<string>();
+      const recordWrite = (keyArgument: unknown): void => {
+        const keys = typeof keyArgument === "string" ? [keyArgument]
+          : Array.isArray(keyArgument) ? keyArgument.filter((key): key is string => typeof key === "string")
+            : typeof keyArgument === "object" && keyArgument !== null ? Object.keys(keyArgument) : [];
+        for (const key of keys) {
+          if (key === "ballot:active") {
+            this.ballotPanelResources(moduleId).forEach((resource) => changedResources.add(resource));
+            continue;
+          }
+          const match = /^ballot:(?:closed:)?([A-Za-z0-9_-]{1,128}):/u.exec(key);
+          if (match?.[1] !== undefined) this.ballotPanelResources(match[1]).forEach((resource) => changedResources.add(resource));
+        }
+      };
+      const monitored = new Proxy(underlying, {
+        get: (target, property, receiver) => {
+          if (property === "put" || property === "delete") {
+            const method = Reflect.get(target, property, target) as (...args: unknown[]) => unknown;
+            return (...args: unknown[]): unknown => {
+              recordWrite(args[0]);
+              return Reflect.apply(method, target, args);
+            };
+          }
+          const value: unknown = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) as unknown : value;
+        },
+      });
+      const result = await operation(monitored);
+      if (changedResources.size > 0) await bumpDurablePanelResources(underlying, [...changedResources]);
+      return result;
+    });
+    return {
+      get: storage.get.bind(storage),
+      list: storage.list.bind(storage),
+      put: storage.put.bind(storage),
+      delete: storage.delete.bind(storage),
+      transaction,
+    };
+  }
+
+  private async notifyCommittedPanelResources(): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    await notifyCommittedResources(this.env, channelId, (revisions) => this.reconcilePanelResources(revisions));
+  }
+
+  public async getPanelResourceRevisions(): Promise<PanelResourceRevisionVector> {
+    return await this.ctx.storage.get<PanelResourceRevisionVector>(PANEL_DURABLE_REVISIONS_KEY) ?? {};
+  }
+
+  /** Delivers only advanced, data-free resources to panel principals in this channel. */
+  public async reconcilePanelResources(revisions: PanelResourceRevisionVector): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const durableRevisions = await this.getPanelResourceRevisions();
+    const combinedRevisions = { ...revisions };
+    for (const [resource, revision] of Object.entries(durableRevisions)) {
+      combinedRevisions[resource] = (combinedRevisions[resource] ?? 0) + revision;
+    }
+    const channelRevisionTotal = Object.entries(combinedRevisions)
+      .filter(([resource]) => resource !== "channel.all")
+      .reduce((sum, [, revision]) => Math.min(Number.MAX_SAFE_INTEGER, sum + revision), 0);
+    const previous = await this.ctx.storage.get<PanelResourceRevisionVector>(PANEL_PUBLISHED_REVISIONS_KEY) ?? {};
+    const advanced = Object.entries(combinedRevisions)
+      .filter(([resource, revision]) => revision > (previous[resource] ?? 0))
+      .sort(([left], [right]) => left.localeCompare(right));
+    if (advanced.length === 0) return;
+    const next = Object.fromEntries(advanced);
+    const overflow = advanced.length > 128;
+    // Large batches carry one bounded wake-up hint; the authenticated GET
+    // still returns the exact per-resource vector for client invalidation.
+    const resources = overflow ? ["channel.all"] : advanced.map(([resource]) => resource);
+    const messageRevisions = overflow
+      ? { "channel.all": channelRevisionTotal }
+      : next;
+    const message = panelResourceChangedMessage(channelId, resources, messageRevisions);
+    await this.publish([message]);
+    await this.ctx.storage.transaction(async (transaction) => {
+      const latest = await transaction.get<PanelResourceRevisionVector>(PANEL_PUBLISHED_REVISIONS_KEY) ?? {};
+      const published = { ...latest };
+      for (const [resource, revision] of Object.entries(combinedRevisions)) {
+        published[resource] = Math.max(published[resource] ?? 0, revision);
+      }
+      await transaction.put(PANEL_PUBLISHED_REVISIONS_KEY, published);
+    });
   }
 
   private async writeBallotAlarmInTransaction(
@@ -1780,25 +1957,32 @@ export class ChannelObject extends DurableObject<Env> {
         },
       }],
     ]);
-    for (const module of modules) {
-      for (const registration of module.alarms ?? []) {
-        const handler = `module:${module.id}:${registration.key}`;
-        if (handlers.has(handler)) throw new Error(`Duplicate alarm handler ${handler}.`);
-        const modulePrefix = `module:${module.id}:`;
-        handlers.set(handler, {
-          ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
-          handle: async (key, entry) => {
-            const execute = () => registration.handle(
-              this.moduleAlarmContext(module.id, registration, externalFetchBudget),
-              key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
-              entry.deadline,
-              entry.ownerRevision,
-            );
-            await this.runModuleAlarmHandler(module.id, registration.key, execute);
-            return undefined;
-          },
-        });
-      }
+    for (const { moduleId, registration } of moduleAlarmHandlerEntries(modules)) {
+      const handler = `module:${moduleId}:${registration.key}`;
+      if (handlers.has(handler)) throw new Error(`Duplicate alarm handler ${handler}.`);
+      const modulePrefix = `module:${moduleId}:`;
+      handlers.set(handler, {
+        ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
+        handle: async (key, entry) => {
+          const execute = () => registration.handle(
+            this.moduleAlarmContext(moduleId, registration, externalFetchBudget),
+            key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
+            entry.deadline,
+            entry.ownerRevision,
+          );
+          await this.runModuleAlarmHandler(moduleId, registration.key, execute);
+          return undefined;
+        },
+      });
+    }
+    const scheduledHandlers = [
+      ...CHANNEL_HOST_ALARM_HANDLER_KEYS,
+      ...moduleAlarmHandlerEntries(modules).map(({ moduleId, registration }) =>
+        `module:${moduleId}:${registration.key}`),
+    ];
+    const missingHandlers = missingAlarmHandlerKeys(scheduledHandlers, handlers.keys());
+    if (missingHandlers.length > 0) {
+      throw new Error(`Alarm handlers are not registered: ${missingHandlers.join(", ")}.`);
     }
     return handlers;
   }
@@ -1914,6 +2098,29 @@ export class ChannelObject extends DurableObject<Env> {
           AND revoked_at IS NULL
           AND (expires_at IS NULL OR expires_at > ?)`,
     ).bind(channelId, tokenId, nowIso).first<TokenValidityRow>();
+  }
+
+  private async panelPrincipalIsCurrent(
+    principal: Extract<RealtimePrincipal, { kind: "panel" }>,
+    channelId: string,
+    now: number,
+  ): Promise<boolean> {
+    if (isExpired(principal, now)) return false;
+    const row = await this.env.DB.prepare(
+      `SELECT session.session_id, session.user_id, member.role
+         FROM auth_sessions AS session
+         JOIN twitch_login_identity AS identity ON identity.user_id = session.user_id
+         JOIN channel_members AS member
+           ON member.channel_id = ? AND member.user_id = session.user_id
+        WHERE session.session_id = ?
+          AND session.user_id = ?
+          AND member.role = ?
+          AND session.revoked_at IS NULL
+          AND session.expires_at > ?
+          AND identity.status <> 'revoked'`,
+    ).bind(channelId, principal.sessionId, principal.userId, principal.role, new Date(now).toISOString())
+      .first<SessionValidityRow>();
+    return row?.session_id === principal.sessionId && row.user_id === principal.userId && row.role === principal.role;
   }
 
   private async allowOverlayHandshake(tokenId: string, now: number): Promise<boolean> {
@@ -2095,6 +2302,24 @@ export class ChannelObject extends DurableObject<Env> {
       closeSocket(pair[1], OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
       return new Response("Overlay token is now bound.", { status: 403 });
     }
+    if (principal.kind === "panel") {
+      try {
+        // Outer route authorization may have gone stale while the request was
+        // queued for this object. This D1 check is the final await before the
+        // synchronous accept, so revocation prevents even the hello message.
+        if (!await this.panelPrincipalIsCurrent(principal, ownChannelId, Date.now())) {
+          return new Response("Panel authorization revoked.", { status: 403 });
+        }
+      } catch (error: unknown) {
+        console.error("Realtime panel handshake authorization could not be checked.", error);
+        return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
+      }
+    }
+    // Authorization above awaits D1 and lets concurrent handshakes interleave.
+    // Reserve capacity again at the synchronous acceptance boundary.
+    if (!this.hasConnectionCapacity(principal)) {
+      return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
+    }
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
     pair[1].serializeAttachment(principal);
     await this.scheduleSecurityAlarm();
@@ -2104,6 +2329,14 @@ export class ChannelObject extends DurableObject<Env> {
       closeSocket(pair[1], OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
     } else {
       pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hello")));
+      if (principal.kind === "panel") {
+        try {
+          const revisions = await readPanelResourceRevisions(this.env.DB, ownChannelId);
+          await this.reconcilePanelResources(revisions);
+        } catch (error: unknown) {
+          console.warn("Panel resource revision snapshot could not be sent.", error);
+        }
+      }
     }
     return new Response(null, {
       status: 101,
@@ -2113,7 +2346,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   /** Distributes only within its own channel and only to principals of the requested kind. */
-  public publish(
+  public async publish(
     messages: readonly RealtimeMessage[],
   ): Promise<void> {
     if (messages.length === 0) return Promise.resolve();
@@ -2123,6 +2356,7 @@ export class ChannelObject extends DurableObject<Env> {
     }
     const now = Date.now();
     const ordinarySockets = messages.some((message) => message.type !== "overlay.changed" &&
+      message.type !== "panel.resources.changed" &&
       !isModuleOverlayRealtimeEnvelope(message))
       ? this.ctx.getWebSockets()
       : [];
@@ -2152,10 +2386,58 @@ export class ChannelObject extends DurableObject<Env> {
           ...this.ctx.getWebSockets("kind:panel"),
           ...(overlaySocketsById.get(envelope.payload.overlayId) ?? []),
         ]
+        : envelope.type === "panel.resources.changed"
+          ? this.ctx.getWebSockets("kind:panel")
         : isModuleOverlayRealtimeEnvelope(envelope)
           ? [...new Set((envelope.overlayIds ?? []).flatMap((overlayId) => overlaySocketsById.get(overlayId) ?? []))]
           : ordinarySockets,
     }));
+    const panelRecipients = [...new Set(serialized.flatMap(({ sockets }) => sockets)
+      .filter((webSocket) => readAttachment(webSocket)?.kind === "panel"))];
+    const authorizedPanels = new Set<WebSocket>();
+    const unavailablePanels = new Set<WebSocket>();
+    const panelSessions = new Map<string, WebSocket[]>();
+    for (const webSocket of panelRecipients) {
+      const principal = readAttachment(webSocket);
+      if (principal?.kind !== "panel") continue;
+      const sockets = panelSessions.get(principal.sessionId) ?? [];
+      sockets.push(webSocket);
+      panelSessions.set(principal.sessionId, sockets);
+    }
+    for (const sessionIds of chunksOf([...panelSessions.keys()], D1_IDS_PER_QUERY)) {
+      const placeholders = sessionIds.map(() => "?").join(", ");
+      try {
+        const result = await this.env.DB.prepare(
+          `SELECT session.session_id, session.user_id, member.role
+             FROM auth_sessions AS session
+             JOIN twitch_login_identity AS identity ON identity.user_id = session.user_id
+             JOIN channel_members AS member
+               ON member.channel_id = ? AND member.user_id = session.user_id
+            WHERE session.session_id IN (${placeholders})
+              AND session.revoked_at IS NULL
+              AND session.expires_at > ?
+              AND identity.status <> 'revoked'`,
+        ).bind(ownChannelId, ...sessionIds, new Date(now).toISOString()).all<SessionValidityRow>();
+        const validSessions = new Set(result.results.map((row) =>
+          `${row.session_id}:${row.user_id}:${String(row.role)}`));
+        for (const sessionId of sessionIds) {
+          for (const webSocket of panelSessions.get(sessionId) ?? []) {
+            const principal = readAttachment(webSocket);
+            if (principal?.kind === "panel" && validSessions.has(
+              `${principal.sessionId}:${principal.userId}:${principal.role}`,
+            )) authorizedPanels.add(webSocket);
+          }
+        }
+      } catch (error: unknown) {
+        console.error("Realtime panel authorization check failed.", error);
+        for (const sessionId of sessionIds) {
+          for (const webSocket of panelSessions.get(sessionId) ?? []) {
+            unavailablePanels.add(webSocket);
+            closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "authorization check unavailable");
+          }
+        }
+      }
+    }
     for (const message of serialized) {
       const envelope = message.envelope;
       for (const webSocket of message.sockets) {
@@ -2166,6 +2448,11 @@ export class ChannelObject extends DurableObject<Env> {
         }
         if (isExpired(principal, now)) {
           closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
+          continue;
+        }
+        if (principal.kind === "panel" && unavailablePanels.has(webSocket)) continue;
+        if (principal.kind === "panel" && !authorizedPanels.has(webSocket)) {
+          closeSocket(webSocket, SOCKET_REVOKED_CODE, "authorization revoked");
           continue;
         }
         if (envelope.type === "variables.changed" && principal.kind === "overlay" &&
@@ -2206,6 +2493,18 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async revokeUser(userId: string): Promise<void> {
     for (const webSocket of this.ctx.getWebSockets(`user:${userId}`)) {
+      const principal = readAttachment(webSocket);
+      if (principal?.kind === "panel" && principal.userId === userId) {
+        const channelId = this.ownChannelId();
+        if (channelId !== null && principal.channelId === channelId) {
+          try {
+            if (await this.panelPrincipalIsCurrent(principal, channelId, Date.now())) continue;
+          } catch (error: unknown) {
+            console.error("Realtime panel revocation check failed.", error);
+            throw error;
+          }
+        }
+      }
       closeSocket(webSocket, SOCKET_REVOKED_CODE, "Channel access revoked");
     }
     await this.stopSecurityAlarmIfIdle();
@@ -2449,12 +2748,14 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   override async alarm(): Promise<void> {
-    const now = Date.now();
-    const nowIso = new Date(now).toISOString();
-    const externalFetchBudget = createModuleExternalFetchBudget();
-    await this.pruneRevokedTokenMarkers(now);
-    await this.stopSecurityAlarmIfIdle();
-    await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers(MODULES, externalFetchBudget));
+    await withCommittedPanelResourceDrain(async () => {
+      const now = Date.now();
+      const nowIso = new Date(now).toISOString();
+      const externalFetchBudget = createModuleExternalFetchBudget();
+      await this.pruneRevokedTokenMarkers(now);
+      await this.stopSecurityAlarmIfIdle();
+      await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers(MODULES, externalFetchBudget));
+    }, () => this.notifyCommittedPanelResources());
   }
 
   override webSocketMessage(webSocket: WebSocket, message: string | ArrayBuffer): void {

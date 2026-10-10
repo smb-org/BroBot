@@ -1,4 +1,4 @@
-import { hashKey, keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { hashKey, keepPreviousData, useQuery, useQueryClient, type Query, type QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "./keys";
 
@@ -15,6 +15,11 @@ export interface ModuleQueryWriteOptions<Value> {
   /** Merge the committed result into the primary query before it is revalidated. */
   updateCache: (current: unknown, result: Value) => unknown;
   relatedParts?: readonly ModuleQueryPart[];
+}
+
+export interface ModuleQueryOptions<Value> {
+  enabled?: boolean;
+  refetchInterval?: number | false | ((query: Query<Value>) => number | false);
 }
 
 export type ModuleQueryWriteFunction<Value> = (baselineRevision: ModuleQueryRevision) => Promise<Value>;
@@ -108,13 +113,14 @@ export const refetchModuleQueryData = <Value,>(
 };
 
 export const moduleQueryKey = (channelId: string, moduleId: string, part: string) =>
-  queryKeys.channel(channelId, `modules/${moduleId}/${part}`);
+  queryKeys.module(channelId, moduleId, part);
 
 export const useModuleQuery = <Value,>(
   channelId: string,
   moduleId: string,
   part: string,
   fn: ModuleQueryFunction<Value>,
+  options: ModuleQueryOptions<Value> = {},
 ) => {
   const queryClient = useQueryClient();
   const queryKey = moduleQueryKey(channelId, moduleId, part);
@@ -127,10 +133,12 @@ export const useModuleQuery = <Value,>(
   return useQuery({
     queryKey,
     queryFn: ({ signal }) => readModuleData(queryClient, queryKey, fn, signal),
+    ...(options.enabled === undefined ? {} : { enabled: options.enabled }),
+    ...(options.refetchInterval === undefined ? {} : { refetchInterval: options.refetchInterval }),
     placeholderData: (previousData, previousQuery) => {
       const previousKey = previousQuery?.queryKey;
-      const resource = `modules/${moduleId}/${part}`;
-      return previousKey?.[0] === "channel" && previousKey[1] === channelId && previousKey[2] === resource
+      return previousKey?.[0] === "channel" && previousKey[1] === channelId &&
+        previousKey[2] === "module" && previousKey[3] === moduleId && previousKey[4] === part
         ? keepPreviousData(previousData)
         : undefined;
     },

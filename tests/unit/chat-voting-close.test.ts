@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleAlarmContext, ModuleEvent } from "../../src/modules/contract";
+import type { BallotSnapshot, ModuleAlarmContext, ModuleEvent } from "../../src/modules/contract";
 import { chatVotingModule } from "../../src/modules/chat_voting";
 import { createTemplateRenderer } from "../../src/worker/template-resolver";
+import { prepareModuleOverlayRealtimeMessage } from "../../src/worker/module-overlay-realtime";
 import type { ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { announceChatVoteStartFromAlarm, closeChatVoteFromAlarm, requestChatVoteClose } from "../../src/modules/chat_voting/service";
@@ -52,8 +53,8 @@ describe("chat voting close service", () => {
       values.set(key, value);
       return Promise.resolve();
     });
-    const read = vi.fn(() => { order.push("read"); return Promise.resolve(snapshot); });
-    const close = vi.fn(() => { order.push("close"); return Promise.resolve(snapshot); });
+    const read = vi.fn<() => Promise<BallotSnapshot | null>>(() => { order.push("read"); return Promise.resolve(snapshot); });
+    const close = vi.fn<() => Promise<BallotSnapshot | null>>(() => { order.push("close"); return Promise.resolve(snapshot); });
     const publishModuleOverlayMessage = vi.fn<ModuleAlarmContext["publishModuleOverlayMessage"]>(
       () => { order.push("overlay"); return Promise.resolve(); },
     );
@@ -217,6 +218,41 @@ describe("chat voting close service", () => {
     expect(sendChat).toHaveBeenCalledTimes(2);
     await expect(repository.byId("fictional-channel", "fictional-poll"))
       .resolves.toMatchObject({ status: "closed", counts: [7, 3] });
+  });
+
+  it("publishes a bounded panel hint when a large closed tally exceeds the overlay limit", async () => {
+    const repository = await seedOpenVote(false);
+    await database.prepare(
+      `UPDATE chat_votes
+          SET kind = 'free_text', preset = 'free_text', option_count = 0, labels_json = '[]', text_mode = 'whole_message',
+              term_filter_ready = 1
+        WHERE channel_id = 'fictional-channel' AND poll_id = 'fictional-poll'`,
+    ).run();
+    const terms = Array.from({ length: 200 }, (_, index) => ({
+      term: `answer-${String(index).padStart(18, "0")}`,
+      count: 1,
+      approved: false,
+    }));
+    const finalSnapshot = { counts: [], revision: 201, terms, more: 0, termFilterReady: true };
+    const order: string[] = [];
+    const { context, read, close, publishModuleOverlayMessage } = createAlarmContext(order);
+    read.mockResolvedValue(finalSnapshot);
+    close.mockResolvedValue(finalSnapshot);
+    const overlayOutcomes: string[] = [];
+    publishModuleOverlayMessage.mockImplementation(async (type, elementKind, payload) => {
+      order.push("overlay");
+      const result = await prepareModuleOverlayRealtimeMessage(
+        database as unknown as D1Database,
+        "fictional-channel",
+        "chat_voting",
+        { kind: "overlay", type, elementKind, payload },
+      );
+      overlayOutcomes.push(result.outcome);
+    });
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(overlayOutcomes).toEqual(["rejected"]);
   });
 
   it("includes a vote question in the default result announcement and closed overlay state", async () => {

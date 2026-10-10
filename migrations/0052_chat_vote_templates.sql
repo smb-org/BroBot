@@ -90,3 +90,23 @@ SELECT lower(hex(randomblob(16))), channel_id, shortcut, title, labels, NULL, du
        1, legacy_alias, NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
   FROM template_labels
  WHERE label_count <= 9 AND (legacy_alias <> 'options' OR label_count >= 2);
+
+INSERT INTO panel_resource_dependencies (source_table, resource) VALUES
+  ('chat_vote_templates', 'module:chat_voting:templates'),
+  ('chat_votes', 'module:chat_voting:recent');
+
+CREATE TRIGGER panel_rev_chat_vote_templates_insert AFTER INSERT ON chat_vote_templates BEGIN
+  INSERT INTO panel_resource_revisions
+    SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'chat_vote_templates'
+    ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER panel_rev_chat_vote_templates_update AFTER UPDATE ON chat_vote_templates BEGIN
+  INSERT INTO panel_resource_revisions
+    SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'chat_vote_templates'
+    ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER panel_rev_chat_vote_templates_delete AFTER DELETE ON chat_vote_templates BEGIN
+  INSERT INTO panel_resource_revisions
+    SELECT OLD.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'chat_vote_templates'
+    ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
+END;

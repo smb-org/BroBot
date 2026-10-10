@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -6,8 +6,10 @@ import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
+import { reconcileDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import type { RealtimeMessage } from "../../src/realtime-contract";
 import { jsonResponse } from "../unit/fixtures";
-import { TestWebSocket } from "./test-websocket";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const variable = {
   channelId: "kanal-a",
@@ -30,7 +32,6 @@ describe("Channel variables page", () => {
     for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.useRealTimers();
     vi.unstubAllGlobals();
-    TestWebSocket.instances = [];
     setBrowserLanguage("de-DE");
   });
 
@@ -123,6 +124,41 @@ describe("Channel variables page", () => {
     fireEvent.click(screen.getByRole("button", { name: "+1" }));
     await waitFor(() => expect(currentValue).toBe(457));
     expect(requests.find(({ method, body }) => method === "POST" && body?.includes('"operation":"add"'))?.body).toBe(JSON.stringify({ operation: "add", amount: 1 }));
+  });
+
+  it("keeps a successful variable increment when the follow-up read fails", async () => {
+    setBrowserLanguage("en-US");
+    let currentValue = variable.value;
+    let variableReads = 0;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables/score/value" && method === "POST") {
+        currentValue += 1;
+        return Promise.resolve(jsonResponse({ variable: { ...variable, value: currentValue } }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables") {
+        variableReads += 1;
+        return variableReads === 1
+          ? Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }))
+          : Promise.reject(new Error("variables revalidation failed"));
+      }
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const view = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.click(screen.getByRole("button", { name: "+1" }));
+
+    await waitFor(() => expect(currentValue).toBe(1235));
+    await waitFor(() => expect(view.queryClient.getQueryData<{ variables: Array<{ value: number }> }>(["channel", "kanal-a", "variables"])?.variables[0]?.value).toBe(1235));
+    await waitFor(() => expect(variableReads).toBe(2));
+    expect(document.querySelector(".channel-variable-value-controls__value")).toHaveTextContent("1,235");
+    const newToasts = toastsSnapshot().filter((toast) => toast.message === "The channel variable could not be saved.");
+    expect(newToasts).toHaveLength(0);
   });
 
   it("opens an existing overlay editor with the variable as an unsaved draft", async () => {
@@ -290,66 +326,34 @@ describe("Channel variables page", () => {
     expect(await screen.findByText(expectedWarning)).toBeInTheDocument();
   });
 
-  it("coalesces variable hints, bounds continuous refreshes, and keeps one request in flight", async () => {
-    let releaseThird: ((result: Response) => void) | null = null;
+  it("revalidates variables from the shared query after a realtime hint", async () => {
     let variableRequestCount = 0;
+    const revisions = { "channel.variables": 1 };
     const fetcher = vi.fn<typeof fetch>();
     fetcher.mockImplementation((input) => {
       const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/revisions")) return Promise.resolve(jsonResponse({ revisions }));
       if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
       variableRequestCount++;
-      return variableRequestCount === 3
-        ? new Promise((resolve) => { releaseThird = resolve; })
-        : Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
     });
     vi.stubGlobal("fetch", fetcher);
-    vi.stubGlobal("WebSocket", TestWebSocket);
 
-    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    const rendered = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
     await screen.findByRole("table");
-    expect(TestWebSocket.instances).toHaveLength(1);
-    vi.useFakeTimers();
-    TestWebSocket.instances[0]?.dispatch("open", new Event("open"));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(variableRequestCount).toBe(2);
+    expect(variableRequestCount).toBe(1);
 
-    const sendHint = (id: number): void => TestWebSocket.instances[0]?.dispatch("message", {
-      data: JSON.stringify({
-        version: 1,
-        id: `variables-changed-${String(id)}`,
-        createdAt: "2026-09-24T12:00:00.000Z",
-        channelId: "kanal-a",
-        type: "variables.changed",
-        payload: { set: [{ name: "score", value: 1235 }], removed: [] },
-      }),
-    } as MessageEvent<string>);
-    for (let index = 0; index < 10; index++) sendHint(index);
-    await act(async () => { await vi.advanceTimersByTimeAsync(119); });
-    expect(variableRequestCount).toBe(2);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(variableRequestCount).toBe(3);
+    await reconcileDashboardRealtimeMessage(rendered.queryClient, {
+      version: 1,
+      id: "variables-changed-1",
+      createdAt: "2026-09-24T12:00:00.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: { set: [{ name: "score", value: 1235 }], removed: [] },
+    } satisfies RealtimeMessage);
 
-    for (let index = 10; index < 25; index++) {
-      sendHint(index);
-      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    }
-    expect(variableRequestCount).toBe(3);
-    expect(releaseThird).toBeTypeOf("function");
-    await act(async () => {
-      releaseThird?.(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(variableRequestCount).toBe(4);
-    fireEvent.focus(window);
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    await waitFor(() => { expect(variableRequestCount).toBe(2); });
+    expect(screen.getByRole("row", { name: /score/i })).toBeInTheDocument();
   });
 
   it("consumes each Spotlight selection, applies later requests on the mounted page, and does not replay one after returning", async () => {

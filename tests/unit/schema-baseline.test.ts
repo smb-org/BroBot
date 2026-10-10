@@ -19,6 +19,12 @@ describe("Schema baseline", () => {
     expect(files.at(-1)).toBe(LATEST_SCHEMA_MIGRATION);
   });
 
+  it("keeps migration numbers unique", () => {
+    const numbers = files.map((file) => /^(\d+)_/u.exec(file)?.[1]);
+    expect(numbers.every((number) => number !== undefined)).toBe(true);
+    expect(new Set(numbers).size).toBe(numbers.length);
+  });
+
   // Not every migration creates a table (0005 only backfills rows), so this
   // scans the whole history rather than assuming the latest file does it.
   it("actually creates the table /healthz checks, somewhere in the migration history", () => {

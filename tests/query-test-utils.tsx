@@ -1,6 +1,7 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { render, type RenderOptions } from "@testing-library/react";
 import type { ReactElement } from "react";
+import { vi } from "vitest";
 
 import { createDashboardQueryClient } from "../src/dashboard/data/client";
 import { dispatchDashboardAuthenticationRequired } from "../src/dashboard/data/events";
@@ -11,6 +12,8 @@ export interface DashboardQueryTestOptions {
   initialData?: readonly { queryKey: readonly unknown[]; data: unknown }[];
   /** Reuse an existing client, e.g. to remount a page against a warm cache. */
   queryClient?: QueryClient;
+  /** Revision vector returned to the connected panel socket in this render. */
+  panelRevisions?: Readonly<Record<string, number>> | null;
 }
 
 export const renderWithQuery = (
@@ -18,6 +21,23 @@ export const renderWithQuery = (
   options?: Omit<RenderOptions, "wrapper">,
   queryOptions: DashboardQueryTestOptions = {},
 ) => {
+  if (queryOptions.panelRevisions !== undefined && queryOptions.panelRevisions !== null) {
+    const previousFetch = globalThis.fetch;
+    const revisions = queryOptions.panelRevisions;
+    const revisionFetch = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = input instanceof Request
+        ? new URL(input.url)
+        : input instanceof URL ? input : new URL(input, window.location.href);
+      if (/^\/api\/channels\/[^/]+\/revisions$/u.test(url.pathname)) {
+        return Promise.resolve(new Response(JSON.stringify({ revisions }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      return previousFetch(input, init);
+    });
+    vi.stubGlobal("fetch", revisionFetch);
+  }
   const queryClient = queryOptions.queryClient ?? createDashboardQueryClient(dispatchDashboardAuthenticationRequired);
   queryClient.setDefaultOptions({
     ...queryClient.getDefaultOptions(),

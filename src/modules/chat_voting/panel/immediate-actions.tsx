@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { Button, Led, notify } from "../../../dashboard/ui";
+import { moduleQueryKey, refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import type { ModuleImmediateActionProperties } from "../../contract";
 import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved";
 import { ChatVoteTemplateList } from "./template-list";
@@ -14,88 +16,68 @@ const ChatVotingImmediateAction = (properties: ModuleImmediateActionProperties):
 const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: ModuleImmediateActionProperties): ReactElement => {
   const language = typeof navigator === "undefined" || !navigator.language.toLowerCase().startsWith("en") ? "de" : "en";
   const labels = chatVotingSavedPanelTexts(language);
-  const [state, setState] = useState<ChatVotingPanelState | null>(null);
-  const [templates, setTemplates] = useState<ChatVoteTemplateListState | null>(null);
-  const [templateError, setTemplateError] = useState(false);
-  const [currentError, setCurrentError] = useState(false);
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const queryClient = useDashboardQueryClient();
+  const fallbackRefetchInterval = realtimeStatus === "connected" ? false : 2_000;
+  const stateQuery = useModuleQuery(channelId, "chat_voting", "panel", (signal) => loadChatVotingState(channelId, signal), {
+    refetchInterval: fallbackRefetchInterval,
+  });
+  const templatesQuery = useModuleQuery(channelId, "chat_voting", "templates", async (signal) => {
+    const latest = await loadChatVoteTemplates(channelId, signal);
+    return mergeChatVoteTemplateLists(
+      queryClient.getQueryData<ChatVoteTemplateListState>(moduleQueryKey(channelId, "chat_voting", "templates")) ?? null,
+      latest,
+    );
+  }, {
+    refetchInterval: fallbackRefetchInterval,
+  });
+  const state = stateQuery.data ?? null;
+  const templates = templatesQuery.data ?? null;
+  const [templateFailureData, setTemplateFailureData] = useState<ChatVoteTemplateListState | null | "none">("none");
+  const [currentFailureData, setCurrentFailureData] = useState<ChatVotingPanelState | null | "none">("none");
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
-  const previousVote = useRef<{ id: string; status: "open" | "closed" } | null>(null);
-  const voteRequestSequence = useRef(0);
-  const templateRequestSequence = useRef(0);
-  const voteAppliedSequence = useRef(0);
-  const templateAppliedSequence = useRef(0);
   const vote = state?.vote ?? null;
   const running = vote?.status === "open";
-  const lockReason = availabilityReason ?? (currentError
+  const templateError = templatesQuery.isError || (templateFailureData !== "none" && templateFailureData === templates);
+  const currentLoadError = stateQuery.isError || (currentFailureData !== "none" && currentFailureData === state);
+  const lockReason = availabilityReason ?? (currentLoadError
     ? labels.liveLoadError
     : state === null ? labels.loading : running ? labels.runningLocked : state.hasOpenBallot ? labels.votekickLocked : null);
 
   const refreshTemplates = useCallback(async (): Promise<void> => {
-    const requestSequence = ++templateRequestSequence.current;
     try {
-      const current = await loadChatVoteTemplates(channelId);
-      if (requestSequence <= templateAppliedSequence.current) return;
-      templateAppliedSequence.current = requestSequence;
-      setTemplates((previous) => mergeChatVoteTemplateLists(previous, current));
-      setTemplateError(false);
+      await refetchModuleQueryData<ChatVoteTemplateListState>(queryClient, channelId, "chat_voting", "templates");
+      setTemplateFailureData("none");
     } catch {
-      if (requestSequence <= templateAppliedSequence.current) return;
-      templateAppliedSequence.current = requestSequence;
-      setTemplateError(true);
+      setTemplateFailureData(templates);
     }
-  }, [channelId]);
+  }, [channelId, queryClient, templates]);
 
   const refreshVote = useCallback(async (): Promise<void> => {
-    const requestSequence = ++voteRequestSequence.current;
     try {
-      const current = await loadChatVotingState(channelId);
-      if (requestSequence <= voteAppliedSequence.current) return;
-      voteAppliedSequence.current = requestSequence;
-      const nextVote = current.vote;
-      const previous = previousVote.current;
-      const newlyOpened = nextVote?.status === "open" &&
-        (previous === null || previous.status !== "open" || previous.id !== nextVote.id);
-      previousVote.current = nextVote === null ? null : { id: nextVote.id, status: nextVote.status };
-      setState(current);
-      setCurrentError(false);
-      if (newlyOpened) void refreshTemplates();
+      await refetchModuleQueryData<ChatVotingPanelState>(queryClient, channelId, "chat_voting", "panel");
+      setCurrentFailureData("none");
     } catch {
-      if (requestSequence <= voteAppliedSequence.current) return;
-      voteAppliedSequence.current = requestSequence;
       // Keep the last known live state visible while the template list loads independently.
-      setCurrentError(true);
+      setCurrentFailureData(state);
     }
-  }, [channelId, refreshTemplates]);
-
-  useEffect(() => {
-    const initialLoad = window.setTimeout(() => {
-      void refreshVote();
-      void refreshTemplates();
-    }, 0);
-    const poll = (): void => {
-      if (document.visibilityState === "visible") void refreshVote();
-    };
-    const timer = window.setInterval(poll, 2_000);
-    document.addEventListener("visibilitychange", poll);
-    return () => {
-      window.clearTimeout(initialLoad);
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", poll);
-    };
-  }, [channelId, refreshTemplates, refreshVote]);
+  }, [channelId, queryClient, state]);
 
   const start = async (template: NonNullable<ChatVoteTemplateListState>["templates"][number]): Promise<void> => {
     if (lockReason !== null || pendingId !== null) return;
     setPendingId(template.id);
     try {
       const started = await startChatVoting(channelId, { templateId: template.id });
-      setTemplates((current) => current === null ? current : {
-        ...current,
-        templates: current.templates.map((entry) => entry.id === template.id
-          ? { ...entry, lastUsedAt: started.openedAt }
-          : entry),
-      });
+      queryClient.setQueryData<ChatVoteTemplateListState>(
+        moduleQueryKey(channelId, "chat_voting", "templates"),
+        (current) => current === undefined ? current : {
+          ...current,
+          templates: current.templates.map((entry) => entry.id === template.id
+            ? { ...entry, lastUsedAt: started.openedAt }
+            : entry),
+        },
+      );
       await refreshVote();
     } catch (error: unknown) {
       notify({ tone: "error", message: error instanceof PanelApiError && error.code === "chat_voting_busy" ? labels.runningLocked : labels.startError });
@@ -124,7 +106,7 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
       : templates.templates.length === 0
         ? labels.noTemplatesLocked
         : lockReason ?? "";
-  const liveStatus = currentError ? labels.liveLoadError : state === null ? labels.loading : running ? labels.running : labels.idle;
+  const liveStatus = currentLoadError ? labels.liveLoadError : state === null ? labels.loading : running ? labels.running : labels.idle;
 
   return <section className="stream-manager-action chat-voting-immediate" aria-label={labels.title}>
     <header className="chat-voting-immediate__header">

@@ -27,6 +27,7 @@ import {
 } from "./repository";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { CHANNEL_ROLES, PLATFORM_ASSIGNABLE_ROLES, type ChannelRole } from "../../contracts/values";
+import { revokeRealtimeUser } from "../realtime";
 
 interface PlatformEnvironment {
   Bindings: Env;
@@ -276,6 +277,7 @@ platformRouter.patch("/api/platform/channels/:channelId/members/:userId", async 
     timestamp,
   );
   if (!changed) return mutationFailed(context);
+  await revokeRealtimeUser(context.env.CHANNEL, channelId, userId);
   return context.json({
     member: memberResponse({ ...existing, role, updatedAt: timestamp }),
   });
@@ -295,6 +297,7 @@ platformRouter.delete("/api/platform/channels/:channelId/members/:userId", async
     nowIso(),
   );
   if (!removed) return mutationFailed(context);
+  await revokeRealtimeUser(context.env.CHANNEL, channelId, userId);
   return context.body(null, 204);
 });
 

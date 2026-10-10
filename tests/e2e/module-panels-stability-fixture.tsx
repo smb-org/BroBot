@@ -1,7 +1,9 @@
 import { createRoot } from "react-dom/client";
+import type { ReactNode } from "react";
 
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
 import { UiProvider } from "../../src/dashboard/ui";
+import { useRealtimePanelMessages } from "../../src/dashboard/realtime";
 import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import ApiSourcePanel from "../../src/modules/api_source/panel";
 import BelaboxPanel from "../../src/modules/belabox/panel";
@@ -19,6 +21,12 @@ const channelId = "channel-a";
 const query = new URLSearchParams(window.location.search);
 const language = query.get("lang") === "de" ? "de" : "en";
 const panelName = query.get("panel");
+const realtimeEnabled = query.get("realtime") === "1";
+
+export const RealtimeHarness = ({ children }: { children: ReactNode }) => {
+  useRealtimePanelMessages(realtimeEnabled ? channelId : null, realtimeEnabled);
+  return <>{children}</>;
+};
 
 const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId} language={language} canManage />
   : panelName === "belabox" ? <BelaboxPanel channelId={channelId} language={language} canManage />
@@ -34,13 +42,15 @@ const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId}
 
 createRoot(document.getElementById("root") as HTMLElement).render(
   <DashboardDataProvider>
-    <UiProvider>
-      <main className="main-content" style={{ width: "min(1400px, 100%)", padding: "16px" }}>
-        {panel}
-        {panelName === "chat_voting" ? <button type="button" onClick={() => {
-          runDashboardNavigationGuards(() => { window.location.assign("/tests/e2e/module-panels-stability-fixture.html?panel=api_source"); }, () => undefined);
-        }}>Leave panel</button> : null}
-      </main>
-    </UiProvider>
+    <RealtimeHarness>
+      <UiProvider>
+        <main className="main-content" style={{ width: "min(1400px, 100%)", padding: "16px" }}>
+          {panel}
+          {panelName === "chat_voting" ? <button type="button" onClick={() => {
+            runDashboardNavigationGuards(() => { window.location.assign("/tests/e2e/module-panels-stability-fixture.html?panel=api_source"); }, () => undefined);
+          }}>Leave panel</button> : null}
+        </main>
+      </UiProvider>
+    </RealtimeHarness>
   </DashboardDataProvider>,
 );

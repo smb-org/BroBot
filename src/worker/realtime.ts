@@ -17,6 +17,7 @@ import {
 import { getOverlayBindingForToken } from "./auth/overlay-token-repository";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "./realtime-protocol";
 import type { ApiErrorCode } from "../contracts/values";
+import { notifyCommittedResources } from "./panel-resources";
 
 interface RealtimeRouteEnvironment {
   Bindings: Env;
@@ -130,6 +131,7 @@ realtimeRouter.get("/ws/overlay", async (context) => {
     token,
     pepper: context.env.OVERLAY_TOKEN_PEPPER,
     now: new Date().toISOString(),
+    onCommittedTouch: (channelId) => notifyCommittedResources(context.env, channelId),
   });
   if (record === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
 
@@ -143,6 +145,18 @@ realtimeRouter.get("/ws/overlay", async (context) => {
 const channelObject = (namespace: Env["CHANNEL"] | undefined, channelId: string) => {
   if (namespace === undefined) return null;
   return namespace.get(namespace.idFromName(channelId));
+};
+
+const requiredChannelObject = (namespace: Env["CHANNEL"] | undefined, channelId: string) => {
+  const object = channelObject(namespace, channelId);
+  if (object === null) throw new Error("Channel namespace is required to revoke realtime access.");
+  return object;
+};
+
+const awaitAllRevocations = async (revocations: readonly Promise<unknown>[]): Promise<void> => {
+  const results = await Promise.allSettled(revocations);
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure !== undefined) throw failure.reason;
 };
 
 export const publishRealtimeMessages = async (
@@ -279,12 +293,17 @@ export const revokeRealtimeUser = async (
   channelId: string,
   userId: string,
 ): Promise<void> => {
-  try {
-    const object = channelObject(namespace, channelId);
-    if (object !== null) await object.revokeUser(userId);
-  } catch (error: unknown) {
-    console.warn("Realtime revocation for user failed.", error);
-  }
+  await requiredChannelObject(namespace, channelId).revokeUser(userId);
+};
+
+export const revokeRealtimeUserFromAllChannels = async (
+  db: D1Database,
+  namespace: Env["CHANNEL"] | undefined,
+  userId: string,
+): Promise<void> => {
+  if (namespace === undefined) throw new Error("Channel namespace is required to revoke realtime access.");
+  const channelIds = await listChannelIdsForUser(db, userId);
+  await awaitAllRevocations(channelIds.map((channelId) => revokeRealtimeUser(namespace, channelId, userId)));
 };
 
 export const revokeRealtimeToken = async (
@@ -323,14 +342,8 @@ export const revokeRealtimeSessionForUser = async (
   userId: string,
   sessionId: string,
 ): Promise<void> => {
-  try {
-    if (namespace === undefined) return;
-    const channelIds = await listChannelIdsForUser(db, userId);
-    await Promise.all(channelIds.map(async (channelId) => {
-      const object = channelObject(namespace, channelId);
-      if (object !== null) await object.revokeSession(sessionId);
-    }));
-  } catch (error: unknown) {
-    console.warn("Realtime revocation for session failed.", error);
-  }
+  if (namespace === undefined) throw new Error("Channel namespace is required to revoke realtime access.");
+  const channelIds = await listChannelIdsForUser(db, userId);
+  await awaitAllRevocations(channelIds.map((channelId) =>
+    requiredChannelObject(namespace, channelId).revokeSession(sessionId)));
 };

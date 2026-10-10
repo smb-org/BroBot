@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { URL as NodeURL } from "node:url";
 import { runInNewContext } from "node:vm";
@@ -13,6 +13,7 @@ import { UiProvider as BaseUiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const UiProvider = ({ children }: { children: ReactNode }) => <BaseUiProvider><ToastHost />{children}</BaseUiProvider>;
 
@@ -106,6 +107,7 @@ describe("Overlays page", () => {
   const routeFetcher = (options: {
     conflictDelete?: boolean;
     emptyOverlays?: boolean;
+    overlayDetailFailsOnce?: boolean;
     secondOverlay?: boolean;
     accessLastUsedAt?: string | null;
     accessExpiresAt?: string | null;
@@ -125,6 +127,7 @@ describe("Overlays page", () => {
     let legacyTokens = [...(options.legacyTokens ?? [])];
     let importedOverlay: typeof overlay | null = null;
     let currentOverlay = overlay;
+    let shouldFailOverlayDetail = options.overlayDetailFailsOnce === true;
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.href);
       const method = init?.method ?? "GET";
@@ -159,7 +162,13 @@ describe("Overlays page", () => {
         legacyTokens = [];
         return jsonResponse({ overlay: importedOverlay }, 201);
       }
-      if (url.pathname === "/api/channels/channel-a/overlays/overlay-a" && method === "GET") return jsonResponse({ overlay: currentOverlay });
+      if (url.pathname === "/api/channels/channel-a/overlays/overlay-a" && method === "GET") {
+        if (shouldFailOverlayDetail) {
+          shouldFailOverlayDetail = false;
+          return jsonResponse({ error: "overlay_unavailable" }, 503);
+        }
+        return jsonResponse({ overlay: currentOverlay });
+      }
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-b" && method === "GET") return jsonResponse({ overlay: overlayB });
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-imported" && method === "GET" && importedOverlay !== null) return jsonResponse({ overlay: importedOverlay });
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-a/accesses" && method === "GET") {
@@ -253,6 +262,18 @@ describe("Overlays page", () => {
     const reason = descriptionId === null ? null : document.getElementById(descriptionId);
     expect(reason).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.");
     expect(reason).toHaveAttribute("role", "note");
+  });
+
+  it("retries an initial overlay detail failure instead of leaving the inspector loading", async () => {
+    vi.stubGlobal("fetch", routeFetcher({ overlayDetailFailsOnce: true }));
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Overlays konnten nicht geladen werden.");
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+
+    expect(await screen.findByRole("region", { name: "Zugänge" })).toBeInTheDocument();
+    expect(screen.queryByText("Overlays werden geladen …")).not.toBeInTheDocument();
   });
 
   it("shows operators the disabled remove action and its reason for revoked access", async () => {

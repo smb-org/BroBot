@@ -1,14 +1,21 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import ChatVotingImmediateAction from "../../src/modules/chat_voting/panel/immediate-actions";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery } from "../query-test-utils";
+
+const render = (element: Parameters<typeof renderWithQuery>[0]) => {
+  setDashboardRealtimeStatus("channel-a", "connected");
+  return renderWithQuery(element);
+};
 
 describe("chat voting immediate action", () => {
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); for (const toast of toastsSnapshot()) dismissToast(toast.id); });
+  afterEach(() => { cleanup(); setDashboardRealtimeStatus("channel-a", "offline"); vi.unstubAllGlobals(); for (const toast of toastsSnapshot()) dismissToast(toast.id); });
 
   it("loads the shared template list and starts a saved vote", async () => {
     const started = vi.fn();
@@ -86,10 +93,11 @@ describe("chat voting immediate action", () => {
     expect(titles).toEqual(["Alpha", "Zeta"]);
   });
 
-  it("ignores a late live response after a newer poll reports the vote ended", async () => {
+  it("ignores a late live response after a newer resource revision reports the vote ended", async () => {
     let resolveFirst!: (response: Response) => void;
     const first = new Promise<Response>((resolve) => { resolveFirst = resolve; });
     let currentCalls = 0;
+    let revision = 0;
     const openVote = {
       id: "poll-a", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["A", "B"],
       title: "Dinner", status: "open", openedAt: "2026-10-04T10:00:00.000Z", closesAt: "2026-10-04T10:02:00.000Z",
@@ -101,6 +109,7 @@ describe("chat voting immediate action", () => {
         ? new URL(input.url).pathname
         : new URL(String(input), "https://brobot.example").pathname;
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (path.endsWith("/revisions")) return Promise.resolve(jsonResponse({ revisions: revision === 0 ? {} : { "module:chat_voting:panel": revision } }));
       if (path.endsWith("/current")) {
         currentCalls += 1;
         if (currentCalls === 1) return first;
@@ -113,9 +122,10 @@ describe("chat voting immediate action", () => {
       }], count: 1, maximum: 100 }));
       return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
     }));
-    render(<UiProvider><ChatVotingImmediateAction channelId="channel-a" canManage availabilityReason={null} /></UiProvider>);
+    const view = render(<UiProvider><ChatVotingImmediateAction channelId="channel-a" canManage availabilityReason={null} /></UiProvider>);
     await waitFor(() => expect(currentCalls).toBe(1));
-    document.dispatchEvent(new Event("visibilitychange"));
+    revision = 1;
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "channel-a"); });
     await waitFor(() => expect(currentCalls).toBe(2));
     const start = await screen.findByRole("button", { name: /Dinner/u });
     await waitFor(() => expect(start).toBeEnabled());
@@ -180,15 +190,17 @@ describe("chat voting immediate action", () => {
     expect(await screen.findByText(/The vote could not be ended\.|Die Abstimmung konnte nicht beendet werden\./u)).toBeInTheDocument();
   });
 
-  it("refreshes saved-template running markers when polling sees an external start", async () => {
+  it("refreshes saved-template running markers from panel resource revisions", async () => {
     let currentVote: Record<string, unknown> | null = null;
     let currentCalls = 0;
+    let revisions: Readonly<Record<string, number>> = {};
     const openedAt = "2026-10-04T10:00:00.000Z";
     vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
       const path = input instanceof Request
         ? new URL(input.url).pathname
         : new URL(String(input), "https://brobot.example").pathname;
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (path.endsWith("/revisions")) return Promise.resolve(jsonResponse({ revisions }));
       if (path.endsWith("/current")) {
         currentCalls += 1;
         return Promise.resolve(jsonResponse({ vote: currentVote, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120 }));
@@ -201,7 +213,7 @@ describe("chat voting immediate action", () => {
       }], count: 1, maximum: 100 }));
       return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
     }));
-    render(<UiProvider><ChatVotingImmediateAction channelId="channel-a" canManage availabilityReason={null} /></UiProvider>);
+    const view = render(<UiProvider><ChatVotingImmediateAction channelId="channel-a" canManage availabilityReason={null} /></UiProvider>);
     await screen.findByRole("button", { name: /Dinner/u });
     await waitFor(() => expect(currentCalls).toBeGreaterThan(0));
     currentVote = {
@@ -209,7 +221,8 @@ describe("chat voting immediate action", () => {
       title: "Dinner", status: "open", openedAt, closesAt: "2026-10-04T10:02:00.000Z",
       requestedDurationSeconds: 120, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
     };
-    document.dispatchEvent(new Event("visibilitychange"));
+    revisions = { "module:chat_voting:panel": 1, "module:chat_voting:templates": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "channel-a"); });
     await waitFor(() => expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent(/Running|Läuft/u));
   });
 });

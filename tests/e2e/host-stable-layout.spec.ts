@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 test.use({ locale: "en-US" });
 
 const channelId = "stable-host-layout";
+let panelRevisions: Record<string, number> = {};
 const channel = {
   channelId,
   login: "stable-channel",
@@ -66,8 +67,13 @@ interface ChannelMockData {
 }
 
 const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: ChannelMockData = {}): Promise<void> => {
+  panelRevisions = {};
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
+    if (pathname === `/api/channels/${channelId}/revisions`) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ revisions: panelRevisions }) });
+      return;
+    }
     if (pathname === "/api/channels") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: data.channelList ?? [channel], bot: channel.bot }) });
       return;
@@ -588,13 +594,14 @@ test("the channel-variable limit and create controls stay above a full list", as
 
 test("a failed realtime variable refresh keeps rows visible and offers retry", async ({ page }) => {
   await page.addInitScript(() => {
-    type LayoutSocket = EventTarget & { open: () => void; close: () => void; readyState: number };
+    type LayoutSocket = EventTarget & { url: string; open: () => void; close: () => void; readyState: number };
     const sockets: LayoutSocket[] = [];
     class MockWebSocket extends EventTarget {
+      readonly url: string;
       readyState = 0;
       constructor(url: string, protocols?: string | string[]) {
         super();
-        void url;
+        this.url = url;
         void protocols;
         sockets.push(this);
       }
@@ -606,6 +613,7 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
     Object.defineProperty(window, "WebSocket", { value: MockWebSocket, writable: true, configurable: true });
   });
   let variableRequestCount = 0;
+  let failVariableRefresh = false;
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
@@ -618,7 +626,7 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
     }
     if (pathname === `/api/channels/${channelId}/variables`) {
       variableRequestCount++;
-      if (variableRequestCount === 3) {
+      if (failVariableRefresh) {
         await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "variables_load_failed" }) });
         return;
       }
@@ -645,19 +653,34 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
   const retrySlot = page.locator(".channel-variables-limit-slot");
   const slotBeforeRefreshFailure = await retrySlot.boundingBox();
+  const initialVariableRequestCount = variableRequestCount;
   await page.evaluate(() => {
-    const sockets = (window as Window & { __layoutSockets?: Array<{ open: () => void }> }).__layoutSockets ?? [];
-    sockets.forEach((socket) => { socket.open(); });
+    const sockets = (window as Window & { __layoutSockets?: Array<{ url: string; open: () => void; close: () => void }> }).__layoutSockets ?? [];
+    const panelSockets = sockets.filter((socket) => new URL(socket.url, window.location.href).pathname.startsWith("/ws/channels/"));
+    panelSockets[0]?.open();
+    panelSockets[0]?.close();
   });
-  await expect.poll(() => variableRequestCount).toBe(3);
+  await expect.poll(() => page.evaluate(() => {
+    const sockets = (window as Window & { __layoutSockets?: Array<{ url: string }> }).__layoutSockets ?? [];
+    return sockets.filter((socket) => new URL(socket.url, window.location.href).pathname.startsWith("/ws/channels/")).length;
+  })).toBeGreaterThan(1);
+  failVariableRefresh = true;
+  await page.evaluate(() => {
+    const sockets = (window as Window & { __layoutSockets?: Array<{ url: string; open: () => void }> }).__layoutSockets ?? [];
+    const panelSockets = sockets.filter((socket) => new URL(socket.url, window.location.href).pathname.startsWith("/ws/channels/"));
+    panelSockets.at(-1)?.open();
+  });
+  await expect.poll(() => variableRequestCount).toBeGreaterThan(initialVariableRequestCount);
   await expect(page.locator(".ui-toast--error")).toBeVisible();
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
   await expect(page.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
   expect(await retrySlot.boundingBox()).toEqual(slotBeforeRefreshFailure);
 
+  const failedVariableRequestCount = variableRequestCount;
+  failVariableRefresh = false;
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect.poll(() => variableRequestCount).toBe(4);
+  await expect.poll(() => variableRequestCount).toBeGreaterThan(failedVariableRequestCount);
   await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
 });
@@ -700,6 +723,7 @@ test("the new-events notice stays visible while reading older events", async ({ 
   });
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   events.entries.unshift(newEvent);
+  panelRevisions["channel.events"] = 1;
   const refreshResponse = page.waitForResponse((response) => response.url().includes(`/api/channels/${channelId}/events`));
   await page.evaluate((timestamp) => {
     const sockets = (window as Window & { __layoutEventSockets?: Array<{ open: () => void; receive: (data: string) => void }> }).__layoutEventSockets ?? [];
@@ -934,7 +958,7 @@ test("stream manager waits for module data and keeps its immediate-action strip 
   }
 });
 
-test("background channel refresh keeps populated overview cards through loading and failure", async ({ page }) => {
+test("window visibility changes do not broadly refresh populated overview cards", async ({ page }) => {
   const secondChannel = {
     ...channel,
     channelId: "stable-host-layout-second",
@@ -944,32 +968,21 @@ test("background channel refresh keeps populated overview cards through loading 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installChannelMocks(page, {}, { channelList: [channel, secondChannel] });
+    let channelListRequests = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/channels") channelListRequests += 1;
+    });
     await page.goto("/");
     const grid = page.locator(".module-grid");
     await expect(grid.locator(":scope > .module-tile")).toHaveCount(2);
     const before = await measureDocumentBox(page, ".module-grid");
-
-    let releaseRefresh!: () => void;
-    let markRefreshStarted!: () => void;
-    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
-    const refreshStarted = new Promise<void>((resolve) => { markRefreshStarted = resolve; });
-    await page.route("**/api/channels", async (route) => {
-      markRefreshStarted();
-      await refreshGate;
-      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "channels_unavailable" }) });
-    });
-
+    const initialChannelListRequests = channelListRequests;
     await page.evaluate(() => { document.dispatchEvent(new Event("visibilitychange")); });
-    await refreshStarted;
+    await page.waitForTimeout(300);
     await expect(page.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
     await expect(grid.locator(":scope > .module-tile")).toHaveCount(2);
     expect(await measureDocumentBox(page, ".module-grid")).toEqual(before);
-
-    releaseRefresh();
-    await expect(page.locator(".ui-toast--error")).toBeVisible();
-    await expect(page.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
-    await expect(grid.locator(":scope > .module-tile")).toHaveCount(2);
-    expect(await measureDocumentBox(page, ".module-grid")).toEqual(before);
+    expect(channelListRequests).toBe(initialChannelListRequests);
     await page.unrouteAll();
   }
 });

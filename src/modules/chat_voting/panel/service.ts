@@ -60,8 +60,8 @@ const route = (channelId: string, path: string): string =>
 
 let csrfTokenRequest: Promise<string> | null = null;
 
-export const loadChatVotingState = async (channelId: string): Promise<ChatVotingPanelState> =>
-  readJson<ChatVotingPanelState>(await fetch(route(channelId, "/current")));
+export const loadChatVotingState = async (channelId: string, signal?: AbortSignal): Promise<ChatVotingPanelState> =>
+  readJson<ChatVotingPanelState>(await fetch(route(channelId, "/current"), signal === undefined ? {} : { signal }));
 
 const csrfHeader = async (): Promise<string> => {
   csrfTokenRequest ??= (async () => {
@@ -106,11 +106,11 @@ export const startChatVoting = async (channelId: string, options: StartChatVotin
 }))).vote);
 };
 
-export const loadChatVoteTemplates = async (channelId: string): Promise<ChatVoteTemplateListState> =>
-  readJson<ChatVoteTemplateListState>(await fetch(route(channelId, "/templates")));
+export const loadChatVoteTemplates = async (channelId: string, signal?: AbortSignal): Promise<ChatVoteTemplateListState> =>
+  readJson<ChatVoteTemplateListState>(await fetch(route(channelId, "/templates"), signal === undefined ? {} : { signal }));
 
-export const loadRecentChatVotes = async (channelId: string): Promise<ChatVoteRecentState> =>
-  readJson<ChatVoteRecentState>(await fetch(route(channelId, "/recent")));
+export const loadRecentChatVotes = async (channelId: string, signal?: AbortSignal): Promise<ChatVoteRecentState> =>
+  readJson<ChatVoteRecentState>(await fetch(route(channelId, "/recent"), signal === undefined ? {} : { signal }));
 
 export const createChatVoteTemplate = async (channelId: string, draft: ChatVoteTemplateDraft): Promise<ChatVoteTemplate> => {
   return csrfMutation(async (token) => (await readJson<{ template: ChatVoteTemplate }>(await fetch(route(channelId, "/templates"), {
