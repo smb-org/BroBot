@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { Suspense, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RetryableLazy } from "../../src/dashboard/RetryableLazy";
@@ -25,5 +26,35 @@ describe("RetryableLazy", () => {
 
     expect(await screen.findByText("Panel loaded")).toBeInTheDocument();
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the lazy type stable when its first render suspends to the route boundary", async () => {
+    let resolveLoad: ((module: { default: () => ReactElement }) => void) | undefined;
+    const pendingLoad = new Promise<{ default: () => ReactElement }>((resolve) => { resolveLoad = resolve; });
+    const load = vi.fn(() => pendingLoad);
+
+    render(
+      <Suspense fallback={<p>Route pending</p>}>
+        <RetryableLazy
+          instanceKey="panel:route-boundary"
+          load={load}
+          properties={{}}
+          loadingFallback={<p>Panel pending</p>}
+          renderError={() => <p>Panel failed</p>}
+          suspendToParent
+        />
+      </Suspense>,
+    );
+
+    expect(screen.getByText("Route pending")).toBeInTheDocument();
+    expect(load).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveLoad?.({ default: () => <p>Panel ready</p> });
+      await pendingLoad;
+    });
+
+    expect(await screen.findByText("Panel ready")).toBeInTheDocument();
+    expect(load).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,4 @@
-import { Component, createElement, lazy, Suspense, useCallback, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { Component, createElement, lazy, Suspense, useCallback, useState, type ComponentType, type LazyExoticComponent, type ReactNode } from "react";
 
 interface LazyLoadErrorBoundaryProperties {
   children: ReactNode;
@@ -29,18 +29,35 @@ interface RetryableLazyProperties<TProperties extends object> {
   loadingFallback: ReactNode;
   renderError: (retry: () => void) => ReactNode;
   suspendToParent?: boolean;
+  onRetry?: () => void;
 }
+
+const lazyViews = new Map<string, unknown>();
+
+const lazyViewFor = <TProperties extends object>(
+  instanceKey: string,
+  load: () => Promise<{ default: ComponentType<TProperties> }>,
+): LazyExoticComponent<ComponentType<TProperties>> => {
+  const cached = lazyViews.get(instanceKey);
+  if (cached !== undefined) return cached as LazyExoticComponent<ComponentType<TProperties>>;
+  const view = lazy<ComponentType<TProperties>>(load);
+  lazyViews.set(instanceKey, view);
+  return view;
+};
 
 /** Loads one lazy view at a time and creates a fresh React.lazy instance after a failed import. */
 const LazyAttempt = <TProperties extends object>({
+  instanceKey,
   load,
   properties,
   loadingFallback,
   renderError,
   retry,
   suspendToParent = false,
-}: Omit<RetryableLazyProperties<TProperties>, "instanceKey"> & { retry: () => void }): ReactNode => {
-  const LazyView = useMemo(() => lazy(load), [load]);
+}: Omit<RetryableLazyProperties<TProperties>, "onRetry"> & { retry: () => void }): ReactNode => {
+  // Keep the lazy type outside the suspended render: React can discard useMemo caches
+  // when the first route attempt suspends, which would otherwise restart the import.
+  const LazyView = lazyViewFor(instanceKey, load);
 
   return (
     <LazyLoadErrorBoundary retry={retry} renderError={renderError}>
@@ -52,9 +69,21 @@ const LazyAttempt = <TProperties extends object>({
 };
 
 export const RetryableLazy = <TProperties extends object>(properties: RetryableLazyProperties<TProperties>): ReactNode => {
-  const { instanceKey, ...attemptProperties } = properties;
+  const { instanceKey, onRetry, ...attemptProperties } = properties;
   const [generation, setGeneration] = useState(0);
-  const retry = useCallback(() => { setGeneration((current) => current + 1); }, []);
+  const retry = useCallback(() => {
+    if (onRetry !== undefined) {
+      onRetry();
+      return;
+    }
+    lazyViews.delete(`${instanceKey}:${String(generation)}`);
+    setGeneration((current) => current + 1);
+  }, [generation, instanceKey, onRetry]);
 
-  return <LazyAttempt key={`${instanceKey}:${String(generation)}`} {...attemptProperties} retry={retry} />;
+  return <LazyAttempt
+    key={`${instanceKey}:${String(generation)}`}
+    {...attemptProperties}
+    instanceKey={`${instanceKey}:${String(generation)}`}
+    retry={retry}
+  />;
 };

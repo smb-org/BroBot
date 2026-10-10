@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ComponentType, type ReactElement
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
-import { loadModulePanel, loadModuleSettingsEditor } from "./module-panel-loaders";
+import { loadModulePanel, loadModuleSettingsEditor, ModuleChunkLoadError, retryModuleChunkLoad } from "./module-panel-loaders";
 import { RetryableLazy } from "./RetryableLazy";
 import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
@@ -204,14 +204,18 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   const loadError = settingsQuery.error instanceof PanelApiError
     ? apiErrorText(settingsQuery.error.code, dashboardTexts().module.settingsLoadError)
     : dashboardTexts().module.settingsLoadError;
+  const retrySettingsQuery = (): void => {
+    if (settingsQuery.error instanceof ModuleChunkLoadError) retryModuleChunkLoad();
+    else void settingsQuery.refetch();
+  };
   if (loaded === undefined) {
     return <LoadState
       variant="panel-320"
       status={settingsQuery.isPending || settingsQuery.isFetching ? "loading" : "error"}
       loading={<Skeleton rows={3} height={34} />}
       empty={null}
-      error={<p className="muted" role="alert">{loadError}</p>}
-      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}
+      error={null}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: retrySettingsQuery }}
       refreshError={false}
     >{null}</LoadState>;
   }
@@ -222,7 +226,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
     loading={<Skeleton rows={3} height={34} />}
     empty={null}
     error={<p className="muted" role="alert">{dashboardTexts().module.settingsLoadError}</p>}
-    queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}
+    queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: retrySettingsQuery }}
     refreshError={settingsQuery.isRefetchError}
   >
     <LoadedModuleSettingsEditor
@@ -579,6 +583,7 @@ const MountedModuleView = ({ module, channelId, canManage, canOperate, botIsMode
       instanceKey={`${module.id}:panel`}
       load={loadPanel}
       suspendToParent={suspendToParent}
+      onRetry={retryModuleChunkLoad}
       properties={{
         channelId,
         language: dashboardLanguage(),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { ChannelRole } from "../../src/contracts/values";
 import { enabledModuleNavigationGroups, visibleModuleNavigationIds } from "../../src/dashboard/nav-pages";
 import { MODULES } from "../../src/modules/registry";
 
@@ -8,6 +9,7 @@ describe("module sidebar categories", () => {
     const groups = enabledModuleNavigationGroups(
       MODULES,
       MODULES.map(({ id }) => ({ id, enabled: true })),
+      "manager",
       "channel-a",
       "en",
       (moduleId) => `Generic ${moduleId}`,
@@ -33,6 +35,7 @@ describe("module sidebar categories", () => {
     const groups = enabledModuleNavigationGroups(
       MODULES,
       states,
+      "manager",
       "channel-a",
       "de",
       (moduleId) => `Generic ${moduleId}`,
@@ -42,6 +45,18 @@ describe("module sidebar categories", () => {
     expect(moduleIds).not.toContain("faq");
     expect(moduleIds).not.toContain("ads");
     expect(moduleIds).toContain("timers");
-    expect(new Set(moduleIds)).toEqual(visibleModuleNavigationIds(states));
+    expect(new Set(moduleIds)).toEqual(visibleModuleNavigationIds(states, "manager"));
+  });
+
+  it("keeps module navigation visible to every member role and hides it without membership", () => {
+    const states = MODULES.map(({ id }) => ({ id, enabled: true }));
+    const roles: readonly ChannelRole[] = ["broadcaster", "manager", "operator"];
+
+    for (const role of roles) {
+      expect(visibleModuleNavigationIds(states, role)).toHaveLength(states.length);
+    }
+
+    expect(visibleModuleNavigationIds(states, null)).toHaveLength(0);
+    expect(enabledModuleNavigationGroups(MODULES, states, null, "channel-a", "en", (id) => id)).toHaveLength(0);
   });
 });

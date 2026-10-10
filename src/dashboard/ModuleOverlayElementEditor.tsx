@@ -2,7 +2,7 @@ import { useCallback, type ComponentType, type ReactElement } from "react";
 
 import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
 import type { JsonObject, OverlayElementEditorProps } from "../modules/contract";
-import { loadModuleOverlayElementEditor } from "./module-panel-loaders";
+import { loadModuleOverlayElementEditor, retryModuleChunkLoad } from "./module-panel-loaders";
 import { RetryableLazy } from "./RetryableLazy";
 import { Button, Skeleton } from "./ui";
 import { dashboardCommonTexts, dashboardTexts } from "./locale";
@@ -45,6 +45,7 @@ export const ModuleOverlayElementEditor = ({ kind, config, channelId, language, 
     <RetryableLazy
       instanceKey={`${registered.moduleId}:overlay-editor:${kind}`}
       load={loadEditor}
+      onRetry={retryModuleChunkLoad}
       properties={{
         config,
         language,
