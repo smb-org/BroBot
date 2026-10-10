@@ -5,6 +5,7 @@ import type { PanelChannelControl, PanelChannelControls } from "../panel-contrac
 import type { RealtimeEnvelope, RealtimeEventLogHint, RealtimeMessage } from "../realtime-contract";
 import { REALTIME_PROTOCOL } from "../realtime-contract";
 import {
+  cancelDashboardRealtimeRetries,
   invalidateDashboardChannelQueries,
   reconcileDashboardRealtimeMessage,
   reconcileDashboardPanelResourceRevisions,
@@ -157,6 +158,7 @@ const panelSocketConnections = new Map<string, PanelSocketConnection>();
 const disposePanelSocket = (channelId: string, connection: PanelSocketConnection): void => {
   if (connection.disposed) return;
   connection.disposed = true;
+  cancelDashboardRealtimeRetries(connection.queryClient, channelId);
   if (connection.reconnectTimer !== null) clearTimeout(connection.reconnectTimer);
   if (connection.cleanupTimer !== null) clearTimeout(connection.cleanupTimer);
   connection.reconnectTimer = null;
@@ -213,6 +215,7 @@ const connectPanelSocket = (channelId: string, connection: PanelSocketConnection
       if (connection.disposed) return;
       if (connection.socket === socket) connection.socket = null;
       if (socketNeedsRenewal(event) || event.code === 1008) {
+        cancelDashboardRealtimeRetries(connection.queryClient, channelId);
         setDashboardRealtimeStatus(channelId, "renew");
         return;
       }

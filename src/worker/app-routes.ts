@@ -20,7 +20,7 @@ app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes, async (context, next) =>
   } finally {
     const channelId = context.req.param("channelId");
     if (channelId.length > 0 && authorizedContextHas(context, "session")) {
-      await notifyCommittedResources(context.env, channelId);
+      await notifyCommittedResources(context.env);
     }
   }
 });

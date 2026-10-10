@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseRealtimeMessage } from "../../src/dashboard/realtime";
 import { dashboardDataKeys, queryKeys } from "../../src/dashboard/data/keys";
 import {
+  cancelDashboardRealtimeRetries,
   getDashboardRealtimeStatus,
   invalidateDashboardChannelQueries,
   reconcileDashboardRealtimeMessage,
@@ -276,6 +277,116 @@ describe("dashboard realtime messages", () => {
     await vi.waitFor(() => { expect(panelReads).toBe(1); });
     unsubscribe();
     reader.clear();
+  });
+
+  it("retries a failed revision read while connected without another hint", async () => {
+    vi.useFakeTimers();
+    const revisionChannel = "revision-read-retry";
+    const reader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const events = queryKeys.channel(revisionChannel, "events");
+    let eventReads = 0;
+    reader.setQueryData(events, { revision: 0 });
+    const unsubscribe = new QueryObserver(reader, {
+      queryKey: events,
+      queryFn: () => { eventReads += 1; return Promise.resolve({ revision: eventReads }); },
+      staleTime: Infinity,
+    }).subscribe(() => undefined);
+    let revisionReads = 0;
+    vi.stubGlobal("fetch", vi.fn(() => {
+      revisionReads += 1;
+      if (revisionReads === 1) return Promise.resolve(new Response("temporarily unavailable", { status: 503 }));
+      return Promise.resolve(new Response(JSON.stringify({ revisions: { "channel.events": 1 } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+    setDashboardRealtimeStatus(revisionChannel, "connected");
+
+    const reconciliation = reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    await vi.advanceTimersByTimeAsync(500);
+    await reconciliation;
+
+    expect(revisionReads).toBe(2);
+    expect(eventReads).toBe(1);
+    expect(reader.getQueryState(events)?.isInvalidated).toBe(false);
+    unsubscribe();
+    reader.clear();
+    setDashboardRealtimeStatus(revisionChannel, "offline");
+  });
+
+  it("cancels pending revision retries when a channel socket is disposed", async () => {
+    vi.useFakeTimers();
+    const revisionChannel = "revision-retry-disposal";
+    const oldReader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const newReader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const fetchRevisions = vi.fn()
+      .mockResolvedValueOnce(new Response("temporarily unavailable", { status: 503 }))
+      .mockResolvedValue(new Response(JSON.stringify({ revisions: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetchRevisions);
+    setDashboardRealtimeStatus(revisionChannel, "connected");
+
+    const oldReconciliation = reconcileDashboardPanelResourceRevisions(oldReader, revisionChannel);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchRevisions).toHaveBeenCalledTimes(1);
+
+    cancelDashboardRealtimeRetries(oldReader, revisionChannel);
+    setDashboardRealtimeStatus(revisionChannel, "offline");
+    await oldReconciliation;
+    setDashboardRealtimeStatus(revisionChannel, "connected");
+    await reconcileDashboardPanelResourceRevisions(newReader, revisionChannel);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(fetchRevisions).toHaveBeenCalledTimes(2);
+    oldReader.clear();
+    newReader.clear();
+    cancelDashboardRealtimeRetries(newReader, revisionChannel);
+    setDashboardRealtimeStatus(revisionChannel, "offline");
+  });
+
+  it("retries an affected query after its normal retries are exhausted", async () => {
+    vi.useFakeTimers();
+    const revisionChannel = "revision-resource-retry";
+    const reader = new QueryClient({ defaultOptions: { queries: { retry: 1, retryDelay: () => 0 } } });
+    const events = queryKeys.channel(revisionChannel, "events");
+    let eventReads = 0;
+    reader.setQueryData(events, { revision: 0 });
+    const unsubscribe = new QueryObserver(reader, {
+      queryKey: events,
+      queryFn: () => {
+        eventReads += 1;
+        return eventReads <= 2
+          ? Promise.reject(new Error("temporary query failure"))
+          : Promise.resolve({ revision: eventReads });
+      },
+      retry: 1,
+      retryDelay: () => 0,
+      staleTime: Infinity,
+    }).subscribe(() => undefined);
+    expect(eventReads).toBe(0);
+    let revision = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: { "channel.events": revision } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
+    setDashboardRealtimeStatus(revisionChannel, "connected");
+
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    revision = 1;
+    const reconciliation = reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(eventReads).toBe(2);
+    await vi.advanceTimersByTimeAsync(500);
+    await reconciliation;
+
+    expect(eventReads).toBe(3);
+    expect(reader.getQueryState(events)?.isInvalidated).toBe(false);
+    unsubscribe();
+    reader.clear();
+    setDashboardRealtimeStatus(revisionChannel, "offline");
   });
 
   it("throttles sequential hints beyond request latency and observes the last committed revision", async () => {

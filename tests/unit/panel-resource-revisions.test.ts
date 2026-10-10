@@ -16,7 +16,9 @@ import { panelRouter } from "../../src/worker/panel/routes";
 import { moduleRouter } from "../../src/worker/panel/module-routes";
 import { platformRouter } from "../../src/worker/platform/routes";
 import { app } from "../../src/worker/worker-app";
+import { createSessionCookie } from "../../src/worker/auth/session";
 import { notifyCommittedResources, panelResourceChangedMessage, PANEL_RESOURCE_NOTIFIER_COVERAGE, readCompletePanelResourceRevisions, readPanelResourceRevisions } from "../../src/worker/panel-resources";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const writeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -385,7 +387,7 @@ describe("panel resource revisions", () => {
     const worker = readFileSync(resolve(root, "src/worker/app-routes.ts"), "utf8");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.platformRoutes");
-    expect(worker).toMatch(/finally \{\s*const channelId = context\.req\.param\("channelId"\);\s*if \(channelId\.length > 0 && authorizedContextHas\(context, "session"\)\) \{\s*await notifyCommittedResources\(context\.env, channelId\);/u);
+    expect(worker).toMatch(/finally \{\s*const channelId = context\.req\.param\("channelId"\);\s*if \(channelId\.length > 0 && authorizedContextHas\(context, "session"\)\) \{\s*await notifyCommittedResources\(context\.env\);/u);
     expect(worker).not.toContain("PANEL_RESOURCE_NOTIFIER_COVERAGE.authRoutes");
     expect(worker).not.toMatch(/context\.res\.status !== 401/u);
     const rootWorker = readFileSync(resolve(root, "src/worker/worker-app.ts"), "utf8");
@@ -440,6 +442,87 @@ describe("panel resource revisions", () => {
     expect(response.status).toBe(400);
     expect(prepare).not.toHaveBeenCalled();
     expect(idFromName).not.toHaveBeenCalled();
+  });
+
+  it("publishes every channel queued by an authenticated channel request", async () => {
+    const database = new TestD1Database();
+    const visitedChannels: string[] = [];
+    const cookieKeys = JSON.stringify({ active: { id: "cookie-v1", key: testKey(1) }, retired: [] });
+    const encryptionKeys = JSON.stringify({ active: { id: "encryption-v1", key: testKey(2) }, retired: [] });
+    try {
+      await insertChannel(database, "cross-channel-a");
+      await insertChannel(database, "cross-channel-b");
+      await insertLoginIdentityAndSession(database, "cross-channel-manager");
+      await insertMember(database, "cross-channel-a", "cross-channel-manager", "manager");
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+
+      const env = {
+        DB: database as unknown as D1Database,
+        SESSION_COOKIE_KEYS: cookieKeys,
+        SESSION_ENCRYPTION_KEYS: encryptionKeys,
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: (channelId: string) => ({
+            getPanelResourceRevisions: () => Promise.resolve({}),
+            reconcilePanelResources: () => { visitedChannels.push(channelId); return Promise.resolve(); },
+          }),
+        },
+      } as unknown as Env;
+      const sessionCookie = await createSessionCookie(
+        { sessionId: "session-cross-channel-manager" },
+        cookieKeys,
+        encryptionKeys,
+      );
+
+      // The target user's channel list is shared across channels, so this
+      // membership commit queues revisions for both existing channel sockets.
+      await insertMember(database, "cross-channel-a", "new-channel-member", "operator");
+      const response = await app.fetch(new Request(
+        "https://brobot.example/api/channels/cross-channel-a/revisions",
+        { headers: { Cookie: `__Host-brobot_session=${sessionCookie}` } },
+      ), env);
+
+      expect(response.status).toBe(200);
+      expect(visitedChannels.sort((left, right) => left.localeCompare(right)))
+        .toEqual(["cross-channel-a", "cross-channel-b"]);
+      const remaining = await database.prepare(
+        "SELECT channel_id FROM panel_resource_pending ORDER BY channel_id LIMIT 1",
+      ).first<{ channel_id: string }>();
+      expect(remaining).toBeNull();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not fan out queued revisions from an unauthenticated channel request", async () => {
+    const database = new TestD1Database();
+    const getChannel = vi.fn();
+    try {
+      await insertChannel(database, "unauthenticated-a");
+      await insertChannel(database, "unauthenticated-b");
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+      await database.prepare(
+        `UPDATE panel_resource_revisions SET revision = revision + 1
+          WHERE channel_id = 'unauthenticated-b' AND resource = 'channel.overview'`,
+      ).run();
+      const env = {
+        DB: database as unknown as D1Database,
+        CHANNEL: { idFromName: (channelId: string) => channelId, get: getChannel },
+      } as unknown as Env;
+
+      const response = await app.fetch(new Request(
+        "https://brobot.example/api/channels/unauthenticated-a/revisions",
+      ), env);
+
+      expect(response.status).toBe(401);
+      expect(getChannel).not.toHaveBeenCalled();
+      const pending = await database.prepare(
+        "SELECT channel_id FROM panel_resource_pending WHERE channel_id = 'unauthenticated-b'",
+      ).first<{ channel_id: string }>();
+      expect(pending?.channel_id).toBe("unauthenticated-b");
+    } finally {
+      database.close();
+    }
   });
 
   it("uses the subscription registry to resolve EventSub notifier channels, including raid directions", () => {
