@@ -17,6 +17,7 @@ import { Button, LoadState, notify, Popover, Skeleton } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { collectChannelNoticeFacts, type ChannelNoticeFact } from "./channel-health";
 import { moduleName } from "./module-labels";
+import { loadModuleImmediateActions } from "./module-panel-loaders";
 import { StateRow } from "./module-panels";
 
 export const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, urgent, onCheck, notifyFailure = true, actionLabel, checkingLabel, lockedReason }: {
@@ -192,7 +193,7 @@ const getLazyImmediateAction = (moduleId: string): LazyExoticComponent<Component
   if (module?.immediateActions === undefined) return null;
   const cached = lazyActions.get(moduleId);
   if (cached !== undefined) return cached;
-  const component = lazy(module.immediateActions.load);
+  const component = lazy(() => loadModuleImmediateActions(moduleId) as Promise<{ default: ComponentType<ModuleImmediateActionProperties> }>);
   lazyActions.set(moduleId, component);
   return component;
 };
