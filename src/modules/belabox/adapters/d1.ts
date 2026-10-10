@@ -32,6 +32,7 @@ export interface BelaboxRecentPoint {
 export interface BelaboxFetchPhase {
   consecutiveFailures: number;
   failing: boolean;
+  lastAttemptAt?: string;
 }
 
 export interface BelaboxStatus {
@@ -169,7 +170,13 @@ const parseFetchPhase = (value: string): BelaboxFetchPhase => {
     const state = parsed as Readonly<Record<string, unknown>>;
     return Number.isSafeInteger(state.consecutiveFailures) && Number(state.consecutiveFailures) >= 0 &&
       typeof state.fetchFailing === "boolean"
-      ? { consecutiveFailures: Number(state.consecutiveFailures), failing: state.fetchFailing }
+      ? {
+        consecutiveFailures: Number(state.consecutiveFailures),
+        failing: state.fetchFailing,
+        ...(typeof state.lastAttemptAt === "string" && Number.isFinite(Date.parse(state.lastAttemptAt))
+          ? { lastAttemptAt: state.lastAttemptAt }
+          : {}),
+      }
       : EMPTY_FETCH_PHASE;
   } catch {
     return EMPTY_FETCH_PHASE;
@@ -735,6 +742,7 @@ const encodedRecent = (recent: readonly BelaboxRecentPoint[]): string => JSON.st
 const encodedPhase = (phase: BelaboxFetchPhase): string => JSON.stringify({
   consecutiveFailures: phase.consecutiveFailures,
   fetchFailing: phase.failing,
+  ...(phase.lastAttemptAt === undefined ? {} : { lastAttemptAt: phase.lastAttemptAt }),
 });
 
 export const belaboxHistoryStatusGuard = `WHERE EXISTS (

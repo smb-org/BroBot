@@ -9,9 +9,6 @@ import * as eventsubMaintenance from "../../src/worker/eventsub-subscriptions";
 import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-const requestedUrl = (input?: RequestInfo | URL): string =>
-  typeof input === "string" ? input : input instanceof URL ? input.href : input?.url ?? "";
-
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
   SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
@@ -325,7 +322,7 @@ describe("Panel read endpoints", () => {
     });
   });
 
-  it("serves the overview before its background Helix lookup finishes (#178)", async () => {
+  it("serves the overview without starting a Helix lookup (#178)", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -336,8 +333,7 @@ describe("Panel read endpoints", () => {
       "2026-09-18T00:00:00.000Z",
       "2026-09-18T00:00:00.000Z",
     );
-    let resolveHelix: ((response: Response) => void) | undefined;
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => new Promise<Response>((resolve) => { resolveHelix = resolve; }));
+    const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
     const runtime = makeStreamRefreshRuntime();
 
@@ -349,14 +345,11 @@ describe("Panel read endpoints", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ channelId: "kanal-a", streamState: null });
-    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(1); });
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
-    resolveHelix?.(new Response(JSON.stringify({ data: [{ id: "live-1" }] }), { status: 200 }));
-    await Promise.all(runtime.tasks);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(runtime.tasks).toHaveLength(0);
     await expect(database.prepare(
       "SELECT state, source FROM channel_stream_state WHERE channel_id = 'kanal-a'",
-    ).first()).resolves.toEqual({ state: "online", source: "helix" });
+    ).first()).resolves.toBeNull();
   });
 
   it("does not call Helix from the overview route when a fresh stream state row exists", async () => {
@@ -389,7 +382,7 @@ describe("Panel read endpoints", () => {
     expect(runtime.channelObject.endStreamStateRefresh).not.toHaveBeenCalled();
   });
 
-  it("records a per-channel Twitch cooldown after a stream refresh is rate-limited", async () => {
+  it("does not record a Twitch cooldown from an overview read", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -403,7 +396,6 @@ describe("Panel read endpoints", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 }));
     vi.stubGlobal("fetch", fetcher);
     const runtime = makeStreamRefreshRuntime();
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     for (let view = 0; view < 2; view++) {
       const response = await panelRouter.fetch(
@@ -412,17 +404,15 @@ describe("Panel read endpoints", () => {
         runtime.executionContext,
       );
       expect(response.status).toBe(200);
-      if (view === 0) await Promise.all(runtime.tasks);
     }
 
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(runtime.channelObject.setTwitchRateLimitRetryAfter).toHaveBeenCalledTimes(1);
-    expect(runtime.channelObject.beginStreamStateRefresh).toHaveBeenCalledTimes(1);
-    expect(warning).toHaveBeenCalledWith("Background stream-state refresh was rate-limited.", "kanal-a");
-    warning.mockRestore();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(runtime.channelObject.setTwitchRateLimitRetryAfter).not.toHaveBeenCalled();
+    expect(runtime.channelObject.beginStreamStateRefresh).not.toHaveBeenCalled();
+    expect(runtime.channelObject.endStreamStateRefresh).not.toHaveBeenCalled();
   });
 
-  it("serves stale stream state and refreshes it in the background", async () => {
+  it("serves stale stream state without refreshing it during the panel read", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
     await insertChannel(database, "kanal-a", "Alpha");
@@ -458,11 +448,14 @@ describe("Panel read endpoints", () => {
       streamStartedAt: "2026-09-23T09:00:00.000Z",
     });
     await Promise.all(runtime.tasks);
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(runtime.tasks).toHaveLength(0);
+    await expect(database.prepare(
+      "SELECT state, source FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ state: "online", source: "helix" });
   });
 
-  it("drains a committed background stream refresh when its readback fails after the response", async () => {
+  it("does not read back or commit stream refresh state from the overview route", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
     await insertChannel(database, "kanal-a", "Alpha");
@@ -512,7 +505,6 @@ describe("Panel read endpoints", () => {
       },
     }) as unknown as D1Database;
     const runtime = makeStreamRefreshRuntime();
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/overview"),
@@ -528,19 +520,14 @@ describe("Panel read endpoints", () => {
 
     expect(response.status).toBe(200);
     await Promise.all(runtime.tasks);
-    expect(streamStateReads).toBe(2);
+    expect(streamStateReads).toBe(0);
     expect((await database.prepare(
       "SELECT state FROM channel_stream_state WHERE channel_id = 'kanal-a'",
-    ).first<{ state: string }>())?.state).toBe("offline");
-    const deliveredRevisions = runtime.channelObject.reconcilePanelResources.mock.calls[0]?.[0];
-    expect(deliveredRevisions?.["channel.overview"]).toBeGreaterThan(0);
-    expect((await database.prepare(
-      "SELECT COUNT(*) AS count FROM panel_resource_pending WHERE channel_id = 'kanal-a'",
-    ).first<{ count: number }>())?.count).toBe(0);
-    warning.mockRestore();
+    ).first<{ state: string }>())?.state).toBe("online");
+    expect(runtime.channelObject.reconcilePanelResources).not.toHaveBeenCalled();
   });
 
-  it("serves stored overview controls while Helix binds a pending pause in the background", async () => {
+  it("leaves pending pause controls unchanged during an overview read", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
     await insertChannel(database, "kanal-a", "Alpha");
@@ -562,10 +549,10 @@ describe("Panel read endpoints", () => {
       "2026-09-18T00:00:00.000Z",
       "2026-09-18T00:00:00.000Z",
     );
-    const startedAt = "2026-09-23T11:59:00.000Z";
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ data: [{ id: "live-1", started_at: startedAt }] }), { status: 200 }),
-    ));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: "live-1", started_at: "2026-09-23T11:59:00.000Z" }] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetcher);
     const runtime = makeStreamRefreshRuntime();
 
     const response = await panelRouter.fetch(
@@ -581,12 +568,14 @@ describe("Panel read endpoints", () => {
       controls: { pause: { active: false, pending: true, mode: "until_stream_end" } },
     });
     await Promise.all(runtime.tasks);
+    expect(runtime.tasks).toHaveLength(0);
+    expect(fetcher).not.toHaveBeenCalled();
     await expect(database.prepare(
       "SELECT pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
-    ).first()).resolves.toEqual({ pause_stream_started_at: startedAt });
+    ).first()).resolves.toEqual({ pause_stream_started_at: null });
   });
 
-  it("stores the real Helix stream start, not the check time, after the overview response (#178)", async () => {
+  it("does not fetch or store a stream start from an overview read (#178)", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -612,9 +601,11 @@ describe("Panel read endpoints", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ channelId: "kanal-a", streamState: null });
     await Promise.all(runtime.tasks);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(runtime.tasks).toHaveLength(0);
     await expect(database.prepare(
       "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
-    ).first()).resolves.toEqual({ state: "online", started_at: "2026-09-20T10:00:00.000Z" });
+    ).first()).resolves.toBeNull();
   });
 
   it("returns the stored stream start for an EventSub-sourced online row, not its changed_at (#178)", async () => {

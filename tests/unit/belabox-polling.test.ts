@@ -2406,7 +2406,7 @@ describe("BELABOX polling", () => {
     expect(stored).toEqual({
       error_code: "network",
       sample_json: null,
-      fetch_phase_json: JSON.stringify({ consecutiveFailures: 1, fetchFailing: false }),
+      fetch_phase_json: JSON.stringify({ consecutiveFailures: 1, fetchFailing: false, lastAttemptAt: "2026-10-05T12:00:00.000Z" }),
       recent_json: "[]",
     });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE channel_id = ?")
@@ -2430,6 +2430,29 @@ describe("BELABOX polling", () => {
     vi.setSystemTime(Date.now() + 2);
     await pollOnDemand(context, fetcher);
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("backs off consecutive on-demand provider failures without writing during the pause", async () => {
+    await insertModule(database, { mode: "on_demand", intervalSeconds: 15 });
+    const { context } = alarmContext(database);
+    const fetcher = vi.fn<typeof fetch>(() => Promise.reject(new TypeError("relay unavailable")));
+
+    const first = await pollOnDemand(context, fetcher);
+    expect(first).toEqual({ ok: false, reason: "network" });
+    const afterFailure = await getBelaboxStatus(context.DB, CHANNEL_ID);
+    expect(afterFailure?.fetchPhase).toMatchObject({ consecutiveFailures: 1, lastAttemptAt: "2026-10-05T12:00:00.000Z" });
+
+    const suppressed = await pollOnDemand(context, fetcher);
+    expect(suppressed).toEqual(first);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({ revision: afterFailure?.revision });
+
+    vi.advanceTimersByTime(1_000);
+    await pollOnDemand(context, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(await getBelaboxStatus(context.DB, CHANNEL_ID)).toMatchObject({
+      fetchPhase: { consecutiveFailures: 2, lastAttemptAt: "2026-10-05T12:00:01.000Z" },
+    });
   });
 
   it("keeps accumulated enrichment for online sessions without a Twitch stream ID", async () => {
@@ -2509,6 +2532,7 @@ describe("BELABOX polling", () => {
       ).bind(CHANNEL_ID).first();
       expect(afterFailure).toEqual({ sampled_at: null, sample_json: null });
 
+      if (mode === "on_demand") vi.advanceTimersByTime(1_000);
       await fetchSample();
       const status = await getBelaboxStatus(context.DB, CHANNEL_ID);
       expect(status).toMatchObject({
@@ -2646,7 +2670,7 @@ describe("BELABOX polling", () => {
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
       await pollOnDemand(context, failing);
-      vi.setSystemTime(Date.now() + 1_000);
+      vi.advanceTimersByTime(1_000 * (2 ** attempt));
     }
     await pollOnDemand(context, () => Promise.resolve(jsonResponse(relayPayload(true))));
 

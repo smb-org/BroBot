@@ -102,6 +102,8 @@ describe("Ad settings editor declaration", () => {
     cleanup();
     renderAds(adsFetch(), "operator");
     expect(await screen.findByText("Nur Broadcaster und Verwalter dürfen Ansagen-Einstellungen ändern.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Werbeplan aktualisieren" })).toBeDisabled();
+    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen den Werbeplan aktualisieren.")).toBeInTheDocument();
     const properties = document.querySelector("dl.ui-settings-editor__properties");
     expect(properties).not.toBeNull();
     expect(within(properties as HTMLElement).getByText("Vorwarnung vor der Werbung")).toBeInTheDocument();
@@ -161,6 +163,7 @@ describe("Ad settings editor declaration", () => {
     expect(view.queryClient.getQueryState(key.queryKey)?.status).toBe("error");
     expect(screen.getByText(/Derzeit ist keine Werbung geplant\./u)).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Der Werbeplan konnte nicht geladen werden.");
+    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
     expect(toastsSnapshot().filter((toast) => toast.message === "Der Werbeplan konnte nicht geladen werden.")).toHaveLength(1);
 

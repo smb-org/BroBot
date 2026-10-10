@@ -140,7 +140,7 @@ describe("chat voting routes", () => {
     });
   });
 
-  it("schedules the close alarm when GET current finds a legacy open vote", async () => {
+  it("reads a legacy open vote without scheduling a close alarm", async () => {
     const database = await createDatabase();
     await database.prepare("UPDATE chat_votes SET legacy_written = 1 WHERE channel_id = ? AND poll_id = ?")
       .bind(CHANNEL_ID, openTextVote.id).run();
@@ -157,7 +157,7 @@ describe("chat voting routes", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "close", openTextVote.id, expect.any(Number), 1);
+    expect(scheduleModuleAlarm).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({ vote: { id: openTextVote.id, status: "open", legacyWritten: true } });
   });
 

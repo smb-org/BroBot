@@ -113,3 +113,15 @@ export const fetchCachedApiSourceJson = async (
   if (result.expiresAt !== null) await storeCachedApiPayload(db, channelId, urlHash, result.payload, result.expiresAt, now);
   return result.payload;
 };
+
+export const readCachedApiSourceJson = async (
+  db: D1Database,
+  channelId: string,
+  url: string,
+  ownOrigin: string | undefined,
+  now: number,
+): Promise<unknown> => {
+  const canonicalUrl = validateApiSourceUrl(url, ownOrigin).href;
+  const cached = await readCachedApiPayload(db, await cacheHash(channelId, canonicalUrl), now);
+  return cached?.payload ?? null;
+};

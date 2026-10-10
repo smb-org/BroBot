@@ -38,13 +38,6 @@ chatVotingRoutes.get("/current", async (context) => {
     getEnabledSettings(context.env.DB, channelId),
     channelLanguage(context.env.DB, channelId),
   ]);
-  const openVote = await repository.open(channelId);
-  if (openVote?.legacyWritten === true) {
-    await requestChatVoteClose(repository, channelId, async (pollId, deadline, ownerRevision) => {
-      const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-      await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, pollId, deadline, ownerRevision);
-    }, undefined, { pollId: openVote.id, legacyOnly: true });
-  }
   const vote = await repository.latest(channelId);
   const effectiveSettings = settings ?? DEFAULT_CHAT_VOTING_SETTINGS;
   const defaultLabels: Record<ChatVotePreset, string[]> = {

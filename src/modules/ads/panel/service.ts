@@ -41,6 +41,16 @@ export const loadAdsSchedule = async (channelId: string, signal?: AbortSignal): 
   };
 };
 
+export const refreshAdsSchedule = async (channelId: string): Promise<AdsScheduleResponse> => {
+  const csrfResponse = await fetch("/api/csrf");
+  const csrf = await json<{ token: string }>(csrfResponse);
+  const response = await fetch(`${schedulePathFor(channelId)}/refresh`, {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrf.token },
+  });
+  return json<AdsScheduleResponse>(response);
+};
+
 export const snoozeAds = async (channelId: string): Promise<AdsScheduleResponse> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);

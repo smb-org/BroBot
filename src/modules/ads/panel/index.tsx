@@ -3,7 +3,7 @@ import { useRef, useState, type ReactElement } from "react";
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import type { AdsScheduleResponse } from "../contracts";
 import { Button, EmptyCellValue, Icon, LoadState, Skeleton, notify } from "../../../dashboard/ui";
-import { loadAdsSchedule, snoozeAds } from "./service";
+import { loadAdsSchedule, refreshAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
 import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryError, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardQueryClient } from "../../../dashboard/data";
@@ -19,7 +19,7 @@ const formatTimestamp = (value: string | null, language: DashboardLanguage): str
   }).format(date);
 };
 
-export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; language?: DashboardLanguage }): ReactElement => {
+export const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId: string; language?: DashboardLanguage; canManage?: boolean }): ReactElement => {
   const labels = adsPanelTexts(language);
   const loadError = labels.loadError;
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
@@ -48,6 +48,7 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
     ? scheduleQuery.isPending ? "loading" : scheduleLoadFailed ? "error" : "loading"
     : "success";
   const [snoozeBusy, setSnoozeBusy] = useState(false);
+  const [refreshBusy, setRefreshBusy] = useState(false);
 
   const snoozeCount = schedule?.schedule.snoozeCount ?? null;
   const snoozeButtonDisabled = schedule === null || snoozeBusy || !schedule.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
@@ -76,9 +77,33 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
       setSnoozeBusy(false);
     }
   };
+  const refreshSchedule = async (): Promise<void> => {
+    if (!canManage || refreshBusy) return;
+    setRefreshBusy(true);
+    try {
+      await runModuleQueryWrite(queryClient, channelId, "ads", "schedule", () => refreshAdsSchedule(channelId), {
+        baselineRevision: null,
+        updateCache: (_current, result) => result,
+      });
+      notify({ tone: "success", message: labels.refreshSuccess });
+    } catch {
+      notify({ tone: "error", message: labels.refreshError });
+    } finally {
+      setRefreshBusy(false);
+    }
+  };
 
   return (
     <section className="module-stack" aria-label={labels.title} style={{ minHeight: "calc(var(--s10) * 24)" }}>
+      <div className="section-heading">
+        <h2>{labels.scheduleSection}</h2>
+        <Button variant="secondary" disabled={!canManage || refreshBusy} describedBy="ads-schedule-refresh-reason"
+          onClick={() => { void refreshSchedule(); }}>{labels.refreshSchedule}</Button>
+      </div>
+      <p id="ads-schedule-refresh-reason" className="lock-reason" data-testid="ads-schedule-refresh-reason"
+        style={{ height: "var(--s6)", overflow: "hidden", margin: 0 }} aria-live="polite">
+        {canManage ? "" : labels.refreshReadOnly}
+      </p>
       <LoadState status={loadStatus} minHeight="calc(var(--s10) * 24)"
         loading={<div className="module-stack" aria-label={labels.loading}>
           <Skeleton rows={4} height={34} />
@@ -91,7 +116,6 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
         refreshError={schedule !== null && scheduleLoadFailed}>
       {schedule === null ? null : <>
       <section className="config-section" aria-label={labels.scheduleSection}>
-        <div className="section-heading"><h2>{labels.scheduleSection}</h2></div>
         <p className="muted mono" title={schedule.asOf === undefined ? undefined : labels.asOf(formatTimestamp(schedule.asOf, language))}
           style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }}>
           {schedule.asOf === undefined ? "" : labels.asOf(formatTimestamp(schedule.asOf, language))}

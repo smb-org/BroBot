@@ -6,8 +6,11 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query";
 
 import { MODULES } from "../../src/modules/registry";
 import { dashboardDataKeys, queryKeys } from "../../src/dashboard/data/keys";
-import { reconcileDashboardRealtimeMessage, reconcileDashboardPanelResourceRevisions } from "../../src/dashboard/data/realtime";
+import { cancelDashboardRealtimeRetries, reconcileDashboardRealtimeMessage, reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
+import { BELABOX_POLL_ALARM_KEY, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
+import { getBelaboxStatus } from "../../src/modules/belabox/adapters/d1";
+import { handleBelaboxPollAlarm } from "../../src/modules/belabox/service";
 import { loadTextLibrary } from "../../src/modules/text_library/panel/service";
 import { authRouter } from "../../src/worker/auth/routes";
 import { eventSubChannelIdForNotification, eventSubRouter } from "../../src/worker/eventsub";
@@ -50,6 +53,7 @@ const routeHasNotifier = (
   nonPanelReads: ReadonlySet<string> = new Set(PANEL_RESOURCE_NOTIFIER_COVERAGE.nonPanelGetRoutes),
 ): boolean => {
   const routeKey = `${route.method} ${route.path}`;
+  if (route.method === "GET" && routeIsCovered(route.path, PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes)) return false;
   if (explicitRoutes.has(routeKey) || nonPanelWrites.has(routeKey) || nonPanelAllRoutes.has(routeKey)) return true;
   if (route.method === "GET") {
     return nonPanelReads.has(route.path) || routeIsCovered(route.path, PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes);
@@ -288,6 +292,7 @@ describe("panel resource revisions", () => {
     const nonPanelGetRoutes = new Set<string>(PANEL_RESOURCE_NOTIFIER_COVERAGE.nonPanelGetRoutes);
     const nonPanelWrites = new Set<string>(PANEL_RESOURCE_NOTIFIER_COVERAGE.nonPanelWriteRoutes);
     expect(new Set([...writingGetRoutes].map((path) => `GET ${path}`))).toEqual(explicitRoutes);
+    expect([...writingGetRoutes].filter((path) => routeIsCovered(path, PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes))).toEqual([]);
     const uncovered = mutations.filter((route) => !routeHasNotifier(route, routePatterns, explicitRoutes, writingGetRoutes, nonPanelWrites));
     expect(uncovered).toEqual([]);
     const unaccountedGets = assembledRoutes.filter(({ method, path }) => method === "GET" &&
@@ -325,6 +330,15 @@ describe("panel resource revisions", () => {
       routePatterns,
       explicitRoutes,
       new Set([...writingGetRoutes, unwrappedWritingGet.path]),
+    )).toBe(false);
+    const channelWritingGet = { method: "GET", path: "/api/channels/channel-a/modules/belabox/status" };
+    const hypotheticalChannelWritingGet = new Set([...writingGetRoutes, channelWritingGet.path]);
+    expect(routeNeedsNotifier(channelWritingGet, hypotheticalChannelWritingGet)).toBe(true);
+    expect(routeHasNotifier(
+      channelWritingGet,
+      routePatterns,
+      explicitRoutes,
+      hypotheticalChannelWritingGet,
     )).toBe(false);
     const unnotifiedPlatformWritingGet = { method: "GET", path: "/api/platform/writing-get" };
     expect(routeHasNotifier(
@@ -934,6 +948,139 @@ describe("panel resource revisions", () => {
       unsubscribe?.();
       writer.clear();
       reader.clear();
+      vi.unstubAllGlobals();
+      database.close();
+    }
+  });
+
+  it("keeps a connected on-demand BELABOX panel read passive after a failed sample revision", async () => {
+    const database = new TestD1Database();
+    const channelId = "belabox-readonly-revision";
+    const userId = "belabox-readonly-manager";
+    const cookieKeys = JSON.stringify({ active: { id: "cookie-v1", key: testKey(21) }, retired: [] });
+    const encryptionKeys = JSON.stringify({ active: { id: "encryption-v1", key: testKey(22) }, retired: [] });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const queryKey = moduleQueryKey(channelId, "belabox", "status");
+    const providerFetch = vi.fn<typeof fetch>(() => Promise.resolve(new Response("unavailable", { status: 503 })));
+    let statusReads = 0;
+    let environment!: Env;
+    let delivered: Readonly<Record<string, number>> = {};
+    let unsubscribe: (() => void) | undefined;
+    const requestUrl = (input: RequestInfo | URL): string =>
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const pollContext = {
+      DB: database as unknown as D1Database,
+      channelId,
+      secrets: {
+        readWithVersion: () => Promise.resolve({ value: "http://relay.belabox.net:8080/publisher", version: "ciphertext-v1" }),
+      },
+      externalFetchBudget: { claim: () => true },
+      schedule: () => Promise.resolve(),
+    } as unknown as Parameters<typeof handleBelaboxPollAlarm>[0];
+    const runModuleAlarm = vi.fn(async (
+      _moduleId: string,
+      _handlerKey: string,
+      alarmKey: string,
+      invocation?: unknown,
+    ) => {
+      await handleBelaboxPollAlarm(pollContext, alarmKey, Date.now(), undefined, providerFetch, invocation);
+      await notifyCommittedResources(environment, channelId);
+    });
+    try {
+      await insertChannel(database, channelId);
+      await insertLoginIdentityAndSession(database, userId);
+      await insertMember(database, channelId, userId, "manager");
+      await database.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+         VALUES (?, 'belabox', 1, '{"mode":"on_demand","intervalSeconds":15}')`,
+      ).bind(channelId).run();
+      await database.prepare(
+        `INSERT INTO module_secrets
+          (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
+         VALUES (?, 'belabox', ?, 'ciphertext-v1', 'test', 1, '2026-10-10T00:00:00.000Z', ?)`,
+      ).bind(channelId, BELABOX_STATS_URL_SECRET, userId).run();
+      await database.prepare(
+        `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+         VALUES (?, 'online', '2026-10-10T00:00:00.000Z', 'eventsub', '2026-10-10T00:00:00.000Z', 'stream-1')`,
+      ).bind(channelId).run();
+
+      const channelObject = {
+        getPanelResourceRevisions: () => Promise.resolve({}),
+        reconcilePanelResources: async (revisions: Readonly<Record<string, number>>) => {
+          const changed = Object.keys(revisions).filter((resource) => (revisions[resource] ?? 0) > (delivered[resource] ?? 0));
+          delivered = { ...revisions };
+          if (changed.length > 0) {
+            await reconcileDashboardRealtimeMessage(queryClient, panelResourceChangedMessage(channelId, changed, revisions));
+          }
+        },
+        runModuleAlarm,
+      };
+      environment = {
+        DB: database as unknown as D1Database,
+        SESSION_COOKIE_KEYS: cookieKeys,
+        SESSION_ENCRYPTION_KEYS: encryptionKeys,
+        TOKEN_ENCRYPTION_KEYS: encryptionKeys,
+        CHANNEL: {
+          idFromName: (id: string) => id,
+          get: () => channelObject,
+        },
+      } as unknown as Env;
+      const sessionCookie = await createSessionCookie(
+        { sessionId: `session-${userId}` }, cookieKeys, encryptionKeys,
+      );
+      const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url.includes("/modules/belabox/status")) statusReads += 1;
+        const headers = new Headers(input instanceof Request ? input.headers : undefined);
+        new Headers(init?.headers).forEach((value, name) => { headers.set(name, value); });
+        headers.set("Cookie", `__Host-brobot_session=${sessionCookie}`);
+        return panelRouter.fetch(new Request(new URL(url, "https://brobot.example"), { ...init, headers }), environment);
+      });
+      vi.stubGlobal("fetch", fetcher);
+      setDashboardRealtimeStatus(channelId, "connected");
+      queryClient.setQueryData(queryKey, { persisted: true });
+      const observer = new QueryObserver(queryClient, {
+        queryKey,
+        queryFn: async () => {
+          const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/belabox/status`);
+          if (!response.ok) throw new Error("BELABOX status read failed.");
+          return await response.json();
+        },
+        staleTime: Infinity,
+        refetchInterval: false,
+        retry: false,
+      });
+      unsubscribe = observer.subscribe(() => undefined);
+      await reconcileDashboardPanelResourceRevisions(queryClient, channelId);
+
+      await handleBelaboxPollAlarm(
+        pollContext,
+        BELABOX_POLL_ALARM_KEY,
+        Date.now(),
+        undefined,
+        providerFetch,
+        { reason: "on_demand" },
+      );
+      const revisionsBeforeStatusRead = await readPanelResourceRevisions(database as unknown as D1Database, channelId);
+      await notifyCommittedResources(environment, channelId);
+      await vi.waitFor(() => { expect(statusReads).toBeGreaterThan(0); });
+      const readsAfterRevision = statusReads;
+      await new Promise<void>((resolvePromise) => { setTimeout(resolvePromise, 4_200); });
+
+      expect(providerFetch).toHaveBeenCalledOnce();
+      expect(runModuleAlarm).not.toHaveBeenCalled();
+      expect(readsAfterRevision).toBeLessThanOrEqual(2);
+      expect(statusReads).toBeLessThanOrEqual(2);
+      expect(await readPanelResourceRevisions(database as unknown as D1Database, channelId)).toEqual(revisionsBeforeStatusRead);
+      expect(await getBelaboxStatus(database as unknown as D1Database, channelId)).toMatchObject({
+        errorCode: "http_5xx",
+        fetchPhase: { consecutiveFailures: 1 },
+      });
+    } finally {
+      cancelDashboardRealtimeRetries(queryClient, channelId);
+      setDashboardRealtimeStatus(channelId, "offline");
+      unsubscribe?.();
+      queryClient.clear();
       vi.unstubAllGlobals();
       database.close();
     }

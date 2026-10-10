@@ -116,7 +116,7 @@ describe("Votekick routes", () => {
 
     expect(own.status).toBe(200);
     await expect(own.json()).resolves.toMatchObject({ running: { id: "ballot-a" }, votekicks: [{ id: "ballot-a" }] });
-    expect(runModuleAlarm).toHaveBeenCalledWith("votekick", "close", "close:ballot-a");
+    expect(runModuleAlarm).not.toHaveBeenCalled();
     expect(foreign.status).toBe(403);
     expect(foreignCancel.status).toBe(403);
     expect(foreignRow).toEqual({ status: "running" });
@@ -199,7 +199,7 @@ describe("Votekick routes", () => {
     expect(revision?.revision).toBeGreaterThan(0);
   });
 
-  it("reconciles a running votekick through its alarm handler on panel access", async () => {
+  it("reads a running votekick without invoking its alarm handler", async () => {
     const database = await databaseFor();
     await insertLoginIdentityAndSession(database, "operator-a");
     await insertMember(database, "channel-a", "operator-a", "operator");
@@ -211,6 +211,6 @@ describe("Votekick routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(runModuleAlarm).toHaveBeenCalledWith("votekick", "close", "close:ballot-panel");
+    expect(runModuleAlarm).not.toHaveBeenCalled();
   });
 });

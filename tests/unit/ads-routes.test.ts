@@ -255,18 +255,51 @@ describe("ad routes", () => {
     expect(oversized.status).toBe(400);
   });
 
-  it("re-arms the prewarning alarm on a successful schedule fetch and writes no event", async () => {
+  it("keeps a cold schedule read passive until a manager requests a refresh", async () => {
     const environment = await setup("operator");
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody("2026-09-21T12:00:00Z"), { status: 200 })));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody("2026-09-21T12:00:00Z"), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
       environment,
     );
 
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ error: "ad_schedule_read_failed", reason: "cache_empty" });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(schedule).not.toHaveBeenCalled();
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log").first()).resolves.toEqual({ count: 0 });
+  });
+
+  it("refreshes the schedule only through an authorized explicit action", async () => {
+    const environment = await setup("manager");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody("2026-09-21T12:00:00Z"), { status: 200 })));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule/refresh", "POST"),
+      environment,
+    );
+
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ schedule: { nextAdAt: "2026-09-21T12:00:00Z" } });
     expect(schedule).toHaveBeenCalledWith();
     await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log").first()).resolves.toEqual({ count: 0 });
+  });
+
+  it("keeps schedule refresh disabled for an operator", async () => {
+    const environment = await setup("operator");
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule/refresh", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(schedule).not.toHaveBeenCalled();
   });
 
   it("serves a fresh cached schedule without calling Helix", async () => {
@@ -289,107 +322,69 @@ describe("ad routes", () => {
     expect(schedule).not.toHaveBeenCalled();
   });
 
-  it("coalesces stale schedule refreshes and serves the last good value while they run", async () => {
+  it("serves a stale schedule without refreshing or reconciling it on GET", async () => {
     const cached = {
       schedule: { nextAdAt: "2026-09-24T18:00:00.000Z", duration: 60, lastAdAt: null, prerollFreeTime: 120, snoozeCount: 1, snoozeRefreshAt: null },
       asOf: new Date(Date.now() - 61_000).toISOString(),
     } satisfies { schedule: AdsSchedule; asOf: string };
     const environment = await setup("operator", ["channel:read:ads", "channel:manage:ads"], cached);
-    let resolveHelix: ((response: Response) => void) | undefined;
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => new Promise<Response>((resolve) => { resolveHelix = resolve; }));
+    const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
-    const tasks: Promise<unknown>[] = [];
-    const executionContext = {
-      waitUntil: (promise: Promise<unknown>) => { tasks.push(promise); },
-      passThroughOnException: () => undefined,
-    } as unknown as ExecutionContext;
-    const request = () => requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule");
-
-    const [left, right] = await Promise.all([
-      request().then((input) => panelRouter.fetch(input, environment, executionContext)),
-      request().then((input) => panelRouter.fetch(input, environment, executionContext)),
-    ]);
-    expect(left.status).toBe(200);
-    expect(right.status).toBe(200);
-    await expect(left.json()).resolves.toMatchObject(cached);
-    await expect(right.json()).resolves.toMatchObject(cached);
-    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(1); });
-    expect(tasks).toHaveLength(2);
-    resolveHelix?.(new Response(scheduleBody("2026-09-24T18:30:00.000Z"), { status: 200 }));
-    await Promise.all(tasks);
-    expect(schedule).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the cached schedule and as-of time when a stale refresh is rate-limited", async () => {
-    const cached = {
-      schedule: { nextAdAt: "2026-09-24T18:00:00.000Z", duration: 60, lastAdAt: null, prerollFreeTime: 120, snoozeCount: 1, snoozeRefreshAt: null },
-      asOf: new Date(Date.now() - 61_000).toISOString(),
-    } satisfies { schedule: AdsSchedule; asOf: string };
-    const environment = await setup("operator", ["channel:read:ads", "channel:manage:ads"], cached);
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 }));
-    vi.stubGlobal("fetch", fetcher);
-    const tasks: Promise<unknown>[] = [];
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const executionContext = {
-      waitUntil: (promise: Promise<unknown>) => { tasks.push(promise); },
-      passThroughOnException: () => undefined,
-    } as unknown as ExecutionContext;
-
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
       environment,
-      executionContext,
     );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject(cached);
-    await Promise.all(tasks);
+    expect(fetcher).not.toHaveBeenCalled();
     expect(schedule).not.toHaveBeenCalled();
-    expect(warning).toHaveBeenCalledWith("Background ad schedule refresh did not complete.", "rate_limited");
-
-    const nextViewTasks: Promise<unknown>[] = [];
-    const nextExecutionContext = {
-      waitUntil: (promise: Promise<unknown>) => { nextViewTasks.push(promise); },
-      passThroughOnException: () => undefined,
-    } as unknown as ExecutionContext;
-    const nextResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
-      environment,
-      nextExecutionContext,
-    );
-
-    expect(nextResponse.status).toBe(200);
-    await expect(nextResponse.json()).resolves.toMatchObject(cached);
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(nextViewTasks).toHaveLength(0);
-    warning.mockRestore();
   });
 
-  it("keeps a cold unauthorized schedule read mapped to 403", async () => {
-    const environment = await setup("operator");
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
-      JSON.stringify({ message: "unauthorized" }),
-      { status: 401 },
-    )));
+  it("does not start a background schedule refresh for a stale cache", async () => {
+    const cached = {
+      schedule: { nextAdAt: "2026-09-24T18:00:00.000Z", duration: 60, lastAdAt: null, prerollFreeTime: 120, snoozeCount: 1, snoozeRefreshAt: null },
+      asOf: new Date(Date.now() - 61_000).toISOString(),
+    } satisfies { schedule: AdsSchedule; asOf: string };
+    const environment = await setup("operator", ["channel:read:ads", "channel:manage:ads"], cached);
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
       environment,
     );
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "ad_schedule_read_failed", reason: "unauthorized" });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject(cached);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(schedule).not.toHaveBeenCalled();
   });
 
-  it("keeps schedule-read failures out of D1 diagnostics", async () => {
+  it("does not contact Twitch while a cold schedule remains uncached", async () => {
     const environment = await setup("operator");
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
+      environment,
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ error: "ad_schedule_read_failed", reason: "cache_empty" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("keeps explicit schedule-refresh failures out of D1 diagnostics", async () => {
+    const environment = await setup("manager");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "Twitch nicht erreichbar" }),
       { status: 429 },
     )));
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule/refresh", "POST"),
       environment,
     );
 
@@ -401,12 +396,12 @@ describe("ad routes", () => {
     expect(body.detail.twitchMessage).toBeUndefined();
   });
 
-  it("handles an empty successful schedule without an event", async () => {
-    const environment = await setup("operator");
+  it("handles an empty successful explicit refresh without an event", async () => {
+    const environment = await setup("manager");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody(null), { status: 200 })));
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule/refresh", "POST"),
       environment,
     );
 

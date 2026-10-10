@@ -917,6 +917,8 @@ export interface ModuleTemplateConditionContext {
   publicOrigin?: string;
   /** Shared across the providers involved in a single template render. */
   externalFetchBudget?: ModuleExternalFetchBudget;
+  /** Prevents provider lookups or cache fills when resolving a panel read. */
+  readOnly?: boolean;
   now: number;
   commandInput?: { commandName: string; arguments: string; usageText?: string };
   /** Records a source label when a condition uses values from this module. */
@@ -1165,6 +1167,7 @@ export interface ModuleRouteVariables {
     channelId: string,
     ids: readonly string[],
     now: number,
+    options?: { readOnly?: boolean },
   ) => Promise<Readonly<Record<string, string>>>;
   publishModuleOverlayMessage: (
     channelId: string,

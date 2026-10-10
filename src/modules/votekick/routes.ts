@@ -22,10 +22,6 @@ votekickRoutes.get("/votekicks", async (context) => {
   const channelId = requiredParam(context.req.param("channelId"), "channelId");
   const now = new Date().toISOString();
   const repository = createVotekickRepository(context.env.DB);
-  const running = await repository.running(channelId);
-  if (running !== null) {
-    await context.get("runModuleAlarm")(channelId, VOTEKICK_MODULE_ID, "close", `close:${running.id}`);
-  }
   const votekicks = await repository.listRecent(channelId, recentCutoff(now));
   return context.json({ running: votekicks.find((item) => item.status === "running") ?? null, votekicks, now });
 });
