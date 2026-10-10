@@ -91,4 +91,39 @@ describe("chat voting tally state", () => {
     const oldClose = { pollId: "poll-a", status: "closed", revision: 0, counts: [3, 1], openedAt: bootstrap.openedAt };
     expect(mergeTallyRealtimeState(newer, oldClose)).toBe(newer);
   });
+
+  it("accepts legacy preset payloads and new kind payloads in the same open overlay", () => {
+    const legacy = {
+      pollId: "legacy-poll",
+      openedAt: "2026-10-04T10:00:00.000Z",
+      status: "open",
+      preset: "digit_01",
+      optionCount: 2,
+      labels: ["No", "Yes"],
+      counts: [3, 7],
+      revision: 4,
+    };
+    const next = mergeTallyRealtimeState(legacy, {
+      pollId: "legacy-poll",
+      openedAt: legacy.openedAt,
+      status: "open",
+      kind: "options",
+      preset: "options_n",
+      optionCount: 2,
+      labels: ["No", "Yes"],
+      counts: [4, 8],
+      revision: 5,
+    });
+    expect(next).toMatchObject({ kind: "options", preset: "options_n", labels: ["No", "Yes"], counts: [4, 8] });
+
+    const newPayloadWithoutCompatibilityPreset = mergeTallyRealtimeState(null, {
+      pollId: "new-poll",
+      kind: "options",
+      optionCount: 2,
+      labels: ["Tea", "Coffee"],
+      counts: [1, 2],
+      revision: 1,
+    });
+    expect(newPayloadWithoutCompatibilityPreset).toMatchObject({ kind: "options", counts: [1, 2] });
+  });
 });

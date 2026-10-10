@@ -4,6 +4,8 @@ import type { ModuleOverlayElementProps } from "../../contract";
 import { rankVoteTerms } from "../domain";
 import { chatVotingOverlayLabels } from "./locale";
 import type { TallyState } from "./tally-state";
+import { chatVotingKindForPreset, chatVotingPresetForKind } from "../contracts";
+import type { ChatVotingKind, ChatVotingPreset } from "../contracts";
 import { OverlayTally, OverlayTallyOptions, type OverlayTallyRow } from "../../../overlay/tally/OverlayTally";
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -24,6 +26,13 @@ const parseState = (value: unknown): TallyState | null => {
     return term !== null && typeof term.term === "string" && Array.from(term.term).length <= 25 &&
       isNonNegativeInteger(term.count) && term.count > 0 && typeof term.approved === "boolean";
   }) ? state.terms as TallyState["terms"] : undefined;
+  const validPreset = state.preset === "yes_no" || state.preset === "scale_5" || state.preset === "options_n" ||
+    state.preset === "digit_01" || state.preset === "digit_12" || state.preset === "free_text";
+  const validKind = state.kind === "yes_no" || state.kind === "options" || state.kind === "free_text";
+  const storedPreset = validPreset ? state.preset as ChatVotingPreset : undefined;
+  const kind: ChatVotingKind | undefined = validKind ? state.kind as ChatVotingKind
+    : storedPreset === undefined ? undefined : chatVotingKindForPreset(storedPreset);
+  const preset = storedPreset ?? (kind === undefined ? undefined : chatVotingPresetForKind(kind));
   return {
     pollId: state.pollId,
     ...(typeof state.openedAt === "string" ? { openedAt: state.openedAt } : {}),
@@ -34,9 +43,8 @@ const parseState = (value: unknown): TallyState | null => {
     ...(state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80 ? { title: state.title } : {}),
     ...(state.status === "open" || state.status === "closed" ? { status: state.status } : {}),
     ...(labels === undefined ? {} : { labels }),
-    ...(state.preset === "yes_no" || state.preset === "scale_5" || state.preset === "options_n" ||
-      state.preset === "digit_01" || state.preset === "digit_12" || state.preset === "free_text"
-      ? { preset: state.preset } : {}),
+    ...(kind === undefined ? {} : { kind }),
+    ...(preset === undefined ? {} : { preset }),
     ...(typeof state.optionCount === "number" && Number.isInteger(state.optionCount) ? { optionCount: state.optionCount } : {}),
     ...(state.textMode === "first_word" || state.textMode === "whole_message" || state.textMode === null
       ? { textMode: state.textMode } : {}),
@@ -52,7 +60,7 @@ const parseState = (value: unknown): TallyState | null => {
 const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
   const current = useMemo(() => parseState(state), [state]);
   const labels = chatVotingOverlayLabels(language);
-  if (current === null || current.counts.length === 0 && current.preset !== "free_text") return null;
+  if (current === null || current.counts.length === 0 && current.kind !== "free_text") return null;
 
   const closed = current.status === "closed";
   const countdownEnabled = config.showCountdown !== false;
@@ -73,14 +81,14 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
   const visibleTextTerms = current.termFilterReady === true
     ? current.terms ?? []
     : (current.terms ?? []).filter((entry) => entry.approved);
-  const textTerms = current.preset === "free_text" ? rankVoteTerms(visibleTextTerms) : [];
+  const textTerms = current.kind === "free_text" ? rankVoteTerms(visibleTextTerms) : [];
   const textRows: OverlayTallyRow[] = textTerms.slice(0, 5).map((entry) => ({
     id: entry.term,
     label: entry.approved ? entry.term : "?",
     count: entry.count,
     title: entry.approved ? entry.term : "?",
   }));
-  const options = current.preset === "free_text" ? textRows : standardRows;
+  const options = current.kind === "free_text" ? textRows : standardRows;
   const textTotal = visibleTextTerms.reduce((sum, entry) => sum + entry.count, 0);
 
   return <OverlayTally
@@ -100,10 +108,10 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
       rows={options}
       layout={layout}
       showPercent={config.showPercent !== false}
-      variant={current.preset === "free_text" ? "terms" : "standard"}
-      emptySlots={current.preset === "free_text" ? 5 : 0}
+      variant={current.kind === "free_text" ? "terms" : "standard"}
+      emptySlots={current.kind === "free_text" ? 5 : 0}
       classPrefix="chat-voting-tally"
-      {...(current.preset === "free_text" ? {
+      {...(current.kind === "free_text" ? {
         totalCount: textTotal,
         more: { label: labels.more, count: current.more ?? 0, reserve: true },
       } : {})}

@@ -1,10 +1,13 @@
 import type { ModuleMutationAuthorization } from "../contract";
-import type { ChatVote, ChatVoteCloseReason, ChatVoteDraft, ChatVoteTerm, ChatVotingPreset, ChatVotingTextMode } from "./contracts";
+import { chatVotingKindForPreset, chatVotingPresetForKind } from "./contracts";
+import type { ChatVote, ChatVoteCloseReason, ChatVoteDraft, ChatVoteTerm, ChatVotingKind, ChatVotingPreset, ChatVotingTextMode } from "./contracts";
 
 interface ChatVoteRow {
   channel_id: string;
   poll_id: string;
-  preset: ChatVotingPreset;
+  kind: ChatVotingKind | null;
+  preset: ChatVotingPreset | null;
+  legacy_written: number;
   option_count: number;
   labels_json: string;
   title: string | null;
@@ -57,28 +60,34 @@ const parseTermArray = (value: string | null): ChatVoteTerm[] | null => {
   } catch { return null; }
 };
 
-const mapRow = (row: ChatVoteRow): ChatVote => ({
-  id: row.poll_id,
-  channelId: row.channel_id,
-  preset: row.preset,
-  optionCount: row.option_count,
-  labels: parseStringArray(row.labels_json) ?? [],
-  title: row.title,
-  textMode: row.text_mode,
-  termFilterReady: row.term_filter_ready === null ? null : row.term_filter_ready === 1,
-  status: row.status,
-  openedAt: row.opened_at,
-  closesAt: row.closes_at,
-  requestedDurationSeconds: row.requested_duration_seconds,
-  closedAt: row.closed_at,
-  closeReason: row.close_reason,
-  counts: parseNumberArray(row.counts_json),
-  voterCount: row.voter_count,
-  textResults: parseTermArray(row.text_results_json),
-  moreTerms: row.more_terms,
-});
+const mapRow = (row: ChatVoteRow): ChatVote => {
+  const kind = row.kind ?? (row.preset === null ? "yes_no" : chatVotingKindForPreset(row.preset));
+  const preset = row.preset ?? chatVotingPresetForKind(kind);
+  return {
+    id: row.poll_id,
+    channelId: row.channel_id,
+    kind,
+    preset,
+    legacyWritten: row.legacy_written === 1,
+    optionCount: row.option_count,
+    labels: parseStringArray(row.labels_json) ?? [],
+    title: row.title,
+    textMode: row.text_mode,
+    termFilterReady: row.term_filter_ready === null ? null : row.term_filter_ready === 1,
+    status: row.status,
+    openedAt: row.opened_at,
+    closesAt: row.closes_at,
+    requestedDurationSeconds: row.requested_duration_seconds,
+    closedAt: row.closed_at,
+    closeReason: row.close_reason,
+    counts: parseNumberArray(row.counts_json),
+    voterCount: row.voter_count,
+    textResults: parseTermArray(row.text_results_json),
+    moreTerms: row.more_terms,
+  };
+};
 
-export const chatVoteSelectColumns = `channel_id, poll_id, preset, option_count, labels_json, status,
+export const chatVoteSelectColumns = `channel_id, poll_id, kind, preset, legacy_written, option_count, labels_json, status,
                                       title, opened_at, closes_at, requested_duration_seconds, closed_at,
                                       close_reason, counts_json, voter_count, text_mode, text_results_json, more_terms,
                                       term_filter_ready`;
@@ -96,7 +105,7 @@ export interface ChatVotingRepository {
     authorization: ModuleMutationAuthorization,
   ): Promise<{ authorized: boolean; changed: boolean }>;
   insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization): Promise<boolean>;
-  requestManualClose(channelId: string, pollId: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
+  requestManualClose(channelId: string, pollId: string, authorization?: ModuleMutationAuthorization, legacyOnly?: boolean): Promise<boolean>;
   finish(
     channelId: string,
     pollId: string,
@@ -154,12 +163,13 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `INSERT INTO chat_votes
-         (channel_id, poll_id, preset, option_count, labels_json, title, text_mode, term_filter_ready, status, opened_at, closes_at,
+         (channel_id, poll_id, kind, preset, legacy_written, option_count, labels_json, title, text_mode, term_filter_ready, status, opened_at, closes_at,
           requested_duration_seconds, close_reason)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
+       SELECT ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
     ).bind(
       vote.channelId,
       vote.id,
+      vote.kind,
       vote.preset,
       vote.optionCount,
       JSON.stringify(vote.labels),
@@ -175,13 +185,13 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     const result = await statement.run();
     return result.meta.changes > 0;
   },
-  async requestManualClose(channelId, pollId, authorization) {
+  async requestManualClose(channelId, pollId, authorization, legacyOnly = false) {
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `UPDATE chat_votes
           SET close_reason = 'manual'
         WHERE channel_id = ? AND poll_id = ? AND status = 'open'
-          AND close_reason IN ('timer', 'limit', 'manual') ${guard}`,
+          AND close_reason IN ('timer', 'limit', 'manual') ${legacyOnly ? "AND legacy_written = 1" : ""} ${guard}`,
     ).bind(channelId, pollId, ...(authorization?.values ?? []));
     const result = await statement.run();
     return result.meta.changes > 0;

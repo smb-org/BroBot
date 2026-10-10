@@ -799,7 +799,7 @@ export type BallotFinalizeResult = Omit<BallotSnapshot, "outcome"> & { outcome: 
 /** Ballot access already bound by the host to one channel and one module. */
 export interface ModuleBallotAccess {
   open: (ballotId: string, optionCount: number, expiresAt: number, rule?: BallotFinalizeRule, termFilter?: BallotTermFilter) => Promise<BallotOpenResult>;
-  cast: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
+  cast: (ballotId: string, userId: string, choice: number, options?: { onlyIfNew?: boolean }) => Promise<BallotCastResult>;
   /** Casts a normalized text term while storing only the ballot-local voter hash. */
   castTerm?: (ballotId: string, userId: string, term: string, matchText?: string) => Promise<BallotCastResult>;
   /** Refreshes a term ballot's blocked-term filter and removes matching aggregate terms. */

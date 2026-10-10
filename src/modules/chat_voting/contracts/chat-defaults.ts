@@ -33,7 +33,8 @@ const freeTextOptionCatalog = {
 export const chatVotingFreeTextOptionText = (language: ModuleLanguage, mode: ChatVotingTextMode | null | undefined): string =>
   mode === "whole_message" ? freeTextOptionCatalog[language].wholeMessage : freeTextOptionCatalog[language].firstWord;
 
-type ChatTextKey = "help" | "busy" | "started" | "result" | "startFailed" | "noOpenVote" | "closing";
+type ChatTextKey = "help" | "busy" | "started" | "result" | "startFailed" | "noOpenVote" | "closing" |
+  "noPreviousVote" | "invalidQuestion" | "invalidQuestionTooLong" | "invalidAnswerCount" | "invalidLabels" | "invalidDuration";
 type ChatTextCatalog = Readonly<Record<Exclude<ChatTextKey, "started" | "result">, string>> & {
   started: (preset: ChatVotePreset, count: number, textMode: ChatVotingTextMode | null, title: string | null) => string;
   result: (title: string | null, result: string) => string;
@@ -41,7 +42,7 @@ type ChatTextCatalog = Readonly<Record<Exclude<ChatTextKey, "started" | "result"
 
 const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
   de: {
-    help: "Nutze !vote yesno [Frage], !vote scale [Frage], !vote 01 [Frage], !vote 12 [Frage], !vote 2–9 [Frage], !vote text [word|message] [Frage] oder !vote end.",
+    help: "Nutze !vote yesno|scale|01|12 [Frage], !vote 2–9 [Frage], !vote text [word|message] [Frage], !vote Frage? | Antwort 1 | Antwort 2 [| Dauer], !vote again oder !vote end.",
     busy: "Es läuft bereits eine Abstimmung.",
     started: (preset, count, mode, title) => {
       const intro = title === null
@@ -57,9 +58,15 @@ const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
     startFailed: "Die Abstimmung konnte nicht gestartet werden.",
     noOpenVote: "Es läuft gerade keine Abstimmung.",
     closing: "Die Abstimmung wird geschlossen.",
+    noPreviousVote: "Es gibt keine vorherige Abstimmung zum Wiederholen.",
+    invalidQuestion: "Eine eigene Abstimmung braucht eine Frage mit abschließendem Fragezeichen.",
+    invalidQuestionTooLong: "Die Frage darf höchstens 80 Zeichen lang sein.",
+    invalidAnswerCount: "Eine Abstimmung braucht zwei bis neun Antworten.",
+    invalidLabels: "Antworten müssen eindeutig, nicht leer und höchstens 32 Zeichen lang sein.",
+    invalidDuration: "Die Dauer muss zwischen einer Sekunde und vier Stunden liegen.",
   },
   en: {
-    help: "Use !vote yesno [question], !vote scale [question], !vote 01 [question], !vote 12 [question], !vote 2–9 [question], !vote text [word|message] [question], or !vote end.",
+    help: "Use !vote yesno|scale|01|12 [question], !vote 2–9 [question], !vote text [word|message] [question], !vote Question? | Answer 1 | Answer 2 [| duration], !vote again, or !vote end.",
     busy: "A vote is already in progress.",
     started: (preset, count, mode, title) => {
       const intro = title === null
@@ -75,6 +82,12 @@ const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
     startFailed: "The vote could not be started.",
     noOpenVote: "There is no vote in progress.",
     closing: "The vote is closing.",
+    noPreviousVote: "There is no previous vote to repeat.",
+    invalidQuestion: "A custom vote needs a question ending in a question mark.",
+    invalidQuestionTooLong: "The question can be at most 80 characters long.",
+    invalidAnswerCount: "A vote needs two to nine answers.",
+    invalidLabels: "Answers must be unique, nonempty, and at most 32 characters long.",
+    invalidDuration: "Duration must be from one second to four hours.",
   },
 };
 

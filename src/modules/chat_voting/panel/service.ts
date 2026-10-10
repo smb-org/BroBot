@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { ChatVote, ChatVoteCloseReason, ChatVotePreset, ChatVoteTerm, ChatVotingTextMode } from "../contracts";
+import type { ChatVote, ChatVoteCloseReason, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "../contracts";
 
 export interface ChatVotingPanelState {
   vote: ChatVote | null;
@@ -9,7 +9,6 @@ export interface ChatVotingPanelState {
   moreTerms: number | null;
   hasOpenBallot: boolean;
   defaultDurationSeconds: number;
-  defaultLabels: Record<ChatVotePreset, string[]>;
 }
 
 const readJson = async <Value>(response: Response): Promise<Value> => {
@@ -36,7 +35,7 @@ const csrfHeader = async (): Promise<string> => {
 };
 
 export interface StartChatVotingOptions {
-  preset: ChatVotePreset;
+  kind: ChatVotingKind;
   optionCount?: number;
   durationSeconds: number;
   textMode?: ChatVotingTextMode;

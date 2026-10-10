@@ -34,13 +34,29 @@ const applyMigrations = async (): Promise<void> => {
     // Strip line comments first: a semicolon inside a comment would otherwise
     // split the statement mid-sentence, and D1 would get a fragment with no
     // statement ("SQL code did not contain a statement").
-    const statements = (migrationSources[path] ?? "")
+    const migrationSql = (migrationSources[path] ?? "")
       .split(/\r?\n/)
-      .map((zeile) => zeile.replace(/^\s*--.*$/, ""))
+      .map((line) => line.replace(/^\s*--.*$/, ""))
       .join("\n")
-      .split(";")
-      .map((statement) => statement.trim())
-      .filter((statement) => statement.length > 0);
+      .split(";");
+    const statements: string[] = [];
+    let triggerStatement: string[] | null = null;
+    for (const segment of migrationSql) {
+      const statement = segment.trim();
+      if (statement.length === 0) continue;
+      if (triggerStatement !== null) {
+        if (statement.toUpperCase() === "END") {
+          statements.push(`${triggerStatement.join(";")};${statement}`);
+          triggerStatement = null;
+        } else {
+          triggerStatement.push(statement);
+        }
+      } else if (/^CREATE\s+TRIGGER\b/i.test(statement)) {
+        triggerStatement = [statement];
+      } else {
+        statements.push(statement);
+      }
+    }
     for (const statement of statements) {
       await database.prepare(statement).run();
     }
@@ -135,7 +151,7 @@ describe("worker skeleton", () => {
     it("checks the schema by highest migration number, not by application order", async () => {
       const database = (env as unknown as { DB: D1Database }).DB;
       const status = async () => (await exports.default.fetch(new Request("http://localhost/healthz"))).status;
-      const sentinel: string = "0045_chat_voting_title.sql";
+      const sentinel: string = "0046_chat_voting_kind.sql";
       const original = (await database.prepare("SELECT name FROM d1_migrations WHERE name LIKE '0040_%' OR name = ?")
         .bind(sentinel).all<{ name: string }>()).results.map((row) => row.name);
       const reinsert = async (names: string[]): Promise<void> => {
@@ -146,7 +162,7 @@ describe("worker skeleton", () => {
         }
       };
       try {
-        // 0040 applied last (highest id) but the highest number is still 0045.
+        // 0040 applied last (highest id) but the highest number is still 0046.
         await reinsert(original.filter((name) => name === sentinel).concat(original.filter((name) => name !== sentinel)));
         expect(await status()).toBe(200);
 

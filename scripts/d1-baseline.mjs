@@ -29,7 +29,7 @@ export const generateBaseline = () => {
       }
     }
     const objects = database.prepare(
-      "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
+      "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name",
     ).all();
     return objects.map((object) => statementWithTerminator(object.sql)).join("\n\n");
   } finally {

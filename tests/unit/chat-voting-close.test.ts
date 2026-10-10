@@ -26,7 +26,9 @@ describe("chat voting close service", () => {
     const vote: ChatVoteDraft = {
       id: "fictional-poll",
       channelId: "fictional-channel",
+      kind: "yes_no",
       preset: "yes_no",
+      legacyWritten: false,
       optionCount: 2,
       labels: ["Yes", "No"],
       title,
@@ -303,7 +305,9 @@ describe("chat voting close service", () => {
     const vote: ChatVoteDraft = {
       id: "fictional-poll",
       channelId: "fictional-channel",
+      kind: preset === "free_text" ? "free_text" : preset === "yes_no" ? "yes_no" : "options",
       preset,
+      legacyWritten: false,
       optionCount,
       labels,
       title,

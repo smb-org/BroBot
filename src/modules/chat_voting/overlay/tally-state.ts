@@ -1,5 +1,5 @@
 import type { BallotTermCount } from "../../contract";
-import type { ChatVotingPreset, ChatVotingTextMode } from "../contracts";
+import type { ChatVotingKind, ChatVotingPreset, ChatVotingTextMode } from "../contracts";
 
 export interface TallyState {
   pollId: string;
@@ -9,6 +9,7 @@ export interface TallyState {
   title?: string | null;
   status?: "open" | "closed";
   labels?: readonly string[];
+  kind?: ChatVotingKind;
   preset?: ChatVotingPreset;
   optionCount?: number;
   textMode?: ChatVotingTextMode | null;
@@ -33,6 +34,7 @@ const isTallyState = (value: unknown): value is TallyState => {
       typeof state.requestedDurationSeconds === "number" && Number.isSafeInteger(state.requestedDurationSeconds) && state.requestedDurationSeconds > 0) &&
     (state.title === undefined || state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80) &&
     (state.labels === undefined || Array.isArray(state.labels) && state.labels.every((label) => typeof label === "string")) &&
+    (state.kind === undefined || state.kind === "yes_no" || state.kind === "options" || state.kind === "free_text") &&
     (state.preset === undefined || state.preset === "yes_no" || state.preset === "scale_5" || state.preset === "options_n" ||
       state.preset === "digit_01" || state.preset === "digit_12" || state.preset === "free_text") &&
     (state.optionCount === undefined || typeof state.optionCount === "number" && Number.isInteger(state.optionCount) && state.optionCount >= 0 && state.optionCount <= 9) &&

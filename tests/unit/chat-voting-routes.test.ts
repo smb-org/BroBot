@@ -16,7 +16,9 @@ const databases: TestD1Database[] = [];
 const openTextVote: ChatVoteDraft = {
   id: "current-text-poll",
   channelId: CHANNEL_ID,
+  kind: "free_text",
   preset: "free_text",
+  legacyWritten: false,
   optionCount: 0,
   labels: [],
   title: null,
@@ -138,6 +140,27 @@ describe("chat voting routes", () => {
     });
   });
 
+  it("schedules the close alarm when GET current finds a legacy open vote", async () => {
+    const database = await createDatabase();
+    await database.prepare("UPDATE chat_votes SET legacy_written = 1 WHERE channel_id = ? AND poll_id = ?")
+      .bind(CHANNEL_ID, openTextVote.id).run();
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
+    const namespace = {
+      idFromName: vi.fn(() => ({})),
+      get: vi.fn(() => ({ scheduleModuleAlarm })),
+    } as unknown as Env["CHANNEL"];
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/current`), {
+      DB: database as unknown as D1Database,
+      CHANNEL: namespace,
+    });
+
+    expect(response.status).toBe(200);
+    expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "close", openTextVote.id, expect.any(Number), 1);
+    await expect(response.json()).resolves.toMatchObject({ vote: { id: openTextVote.id, status: "open", legacyWritten: true } });
+  });
+
   it("starts a panel vote with a trimmed question and Unicode labels counted in code points", async () => {
     const database = await createDatabase();
     await createChatVotingRepository(database as unknown as D1Database).finish(
@@ -169,6 +192,26 @@ describe("chat voting routes", () => {
       after: { labels, title },
     });
     expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "announce_start", expect.stringMatching(/^start:/u), expect.any(Number), 0);
+  });
+
+  it.each(["digit_01", "digit_12"])("accepts the legacy %s request without optionCount as a two-answer yes/no vote", async (preset) => {
+    const database = await createDatabase();
+    await createChatVotingRepository(database as unknown as D1Database).finish(
+      CHANNEL_ID, openTextVote.id, "manual", "2026-10-04T10:01:00.000Z", [], [], 0, true,
+    );
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+    const namespace = {
+      idFromName: vi.fn(() => ({})),
+      get: vi.fn(() => ({ scheduleModuleAlarm: vi.fn(() => Promise.resolve()) })),
+    } as unknown as Env["CHANNEL"];
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preset, durationSeconds: 60, labels: ["Nope", "Sure"] }),
+    }), { DB: database as unknown as D1Database, CHANNEL: namespace });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ vote: { kind: "yes_no", optionCount: 2, labels: ["Nope", "Sure"] } });
   });
 
   it("rejects an approval from a stale displayed poll before refreshing or mutating ballots", async () => {

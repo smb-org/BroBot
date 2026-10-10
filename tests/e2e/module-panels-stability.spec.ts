@@ -375,6 +375,7 @@ test("custom duration fits with its controls and unit at desktop and mobile widt
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
     await gotoPanel(page, "chat_voting");
+    await page.getByRole("spinbutton", { name: "Number of answers" }).fill("2");
     await chooseOption(page, "Duration", "Custom …");
     const seconds = page.getByRole("spinbutton", { name: "Seconds" });
     await seconds.fill("14400");
@@ -402,24 +403,25 @@ test("custom duration fits with its controls and unit at desktop and mobile widt
   }
 });
 
-test("a timer-closed vote becomes the next draft without changing its configuration", async ({ page }) => {
+test("a timer-closed vote leaves the panel draft unchanged", async ({ page }) => {
   const defaults = {
     yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
     scale_5: ["1", "2", "3", "4", "5"], options_n: Array.from({ length: 9 }, (_, index) => String(index + 1)), free_text: [],
   };
   let vote: Record<string, unknown> | null = null;
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
-    const counts = vote?.preset === "options_n" ? Array<number>(9).fill(0) : null;
+    const counts = vote?.kind === "options" ? Array<number>(9).fill(0) : null;
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
       vote, counts, revision: vote?.status === "open" ? 2 : 1, terms: null, moreTerms: null,
       hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 120, defaultLabels: defaults,
     }) });
   });
   await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
-    const body = await route.request().postDataJSON() as { preset: string; optionCount: number; durationSeconds: number; labels: string[] };
-    expect(body).toMatchObject({ preset: "options_n", optionCount: 9, durationSeconds: 90 });
+    const body = await route.request().postDataJSON() as { kind: string; optionCount: number; durationSeconds: number; labels: string[]; title: string };
+    expect(body).toMatchObject({ kind: "options", optionCount: 9, durationSeconds: 90, title: "Draft question?" });
     vote = {
-      id: "timer-vote", channelId: "channel-a", preset: body.preset, optionCount: body.optionCount, labels: body.labels,
+      id: "timer-vote", channelId: "channel-a", kind: body.kind, preset: "options_n", optionCount: body.optionCount,
+      labels: body.labels, title: "Timer vote?", textMode: null,
       status: "open", openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:01:30.000Z",
       requestedDurationSeconds: body.durationSeconds, closedAt: null, closeReason: null, counts: Array<number>(9).fill(0), voterCount: 0,
     };
@@ -429,8 +431,9 @@ test("a timer-closed vote becomes the next draft without changing its configurat
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "chat_voting");
 
-  await chooseOption(page, "Vote type", "Options 2–9");
-  await page.getByRole("spinbutton", { name: "Number of options" }).fill("9");
+  await page.getByRole("textbox", { name: "Question" }).fill("Draft question?");
+  await page.getByRole("spinbutton", { name: "Number of answers" }).fill("9");
+  await page.getByRole("textbox", { name: "Label for option 1" }).fill("First");
   await chooseOption(page, "Duration", "Custom …");
   await page.getByRole("spinbutton", { name: "Seconds" }).fill("90");
   const setup = page.locator(".chat-voting-setup");
@@ -438,15 +441,19 @@ test("a timer-closed vote becomes the next draft without changing its configurat
 
   await page.getByRole("button", { name: "Start vote" }).click();
   await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
-  await expect(page.getByRole("spinbutton", { name: "Number of options" })).toHaveValue("9");
+  await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("Draft question?");
+  await expect(page.getByRole("spinbutton", { name: "Number of answers" })).toHaveValue("9");
+  await expect(page.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("First");
   await expect(page.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("90");
   const setupWhileRunningBefore = await box(setup);
   const actionWhileRunningBefore = await box(action);
   vote = { ...(vote as unknown as Record<string, unknown>), status: "closed", closedAt: "2030-01-01T12:01:30.000Z" };
 
   await expect(page.getByTestId("chat-voting-header-status")).toContainText("Closed", { timeout: 5_000 });
-  await expect(page.getByRole("combobox", { name: "Vote type" })).toHaveValue("Options 2–9");
-  await expect(page.getByRole("spinbutton", { name: "Number of options" })).toHaveValue("9");
+  await expect(page.getByRole("combobox", { name: "Vote type" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("Draft question?");
+  await expect(page.getByRole("spinbutton", { name: "Number of answers" })).toHaveValue("9");
+  await expect(page.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("First");
   await expect(page.getByRole("combobox", { name: "Duration" })).toHaveValue("Custom …");
   await expect(page.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("90");
   await expect(page.getByRole("button", { name: "Start vote" })).toBeEnabled();
