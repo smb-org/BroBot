@@ -1385,7 +1385,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .platform-members__skeleton-heading,
 .platform-members__skeleton-name,
 .platform-members__skeleton-login,
-.platform-members__skeleton-role { display: block; border-radius: 4px; background: var(--well); }
+.platform-members__skeleton-role { display: block; border-radius: var(--r-control); background: var(--well); }
 .platform-members__skeleton-heading { width: 42px; height: 10px; }
 .platform-members__skeleton-heading--role { width: 30px; }
 .platform-members__skeleton-name { width: 48%; height: 14px; }
