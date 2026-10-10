@@ -772,19 +772,17 @@ test("event rows keep their cell geometry after loading older events at desktop 
     await page.goto(`/channels/${channelId}/events`);
     await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
     const existingRow = page.locator(".event-table tbody tr").first();
-    const before = await existingRow.evaluate((row) => [row, ...Array.from(row.children)].map((element) => {
+    const measureRow = async (): Promise<number[][]> => existingRow.evaluate((row) => [row, ...Array.from(row.children)].map((element) => {
       const rect = element.getBoundingClientRect();
       const round = (value: number): number => Math.round(value * 100) / 100;
+      if (rect.width === 0 && rect.height === 0) return [0, 0, 0, 0];
       return [round(rect.x + window.scrollX), round(rect.y + window.scrollY), round(rect.width), round(rect.height)];
     }));
+    const before = await measureRow();
 
     await page.getByRole("button", { name: "Load older events" }).click();
     await expect(page.locator(".event-table tbody tr")).toHaveCount(51);
-    const after = await existingRow.evaluate((row) => [row, ...Array.from(row.children)].map((element) => {
-      const rect = element.getBoundingClientRect();
-      const round = (value: number): number => Math.round(value * 100) / 100;
-      return [round(rect.x + window.scrollX), round(rect.y + window.scrollY), round(rect.width), round(rect.height)];
-    }));
+    const after = await measureRow();
     expect(after).toEqual(before);
     const olderActorCell = page.locator(".event-table tbody tr").last().locator("td").nth(2);
     await expect(olderActorCell).toHaveAttribute("title", longActor);
