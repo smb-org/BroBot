@@ -50,8 +50,9 @@ export const PANEL_RESOURCE_NOTIFIER_COVERAGE = {
   nonPanelAllRoutes: ["ALL /api/*", "ALL /*"],
   eventSubRoute: "/api/twitch/eventsub",
   eventSubHandler: "eventSubRouter notification/revocation finally",
-  channelAlarm: "ChannelObject.alarm.finally",
-  scheduledMaintenance: "scheduled.finally",
+  channelAlarm: "ChannelObject.alarm with committed-resource drain",
+  scheduledMaintenance: "scheduled background drain helper",
+  backgroundCommitScheduler: "schedulePanelResourceBackgroundWork",
 } as const;
 
 const reconcileChannelResources = async (
@@ -133,13 +134,6 @@ const claimPendingChannels = async (
   const channelIds = result.results.flatMap(({ channel_id }) =>
     typeof channel_id === "string" && channel_id.length > 0 ? [channel_id] : []);
   return { channelIds, claimToken };
-};
-
-const channelHasPendingResources = async (database: D1Database, channelId: string): Promise<boolean> => {
-  const result = await database.prepare(
-    "SELECT 1 AS queued FROM panel_resource_pending WHERE channel_id = ? LIMIT 1",
-  ).bind(channelId).all<{ queued: number }>();
-  return result.results.some(({ queued }) => queued === 1);
 };
 
 const reconcileClaimedChannels = async (
@@ -224,7 +218,6 @@ export const notifyCommittedResources = async (
   reconcileLocal?: (revisions: PanelResourceRevisionVector) => Promise<void>,
 ): Promise<void> => {
   let localChannelWasReconciled = false;
-  let queueDrainFailed = false;
   try {
     let claim = await claimPendingChannels(env.DB, channelId);
     while (claim.channelIds.length > 0) {
@@ -233,20 +226,15 @@ export const notifyCommittedResources = async (
       claim = await claimPendingChannels(env.DB, channelId);
     }
   } catch (error: unknown) {
-    queueDrainFailed = true;
     console.warn("Committed panel resources could not be claimed.", errorMessage(error));
   }
 
   if (channelId !== undefined && reconcileLocal !== undefined && !localChannelWasReconciled) {
     let revisions: PanelResourceRevisionVector = {};
     try {
-      // DO-only commits have no D1 queue row. Reconcile them locally; if a
-      // D1 row is leased by another drain, that drain owns its publication.
-      if (!queueDrainFailed && await channelHasPendingResources(env.DB, channelId)) return;
-    } catch (error: unknown) {
-      console.warn("Committed panel resources could not be checked locally.", channelId, errorMessage(error));
-    }
-    try {
+      // DO-only commits have no D1 queue row. Always reconcile locally when
+      // this call did not claim the channel: a D1 row may be leased by a drain
+      // that captured an older revision and will compare-and-delete it later.
       revisions = await readPanelResourceRevisions(env.DB, channelId);
     } catch (error: unknown) {
       // Local DO revisions are independent of D1 and still need a same-DO
@@ -259,6 +247,42 @@ export const notifyCommittedResources = async (
       console.warn("Committed panel resources could not be published locally.", channelId, errorMessage(error));
     }
   }
+};
+
+/** Wraps every deferred task that can commit dashboard data with an outer drain. */
+export const withCommittedPanelResourceDrain = async <T>(
+  work: () => Promise<T>,
+  drain: () => Promise<void>,
+): Promise<T> => {
+  try {
+    return await work();
+  } finally {
+    try {
+      await drain();
+    } catch (error: unknown) {
+      console.warn("Background panel resource drain failed.", errorMessage(error));
+    }
+  }
+};
+
+export const schedulePanelResourceBackgroundWork = <T>(
+  env: Pick<Env, "DB" | "CHANNEL">,
+  work: Promise<T>,
+  executionContext: () => { waitUntil: (promise: Promise<unknown>) => void },
+): Promise<T> => {
+  const wrappedWork = withCommittedPanelResourceDrain(
+    () => work,
+    () => notifyCommittedResources(env),
+  );
+  try {
+    executionContext().waitUntil(wrappedWork);
+  } catch (error: unknown) {
+    console.warn("Background work could not be registered with the execution context.", errorMessage(error));
+    void wrappedWork.catch((workError: unknown) => {
+      console.warn("Background panel work failed without an execution context.", errorMessage(workError));
+    });
+  }
+  return wrappedWork;
 };
 
 export const panelResourceChangedMessage = (

@@ -1,3 +1,5 @@
+import { schedulePanelResourceBackgroundWork } from "./worker/panel-resources";
+
 export type ServerTimingPhase = "auth" | "d1" | "do" | "helix";
 export type ServerTimingRecord = Record<ServerTimingPhase, number>;
 
@@ -37,14 +39,15 @@ export const measureServerTiming = async <T>(
 };
 
 export const scheduleBackgroundWork = (
-  context: { executionCtx: { waitUntil: (promise: Promise<unknown>) => void } },
+  context: {
+    env: Pick<Env, "DB" | "CHANNEL">;
+    executionCtx: { waitUntil: (promise: Promise<unknown>) => void };
+  },
   work: Promise<unknown>,
 ): void => {
-  try {
-    context.executionCtx.waitUntil(work);
-  } catch {
-    // Direct Hono unit requests have no ExecutionContext; keep their work
-    // observed while production requests always use waitUntil above.
-    void work.catch((error: unknown) => { console.warn("Background dashboard work failed.", error); });
-  }
+  void schedulePanelResourceBackgroundWork(
+    context.env,
+    work,
+    () => context.executionCtx,
+  );
 };

@@ -74,7 +74,7 @@ import { hydrateModuleOverlayElements } from "../overlays/module-state";
 import { hydrateCachedAdsCountdownSnapshot } from "../overlays/ads-countdown-cache";
 import { ADS_COUNTDOWN_ELEMENT_KIND } from "../../modules/ads/overlay/kinds";
 import { createOverlayElementContext } from "../overlays/element-context";
-import { notifyCommittedResources } from "../panel-resources";
+import { notifyCommittedResources, schedulePanelResourceBackgroundWork } from "../panel-resources";
 
 const nowIso = (): string => new Date().toISOString();
 const OVERLAY_VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
@@ -567,12 +567,11 @@ authRouter.get("/auth/twitch/callback", async (context) => {
       }, "connected", null, now);
       await notifyCommittedResources(context.env);
       const maintenance = maintainAfterBotAuthorization(context.env, now);
-      try {
-        context.executionCtx.waitUntil(maintenance);
-      } catch {
-        // In tests or other runtimes without an ExecutionContext, the work continues running anyway.
-        void maintenance;
-      }
+      void schedulePanelResourceBackgroundWork(
+        context.env,
+        maintenance,
+        () => context.executionCtx,
+      );
       return context.redirect(redirectHome(context.env.PUBLIC_ORIGIN), 302);
     }
 
@@ -654,11 +653,11 @@ authRouter.get("/auth/twitch/callback", async (context) => {
     context.header("Set-Cookie", serializeSessionCookie(cookie));
     if (state.reconcileEventSub) {
       const maintenance = maintainAfterBroadcasterAuthorization(context.env, now);
-      try {
-        context.executionCtx.waitUntil(maintenance);
-      } catch {
-        void maintenance;
-      }
+      void schedulePanelResourceBackgroundWork(
+        context.env,
+        maintenance,
+        () => context.executionCtx,
+      );
     }
     return context.redirect(redirectAfterLogin(context.env.PUBLIC_ORIGIN, transaction.redirectPath), 302);
   } catch (error) {

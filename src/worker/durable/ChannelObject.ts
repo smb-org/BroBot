@@ -62,6 +62,7 @@ import {
   panelResourceChangedMessage,
   readPanelResourceRevisions,
   type PanelResourceRevisionVector,
+  withCommittedPanelResourceDrain,
 } from "../panel-resources";
 import { createModuleSecretAccess } from "../module-secrets";
 import { sendChatMessage } from "../chat";
@@ -1589,11 +1590,10 @@ export class ChannelObject extends DurableObject<Env> {
       undefined,
       invocation,
     );
-    try {
-      return await this.runModuleAlarmHandler(moduleId, handlerKey, execute);
-    } finally {
-      await this.notifyCommittedPanelResources();
-    }
+    return await withCommittedPanelResourceDrain(
+      () => this.runModuleAlarmHandler(moduleId, handlerKey, execute),
+      () => this.notifyCommittedPanelResources(),
+    );
   }
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
@@ -2738,16 +2738,14 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   override async alarm(): Promise<void> {
-    const now = Date.now();
-    const nowIso = new Date(now).toISOString();
-    const externalFetchBudget = createModuleExternalFetchBudget();
-    try {
+    await withCommittedPanelResourceDrain(async () => {
+      const now = Date.now();
+      const nowIso = new Date(now).toISOString();
+      const externalFetchBudget = createModuleExternalFetchBudget();
       await this.pruneRevokedTokenMarkers(now);
       await this.stopSecurityAlarmIfIdle();
       await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers(MODULES, externalFetchBudget));
-    } finally {
-      await this.notifyCommittedPanelResources();
-    }
+    }, () => this.notifyCommittedPanelResources());
   }
 
   override webSocketMessage(webSocket: WebSocket, message: string | ArrayBuffer): void {

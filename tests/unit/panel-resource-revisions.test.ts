@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
@@ -64,6 +64,12 @@ const addChannel = async (database: TestD1Database, channelId: string): Promise<
      VALUES (?, ?, ?, '2026-10-10T00:00:00.000Z', '2026-10-10T00:00:00.000Z')`,
   ).bind(channelId, channelId, channelId).run();
 };
+
+const sourceFilesUnder = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  const path = resolve(directory, entry.name);
+  if (entry.isDirectory()) return sourceFilesUnder(path);
+  return /\.(?:ts|tsx)$/u.test(entry.name) ? [path] : [];
+});
 
 interface PanelWriteRegressionCase {
   name: string;
@@ -361,19 +367,20 @@ describe("panel resource revisions", () => {
     expect(authRouteSource).toMatch(/authRouter\.get\("\/api\/overlay\/bootstrap"[\s\S]*?finally \{[\s\S]*?notifyCommittedResources\(context\.env, record\.channelId\)/u);
     expect(moduleAlarms.length).toBeGreaterThan(0);
     expect(maintenanceJobs.length).toBeGreaterThan(0);
-    expect(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelAlarm).toBe("ChannelObject.alarm.finally");
-    expect(PANEL_RESOURCE_NOTIFIER_COVERAGE.scheduledMaintenance).toBe("scheduled.finally");
+    expect(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelAlarm).toBe("ChannelObject.alarm with committed-resource drain");
+    expect(PANEL_RESOURCE_NOTIFIER_COVERAGE.scheduledMaintenance).toBe("scheduled background drain helper");
     expect(PANEL_RESOURCE_NOTIFIER_COVERAGE.eventSubHandler).toBe("eventSubRouter notification/revocation finally");
 
     const channelObject = readFileSync(resolve(root, "src/worker/durable/ChannelObject.ts"), "utf8");
     expect(channelObject).toContain("moduleAlarmHandlerEntries(modules)");
     const alarm = /override async alarm\(\): Promise<void>\s+\{([\s\S]*?)\n\s+\}\n\n\s+override webSocketMessage/u.exec(channelObject)?.[1] ?? "";
-    expect(alarm).toMatch(/finally \{\s*await this\.notifyCommittedPanelResources\(\);/u);
+    expect(alarm).toContain("withCommittedPanelResourceDrain(async () => {");
+    expect(alarm).toContain("() => this.notifyCommittedPanelResources()");
     expect(alarm).toContain("this.alarmHandlers(MODULES");
     const alarmStart = channelObject.indexOf("public async runModuleAlarm(");
     const alarmEnd = channelObject.indexOf("private ballotAccess(", alarmStart);
     const directAlarm = alarmStart < 0 || alarmEnd < 0 ? "" : channelObject.slice(alarmStart, alarmEnd);
-    expect(directAlarm).toMatch(/finally \{\s*await this\.notifyCommittedPanelResources\(\);/u);
+    expect(directAlarm).toContain("withCommittedPanelResourceDrain(");
     const alarmStorageStart = channelObject.indexOf("storage: {", channelObject.indexOf("private moduleAlarmContext("));
     const alarmStorageEnd = channelObject.indexOf("schedule:", alarmStorageStart);
     const alarmStorage = alarmStorageStart < 0 || alarmStorageEnd < 0
@@ -382,14 +389,29 @@ describe("panel resource revisions", () => {
     expect(alarmStorage).toContain("this.ctx.storage.transaction");
     expect(alarmStorage).toContain("bumpDurablePanelResources(transaction, [`module:${moduleId}:data`])");
     const scheduled = readFileSync(resolve(root, "src/worker/scheduled.ts"), "utf8");
-    expect(scheduled).toContain(".finally(async () => {");
-    expect(scheduled).toContain("await notifyCommittedResources(env);");
+    expect(scheduled).toContain("schedulePanelResourceBackgroundWork(");
     const worker = readFileSync(resolve(root, "src/worker/app-routes.ts"), "utf8");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.platformRoutes");
     expect(worker).toMatch(/finally \{\s*const channelId = context\.req\.param\("channelId"\);\s*if \(channelId\.length > 0 && authorizedContextHas\(context, "session"\)\) \{\s*await notifyCommittedResources\(context\.env\);/u);
     expect(worker).not.toContain("PANEL_RESOURCE_NOTIFIER_COVERAGE.authRoutes");
     expect(worker).not.toMatch(/context\.res\.status !== 401/u);
+    const deferredSources = new Map(sourceFilesUnder(resolve(root, "src")).map((path) => [
+      relative(root, path), readFileSync(path, "utf8"),
+    ]));
+    const unwrappedWaitUntilFiles = [...deferredSources]
+      .filter(([, source]) => /\.waitUntil\s*\(/u.test(source))
+      .map(([path]) => path);
+    expect(unwrappedWaitUntilFiles).toEqual(["src/worker/panel-resources.ts"]);
+    expect(deferredSources.get("src/worker/panel-resources.ts")).toMatch(
+      /withCommittedPanelResourceDrain = async[\s\S]*?finally \{\s*try \{\s*await drain\(\);/u,
+    );
+    expect(PANEL_RESOURCE_NOTIFIER_COVERAGE.backgroundCommitScheduler).toBe("schedulePanelResourceBackgroundWork");
+    for (const path of ["src/server-timing.ts", "src/worker/auth/routes.ts", "src/worker/scheduled.ts"]) {
+      expect(deferredSources.get(path), `${path} must wrap deferred commits`)
+        .toContain(`${PANEL_RESOURCE_NOTIFIER_COVERAGE.backgroundCommitScheduler}(`);
+    }
+    expect(deferredSources.get("src/worker/panel-resources.ts")).toContain("executionContext().waitUntil(wrappedWork)");
     const rootWorker = readFileSync(resolve(root, "src/worker/worker-app.ts"), "utf8");
     expect(rootWorker).toContain('app.get("/healthz"');
     expect(rootWorker).toContain('app.all("/api/*"');
@@ -619,6 +641,101 @@ describe("panel resource revisions", () => {
       expect((await database.prepare("SELECT COUNT(*) AS count FROM panel_resource_pending").first<{ count: number }>())?.count)
         .toBe(0);
     } finally {
+      database.close();
+    }
+  });
+
+  it("reconciles a newer DO revision while an older D1 delivery is leased", async () => {
+    const database = new TestD1Database();
+    let releaseExternal!: () => void;
+    let externalStarted!: () => void;
+    const externalGate = new Promise<void>((resolve) => { releaseExternal = resolve; });
+    const externalStart = new Promise<void>((resolve) => { externalStarted = resolve; });
+    let doRevision = 1;
+    let deliveredDoRevision = 0;
+    const reconcilePanelResources = vi.fn(async () => {
+      deliveredDoRevision = Math.max(deliveredDoRevision, doRevision);
+      if (reconcilePanelResources.mock.calls.length === 1) {
+        externalStarted();
+        await externalGate;
+      }
+    });
+    const env = {
+      DB: database as unknown as D1Database,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ reconcilePanelResources }),
+      },
+    } as unknown as Env;
+    try {
+      await addChannel(database, "leased-do-revision");
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+      await database.prepare("UPDATE channels SET display_name = 'First' WHERE channel_id = ?")
+        .bind("leased-do-revision").run();
+
+      const externalDrain = notifyCommittedResources(env);
+      await externalStart;
+      expect(deliveredDoRevision).toBe(1);
+
+      doRevision = 2;
+      const localReconciliation = vi.fn(() => {
+        deliveredDoRevision = Math.max(deliveredDoRevision, doRevision);
+        return Promise.resolve();
+      });
+      await notifyCommittedResources(env, "leased-do-revision", localReconciliation);
+
+      expect(localReconciliation).toHaveBeenCalledTimes(1);
+      expect(deliveredDoRevision).toBe(2);
+      releaseExternal();
+      await externalDrain;
+      expect(deliveredDoRevision).toBe(2);
+      expect((await database.prepare(
+        "SELECT COUNT(*) AS count FROM panel_resource_pending WHERE channel_id = ?",
+      ).bind("leased-do-revision").first<{ count: number }>())?.count).toBe(0);
+    } finally {
+      releaseExternal();
+      database.close();
+    }
+  });
+
+  it("compare-and-deletes only the D1 revision an earlier drain published", async () => {
+    const database = new TestD1Database();
+    let releaseExternal!: () => void;
+    let externalStarted!: () => void;
+    const externalGate = new Promise<void>((resolve) => { releaseExternal = resolve; });
+    const externalStart = new Promise<void>((resolve) => { externalStarted = resolve; });
+    const reconcilePanelResources = vi.fn(async () => {
+      if (reconcilePanelResources.mock.calls.length === 1) {
+        externalStarted();
+        await externalGate;
+      }
+    });
+    const env = {
+      DB: database as unknown as D1Database,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ reconcilePanelResources }),
+      },
+    } as unknown as Env;
+    try {
+      await addChannel(database, "compare-delete");
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+      await database.prepare("UPDATE channels SET display_name = 'First' WHERE channel_id = ?")
+        .bind("compare-delete").run();
+
+      const externalDrain = notifyCommittedResources(env);
+      await externalStart;
+      await database.prepare("UPDATE channels SET display_name = 'Second' WHERE channel_id = ?")
+        .bind("compare-delete").run();
+      releaseExternal();
+      await externalDrain;
+
+      expect(reconcilePanelResources).toHaveBeenCalledTimes(2);
+      expect((await database.prepare(
+        "SELECT COUNT(*) AS count FROM panel_resource_pending WHERE channel_id = ?",
+      ).bind("compare-delete").first<{ count: number }>())?.count).toBe(0);
+    } finally {
+      releaseExternal();
       database.close();
     }
   });

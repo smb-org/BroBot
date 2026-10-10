@@ -129,6 +129,7 @@ const makeStreamRefreshRuntime = (lease: string | null = "stream-refresh") => {
     beginStreamStateRefresh: vi.fn(() => Promise.resolve(lease)),
     endStreamStateRefresh: vi.fn(() => Promise.resolve()),
     getTwitchRateLimitRetryAfter: vi.fn(() => Promise.resolve(retryAfter !== null && retryAfter > Date.now() ? retryAfter : null)),
+    reconcilePanelResources: vi.fn<(revisions: Readonly<Record<string, number>>) => Promise<void>>(() => Promise.resolve()),
     setTwitchRateLimitRetryAfter: vi.fn((deadline: number) => {
       retryAfter = deadline;
       return Promise.resolve();
@@ -459,6 +460,84 @@ describe("Panel read endpoints", () => {
     await Promise.all(runtime.tasks);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+  });
+
+  it("drains a committed background stream refresh when its readback fails after the response", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at)
+       VALUES ('kanal-a', 'online', '2026-09-23T11:49:00.000Z', 'helix', '2026-09-23T09:00:00.000Z')`,
+    ).run();
+    await insertAppAccessToken(
+      database,
+      await encryptJson({ token: "app-token" }, parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS)),
+      "2099-09-21T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+    );
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    ));
+
+    let streamStateReads = 0;
+    const databaseWithFailedReadback = new Proxy(database, {
+      get(target, property) {
+        if (property === "prepare") {
+          return (sql: string) => {
+            const statement = target.prepare(sql);
+            const normalized = sql.replace(/\s+/gu, " ").trim();
+            if (normalized !== "SELECT state, source, changed_at, started_at, stream_id, checked_at FROM channel_stream_state WHERE channel_id = ?") {
+              return statement;
+            }
+            return new Proxy(statement, {
+              get(statementTarget, statementProperty, receiver) {
+                if (statementProperty === "first") {
+                  return async <T>(): Promise<T | null> => {
+                    streamStateReads += 1;
+                    if (streamStateReads === 2) throw new Error("stream state readback failed");
+                    return await statementTarget.first<T>();
+                  };
+                }
+                return Reflect.get(statementTarget, statementProperty, receiver) as unknown;
+              },
+            });
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) as unknown : value;
+      },
+    }) as unknown as D1Database;
+    const runtime = makeStreamRefreshRuntime();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      {
+        ...environment,
+        ...runtime,
+        DB: databaseWithFailedReadback,
+        TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
+      },
+      runtime.executionContext,
+    );
+
+    expect(response.status).toBe(200);
+    await Promise.all(runtime.tasks);
+    expect(streamStateReads).toBe(2);
+    expect((await database.prepare(
+      "SELECT state FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+    ).first<{ state: string }>())?.state).toBe("offline");
+    const deliveredRevisions = runtime.channelObject.reconcilePanelResources.mock.calls[0]?.[0];
+    expect(deliveredRevisions?.["channel.overview"]).toBeGreaterThan(0);
+    expect((await database.prepare(
+      "SELECT COUNT(*) AS count FROM panel_resource_pending WHERE channel_id = 'kanal-a'",
+    ).first<{ count: number }>())?.count).toBe(0);
+    warning.mockRestore();
   });
 
   it("serves stored overview controls while Helix binds a pending pause in the background", async () => {
