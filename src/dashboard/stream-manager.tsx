@@ -285,9 +285,8 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
     <section className="content-section" aria-label={texts.streamManager.feedTitle}>
       <div className="section-heading"><h2>{texts.streamManager.feedTitle}</h2><a className="stream-manager-feed__all" href={dashboardRoutePath(allAlertsRoute)} onClick={onNavigate === undefined ? undefined : (event) => { event.preventDefault(); onNavigate(allAlertsRoute); }}>{texts.streamManager.feedAll}</a></div>
       <LoadState
-        variant="panel"
+        variant="feed-132"
         status={feedStatus}
-        minHeight={132}
         loading={<Skeleton rows={3} height={44} />}
         empty={<p className="stream-manager-feed__empty">{texts.streamManager.feedEmpty}</p>}
         error={<p role="alert">{texts.events.connectionLost}</p>}

@@ -28,16 +28,21 @@ export const QueryStateFixture = () => {
         searchClearLabel="Clear search"
         searchValue=""
         onSearchChange={() => undefined}
+        filtersLabel="Variable filters"
+        filters={<button className="button button--secondary" type="button">Role filter</button>}
         create={{ label: "Create variable", onClick: () => undefined, disabled: true, reason: limitReason }}
         usage={{ count: 25, maximum: 25, copy: { countSuffix: "variables", filteredInfix: "of", filteredSuffix: "shown", limitInfix: "of", limitSuffix: "used", loadedSuffix: "loaded" } }}
+        activeFilters="Role: Manager"
+        activeFiltersLabel="Active filter"
+        resetLabel="Reset"
+        onReset={() => undefined}
         {...(queryError === undefined ? {} : { queryError })}
       />
       <section aria-label="Compact editor state">
         <LoadState
-          variant="compact"
+          variant="compact-64"
           className="compact-load"
           status={status}
-          minHeight="calc(var(--s6) + var(--s10))"
           loading={<div />}
           empty={<div />}
           error={<div />}
@@ -46,10 +51,9 @@ export const QueryStateFixture = () => {
       </section>
       <section aria-label="Module settings state">
         <LoadState
-          variant="panel"
+          variant="panel-320"
           className="panel-load"
           status={status}
-          minHeight="calc(var(--s10) * 8)"
           loading={<div />}
           empty={<div />}
           error={<div />}

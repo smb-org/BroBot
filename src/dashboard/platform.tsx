@@ -281,9 +281,8 @@ const ChannelInspector = ({
       </>}
       <InspectorSection title={texts.members}>
         <LoadStateView
-          variant="panel"
+          variant="panel-220"
           status={members.data === null ? members.status === "error" ? "error" : "loading" : members.data.members.length === 0 ? "empty" : "success"}
-          minHeight={220}
           loading={<PlatformMembersSkeleton />}
           empty={<MembersTable members={[]} selectedUserId={selectedMemberId} onSelect={(member) => { setSelectedMemberId(member.userId); }} />}
           error={<PlatformMembersSkeleton />}
@@ -470,9 +469,8 @@ const PlatformAudit = ({
     <section className="config-section" aria-label={texts.audit}>
       <div className="section-heading"><h2>{texts.audit}</h2></div>
       <LoadStateView
-        variant="panel"
+        variant="panel-280"
         status={status}
-        minHeight={280}
         loading={<Skeleton rows={6} height={34} />}
         empty={<p className="muted">{texts.auditEmpty}</p>}
         error={<p role="alert">{auditState.error ?? texts.error}</p>}
@@ -611,9 +609,8 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
                 <div>
                   <InspectorHeading level="h2" title={texts.channelOverview} />
                   <LoadStateView
-                    variant="panel"
+                    variant="panel-360"
                     status={overviewStatus}
-                    minHeight={360}
                     loading={<Skeleton rows={6} height={34} />}
                     empty={<p className="muted">{texts.noChannels}</p>}
                     error={<p role="alert">{overview.error ?? texts.error}</p>}

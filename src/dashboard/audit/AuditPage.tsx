@@ -209,22 +209,19 @@ const AuditPageContent = ({ identityKey, entries, nextCursor, filters, onFilters
           <section className="content-section" aria-label={texts.audit.title}>
             <AuditFilterBar filters={filters} onChange={onFiltersChange} />
             <UiLoadState
-              variant="compact"
-              className="ui-load-state--status-row"
+              variant="status-row"
               status={error !== null && entries.length > 0 ? "error" : "success"}
-              minHeight={20}
               loading={null}
               empty={null}
               error={null}
               {...(error !== null && entries.length > 0 ? { queryError: { title: texts.audit.loadError, message: error, onRetry } } : {})}
             >{null}</UiLoadState>
             <UiLoadState
-              variant="panel"
+              variant="panel-420"
               status={loading
                 ? "loading"
                 : error !== null && entries.length === 0 ? "error"
                 : entries.length === 0 ? "empty" : "success"}
-              minHeight={420}
               loading={<Skeleton rows={50} height={44} />}
               empty={filterActive
                 ? <EmptyState title={texts.audit.noMatches} description={texts.audit.activeFilters} action={{ label: texts.audit.resetFilters, onClick: () => { onFiltersChange(emptyAuditFilter); } }} />

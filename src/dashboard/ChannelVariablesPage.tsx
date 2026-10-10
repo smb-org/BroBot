@@ -338,9 +338,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
     />
     <LoadState
-      variant="panel"
+      variant="panel-360"
       status={listStatus}
-      minHeight={360}
       loading={<Skeleton rows={8} height={34} />}
       empty={<p className="empty-state">{variables.length === 0 ? labels.empty : dashboardCommonTexts().noMatches}</p>}
       error={<p role="alert">{variablesLoadError}</p>}

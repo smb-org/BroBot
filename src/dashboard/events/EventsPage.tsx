@@ -505,12 +505,11 @@ const EventsPageFilterState = ({
                 : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
             </div>
             <UiLoadState
-              variant="panel"
+              variant="panel-420"
               status={loading && eventEntries.length === 0
                 ? "loading"
                 : error !== null && eventEntries.length === 0 ? "error"
                 : eventEntries.length === 0 ? "empty" : "success"}
-              minHeight={420}
               loading={<Skeleton rows={50} height={34} />}
               empty={filterActive ? (
                 <EmptyState

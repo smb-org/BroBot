@@ -9,14 +9,13 @@ describe("LoadState retry layout", () => {
   });
 
   it("reserves the same content and retry rows before and after an error", () => {
-    const minHeight = "calc(var(--s10) * 5)";
+    const minHeight = "200px";
     const queryError = { title: "Data could not be loaded.", message: "Unable to load.", onRetry: vi.fn() };
     const { container, rerender } = render(
       <UiProvider>
         <LoadState
-          variant="panel"
+          variant="panel-200"
           status="success"
-          minHeight={minHeight}
           loading={<div />}
           empty={<div />}
           error={<p role="alert">Unable to load.</p>}
@@ -39,9 +38,8 @@ describe("LoadState retry layout", () => {
     rerender(
       <UiProvider>
         <LoadState
-          variant="panel"
+          variant="panel-200"
           status="success"
-          minHeight={minHeight}
           loading={<div />}
           empty={<div />}
           error={<p role="alert">Unable to load.</p>}
@@ -62,9 +60,8 @@ describe("LoadState retry layout", () => {
     rerender(
       <UiProvider>
         <LoadState
-          variant="panel"
+          variant="panel-200"
           status="error"
-          minHeight={minHeight}
           loading={<div />}
           empty={<div />}
           error={<p role="alert">Unable to load.</p>}
@@ -83,15 +80,14 @@ describe("LoadState retry layout", () => {
     expect(screen.getByText("Data could not be loaded.")).toBeVisible();
   });
 
-  it("keeps initial errors compact inside a caller-sized reserved box", () => {
+  it("keeps initial errors compact inside a fixed reservation", () => {
     const minHeight = "calc(var(--s6) + var(--s10))";
     const queryError = { message: "Template variables could not be loaded.", onRetry: vi.fn() };
     const { container, rerender } = render(
       <UiProvider>
         <LoadState
-          variant="compact"
+          variant="compact-64"
           status="loading"
-          minHeight={minHeight}
           loading={<div />}
           empty={<div />}
           error={<div />}
@@ -107,9 +103,8 @@ describe("LoadState retry layout", () => {
     rerender(
       <UiProvider>
         <LoadState
-          variant="compact"
+          variant="compact-64"
           status="error"
-          minHeight={minHeight}
           loading={<div />}
           empty={<div />}
           error={<div />}
@@ -127,9 +122,8 @@ describe("LoadState retry layout", () => {
     rerender(
       <UiProvider>
         <LoadState
-          variant="compact"
+          variant="compact-64"
           status="success"
-          minHeight={minHeight}
           loading={<div />}
           empty={<div />}
           error={<div />}

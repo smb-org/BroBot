@@ -400,7 +400,7 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
 
   if (visibleLoadError !== null || session === null || !moduleStatesReady) return <section className="overlay-editor overlay-editor--message">
     <Button variant="subtle" onClick={onBack}>{labels.editorBack}</Button>
-    <LoadState variant="panel" status={visibleLoadError === null ? "loading" : "error"} minHeight="360px"
+    <LoadState variant="panel-360" status={visibleLoadError === null ? "loading" : "error"}
       loading={<p className="loading-line">{labels.editorLoading}</p>}
       empty={<span />}
       error={<p role="alert">{visibleLoadError ?? labels.editorLoadError}</p>}

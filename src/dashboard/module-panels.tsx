@@ -211,9 +211,8 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
     : dashboardTexts().module.settingsLoadError;
   if (loaded === undefined) {
     return <LoadState
-      variant="panel"
+      variant="panel-320"
       status={settingsQuery.isPending || settingsQuery.isFetching ? "loading" : "error"}
-      minHeight="calc(var(--s10) * 8)"
       loading={<Skeleton rows={3} height={34} />}
       empty={null}
       error={<p className="muted" role="alert">{loadError}</p>}
@@ -223,9 +222,8 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   }
   const copy = loaded.definition.locales[language];
   return <LoadState
-    variant="panel"
+    variant="panel-320"
     status="success"
-    minHeight="calc(var(--s10) * 8)"
     loading={<Skeleton rows={3} height={34} />}
     empty={null}
     error={<p className="muted" role="alert">{dashboardTexts().module.settingsLoadError}</p>}

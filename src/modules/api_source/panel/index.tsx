@@ -152,9 +152,8 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     <InspectorSection title={labels.sourceList}>
       <div data-testid="api-source-list-slot" style={{ height: "calc(var(--s10) * 6)", overflow: "hidden" }}>
       <LoadState
-        variant="panel"
+        variant="panel-200"
         status={loadStatus}
-        minHeight="calc(var(--s10) * 5)"
         loading={<Skeleton rows={4} height={34} />}
         empty={<p className="muted">{labels.empty}</p>}
         error={<p className="muted">{labels.loadFailed}</p>}

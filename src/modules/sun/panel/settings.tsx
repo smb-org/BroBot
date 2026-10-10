@@ -64,9 +64,8 @@ function SunSettingsPanelContent({
 
   return (
     <LoadState
-      variant="panel"
+      variant="panel-480"
       status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
-      minHeight="calc(var(--s10) * 12)"
       loading={<Skeleton rows={3} height={34} />}
       empty={<div />}
       error={<p>{labels.loadFailed}</p>}

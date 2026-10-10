@@ -635,9 +635,8 @@ const OverviewPage = ({ channelState, onNavigate }: { channelState: LoadState<Pa
     <>
       <ModuleHeading kind="overview" title={texts.navigation.overview} subtitle={channels.length === 1 ? texts.overview.oneChannelAvailable : <ModuleCount count={channels.length} label={texts.overview.channelsAvailableShort} />} />
       <UiLoadState
-        variant="panel"
+        variant="panel-360"
         status={status}
-        minHeight={360}
         loading={<Skeleton rows={3} height={132} />}
         empty={<section className="empty-state"><h2>{texts.overview.noChannelAvailable}</h2><p>{texts.overview.noMembership}</p></section>}
         error={<Skeleton rows={3} height={132} />}
@@ -1166,19 +1165,16 @@ const SystemPage = ({ system, error, loadedAt, onRetry }: SystemPageProperties):
     <>
       <ModuleHeading kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
       <UiLoadState
-        variant="compact"
-        className="ui-load-state--status-row"
+        variant="status-row"
         status={system !== undefined && error !== null ? "error" : "success"}
-        minHeight={20}
         loading={null}
         empty={null}
         error={null}
         {...(system !== undefined && error !== null ? { queryError: { title: texts.errors.dataLoadFailed, message: error, onRetry } } : {})}
       >{null}</UiLoadState>
       <UiLoadState
-        variant="panel"
+        variant="panel-720"
         status={system !== undefined ? "success" : error !== null ? "error" : "loading"}
-        minHeight={720}
         loading={<Skeleton rows={8} height={58} />}
         empty={<Skeleton rows={8} height={58} />}
         error={<p role="alert">{error ?? texts.system.loadState}</p>}
@@ -1619,9 +1615,8 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "platform" && isPlatform ? <PlatformPage onAuthenticationRequired={requestLogin} /> : null}
         {!showBotBlocking && isChannelOrModuleRoute && selectedChannel === null && channels.status !== "success" ? (
           <UiLoadState
-            variant="panel"
+            variant="panel-720"
             status={channels.status === "error" ? "error" : "loading"}
-            minHeight={720}
             loading={<Skeleton rows={8} height={58} />}
             empty={<Skeleton rows={8} height={58} />}
             error={<Skeleton rows={8} height={58} />}
@@ -1650,9 +1645,8 @@ export const DashboardApp = (): ReactElement => {
               : { contact: dashboardTexts().blocking.botContact })}
         /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && selectedChannel !== null ? <UiLoadState
-          variant="panel"
+          variant="panel-960"
           status={overviewPageStatus}
-          minHeight={960}
           loading={<Skeleton rows={12} height={58} />}
           empty={<Skeleton rows={12} height={58} />}
           error={<Skeleton rows={12} height={58} />}
@@ -1688,9 +1682,8 @@ export const DashboardApp = (): ReactElement => {
           : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={() => reloadAfterModuleToggle(route.channelId)} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && selectedChannel !== null ? <UiLoadState
-          variant="panel"
+          variant="panel-720"
           status={overviewPageStatus}
-          minHeight={720}
           loading={<Skeleton rows={8} height={58} />}
           empty={<Skeleton rows={8} height={58} />}
           error={<Skeleton rows={8} height={58} />}

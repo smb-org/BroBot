@@ -61,9 +61,8 @@ function WeatherSettingsPanelContent({ channelId, language, canManage }: ModuleP
   };
 
   return <LoadState
-    variant="panel"
+    variant="panel-640"
     status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
-    minHeight="calc(var(--s10) * 16)"
     loading={<Skeleton rows={4} height={34} />}
     empty={<div />}
     error={<p>{labels.loadFailed}</p>}

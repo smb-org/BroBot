@@ -249,7 +249,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
         <Button variant="primary" disabled={!canManage} onClick={openCreate}>{labels.add}</Button>
         {canManage ? null : <p className="lock-reason">{labels.roleLocked}</p>}
         <div data-testid="timers-list-slot" style={{ height: "calc(var(--s10) * 19)", overflow: "hidden" }}>
-        <LoadState variant="panel" status={listStatus} minHeight="calc(var(--s10) * 18)"
+        <LoadState variant="panel-720" status={listStatus}
           loading={<Skeleton rows={7} height={34} />}
           empty={<p className="muted">{labels.empty}</p>}
           error={<p className="muted">{labels.loadError}</p>}

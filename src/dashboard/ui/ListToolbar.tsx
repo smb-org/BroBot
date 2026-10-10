@@ -122,9 +122,8 @@ export function ListToolbar({
         )}
       </div>
       <LoadState
-        variant="compact"
+        variant="status-row"
         status={queryError === undefined ? "success" : "error"}
-        minHeight={20}
         loading={null}
         empty={null}
         error={null}

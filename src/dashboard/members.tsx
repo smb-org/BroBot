@@ -425,9 +425,8 @@ const MembersPageContent = ({
               />
               <div className={fetching ? "stale" : undefined} aria-busy={fetching}>
               <LoadState
-                variant="panel"
+                variant="panel-320"
                 status={members.length > 0 ? visibleMembers.length === 0 ? "empty" : "success" : error !== null ? "error" : loading ? "loading" : "empty"}
-                minHeight={320}
                 loading={<MemberListSkeleton />}
                 empty={members.length > 0 ? <p className="empty-state">{dashboardCommonTexts().noMatches}</p> : <MemberList members={members} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
                 error={<p role="alert">{error ?? texts.load}</p>}

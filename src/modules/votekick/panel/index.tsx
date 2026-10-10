@@ -171,8 +171,7 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
     </InspectorSection>
   </div>;
   return <section className="module-stack" aria-label={labels.ariaLabel}>
-    <LoadState variant="panel" status={loading ? "loading" : data === null ? "error" : "success"}
-      minHeight="0"
+    <LoadState variant="panel-0" status={loading ? "loading" : data === null ? "error" : "success"}
       loading={renderSections(true)}
       empty={renderSections(false)}
       error={renderSections(true)}
