@@ -7,7 +7,7 @@ export type VoteCommand =
   | { kind: "start"; voteKind: ChatVotingKind; preset: ChatVotingPreset; optionCount: number; labels?: readonly string[]; textMode?: ChatVotingTextMode; title: string | null; durationSeconds?: number }
   | { kind: "again" }
   | { kind: "end" }
-  | { kind: "invalid"; problem: "question" | "answerCount" | "labels" | "duration" }
+  | { kind: "invalid"; problem: "question" | "questionTooLong" | "answerCount" | "labels" | "duration" }
   | { kind: "help" };
 
 export type VoteLabelSetting = "yesNoLabels" | "scaleLabels" | "optionLabels" | "zeroOneLabels" | "oneTwoLabels";
@@ -65,7 +65,7 @@ const startCommand = (
 ): VoteCommand => {
   const normalizedTitle = normalizeVoteTitle(title);
   if (normalizedTitle !== null && voteLabelLength(normalizedTitle) > CHAT_VOTING_TITLE_MAX_LENGTH) {
-    return { kind: "invalid", problem: "question" };
+    return { kind: "invalid", problem: "questionTooLong" };
   }
   if (labels !== undefined && !validateVoteLabels(labels, 2, 9)) return { kind: "invalid", problem: "labels" };
   return {

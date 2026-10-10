@@ -290,7 +290,19 @@ describe("chat voting event service", () => {
     const action = result.actions[0];
     expect(action?.kind).toBe("chat");
     if (action?.kind !== "chat") throw new Error("An overlong question should receive the vote help reply.");
-    expect(action.text).toContain("question mark");
+    expect(action.text).toContain("80 characters");
+  });
+
+  it("names the length limit for an overlong custom question that ends in a question mark", async () => {
+    const insertOpen = vi.fn(() => Promise.resolve(true));
+
+    const result = await processChatVotingMessage(
+      eventWithText(`!vote ${"x".repeat(81)}? | A | B`, ["moderator"]), repositoryWith({ insertOpen }), executionContext());
+
+    expect(insertOpen).not.toHaveBeenCalled();
+    const action = result.actions[0];
+    if (action?.kind !== "chat") throw new Error("An overlong question should receive a chat reply.");
+    expect(action.text).toContain("80 characters");
   });
 
   it("opens the shared ballot before writing the row and schedules the hard-limit alarm", async () => {

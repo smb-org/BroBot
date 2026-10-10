@@ -169,6 +169,7 @@ const directChat = (text: string) => ({ kind: "chat" as const, text, automated: 
 
 const invalidVoteMessages = {
   question: "invalidQuestion",
+  questionTooLong: "invalidQuestionTooLong",
   answerCount: "invalidAnswerCount",
   labels: "invalidLabels",
   duration: "invalidDuration",

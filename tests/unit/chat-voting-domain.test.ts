@@ -67,7 +67,9 @@ describe("chat voting command and result domain", () => {
 
   it("rejects overlong command questions and ignores commands outside the message start", () => {
     expect(parseVoteCommand(`!vote yesno ${"😀".repeat(CHAT_VOTING_TITLE_MAX_LENGTH + 1)}`))
-      .toEqual({ kind: "invalid", problem: "question" });
+      .toEqual({ kind: "invalid", problem: "questionTooLong" });
+    expect(parseVoteCommand(`!vote ${"x".repeat(CHAT_VOTING_TITLE_MAX_LENGTH + 1)}? | A | B`))
+      .toEqual({ kind: "invalid", problem: "questionTooLong" });
     expect(parseVoteCommand("hello !vote yesno")).toBeNull();
   });
 

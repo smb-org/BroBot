@@ -34,7 +34,7 @@ export const chatVotingFreeTextOptionText = (language: ModuleLanguage, mode: Cha
   mode === "whole_message" ? freeTextOptionCatalog[language].wholeMessage : freeTextOptionCatalog[language].firstWord;
 
 type ChatTextKey = "help" | "busy" | "started" | "result" | "startFailed" | "noOpenVote" | "closing" |
-  "noPreviousVote" | "invalidQuestion" | "invalidAnswerCount" | "invalidLabels" | "invalidDuration";
+  "noPreviousVote" | "invalidQuestion" | "invalidQuestionTooLong" | "invalidAnswerCount" | "invalidLabels" | "invalidDuration";
 type ChatTextCatalog = Readonly<Record<Exclude<ChatTextKey, "started" | "result">, string>> & {
   started: (preset: ChatVotePreset, count: number, textMode: ChatVotingTextMode | null, title: string | null) => string;
   result: (title: string | null, result: string) => string;
@@ -60,6 +60,7 @@ const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
     closing: "Die Abstimmung wird geschlossen.",
     noPreviousVote: "Es gibt keine vorherige Abstimmung zum Wiederholen.",
     invalidQuestion: "Eine eigene Abstimmung braucht eine Frage mit abschließendem Fragezeichen.",
+    invalidQuestionTooLong: "Die Frage darf höchstens 80 Zeichen lang sein.",
     invalidAnswerCount: "Eine Abstimmung braucht zwei bis neun Antworten.",
     invalidLabels: "Antworten müssen eindeutig, nicht leer und höchstens 32 Zeichen lang sein.",
     invalidDuration: "Die Dauer muss zwischen einer Sekunde und vier Stunden liegen.",
@@ -83,6 +84,7 @@ const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
     closing: "The vote is closing.",
     noPreviousVote: "There is no previous vote to repeat.",
     invalidQuestion: "A custom vote needs a question ending in a question mark.",
+    invalidQuestionTooLong: "The question can be at most 80 characters long.",
     invalidAnswerCount: "A vote needs two to nine answers.",
     invalidLabels: "Answers must be unique, nonempty, and at most 32 characters long.",
     invalidDuration: "Duration must be from one second to four hours.",
