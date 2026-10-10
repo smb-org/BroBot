@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 
 import { dashboardCommonTexts } from "../locale";
 import { colors } from "./theme";
+import { Button } from "./Button";
 import { dismissToast, subscribeToToasts, toastsSnapshot } from "./toast-store";
 
 /** The dashboard shell mounts this host once; modules call `notify` through the UI seam. */
@@ -25,7 +26,11 @@ export function ToastHost() {
             closeButtonProps={{ "aria-label": closeLabel }}
             onClose={() => { dismissToast(toast.id); }}
           >
-            {toast.message}
+            <span className="ui-toast__message">{toast.message}</span>
+            {toast.action === undefined ? null : <Button size="compact" variant="subtle" onClick={() => {
+              toast.action?.onClick();
+              dismissToast(toast.id);
+            }}>{toast.action.label}</Button>}
           </Notification>
         ))}
       </div>

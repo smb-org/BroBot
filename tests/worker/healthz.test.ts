@@ -163,7 +163,7 @@ describe("worker skeleton", () => {
         }
       };
       try {
-        // 0040 applied last (highest id) but the highest migration number still decides health.
+        // 0040 applied last (highest id), but health uses the highest migration number.
         await reinsert(original.filter((name) => name === sentinel).concat(original.filter((name) => name !== sentinel)));
         expect(await status()).toBe(200);
 

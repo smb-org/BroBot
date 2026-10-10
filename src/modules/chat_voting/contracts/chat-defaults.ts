@@ -34,15 +34,18 @@ export const chatVotingFreeTextOptionText = (language: ModuleLanguage, mode: Cha
   mode === "whole_message" ? freeTextOptionCatalog[language].wholeMessage : freeTextOptionCatalog[language].firstWord;
 
 type ChatTextKey = "help" | "busy" | "started" | "result" | "startFailed" | "noOpenVote" | "closing" |
-  "noPreviousVote" | "invalidQuestion" | "invalidQuestionTooLong" | "invalidAnswerCount" | "invalidLabels" | "invalidDuration";
-type ChatTextCatalog = Readonly<Record<Exclude<ChatTextKey, "started" | "result">, string>> & {
+  "noPreviousVote" | "invalidQuestion" | "invalidQuestionTooLong" | "invalidAnswerCount" | "invalidLabels" | "invalidDuration" |
+  "unknownShortcut" | "templateStartProblem";
+type ChatTextCatalog = Readonly<Record<Exclude<ChatTextKey, "started" | "result" | "unknownShortcut" | "templateStartProblem">, string>> & {
   started: (preset: ChatVotePreset, count: number, textMode: ChatVotingTextMode | null, title: string | null) => string;
   result: (title: string | null, result: string) => string;
+  unknownShortcut: (shortcut: string) => string;
+  templateStartProblem: (title: string, problem: "answers" | "duration") => string;
 };
 
 const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
   de: {
-    help: "Nutze !vote yesno|scale|01|12 [Frage], !vote 2–9 [Frage], !vote text [word|message] [Frage], !vote Frage? | Antwort 1 | Antwort 2 [| Dauer], !vote again oder !vote end.",
+    help: "Nutze !vote <Kürzel> für gespeicherte Abstimmungen, !vote yesno|scale|01|12 [Frage], !vote 2–9 [Frage], !vote text [word|message] [Frage], !vote Frage? | Antwort 1 | Antwort 2 [| Dauer], !vote again oder !vote end.",
     busy: "Es läuft bereits eine Abstimmung.",
     started: (preset, count, mode, title) => {
       const intro = title === null
@@ -64,9 +67,11 @@ const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
     invalidAnswerCount: "Eine Abstimmung braucht zwei bis neun Antworten.",
     invalidLabels: "Antworten müssen eindeutig, nicht leer und höchstens 32 Zeichen lang sein.",
     invalidDuration: "Die Dauer muss zwischen einer Sekunde und vier Stunden liegen.",
+    unknownShortcut: (shortcut) => `Unbekanntes Abstimmungskürzel: !vote ${shortcut}.`,
+    templateStartProblem: (title, problem) => `„${title || "Ohne Titel"}“ kann nicht starten: ${problem === "answers" ? "Es braucht zwei bis neun eindeutige Antworten." : "Die Dauer muss zwischen einer Sekunde und vier Stunden liegen."}`,
   },
   en: {
-    help: "Use !vote yesno|scale|01|12 [question], !vote 2–9 [question], !vote text [word|message] [question], !vote Question? | Answer 1 | Answer 2 [| duration], !vote again, or !vote end.",
+    help: "Use !vote <shortcut> for saved votes, !vote yesno|scale|01|12 [question], !vote 2–9 [question], !vote text [word|message] [question], !vote Question? | Answer 1 | Answer 2 [| duration], !vote again, or !vote end.",
     busy: "A vote is already in progress.",
     started: (preset, count, mode, title) => {
       const intro = title === null
@@ -88,6 +93,8 @@ const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
     invalidAnswerCount: "A vote needs two to nine answers.",
     invalidLabels: "Answers must be unique, nonempty, and at most 32 characters long.",
     invalidDuration: "Duration must be from one second to four hours.",
+    unknownShortcut: (shortcut) => `Unknown vote shortcut: !vote ${shortcut}.`,
+    templateStartProblem: (title, problem) => `“${title || "Untitled"}” cannot start: ${problem === "answers" ? "It needs two to nine unique answers." : "Duration must be from one second to four hours."}`,
   },
 };
 
@@ -99,8 +106,13 @@ export const chatVotingChatText = (
   textMode?: ChatVotingTextMode | null,
   title?: string | null,
   result?: string,
+  problem?: "answers" | "duration",
 ): string => message === "started"
   ? catalog[language].started(preset ?? "yes_no", optionCount ?? 2, textMode ?? null, title ?? null)
   : message === "result"
     ? catalog[language].result(title ?? null, result ?? "")
-    : catalog[language][message];
+    : message === "unknownShortcut"
+      ? catalog[language].unknownShortcut(title ?? "")
+      : message === "templateStartProblem"
+        ? catalog[language].templateStartProblem(title ?? "", problem ?? "answers")
+        : catalog[language][message];

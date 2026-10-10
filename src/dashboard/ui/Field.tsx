@@ -27,6 +27,8 @@ interface FieldBaseProps {
   mono?: boolean;
   /** Counts Unicode code points when a field's limit does not use UTF-16 units. */
   countLength?: (value: string) => number;
+  /** Hides the displayed counter until the value reaches 80% of its limit. */
+  countWhenNearLimitOnly?: boolean;
   name?: string;
   id?: string;
   normalize?: (value: string) => string;
@@ -60,13 +62,14 @@ export type FieldProps = FieldBaseProps & FieldCountProps & (
  * `×` and the border stays strong (wired in the theme's `Input`
  * override, not here).
  */
-export function Field({ label, ariaLabel, labelHidden = false, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, countLength, name, id, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, onKeyDown, variant, clearLabel }: FieldProps) {
+export function Field({ label, ariaLabel, labelHidden = false, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, countLength, countWhenNearLimitOnly = false, name, id, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, onKeyDown, variant, clearLabel }: FieldProps) {
   const disabledReason = useDisabledFieldReason();
   const searchVariant = variant === "search";
   const effectiveLabelHidden = labelHidden || searchVariant;
   const count = countLength?.(value) ?? value.length;
   const overLimit = maxLength !== undefined && count > maxLength;
   const nearLimit = maxLength !== undefined && count >= maxLength * 0.9;
+  const showCount = !countWhenNearLimitOnly || (maxLength !== undefined && count >= Math.ceil(maxLength * 0.8)) || overLimit;
   const effectiveError = error ?? (overLimit ? countLabel(count, maxLength) : undefined);
   const errorNode = effectiveError === undefined || effectiveError === "" ? undefined : (
     <span><span aria-hidden="true">× </span>{typeof effectiveError === "string" ? <TruncatedText text={effectiveError} /> : effectiveError}</span>
@@ -92,7 +95,7 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
   const description: ReactNode = (
     <span className="ui-field__description">
       {hint === undefined ? null : <TruncatedText className="ui-field__hint" text={hint} />}
-      {maxLength === undefined ? null : <span className={`ui-field__count${nearLimit && !overLimit ? " ui-field__count--warning" : ""}${overLimit ? " ui-field__count--error" : ""}`}>{countLabel(count, maxLength)}</span>}
+      {maxLength === undefined || !showCount ? null : <span className={`ui-field__count${nearLimit && !overLimit ? " ui-field__count--warning" : ""}${overLimit ? " ui-field__count--error" : ""}`}>{countLabel(count, maxLength)}</span>}
       {describedHelper(null, disabledReason, `field-${id ?? label}`)}
     </span>
   );
@@ -128,7 +131,7 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
       name={name}
       id={id}
       leftSection={leading}
-      leftSectionWidth={leadingLabel === undefined && !searchVariant ? undefined : 36}
+      leftSectionWidth={leadingLabel === undefined && !searchVariant ? undefined : Math.max(36, (leadingLabel?.length ?? 0) * 9 + 16)}
       leftSectionPointerEvents="none"
       rightSection={clearButton}
       rightSectionWidth={searchVariant ? 44 : undefined}

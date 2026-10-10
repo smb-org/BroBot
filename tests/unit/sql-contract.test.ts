@@ -28,7 +28,7 @@ import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
-import { chatVoteSelectColumns } from "../../src/modules/chat_voting/repository";
+import { chatVoteSelectColumns, chatVoteTemplateSelectColumns } from "../../src/modules/chat_voting/repository";
 import {
   belaboxExpectedOpenStreamSetGuard,
   belaboxHistoryModuleRevisionGuard,
@@ -116,6 +116,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["textBlockSelectColumns", textBlockSelectColumns],
   ["textBlockCategorySelectColumns", textBlockCategorySelectColumns],
   ["chatVoteSelectColumns", chatVoteSelectColumns],
+  ["chatVoteTemplateSelectColumns", chatVoteTemplateSelectColumns],
   ["belaboxHistoryStatusGuard", belaboxHistoryStatusGuard],
   ["belaboxHistoryModuleRevisionGuard", belaboxHistoryModuleRevisionGuard],
   ["belaboxStreamStateSnapshotGuard", belaboxStreamStateSnapshotGuard],
@@ -191,10 +192,10 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(56);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(46);
-      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(124);
-      expect(objects).toHaveLength(226);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(57);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(48);
+      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(127);
+      expect(objects).toHaveLength(232);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),
