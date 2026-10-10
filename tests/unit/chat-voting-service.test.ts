@@ -13,7 +13,9 @@ import { processChatVotingMessage, requestChatVoteClose, startChatVote } from ".
 const openVote: ChatVote = {
   id: "fictional-poll",
   channelId: "fictional-channel",
+  kind: "yes_no",
   preset: "yes_no",
+  legacyWritten: false,
   optionCount: 2,
   labels: ["Yes", "No"],
   title: null,
@@ -29,6 +31,7 @@ const openVote: ChatVote = {
 
 const openTextVote: ChatVote = {
   ...openVote,
+  kind: "free_text",
   preset: "free_text",
   optionCount: 0,
   labels: [],
@@ -116,7 +119,7 @@ describe("chat voting event service", () => {
 
     const result = await processChatVotingMessage(eventWithText("2"), repository, context);
 
-    expect(context.ballots.cast).toHaveBeenCalledWith("fictional-poll", "fictional-voter-1", 2);
+    expect(context.ballots.cast).toHaveBeenCalledWith("fictional-poll", "fictional-voter-1", 2, undefined);
     expect(result.actions).toEqual([{
       kind: "overlay",
       type: "tally",
@@ -126,11 +129,54 @@ describe("chat voting event service", () => {
         openedAt: openVote.openedAt,
         closesAt: openVote.closesAt,
         requestedDurationSeconds: null,
+        kind: "yes_no",
+        preset: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        textMode: null,
         title: null,
         counts: [0, 1],
         revision: 1,
       },
     }]);
+  });
+
+  it("casts an exact option word only when the voter has no existing number vote", async () => {
+    const optionsVote: ChatVote = {
+      ...openVote,
+      kind: "options",
+      preset: "options_n",
+      labels: ["Pizza", "Burger"],
+    };
+    const repository = repositoryWith({ open: vi.fn(() => Promise.resolve(optionsVote)) });
+    const context = executionContext();
+
+    await processChatVotingMessage(eventWithText(" PIZZA! "), repository, context);
+
+    expect(context.ballots.cast).toHaveBeenCalledWith(
+      "fictional-poll",
+      "fictional-voter-1",
+      1,
+      { onlyIfNew: true },
+    );
+  });
+
+  it("routes a legacy open vote through the existing close alarm on its first chat event", async () => {
+    const legacyVote = { ...openVote, legacyWritten: true };
+    const requestManualClose = vi.fn(() => Promise.resolve(true));
+    const repository = repositoryWith({
+      open: vi.fn(() => Promise.resolve(legacyVote)),
+      byId: vi.fn(() => Promise.resolve(legacyVote)),
+      requestManualClose,
+    });
+    const context = executionContext();
+
+    const result = await processChatVotingMessage(eventWithText("1"), repository, context);
+
+    expect(result.actions).toEqual([]);
+    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", legacyVote.id, undefined, true);
+    expect(context.scheduleAlarm).toHaveBeenCalledWith("close", legacyVote.id, Date.now(), 1);
+    expect(context.ballots.cast).not.toHaveBeenCalled();
   });
 
   it("normalizes a free-text vote and publishes the bounded term tally", async () => {
@@ -157,6 +203,7 @@ describe("chat voting event service", () => {
         openedAt: openTextVote.openedAt,
         closesAt: openTextVote.closesAt,
         requestedDurationSeconds: null,
+        kind: "free_text",
         preset: "free_text",
         optionCount: 0,
         textMode: "first_word",
@@ -212,6 +259,15 @@ describe("chat voting event service", () => {
     expect(context.scheduleAlarm).toHaveBeenCalledWith("announce_start", expect.stringMatching(/^start:/u), Date.now(), 0);
   });
 
+  it("falls back to unique numeric labels when configured labels collide with appended numbers", async () => {
+    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const event = { ...eventWithText("!vote 3", ["moderator"]), settings: { ...DEFAULT_CHAT_VOTING_SETTINGS, optionLabels: "Pizza|3" } };
+
+    await processChatVotingMessage(event, repositoryWith({ insertOpen }), executionContext());
+
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ kind: "options", labels: ["1", "2", "3"] }), undefined);
+  });
+
   it("does not schedule a start announcement when the optional template is empty", async () => {
     const context = executionContext();
     const event = { ...eventWithText("!vote yesno", ["moderator"]), settings: { ...DEFAULT_CHAT_VOTING_SETTINGS, startText: "" } };
@@ -234,7 +290,7 @@ describe("chat voting event service", () => {
     const action = result.actions[0];
     expect(action?.kind).toBe("chat");
     if (action?.kind !== "chat") throw new Error("An overlong question should receive the vote help reply.");
-    expect(action.text).toContain("!vote yesno [question]");
+    expect(action.text).toContain("question mark");
   });
 
   it("opens the shared ballot before writing the row and schedules the hard-limit alarm", async () => {
@@ -259,6 +315,7 @@ describe("chat voting event service", () => {
       channelId: "fictional-channel",
       preset: "yes_no",
       optionCount: 2,
+      durationSeconds: 0,
       settings: DEFAULT_CHAT_VOTING_SETTINGS,
       language: "en",
       openedAt,
@@ -284,6 +341,7 @@ describe("chat voting event service", () => {
       channelId: "fictional-channel",
       preset: "yes_no",
       optionCount: 2,
+      durationSeconds: 0,
       settings: DEFAULT_CHAT_VOTING_SETTINGS,
       language: "en",
     }, ballots, vi.fn(() => Promise.resolve()));
@@ -301,7 +359,8 @@ describe("chat voting event service", () => {
       channelId: "fictional-channel",
       preset: "yes_no",
       optionCount: 2,
-      settings: { ...DEFAULT_CHAT_VOTING_SETTINGS, autoCloseSeconds: 90 },
+      durationSeconds: 90,
+      settings: DEFAULT_CHAT_VOTING_SETTINGS,
       language: "en",
       openedAt: Date.parse("2026-10-04T10:00:00.000Z"),
     }, executionContext().ballots, vi.fn(() => Promise.resolve()));
@@ -322,6 +381,7 @@ describe("chat voting event service", () => {
       channelId: "fictional-channel",
       preset: "free_text",
       optionCount: 0,
+      durationSeconds: 0,
       textMode: "first_word",
       blockedTerms: null,
       settings: DEFAULT_CHAT_VOTING_SETTINGS,
@@ -343,6 +403,7 @@ describe("chat voting event service", () => {
       channelId: "fictional-channel",
       preset: "free_text",
       optionCount: 0,
+      durationSeconds: 0,
       textMode: "whole_message",
       blockedTerms: [],
       settings: DEFAULT_CHAT_VOTING_SETTINGS,
@@ -386,7 +447,7 @@ describe("chat voting event service", () => {
 
     const allowed = await processChatVotingMessage(eventWithText("!vote end", ["moderator"]), repository, context);
     expect(allowed.actions).toEqual([{ kind: "chat", text: "The vote is closing.", automated: false }]);
-    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined);
+    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined, false);
     expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), 1);
   });
 
@@ -406,8 +467,8 @@ describe("chat voting event service", () => {
       .resolves.toMatchObject({ closeReason: "manual" });
 
     expect(requestManualClose).toHaveBeenCalledTimes(2);
-    expect(requestManualClose).toHaveBeenNthCalledWith(1, "fictional-channel", "fictional-poll", undefined);
-    expect(requestManualClose).toHaveBeenNthCalledWith(2, "fictional-channel", "fictional-poll", undefined);
+    expect(requestManualClose).toHaveBeenNthCalledWith(1, "fictional-channel", "fictional-poll", undefined, false);
+    expect(requestManualClose).toHaveBeenNthCalledWith(2, "fictional-channel", "fictional-poll", undefined, false);
     expect(scheduleClose).toHaveBeenCalledTimes(2);
     for (const [pollId, deadline, revision] of scheduleClose.mock.calls) {
       expect(pollId).toBe("fictional-poll");

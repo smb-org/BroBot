@@ -380,6 +380,7 @@ export const castStoredBallot = async (
   ballotId: string,
   userId: string,
   choice: number,
+  options?: { onlyIfNew?: boolean },
 ): Promise<BallotCastResult> => {
   validId(moduleId, "Module id");
   validId(ballotId, "Ballot id");
@@ -407,6 +408,9 @@ export const castStoredBallot = async (
       return { status: "not_open", counts: [], revision: 0 };
     }
     const previous = await transaction.get<number>(voteKey);
+    if (options?.onlyIfNew === true && previous !== undefined) {
+      return { status: "unchanged", ...snapshotOf(ballot) };
+    }
     if (previous === choice) return { status: "unchanged", ...snapshotOf(ballot) };
     const counts = [...ballot.counts];
     if (previous !== undefined && Number.isInteger(previous) && previous >= 1 && previous <= ballot.optionCount) {

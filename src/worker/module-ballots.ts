@@ -22,7 +22,7 @@ export const moduleBallots = (
   const object = namespace.get(namespace.idFromName(channelId));
   return {
     open: (ballotId, optionCount, expiresAt, rule, termFilter) => object.openBallot(moduleId, ballotId, optionCount, expiresAt, rule, termFilter),
-    cast: (ballotId, userId, choice) => object.castBallot(moduleId, ballotId, userId, choice),
+    cast: (ballotId, userId, choice, options) => object.castBallot(moduleId, ballotId, userId, choice, options),
     castTerm: (ballotId, userId, term, matchText) => object.castBallotTerm(moduleId, ballotId, userId, term, matchText),
     setBlockedTerms: (ballotId, terms) => object.setBlockedTerms(moduleId, ballotId, terms),
     approveTerm: (ballotId, term) => object.approveTerm(moduleId, ballotId, term),

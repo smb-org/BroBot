@@ -2,8 +2,8 @@ import { Hono } from "hono";
 
 import type { AuditAction } from "../../contracts/values";
 import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
-import type { ChatVotePreset } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingKindForPreset, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
+import type { ChatVotePreset, ChatVotingKind } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, startChatVote } from "./service";
 import { configuredLabels, isBlockedFreeTextVote, isValidVoteTitle, labelsForVote, normalizeBlockedVoteTerm, normalizeVoteTitle } from "./domain";
@@ -34,11 +34,18 @@ export const chatVotingRoutes = new Hono<ModuleRouteEnvironment>();
 chatVotingRoutes.get("/current", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const repository = createChatVotingRepository(context.env.DB);
-  const [vote, settings, language] = await Promise.all([
-    repository.latest(channelId),
+  const [settings, language] = await Promise.all([
     getEnabledSettings(context.env.DB, channelId),
     channelLanguage(context.env.DB, channelId),
   ]);
+  const openVote = await repository.open(channelId);
+  if (openVote?.legacyWritten === true) {
+    await requestChatVoteClose(repository, channelId, async (pollId, deadline, ownerRevision) => {
+      const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+      await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, pollId, deadline, ownerRevision);
+    }, undefined, { pollId: openVote.id, legacyOnly: true });
+  }
+  const vote = await repository.latest(channelId);
   const effectiveSettings = settings ?? DEFAULT_CHAT_VOTING_SETTINGS;
   const defaultLabels: Record<ChatVotePreset, string[]> = {
     yes_no: labelsForVote(effectiveSettings, "yes_no", 2, language),
@@ -73,25 +80,36 @@ chatVotingRoutes.get("/current", async (context) => {
 chatVotingRoutes.post("/start", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const body = await readBody(context.req.raw);
-  if (!isRecord(body) || !["yes_no", "scale_5", "options_n", "digit_01", "digit_12", "free_text"].includes(String(body.preset))) {
+  if (!isRecord(body)) {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
-  const preset = body.preset as ChatVotePreset;
+  let kind: ChatVotingKind;
+  let preset: ChatVotePreset;
+  if (body.kind === "yes_no" || body.kind === "options" || body.kind === "free_text") {
+    kind = body.kind;
+    preset = chatVotingPresetForKind(kind);
+  } else if (["yes_no", "scale_5", "options_n", "digit_01", "digit_12", "free_text"].includes(String(body.preset))) {
+    preset = body.preset as ChatVotePreset;
+    // Legacy two-answer presets start yes/no votes (words ignored), like the chat aliases.
+    kind = preset === "digit_01" || preset === "digit_12" ? "yes_no" : chatVotingKindForPreset(preset);
+  } else {
+    return context.json({ error: "chat_voting_request_invalid" }, 400);
+  }
   if (body.title !== undefined && body.title !== null && typeof body.title !== "string") {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
   const title = normalizeVoteTitle(typeof body.title === "string" ? body.title : "");
   if (!isValidVoteTitle(title ?? "")) return context.json({ error: "chat_voting_request_invalid" }, 400);
-  const optionCount = preset === "free_text" ? 0
-    : preset === "yes_no" || preset === "digit_01" || preset === "digit_12" ? 2
+  const optionCount = kind === "free_text" ? 0
+    : kind === "yes_no" || preset === "digit_01" || preset === "digit_12" ? 2
       : preset === "scale_5" ? 5 : body.optionCount;
   if (!Number.isSafeInteger(optionCount) || (optionCount as number) < 0 || (optionCount as number) > 9 ||
-      preset === "options_n" && (optionCount as number) < 2) {
+      kind === "options" && (optionCount as number) < 2) {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
   const textMode = body.textMode === undefined ? "first_word"
     : body.textMode === "first_word" || body.textMode === "whole_message" ? body.textMode : null;
-  if (preset === "free_text" && textMode === null || preset !== "free_text" && body.textMode !== undefined) {
+  if (kind === "free_text" && textMode === null || kind !== "free_text" && body.textMode !== undefined) {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
   const durationSeconds = body.durationSeconds;
@@ -101,7 +119,7 @@ chatVotingRoutes.post("/start", async (context) => {
   }
   let voteLabels: string[] | undefined;
   if (body.labels !== undefined) {
-    if (preset === "free_text" || !Array.isArray(body.labels) || body.labels.some((label) => typeof label !== "string")) {
+    if (kind === "free_text" || !Array.isArray(body.labels) || body.labels.some((label) => typeof label !== "string")) {
       return context.json({ error: "chat_voting_request_invalid" }, 400);
     }
     voteLabels = configuredLabels(body.labels as string[], optionCount as number) ?? undefined;
@@ -124,12 +142,14 @@ chatVotingRoutes.post("/start", async (context) => {
   try {
     result = await startChatVote(repository, {
       channelId,
+      kind,
       preset,
       optionCount: optionCount as number,
+      durationSeconds: durationSeconds as number,
       title,
       ...(voteLabels === undefined ? {} : { labels: voteLabels }),
-      ...(preset === "free_text" ? { textMode: textMode ?? "first_word", blockedTerms } : {}),
-      settings: { ...settings, autoCloseSeconds: durationSeconds as number },
+      ...(kind === "free_text" ? { textMode: textMode ?? "first_word", blockedTerms } : {}),
+      settings,
       language: await channelLanguage(context.env.DB, channelId),
       authorization,
     }, context.get("ballots")(channelId), async (pollId, deadline, ownerRevision) => {
@@ -176,7 +196,7 @@ chatVotingRoutes.post("/approve-term", async (context) => {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
   const vote = await createChatVotingRepository(context.env.DB).open(channelId);
-  if (vote === null || vote.preset !== "free_text") return context.json({ error: "chat_voting_not_running" }, 409);
+  if (vote === null || vote.kind !== "free_text") return context.json({ error: "chat_voting_not_running" }, 409);
   if (body.pollId !== vote.id) return context.json({ error: "chat_voting_poll_changed" }, 409);
   let rawBlockedTerms: readonly string[] | null;
   try {
@@ -211,6 +231,7 @@ chatVotingRoutes.post("/approve-term", async (context) => {
         openedAt: vote.openedAt,
         closesAt: vote.closesAt,
         requestedDurationSeconds: vote.requestedDurationSeconds,
+        kind: vote.kind,
         preset: vote.preset,
         optionCount: vote.optionCount,
         textMode: vote.textMode,

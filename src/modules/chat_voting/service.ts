@@ -1,7 +1,7 @@
 import type { BallotTermCount, ModuleEvent, ModuleExecutionContext, ModuleMutationAuthorization, ModuleResult } from "../contract";
 import type { ModuleLanguage, ModuleAlarmContext } from "../contract";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey, chatVotingStartAnnouncementPollId } from "./contracts";
-import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey, chatVotingStartAnnouncementPollId } from "./contracts";
+import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVotingKind, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
 import { configuredLabels, formatFreeTextVoteResult, formatVoteOptions, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, normalizeVoteTitle, parseVoteCommand, voteChoiceFromMessage, voteCloseDeadline, voteLabelLength } from "./domain";
 import type { ChatVotingRepository } from "./repository";
 import { chatVotingChatText, chatVotingDurationText, DEFAULT_CHAT_VOTING_START_DURATION_SUFFIX, LEGACY_CHAT_VOTING_START_TEXT, LEGACY_CHAT_VOTING_START_TEXT_EN } from "./contracts/chat-defaults";
@@ -9,8 +9,10 @@ import { createChatVotingRepository } from "./repository";
 
 export interface StartChatVoteInput {
   channelId: string;
+  kind?: ChatVotingKind;
   preset: ChatVotePreset;
   optionCount: number;
+  durationSeconds: number;
   labels?: readonly string[];
   title?: string | null;
   textMode?: ChatVotingTextMode;
@@ -43,43 +45,45 @@ export const startChatVote = async (
   scheduleClose: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
   scheduleStartAnnouncement?: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
 ): Promise<VoteStartResult> => {
-  const expectedOptionCount = input.preset === "free_text" ? 0
-    : input.preset === "yes_no" || input.preset === "digit_01" || input.preset === "digit_12" ? 2
-      : input.preset === "scale_5" ? 5 : null;
-  if (input.preset === "options_n" && (!Number.isInteger(input.optionCount) || input.optionCount < 2 || input.optionCount > 9) ||
-      expectedOptionCount !== null && input.optionCount !== expectedOptionCount) {
-    throw new RangeError("The selected voting preset has an invalid option count.");
-  }
+  const kind = input.kind ?? (input.preset === "free_text" ? "free_text"
+    : input.preset === "yes_no" ? "yes_no" : "options");
+  const expectedOptionCount = kind === "free_text" ? 0 : kind === "yes_no" ? 2 : null;
   if (!Number.isInteger(input.optionCount) || input.optionCount < 0 || input.optionCount > 9 ||
-      input.preset === "yes_no" && input.optionCount !== 2 ||
-      input.preset === "scale_5" && input.optionCount !== 5) {
+      expectedOptionCount !== null && input.optionCount !== expectedOptionCount ||
+      kind === "options" && (input.optionCount < 2 || input.optionCount > 9)) {
     throw new RangeError("The selected voting preset has an invalid option count.");
   }
   const voteLabels = input.labels === undefined
     ? labelsForVote(input.settings, input.preset, input.optionCount, input.language)
-    : input.preset === "free_text" ? null : configuredLabels(input.labels, input.optionCount);
+    : kind === "free_text" ? null : configuredLabels(input.labels, input.optionCount);
   if (voteLabels === null) throw new RangeError("The selected voting preset has invalid labels.");
   const title = normalizeVoteTitle(input.title ?? "");
   if (title !== null && voteLabelLength(title) > CHAT_VOTING_TITLE_MAX_LENGTH) throw new RangeError("The voting question is too long.");
+  if (!Number.isSafeInteger(input.durationSeconds) || input.durationSeconds < 0 || input.durationSeconds > 14_400) {
+    throw new RangeError("The voting duration is invalid.");
+  }
   const requestedOpenedAt = input.openedAt ?? Date.now();
   const latestVote = await repository.latest(input.channelId);
   const latestOpenedAt = latestVote === null ? Number.NaN : Date.parse(latestVote.openedAt);
   const openedAt = Number.isFinite(latestOpenedAt)
     ? Math.max(requestedOpenedAt, latestOpenedAt + 1)
     : requestedOpenedAt;
-  const deadline = voteCloseDeadline(openedAt, input.settings.autoCloseSeconds);
+  const deadline = voteCloseDeadline(openedAt, input.durationSeconds);
+  const preset = chatVotingPresetForKind(kind);
   const vote: ChatVoteDraft = {
     id: crypto.randomUUID(),
     channelId: input.channelId,
-    preset: input.preset,
+    kind,
+    preset,
+    legacyWritten: false,
     optionCount: input.optionCount,
     labels: voteLabels,
     title,
-    textMode: input.preset === "free_text" ? input.textMode ?? "first_word" : null,
-    termFilterReady: input.preset === "free_text" ? input.blockedTerms != null : null,
+    textMode: kind === "free_text" ? input.textMode ?? "first_word" : null,
+    termFilterReady: kind === "free_text" ? input.blockedTerms != null : null,
     openedAt: new Date(openedAt).toISOString(),
     closesAt: new Date(deadline.closesAt).toISOString(),
-    requestedDurationSeconds: input.settings.autoCloseSeconds === 0 ? null : input.settings.autoCloseSeconds,
+    requestedDurationSeconds: input.durationSeconds === 0 ? null : input.durationSeconds,
     closeReason: deadline.reason,
     status: "open",
     textResults: null,
@@ -93,7 +97,7 @@ export const startChatVote = async (
     vote.optionCount,
     openedAt + CHAT_VOTING_BALLOT_RETENTION_MS,
     undefined,
-    input.preset === "free_text" ? { blockedTerms } : undefined,
+    kind === "free_text" ? { blockedTerms } : undefined,
   );
   if (opened.status === "busy") return { status: "busy" };
 
@@ -139,10 +143,13 @@ export const requestChatVoteClose = async (
   channelId: string,
   scheduleClose: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
   authorization?: ModuleMutationAuthorization,
+  options: { pollId?: string; legacyOnly?: boolean } = {},
 ): Promise<ChatVote | null> => {
-  const vote = await repository.open(channelId);
-  if (vote === null) return null;
-  const requested = await repository.requestManualClose(channelId, vote.id, authorization);
+  const vote = options.pollId === undefined
+    ? await repository.open(channelId)
+    : await repository.byId(channelId, options.pollId);
+  if (vote === null || vote.status !== "open" || options.legacyOnly === true && !vote.legacyWritten) return null;
+  const requested = await repository.requestManualClose(channelId, vote.id, authorization, options.legacyOnly ?? false);
   if (!requested) return null;
   await scheduleClose(vote.id, Date.now(), 1);
   return { ...vote, closeReason: "manual" };
@@ -159,6 +166,13 @@ const chatterId = (event: ModuleEvent): string | null =>
   typeof event.payload.chatter_user_id === "string" ? event.payload.chatter_user_id : null;
 
 const directChat = (text: string) => ({ kind: "chat" as const, text, automated: false as const });
+
+const invalidVoteMessages = {
+  question: "invalidQuestion",
+  answerCount: "invalidAnswerCount",
+  labels: "invalidLabels",
+  duration: "invalidDuration",
+} as const;
 
 const canControlVotes = (event: ModuleEvent): boolean =>
   event.chatStatus?.includes("moderator") === true || event.chatStatus?.includes("broadcaster") === true;
@@ -185,10 +199,19 @@ export const processChatVotingMessage = async (
   repository: ChatVotingRepository,
   context: ModuleExecutionContext,
 ): Promise<ModuleResult> => {
+  if (event.subscriptionType !== "channel.chat.message") return { actions: [], diagnostics: [] };
   const text = messageText(event);
-  if (event.subscriptionType !== "channel.chat.message" || text === null || text.length === 0) {
+
+  const openVote = await repository.open(event.channelId);
+  if (openVote?.legacyWritten === true) {
+    await requestChatVoteClose(repository, event.channelId, closeAlarmScheduler(context), undefined, {
+      pollId: openVote.id,
+      legacyOnly: true,
+    });
     return { actions: [], diagnostics: [] };
   }
+  if (text === null || text.length === 0) return { actions: [], diagnostics: [] };
+
   const command = parseVoteCommand(text);
 
   const userId = chatterId(event);
@@ -206,6 +229,9 @@ export const processChatVotingMessage = async (
     if (command.kind === "help") {
       return { actions: [directChat(chatVotingChatText(language, "help"))], diagnostics: [] };
     }
+    if (command.kind === "invalid") {
+      return { actions: [directChat(chatVotingChatText(language, invalidVoteMessages[command.problem]))], diagnostics: [] };
+    }
     if (command.kind === "end") {
       const closed = await requestChatVoteClose(repository, event.channelId, closeAlarmScheduler(context));
       return {
@@ -214,19 +240,42 @@ export const processChatVotingMessage = async (
       };
     }
 
+    let startCommand = command;
+    if (command.kind === "again") {
+      const previous = await repository.latest(event.channelId);
+      if (previous === null || previous.status !== "closed") {
+        const reply = previous?.status === "open" ? "busy" : "noPreviousVote";
+        return { actions: [directChat(chatVotingChatText(language, reply))], diagnostics: [] };
+      }
+      startCommand = {
+        kind: "start",
+        voteKind: previous.kind,
+        preset: chatVotingPresetForKind(previous.kind),
+        optionCount: previous.optionCount,
+        ...(previous.kind === "free_text" ? {} : { labels: previous.labels }),
+        ...(previous.kind === "free_text" ? { textMode: previous.textMode ?? "first_word" } : {}),
+        title: previous.title,
+        durationSeconds: previous.requestedDurationSeconds ?? 0,
+      };
+    }
+    if (startCommand.kind !== "start") return { actions: [], diagnostics: [] };
+
     try {
       let blockedTerms: readonly string[] | null = null;
-      if (command.preset === "free_text") {
+      if (startCommand.voteKind === "free_text") {
         try { blockedTerms = await context.readChannelBlockedTerms?.() ?? null; }
         catch { blockedTerms = null; }
       }
       const result = await startChatVote(repository, {
         channelId: event.channelId,
-        preset: command.preset,
-        optionCount: command.optionCount,
-        title: command.title,
-        ...(command.textMode === undefined ? {} : { textMode: command.textMode }),
-        ...(command.preset === "free_text" ? { blockedTerms } : {}),
+        kind: startCommand.voteKind,
+        preset: startCommand.preset,
+        optionCount: startCommand.optionCount,
+        durationSeconds: startCommand.durationSeconds ?? event.settings.autoCloseSeconds,
+        ...(startCommand.labels === undefined ? {} : { labels: startCommand.labels }),
+        title: startCommand.title,
+        ...(startCommand.textMode === undefined ? {} : { textMode: startCommand.textMode }),
+        ...(startCommand.voteKind === "free_text" ? { blockedTerms } : {}),
         settings: event.settings,
         language,
       }, context.ballots, closeAlarmScheduler(context), startAnnouncementScheduler(context));
@@ -244,11 +293,11 @@ export const processChatVotingMessage = async (
     }
   }
 
-  const vote = await repository.open(event.channelId);
+  const vote = openVote;
   if (vote === null) return { actions: [], diagnostics: [] };
   const closesAt = Date.parse(vote.closesAt);
   if (!Number.isFinite(closesAt) || Date.now() >= closesAt) return { actions: [], diagnostics: [] };
-  if (vote.preset === "free_text") {
+  if (vote.kind === "free_text") {
     const matchText = normalizeFreeTextVoteForMatching(text);
     const term = normalizeFreeTextVote(text, vote.textMode ?? "first_word");
     if (term === null || context.ballots.castTerm === undefined) return { actions: [], diagnostics: [] };
@@ -266,10 +315,11 @@ export const processChatVotingMessage = async (
           openedAt: vote.openedAt,
           closesAt: vote.closesAt,
           requestedDurationSeconds: vote.requestedDurationSeconds,
+          kind: vote.kind,
           preset: vote.preset,
           optionCount: vote.optionCount,
           title: vote.title,
-          textMode: vote.textMode,
+          textMode: vote.textMode ?? null,
           labels: [...vote.labels],
           counts: [...result.counts],
           terms: (result.terms ?? []).map((entry) => ({ ...entry })),
@@ -282,9 +332,10 @@ export const processChatVotingMessage = async (
     };
   }
 
-  const choice = voteChoiceFromMessage(text, vote.preset, vote.optionCount);
+  const choice = voteChoiceFromMessage(text, vote.kind, vote.optionCount, vote.labels);
   if (choice === null) return { actions: [], diagnostics: [] };
-  const result = await context.ballots.cast(vote.id, userId, choice);
+  const result = await context.ballots.cast(vote.id, userId, choice.choice,
+    choice.source === "word" ? { onlyIfNew: true } : undefined);
   if (result.status !== "counted" && result.status !== "changed") return { actions: [], diagnostics: [] };
   return {
     actions: [{
@@ -296,6 +347,11 @@ export const processChatVotingMessage = async (
         openedAt: vote.openedAt,
         closesAt: vote.closesAt,
         requestedDurationSeconds: vote.requestedDurationSeconds,
+        kind: vote.kind,
+        preset: chatVotingPresetForKind(vote.kind),
+        optionCount: vote.optionCount,
+        labels: [...vote.labels],
+        textMode: vote.textMode ?? null,
         title: vote.title,
         counts: [...result.counts],
         revision: result.revision,
@@ -467,6 +523,11 @@ export const closeChatVoteFromAlarm = async (
     openedAt: closedVote.openedAt,
     closesAt: closedVote.closesAt,
     requestedDurationSeconds: closedVote.requestedDurationSeconds,
+    kind: closedVote.kind,
+    preset: chatVotingPresetForKind(closedVote.kind),
+    optionCount: closedVote.optionCount,
+    labels: [...closedVote.labels],
+    textMode: closedVote.textMode ?? null,
     title: closedVote.title,
     status: "closed",
     counts: [...(closedVote.counts ?? snapshot.counts)],

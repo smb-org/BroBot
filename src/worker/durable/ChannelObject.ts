@@ -1558,7 +1558,7 @@ export class ChannelObject extends DurableObject<Env> {
   private ballotAccess(moduleId: string): ModuleBallotAccess {
     return {
       open: (ballotId, optionCount, expiresAt, rule, termFilter) => this.openBallot(moduleId, ballotId, optionCount, expiresAt, rule, termFilter),
-      cast: (ballotId, userId, choice) => this.castBallot(moduleId, ballotId, userId, choice),
+      cast: (ballotId, userId, choice, options) => this.castBallot(moduleId, ballotId, userId, choice, options),
       castTerm: (ballotId, userId, term, matchText) => this.castBallotTerm(moduleId, ballotId, userId, term, matchText),
       setBlockedTerms: (ballotId, terms) => setStoredBallotBlockedTerms(this.ctx.storage, moduleId, ballotId, terms),
       approveTerm: (ballotId, term) => approveStoredBallotTerm(this.ctx.storage, moduleId, ballotId, term),
@@ -1614,10 +1614,11 @@ export class ChannelObject extends DurableObject<Env> {
     ballotId: string,
     userId: string,
     choice: number,
+    options?: { onlyIfNew?: boolean },
   ): Promise<BallotCastResult> {
     const channelId = this.ownChannelId();
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
-    return await castStoredBallot(this.ctx.storage, channelId, moduleId, ballotId, userId, choice);
+    return await castStoredBallot(this.ctx.storage, channelId, moduleId, ballotId, userId, choice, options);
   }
 
   public async castBallotTerm(

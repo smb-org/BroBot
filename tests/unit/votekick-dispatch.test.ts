@@ -20,6 +20,37 @@ const keyRing = JSON.stringify({
   active: { id: "votekick-dispatch", key: Buffer.from(new Uint8Array(32).fill(8)).toString("base64url") },
   retired: [],
 });
+
+describe("shared ballot cast policy", () => {
+  it("returns unchanged for onlyIfNew after the same voter has already cast a number", async () => {
+    const storage = memoryBallotStorage();
+    const opened = await openStoredBallot(storage, "chat_voting", "word-vote", 2, Date.now() + 60_000);
+    expect(opened.status).toBe("opened");
+
+    const numbered = await castStoredBallot(storage, "channel-a", "chat_voting", "word-vote", "voter-a", 1);
+    const word = await castStoredBallot(
+      storage,
+      "channel-a",
+      "chat_voting",
+      "word-vote",
+      "voter-a",
+      2,
+      { onlyIfNew: true },
+    );
+
+    expect(numbered).toMatchObject({ status: "counted", counts: [1, 0], revision: 1 });
+    expect(word).toMatchObject({ status: "unchanged", counts: [1, 0], revision: 1 });
+    const changedWithoutTheOption = await castStoredBallot(
+      storage,
+      "channel-a",
+      "chat_voting",
+      "word-vote",
+      "voter-a",
+      2,
+    );
+    expect(changedWithoutTheOption).toMatchObject({ status: "changed", counts: [0, 1], revision: 2 });
+  });
+});
 const databases: TestD1Database[] = [];
 
 type TestBallotTransaction = {

@@ -357,14 +357,11 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-panel__body { display: grid; grid-template-columns: 26rem minmax(0, 1fr); align-items: start; gap: var(--s8); }
 .chat-voting-setup, .chat-voting-result { display: grid; align-content: start; min-width: 0; }
 .chat-voting-setup { gap: var(--s4); }
-.chat-voting-type-question-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s2); min-width: 0; }
-.chat-voting-type-question-row > * { min-width: 0; }
 .chat-voting-column-heading { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; }
 .chat-voting-labels-group { display: grid; gap: var(--s2); min-width: 0; }
 .chat-voting-labels-group h3 { color: var(--text-2); font-size: 12px; font-weight: 500; }
 .chat-voting-labels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); min-width: 0; }
-.chat-voting-labels--scale { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.chat-voting-labels--options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.chat-voting-labels--options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .chat-voting-labels .ui-field .mantine-InputWrapper-label { margin-bottom: 0; }
 .chat-voting-duration-row { display: grid; grid-template-columns: minmax(0, 1fr) 16rem; align-items: end; gap: var(--s2); min-width: 0; }
 .chat-voting-duration-row:not(.chat-voting-duration-row--custom) { grid-template-columns: minmax(0, 20rem); }
@@ -1692,7 +1689,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .event-table__mobile-meta > span:first-child { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .event-table__mobile-meta > span:nth-child(3) { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chat-voting-panel__body { grid-template-columns: minmax(0, 1fr); gap: var(--s8); }
-  .chat-voting-labels--scale, .chat-voting-labels--options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chat-voting-labels--options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chat-voting-duration-row { grid-template-columns: minmax(0, 1fr) 16rem; }
   .chat-voting-duration-row:not(.chat-voting-duration-row--custom) { grid-template-columns: minmax(0, 20rem); }
   .chat-voting-results__row { grid-template-columns: 1.5rem minmax(2.5rem, 1fr) minmax(2rem, 1.5fr) 2.5rem 3rem; gap: var(--s2); }

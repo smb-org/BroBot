@@ -47,6 +47,7 @@ const openVote = {
 const fetchFor = (
   readCurrent: () => unknown = () => currentState(),
   onStart: (body: unknown) => unknown = () => ({ vote: openVote }),
+  onClose: () => void = () => {},
 ) => vi.fn<typeof fetch>((input, init) => {
   const path = input instanceof Request
     ? new URL(input.url).pathname
@@ -56,7 +57,10 @@ const fetchFor = (
     const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
     return Promise.resolve(jsonResponse(onStart(body)));
   }
-  if (path.endsWith("/close")) return Promise.resolve(jsonResponse({ closing: true, pollId: openVote.id }));
+  if (path.endsWith("/close")) {
+    onClose();
+    return Promise.resolve(jsonResponse({ closing: true, pollId: openVote.id }));
+  }
   if (path.endsWith("/approve-term")) return Promise.resolve(jsonResponse({ terms: [], moreTerms: 0, revision: 2 }));
   return Promise.resolve(jsonResponse(readCurrent()));
 });
@@ -90,52 +94,34 @@ describe("chat voting live panel", () => {
     expect(await screen.findByText("No vote yet. Start one in chat with !vote yesno [question].")).toBeInTheDocument();
   });
 
-  it("groups vote types and explains the exact chat input in the options", async () => {
+  it("has no type selector and offers yes/no, answer labels, free text, and duration controls", async () => {
     vi.stubGlobal("fetch", fetchFor());
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
-    const type = await screen.findByRole("combobox", { name: "Vote type" });
-    expect(type).toHaveValue("Yes / No");
-    expect(type.closest(".ui-select")).toHaveTextContent("Chat types 1 = yes, 2 = no. Each person’s latest vote counts.");
-    fireEvent.click(type);
-    const listboxId = type.getAttribute("aria-controls");
-    const listbox = listboxId === null ? null : document.getElementById(listboxId);
-    expect(listbox).not.toBeNull();
-    if (listbox === null) throw new Error("The type listbox has not mounted.");
-    expect(listbox).toHaveTextContent("Two options");
-    expect(listbox).toHaveTextContent("Yes / NoChat types 1 = yes, 2 = no");
-    expect(listbox).toHaveTextContent("0 / 1Chat types 0 = no, 1 = yes");
-    expect(listbox).toHaveTextContent("1 / 2Chat types 1 or 2");
-    expect(listbox).toHaveTextContent("Multiple options");
-    expect(listbox).toHaveTextContent("Free textChat types a word · top 5 are counted");
-  });
-
-  it("renders only the selected preset fields and keeps one duration select", async () => {
-    vi.stubGlobal("fetch", fetchFor());
-    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
-
-    expect(await screen.findByRole("textbox", { name: "Label for option 1" })).toHaveAttribute("placeholder", "Yes");
-    expect(screen.queryByRole("spinbutton", { name: "Number of options" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("radiogroup", { name: "Counting mode" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Question" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Vote type" })).not.toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Number of answers" })).toHaveValue("0");
+    expect(screen.queryByRole("textbox", { name: "Label for option 1" })).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Duration" })).toBeInTheDocument();
     expect(screen.queryByRole("spinbutton", { name: "Seconds" })).not.toBeInTheDocument();
 
-    await selectOption("Vote type", "Options 2–9");
-    expect(screen.getByRole("spinbutton", { name: "Number of options" })).toBeInTheDocument();
+    const optionCount = screen.getByRole("spinbutton", { name: "Number of answers" });
+    fireEvent.change(optionCount, { target: { value: "2" } });
     expect(screen.getByRole("textbox", { name: "Label for option 1" })).toBeInTheDocument();
-    expect(screen.queryByRole("radiogroup", { name: "Counting mode" })).not.toBeInTheDocument();
 
-    await selectOption("Vote type", "Free text");
+    fireEvent.click(screen.getByRole("switch", { name: "Free text" }));
     expect(screen.getByRole("radiogroup", { name: "Counting mode" })).toBeInTheDocument();
     expect(screen.getByRole("radiogroup", { name: "Counting mode" })).toHaveTextContent("Whole message");
-    expect(screen.queryByRole("spinbutton", { name: "Number of options" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: "Number of answers" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Label for option 1" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "Free text" }));
+    expect(screen.getByRole("spinbutton", { name: "Number of answers" })).toHaveValue("2");
 
     await selectOption("Duration", "Custom …");
     expect(screen.getByRole("spinbutton", { name: "Seconds" })).toBeInTheDocument();
   });
 
-  it("sends edited labels for this vote while leaving the defaults in settings", async () => {
+  it("sends edited answer labels for this vote", async () => {
     let startPayload: unknown;
     let started = false;
     vi.stubGlobal("fetch", fetchFor(
@@ -144,13 +130,15 @@ describe("chat voting live panel", () => {
     ));
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
+    const count = await screen.findByRole("spinbutton", { name: "Number of answers" });
+    fireEvent.change(count, { target: { value: "2" } });
     const yes = await screen.findByRole("textbox", { name: "Label for option 1" });
     const no = screen.getByRole("textbox", { name: "Label for option 2" });
     fireEvent.change(yes, { target: { value: "Pizza" } });
     fireEvent.change(no, { target: { value: "Burger" } });
     fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
 
-    await waitFor(() => expect(startPayload).toEqual({ preset: "yes_no", durationSeconds: 120, labels: ["Pizza", "Burger"] }));
+    await waitFor(() => expect(startPayload).toEqual({ kind: "options", optionCount: 2, labels: ["Pizza", "Burger"], durationSeconds: 120 }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("Pizza"));
     expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Burger");
   });
@@ -184,17 +172,54 @@ describe("chat voting live panel", () => {
     expect(startPayload).toBeUndefined();
   });
 
-  it("shows the running question above its result", async () => {
+  it("keeps the draft question separate from a running vote", async () => {
     const titledVote = { ...openVote, title: "Pizza today?" };
     vi.stubGlobal("fetch", fetchFor(() => currentState({ vote: titledVote, counts: [4, 2], hasOpenBallot: true })));
     const { container } = render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
     const question = await screen.findByText("Pizza today?", { selector: ".chat-voting-result__question" });
     expect(question.compareDocumentPosition(container.querySelector(".chat-voting-results") as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Pizza today?");
+    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("");
   });
 
-  it("uses inline key labels for 0/1 and submits the default for an untouched field", async () => {
+  it("keeps the one draft intact after start, end, and a component re-render", async () => {
+    let started = false;
+    let closed = false;
+    const startedVote = { ...openVote, title: "Started question?" };
+    const readCurrent = () => currentState(started ? {
+      vote: closed ? { ...startedVote, status: "closed", closedAt: "2026-10-04T10:03:00.000Z" } : startedVote,
+      counts: [0, 0],
+    } : {});
+    vi.stubGlobal("fetch", fetchFor(
+      readCurrent,
+      () => { started = true; return { vote: startedVote }; },
+      () => { closed = true; },
+    ));
+    const view = render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Question" }), { target: { value: "Draft question?" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Number of answers" }), { target: { value: "2" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Label for option 1" }), { target: { value: "Coffee" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Label for option 2" }), { target: { value: "Tea" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
+
+    await screen.findByRole("button", { name: "End vote" });
+    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Draft question?");
+    expect(screen.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("Coffee");
+    expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Tea");
+    fireEvent.click(screen.getByRole("button", { name: "End vote" }));
+
+    await screen.findByRole("button", { name: "Start vote" });
+    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Draft question?");
+    expect(screen.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("Coffee");
+    expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Tea");
+    view.rerender(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Draft question?");
+    expect(screen.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("Coffee");
+    expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Tea");
+  });
+
+  it("uses localized yes/no defaults when there are no answer labels", async () => {
     let startPayload: unknown;
     vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
       startPayload = body;
@@ -203,16 +228,29 @@ describe("chat voting live panel", () => {
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
     await screen.findByRole("button", { name: "Start vote" });
-    await selectOption("Vote type", "0 / 1");
-    const zero = screen.getByRole("textbox", { name: "Label for option 0" });
-    const one = screen.getByRole("textbox", { name: "Label for option 1" });
-    expect(zero).toHaveAttribute("placeholder", "No");
-    expect(one).toHaveAttribute("placeholder", "Yes");
-    expect(zero.closest(".mantine-TextInput-root")).toHaveClass("ui-field--prefixed");
-    fireEvent.change(zero, { target: { value: "Nope" } });
+    expect(screen.getByText("With no answers, chat votes with 1 for yes and 2 for no.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
 
-    await waitFor(() => expect(startPayload).toEqual({ preset: "digit_01", durationSeconds: 120, labels: ["Nope", "Yes"] }));
+    await waitFor(() => expect(startPayload).toEqual({ kind: "yes_no", labels: ["Yes", "No"], durationSeconds: 120 }));
+  });
+
+  it("starts free-text voting when the hidden answer count is invalid", async () => {
+    let startPayload: unknown;
+    vi.stubGlobal("fetch", fetchFor(undefined, (body) => {
+      startPayload = body;
+      return { vote: openVote };
+    }));
+    render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    const answerCount = await screen.findByRole("spinbutton", { name: "Number of answers" });
+    fireEvent.change(answerCount, { target: { value: "1" } });
+    expect(screen.getByRole("button", { name: "Start vote" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("switch", { name: "Free text" }));
+    expect(screen.queryByRole("spinbutton", { name: "Number of answers" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start vote" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
+
+    await waitFor(() => expect(startPayload).toEqual({ kind: "free_text", durationSeconds: 120, textMode: "first_word" }));
   });
 
   it("counts emoji labels in code points in the field and start validation", async () => {
@@ -223,13 +261,15 @@ describe("chat voting live panel", () => {
     }));
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
+    const count = await screen.findByRole("spinbutton", { name: "Number of answers" });
+    fireEvent.change(count, { target: { value: "2" } });
     const emojiLabel = "😀".repeat(17);
     fireEvent.change(await screen.findByRole("textbox", { name: "Label for option 1" }), { target: { value: emojiLabel } });
     expect(screen.getByText("17/32")).toBeInTheDocument();
     const start = screen.getByRole("button", { name: "Start vote" });
     expect(start).toBeEnabled();
     fireEvent.click(start);
-    await waitFor(() => expect(startPayload).toMatchObject({ labels: [emojiLabel, "No"] }));
+    await waitFor(() => expect(startPayload).toMatchObject({ labels: [emojiLabel, "2"] }));
   });
 
   it("shows invalid duration and option-count reasons in the fixed hint and field", async () => {
@@ -237,12 +277,11 @@ describe("chat voting live panel", () => {
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
     await screen.findByRole("button", { name: "Start vote" });
-    await selectOption("Vote type", "Options 2–9");
-    const optionCount = screen.getByRole("spinbutton", { name: "Number of options" });
-    fireEvent.change(optionCount, { target: { value: "" } });
+    const optionCount = screen.getByRole("spinbutton", { name: "Number of answers" });
+    fireEvent.change(optionCount, { target: { value: "1" } });
     const hint = screen.getByTestId("chat-voting-hint-slot");
-    expect(hint).toHaveTextContent("Enter a number from 2 to 9.");
-    expect(optionCount.closest(".ui-number-field__stepper")).toHaveTextContent("Enter a number from 2 to 9.");
+    expect(hint).toHaveTextContent("Enter 0 or a number from 2 to 9.");
+    expect(optionCount.closest(".ui-number-field__stepper")).toHaveTextContent("Enter 0 or a number from 2 to 9.");
     expect(screen.getByRole("button", { name: "Start vote" })).toBeDisabled();
 
     await selectOption("Duration", "Custom …");
@@ -257,9 +296,8 @@ describe("chat voting live panel", () => {
     vi.stubGlobal("fetch", fetchFor(() => currentState({ vote: openVote, counts: [4, 2], hasOpenBallot: true })));
     render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
-    expect(await screen.findByRole("textbox", { name: "Label for option 1" })).toHaveValue("Pizza");
-    expect(screen.getByRole("combobox", { name: "Vote type" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Burger");
+    expect(await screen.findByRole("textbox", { name: "Question" })).toHaveValue("");
+    expect(screen.getByRole("spinbutton", { name: "Number of answers" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "End vote" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "End vote" })).toHaveAttribute("style");
     expect(screen.getByTestId("chat-voting-hint-slot")).toHaveTextContent("Locked while a vote or votekick is running.");

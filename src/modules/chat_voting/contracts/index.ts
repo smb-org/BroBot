@@ -59,6 +59,12 @@ export const DEFAULT_CHAT_VOTING_SETTINGS: ChatVotingSettings = {
 export const CHAT_VOTING_PRESETS = ["yes_no", "scale_5", "options_n", "digit_01", "digit_12", "free_text"] as const;
 export type ChatVotingPreset = (typeof CHAT_VOTING_PRESETS)[number];
 export type ChatVotePreset = ChatVotingPreset;
+export const CHAT_VOTING_KINDS = ["yes_no", "options", "free_text"] as const;
+export type ChatVotingKind = (typeof CHAT_VOTING_KINDS)[number];
+export const chatVotingKindForPreset = (preset: ChatVotingPreset): ChatVotingKind =>
+  preset === "free_text" ? "free_text" : preset === "yes_no" ? "yes_no" : "options";
+export const chatVotingPresetForKind = (kind: ChatVotingKind): ChatVotingPreset =>
+  kind === "free_text" ? "free_text" : kind === "yes_no" ? "yes_no" : "options_n";
 export const CHAT_VOTING_TEXT_MODES = ["first_word", "whole_message"] as const;
 export type ChatVotingTextMode = (typeof CHAT_VOTING_TEXT_MODES)[number];
 
@@ -74,7 +80,9 @@ export type ChatVoteCloseReason = (typeof CHAT_VOTE_CLOSE_REASONS)[number];
 export interface ChatVote {
   id: string;
   channelId: string;
+  kind: ChatVotingKind;
   preset: ChatVotingPreset;
+  legacyWritten: boolean;
   optionCount: number;
   labels: readonly string[];
   title: string | null;

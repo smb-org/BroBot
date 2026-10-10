@@ -15,7 +15,9 @@ describe("chat voting repository mutation guards", () => {
       const vote: ChatVoteDraft = {
         id: "question-poll",
         channelId: "fictional-channel",
+        kind: "yes_no",
         preset: "yes_no",
+        legacyWritten: false,
         optionCount: 2,
         labels: ["Yes", "No"],
         title: "Pizza today?",
@@ -49,7 +51,9 @@ describe("chat voting repository mutation guards", () => {
       const vote: ChatVoteDraft = {
         id: "fictional-poll",
         channelId: "fictional-channel",
+        kind: "yes_no",
         preset: "yes_no",
+        legacyWritten: false,
         optionCount: 2,
         labels: ["Yes", "No"],
         title: null,
@@ -84,7 +88,9 @@ describe("chat voting repository mutation guards", () => {
       const vote: ChatVoteDraft = {
         id: "fictional-poll",
         channelId: "fictional-channel",
+        kind: "yes_no",
         preset: "yes_no",
+        legacyWritten: false,
         optionCount: 2,
         labels: ["Yes", "No"],
         title: null,

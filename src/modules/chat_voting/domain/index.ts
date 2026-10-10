@@ -1,11 +1,13 @@
 import type { ModuleLanguage } from "../../contract";
 import { CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
-import type { ChatVoteTerm, ChatVotingPreset, ChatVotingSettings, ChatVotingTextMode } from "../contracts";
+import type { ChatVoteTerm, ChatVotingKind, ChatVotingPreset, ChatVotingSettings, ChatVotingTextMode } from "../contracts";
 import { chatVotingFreeTextOptionText } from "../contracts/chat-defaults";
 
 export type VoteCommand =
-  | { kind: "start"; preset: ChatVotingPreset; optionCount: number; textMode?: ChatVotingTextMode; title: string | null }
+  | { kind: "start"; voteKind: ChatVotingKind; preset: ChatVotingPreset; optionCount: number; labels?: readonly string[]; textMode?: ChatVotingTextMode; title: string | null; durationSeconds?: number }
+  | { kind: "again" }
   | { kind: "end" }
+  | { kind: "invalid"; problem: "question" | "answerCount" | "labels" | "duration" }
   | { kind: "help" };
 
 export type VoteLabelSetting = "yesNoLabels" | "scaleLabels" | "optionLabels" | "zeroOneLabels" | "oneTwoLabels";
@@ -22,7 +24,18 @@ export const isValidVoteTitle = (title: string): boolean =>
 export const isValidVoteLabel = (label: string): boolean => {
   const trimmed = label.trim();
   const length = voteLabelLength(trimmed);
-  return length > 0 && length <= CHAT_VOTING_LABEL_MAX_LENGTH;
+  return length > 0 && length <= CHAT_VOTING_LABEL_MAX_LENGTH &&
+    normalizeFreeTextVoteForMatching(trimmed).length > 0;
+};
+
+export const validateVoteLabels = (
+  labels: readonly string[],
+  minimum = 2,
+  maximum = 9,
+): boolean => {
+  if (labels.length < minimum || labels.length > maximum || !labels.every(isValidVoteLabel)) return false;
+  const normalized = labels.map(normalizeFreeTextVoteForMatching);
+  return new Set(normalized).size === normalized.length;
 };
 
 export const isValidVoteLabelSetting = (value: string, setting: VoteLabelSetting): boolean => {
@@ -31,8 +44,7 @@ export const isValidVoteLabelSetting = (value: string, setting: VoteLabelSetting
   const [minimum, maximum] = setting === "yesNoLabels" || setting === "zeroOneLabels" || setting === "oneTwoLabels" ? [2, 2]
     : setting === "scaleLabels" ? [5, 5]
       : [2, 9];
-  return labels.length >= minimum && labels.length <= maximum &&
-    labels.every(isValidVoteLabel);
+  return validateVoteLabels(labels, minimum, maximum);
 };
 
 /** Splits off the first whitespace-delimited token of trimmed text in linear time (no regex backtracking). */
@@ -42,46 +54,110 @@ const splitFirstToken = (text: string): [token: string, rest: string] => {
   return [text.slice(0, end), text.slice(end).trim()];
 };
 
+const startCommand = (
+  voteKind: ChatVotingKind,
+  preset: ChatVotingPreset,
+  optionCount: number,
+  title: string,
+  labels?: readonly string[],
+  textMode?: ChatVotingTextMode,
+  durationSeconds?: number,
+): VoteCommand => {
+  const normalizedTitle = normalizeVoteTitle(title);
+  if (normalizedTitle !== null && voteLabelLength(normalizedTitle) > CHAT_VOTING_TITLE_MAX_LENGTH) {
+    return { kind: "invalid", problem: "question" };
+  }
+  if (labels !== undefined && !validateVoteLabels(labels, 2, 9)) return { kind: "invalid", problem: "labels" };
+  return {
+    kind: "start",
+    voteKind,
+    preset,
+    optionCount,
+    ...(labels === undefined ? {} : { labels }),
+    ...(textMode === undefined ? {} : { textMode }),
+    title: normalizedTitle,
+    ...(durationSeconds === undefined ? {} : { durationSeconds }),
+  };
+};
+
+const parseInlineOptions = (tail: string): VoteCommand => {
+  const segments = tail.split("|").map((segment) => segment.trim());
+  const question = segments[0] ?? "";
+  if (!question.endsWith("?")) return { kind: "invalid", problem: "question" };
+  let durationSeconds: number | undefined;
+  const last = segments.at(-1) ?? "";
+  if (/^\d{1,3}(s|m|h)$/u.test(last)) {
+    const amount = Number(last.slice(0, -1));
+    const unit = last.at(-1);
+    const multiplier = unit === "h" ? 3_600 : unit === "m" ? 60 : 1;
+    durationSeconds = amount * multiplier;
+    if (durationSeconds < 1 || durationSeconds > 14_400) return { kind: "invalid", problem: "duration" };
+    segments.pop();
+  }
+  const labels = segments.slice(1);
+  if (labels.length < 2 || labels.length > 9) return { kind: "invalid", problem: "answerCount" };
+  return startCommand("options", "options_n", labels.length, question, labels, undefined, durationSeconds);
+};
+
 export const parseVoteCommand = (text: string): VoteCommand | null => {
   const [command, tail] = splitFirstToken(text.trim());
   if (command.toLowerCase() !== "!vote") return null;
+  if (tail.length === 0 || tail.toLowerCase() === "help") return { kind: "help" };
+  if (tail.toLowerCase() === "end") return { kind: "end" };
+  if (tail.toLowerCase() === "again") return { kind: "again" };
+  if (tail.includes("|")) return parseInlineOptions(tail);
+
   const [rawArgument, remainder] = splitFirstToken(tail);
   const argument = rawArgument.length === 0 ? undefined : rawArgument.toLowerCase();
-  if (argument === "end") return remainder.length === 0 ? { kind: "end" } : { kind: "help" };
-  const start = (preset: ChatVotingPreset, optionCount: number, title = remainder): VoteCommand => {
-    const normalizedTitle = normalizeVoteTitle(title);
-    if (normalizedTitle !== null && voteLabelLength(normalizedTitle) > CHAT_VOTING_TITLE_MAX_LENGTH) return { kind: "help" };
-    return { kind: "start", preset, optionCount, title: normalizedTitle };
-  };
-  if (argument === "yesno") return start("yes_no", 2);
-  if (argument === "scale") return start("scale_5", 5);
-  if (argument === "01") return start("digit_01", 2);
-  if (argument === "12") return start("digit_12", 2);
+  if (argument === "yesno") return startCommand("yes_no", "yes_no", 2, remainder);
+  if (argument === "scale") return startCommand("options", "scale_5", 5, remainder);
+  if (argument === "01") return startCommand("yes_no", "digit_01", 2, remainder);
+  if (argument === "12") return startCommand("yes_no", "digit_12", 2, remainder);
   if (argument === "text") {
     const [modeToken, modeRest] = splitFirstToken(remainder);
     const mode = modeToken.toLowerCase();
     const hasMode = mode === "word" || mode === "message";
     const title = hasMode ? modeRest : remainder;
-    const command = start("free_text", 0, title);
-    if (command.kind !== "start") return command;
-    return { ...command, textMode: mode === "message" ? "whole_message" : "first_word" };
+    return startCommand("free_text", "free_text", 0, title, undefined,
+      mode === "message" ? "whole_message" : "first_word");
   }
-  if (argument !== undefined && /^[2-9]$/u.test(argument)) return start("options_n", Number(argument));
+  if (argument !== undefined && /^[2-9]$/u.test(argument)) {
+    return startCommand("options", "options_n", Number(argument), remainder);
+  }
+  if (tail.endsWith("?")) return startCommand("yes_no", "yes_no", 2, tail);
   return { kind: "help" };
 };
 
-export const voteChoiceFromMessage = (text: string, preset: ChatVotingPreset, optionCount: number): number | null => {
-  if (preset === "digit_01") return text === "0" ? 1 : text === "1" ? 2 : null;
-  if (preset === "digit_12") return text === "1" ? 1 : text === "2" ? 2 : null;
-  if (!/^[1-9]$/u.test(text)) return null;
-  const choice = Number(text);
-  return choice <= optionCount ? choice : null;
+export interface VoteChoice {
+  choice: number;
+  source: "number" | "word";
+}
+
+export const voteChoiceFromMessage = (
+  text: string,
+  kind: ChatVotingKind,
+  optionCount: number,
+  labels: readonly string[] = [],
+): VoteChoice | null => {
+  const trimmed = text.trim();
+  if (/^[1-9]\d*$/u.test(trimmed)) {
+    const choice = Number(trimmed);
+    if (Number.isSafeInteger(choice) && choice <= optionCount) return { choice, source: "number" };
+  }
+  if (kind !== "options") return null;
+  const normalizedText = normalizeFreeTextVoteForMatching(trimmed);
+  if (normalizedText.length === 0) return null;
+  const index = labels.findIndex((label) => {
+    const normalizedLabel = normalizeFreeTextVoteForMatching(label);
+    return normalizedLabel.length > 0 && !/^\p{N}+$/u.test(normalizedLabel) && normalizedLabel === normalizedText;
+  });
+  return index < 0 ? null : { choice: index + 1, source: "word" };
 };
 
 export const configuredLabels = (labels: readonly string[], count: number, allowAdditional = false): string[] | null => {
   const normalized = labels.map((label) => label.trim());
   const acceptedLength = allowAdditional ? normalized.length >= count : normalized.length === count;
-  return acceptedLength && normalized.slice(0, count).every(isValidVoteLabel)
+  return acceptedLength && validateVoteLabels(normalized.slice(0, count), count, count)
     ? normalized.slice(0, count)
     : null;
 };
@@ -102,7 +178,11 @@ export const labelsForVote = (
       : preset === "digit_01" ? settings.zeroOneLabels : settings.oneTwoLabels;
   if (preset === "options_n" && isValidVoteLabelSetting(setting, "optionLabels") && setting.trim().length > 0) {
     const configured = setting.split("|").map((label) => label.trim());
-    return Array.from({ length: optionCount }, (_, index) => configured[index] ?? String(index + 1));
+    const labels = Array.from({ length: optionCount }, (_, index) => configured[index] ?? String(index + 1));
+    // Appended key numbers can collide with configured labels; plain numbers are always unique.
+    return validateVoteLabels(labels, optionCount, optionCount)
+      ? labels
+      : Array.from({ length: optionCount }, (_, index) => String(index + 1));
   }
   const configured = labelsFromSetting(
     setting,

@@ -1,6 +1,4 @@
 import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale";
-import type { ChatVotePreset } from "../contracts";
-
 export interface ChatVotingPanelTexts {
   title: string;
   newVote: string;
@@ -13,12 +11,9 @@ export interface ChatVotingPanelTexts {
   noVote: string;
   loading: string;
   loadError: string;
-  voteType: string;
   question: string;
   questionCount: (count: number, maximum: number) => string;
-  presetGroups: { twoOptions: string; scale: string; multipleOptions: string; freeText: string };
-  presetDescriptions: Record<ChatVotePreset, string>;
-  presetHints: Record<ChatVotePreset, string>;
+  yesNoDefaultHint: string;
   labelsHeading: string;
   labelFieldName: (key: string) => string;
   labelCount: (count: number, maximum: number) => string;
@@ -33,17 +28,12 @@ export interface ChatVotingPanelTexts {
   durationRange: string;
   increaseDuration: string;
   decreaseDuration: string;
-  yesNo: string;
-  zeroOne: string;
-  oneTwo: string;
-  scale: string;
   freeText: string;
   textMode: string;
   firstWord: string;
   wholeMessage: string;
   freeTextHint: string;
   optionCount: string;
-  options: string;
   optionCountHint: string;
   increaseOptionCount: string;
   decreaseOptionCount: string;
@@ -57,6 +47,7 @@ export interface ChatVotingPanelTexts {
   roleDisabledReason: string;
   invalidDuration: string;
   invalidOptionCount: string;
+  invalidLabels: string;
   nextDay: string;
   resultMeta: (count: number, from: string, to: string | null, moreTerms?: number) => string;
   resultBar: (label: string, count: number, percent: number) => string;
@@ -85,26 +76,9 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     noVote: "Noch keine Abstimmung. Starte eine im Chat mit !vote yesno [question].",
     loading: "Abstimmung wird geladen …",
     loadError: "Die Abstimmung konnte nicht geladen werden.",
-    voteType: "Abstimmungstyp",
     question: "Frage",
     questionCount: (count, maximum) => `${String(count)}/${String(maximum)}`,
-    presetGroups: { twoOptions: "Zwei Optionen", scale: "Skala", multipleOptions: "Mehrere Optionen", freeText: "Freitext" },
-    presetDescriptions: {
-      yes_no: "Chat tippt 1 = Ja, 2 = Nein",
-      digit_01: "Chat tippt 0 = Nein, 1 = Ja",
-      digit_12: "Chat tippt 1 oder 2",
-      scale_5: "Chat tippt eine Zahl von 1 bis 5",
-      options_n: "Chat tippt die Nummer der Option",
-      free_text: "Chat schreibt ein Wort · die Top 5 zählen",
-    },
-    presetHints: {
-      yes_no: "Chat tippt 1 = Ja, 2 = Nein. Pro Person zählt die letzte Stimme.",
-      digit_01: "Chat tippt 0 = Nein, 1 = Ja. Pro Person zählt die letzte Stimme.",
-      digit_12: "Chat tippt 1 oder 2. Pro Person zählt die letzte Stimme.",
-      scale_5: "Chat tippt eine Zahl von 1 bis 5.",
-      options_n: "Chat tippt die Nummer der Option.",
-      free_text: "Chat schreibt ein Wort; die Top 5 Begriffe zählen.",
-    },
+    yesNoDefaultHint: "Ohne Antworten stimmt der Chat mit 1 für Ja und 2 für Nein ab.",
     labelsHeading: "Beschriftungen",
     labelFieldName: (key) => `Beschriftung für Option ${key}`,
     labelCount: (count, maximum) => `${String(count)}/${String(maximum)}`,
@@ -119,18 +93,13 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     durationRange: "1 bis 14.400 Sekunden",
     increaseDuration: "Dauer erhöhen",
     decreaseDuration: "Dauer verringern",
-    yesNo: "Ja / Nein",
-    zeroOne: "0 / 1",
-    oneTwo: "1 / 2",
-    scale: "Skala 1–5",
     freeText: "Freitext",
     textMode: "Zählweise",
     firstWord: "Erstes Wort",
     wholeMessage: "Ganze Nachricht",
     freeTextHint: "Ganze Nachricht: bis 25 Zeichen. Neue Begriffe erscheinen erst nach Freigabe.",
-    optionCount: "Anzahl",
-    options: "Optionen 2–9",
-    optionCountHint: "Zwei bis neun Optionen",
+    optionCount: "Anzahl der Antworten",
+    optionCountHint: "Keine Antwort für Ja/Nein oder zwei bis neun Antworten",
     increaseOptionCount: "Optionszahl erhöhen",
     decreaseOptionCount: "Optionszahl verringern",
     start: "Abstimmung starten",
@@ -142,7 +111,8 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     startDisabledReason: "Gesperrt, solange eine Abstimmung oder ein Votekick läuft.",
     roleDisabledReason: "Deine Kanalrolle darf Abstimmungen nur ansehen.",
     invalidDuration: "Gib eine Dauer von 1 bis 14.400 Sekunden ein.",
-    invalidOptionCount: "Gib eine Zahl von 2 bis 9 ein.",
+    invalidOptionCount: "Gib 0 oder eine Zahl von 2 bis 9 ein.",
+    invalidLabels: "Antworten müssen eindeutig und nicht leer sein.",
     nextDay: "(+1)",
     resultMeta: (count, from, to, moreTerms) => `${String(count)} Stimmen · ${to === null ? `seit ${from}` : `${from}–${to}`}${moreTerms ? ` · ${String(moreTerms)} weitere` : ""}`,
     resultBar: (label, count, percent) => `${label}: ${String(count)} Stimmen, ${String(percent)} Prozent`,
@@ -169,26 +139,9 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     noVote: "No vote yet. Start one in chat with !vote yesno [question].",
     loading: "Loading the vote …",
     loadError: "The vote could not be loaded.",
-    voteType: "Vote type",
     question: "Question",
     questionCount: (count, maximum) => `${String(count)}/${String(maximum)}`,
-    presetGroups: { twoOptions: "Two options", scale: "Scale", multipleOptions: "Multiple options", freeText: "Free text" },
-    presetDescriptions: {
-      yes_no: "Chat types 1 = yes, 2 = no",
-      digit_01: "Chat types 0 = no, 1 = yes",
-      digit_12: "Chat types 1 or 2",
-      scale_5: "Chat types a number from 1 to 5",
-      options_n: "Chat types the option number",
-      free_text: "Chat types a word · top 5 are counted",
-    },
-    presetHints: {
-      yes_no: "Chat types 1 = yes, 2 = no. Each person’s latest vote counts.",
-      digit_01: "Chat types 0 = no, 1 = yes. Each person’s latest vote counts.",
-      digit_12: "Chat types 1 or 2. Each person’s latest vote counts.",
-      scale_5: "Chat types a number from 1 to 5.",
-      options_n: "Chat types the option number.",
-      free_text: "Chat types a word; the top 5 terms count.",
-    },
+    yesNoDefaultHint: "With no answers, chat votes with 1 for yes and 2 for no.",
     labelsHeading: "Labels",
     labelFieldName: (key) => `Label for option ${key}`,
     labelCount: (count, maximum) => `${String(count)}/${String(maximum)}`,
@@ -203,18 +156,13 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     durationRange: "1 to 14,400 seconds",
     increaseDuration: "Increase duration",
     decreaseDuration: "Decrease duration",
-    yesNo: "Yes / No",
-    zeroOne: "0 / 1",
-    oneTwo: "1 / 2",
-    scale: "Scale 1–5",
     freeText: "Free text",
     textMode: "Counting mode",
     firstWord: "First word",
     wholeMessage: "Whole message",
     freeTextHint: "Whole messages count up to 25 characters; new terms appear after approval.",
-    optionCount: "Number of options",
-    options: "Options 2–9",
-    optionCountHint: "Two to nine options",
+    optionCount: "Number of answers",
+    optionCountHint: "No answers for yes/no, or two to nine answers",
     increaseOptionCount: "Increase option count",
     decreaseOptionCount: "Decrease option count",
     start: "Start vote",
@@ -226,7 +174,8 @@ const catalog: LocaleCatalog<ChatVotingPanelTexts> = {
     startDisabledReason: "Locked while a vote or votekick is running.",
     roleDisabledReason: "Your channel role can only view votes.",
     invalidDuration: "Enter a duration from 1 to 14,400 seconds.",
-    invalidOptionCount: "Enter a number from 2 to 9.",
+    invalidOptionCount: "Enter 0 or a number from 2 to 9.",
+    invalidLabels: "Answers must be unique and nonempty.",
     nextDay: "(+1)",
     resultMeta: (count, from, to, moreTerms) => `${String(count)} votes · ${to === null ? `since ${from}` : `${from}–${to}`}${moreTerms ? ` · ${String(moreTerms)} more` : ""}`,
     resultBar: (label, count, percent) => `${label}: ${String(count)} votes, ${String(percent)} percent`,

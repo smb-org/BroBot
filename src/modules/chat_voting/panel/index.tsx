@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 
-import { Button, Field, Led, LoadState, notify, NumberField, SegmentedControl, Select, Skeleton } from "../../../dashboard/ui";
-import type { SelectOption } from "../../../dashboard/ui";
+import { Button, Field, Led, LoadState, notify, NumberField, SegmentedControl, Select, Skeleton, Switch } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
-import { CHAT_VOTING_MAX_TEXT_TERMS, CHAT_VOTING_PRESETS, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
+import { CHAT_VOTING_MAX_TEXT_TERMS, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
 import type { ChatVotePreset, ChatVotingTextMode } from "../contracts";
-import { CHAT_VOTING_LABEL_MAX_LENGTH, isValidVoteLabel, isValidVoteTitle, rankVoteTerms, voteLabelLength } from "../domain";
+import { CHAT_VOTING_LABEL_MAX_LENGTH, isValidVoteTitle, rankVoteTerms, validateVoteLabels, voteLabelLength } from "../domain";
 import { compactDateRange, dateText, timeText } from "./date-range";
 import { chatVotingPanelTexts } from "./locale-panel";
 import type { ChatVotingPanelState } from "./service";
@@ -19,27 +18,6 @@ const durationPresetFor = (seconds: number): DurationPreset =>
 const secondsForDurationPreset = (preset: DurationPreset, customSeconds: number | ""): number | "" =>
   preset === "open" ? 0 : preset === "one" ? 60 : preset === "two" ? 120 : preset === "five" ? 300 : customSeconds;
 
-const emptyPresetRecord = <Value,>(value: Value): Record<ChatVotePreset, Value> => ({
-  yes_no: value,
-  digit_01: value,
-  digit_12: value,
-  scale_5: value,
-  options_n: value,
-  free_text: value,
-});
-
-const emptyLabels = (): Record<ChatVotePreset, string[]> => emptyPresetRecord([]);
-const emptyTouched = (): Record<ChatVotePreset, boolean> => emptyPresetRecord(false);
-
-const copyDefaultLabels = (defaults: Record<ChatVotePreset, string[]>): Record<ChatVotePreset, string[]> => ({
-  yes_no: [...defaults.yes_no],
-  digit_01: [...defaults.digit_01],
-  digit_12: [...defaults.digit_12],
-  scale_5: [...defaults.scale_5],
-  options_n: [...defaults.options_n],
-  free_text: [...defaults.free_text],
-});
-
 const keysForPreset = (preset: ChatVotePreset, optionCount: number): string[] => {
   if (preset === "free_text") return [];
   if (preset === "digit_01") return ["0", "1"];
@@ -48,94 +26,56 @@ const keysForPreset = (preset: ChatVotePreset, optionCount: number): string[] =>
   return Array.from({ length: count }, (_unused, index) => String(index + 1));
 };
 
-const presetOptions = (texts: ReturnType<typeof chatVotingPanelTexts>): SelectOption[] => [
-  { value: "yes_no", label: texts.yesNo, group: texts.presetGroups.twoOptions, description: texts.presetDescriptions.yes_no },
-  { value: "digit_01", label: texts.zeroOne, group: texts.presetGroups.twoOptions, description: texts.presetDescriptions.digit_01 },
-  { value: "digit_12", label: texts.oneTwo, group: texts.presetGroups.twoOptions, description: texts.presetDescriptions.digit_12 },
-  { value: "scale_5", label: texts.scale, group: texts.presetGroups.scale, description: texts.presetDescriptions.scale_5 },
-  { value: "options_n", label: texts.options, group: texts.presetGroups.multipleOptions, description: texts.presetDescriptions.options_n },
-  { value: "free_text", label: texts.freeText, group: texts.presetGroups.freeText, description: texts.presetDescriptions.free_text },
-];
+interface VoteDraft {
+  channelId: string;
+  question: string;
+  optionCount: number | "";
+  answerLabels: string[];
+  freeText: boolean;
+  textMode: ChatVotingTextMode;
+  durationPreset: DurationPreset;
+  customDurationSeconds: number | "";
+}
+
+const createVoteDraft = (channelId: string, defaultDurationSeconds: number): VoteDraft => {
+  const durationPreset = durationPresetFor(defaultDurationSeconds);
+  return {
+    channelId,
+    question: "",
+    optionCount: 0,
+    answerLabels: [],
+    freeText: false,
+    textMode: "first_word",
+    durationPreset,
+    customDurationSeconds: durationPreset === "custom" ? defaultDurationSeconds : 60,
+  };
+};
 
 export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true }: ModulePanelProperties): ReactElement => {
   const labels = chatVotingPanelTexts(language);
   const [state, setState] = useState<ChatVotingPanelState | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  const loadErrorNotified = useRef(false);
+  const [loadErrorNotified, setLoadErrorNotified] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [draftPreset, setDraftPreset] = useState<ChatVotePreset>("yes_no");
-  const [draftOptionCount, setDraftOptionCount] = useState<number | "">(2);
-  const [draftTextMode, setDraftTextMode] = useState<ChatVotingTextMode>("first_word");
-  const [draftQuestion, setDraftQuestion] = useState("");
-  const [draftLabels, setDraftLabels] = useState<Record<ChatVotePreset, string[]>>(emptyLabels);
-  const [draftDurationPreset, setDraftDurationPreset] = useState<DurationPreset | null>(null);
-  const [draftCustomDurationSeconds, setDraftCustomDurationSeconds] = useState<number | "">(60);
-  const configurationInitialized = useRef(false);
-  const durationDraftTouched = useRef(false);
-  const labelDraftTouched = useRef<Record<ChatVotePreset, boolean>>(emptyTouched());
-  const lastVote = useRef<ChatVotingPanelState["vote"]>(null);
-  const initializedChannel = useRef(channelId);
+  const [draftState, setDraftState] = useState<VoteDraft | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
-    if (initializedChannel.current !== channelId) {
-      initializedChannel.current = channelId;
-      configurationInitialized.current = false;
-      durationDraftTouched.current = false;
-      labelDraftTouched.current = emptyTouched();
-      lastVote.current = null;
-      setDraftLabels(emptyLabels());
-      setDraftQuestion("");
-    }
     try {
       const next = await loadChatVotingState(channelId);
-      const closedSinceLastRead = next.vote?.status === "closed" && lastVote.current?.id === next.vote.id && lastVote.current.status === "open";
-      const justClosedVote = closedSinceLastRead ? next.vote : null;
-      if (justClosedVote !== null) {
-        labelDraftTouched.current = emptyTouched();
-        labelDraftTouched.current[justClosedVote.preset] = true;
-        setDraftQuestion(justClosedVote.title ?? "");
-      }
-      if (!configurationInitialized.current && next.vote?.status === "closed") {
-        setDraftQuestion(next.vote.title ?? "");
-      }
-      const defaults = next.defaultLabels;
-      setDraftLabels((current) => {
-        const updated = { ...current };
-        for (const preset of CHAT_VOTING_PRESETS) {
-          if (!labelDraftTouched.current[preset]) updated[preset] = [...defaults[preset]];
-        }
-        if (justClosedVote !== null) updated[justClosedVote.preset] = [...justClosedVote.labels];
-        return updated;
-      });
       setState(next);
-      lastVote.current = next.vote;
-      if (justClosedVote !== null) {
-        setDraftPreset(justClosedVote.preset);
-        setDraftOptionCount(justClosedVote.optionCount);
-        setDraftTextMode(justClosedVote.textMode ?? "first_word");
-        const voteDurationPreset = durationPresetFor(justClosedVote.requestedDurationSeconds ?? 0);
-        setDraftDurationPreset(voteDurationPreset);
-        if (voteDurationPreset === "custom") setDraftCustomDurationSeconds(justClosedVote.requestedDurationSeconds ?? "");
-        durationDraftTouched.current = true;
-        configurationInitialized.current = true;
-      } else if (!configurationInitialized.current || next.vote?.status !== "open" && !durationDraftTouched.current) {
-        const defaultDurationSeconds = next.defaultDurationSeconds;
-        const defaultDurationPreset = durationPresetFor(defaultDurationSeconds);
-        setDraftDurationPreset(defaultDurationPreset);
-        if (defaultDurationPreset === "custom") setDraftCustomDurationSeconds(defaultDurationSeconds);
-        durationDraftTouched.current = false;
-        configurationInitialized.current = true;
-      }
+      setDraftState((current) => current?.channelId === channelId
+        ? current
+        : createVoteDraft(channelId, next.defaultDurationSeconds));
       setLoadFailed(false);
-      loadErrorNotified.current = false;
+      setLoadErrorNotified(false);
     } catch {
       setLoadFailed(true);
-      if (!loadErrorNotified.current) {
-        loadErrorNotified.current = true;
+      if (!loadErrorNotified) {
+        setLoadErrorNotified(true);
         notify({ tone: "error", message: labels.loadError });
       }
     }
-  }, [channelId, labels.loadError]);
+  }, [channelId, labels.loadError, loadErrorNotified]);
 
   useEffect(() => { void Promise.resolve().then(() => refresh()); }, [refresh]);
 
@@ -149,40 +89,39 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
     };
   }, [refresh]);
 
-  const selectedCount = draftPreset === "options_n" && typeof draftOptionCount === "number" ? draftOptionCount : 2;
-  const labelKeys = keysForPreset(draftPreset, selectedCount);
-  const selectedDefaults = state?.defaultLabels[draftPreset] ?? [];
-  const effectiveDraftLabels = labelKeys.map((key, index) => {
-    const entered = draftLabels[draftPreset][index]?.trim() ?? "";
-    return entered || selectedDefaults[index] || key;
-  });
-  const validLabels = effectiveDraftLabels.every(isValidVoteLabel);
-  const validQuestion = isValidVoteTitle(draftQuestion);
+  const draft = draftState?.channelId === channelId
+    ? draftState
+    : createVoteDraft(channelId, state?.defaultDurationSeconds ?? 0);
+  const updateDraft = (update: Partial<VoteDraft>): void => {
+    setDraftState((current) => ({
+      ...(current?.channelId === channelId ? current : createVoteDraft(channelId, state?.defaultDurationSeconds ?? 0)),
+      ...update,
+    }));
+  };
+  const answerCount = typeof draft.optionCount === "number" ? draft.optionCount : -1;
+  const validOptionCount = draft.freeText || answerCount === 0 || answerCount >= 2 && answerCount <= 9;
+  const effectiveDraftLabels = answerCount >= 2 && answerCount <= 9
+    ? Array.from({ length: answerCount }, (_unused, index) => draft.answerLabels[index]?.trim() || String(index + 1))
+    : language === "de" ? ["Ja", "Nein"] : ["Yes", "No"];
+  const validLabels = draft.freeText || answerCount === 0 || validateVoteLabels(effectiveDraftLabels, answerCount, answerCount);
+  const validQuestion = isValidVoteTitle(draft.question);
 
   const start = async (): Promise<void> => {
-    if (draftDurationPreset === null) return;
-    const durationSeconds = secondsForDurationPreset(draftDurationPreset, draftCustomDurationSeconds);
-    const validOptionCount = typeof draftOptionCount === "number" && Number.isInteger(draftOptionCount) && draftOptionCount >= 2 && draftOptionCount <= 9;
-    const minimumDurationSeconds = draftDurationPreset === "open" ? 0 : 1;
+    const durationSeconds = secondsForDurationPreset(draft.durationPreset, draft.customDurationSeconds);
+    const minimumDurationSeconds = draft.durationPreset === "open" ? 0 : 1;
     if (durationSeconds === "" || !Number.isSafeInteger(durationSeconds) || durationSeconds < minimumDurationSeconds || durationSeconds > 14_400 ||
-        draftPreset === "options_n" && !validOptionCount || !validLabels || !validQuestion) return;
+        !validOptionCount || !validLabels || !validQuestion) return;
     setBusy(true);
     try {
+      const kind = draft.freeText ? "free_text" : answerCount === 0 ? "yes_no" : "options";
       await startChatVoting(channelId, {
-        preset: draftPreset,
-        ...(draftPreset === "options_n" ? { optionCount: draftOptionCount as number } : {}),
+        kind,
+        ...(kind === "free_text" ? {} : { labels: effectiveDraftLabels }),
+        ...(kind === "options" ? { optionCount: answerCount } : {}),
         durationSeconds,
-        ...(draftQuestion.trim().length === 0 ? {} : { title: draftQuestion.trim() }),
-        ...(draftPreset === "free_text" ? { textMode: draftTextMode } : {}),
-        ...(draftPreset === "free_text" ? {} : { labels: effectiveDraftLabels }),
+        ...(draft.question.trim().length === 0 ? {} : { title: draft.question.trim() }),
+        ...(draft.freeText ? { textMode: draft.textMode } : {}),
       });
-      durationDraftTouched.current = false;
-      labelDraftTouched.current = emptyTouched();
-      if (state !== null) setDraftLabels(copyDefaultLabels(state.defaultLabels));
-      const defaultDurationSeconds = state?.defaultDurationSeconds ?? 0;
-      const defaultDurationPreset = durationPresetFor(defaultDurationSeconds);
-      setDraftDurationPreset(defaultDurationPreset);
-      if (defaultDurationPreset === "custom") setDraftCustomDurationSeconds(defaultDurationSeconds);
       await refresh();
     } catch (error: unknown) {
       notify({ tone: "error", message: error instanceof Error && "code" in error && error.code === "chat_voting_busy" ? labels.busy : labels.startError });
@@ -237,33 +176,20 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   const moreTerms = state.moreTerms ?? vote?.moreTerms ?? 0;
   const activeBallot = running || state.hasOpenBallot;
   const configurationDisabled = busy || activeBallot || !canOperate;
-  const displayedPreset = running ? vote.preset : draftPreset;
-  const displayedOptionCount = running ? vote.optionCount : draftOptionCount;
-  const displayedTextMode = running ? vote.textMode ?? "first_word" : draftTextMode;
-  const displayedDurationPreset = running
-    ? durationPresetFor(vote.requestedDurationSeconds ?? 0)
-    : draftDurationPreset;
-  const displayedCustomDurationSeconds = running && displayedDurationPreset === "custom"
-    ? vote.requestedDurationSeconds ?? ""
-    : draftCustomDurationSeconds;
-  const validOptionCount = typeof draftOptionCount === "number" && Number.isInteger(draftOptionCount) && draftOptionCount >= 2 && draftOptionCount <= 9;
-  const durationSeconds = draftDurationPreset === null ? "" : secondsForDurationPreset(draftDurationPreset, draftCustomDurationSeconds);
-  const minimumDurationSeconds = draftDurationPreset === "open" ? 0 : 1;
+  const durationSeconds = secondsForDurationPreset(draft.durationPreset, draft.customDurationSeconds);
+  const minimumDurationSeconds = draft.durationPreset === "open" ? 0 : 1;
   const validDuration = typeof durationSeconds === "number" && Number.isSafeInteger(durationSeconds) && durationSeconds >= minimumDurationSeconds && durationSeconds <= 14_400;
-  const validConfiguration = (draftPreset !== "options_n" || validOptionCount) && validDuration && validLabels && validQuestion;
+  const validConfiguration = validOptionCount && validDuration && validLabels && validQuestion;
   const actionHint = !canOperate ? labels.roleDisabledReason : activeBallot ? labels.startDisabledReason
     : !validDuration ? labels.invalidDuration
-      : draftPreset === "options_n" && !validOptionCount ? labels.invalidOptionCount : null;
+      : !validOptionCount ? labels.invalidOptionCount
+        : !validLabels ? labels.invalidLabels : null;
   const loadStateProps = {
     minHeight: "calc(var(--s10) * 8)",
     loading: <Skeleton rows={8} height={34} />,
     empty: <p className="empty-state">{labels.noVote}</p>,
     error: <p className="form-error" role="alert">{labels.loadError}</p>,
   } as const;
-  const displayedLabelKeys = keysForPreset(displayedPreset, typeof displayedOptionCount === "number" ? displayedOptionCount : 2);
-  const displayedQuestion = running ? vote.title ?? "" : draftQuestion;
-  const displayedLabels = running ? vote.labels : draftLabels[displayedPreset];
-  const displayedDefaults = state.defaultLabels[displayedPreset];
   const resultCount = vote === null ? 0 : closed ? vote.voterCount ?? (vote.preset === "free_text" ? textTotal : total)
     : vote.preset === "free_text" ? textTotal : total;
   const resultRange = closed ? compactDateRange(vote.openedAt, vote.closedAt ?? vote.closesAt, language, labels.nextDay) : null;
@@ -293,94 +219,96 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
         <div className="chat-voting-panel__body">
           <div className="chat-voting-setup">
             <h3 className="chat-voting-column-heading">{labels.newVote}</h3>
-            <div className="chat-voting-type-question-row">
-              <Select
-                id="chat-voting-preset"
-                label={labels.voteType}
-                value={displayedPreset}
-                hint={labels.presetHints[displayedPreset]}
-                disabled={configurationDisabled}
-                onChange={(value) => { if (value !== null) setDraftPreset(value as ChatVotePreset); }}
-                options={presetOptions(labels)}
-              />
-              <Field
-                id="chat-voting-question"
-                label={labels.question}
-                value={displayedQuestion}
-                maxLength={CHAT_VOTING_TITLE_MAX_LENGTH}
-                countLength={voteLabelLength}
-                countLabel={labels.questionCount}
-                disabled={configurationDisabled}
-                onChange={(value) => {
-                  setDraftQuestion(value);
-                }}
-              />
-            </div>
-
-            {displayedPreset === "options_n" ? <NumberField
-              id="chat-voting-option-count"
-              label={labels.optionCount}
-              hint={labels.optionCountHint}
-              value={displayedOptionCount}
-              min={2}
-              max={9}
-              step={1}
-              {...(!running && !validOptionCount ? { error: labels.invalidOptionCount } : {})}
-              increaseLabel={labels.increaseOptionCount}
-              decreaseLabel={labels.decreaseOptionCount}
+            <Field
+              id="chat-voting-question"
+              label={labels.question}
+              value={draft.question}
+              maxLength={CHAT_VOTING_TITLE_MAX_LENGTH}
+              countLength={voteLabelLength}
+              countLabel={labels.questionCount}
               disabled={configurationDisabled}
-              onChange={setDraftOptionCount}
-            /> : null}
+              onChange={(value) => updateDraft({ question: value })}
+            />
 
-            {displayedPreset === "free_text" ? <SegmentedControl
+            <Switch
+              label={labels.freeText}
+              hint={labels.freeTextHint}
+              checked={draft.freeText}
+              disabled={configurationDisabled}
+              onChange={(freeText) => updateDraft({ freeText })}
+            />
+
+            {draft.freeText ? <SegmentedControl
               label={labels.textMode}
               hint={labels.freeTextHint}
-              value={displayedTextMode}
+              value={draft.textMode}
               disabled={configurationDisabled}
-              onChange={(value) => setDraftTextMode(value as ChatVotingTextMode)}
+              onChange={(value) => updateDraft({ textMode: value as ChatVotingTextMode })}
               options={[
                 { value: "first_word", label: labels.firstWord },
                 { value: "whole_message", label: labels.wholeMessage },
               ]}
-            /> : <div className="chat-voting-labels-group">
-              <h3>{labels.labelsHeading}</h3>
-              <div className={`chat-voting-labels${displayedPreset === "scale_5" ? " chat-voting-labels--scale" : displayedPreset === "options_n" ? " chat-voting-labels--options" : ""}`}>
-                {displayedLabelKeys.map((key, index) => <Field
-                  key={`${displayedPreset}-${key}`}
-                  id={`chat-voting-label-${displayedPreset}-${key}`}
-                  label={labels.labelFieldName(key)}
-                  ariaLabel={labels.labelFieldName(key)}
-                  labelHidden
-                  leftLabel={key}
-                  value={displayedLabels[index] ?? ""}
-                  placeholder={displayedDefaults[index] ?? key}
-                  maxLength={CHAT_VOTING_LABEL_MAX_LENGTH}
-                  countLabel={labels.labelCount}
-                  countLength={voteLabelLength}
-                  disabled={configurationDisabled}
-                  onChange={(value) => {
-                    labelDraftTouched.current[draftPreset] = true;
-                    setDraftLabels((current) => {
-                      const next = [...current[draftPreset]];
-                      next[index] = value;
-                      return { ...current, [draftPreset]: next };
-                    });
-                  }}
-                />)}
-              </div>
-            </div>}
+            /> : <>
+              <NumberField
+                id="chat-voting-option-count"
+                label={labels.optionCount}
+                hint={labels.optionCountHint}
+                value={draft.optionCount}
+                min={0}
+                max={9}
+                step={1}
+                {...(!validOptionCount ? { error: labels.invalidOptionCount } : {})}
+                increaseLabel={labels.increaseOptionCount}
+                decreaseLabel={labels.decreaseOptionCount}
+                disabled={configurationDisabled}
+                onChange={(optionCount) => updateDraft({
+                  optionCount,
+                  answerLabels: typeof optionCount === "number"
+                    ? Array.from({ length: optionCount }, (_unused, index) => draft.answerLabels[index] ?? "")
+                    : draft.answerLabels,
+                })}
+              />
+              {answerCount === 0 ? <p className="muted">{labels.yesNoDefaultHint}</p> : null}
+              {answerCount > 0 && answerCount <= 9 ? <div className="chat-voting-labels-group">
+                <h3>{labels.labelsHeading}</h3>
+                <div className="chat-voting-labels chat-voting-labels--options">
+                  {Array.from({ length: answerCount }, (_unused, index) => {
+                    const answerNumber = String(index + 1);
+                    const fieldLabel = labels.labelFieldName(answerNumber);
+                    return <Field
+                      key={`answer-${answerNumber}`}
+                      id={`chat-voting-label-${answerNumber}`}
+                      label={fieldLabel}
+                      ariaLabel={fieldLabel}
+                      labelHidden
+                      leftLabel={answerNumber}
+                      value={draft.answerLabels[index] ?? ""}
+                      placeholder={answerNumber}
+                      maxLength={CHAT_VOTING_LABEL_MAX_LENGTH}
+                      countLabel={labels.labelCount}
+                      countLength={voteLabelLength}
+                      disabled={configurationDisabled}
+                      onChange={(value) => {
+                        const answerLabels = [...draft.answerLabels];
+                        answerLabels[index] = value;
+                        updateDraft({ answerLabels });
+                      }}
+                    />;
+                  })}
+                </div>
+              </div> : null}
+            </>}
 
-            <div className={`chat-voting-duration-row${displayedDurationPreset === "custom" ? " chat-voting-duration-row--custom" : ""}`}>
+            <div className={`chat-voting-duration-row${draft.durationPreset === "custom" ? " chat-voting-duration-row--custom" : ""}`}>
               <Select
                 id="chat-voting-duration"
                 label={labels.duration}
-                value={displayedDurationPreset ?? "open"}
-                {...(displayedDurationPreset === "open" ? { hint: labels.openDurationHint } : {})}
+                value={draft.durationPreset}
+                {...(draft.durationPreset === "open" ? { hint: labels.openDurationHint } : {})}
                 disabled={configurationDisabled}
                 onChange={(value) => {
                   if (value === null) return;
-                  durationDraftTouched.current = true;
-                  setDraftDurationPreset(value as DurationPreset);
+                  updateDraft({ durationPreset: value as DurationPreset });
                 }}
                 options={[
                   { value: "open", label: labels.openDuration },
@@ -390,11 +318,11 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
                   { value: "custom", label: labels.customDuration },
                 ]}
               />
-              {displayedDurationPreset === "custom" ? <NumberField
+              {draft.durationPreset === "custom" ? <NumberField
                 id="chat-voting-duration-seconds"
                 label={labels.customDurationSeconds}
                 hint={labels.durationRange}
-                value={displayedCustomDurationSeconds}
+                value={draft.customDurationSeconds}
                 min={1}
                 max={14_400}
                 step={30}
@@ -404,8 +332,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
                 decreaseLabel={labels.decreaseDuration}
                 disabled={configurationDisabled}
                 onChange={(value) => {
-                  durationDraftTouched.current = true;
-                  setDraftCustomDurationSeconds(value);
+                  updateDraft({ customDurationSeconds: value });
                 }}
               /> : null}
             </div>

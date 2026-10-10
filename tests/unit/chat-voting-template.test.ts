@@ -9,7 +9,9 @@ import { renderTemplate } from "../../src/template";
 const voteFor = (language: "de" | "en", requestedDurationSeconds: number | null, title: string | null = "What should we eat today?"): ChatVote => ({
   id: "vote-a",
   channelId: "channel-a",
+  kind: "options",
   preset: "options_n",
+  legacyWritten: false,
   optionCount: 3,
   labels: language === "de" ? ["Pizza", "Burger", "Döner"] : ["Pizza", "Burger", "Kebab"],
   title,

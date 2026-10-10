@@ -16,31 +16,58 @@ import {
   normalizeFreeTextVote,
   parseVoteCommand,
   rankVoteTerms,
+  validateVoteLabels,
   voteChoiceFromMessage,
   voteCloseDeadline,
   voteLabelLength,
 } from "../../src/modules/chat_voting/domain";
 
 describe("chat voting command and result domain", () => {
-  it("parses only the supported start and end commands", () => {
-    expect(parseVoteCommand("!vote yesno")).toEqual({ kind: "start", preset: "yes_no", optionCount: 2, title: null });
-    expect(parseVoteCommand("!vote SCALE")).toEqual({ kind: "start", preset: "scale_5", optionCount: 5, title: null });
-    expect(parseVoteCommand("!vote 9")).toEqual({ kind: "start", preset: "options_n", optionCount: 9, title: null });
-    expect(parseVoteCommand("!vote 01")).toEqual({ kind: "start", preset: "digit_01", optionCount: 2, title: null });
-    expect(parseVoteCommand("!vote 12")).toEqual({ kind: "start", preset: "digit_12", optionCount: 2, title: null });
-    expect(parseVoteCommand("!vote text")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: null, textMode: "first_word" });
-    expect(parseVoteCommand("!vote text word")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: null, textMode: "first_word" });
-    expect(parseVoteCommand("!vote text message")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: null, textMode: "whole_message" });
-    expect(parseVoteCommand("!vote text both")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: "both", textMode: "first_word" });
-    expect(parseVoteCommand("!vote text word extra")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: "extra", textMode: "first_word" });
-    expect(parseVoteCommand("!vote yesno  Pizza today?  ")).toEqual({ kind: "start", preset: "yes_no", optionCount: 2, title: "Pizza today?" });
-    expect(parseVoteCommand("!vote 3 Who wins?")).toEqual({ kind: "start", preset: "options_n", optionCount: 3, title: "Who wins?" });
-    expect(parseVoteCommand("!vote text message Which message wins?")).toEqual({ kind: "start", preset: "free_text", optionCount: 0, title: "Which message wins?", textMode: "whole_message" });
-    expect(parseVoteCommand(`!vote yesno ${"😀".repeat(CHAT_VOTING_TITLE_MAX_LENGTH)}`)).toMatchObject({ kind: "start", title: "😀".repeat(CHAT_VOTING_TITLE_MAX_LENGTH) });
-    expect(parseVoteCommand(`!vote yesno ${"😀".repeat(CHAT_VOTING_TITLE_MAX_LENGTH + 1)}`)).toEqual({ kind: "help" });
-    expect(parseVoteCommand("!vote end")).toEqual({ kind: "end" });
-    expect(parseVoteCommand("!vote unknown")).toEqual({ kind: "help" });
-    expect(parseVoteCommand("!vote end extra")).toEqual({ kind: "help" });
+  const parserCases: Array<[string, unknown]> = [
+    ["!vote", { kind: "help" }],
+    ["!vote help", { kind: "help" }],
+    ["!vote end", { kind: "end" }],
+    ["!vote again", { kind: "again" }],
+    ["!vote yesno", { kind: "start", voteKind: "yes_no", preset: "yes_no", optionCount: 2, title: null }],
+    ["!vote scale", { kind: "start", voteKind: "options", preset: "scale_5", optionCount: 5, title: null }],
+    ["!vote 01", { kind: "start", voteKind: "yes_no", preset: "digit_01", optionCount: 2, title: null }],
+    ["!vote 12", { kind: "start", voteKind: "yes_no", preset: "digit_12", optionCount: 2, title: null }],
+    ["!vote 2", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, title: null }],
+    ["!vote 3", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 3, title: null }],
+    ["!vote 4", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 4, title: null }],
+    ["!vote 5", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 5, title: null }],
+    ["!vote 6", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 6, title: null }],
+    ["!vote 7", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 7, title: null }],
+    ["!vote 8", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 8, title: null }],
+    ["!vote 9", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 9, title: null }],
+    ["!vote text", { kind: "start", voteKind: "free_text", preset: "free_text", optionCount: 0, title: null, textMode: "first_word" }],
+    ["!vote text word", { kind: "start", voteKind: "free_text", preset: "free_text", optionCount: 0, title: null, textMode: "first_word" }],
+    ["!vote text message", { kind: "start", voteKind: "free_text", preset: "free_text", optionCount: 0, title: null, textMode: "whole_message" }],
+    ["!vote text message Which message wins?", { kind: "start", voteKind: "free_text", preset: "free_text", optionCount: 0, title: "Which message wins?", textMode: "whole_message" }],
+    ["!vote yesno  Pizza today?  ", { kind: "start", voteKind: "yes_no", preset: "yes_no", optionCount: 2, title: "Pizza today?" }],
+    ["!vote 3 Who wins?", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 3, title: "Who wins?" }],
+    ["!vote Pizza or Burger?", { kind: "start", voteKind: "yes_no", preset: "yes_no", optionCount: 2, title: "Pizza or Burger?" }],
+    ["!vote Dinner? | Pizza | Burger", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, labels: ["Pizza", "Burger"], title: "Dinner?" }],
+    ["!vote Dinner? | Pizza | Burger | 90s", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, labels: ["Pizza", "Burger"], title: "Dinner?", durationSeconds: 90 }],
+    ["!vote Dinner? | Pizza | Burger | 2m", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, labels: ["Pizza", "Burger"], title: "Dinner?", durationSeconds: 120 }],
+    ["!vote Dinner? | Pizza | Burger | 1h", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, labels: ["Pizza", "Burger"], title: "Dinner?", durationSeconds: 3600 }],
+    ["!vote 2 Pizzas? | A | B", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 2, labels: ["A", "B"], title: "2 Pizzas?" }],
+    ["!vote UnknownToken", { kind: "help" }],
+    ["!vote 10", { kind: "help" }],
+    ["!vote Question | A | B", { kind: "invalid", problem: "question" }],
+    ["!vote Question? | A", { kind: "invalid", problem: "answerCount" }],
+    ["!vote Question? | Same | same!", { kind: "invalid", problem: "labels" }],
+    ["!vote Question? | A | B | 0s", { kind: "invalid", problem: "duration" }],
+    ["!vote Question? | A | B | 5minutes", { kind: "start", voteKind: "options", preset: "options_n", optionCount: 3, labels: ["A", "B", "5minutes"], title: "Question?" }],
+  ];
+
+  it.each(parserCases)("parses %s", (input, expected) => {
+    expect(parseVoteCommand(input)).toEqual(expected);
+  });
+
+  it("rejects overlong command questions and ignores commands outside the message start", () => {
+    expect(parseVoteCommand(`!vote yesno ${"😀".repeat(CHAT_VOTING_TITLE_MAX_LENGTH + 1)}`))
+      .toEqual({ kind: "invalid", problem: "question" });
     expect(parseVoteCommand("hello !vote yesno")).toBeNull();
   });
 
@@ -80,6 +107,10 @@ describe("chat voting command and result domain", () => {
     expect(configuredLabels(["Yes", " "], 2)).toBeNull();
     expect(configuredLabels(["x".repeat(33), "No"], 2)).toBeNull();
     expect(configuredLabels(["one", "two", "three"], 2)).toBeNull();
+    expect(validateVoteLabels(["Pizza", "burger!"])).toBe(true);
+    expect(validateVoteLabels(["Pizza", "pizza"])).toBe(false);
+    expect(validateVoteLabels(["!!!", "Burger"])).toBe(false);
+    expect(validateVoteLabels(["1", "2"])).toBe(true);
   });
 
   it("counts vote-label limits in Unicode code points", () => {
@@ -96,6 +127,7 @@ describe("chat voting command and result domain", () => {
     expect(isValidVoteLabelSetting("  ", "scaleLabels")).toBe(true);
     expect(isValidVoteLabelSetting("", "optionLabels")).toBe(true);
     expect(isValidVoteLabelSetting("Ja|Nein", "yesNoLabels")).toBe(true);
+    expect(isValidVoteLabelSetting("Ja|ja!", "yesNoLabels")).toBe(false);
     expect(isValidVoteLabelSetting("Nein|Ja", "zeroOneLabels")).toBe(true);
     expect(isValidVoteLabelSetting("1|2", "oneTwoLabels")).toBe(true);
     expect(isValidVoteLabelSetting("No|Yes|Maybe", "zeroOneLabels")).toBe(false);
@@ -108,13 +140,29 @@ describe("chat voting command and result domain", () => {
     expect(isValidVoteLabelSetting(`${"x".repeat(33)}|No`, "yesNoLabels")).toBe(false);
   });
 
-  it("accepts exactly the preset digits and never turns 0 into another preset vote", () => {
-    expect(voteChoiceFromMessage("0", "digit_01", 2)).toBe(1);
-    expect(voteChoiceFromMessage("1", "digit_01", 2)).toBe(2);
-    expect(voteChoiceFromMessage("0", "digit_12", 2)).toBeNull();
-    expect(voteChoiceFromMessage("2", "digit_12", 2)).toBe(2);
-    expect(voteChoiceFromMessage(" 1", "digit_01", 2)).toBeNull();
-    expect(voteChoiceFromMessage("0", "yes_no", 2)).toBeNull();
+  it.each(["!vote 01", "!vote 12"])("ignores label words in a yes/no vote started by %s", (text) => {
+    const command = parseVoteCommand(text);
+    if (command?.kind !== "start") throw new Error("Expected a start command.");
+    expect(command.voteKind).toBe("yes_no");
+    expect(voteChoiceFromMessage("Yes", command.voteKind, command.optionCount, ["No", "Yes"])).toBeNull();
+    expect(voteChoiceFromMessage("2", command.voteKind, command.optionCount, ["No", "Yes"])).toEqual({ choice: 2, source: "number" });
+  });
+
+  it("falls back to plain numbers when configured option labels collide with key numbers", () => {
+    expect(labelsForVote({ ...DEFAULT_CHAT_VOTING_SETTINGS, optionLabels: "Pizza|3" }, "options_n", 3, "en"))
+      .toEqual(["1", "2", "3"]);
+  });
+
+  it("trims numeric choices and matches option words only by exact normalized labels", () => {
+    expect(voteChoiceFromMessage(" 1 ", "yes_no", 2)).toEqual({ choice: 1, source: "number" });
+    expect(voteChoiceFromMessage(" 2 ", "options", 2, ["Pizza", "Burger"])).toEqual({ choice: 2, source: "number" });
+    expect(voteChoiceFromMessage("0", "options", 2, ["Pizza", "Burger"])).toBeNull();
+    expect(voteChoiceFromMessage("  ＰＩＺＺＡ! ", "options", 2, ["Pizza", "Burger"])).toEqual({ choice: 1, source: "word" });
+    expect(voteChoiceFromMessage("Pizza extra", "options", 2, ["Pizza", "Burger"])).toBeNull();
+    expect(voteChoiceFromMessage("2", "options", 2, ["One", "2"])).toEqual({ choice: 2, source: "number" });
+    expect(voteChoiceFromMessage("2!", "options", 2, ["One", "2"])).toBeNull();
+    expect(voteChoiceFromMessage("Yes", "yes_no", 2, ["Yes", "No"])).toBeNull();
+    expect(voteChoiceFromMessage("!!!", "options", 2, ["Pizza", "Burger"])).toBeNull();
   });
 
   it("normalizes free-text words and whole messages with Unicode punctuation rules", () => {
