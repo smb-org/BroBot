@@ -88,12 +88,24 @@ describe("chat voting routes", () => {
     const database = await createDatabase();
     const app = appFor(ballotAccess(), () => Promise.resolve([]));
     const templatesPath = `/channels/${CHANNEL_ID}/modules/chat_voting/templates`;
-    const createdResponse = await app.fetch(new Request(`https://brobot.example${templatesPath}`, { method: "POST", body: "{}" }), {
+    const blankResponse = await app.fetch(new Request(`https://brobot.example${templatesPath}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+    }), { DB: database as unknown as D1Database });
+    expect(blankResponse.status).toBe(400);
+    const whitespaceLabelResponse = await app.fetch(new Request(`https://brobot.example${templatesPath}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "  ", labels: [" ", ""], freeTextMode: null, durationSeconds: 120 }),
+    }), { DB: database as unknown as D1Database });
+    expect(whitespaceLabelResponse.status).toBe(400);
+    const createdResponse = await app.fetch(new Request(`https://brobot.example${templatesPath}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 }),
+    }), {
       DB: database as unknown as D1Database,
     });
     expect(createdResponse.status).toBe(201);
     const created = await createdResponse.json<{ template: ChatVoteTemplate }>();
-    expect(created.template).toMatchObject({ title: "", labels: [], durationSeconds: 120, revision: 1 });
+    expect(created.template).toMatchObject({ title: "Dinner", labels: ["Pizza", "Burger"], durationSeconds: 120, revision: 1 });
     const entryPath = `${templatesPath}/${encodeURIComponent(created.template.id)}`;
     const savedResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -101,6 +113,12 @@ describe("chat voting routes", () => {
     }), { DB: database as unknown as D1Database });
     expect(savedResponse.status).toBe(200);
     await expect(savedResponse.json()).resolves.toMatchObject({ template: { title: "One answer draft", labels: ["Only one"], revision: 2 } });
+    const blankPatchResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: " ", labels: [" ", ""], freeTextMode: null, durationSeconds: 120, revision: 2 }),
+    }), { DB: database as unknown as D1Database });
+    expect(blankPatchResponse.status).toBe(400);
+    await expect(blankPatchResponse.json()).resolves.toEqual({ error: "chat_vote_template_request_invalid" });
     const staleResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shortcut: null, title: "Stale", labels: ["A", "B"], freeTextMode: null, durationSeconds: 120, revision: 1 }),
@@ -172,7 +190,8 @@ describe("chat voting routes", () => {
       .bind(role, CHANNEL_ID, ACTOR_ID).run();
     const app = appFor(ballotAccess(), () => Promise.resolve([]));
     const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/templates`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 }),
     }), { DB: database as unknown as D1Database });
     expect(response.status).toBe(201);
   });

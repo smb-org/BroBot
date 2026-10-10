@@ -422,7 +422,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-panel .list-row--selected .list-row__link { box-shadow: inset 2px 0 0 var(--brand-text); background: var(--tint-1); }
 .chat-voting-template-inspector > .section-heading h3 { font-size: 15px; }
 .chat-voting-template-inspector .inspector-content-section__heading { margin-bottom: var(--s2); padding-bottom: 0; border-bottom: 0; }
-.chat-voting-editor__running-note { margin: 0; color: var(--text-3); font-size: 12px; }
+.chat-voting-editor__running-note { box-sizing: border-box; height: 16px; min-height: 16px; max-height: 16px; margin: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-voting-editor__ghost-answers { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: var(--s2); min-height: 88px; color: var(--text-3); }
 .chat-voting-editor__answer-list { display: grid; gap: 8px; min-width: 0; }
 .chat-voting-editor__answer { display: grid; grid-template-columns: 24px minmax(0, 1fr) 34px; align-items: start; gap: 4px; min-width: 0; }
@@ -454,14 +454,11 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-editor__duration-slot .mantine-InputWrapper-description,
 .chat-voting-editor__duration-slot .mantine-InputWrapper-error { display: none; }
 .chat-voting-editor__chat-hint { min-height: 20px; margin: 0 0 var(--s3); overflow: hidden; color: var(--text-3); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.chat-voting-editor__save-status { flex: 0 1 12rem; min-width: 0; overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.chat-voting-editor__save-status--error { color: var(--error-text); }
 .chat-voting-template-inspector .chat-voting-editor__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.chat-voting-template-inspector .chat-voting-editor__footer { position: static; flex: none; margin: 0 -16px -18px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--surface-inspector); }
-.chat-voting-template-inspector .chat-voting-editor__footer .inspector-actions { position: static; align-items: center; flex-wrap: nowrap; gap: var(--s2); margin: 0; padding: 0; border: 0; background: transparent; }
-.chat-voting-template-inspector .chat-voting-editor__footer .inspector-actions__destructive { order: 0; flex: none; margin: 0; }
-.chat-voting-template-inspector .chat-voting-editor__footer .inspector-actions__primary { order: 1; flex: 1 1 auto; min-width: 0; margin: 0; justify-content: flex-end; }
-.chat-voting-editor__start-reason { min-height: 16px; margin: var(--s2) 0 0; color: var(--text-3); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.chat-voting-template-inspector .chat-voting-editor__footer { box-sizing: border-box; height: 64px; min-height: 64px; position: static; flex: none; margin: 0 -16px -18px; padding: 0 16px; border-top: 1px solid var(--line); background: var(--surface-inspector); }
+.chat-voting-template-inspector .chat-voting-editor__footer .ui-save-bar { height: 64px; min-height: 64px; }
+.chat-voting-editor__save-footer { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--s2); min-width: 0; }
+.chat-voting-editor__start-reason { display: block; box-sizing: border-box; min-width: 0; min-height: 16px; max-height: 16px; margin: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-voting-template-inspector .inspector-content-section .ui-segmented-control__label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .chat-voting-template-inspector .chat-voting-editor__start-button { flex: none; white-space: nowrap; }
 .chat-voting-template-inspector .chat-voting-editor__start-button:disabled { opacity: 1 !important; color: var(--text-2); background: var(--surface-well); border-color: var(--line-strong); }

@@ -5,7 +5,7 @@ import { Button, Led, notify } from "../../../dashboard/ui";
 import type { ModuleImmediateActionProperties } from "../../contract";
 import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved";
 import { ChatVoteTemplateList } from "./template-list";
-import { closeChatVoting, loadChatVotingState, loadChatVoteTemplates, startChatVoting, type ChatVotingPanelState, type ChatVoteTemplateListState } from "./service";
+import { closeChatVoting, loadChatVotingState, loadChatVoteTemplates, mergeChatVoteTemplateLists, startChatVoting, type ChatVotingPanelState, type ChatVoteTemplateListState } from "./service";
 import { timeText } from "./date-range";
 
 const ChatVotingImmediateAction = (properties: ModuleImmediateActionProperties): ReactElement =>
@@ -23,6 +23,8 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
   const previousVote = useRef<{ id: string; status: "open" | "closed" } | null>(null);
   const voteRequestSequence = useRef(0);
   const templateRequestSequence = useRef(0);
+  const voteAppliedSequence = useRef(0);
+  const templateAppliedSequence = useRef(0);
   const vote = state?.vote ?? null;
   const running = vote?.status === "open";
   const lockReason = availabilityReason ?? (currentError
@@ -33,22 +35,13 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
     const requestSequence = ++templateRequestSequence.current;
     try {
       const current = await loadChatVoteTemplates(channelId);
-      if (requestSequence !== templateRequestSequence.current) return;
-      const usageById = new Map(current.templates.map((template) => [template.id, template.lastUsedAt]));
-      setTemplates((previous) => previous === null ? current : {
-        ...previous,
-        templates: previous.templates.map((template) => {
-          const latestUsage = usageById.get(template.id) ?? null;
-          const lastUsedAt = [template.lastUsedAt, latestUsage]
-            .filter((value): value is string => value !== null)
-            .sort((left, right) => left.localeCompare(right))
-            .at(-1) ?? null;
-          return { ...template, lastUsedAt };
-        }),
-      });
+      if (requestSequence <= templateAppliedSequence.current) return;
+      templateAppliedSequence.current = requestSequence;
+      setTemplates((previous) => mergeChatVoteTemplateLists(previous, current));
       setTemplateError(false);
     } catch {
-      if (requestSequence !== templateRequestSequence.current) return;
+      if (requestSequence <= templateAppliedSequence.current) return;
+      templateAppliedSequence.current = requestSequence;
       setTemplateError(true);
     }
   }, [channelId]);
@@ -57,7 +50,8 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
     const requestSequence = ++voteRequestSequence.current;
     try {
       const current = await loadChatVotingState(channelId);
-      if (requestSequence !== voteRequestSequence.current) return;
+      if (requestSequence <= voteAppliedSequence.current) return;
+      voteAppliedSequence.current = requestSequence;
       const nextVote = current.vote;
       const previous = previousVote.current;
       const newlyOpened = nextVote?.status === "open" &&
@@ -67,7 +61,8 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
       setCurrentError(false);
       if (newlyOpened) void refreshTemplates();
     } catch {
-      if (requestSequence !== voteRequestSequence.current) return;
+      if (requestSequence <= voteAppliedSequence.current) return;
+      voteAppliedSequence.current = requestSequence;
       // Keep the last known live state visible while the template list loads independently.
       setCurrentError(true);
     }

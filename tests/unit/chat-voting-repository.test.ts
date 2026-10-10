@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
+import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -65,6 +66,57 @@ describe("chat voting repository mutation guards", () => {
       await expect(repository.templates.createTemplate("fictional-channel", "template-over-limit", draft, "2026-10-04T10:00:00.000Z", authorization))
         .resolves.toBe("limit");
       await expect(repository.templates.templates("fictional-channel")).resolves.toHaveLength(100);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("returns the PATCH acknowledgement from its UPDATE batch during a concurrent write", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await insertLoginIdentityAndSession(database, "fictional-operator");
+      await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      const base = database as unknown as D1Database;
+      const authorization = authorizeModuleMutation(
+        "fictional-channel",
+        { userId: "fictional-operator", sessionId: "session-fictional-operator" },
+        "2026-10-04T10:00:00.000Z",
+      );
+      const initial = { shortcut: "dinner", title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 } as const;
+      await createChatVotingRepository(base).templates.createTemplate("fictional-channel", "template-race", initial, "2026-10-04T10:00:00.000Z", authorization);
+      let injected = false;
+      const concurrentDatabase = {
+        prepare: base.prepare.bind(base),
+        batch: async (statements: D1PreparedStatement[]) => {
+          const result = await base.batch(statements);
+          if (!injected) {
+            injected = true;
+            await database.prepare(
+              "UPDATE chat_vote_templates SET title = ?, revision = revision + 1 WHERE channel_id = ? AND id = ? AND revision = ?",
+            ).bind("Concurrent writer", "fictional-channel", "template-race", 2).run();
+          }
+          return result;
+        },
+      } as unknown as D1Database;
+      const audit = prepareModuleAudit(concurrentDatabase, "fictional-operator", "2026-10-04T10:00:01.000Z", {
+        channelId: "fictional-channel",
+        moduleId: "chat_voting",
+        action: "chat_voting.template.updated",
+        before: { id: "template-race", revision: 1 },
+        after: { id: "template-race", revision: 2 },
+      });
+
+      const result = await createChatVotingRepository(concurrentDatabase).templates.saveTemplate(
+        "fictional-channel", "template-race", 1, { ...initial, title: "Acknowledged write" },
+        "2026-10-04T10:00:01.000Z", authorization, audit,
+      );
+
+      expect(result).toMatchObject({ status: "saved", template: { title: "Acknowledged write", revision: 2 } });
+      await expect(createChatVotingRepository(base).templates.template("fictional-channel", "template-race"))
+        .resolves.toMatchObject({ title: "Concurrent writer", revision: 3 });
+      await expect(database.prepare("SELECT action FROM audit_log WHERE action = 'chat_voting.template.updated'").all())
+        .resolves.toMatchObject({ results: [{ action: "chat_voting.template.updated" }] });
     } finally {
       database.close();
     }

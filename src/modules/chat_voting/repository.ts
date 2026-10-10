@@ -212,33 +212,35 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
     return (count?.count ?? 0) >= 100 ? "limit" : "conflict";
   },
   async saveTemplate(channelId, id, revision, draft, updatedAt, authorization, audit) {
-    let changes: number;
+    const existed = await db.prepare(
+      "SELECT 1 AS present FROM chat_vote_templates WHERE channel_id = ? AND id = ? LIMIT 1",
+    ).bind(channelId, id).first<{ present: number }>() !== null;
+    let template: ChatVoteTemplate | null;
     try {
       const mutation = db.prepare(
         `UPDATE chat_vote_templates
             SET shortcut = ?, title = ?, labels = ?, free_text_mode = ?, duration_seconds = ?,
                 revision = revision + 1, updated_at = ?
           WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}
+          RETURNING ${chatVoteTemplateSelectColumns}
         `,
       ).bind(draft.shortcut, draft.title, JSON.stringify(draft.labels), draft.freeTextMode,
         draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values);
       const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
       if (result === undefined) throw new Error("Template save mutation returned no D1 result.");
-      changes = result.meta.changes;
+      const row = result.results[0] as ChatVoteTemplateRow | undefined;
+      template = row === undefined ? null : mapTemplateRow(row);
     } catch (error: unknown) {
       if (error instanceof Error && error.message.includes("chat_vote_templates.channel_id, chat_vote_templates.shortcut")) {
         return { status: "shortcut_conflict" };
       }
       throw error;
     }
-    if (changes > 0) {
-      const template = await this.template(channelId, id);
-      return template === null ? { status: "missing" } : { status: "saved", template };
-    }
+    if (template !== null) return { status: "saved", template };
     const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
       .bind(...authorization.values).first<{ authorized: number }>();
     if (authorized === null) return { status: "unauthorized" };
-    return await this.template(channelId, id) === null ? { status: "missing" } : { status: "conflict" };
+    return existed ? { status: "conflict" } : { status: "missing" };
   },
   async deleteTemplate(channelId, id, revision, authorization, audit) {
     const mutation = db.prepare(

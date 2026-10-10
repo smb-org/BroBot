@@ -41,6 +41,27 @@ const getEnabledSettings = async (db: D1Database, channelId: string) => {
   } catch { return null; }
 };
 
+const templateDraftFromBody = (body: unknown): ChatVoteTemplateDraft | null => {
+  if (!isRecord(body) || (body.shortcut !== null && typeof body.shortcut !== "string") ||
+      typeof body.title !== "string" || voteLabelLength(body.title) > 80 ||
+      !Array.isArray(body.labels) || body.labels.length > 9 ||
+      body.labels.some((label) => typeof label !== "string" || voteLabelLength(label) > 32) ||
+      (body.freeTextMode !== null && body.freeTextMode !== "first_word" && body.freeTextMode !== "whole_message") ||
+      typeof body.durationSeconds !== "number" || !Number.isSafeInteger(body.durationSeconds) || body.durationSeconds < 0 || body.durationSeconds > 14_400) return null;
+  const shortcut = body.shortcut;
+  if (!isValidTemplateShortcut(shortcut)) return null;
+  return {
+    shortcut,
+    title: body.title,
+    labels: body.labels,
+    freeTextMode: body.freeTextMode,
+    durationSeconds: body.durationSeconds,
+  };
+};
+
+const isBlankTemplateDraft = (draft: ChatVoteTemplateDraft): boolean =>
+  draft.shortcut === null && draft.title.trim().length === 0 && draft.labels.every((label) => label.trim().length === 0) && draft.freeTextMode === null;
+
 const channelLanguage = async (db: D1Database, channelId: string): Promise<"de" | "en"> => {
   const row = await db.prepare("SELECT language FROM channels WHERE channel_id = ?")
     .bind(channelId).first<{ language: string }>();
@@ -89,18 +110,16 @@ chatVotingRoutes.get("/recent", async (context) => {
 
 chatVotingRoutes.post("/templates", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
-  const settings = await getEnabledSettings(context.env.DB, channelId) ?? DEFAULT_CHAT_VOTING_SETTINGS;
+  const body = await readBody(context.req.raw);
+  if (isRecord(body) && (body.shortcut === null || typeof body.shortcut === "string") && !isValidTemplateShortcut(body.shortcut)) {
+    return context.json({ error: "chat_vote_template_shortcut_invalid" }, 400);
+  }
+  const draft = templateDraftFromBody(body);
+  if (draft === null || isBlankTemplateDraft(draft)) return context.json({ error: "chat_vote_template_request_invalid" }, 400);
   const now = new Date().toISOString();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
   const id = crypto.randomUUID();
-  const draft: ChatVoteTemplateDraft = {
-    shortcut: null,
-    title: "",
-    labels: [],
-    freeTextMode: null,
-    durationSeconds: settings.autoCloseSeconds,
-  };
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: CHAT_VOTING_MODULE_ID,
@@ -117,24 +136,6 @@ chatVotingRoutes.post("/templates", async (context) => {
   return context.json({ template }, 201);
 });
 
-const templateDraftFromBody = (body: unknown): ChatVoteTemplateDraft | null => {
-  if (!isRecord(body) || (body.shortcut !== null && typeof body.shortcut !== "string") ||
-      typeof body.title !== "string" || voteLabelLength(body.title) > 80 ||
-      !Array.isArray(body.labels) || body.labels.length > 9 ||
-      body.labels.some((label) => typeof label !== "string" || voteLabelLength(label) > 32) ||
-      (body.freeTextMode !== null && body.freeTextMode !== "first_word" && body.freeTextMode !== "whole_message") ||
-      typeof body.durationSeconds !== "number" || !Number.isSafeInteger(body.durationSeconds) || body.durationSeconds < 0 || body.durationSeconds > 14_400) return null;
-  const shortcut = body.shortcut;
-  if (!isValidTemplateShortcut(shortcut)) return null;
-  return {
-    shortcut,
-    title: body.title,
-    labels: body.labels,
-    freeTextMode: body.freeTextMode,
-    durationSeconds: body.durationSeconds,
-  };
-};
-
 chatVotingRoutes.patch("/templates/:id", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const id = context.req.param("id");
@@ -143,7 +144,7 @@ chatVotingRoutes.patch("/templates/:id", async (context) => {
     return context.json({ error: "chat_vote_template_shortcut_invalid" }, 400);
   }
   const draft = templateDraftFromBody(body);
-  if (id.length < 1 || id.length > 128 || !isRecord(body) || !Number.isSafeInteger(body.revision) || (body.revision as number) < 1 || draft === null) {
+  if (id.length < 1 || id.length > 128 || !isRecord(body) || !Number.isSafeInteger(body.revision) || (body.revision as number) < 1 || draft === null || isBlankTemplateDraft(draft)) {
     return context.json({ error: "chat_vote_template_request_invalid" }, 400);
   }
   const now = new Date().toISOString();

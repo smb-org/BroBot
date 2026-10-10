@@ -58,9 +58,10 @@ interface FetchHarnessOptions {
   current?: ChatVotingPanelState;
   getCurrent?: () => ChatVotingPanelState | Promise<ChatVotingPanelState>;
   recent?: ChatVote[];
-  getRecent?: () => ChatVote[];
+  getRecent?: () => ChatVote[] | Promise<ChatVote[]>;
   getTemplates?: () => ChatVoteTemplate[] | Promise<ChatVoteTemplate[]>;
   csrfToken?: () => string;
+  onCreate?: (body: Record<string, unknown>) => Response | Promise<Response>;
   onPatch?: (templateId: string, body: Record<string, unknown>, csrfToken: string) => Response | Promise<Response>;
   onStart?: (body: Record<string, unknown>) => Response;
   onClose?: () => void;
@@ -81,7 +82,15 @@ const fetchHarness = (options: FetchHarnessOptions = {}) => {
       const listed = options.getTemplates?.() ?? templates;
       return Promise.resolve(listed).then((entries) => jsonResponse({ templates: entries, count: entries.length, maximum: 100 }));
     }
-    if (path.endsWith("/recent")) return Promise.resolve(jsonResponse({ votes: options.getRecent?.() ?? options.recent ?? [] }));
+    if (path.endsWith("/recent")) return Promise.resolve(options.getRecent?.() ?? options.recent ?? [])
+      .then((votes) => jsonResponse({ votes }));
+    if (path.endsWith("/templates") && method === "POST") {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+      if (options.onCreate !== undefined) return Promise.resolve(options.onCreate(body));
+      const created = template({ id: "created-template", title: typeof body.title === "string" ? body.title : "", labels: Array.isArray(body.labels) ? body.labels as string[] : [], revision: 1 });
+      templates = [created, ...templates];
+      return Promise.resolve(jsonResponse({ template: created }, 201));
+    }
     if (path.endsWith("/start")) {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
       return Promise.resolve(options.onStart?.(body) ?? jsonResponse({ vote: runningVote }));
@@ -132,48 +141,83 @@ describe("saved chat voting panel", () => {
     expect(view.container.querySelector(".chat-voting-live")).toBeInTheDocument();
   });
 
-  it("replaces answers with a quick template and restores the old answers from the toast", async () => {
+  it("keeps a new draft local and retains edits made while its first Save is pending", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    mount(fetchHarness());
+    let resolveCreate!: (response: Response) => void;
+    const pendingCreate = new Promise<Response>((resolve) => { resolveCreate = resolve; });
+    let submitted: Record<string, unknown> | null = null;
+    mount(fetchHarness({ templates: [], onCreate: (body) => { submitted = body; return pendingCreate; } }));
+    const createButtons = await screen.findAllByRole("button", { name: "Create vote" });
+    const createButton = createButtons.at(0);
+    if (createButton === undefined) throw new Error("The create action is missing.");
+    fireEvent.click(createButton);
+    const question = await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.change(question, { target: { value: "First title" } });
+    expect(submitted).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(submitted).toMatchObject({ title: "First title" }));
+    fireEvent.change(question, { target: { value: "Edit while saving" } });
+    resolveCreate(jsonResponse({ template: template({ id: "created-template", title: "First title", revision: 1 }) }, 201));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Edit while saving"));
+    expect(screen.getByRole("textbox", { name: "Question" })).toBe(question);
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("keeps quick-template changes local until Save", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let saved: Record<string, unknown> | null = null;
+    mount(fetchHarness({ onPatch: (_id, body) => {
+      saved = body;
+      return jsonResponse({ template: template({ labels: body.labels as string[], revision: 2 }) });
+    } }));
     const pizza = await screen.findByRole("textbox", { name: "Answer 1" });
     expect(pizza).toHaveValue("Pizza");
     fireEvent.click(screen.getByRole("button", { name: "1–5" }));
     expect(await screen.findByRole("textbox", { name: "Answer 5" })).toHaveValue("5");
-    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-    expect(screen.getByRole("textbox", { name: "Answer 1" })).toHaveValue("Pizza");
-    expect(screen.getByRole("textbox", { name: "Answer 2" })).toHaveValue("Burger");
-    dismissToast(toastsSnapshot().at(-1)?.id ?? -1);
+    expect(saved).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(saved).toMatchObject({ labels: ["1", "2", "3", "4", "5"] }));
   });
 
-  it("keeps an invalid shortcut local while autosaving other fields", async () => {
+  it("keeps an invalid shortcut and other edits local until Save validation", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    let saved: Record<string, unknown> | null = null;
-    const view = mount(fetchHarness({ onPatch: (_id, body) => { saved = body; return jsonResponse({ template: { ...template({ title: "Lunch?", revision: 2 }), shortcut: null } }); } }));
+    const patches: Record<string, unknown>[] = [];
+    const view = mount(fetchHarness({ onPatch: (_id, body) => {
+      patches.push(body);
+      return jsonResponse({ template: { ...template({ title: "Lunch?", revision: 2 }), shortcut: "lunch" } });
+    } }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Question" }), { target: { value: "Lunch?" } });
     const shortcut = screen.getByRole("textbox", { name: "Shortcut" });
     fireEvent.change(shortcut, { target: { value: "Bad!" } });
     expect(shortcut).toBeInvalid();
-    await waitFor(() => expect(saved).not.toBeNull(), { timeout: 2_000 });
-    expect(saved).toMatchObject({ title: "Lunch?", shortcut: null, labels: ["Pizza", "Burger"] });
+    expect(patches).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(view.container).toHaveTextContent("Use a–z first");
+    expect(patches).toHaveLength(0);
+    fireEvent.change(shortcut, { target: { value: "lunch" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0]).toMatchObject({ title: "Lunch?", shortcut: "lunch", labels: ["Pizza", "Burger"] });
   });
 
-  it("stops autosaving a shortcut rejected by a server-only conflict", async () => {
+  it("shows a server shortcut conflict in the field and keeps the full local draft", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     const patches: Record<string, unknown>[] = [];
     mount(fetchHarness({ onPatch: (_id, body) => {
       patches.push(body);
-      if (patches.length === 1) return jsonResponse({ error: "chat_vote_template_shortcut_conflict" }, 409);
-      return jsonResponse({ template: template({ shortcut: null, revision: 2 }) });
+      return jsonResponse({ error: "chat_vote_template_shortcut_conflict" }, 409);
     } }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Question" }), { target: { value: "Lunch?" } });
     fireEvent.change(await screen.findByRole("textbox", { name: "Shortcut" }), { target: { value: "essen" } });
-    await waitFor(() => expect(patches).toHaveLength(2), { timeout: 2_000 });
-    await new Promise((resolve) => window.setTimeout(resolve, 20));
-    expect(patches).toHaveLength(2);
+    expect(patches).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(patches).toHaveLength(1));
     expect(screen.getByRole("textbox", { name: "Shortcut" })).toBeInvalid();
+    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Lunch?");
+    expect(screen.getByRole("textbox", { name: "Answer 2" })).toHaveValue("Burger");
   });
 
-  it("drains a revert made during an in-flight save before Start succeeds", async () => {
+  it("does not start a stale draft if it changes while the save is pending", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let resolveFirstSave!: (response: Response) => void;
     const firstSave = new Promise<Response>((resolve) => { resolveFirstSave = resolve; });
@@ -192,57 +236,33 @@ describe("saved chat voting panel", () => {
     fireEvent.change(question, { target: { value: "Dinner B" } });
     fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
     await waitFor(() => expect(patches).toHaveLength(1));
-    fireEvent.change(question, { target: { value: "Dinner" } });
+    fireEvent.change(question, { target: { value: "Newer local edit" } });
     resolveFirstSave(jsonResponse({ template: template({ title: "Dinner B", revision: 2 }) }));
-    await waitFor(() => expect(patches).toHaveLength(2));
-    await waitFor(() => expect(started).toBe(true));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Newer local edit"));
+    expect(started).toBe(false);
+    expect(patches).toHaveLength(1);
     expect(patches[0]).toMatchObject({ title: "Dinner B", revision: 1 });
-    expect(patches[1]).toMatchObject({ title: "Dinner", revision: 2 });
   });
 
-  it("starts from the acknowledged revision after flushing a debounced edit", async () => {
+  it("saves an unsaved draft before starting it", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let serverTemplate = template();
+    const order: string[] = [];
     const patches: Record<string, unknown>[] = [];
     mount(fetchHarness({
       onPatch: (_id, body) => {
         patches.push(body);
+        order.push("save");
         serverTemplate = { ...serverTemplate, ...body, revision: serverTemplate.revision + 1 };
         return jsonResponse({ template: serverTemplate });
       },
-      onStart: () => jsonResponse({ vote: runningVote }),
+      onStart: () => { order.push("start"); return jsonResponse({ vote: runningVote }); },
     }));
     const question = await screen.findByRole("textbox", { name: "Question" });
     fireEvent.change(question, { target: { value: "Saved before Start" } });
     fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
-    await waitFor(() => expect(patches).toHaveLength(1));
-    fireEvent.change(question, { target: { value: "Next edit" } });
-    await waitFor(() => expect(patches).toHaveLength(2), { timeout: 2_000 });
+    await waitFor(() => expect(order).toEqual(["save", "start"]));
     expect(patches[0]).toMatchObject({ title: "Saved before Start", revision: 1 });
-    expect(patches[1]).toMatchObject({ title: "Next edit", revision: 2 });
-  });
-
-  it("uses the cached CSRF token for pagehide saves and dispatches keepalive immediately", async () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    const patches: string[] = [];
-    const fetch = fetchHarness({ onPatch: (_id, _body, token) => {
-      patches.push(token);
-      return jsonResponse({ error: "csrf_invalid" }, 403);
-    } });
-    mount(fetch);
-    const csrfPath = (input: RequestInfo | URL): string => input instanceof Request
-      ? new URL(input.url).pathname
-      : new URL(String(input), "https://brobot.example").pathname;
-    const csrfRequestsBefore = fetch.mock.calls.filter(([input]) => csrfPath(input) === "/api/csrf").length;
-    fireEvent.change(await screen.findByRole("textbox", { name: "Question" }), { target: { value: "Unload save" } });
-    fireEvent(window, new Event("pagehide"));
-    await waitFor(() => expect(fetch.mock.calls.some(([input, init]) => {
-      const path = csrfPath(input);
-      return path.endsWith("/templates/template-dinner") && init?.keepalive === true;
-    })).toBe(true));
-    expect(fetch.mock.calls.filter(([input]) => csrfPath(input) === "/api/csrf")).toHaveLength(csrfRequestsBefore);
-    await waitFor(() => expect(patches).toHaveLength(1));
-    expect(patches[0]).toBe("csrf-token");
   });
 
   it("refetches an invalidated CSRF token and retries an active mutation once", async () => {
@@ -260,33 +280,13 @@ describe("saved chat voting panel", () => {
     }));
     const question = await screen.findByRole("textbox", { name: "Question" });
     fireEvent.change(question, { target: { value: "Recovered save" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(patches).toHaveLength(2), { timeout: 2_000 });
     expect(patches[1]).toBe("refreshed-csrf-token");
     expect(patches[0]).not.toBe(patches[1]);
   });
 
-  it("retains a newer draft when pagehide meets a pending save", async () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    let resolveFirstSave!: (response: Response) => void;
-    const firstSave = new Promise<Response>((resolve) => { resolveFirstSave = resolve; });
-    const patches: Record<string, unknown>[] = [];
-    mount(fetchHarness({ onPatch: (_id, body) => {
-      patches.push(body);
-      return patches.length === 1 ? firstSave : jsonResponse({ template: template({ title: String(body.title), revision: 3 }) });
-    } }));
-    const question = await screen.findByRole("textbox", { name: "Question" });
-    fireEvent.change(question, { target: { value: "First pending edit" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
-    await waitFor(() => expect(patches).toHaveLength(1));
-    fireEvent.change(question, { target: { value: "Keep this draft" } });
-    fireEvent(window, new Event("pagehide"));
-    expect(patches).toHaveLength(1);
-    expect(window.sessionStorage.getItem("chat-voting-template-drafts:fictional-channel")).toContain("Keep this draft");
-    resolveFirstSave(jsonResponse({ template: template({ title: "First pending edit", revision: 2 }) }));
-    await waitFor(() => expect(patches).toHaveLength(2));
-  });
-
-  it("reloads on a revision conflict and preserves the focused field caret when its value is unchanged", async () => {
+  it("reloads the server version after an explicit save conflicts and preserves the focused caret", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let requested = false;
     const latest = template({ title: "Lunch?", revision: 2 });
@@ -303,12 +303,14 @@ describe("saved chat voting panel", () => {
     const setSelectionRange = Reflect.get(question, "setSelectionRange");
     if (typeof setSelectionRange !== "function") throw new Error("The question field cannot select text.");
     Reflect.apply(setSelectionRange, question, [2, 4]);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requested).toBe(true), { timeout: 2_000 });
-    await screen.findByText("“Lunch?” changed elsewhere and was reloaded.");
+    expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     await waitFor(() => expect(document.activeElement).toBe(question));
     expect(question).toHaveValue("Lunch?");
     expect(question).toHaveProperty("selectionStart", 2);
-    expect(view.container).toHaveTextContent("Changed elsewhere – reloaded");
+    expect(view.container).not.toHaveTextContent("Changed elsewhere – reload");
   });
 
   it("confirms deletion and removes the saved row", async () => {
@@ -447,60 +449,6 @@ describe("saved chat voting panel", () => {
     expect(seconds).toBeEnabled();
   });
 
-  it("restores Custom mode for a pending custom-duration draft", async () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    window.sessionStorage.setItem("chat-voting-template-drafts:fictional-channel", JSON.stringify({
-      "template-dinner": {
-        baseRevision: 1,
-        acknowledged: { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 },
-        draft: { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 150 },
-      },
-    }));
-    mount(fetchHarness({ templates: [template({ durationSeconds: 120 })] }));
-    const seconds = await screen.findByRole("spinbutton", { name: "Seconds" });
-    await waitFor(() => expect(seconds).toHaveValue("150"));
-    await waitFor(() => expect(screen.getByRole("radio", { name: "Custom" })).toBeChecked());
-    expect(seconds).toBeEnabled();
-    window.sessionStorage.removeItem("chat-voting-template-drafts:fictional-channel");
-  });
-
-  it("restores a saved duration preset and selects its matching segment", async () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    window.sessionStorage.setItem("chat-voting-template-drafts:fictional-channel", JSON.stringify({
-      "template-dinner": {
-        baseRevision: 1,
-        acknowledged: { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 },
-        draft: { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 300 },
-      },
-    }));
-    mount(fetchHarness({ templates: [template({ durationSeconds: 120 })] }));
-    const seconds = await screen.findByRole("spinbutton", { name: "Seconds" });
-    await waitFor(() => expect(seconds).toHaveValue("300"));
-    await waitFor(() => expect(screen.getByRole("radio", { name: "5 min" })).toBeChecked());
-    expect(seconds).toBeDisabled();
-  });
-
-  it("does not restore a pending draft when its acknowledged revision is stale", async () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    const latest = template({ title: "Remote edit", revision: 2 });
-    const patches: Record<string, unknown>[] = [];
-    window.sessionStorage.setItem("chat-voting-template-drafts:fictional-channel", JSON.stringify({
-      "template-dinner": {
-        baseRevision: 1,
-        acknowledged: { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 },
-        draft: { shortcut: null, title: "Local stale edit", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 },
-      },
-    }));
-    mount(fetchHarness({ templates: [latest], onPatch: (_id, body) => {
-      patches.push(body);
-      return jsonResponse({ template: latest });
-    } }));
-    expect(await screen.findByRole("textbox", { name: "Question" })).toHaveValue("Remote edit");
-    await screen.findByText("“Remote edit” changed elsewhere and was reloaded.");
-    expect(patches).toHaveLength(0);
-    expect(window.sessionStorage.getItem("chat-voting-template-drafts:fictional-channel")).toBeNull();
-  });
-
   it("synchronizes duration mode after a conflict reload", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     const latest = template({ durationSeconds: 300, revision: 2 });
@@ -512,8 +460,9 @@ describe("saved chat voting panel", () => {
     const seconds = await screen.findByRole("spinbutton", { name: "Seconds" });
     fireEvent.click(screen.getByRole("radio", { name: "Custom" }));
     fireEvent.change(seconds, { target: { value: "150" } });
-    await screen.findByText("“Dinner” changed elsewhere and was reloaded.");
-    expect(await screen.findByRole("radio", { name: "5 min" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(screen.getByRole("radio", { name: "5 min" })).toBeChecked());
     expect(seconds).toHaveValue("300");
     expect(seconds).toBeDisabled();
   });
@@ -628,6 +577,34 @@ describe("saved chat voting panel", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     expect(await screen.findByText("Lunch", { selector: ".list-row__title" })).toBeInTheDocument();
     expect(recentRequests).toBeGreaterThan(previousRequestCount);
+  });
+
+  it("does not let an in-flight Recent response undo history invalidation", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    const staleVote: ChatVote = { ...runningVote, id: "poll-stale", title: "Stale", status: "closed", closedAt: "2026-10-04T10:01:00.000Z" };
+    const latestVote: ChatVote = { ...runningVote, id: "poll-latest", title: "Latest", status: "closed", closedAt: "2026-10-04T10:02:00.000Z" };
+    let current = currentState();
+    let recentRequests = 0;
+    let resolveStale!: (votes: ChatVote[]) => void;
+    const staleResponse = new Promise<ChatVote[]>((resolve) => { resolveStale = resolve; });
+    mount(fetchHarness({
+      getCurrent: () => current,
+      getRecent: () => {
+        recentRequests += 1;
+        return recentRequests === 1 ? staleResponse : [latestVote];
+      },
+    }));
+    await waitFor(() => expect(document.querySelector(".chat-voting-live")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
+    await waitFor(() => expect(recentRequests).toBe(1));
+    current = currentState({ vote: latestVote });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(await screen.findByText("Latest", { selector: ".list-row__title" })).toBeInTheDocument();
+    resolveStale([staleVote]);
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    expect(screen.getByText("Latest", { selector: ".list-row__title" })).toBeInTheDocument();
+    expect(screen.queryByText("Stale", { selector: ".list-row__title" })).not.toBeInTheDocument();
   });
 
   it("opens the inspector below 1280px only after a row is selected", async () => {

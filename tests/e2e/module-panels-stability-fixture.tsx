@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
 import { UiProvider } from "../../src/dashboard/ui";
+import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import ApiSourcePanel from "../../src/modules/api_source/panel";
 import BelaboxPanel from "../../src/modules/belabox/panel";
 import BelaboxStatusAction from "../../src/modules/belabox/panel/immediate-actions";
@@ -36,6 +37,9 @@ createRoot(document.getElementById("root") as HTMLElement).render(
     <UiProvider>
       <main className="main-content" style={{ width: "min(1400px, 100%)", padding: "16px" }}>
         {panel}
+        {panelName === "chat_voting" ? <button type="button" onClick={() => {
+          runDashboardNavigationGuards(() => { window.location.assign("/tests/e2e/module-panels-stability-fixture.html?panel=api_source"); }, () => undefined);
+        }}>Leave panel</button> : null}
       </main>
     </UiProvider>
   </DashboardDataProvider>,
