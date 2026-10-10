@@ -1,4 +1,4 @@
-import { Fragment, StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Fragment, StrictMode, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 
@@ -34,6 +34,7 @@ import {
   type PanelChannelSettings,
 } from "./api";
 import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
+import { preloadModulePanel } from "./module-panel-loaders";
 import { BroadcasterConsentAction, ChannelNotices, ImmediateActions, ModeratorCheckAction, WarningsAndErrorsFeed } from "./stream-manager";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
 import { useSystemQuery } from "./data/lists";
@@ -242,6 +243,37 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
     ? route.channelId
     : channels[0]?.channelId ?? "";
 
+  useEffect(() => {
+    if (moduleStates === null) return;
+    const enabledModuleIds = moduleStates.filter((module) => module.enabled).map((module) => module.id);
+    if (enabledModuleIds.length === 0) return;
+
+    let cancelled = false;
+    const preloadEnabledModules = (): void => {
+      if (cancelled) return;
+      for (const moduleId of enabledModuleIds) {
+        void preloadModulePanel(moduleId).catch(() => undefined);
+      }
+    };
+    const idleWindow = window as unknown as {
+      requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (idleWindow.requestIdleCallback !== undefined) {
+      const handle = idleWindow.requestIdleCallback(preloadEnabledModules, { timeout: 1_000 });
+      return () => {
+        cancelled = true;
+        idleWindow.cancelIdleCallback?.(handle);
+      };
+    }
+
+    const handle = window.setTimeout(preloadEnabledModules, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [moduleStates]);
+
   const pages = dashboardNavEntries({ isPlatformAdmin: platform }, navigationChannelId, texts);
   const pageEntry = (page: (typeof pages)[number]): SidebarEntry => {
     const entryRoute = page.route;
@@ -289,6 +321,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
       href: dashboardRoutePath(entry.route),
       active: route.kind === "module" && route.moduleId === entry.moduleId,
       onNavigate: () => { onNavigate(entry.route); },
+      onPreload: () => { void preloadModulePanel(entry.moduleId).catch(() => undefined); },
       led: { status: "green" as const, word: statusWord(true) },
     })),
   }));
@@ -1687,7 +1720,9 @@ export const DashboardApp = (): ReactElement => {
           loading={<Skeleton rows={8} height={58} />}
           empty={<Skeleton rows={8} height={58} />}
           error={<Skeleton rows={8} height={58} />}
-        >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId ? { initialSelection: pendingModuleSelection.value } : {})} /> : null}</UiLoadState> : null}
+        >{overviewMatchesRoute && overview.data !== null ? <Suspense fallback={<div className="module-view-fallback" aria-hidden="true"><Skeleton rows={3} height={58} /></div>}>
+          <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId ? { initialSelection: pendingModuleSelection.value } : {})} />
+        </Suspense> : null}</UiLoadState> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage
           key={route.channelId}
           system={systemQuery.data}

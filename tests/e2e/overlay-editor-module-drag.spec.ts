@@ -32,6 +32,12 @@ const dragElement = async (page: Page, element: Locator): Promise<void> => {
   await expect.poll(async () => Number(await page.locator("#overlay-editor-x").inputValue())).toBeGreaterThan(beforeX);
 };
 
+const box = async (locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> => locator.evaluate((element) => {
+  const rect = element.getBoundingClientRect();
+  const round = (value: number): number => Math.round(value * 100) / 100;
+  return { x: round(rect.x), y: round(rect.y), width: round(rect.width), height: round(rect.height) };
+});
+
 test("module overlay elements have visible previews and drag by their measured bounds", async ({ page }) => {
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
@@ -73,6 +79,16 @@ test("module overlay elements have visible previews and drag by their measured b
     await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
   });
 
+  let markEditorRequestStarted: () => void = () => undefined;
+  const editorRequestStarted = new Promise<void>((resolve) => { markEditorRequestStarted = resolve; });
+  let releaseEditorRequest: () => void = () => undefined;
+  const editorResponseGate = new Promise<void>((resolve) => { releaseEditorRequest = resolve; });
+  await page.route("**/src/modules/chat_voting/overlay/editor.tsx*", async (route) => {
+    markEditorRequestStarted();
+    await editorResponseGate;
+    await route.continue();
+  });
+
   await page.goto(`/channels/${channelId}/overlays/${overlayId}`);
   await expect(page.getByRole("heading", { name: "Drag test" })).toBeVisible();
   const frame = page.frameLocator('[data-testid="overlay-editor-renderer"]');
@@ -80,6 +96,12 @@ test("module overlay elements have visible previews and drag by their measured b
   const addElement = page.getByRole("button", { name: "Add element" });
   await addElement.click();
   await page.getByRole("option", { name: "Voting tally" }).click();
+  await editorRequestStarted;
+  const propertyFields = page.locator(".overlay-editor__property-fields");
+  const propertyFieldsBeforeEditorLoads = await box(propertyFields);
+  releaseEditorRequest();
+  await expect(page.locator(".module-overlay-element-editor select")).toBeVisible();
+  expect(await box(propertyFields)).toEqual(propertyFieldsBeforeEditorLoads);
   await expect(frame.locator("style[data-brobot-overlay-tally-css]")).toHaveCount(1, { timeout: 15_000 });
   const tally = frame.locator('[data-kind="chat_voting.tally"]');
   await expect(tally).toBeVisible({ timeout: 15_000 });

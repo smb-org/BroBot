@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState, type ReactElement } from "react";
 
 import type { PanelAuditEntry, PanelAuditFilters } from "../../panel-contract";
 import { AUDIT_AREAS } from "../../contracts/values";
-import { MODULES } from "../../modules/registry";
 import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
 import { ModuleHeading } from "../module-panels";
+import { loadModuleSettingsEditor } from "../module-panel-loaders";
 import { formatEventDetail } from "../events/model";
 import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import { PanelApiError } from "../api";
@@ -126,10 +126,10 @@ const useModuleFieldCatalog = (entry: PanelAuditEntry | null): SettingsEditorCat
   const hasSettingsFields = entry !== null && auditDiffRows(entry.before, entry.after).some((row) => row.fromSettings);
   useEffect(() => {
     if (!hasSettingsFields || moduleId === null) return;
-    const module = MODULES.find((candidate) => candidate.id === moduleId);
-    if (module?.settingsEditor === undefined) return;
+    const definitionPromise = loadModuleSettingsEditor(moduleId);
+    if (definitionPromise === null) return;
     let active = true;
-    void module.settingsEditor().then((definition) => {
+    void definitionPromise.then((definition) => {
       if (active) setLoaded({ moduleId, catalog: definition.default.locales[dashboardLanguage()] });
     }).catch(() => undefined);
     return () => { active = false; };

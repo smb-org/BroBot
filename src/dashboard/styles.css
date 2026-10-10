@@ -351,6 +351,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .error-panel { border-style: solid; border-color: rgba(226, 86, 77, .45); background: var(--error-surface); }
 .error-panel strong { color: var(--error); }
 .module-stack { display: grid; gap: var(--s3); }
+.module-view-fallback { min-height: calc(var(--s10) * 8); }
 .chat-voting-panel { width: min(var(--dashboard-content-width), 100%); }
 .chat-voting-panel__status { display: flex; align-items: center; gap: var(--s2); width: min(15rem, 48%); min-width: 0; }
 .chat-voting-panel__status-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

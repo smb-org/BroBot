@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType, t
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
+import { loadModulePanel, loadModuleSettingsEditor } from "./module-panel-loaders";
 import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
@@ -161,7 +162,7 @@ const getLazyPanel = (module: (typeof MODULES)[number]): LazyExoticComponent<Com
   if (module.panel === undefined) return null;
   const existing = lazyPanels.get(module.id);
   if (existing !== undefined) return existing;
-  const panel = lazy(module.panel);
+  const panel = lazy(() => loadModulePanel(module) as Promise<{ default: ComponentType<ModulePanelProperties> }>);
   lazyPanels.set(module.id, panel);
   return panel;
 };
@@ -169,6 +170,7 @@ const getLazyPanel = (module: (typeof MODULES)[number]): LazyExoticComponent<Com
 interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
+  suspendToParent?: boolean;
   canManage?: boolean;
   canOperate?: boolean;
   botIsModerator?: boolean | null;
@@ -199,8 +201,10 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   const queryClient = useDashboardQueryClient();
   const settingsQuery = useModuleQuery(channelId, module.id, "settings", async (signal) => {
     if (module.settingsEditor === undefined) throw new Error("Module settings editor is unavailable.");
+    const definitionPromise = loadModuleSettingsEditor(module.id);
+    if (definitionPromise === null) throw new Error("Module settings editor is unavailable.");
     const [definition, response] = await Promise.all([
-      module.settingsEditor(),
+      definitionPromise,
       getChannelModuleSettings(channelId, module.id, signal),
     ]);
     return { definition: definition.default, settings: response.settings, revision: response.revision, variables: response.variables };
@@ -529,7 +533,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   </>;
 };
 
-export const ModulePanelMount = ({ channelId, activeModules, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, suspendToParent = false, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -549,8 +553,8 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true, c
 
   return (
     <section className="module-stack" aria-label={dashboardTexts().module.views}>
-      <Suspense fallback={<p className="muted">{dashboardTexts().module.loadingViews}</p>}>
-        {registeredViews.map(({ id, Panel, module }) => <MountedModuleView
+      {registeredViews.map(({ id, Panel, module }) => {
+        const view = <MountedModuleView
           key={`${channelId}:${id}`}
           module={module}
           Panel={Panel}
@@ -559,8 +563,12 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true, c
           canOperate={canOperate}
           botIsModerator={botIsModerator}
           {...(initialSelection === undefined ? {} : { initialSelection })}
-        />)}
-      </Suspense>
+        />;
+        return suspendToParent ? view : <Suspense
+          key={`${channelId}:${id}`}
+          fallback={<div className="module-view-fallback" aria-hidden="true"><Skeleton rows={3} height={58} /></div>}
+        >{view}</Suspense>;
+      })}
     </section>
   );
 };
@@ -858,7 +866,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {stateMessage === null ? (
           registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
+            <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} suspendToParent canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
             </section>
           )
         ) : (
