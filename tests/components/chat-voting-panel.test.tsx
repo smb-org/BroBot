@@ -585,6 +585,47 @@ describe("saved chat voting panel", () => {
     expect(view.container).not.toHaveTextContent("Changed elsewhere – reload");
   });
 
+  it("keeps the reloaded template revision in the shared cache after reselection", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const initial = template();
+    const second = template({ id: "template-lunch", title: "Lunch" });
+    const revisionTwo = template({ title: "Updated at revision 2", revision: 2 });
+    const revisionThree = template({ title: "Updated at revision 3", revision: 3 });
+    let serverTemplates = [initial, second];
+    const view = mount(fetchHarness({
+      templates: serverTemplates,
+      getTemplates: () => serverTemplates,
+      onPatch: () => {
+        serverTemplates = [revisionTwo, second];
+        return jsonResponse({ error: "chat_vote_template_conflict" }, 409);
+      },
+    }));
+    const question = await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.change(question, { target: { value: "My conflicting edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByRole("button", { name: "Reload" });
+    await waitFor(() => {
+      const cached = view.queryClient.getQueryData<{ templates: ChatVoteTemplate[] }>(moduleQueryKey("fictional-channel", "chat_voting", "templates"));
+      expect(cached?.templates.find((entry) => entry.id === initial.id)?.revision).toBe(2);
+    });
+
+    serverTemplates = [revisionThree, second];
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(question).toHaveValue(revisionThree.title));
+
+    const secondLink = [...document.querySelectorAll<HTMLAnchorElement>(".chat-voting-template-list .list-row__link")]
+      .find((link) => link.getAttribute("href") === `#${second.id}`);
+    if (secondLink === undefined) throw new Error("The second saved template is missing from the list.");
+    fireEvent.click(secondLink);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue(second.title));
+
+    const firstLink = [...document.querySelectorAll<HTMLAnchorElement>(".chat-voting-template-list .list-row__link")]
+      .find((link) => link.getAttribute("href") === `#${initial.id}`);
+    if (firstLink === undefined) throw new Error("The reloaded saved template is missing from the list.");
+    fireEvent.click(firstLink);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue(revisionThree.title));
+  });
+
   it("ignores a delayed conflict reload after replacing the template inspector", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     const first = template({ id: "template-a", title: "Template A" });

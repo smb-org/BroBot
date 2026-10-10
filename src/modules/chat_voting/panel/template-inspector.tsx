@@ -2,12 +2,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElemen
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, NumberField, SaveBar, SegmentedControl, SubInspector, Switch, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
-import { runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
+import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
 import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
 import { isValidTemplateShortcut, normalizeFreeTextVoteForMatching, templateStartProblem, voteLabelLength } from "../domain";
 import { chatVotingSavedPanelTexts } from "./locale-saved";
-import { createChatVoteTemplate, loadChatVoteTemplates, saveChatVoteTemplate } from "./service";
+import { createChatVoteTemplate, saveChatVoteTemplate } from "./service";
 import type { ChatVoteTemplateListState } from "./service";
 
 export interface TemplateInspectorActions {
@@ -246,7 +246,8 @@ export function ChatVoteTemplateInspector({
     const isCurrentRequest = (): boolean => reloadGeneration.current === requestGeneration
       && draftGeneration.current === requestDraftGeneration;
     try {
-      const latest = (await loadChatVoteTemplates(channelId)).templates.find((entry) => entry.id === template.id);
+      const latest = (await refetchModuleQueryData<ChatVoteTemplateListState>(queryClient, channelId, "chat_voting", "templates"))
+        .templates.find((entry) => entry.id === template.id);
       if (!isCurrentRequest()) return;
       if (latest === undefined) {
         setSaveError(labels.conflictReloadMissing);
