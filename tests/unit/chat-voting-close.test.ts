@@ -226,7 +226,7 @@ describe("chat voting close service", () => {
     const repository = await seedOpenVote(false);
     await database.prepare(
       `UPDATE chat_votes
-          SET preset = 'free_text', option_count = 0, labels_json = '[]', text_mode = 'whole_message',
+          SET kind = 'free_text', preset = 'free_text', option_count = 0, labels_json = '[]', text_mode = 'whole_message',
               term_filter_ready = 1
         WHERE channel_id = 'fictional-channel' AND poll_id = 'fictional-poll'`,
     ).run();

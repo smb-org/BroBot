@@ -180,7 +180,7 @@ describe("chat voting live panel", () => {
     expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Burger");
   });
 
-  it("uses saved default labels and duration for the next vote", async () => {
+  it("uses the saved default duration for the next vote", async () => {
     setDashboardRealtimeStatus("fictional-channel", "connected");
     let serverState = currentState();
     let startPayload: unknown;
@@ -190,10 +190,9 @@ describe("chat voting live panel", () => {
     ));
     const view = render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
 
-    expect(await screen.findByRole("textbox", { name: "Label for option 1" })).toHaveAttribute("placeholder", "Yes");
+    expect(await screen.findByRole("button", { name: "Start vote" })).toBeEnabled();
     serverState = currentState({
       defaultDurationSeconds: 300,
-      defaultLabels: { ...defaultLabels, yes_no: ["Approve", "Reject"] },
     });
 
     await act(async () => {
@@ -204,9 +203,10 @@ describe("chat voting live panel", () => {
       });
     });
 
-    expect(await screen.findByRole("textbox", { name: "Label for option 1" })).toHaveAttribute("placeholder", "Approve");
+    await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey("fictional-channel", "chat_voting", "panel")))
+      .toMatchObject({ defaultDurationSeconds: 300 }));
     fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
-    await waitFor(() => expect(startPayload).toEqual({ preset: "yes_no", durationSeconds: 300, labels: ["Approve", "Reject"] }));
+    await waitFor(() => expect(startPayload).toEqual({ kind: "yes_no", labels: ["Yes", "No"], durationSeconds: 300 }));
   });
 
   it("sends a trimmed question and enforces its 80-code-point limit", async () => {

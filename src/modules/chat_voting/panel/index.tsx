@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useRef, useState, type ReactElement } from "react";
 
 import { Button, Field, Led, LoadState, notify, NumberField, SegmentedControl, Select, Skeleton, Switch } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
@@ -55,7 +55,6 @@ const createVoteDraft = (channelId: string, defaultDurationSeconds: number): Vot
 
 export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true }: ModulePanelProperties): ReactElement => {
   const labels = chatVotingPanelTexts(language);
-  const [state, setState] = useState<ChatVotingPanelState | null>(null);
   const loadErrorNotified = useRef(false);
   const [busy, setBusy] = useState(false);
   const [draftState, setDraftState] = useState<VoteDraft | null>(null);
@@ -76,29 +75,18 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   }, {
     refetchInterval: realtimeStatus === "connected" ? false : 2_000,
   });
-
-  const applyState = useCallback((next: ChatVotingPanelState): void => {
-    setState(next);
-    setDraftState((current) => current?.channelId === channelId
-      ? current
-      : createVoteDraft(channelId, next.defaultDurationSeconds));
-    loadErrorNotified.current = false;
-  }, [channelId]);
-
-  useEffect(() => {
-    if (stateQuery.data !== undefined) applyState(stateQuery.data);
-  }, [applyState, stateQuery.data]);
+  const state = stateQuery.data ?? null;
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
-      applyState(await refetchModuleQueryData<ChatVotingPanelState>(queryClient, channelId, "chat_voting", "panel"));
+      await refetchModuleQueryData<ChatVotingPanelState>(queryClient, channelId, "chat_voting", "panel");
     } catch {
       if (!loadErrorNotified.current) {
         loadErrorNotified.current = true;
         notify({ tone: "error", message: labels.loadError });
       }
     }
-  }, [applyState, channelId, labels.loadError, queryClient]);
+  }, [channelId, labels.loadError, queryClient]);
 
   const draft = draftState?.channelId === channelId
     ? draftState

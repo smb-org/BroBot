@@ -144,8 +144,22 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
     keys: (id) => [moduleQueryKey(id, "chat_voting", "panel")],
     write: async (database, id) => {
       await database.prepare(
-        `INSERT INTO chat_votes (channel_id, poll_id, preset, option_count, labels_json, status, opened_at, closes_at, close_reason)
-         VALUES (?, 'poll-1', 'yes_no', 2, '["Yes","No"]', 'open', '2026-10-10T00:00:00.000Z', '2026-10-10T00:02:00.000Z', 'manual')`,
+        `INSERT INTO chat_votes (channel_id, poll_id, kind, preset, legacy_written, option_count, labels_json, status, opened_at, closes_at, close_reason)
+         VALUES (?, 'poll-1', 'yes_no', 'yes_no', 0, 2, '["Yes","No"]', 'open', '2026-10-10T00:00:00.000Z', '2026-10-10T00:02:00.000Z', 'manual')`,
+      ).bind(id).run();
+    },
+  },
+  {
+    name: "chat voting word approvals",
+    keys: (id) => [moduleQueryKey(id, "chat_voting", "panel")],
+    write: async (database, id) => {
+      await database.prepare(
+        `INSERT INTO chat_votes (channel_id, poll_id, kind, preset, legacy_written, option_count, labels_json, text_mode, term_filter_ready, status, opened_at, closes_at, close_reason)
+         VALUES (?, 'poll-words', 'free_text', 'free_text', 0, 0, '[]', 'first_word', 1, 'open', '2026-10-10T00:00:00.000Z', '2026-10-10T00:02:00.000Z', 'manual')`,
+      ).bind(id).run();
+      await database.prepare(
+        `INSERT INTO chat_vote_term_approvals (channel_id, poll_id, term, approved_at, approved_by)
+         VALUES (?, 'poll-words', 'pizza', '2026-10-10T00:00:01.000Z', 'manager-1')`,
       ).bind(id).run();
     },
   },
@@ -222,9 +236,25 @@ describe("panel resource revisions", () => {
 
     const moduleMutations = MODULES.flatMap((module) => module.routes?.routes ?? [])
       .filter(({ method }) => writeMethods.has(method));
+    const chatVoting = MODULES.find(({ id }) => id === "chat_voting");
+    const chatVotingRoutes = chatVoting?.routes?.routes ?? [];
+    const chatVotingMutations = chatVotingRoutes.filter(({ method }) => writeMethods.has(method));
     const moduleAlarms = MODULES.flatMap((module) => module.alarms ?? []);
     const maintenanceJobs = MODULES.filter((module) => module.scheduledMaintenance !== undefined);
     expect(moduleMutations.length).toBeGreaterThan(0);
+    expect(chatVoting).toBeDefined();
+    expect(chatVotingMutations.map(({ method, path }) => `${method} ${path.slice(path.lastIndexOf("/"))}`)).toEqual(
+      expect.arrayContaining(["POST /start", "POST /approve-term", "POST /close"]),
+    );
+    expect(chatVotingRoutes.some(({ method, path }) => method === "GET" && path.endsWith("/current"))).toBe(true);
+    for (const { path } of chatVotingRoutes) {
+      const mountedPath = path.startsWith("/api/channels/")
+        ? path
+        : `/api/channels/:channelId/modules/chat_voting${path}`;
+      expect(routeIsCovered(mountedPath, PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes)).toBe(true);
+    }
+    expect(chatVoting?.eventSubTypes).toContain("channel.chat.message");
+    expect(chatVoting?.alarms?.length ?? 0).toBeGreaterThan(0);
     expect(PANEL_RESOURCE_NOTIFIER_COVERAGE.moduleRoutes).toBe("channelRoutes");
     const moduleRouterSource = readFileSync(resolve(root, "src/worker/panel/module-routes.ts"), "utf8");
     expect(moduleRouterSource).toContain("moduleRouter.route(`/api/channels/:channelId/modules/${module.id}`, module.routes)");
@@ -257,7 +287,23 @@ describe("panel resource revisions", () => {
     const worker = readFileSync(resolve(root, "src/worker/index.ts"), "utf8");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.platformRoutes");
+    expect(worker).toMatch(/app\.use\(PANEL_RESOURCE_NOTIFIER_COVERAGE\.channelRoutes,[\s\S]*?finally \{\s*const channelId = context\.req\.param\("channelId"\);[\s\S]*?await notifyCommittedResources\(context\.env, channelId\);/u);
     expect(worker).not.toMatch(/context\.res\.status !== 401/u);
+    const ballotStorageStart = channelObject.indexOf("private ballotStorage(");
+    const ballotStorageEnd = channelObject.indexOf("private async notifyCommittedPanelResources(", ballotStorageStart);
+    const ballotStorage = ballotStorageStart < 0 || ballotStorageEnd < 0 ? "" : channelObject.slice(ballotStorageStart, ballotStorageEnd);
+    expect(ballotStorage).toContain("this.ballotPanelResources(match[1])");
+    expect(ballotStorage).toMatch(/bumpDurablePanelResources\(underlying, \[\.\.\.changedResources\]\)/u);
+    const ballotCastStart = channelObject.indexOf("public async castBallot(");
+    const ballotTermCastStart = channelObject.indexOf("public async castBallotTerm(", ballotCastStart);
+    const ballotCast = ballotCastStart < 0 || ballotTermCastStart < 0 ? "" : channelObject.slice(ballotCastStart, ballotTermCastStart);
+    expect(ballotCast).toContain("choice, options");
+    expect(ballotCast).toMatch(/result\.status === "counted" \|\| result\.status === "changed"\) \{\s*await this\.notifyCommittedPanelResources\(\);/u);
+    const ballotTermCastEnd = channelObject.indexOf("public async setBlockedTerms(", ballotTermCastStart);
+    const ballotTermCast = ballotTermCastStart < 0 || ballotTermCastEnd < 0 ? "" : channelObject.slice(ballotTermCastStart, ballotTermCastEnd);
+    expect(ballotTermCast).toContain("castStoredBallotTerm");
+    expect(ballotTermCast).toContain('result.status === "overflow"');
+    expect(ballotTermCast).toContain("await this.notifyCommittedPanelResources()");
     const eventSubSource = readFileSync(resolve(root, "src/worker/eventsub.ts"), "utf8");
     expect(eventSubSource).toMatch(/finally \{\s*await notifyCommittedResources\(context\.env, revocation\.channelId\);/u);
     expect(eventSubSource).toMatch(/finally \{\s*await notifyCommittedResources\(context\.env, notifierChannelId\);/u);
@@ -570,6 +616,8 @@ describe("panel resource revisions", () => {
       expect(resourcesFor("text_commands")).toContain("channel.variables");
       expect(resourcesFor("channel_variables")).toContain("channel.library");
       expect(resourcesFor("overlays")).toContain("channel.variables");
+      expect(resourcesFor("chat_votes")).toContain("module:chat_voting:panel");
+      expect(resourcesFor("chat_vote_term_approvals")).toContain("module:chat_voting:panel");
     } finally {
       database.close();
     }
