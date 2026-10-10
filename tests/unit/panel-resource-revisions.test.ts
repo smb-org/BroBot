@@ -461,6 +461,125 @@ describe("panel resource revisions", () => {
     expect(loginMaintenance).toMatch(/if \(revoked\) \{\s*const pending = await getPendingRealtimeUserRevocation[\s\S]*?await revokeRealtimeUserFromAllChannels/u);
   });
 
+  it("keeps every registered channel panel GET read-only with an expired ballot", async () => {
+    const channelId = "panel-get-read-only-channel";
+    const userId = "panel-get-read-only-operator";
+    const database = new TestD1Database();
+    const cookieKeys = JSON.stringify({ active: { id: "cookie-v1", key: testKey(3) }, retired: [] });
+    const encryptionKeys = JSON.stringify({ active: { id: "encryption-v1", key: testKey(4) }, retired: [] });
+    const expiredBallots = new Map([
+      ["chat_voting/expired-poll", { moduleId: "chat_voting", ballotId: "expired-poll", counts: [1, 0], revision: 2 }],
+      ["votekick/expired-kick", { moduleId: "votekick", ballotId: "expired-kick", counts: [1, 0], revision: 2 }],
+    ]);
+    const doRevisions: Record<string, number> = {
+      "module:chat_voting:panel": 2,
+      "module:votekick:panel": 2,
+    };
+    const hints: string[] = [];
+    let activeBallot: { moduleId: string; ballotId: string } = { moduleId: "chat_voting", ballotId: "expired-poll" };
+    const finalizeExpired = (moduleId: string, ballotId: string): void => {
+      if (!expiredBallots.has(`${moduleId}/${ballotId}`)) return;
+      doRevisions[`module:${moduleId}:panel`] = (doRevisions[`module:${moduleId}:panel`] ?? 0) + 1;
+      doRevisions["module:chat_voting:panel"] = (doRevisions["module:chat_voting:panel"] ?? 0) + Number(moduleId !== "chat_voting");
+      if (activeBallot.moduleId === moduleId && activeBallot.ballotId === ballotId) activeBallot = { moduleId: "", ballotId: "" };
+      hints.push(`module:${moduleId}:panel`);
+    };
+    const snapshotFor = (moduleId: string, ballotId: string) => {
+      const ballot = expiredBallots.get(`${moduleId}/${ballotId}`);
+      return ballot === undefined ? null : { counts: [...ballot.counts], revision: ballot.revision, outcome: "expired" as const };
+    };
+    const channelObject = new Proxy({
+      getPanelResourceRevisions: vi.fn(() => Promise.resolve({ ...doRevisions })),
+      readBallot: vi.fn((moduleId: string, ballotId: string) => {
+        finalizeExpired(moduleId, ballotId);
+        return Promise.resolve(snapshotFor(moduleId, ballotId));
+      }),
+      hasOpenBallot: vi.fn(() => {
+        finalizeExpired(activeBallot.moduleId, activeBallot.ballotId);
+        return Promise.resolve(false);
+      }),
+      readBallotSnapshot: vi.fn((moduleId: string, ballotId: string) => Promise.resolve(snapshotFor(moduleId, ballotId))),
+      hasOpenBallotSnapshot: vi.fn(() => Promise.resolve(false)),
+      getCachedAdSchedule: vi.fn(() => Promise.resolve(null)),
+      getTwitchRateLimitRetryAfter: vi.fn(() => Promise.resolve(null)),
+    }, {
+      get: (target, property, receiver) => {
+        if (Reflect.has(target, property)) return Reflect.get(target, property, receiver) as unknown;
+        return () => Promise.resolve(null);
+      },
+    });
+    const environment = {
+      DB: database as unknown as D1Database,
+      CHANNEL: {
+        idFromName: (id: string) => id,
+        get: () => channelObject,
+      },
+      SESSION_COOKIE_KEYS: cookieKeys,
+      SESSION_ENCRYPTION_KEYS: encryptionKeys,
+      PUBLIC_ORIGIN: "https://brobot.example",
+      TWITCH_CLIENT_ID: "test-client",
+    } as unknown as Env;
+    const sessionCookie = await createSessionCookie({ sessionId: `session-${userId}` }, cookieKeys, encryptionKeys);
+
+    try {
+      await insertChannel(database, channelId);
+      await insertLoginIdentityAndSession(database, userId);
+      await insertMember(database, channelId, userId, "manager");
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, '{}')",
+      ).bind(channelId).run();
+      await database.prepare(
+        `INSERT INTO chat_votes
+          (channel_id, poll_id, kind, preset, legacy_written, option_count, labels_json, status, opened_at, closes_at, close_reason)
+         VALUES (?, 'expired-poll', 'yes_no', 'yes_no', 0, 2, '["Yes","No"]', 'open', ?, ?, 'timer')`,
+      ).bind(channelId, new Date(Date.now() - 120_000).toISOString(), new Date(Date.now() - 60_000).toISOString()).run();
+      await database.prepare(
+        `INSERT INTO votekicks (channel_id, votekick_id, status, threshold, yes_votes, no_votes, ballot_revision, started_at, expires_at)
+         VALUES (?, 'expired-kick', 'running', 3, 1, 0, 2, ?, ?)` ,
+      ).bind(channelId, new Date(Date.now() - 120_000).toISOString(), new Date(Date.now() - 60_000).toISOString()).run();
+
+      const registeredGetPaths = [...new Set(panelRouter.routes
+        .filter(({ method, path }) => method === "GET" && (path === "/api/channels" || path.startsWith("/api/channels/:channelId")))
+        .map(({ path }) => path))];
+      expect(registeredGetPaths.length).toBeGreaterThan(10);
+      const parameterValues: Record<string, string> = {
+        channelId,
+        moduleId: "chat_voting",
+        overlayId: "missing-overlay",
+        tokenId: "missing-token",
+        id: "missing-id",
+        name: "missing-name",
+        userId: "missing-user",
+      };
+      const routeUrl = (path: string): string => path.replace(/:([A-Za-z0-9_]+)/gu, (_match, name: string) => parameterValues[name] ?? "missing-param");
+      const totalChanges = async (): Promise<number> =>
+        (await database.prepare("SELECT total_changes() AS value").first<{ value: number }>())?.value ?? 0;
+
+      for (const fixture of [
+        { moduleId: "chat_voting", ballotId: "expired-poll" },
+        { moduleId: "votekick", ballotId: "expired-kick" },
+      ]) {
+        activeBallot = fixture;
+        for (const path of registeredGetPaths) {
+          const revisionsBefore = await readCompletePanelResourceRevisions(environment, channelId);
+          const d1ChangesBefore = await totalChanges();
+          const request = new Request(`https://brobot.example${routeUrl(path)}`, {
+            headers: { Cookie: `__Host-brobot_session=${sessionCookie}` },
+          });
+
+          await panelRouter.fetch(request, environment);
+
+          expect(await totalChanges(), `D1 writes from GET ${path} with ${fixture.moduleId} expired`).toBe(d1ChangesBefore);
+          expect(await readCompletePanelResourceRevisions(environment, channelId),
+            `revision vector from GET ${path} with ${fixture.moduleId} expired`).toEqual(revisionsBefore);
+          expect(hints, `realtime hints from GET ${path} with ${fixture.moduleId} expired`).toEqual([]);
+        }
+      }
+    } finally {
+      database.close();
+    }
+  });
+
   it("does not enumerate channels for an unauthenticated OAuth callback", async () => {
     const prepare = vi.fn();
     const idFromName = vi.fn((channelId: string) => channelId);

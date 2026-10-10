@@ -98,9 +98,11 @@ import {
   expireStoredBallot,
   finalizeStoredBallot,
   hasOpenStoredBallot,
+  hasOpenStoredBallotSnapshot,
   hardDeleteFinalizedStoredBallot,
   openStoredBallot,
   readStoredBallot,
+  readStoredBallotSnapshot,
   setStoredBallotBlockedTerms,
 } from "./ballots";
 
@@ -1732,6 +1734,10 @@ export class ChannelObject extends DurableObject<Env> {
     return snapshot;
   }
 
+  public async readBallotSnapshot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
+    return await readStoredBallotSnapshot(this.ballotStorage(moduleId), moduleId, ballotId);
+  }
+
   public async hasOpenBallot(): Promise<boolean> {
     const hasOpen = await hasOpenStoredBallot(this.ballotStorage(CHAT_VOTING_MODULE_ID), async (transaction, moduleId, ballotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
@@ -1743,6 +1749,10 @@ export class ChannelObject extends DurableObject<Env> {
     });
     if (!hasOpen) await this.notifyCommittedPanelResources();
     return hasOpen;
+  }
+
+  public async hasOpenBallotSnapshot(): Promise<boolean> {
+    return await hasOpenStoredBallotSnapshot(this.ballotStorage(CHAT_VOTING_MODULE_ID));
   }
 
   public async closeBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {

@@ -50,12 +50,12 @@ chatVotingRoutes.get("/current", async (context) => {
   };
   const ballots = context.get("ballots")(channelId);
   if (vote === null) {
-    const hasOpenBallot = await ballots.hasOpenBallot?.() ?? false;
+    const hasOpenBallot = await ballots.hasOpenBallotSnapshot?.() ?? false;
     return context.json({ vote: null, counts: null, revision: 0, terms: null, moreTerms: null, hasOpenBallot, defaultDurationSeconds: effectiveSettings.autoCloseSeconds, defaultLabels });
   }
   const [snapshot, hasOpenBallot] = await Promise.all([
-    vote.status === "open" ? ballots.read(vote.id) : Promise.resolve(null),
-    ballots.hasOpenBallot?.() ?? Promise.resolve(false),
+    vote.status === "open" ? ballots.readSnapshot?.(vote.id) ?? Promise.resolve(null) : Promise.resolve(null),
+    ballots.hasOpenBallotSnapshot?.() ?? Promise.resolve(false),
   ]);
   return context.json({
     vote,

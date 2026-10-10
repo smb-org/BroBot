@@ -809,6 +809,10 @@ export interface ModuleBallotAccess {
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
   /** Reads whether any module currently owns the channel's exclusive ballot. */
   hasOpenBallot?: () => Promise<boolean>;
+  /** Reads a snapshot without finalizing an expired ballot or changing its alarm. */
+  readSnapshot?: (ballotId: string) => Promise<BallotSnapshot | null>;
+  /** Reads channel-wide availability without finalizing or cleaning up a ballot. */
+  hasOpenBallotSnapshot?: () => Promise<boolean>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
   /** Atomically finalizes using the stored pass rule and returns the outcome and snapshot. */
   finalize: (ballotId: string) => Promise<BallotFinalizeResult>;

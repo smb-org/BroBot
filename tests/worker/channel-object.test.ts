@@ -1956,6 +1956,38 @@ describe("ChannelObject realtime path", () => {
     await expect(object.hasOpenBallot()).resolves.toBe(false);
   });
 
+  it.each([
+    ["chat_voting", "expired-poll"],
+    ["votekick", "expired-kick"],
+  ])("reads an expired %s ballot snapshot and availability without committing changes", async (moduleId, ballotId) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const panel = socketFor(validPrincipal());
+    const object = objectFor([panel]);
+    await object.openBallot(moduleId, ballotId, 2, 20_000);
+    await object.castBallot(moduleId, ballotId, "viewer-1", 1);
+
+    const storage = storageOf(object);
+    const key = `ballot:${moduleId}:${ballotId}`;
+    const ballotBefore = structuredClone(storage.values.get(key));
+    const activeBefore = structuredClone(storage.values.get("ballot:active"));
+    const revisionsBefore = await object.getPanelResourceRevisions();
+    panel.send.mockClear();
+    vi.setSystemTime(20_000);
+
+    const [snapshot, available] = await Promise.all([
+      object.readBallotSnapshot(moduleId, ballotId),
+      object.hasOpenBallotSnapshot(),
+    ]);
+
+    expect(snapshot).toEqual({ counts: [1, 0], revision: 1, outcome: "expired" });
+    expect(available).toBe(false);
+    expect(storage.values.get(key)).toEqual(ballotBefore);
+    expect(storage.values.get("ballot:active")).toEqual(activeBefore);
+    expect(await object.getPanelResourceRevisions()).toEqual(revisionsBefore);
+    expect(panel.send.mock.calls).toEqual([]);
+  });
+
   it("preserves an active ballot alarm when another open uses the same id or invalid arguments", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
