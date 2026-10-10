@@ -2305,6 +2305,11 @@ export class ChannelObject extends DurableObject<Env> {
         return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
       }
     }
+    // Authorization above awaits D1 and lets concurrent handshakes interleave.
+    // Reserve capacity again at the synchronous acceptance boundary.
+    if (!this.hasConnectionCapacity(principal)) {
+      return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
+    }
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
     pair[1].serializeAttachment(principal);
     await this.scheduleSecurityAlarm();

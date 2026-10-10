@@ -494,6 +494,135 @@ describe("panel resource revisions", () => {
     }
   });
 
+  it("drains shared-cache revisions for every channel named by one commit", async () => {
+    const database = new TestD1Database();
+    const visitedChannels: string[] = [];
+    const localReconciliation = vi.fn(() => Promise.resolve());
+    try {
+      await addChannel(database, "weather-channel-a");
+      await addChannel(database, "weather-channel-b");
+      await database.prepare(
+        "UPDATE channels SET location_latitude = 52.5, location_longitude = 13.4 WHERE channel_id IN (?, ?)",
+      ).bind("weather-channel-a", "weather-channel-b").run();
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+      await database.prepare(
+        `INSERT INTO weather_cache
+          (provider, location_key, latitude, longitude, payload_json, expires_at, updated_at)
+         VALUES ('met_norway', 'shared-berlin', 52.5, 13.4, '{}', '2026-10-10T01:00:00.000Z', '2026-10-10T00:00:00.000Z')`,
+      ).run();
+      const env = {
+        DB: database as unknown as D1Database,
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: (channelId: string) => ({
+            reconcilePanelResources: () => { visitedChannels.push(channelId); return Promise.resolve(); },
+          }),
+        },
+      } as unknown as Env;
+
+      await notifyCommittedResources(env, "weather-channel-a", localReconciliation);
+
+      expect(localReconciliation).toHaveBeenCalledTimes(1);
+      expect(visitedChannels).toEqual(["weather-channel-b"]);
+      expect((await database.prepare("SELECT COUNT(*) AS count FROM panel_resource_pending").first<{ count: number }>())?.count)
+        .toBe(0);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("claims a migration backlog once across concurrent drains with bounded DO concurrency", async () => {
+    const database = new TestD1Database();
+    const channelIds = Array.from({ length: 8 }, (_, index) => `backlog-${String(index)}`);
+    const visitedChannels: string[] = [];
+    const releases: Array<() => void> = [];
+    let activeCalls = 0;
+    let maximumConcurrentCalls = 0;
+    try {
+      for (const channelId of channelIds) await addChannel(database, channelId);
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+      // Recreate the migration backfill that queues every existing channel.
+      await database.prepare(
+        `INSERT INTO panel_resource_pending (channel_id, resource, revision)
+         SELECT channel_id, resource, revision FROM panel_resource_revisions
+         WHERE 1
+         ON CONFLICT(channel_id, resource) DO UPDATE SET revision = MAX(revision, excluded.revision)`,
+      ).run();
+      const env = {
+        DB: database as unknown as D1Database,
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: (channelId: string) => ({
+            reconcilePanelResources: () => new Promise<void>((resolve) => {
+              visitedChannels.push(channelId);
+              activeCalls += 1;
+              maximumConcurrentCalls = Math.max(maximumConcurrentCalls, activeCalls);
+              releases.push(() => { activeCalls -= 1; resolve(); });
+            }),
+          }),
+        },
+      } as unknown as Env;
+
+      const drains = Promise.all([
+        notifyCommittedResources(env),
+        notifyCommittedResources(env),
+        notifyCommittedResources(env),
+      ]);
+      await vi.waitFor(() => { expect(visitedChannels).toHaveLength(4); });
+      expect(maximumConcurrentCalls).toBe(4);
+      expect(new Set(visitedChannels).size).toBe(4);
+      releases.splice(0).forEach((release) => { release(); });
+      await vi.waitFor(() => { expect(visitedChannels).toHaveLength(8); });
+      releases.splice(0).forEach((release) => { release(); });
+      await drains;
+
+      expect(visitedChannels.slice().sort((left, right) => left.localeCompare(right)))
+        .toEqual(channelIds.slice().sort((left, right) => left.localeCompare(right)));
+      expect(maximumConcurrentCalls).toBeLessThanOrEqual(4);
+      expect((await database.prepare("SELECT COUNT(*) AS count FROM panel_resource_pending").first<{ count: number }>())?.count)
+        .toBe(0);
+    } finally {
+      releases.splice(0).forEach((release) => { release(); });
+      database.close();
+    }
+  });
+
+  it("reclaims a failed delivery after its lease expires", async () => {
+    const database = new TestD1Database();
+    const reconcilePanelResources = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary Durable Object failure"))
+      .mockResolvedValue(undefined);
+    try {
+      await addChannel(database, "lease-recovery");
+      const env = {
+        DB: database as unknown as D1Database,
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: () => ({ reconcilePanelResources }),
+        },
+      } as unknown as Env;
+
+      await notifyCommittedResources(env);
+      expect(reconcilePanelResources).toHaveBeenCalledTimes(1);
+      const leasedRow = await database.prepare(
+        "SELECT claimed_until, claim_token FROM panel_resource_pending WHERE channel_id = ? LIMIT 1",
+      ).bind("lease-recovery").first<{ claimed_until: number; claim_token: string }>();
+      expect(leasedRow?.claimed_until).toBeGreaterThan(Date.now());
+      expect(leasedRow?.claim_token).toEqual(expect.any(String));
+
+      await database.prepare(
+        "UPDATE panel_resource_pending SET claimed_until = ? WHERE channel_id = ?",
+      ).bind(Date.now() - 1, "lease-recovery").run();
+      await notifyCommittedResources(env);
+
+      expect(reconcilePanelResources).toHaveBeenCalledTimes(2);
+      expect((await database.prepare("SELECT COUNT(*) AS count FROM panel_resource_pending").first<{ count: number }>())?.count)
+        .toBe(0);
+    } finally {
+      database.close();
+    }
+  });
+
   it("does not fan out queued revisions from an unauthenticated channel request", async () => {
     const database = new TestD1Database();
     const getChannel = vi.fn();

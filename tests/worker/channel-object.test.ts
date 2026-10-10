@@ -3217,6 +3217,70 @@ describe("ChannelObject realtime path", () => {
     expect(hasCapacity({ v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-1", overlayId: null, expiresAt: null })).toBe(true);
   });
 
+  it("rechecks the panel socket cap after concurrent authorization reads", async () => {
+    const pendingAuthorizations: Array<() => void> = [];
+    let deferredAuthorizationReads = 0;
+    const database = {
+      prepare: vi.fn((query: string) => {
+        let bindings: unknown[] = [];
+        const statement = {
+          bind: vi.fn((...values: unknown[]) => { bindings = values; return statement; }),
+          first: vi.fn(() => {
+            if (!query.includes("FROM auth_sessions AS session")) return Promise.resolve(null);
+            const row = {
+              session_id: bindings[1],
+              user_id: bindings[2],
+              role: bindings[3],
+            };
+            return deferredAuthorizationReads < 11
+              ? new Promise((resolve: (value: unknown) => void) => {
+                deferredAuthorizationReads += 1;
+                pendingAuthorizations.push(() => {
+                  resolve(row);
+                });
+              })
+              : Promise.resolve(row);
+          }),
+          all: vi.fn(() => Promise.resolve({ results: [] })),
+          run: vi.fn(() => Promise.resolve({ success: true })),
+        };
+        return statement;
+      }),
+    } as unknown as D1Database;
+    const object = objectFor([], database);
+    const pairs = Array.from({ length: 11 }, (_, index) => ({
+      0: new WebSocketPair()[0],
+      1: {
+        tags: ["kind:panel", "user:shared-panel-user", `session:session-${String(index)}`],
+        accept: vi.fn(),
+        close: vi.fn(),
+        send: vi.fn(),
+        serializeAttachment: vi.fn(),
+        deserializeAttachment: vi.fn(),
+      } as unknown as WebSocket,
+    }));
+    let nextPair = 0;
+    vi.stubGlobal("WebSocketPair", function WebSocketPairDouble() {
+      const pair = pairs[nextPair];
+      nextPair += 1;
+      if (pair === undefined) throw new Error("No test socket pair remains.");
+      return pair;
+    });
+
+    const handshakes = Array.from({ length: 11 }, (_, index) => object.fetch(upgradeRequest(validPrincipal({
+      userId: "shared-panel-user",
+      sessionId: `session-${String(index)}`,
+    }))));
+    await vi.waitFor(() => { expect(pendingAuthorizations).toHaveLength(11); });
+    pendingAuthorizations.splice(0).forEach((release) => { release(); });
+    const responses = await Promise.all(handshakes);
+    const state = (object as unknown as { ctx: { acceptWebSocket: ReturnType<typeof vi.fn> } }).ctx;
+
+    expect(state.acceptWebSocket).toHaveBeenCalledTimes(10);
+    expect(responses.filter(({ status }) => status === 101)).toHaveLength(10);
+    expect(responses.filter(({ status }) => status === 503)).toHaveLength(1);
+  });
+
   it("rate-limits repeated overlay handshakes per token", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-09-21T12:00:00.000Z");
