@@ -311,7 +311,11 @@ export const processChatVotingMessage = async (
         return { actions: [directChat(chatVotingChatText(language, "busy"))], diagnostics: [] };
       }
       if (templateToMarkUsed !== null) {
-        await repository.templates.markTemplateUsed(event.channelId, templateToMarkUsed.id, result.vote.openedAt);
+        try {
+          await repository.templates.markTemplateUsed(event.channelId, templateToMarkUsed.id, result.vote.openedAt);
+        } catch {
+          // Usage ordering is secondary to the already opened vote.
+        }
       }
       return {
         actions: [

@@ -6,6 +6,7 @@ import { DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteDraft, type ChatVoteTemplate
 import { chatVotingRoutes } from "../../src/modules/chat_voting/routes";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
+import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -66,6 +67,7 @@ const appFor = (
     context.set("readChannelBlockedTerms", readBlockedTerms);
     context.set("publishModuleOverlayMessage", publish);
     context.set("writeModuleAudit", writeAudit);
+    context.set("prepareModuleAudit", (entry, changedAt) => prepareModuleAudit(context.env.DB, ACTOR_ID, changedAt, entry));
     await next();
   });
   app.route(`/channels/:channelId/modules/chat_voting`, chatVotingRoutes);
@@ -115,6 +117,53 @@ describe("chat voting routes", () => {
       method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: 2 }),
     }), { DB: database as unknown as D1Database });
     expect(deleteResponse.status).toBe(200);
+    const auditEntries = await database.prepare(
+      "SELECT action, actor_user_id, before_json, after_json FROM audit_log WHERE channel_id = ? AND action LIKE 'chat_voting.template.%'",
+    ).bind(CHANNEL_ID).all<{ action: string; actor_user_id: string; before_json: string | null; after_json: string | null }>();
+    expect(auditEntries.results).toHaveLength(3);
+    expect(auditEntries.results.map((entry) => entry.action).sort((left, right) => left.localeCompare(right))).toEqual([
+      "chat_voting.template.created",
+      "chat_voting.template.deleted",
+      "chat_voting.template.updated",
+    ]);
+    expect(auditEntries.results.every((entry) => entry.actor_user_id === ACTOR_ID)).toBe(true);
+    const updatedAudit = auditEntries.results.find((entry) => entry.action === "chat_voting.template.updated");
+    expect(updatedAudit?.before_json).toContain('"revision":1');
+    expect(updatedAudit?.after_json).toContain('"name":"One answer draft"');
+    const deletedAudit = auditEntries.results.find((entry) => entry.action === "chat_voting.template.deleted");
+    expect(deletedAudit?.before_json).toContain('"name":"One answer draft"');
+    expect(deletedAudit?.after_json).toBe("null");
+  });
+
+  it("keeps a successful template start successful when usage bookkeeping fails", async () => {
+    const database = await createDatabase();
+    const repository = createChatVotingRepository(database as unknown as D1Database);
+    await repository.finish(CHANNEL_ID, openTextVote.id, "manual", "2026-10-04T10:01:00.000Z", [], [], 0, true);
+    const authorization = authorizeModuleMutation(
+      CHANNEL_ID,
+      { userId: ACTOR_ID, sessionId: `session-${ACTOR_ID}` },
+      "2026-10-04T10:02:00.000Z",
+    );
+    const createStatus = await repository.templates.createTemplate(CHANNEL_ID, "usage-failure-template", {
+      shortcut: "essen", title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120,
+    }, "2026-10-04T10:02:00.000Z", authorization);
+    expect(createStatus).toBe("created");
+    await database.prepare(
+      "CREATE TRIGGER fail_template_usage BEFORE UPDATE OF last_used_at ON chat_vote_templates BEGIN SELECT RAISE(FAIL, 'usage write failed'); END",
+    ).run();
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
+    const namespace = {
+      idFromName: vi.fn(() => ({})),
+      get: vi.fn(() => ({ scheduleModuleAlarm })),
+    } as unknown as Env["CHANNEL"];
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/start`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ templateId: "usage-failure-template" }),
+    }), { DB: database as unknown as D1Database, CHANNEL: namespace });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ vote: { title: "Dinner", status: "open" } });
+    expect(scheduleModuleAlarm).toHaveBeenCalled();
   });
 
   it.each(["broadcaster", "manager", "operator"] as const)("allows template CRUD for the %s channel member role", async (role) => {

@@ -56,11 +56,12 @@ const currentState = (overrides: Partial<ChatVotingPanelState> = {}): ChatVoting
 interface FetchHarnessOptions {
   templates?: ChatVoteTemplate[];
   current?: ChatVotingPanelState;
-  getCurrent?: () => ChatVotingPanelState;
+  getCurrent?: () => ChatVotingPanelState | Promise<ChatVotingPanelState>;
   recent?: ChatVote[];
   getRecent?: () => ChatVote[];
-  getTemplates?: () => ChatVoteTemplate[];
-  onPatch?: (templateId: string, body: Record<string, unknown>) => Response | Promise<Response>;
+  getTemplates?: () => ChatVoteTemplate[] | Promise<ChatVoteTemplate[]>;
+  csrfToken?: () => string;
+  onPatch?: (templateId: string, body: Record<string, unknown>, csrfToken: string) => Response | Promise<Response>;
   onStart?: (body: Record<string, unknown>) => Response;
   onClose?: () => void;
   onDelete?: (templateId: string) => Response;
@@ -73,11 +74,12 @@ const fetchHarness = (options: FetchHarnessOptions = {}) => {
       ? new URL(input.url).pathname
       : new URL(String(input), "https://brobot.example").pathname;
     const method = init?.method ?? "GET";
-    if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-    if (path.endsWith("/current")) return Promise.resolve(jsonResponse(options.getCurrent?.() ?? options.current ?? currentState()));
+    if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: options.csrfToken?.() ?? "csrf-token" }));
+    if (path.endsWith("/current")) return Promise.resolve(options.getCurrent?.() ?? options.current ?? currentState())
+      .then((current) => jsonResponse(current));
     if (path.endsWith("/templates") && method === "GET") {
       const listed = options.getTemplates?.() ?? templates;
-      return Promise.resolve(jsonResponse({ templates: listed, count: listed.length, maximum: 100 }));
+      return Promise.resolve(listed).then((entries) => jsonResponse({ templates: entries, count: entries.length, maximum: 100 }));
     }
     if (path.endsWith("/recent")) return Promise.resolve(jsonResponse({ votes: options.getRecent?.() ?? options.recent ?? [] }));
     if (path.endsWith("/start")) {
@@ -91,7 +93,9 @@ const fetchHarness = (options: FetchHarnessOptions = {}) => {
       const templateId = decodeURIComponent(templatePath[1] ?? "");
       if (method === "PATCH") {
         const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
-        if (options.onPatch !== undefined) return Promise.resolve(options.onPatch(templateId, body));
+        if (options.onPatch !== undefined) {
+          return Promise.resolve(options.onPatch(templateId, body, new Headers(init?.headers).get("X-CSRF-Token") ?? ""));
+        }
         const current = templates.find((entry) => entry.id === templateId);
         if (current === undefined) return Promise.resolve(jsonResponse({ error: "chat_vote_template_missing" }, 404));
         const updated = { ...current, ...body, revision: current.revision + 1, updatedAt: "2026-10-04T10:01:00.000Z" };
@@ -154,6 +158,21 @@ describe("saved chat voting panel", () => {
     expect(view.container).toHaveTextContent("Use a–z first");
   });
 
+  it("stops autosaving a shortcut rejected by a server-only conflict", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const patches: Record<string, unknown>[] = [];
+    mount(fetchHarness({ onPatch: (_id, body) => {
+      patches.push(body);
+      if (patches.length === 1) return jsonResponse({ error: "chat_vote_template_shortcut_conflict" }, 409);
+      return jsonResponse({ template: template({ shortcut: null, revision: 2 }) });
+    } }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Shortcut" }), { target: { value: "essen" } });
+    await waitFor(() => expect(patches).toHaveLength(2), { timeout: 2_000 });
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    expect(patches).toHaveLength(2);
+    expect(screen.getByRole("textbox", { name: "Shortcut" })).toBeInvalid();
+  });
+
   it("drains a revert made during an in-flight save before Start succeeds", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let resolveFirstSave!: (response: Response) => void;
@@ -205,7 +224,11 @@ describe("saved chat voting panel", () => {
 
   it("uses the cached CSRF token for pagehide saves and dispatches keepalive immediately", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    const fetch = fetchHarness();
+    const patches: string[] = [];
+    const fetch = fetchHarness({ onPatch: (_id, _body, token) => {
+      patches.push(token);
+      return jsonResponse({ error: "csrf_invalid" }, 403);
+    } });
     mount(fetch);
     const csrfPath = (input: RequestInfo | URL): string => input instanceof Request
       ? new URL(input.url).pathname
@@ -218,6 +241,28 @@ describe("saved chat voting panel", () => {
       return path.endsWith("/templates/template-dinner") && init?.keepalive === true;
     })).toBe(true));
     expect(fetch.mock.calls.filter(([input]) => csrfPath(input) === "/api/csrf")).toHaveLength(csrfRequestsBefore);
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0]).toBe("csrf-token");
+  });
+
+  it("refetches an invalidated CSRF token and retries an active mutation once", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const patches: string[] = [];
+    let tokenRequests = 0;
+    mount(fetchHarness({
+      csrfToken: () => ++tokenRequests === 1 ? "initial-csrf-token" : "refreshed-csrf-token",
+      onPatch: (_id, _body, token) => {
+        patches.push(token);
+        return patches.length === 1
+          ? jsonResponse({ error: "csrf_invalid" }, 403)
+          : jsonResponse({ template: template({ title: "Recovered save", revision: 2 }) });
+      },
+    }));
+    const question = await screen.findByRole("textbox", { name: "Question" });
+    fireEvent.change(question, { target: { value: "Recovered save" } });
+    await waitFor(() => expect(patches).toHaveLength(2), { timeout: 2_000 });
+    expect(patches[1]).toBe("refreshed-csrf-token");
+    expect(patches[0]).not.toBe(patches[1]);
   });
 
   it("retains a newer draft when pagehide meets a pending save", async () => {
@@ -290,6 +335,101 @@ describe("saved chat voting panel", () => {
     expect(screen.getByRole("button", { name: "End vote" })).toBeEnabled();
   });
 
+  it("ignores a slow live-state response after a newer poll has completed", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let resolveFirst!: (state: ChatVotingPanelState) => void;
+    const first = new Promise<ChatVotingPanelState>((resolve) => { resolveFirst = resolve; });
+    let currentCalls = 0;
+    const closedVote: ChatVote = { ...runningVote, status: "closed", closedAt: "2026-10-04T10:02:00.000Z" };
+    mount(fetchHarness({ getCurrent: () => {
+      currentCalls += 1;
+      return currentCalls === 1 ? first : currentState({ vote: closedVote });
+    } }));
+    await waitFor(() => expect(currentCalls).toBe(1));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(currentCalls).toBe(2));
+    const start = await screen.findByRole("button", { name: "Start vote" });
+    await waitFor(() => expect(start).toBeEnabled());
+    resolveFirst(currentState({ vote: runningVote }));
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    expect(start).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "End vote" })).not.toBeInTheDocument();
+  });
+
+  it("does not let an older template-usage response clear a newer running marker", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const firstOpenedAt = "2026-10-04T10:00:00.000Z";
+    const secondOpenedAt = "2026-10-04T10:01:00.000Z";
+    let current = currentState();
+    let currentCalls = 0;
+    let templateCalls = 0;
+    let resolveOldUsage!: (templates: ChatVoteTemplate[]) => void;
+    let resolveLatestUsage!: (templates: ChatVoteTemplate[]) => void;
+    const oldUsage = new Promise<ChatVoteTemplate[]>((resolve) => { resolveOldUsage = resolve; });
+    const latestUsage = new Promise<ChatVoteTemplate[]>((resolve) => { resolveLatestUsage = resolve; });
+    const fetch = fetchHarness({
+      getCurrent: () => { currentCalls += 1; return current; },
+      getTemplates: () => {
+        templateCalls += 1;
+        if (templateCalls === 2) return oldUsage;
+        if (templateCalls === 3) return latestUsage;
+        return [template()];
+      },
+    });
+    mount(fetch);
+    await screen.findByRole("button", { name: "Start “Dinner”" });
+    const firstVote: ChatVote = { ...runningVote, id: "poll-first", openedAt: firstOpenedAt };
+    current = currentState({ vote: firstVote });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(templateCalls).toBe(2));
+
+    current = currentState();
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(currentCalls).toBeGreaterThan(2));
+    const start = screen.getByRole("button", { name: "Start “Dinner”" });
+    await waitFor(() => expect(start).toBeEnabled());
+    const secondVote: ChatVote = { ...runningVote, id: "poll-second", openedAt: secondOpenedAt };
+    current = currentState({ vote: secondVote });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(templateCalls).toBe(3));
+    resolveLatestUsage([template({ lastUsedAt: secondOpenedAt })]);
+    await waitFor(() => expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent("Running"));
+    resolveOldUsage([template({ lastUsedAt: firstOpenedAt })]);
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent("Running");
+  });
+
+  it("clears a usage-refresh error after a later usage refresh succeeds", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let current = currentState();
+    let currentCalls = 0;
+    let templateCalls = 0;
+    const openedAt = "2026-10-04T10:00:00.000Z";
+    mount(fetchHarness({
+      getCurrent: () => { currentCalls += 1; return current; },
+      getTemplates: () => {
+        templateCalls += 1;
+        if (templateCalls === 2) return Promise.reject(new Error("temporary usage refresh failure"));
+        return [template({ lastUsedAt: templateCalls > 2 ? openedAt : null })];
+      },
+    }));
+    await screen.findByRole("button", { name: "Start “Dinner”" });
+    await waitFor(() => expect(templateCalls).toBe(1));
+    current = currentState({ vote: runningVote });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(currentCalls).toBeGreaterThan(1));
+    await waitFor(() => expect(templateCalls).toBe(2));
+    expect(document.querySelector(".chat-voting-list .stale")).toBeInTheDocument();
+
+    current = currentState();
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(currentCalls).toBeGreaterThan(2));
+    current = currentState({ vote: { ...runningVote, id: "poll-next", openedAt: "2026-10-04T10:01:00.000Z" } });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(templateCalls).toBe(3));
+    await waitFor(() => expect(document.querySelector(".chat-voting-list .stale")).not.toBeInTheDocument());
+  });
+
   it("can enter Custom duration from a preset and return to it after choosing another preset", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     mount(fetchHarness({ templates: [template({ durationSeconds: 120 })] }));
@@ -310,7 +450,11 @@ describe("saved chat voting panel", () => {
   it("restores Custom mode for a pending custom-duration draft", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     window.sessionStorage.setItem("chat-voting-template-drafts:fictional-channel", JSON.stringify({
-      "template-dinner": { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 150 },
+      "template-dinner": {
+        baseRevision: 1,
+        acknowledged: { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 },
+        draft: { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 150 },
+      },
     }));
     mount(fetchHarness({ templates: [template({ durationSeconds: 120 })] }));
     const seconds = await screen.findByRole("spinbutton", { name: "Seconds" });
@@ -318,6 +462,43 @@ describe("saved chat voting panel", () => {
     await waitFor(() => expect(screen.getByRole("radio", { name: "Custom" })).toBeChecked());
     expect(seconds).toBeEnabled();
     window.sessionStorage.removeItem("chat-voting-template-drafts:fictional-channel");
+  });
+
+  it("restores a saved duration preset and selects its matching segment", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    window.sessionStorage.setItem("chat-voting-template-drafts:fictional-channel", JSON.stringify({
+      "template-dinner": {
+        baseRevision: 1,
+        acknowledged: { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 },
+        draft: { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 300 },
+      },
+    }));
+    mount(fetchHarness({ templates: [template({ durationSeconds: 120 })] }));
+    const seconds = await screen.findByRole("spinbutton", { name: "Seconds" });
+    await waitFor(() => expect(seconds).toHaveValue("300"));
+    await waitFor(() => expect(screen.getByRole("radio", { name: "5 min" })).toBeChecked());
+    expect(seconds).toBeDisabled();
+  });
+
+  it("does not restore a pending draft when its acknowledged revision is stale", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const latest = template({ title: "Remote edit", revision: 2 });
+    const patches: Record<string, unknown>[] = [];
+    window.sessionStorage.setItem("chat-voting-template-drafts:fictional-channel", JSON.stringify({
+      "template-dinner": {
+        baseRevision: 1,
+        acknowledged: { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 },
+        draft: { shortcut: null, title: "Local stale edit", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 },
+      },
+    }));
+    mount(fetchHarness({ templates: [latest], onPatch: (_id, body) => {
+      patches.push(body);
+      return jsonResponse({ template: latest });
+    } }));
+    expect(await screen.findByRole("textbox", { name: "Question" })).toHaveValue("Remote edit");
+    await screen.findByText("“Remote edit” changed elsewhere and was reloaded.");
+    expect(patches).toHaveLength(0);
+    expect(window.sessionStorage.getItem("chat-voting-template-drafts:fictional-channel")).toBeNull();
   });
 
   it("synchronizes duration mode after a conflict reload", async () => {

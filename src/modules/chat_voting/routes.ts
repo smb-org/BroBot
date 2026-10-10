@@ -12,6 +12,24 @@ const readBody = async (request: Request): Promise<unknown> => request.json().ca
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const templateAuditSnapshot = (template: {
+  id: string;
+  title: string;
+  shortcut: string | null;
+  labels: readonly string[];
+  freeTextMode: "first_word" | "whole_message" | null;
+  durationSeconds: number;
+  revision: number;
+}) => ({
+  id: template.id,
+  name: template.title,
+  shortcut: template.shortcut,
+  labels: [...template.labels],
+  freeTextMode: template.freeTextMode,
+  durationSeconds: template.durationSeconds,
+  revision: template.revision,
+});
+
 const getEnabledSettings = async (db: D1Database, channelId: string) => {
   const row = await db.prepare(
     "SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ? AND enabled = 1",
@@ -76,13 +94,21 @@ chatVotingRoutes.post("/templates", async (context) => {
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
   const id = crypto.randomUUID();
-  const status = await repository.templates.createTemplate(channelId, id, {
+  const draft: ChatVoteTemplateDraft = {
     shortcut: null,
     title: "",
     labels: [],
     freeTextMode: null,
     durationSeconds: settings.autoCloseSeconds,
-  }, now, authorization);
+  };
+  const audit = context.get("prepareModuleAudit")({
+    channelId,
+    moduleId: CHAT_VOTING_MODULE_ID,
+    action: "chat_voting.template.created" satisfies AuditAction,
+    before: null,
+    after: templateAuditSnapshot({ id, ...draft, revision: 1 }),
+  }, now);
+  const status = await repository.templates.createTemplate(channelId, id, draft, now, authorization, audit);
   if (status === "limit") return context.json({ error: "chat_vote_template_limit" }, 409);
   if (status === "conflict") return context.json({ error: "chat_vote_template_shortcut_conflict" }, 409);
   if (status === "unauthorized") return context.json({ error: "chat_voting_not_authorized" }, 403);
@@ -122,7 +148,16 @@ chatVotingRoutes.patch("/templates/:id", async (context) => {
   }
   const now = new Date().toISOString();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
-  const result = await createChatVotingRepository(context.env.DB).templates.saveTemplate(channelId, id, body.revision as number, draft, now, authorization);
+  const repository = createChatVotingRepository(context.env.DB);
+  const before = await repository.templates.template(channelId, id);
+  const audit = context.get("prepareModuleAudit")({
+    channelId,
+    moduleId: CHAT_VOTING_MODULE_ID,
+    action: "chat_voting.template.updated" satisfies AuditAction,
+    before: before === null ? null : templateAuditSnapshot(before),
+    after: templateAuditSnapshot({ id, ...draft, revision: (body.revision as number) + 1 }),
+  }, now);
+  const result = await repository.templates.saveTemplate(channelId, id, body.revision as number, draft, now, authorization, audit);
   if (result.status === "unauthorized") return context.json({ error: "chat_voting_not_authorized" }, 403);
   if (result.status === "shortcut_conflict") return context.json({ error: "chat_vote_template_shortcut_conflict" }, 409);
   if (result.status === "conflict") return context.json({ error: "chat_vote_template_conflict" }, 409);
@@ -137,8 +172,18 @@ chatVotingRoutes.delete("/templates/:id", async (context) => {
   if (id.length < 1 || id.length > 128 || !isRecord(body) || !Number.isSafeInteger(body.revision) || (body.revision as number) < 1) {
     return context.json({ error: "chat_vote_template_request_invalid" }, 400);
   }
-  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), new Date().toISOString());
-  const status = await createChatVotingRepository(context.env.DB).templates.deleteTemplate(channelId, id, body.revision as number, authorization);
+  const now = new Date().toISOString();
+  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+  const repository = createChatVotingRepository(context.env.DB);
+  const before = await repository.templates.template(channelId, id);
+  const audit = context.get("prepareModuleAudit")({
+    channelId,
+    moduleId: CHAT_VOTING_MODULE_ID,
+    action: "chat_voting.template.deleted" satisfies AuditAction,
+    before: before === null ? null : templateAuditSnapshot(before),
+    after: null,
+  }, now);
+  const status = await repository.templates.deleteTemplate(channelId, id, body.revision as number, authorization, audit);
   if (status === "unauthorized") return context.json({ error: "chat_voting_not_authorized" }, 403);
   if (status === "conflict") return context.json({ error: "chat_vote_template_conflict" }, 409);
   if (status === "missing") return context.json({ error: "chat_vote_template_missing" }, 404);
@@ -237,7 +282,11 @@ chatVotingRoutes.post("/start", async (context) => {
   }
   if (result.status === "busy") return context.json({ error: "chat_voting_busy" }, 409);
   if (templateToMarkUsed !== null) {
-    await repository.templates.markTemplateUsed(channelId, templateToMarkUsed, result.vote.openedAt);
+    try {
+      await repository.templates.markTemplateUsed(channelId, templateToMarkUsed, result.vote.openedAt);
+    } catch {
+      // Usage ordering is secondary to the already opened vote.
+    }
   }
 
   await context.get("writeModuleAudit")({

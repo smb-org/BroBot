@@ -126,9 +126,9 @@ export interface ChatVoteTemplateRepository {
   template(channelId: string, id: string): Promise<ChatVoteTemplate | null>;
   templateByShortcut(channelId: string, shortcut: string): Promise<ChatVoteTemplate | null>;
   templateByLegacyAlias(channelId: string, alias: NonNullable<ChatVoteTemplate["legacyAlias"]>): Promise<ChatVoteTemplate | null>;
-  createTemplate(channelId: string, id: string, draft: ChatVoteTemplateDraft, createdAt: string, authorization: ModuleMutationAuthorization): Promise<ChatVoteTemplateWriteStatus>;
-  saveTemplate(channelId: string, id: string, revision: number, draft: ChatVoteTemplateDraft, updatedAt: string, authorization: ModuleMutationAuthorization): Promise<ChatVoteTemplateSaveResult>;
-  deleteTemplate(channelId: string, id: string, revision: number, authorization: ModuleMutationAuthorization): Promise<ChatVoteTemplateWriteStatus>;
+  createTemplate(channelId: string, id: string, draft: ChatVoteTemplateDraft, createdAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateWriteStatus>;
+  saveTemplate(channelId: string, id: string, revision: number, draft: ChatVoteTemplateDraft, updatedAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateSaveResult>;
+  deleteTemplate(channelId: string, id: string, revision: number, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateWriteStatus>;
   markTemplateUsed(channelId: string, id: string, usedAt: string): Promise<void>;
 }
 
@@ -191,8 +191,8 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
     ).bind(channelId, alias).first<ChatVoteTemplateRow>();
     return row === null ? null : mapTemplateRow(row);
   },
-  async createTemplate(channelId, id, draft, createdAt, authorization) {
-    const result = await db.prepare(
+  async createTemplate(channelId, id, draft, createdAt, authorization, audit) {
+    const mutation = db.prepare(
       `INSERT INTO chat_vote_templates
          (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision,
           legacy_alias, last_used_at, created_at, updated_at)
@@ -200,7 +200,9 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
         WHERE (SELECT COUNT(*) FROM chat_vote_templates WHERE channel_id = ?) < 100 ${authorization.sql}
        ON CONFLICT (channel_id, shortcut) WHERE shortcut IS NOT NULL DO NOTHING`,
     ).bind(id, channelId, draft.shortcut, draft.title, JSON.stringify(draft.labels), draft.freeTextMode,
-      draft.durationSeconds, createdAt, createdAt, channelId, ...authorization.values).run();
+      draft.durationSeconds, createdAt, createdAt, channelId, ...authorization.values);
+    const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
+    if (result === undefined) throw new Error("Template creation mutation returned no D1 result.");
     if (result.meta.changes > 0) return "created";
     const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
       .bind(...authorization.values).first<{ authorized: number }>();
@@ -209,33 +211,41 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
       .bind(channelId).first<{ count: number }>();
     return (count?.count ?? 0) >= 100 ? "limit" : "conflict";
   },
-  async saveTemplate(channelId, id, revision, draft, updatedAt, authorization) {
-    let row: ChatVoteTemplateRow | null;
+  async saveTemplate(channelId, id, revision, draft, updatedAt, authorization, audit) {
+    let changes: number;
     try {
-      row = await db.prepare(
+      const mutation = db.prepare(
         `UPDATE chat_vote_templates
             SET shortcut = ?, title = ?, labels = ?, free_text_mode = ?, duration_seconds = ?,
                 revision = revision + 1, updated_at = ?
           WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}
-          RETURNING ${chatVoteTemplateSelectColumns}`,
+        `,
       ).bind(draft.shortcut, draft.title, JSON.stringify(draft.labels), draft.freeTextMode,
-        draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values).first<ChatVoteTemplateRow>();
+        draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values);
+      const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
+      if (result === undefined) throw new Error("Template save mutation returned no D1 result.");
+      changes = result.meta.changes;
     } catch (error: unknown) {
       if (error instanceof Error && error.message.includes("chat_vote_templates.channel_id, chat_vote_templates.shortcut")) {
         return { status: "shortcut_conflict" };
       }
       throw error;
     }
-    if (row !== null) return { status: "saved", template: mapTemplateRow(row) };
+    if (changes > 0) {
+      const template = await this.template(channelId, id);
+      return template === null ? { status: "missing" } : { status: "saved", template };
+    }
     const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
       .bind(...authorization.values).first<{ authorized: number }>();
     if (authorized === null) return { status: "unauthorized" };
     return await this.template(channelId, id) === null ? { status: "missing" } : { status: "conflict" };
   },
-  async deleteTemplate(channelId, id, revision, authorization) {
-    const result = await db.prepare(
+  async deleteTemplate(channelId, id, revision, authorization, audit) {
+    const mutation = db.prepare(
       `DELETE FROM chat_vote_templates WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}`,
-    ).bind(channelId, id, revision, ...authorization.values).run();
+    ).bind(channelId, id, revision, ...authorization.values);
+    const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
+    if (result === undefined) throw new Error("Template deletion mutation returned no D1 result.");
     if (result.meta.changes > 0) return "saved";
     const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
       .bind(...authorization.values).first<{ authorized: number }>();

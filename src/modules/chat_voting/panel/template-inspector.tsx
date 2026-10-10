@@ -49,12 +49,16 @@ export function ChatVoteTemplateInspector({
   const labels = chatVotingSavedPanelTexts(language);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [durationMode, setDurationMode] = useState(() => durationPreset(draft.durationSeconds));
+  const [customDurationSelected, setCustomDurationSelected] = useState(false);
   useEffect(() => {
     const inferredMode = durationPreset(draft.durationSeconds);
-    if (inferredMode !== "custom" && saveState !== "conflict") return;
-    const timer = window.setTimeout(() => setDurationMode(inferredMode), 0);
+    if (saveState !== "conflict" && (customDurationSelected || inferredMode === durationMode)) return;
+    const timer = window.setTimeout(() => {
+      if (saveState === "conflict") setCustomDurationSelected(false);
+      setDurationMode(inferredMode);
+    }, 0);
     return () => window.clearTimeout(timer);
-  }, [draft.durationSeconds, saveState]);
+  }, [customDurationSelected, draft.durationSeconds, durationMode, saveState]);
   const title = draft.title.trim() || labels.untitled;
   const startProblem = templateStartProblem(draft);
   const invalid = startProblem !== null;
@@ -186,6 +190,7 @@ export function ChatVoteTemplateInspector({
             value={durationMode}
             onChange={(value) => {
               setDurationMode(value);
+              setCustomDurationSelected(value === "custom");
               if (value === "open") onChange({ durationSeconds: 0 });
               else if (value === "one") onChange({ durationSeconds: 60 });
               else if (value === "two") onChange({ durationSeconds: 120 });

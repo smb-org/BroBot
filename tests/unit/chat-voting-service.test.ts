@@ -151,6 +151,26 @@ describe("chat voting event service", () => {
     expect(pollId.length).toBeGreaterThan(0);
   });
 
+  it("returns the opened overlay action when shortcut usage bookkeeping fails", async () => {
+    const markTemplateUsed = vi.fn(() => Promise.reject(new Error("usage write failed")));
+    const templates = templateRepositoryWith({
+      templateByShortcut: vi.fn(() => Promise.resolve(savedTemplate)),
+      markTemplateUsed,
+    });
+    const result = await processChatVotingMessage(
+      eventWithText("!vote essen", ["moderator"]),
+      repositoryWith({ templates }),
+      executionContext(),
+    );
+
+    expect(markTemplateUsed).toHaveBeenCalledOnce();
+    expect(result.actions).toHaveLength(1);
+    const [action] = result.actions;
+    if (action?.kind !== "overlay") throw new Error("A bookkeeping failure suppressed the opened overlay action.");
+    expect(action).toMatchObject({ type: "opened", elementKind: "chat_voting.tally" });
+    expect(typeof action.payload.pollId).toBe("string");
+  });
+
   it("replies with an unknown-shortcut message and starts nothing", async () => {
     const insertOpen = vi.fn(() => Promise.resolve(true));
     const result = await processChatVotingMessage(

@@ -21,6 +21,8 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
   const previousVote = useRef<{ id: string; status: "open" | "closed" } | null>(null);
+  const voteRequestSequence = useRef(0);
+  const templateRequestSequence = useRef(0);
   const vote = state?.vote ?? null;
   const running = vote?.status === "open";
   const lockReason = availabilityReason ?? (currentError
@@ -28,18 +30,34 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
     : state === null ? labels.loading : running ? labels.runningLocked : state.hasOpenBallot ? labels.votekickLocked : null);
 
   const refreshTemplates = useCallback(async (): Promise<void> => {
+    const requestSequence = ++templateRequestSequence.current;
     try {
       const current = await loadChatVoteTemplates(channelId);
-      setTemplates(current);
+      if (requestSequence !== templateRequestSequence.current) return;
+      const usageById = new Map(current.templates.map((template) => [template.id, template.lastUsedAt]));
+      setTemplates((previous) => previous === null ? current : {
+        ...previous,
+        templates: previous.templates.map((template) => {
+          const latestUsage = usageById.get(template.id) ?? null;
+          const lastUsedAt = [template.lastUsedAt, latestUsage]
+            .filter((value): value is string => value !== null)
+            .sort((left, right) => left.localeCompare(right))
+            .at(-1) ?? null;
+          return { ...template, lastUsedAt };
+        }),
+      });
       setTemplateError(false);
     } catch {
+      if (requestSequence !== templateRequestSequence.current) return;
       setTemplateError(true);
     }
   }, [channelId]);
 
   const refreshVote = useCallback(async (): Promise<void> => {
+    const requestSequence = ++voteRequestSequence.current;
     try {
       const current = await loadChatVotingState(channelId);
+      if (requestSequence !== voteRequestSequence.current) return;
       const nextVote = current.vote;
       const previous = previousVote.current;
       const newlyOpened = nextVote?.status === "open" &&
@@ -49,6 +67,7 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
       setCurrentError(false);
       if (newlyOpened) void refreshTemplates();
     } catch {
+      if (requestSequence !== voteRequestSequence.current) return;
       // Keep the last known live state visible while the template list loads independently.
       setCurrentError(true);
     }

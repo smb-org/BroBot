@@ -73,6 +73,8 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   const announcementSequence = useRef(0);
   const previousVote = useRef<{ id: string; status: "open" | "closed"; title: string | null } | null>(null);
   const recentRequestSequence = useRef(0);
+  const voteRequestSequence = useRef(0);
+  const templateRequestSequence = useRef(0);
   const [wide, setWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1280);
   const templates = useMemo(() => templateList?.templates ?? [], [templateList]);
   const voteRef = useRef(voteState);
@@ -89,28 +91,36 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     });
   }, []);
   const autosave = useChatVoteTemplateAutosave(channelId, templates, language, replaceTemplate);
+  const templatesRefreshed = autosave.templatesRefreshed;
 
   const refreshVote = useCallback(async (): Promise<void> => {
+    const requestSequence = ++voteRequestSequence.current;
     try {
       const next = await loadChatVotingState(channelId);
+      if (requestSequence !== voteRequestSequence.current) return;
       setVoteState(next);
       setVoteError(false);
     } catch {
+      if (requestSequence !== voteRequestSequence.current) return;
       setVoteError(true);
       if (voteRef.current === null) notify({ tone: "error", message: labels.liveLoadError });
     }
   }, [channelId, labels.liveLoadError]);
 
   const refreshTemplates = useCallback(async (): Promise<void> => {
+    const requestSequence = ++templateRequestSequence.current;
     try {
       const next = await loadChatVoteTemplates(channelId);
+      if (requestSequence !== templateRequestSequence.current) return;
+      templatesRefreshed(next.templates);
       setTemplateList(next);
       setTemplateError(false);
     } catch {
+      if (requestSequence !== templateRequestSequence.current) return;
       setTemplateError(true);
       if (templateListRef.current === null) notify({ tone: "error", message: labels.templatesError });
     }
-  }, [channelId, labels.templatesError]);
+  }, [channelId, labels.templatesError, templatesRefreshed]);
 
   const refreshRecent = useCallback(async (): Promise<void> => {
     const requestSequence = ++recentRequestSequence.current;
@@ -127,20 +137,31 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   }, [channelId, labels.recentError]);
 
   const refreshTemplateUsage = useCallback(async (): Promise<void> => {
+    const requestSequence = ++templateRequestSequence.current;
     try {
       const latest = await loadChatVoteTemplates(channelId);
+      if (requestSequence !== templateRequestSequence.current) return;
+      templatesRefreshed(latest.templates);
       const usageById = new Map(latest.templates.map((template) => [template.id, template.lastUsedAt]));
       setTemplateList((current) => current === null ? latest : {
         ...current,
         templates: current.templates.map((template) => usageById.has(template.id)
-          ? { ...template, lastUsedAt: usageById.get(template.id) ?? null }
+          ? {
+            ...template,
+            lastUsedAt: [template.lastUsedAt, usageById.get(template.id) ?? null]
+              .filter((value): value is string => value !== null)
+              .sort((left, right) => left.localeCompare(right))
+              .at(-1) ?? null,
+          }
           : template),
       });
+      setTemplateError(false);
     } catch {
+      if (requestSequence !== templateRequestSequence.current) return;
       setTemplateError(true);
       if (templateListRef.current === null) notify({ tone: "error", message: labels.templatesError });
     }
-  }, [channelId, labels.templatesError]);
+  }, [channelId, labels.templatesError, templatesRefreshed]);
 
   useEffect(() => {
     const resize = (): void => { setWide(window.innerWidth >= 1280); };
