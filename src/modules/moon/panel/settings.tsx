@@ -57,12 +57,12 @@ function MoonSettingsPanelContent({ channelId, language, canManage }: ModulePane
 
   return (
     <LoadState
+      variant="panel-480"
       status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
-      minHeight="calc(var(--s10) * 12)"
       loading={<Skeleton rows={3} height={34} />}
       empty={<div />}
       error={<p>{labels.loadFailed}</p>}
-      onRetry={() => { void settingsQuery.refetch(); }}
+      queryError={{ message: labels.loadFailed, onRetry: () => { void settingsQuery.refetch(); } }}
       refreshError={settingsQuery.isRefetchError}
     >
     <div className="module-stack moon-settings" aria-label={labels.errorTexts}>

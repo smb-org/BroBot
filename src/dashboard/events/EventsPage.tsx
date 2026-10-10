@@ -7,7 +7,7 @@ import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedState, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, QueryErrorState, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
+import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type QueryError, type SelectOption } from "../ui";
 import { PanelApiError } from "../api";
 import { refreshQuery } from "../data/refresh";
 import { dashboardDataKeys } from "../data/keys";
@@ -125,7 +125,7 @@ const EventFilterBar = ({
   moduleOptions: readonly PanelModuleState[];
   loadedCount: number;
   onChange: (filters: PanelEventFilters) => void;
-  queryError?: { message: string; retryLabel: string; onRetry: () => void };
+  queryError?: QueryError;
 }): ReactElement => {
   const texts = dashboardTexts();
   const [personDraft, setPersonDraft] = useState(filters.person ?? "");
@@ -491,8 +491,8 @@ const EventsPageFilterState = ({
               loadedCount={eventEntries.length}
               onChange={onFiltersChange}
               {...(error === null || eventEntries.length === 0 ? {} : { queryError: {
+                title: texts.events.connectionLost,
                 message: error,
-                retryLabel: dashboardCommonTexts().retry,
                 onRetry: onRefresh,
               } })}
             />
@@ -505,11 +505,11 @@ const EventsPageFilterState = ({
                 : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
             </div>
             <UiLoadState
+              variant="panel-420"
               status={loading && eventEntries.length === 0
                 ? "loading"
                 : error !== null && eventEntries.length === 0 ? "error"
                 : eventEntries.length === 0 ? "empty" : "success"}
-              minHeight={420}
               loading={<Skeleton rows={50} height={34} />}
               empty={filterActive ? (
                 <EmptyState
@@ -524,12 +524,8 @@ const EventsPageFilterState = ({
                   action={{ label: texts.events.resetFilters, onClick: () => { onFiltersChange(emptyEventFilter); } }}
                 />
               ) : <p className="empty-state">{texts.events.none}</p>}
-              error={<QueryErrorState
-                title={texts.events.connectionLost}
-                reason={error ?? texts.events.load}
-                retryLabel={dashboardCommonTexts().retry}
-                onRetry={onRefresh}
-              />}
+              error={<p role="alert">{error ?? texts.events.load}</p>}
+              queryError={{ title: texts.events.connectionLost, message: error ?? texts.events.load, onRetry: onRefresh }}
             >
               <>
               <div ref={feedRef} className="event-feed">

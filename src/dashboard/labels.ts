@@ -77,7 +77,6 @@ export interface PlatformTexts {
   load: string;
   noChannels: string;
   error: string;
-  retry: string;
   releaseChannel: string;
   twitchLogin: string;
   /** Hint under the `Field` that searches a Twitch login, for both releasing a channel and adding a member (3.0). */
@@ -157,7 +156,6 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     load: "Betreiberdaten werden geladen …",
     noChannels: "Noch kein Kanal freigegeben.",
     error: "Die Betreiberdaten konnten nicht geladen werden.",
-    retry: "Erneut versuchen",
     releaseChannel: "Kanal freigeben",
     twitchLogin: "Twitch-Login",
     twitchLoginHint: "Genau wie auf Twitch, ohne @.",
@@ -238,7 +236,6 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     load: "Loading operator data …",
     noChannels: "No channel has been released yet.",
     error: "Operator data could not be loaded.",
-    retry: "Try again",
     releaseChannel: "Release channel",
     twitchLogin: "Twitch login",
     twitchLoginHint: "Exactly as on Twitch, without @.",

@@ -6,7 +6,7 @@ import { MODULES } from "../../modules/registry";
 import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
 import { ModuleHeading } from "../module-panels";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, QueryErrorState, QueryStatusRow, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import { PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useAuditQuery } from "../data/lists";
@@ -208,22 +208,26 @@ const AuditPageContent = ({ identityKey, entries, nextCursor, filters, onFilters
         list={
           <section className="content-section" aria-label={texts.audit.title}>
             <AuditFilterBar filters={filters} onChange={onFiltersChange} />
-            <QueryStatusRow
-              message={error !== null && entries.length > 0 ? error : null}
-              retryLabel={dashboardCommonTexts().retry}
-              onRetry={onRetry}
-            />
             <UiLoadState
+              variant="status-row"
+              status={error !== null && entries.length > 0 ? "error" : "success"}
+              loading={null}
+              empty={null}
+              error={null}
+              {...(error !== null && entries.length > 0 ? { queryError: { title: texts.audit.loadError, message: error, onRetry } } : {})}
+            >{null}</UiLoadState>
+            <UiLoadState
+              variant="panel-420"
               status={loading
                 ? "loading"
                 : error !== null && entries.length === 0 ? "error"
                 : entries.length === 0 ? "empty" : "success"}
-              minHeight={420}
               loading={<Skeleton rows={50} height={44} />}
               empty={filterActive
                 ? <EmptyState title={texts.audit.noMatches} description={texts.audit.activeFilters} action={{ label: texts.audit.resetFilters, onClick: () => { onFiltersChange(emptyAuditFilter); } }} />
                 : <p className="empty-state">{texts.audit.empty}</p>}
-              error={<QueryErrorState title={texts.audit.loadError} reason={error ?? texts.audit.load} retryLabel={dashboardCommonTexts().retry} onRetry={onRetry} />}
+              error={<p role="alert">{error ?? texts.audit.load}</p>}
+              queryError={{ title: texts.audit.loadError, message: error ?? texts.audit.load, onRetry }}
             >
               {entries.length > 0 ? <>
               <div key={identityKey} className={fetching ? "stale" : undefined} aria-busy={fetching}>

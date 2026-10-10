@@ -1,7 +1,8 @@
 import { useCallback, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, Led, notify } from "../../../dashboard/ui";
+import { Button, Led, LoadState, notify } from "../../../dashboard/ui";
+import { dashboardTexts } from "../../../dashboard/locale";
 import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import type { ModuleImmediateActionProperties } from "../../contract";
@@ -9,6 +10,9 @@ import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved"
 import { ChatVoteTemplateList } from "./template-list";
 import { closeChatVoting, laterUsageTime, loadChatVotingState, loadChatVoteTemplates, mergeChatVoteTemplateLists, startChatVoting, type ChatVotingPanelState, type ChatVoteTemplateListState } from "./service";
 import { timeText } from "./date-range";
+
+const isAbortedRequest = (failure: unknown): boolean => typeof failure === "object" && failure !== null &&
+  "name" in failure && (failure.name === "AbortError" || failure.name === "CancelledError");
 
 const ChatVotingImmediateAction = (properties: ModuleImmediateActionProperties): ReactElement =>
   <ChatVotingImmediateActionForChannel key={properties.channelId} {...properties} />;
@@ -49,7 +53,8 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
     try {
       await refetchModuleQueryData<ChatVoteTemplateListState>(queryClient, channelId, "chat_voting", "templates");
       setTemplateFailureData("none");
-    } catch {
+    } catch (failure: unknown) {
+      if (isAbortedRequest(failure)) return;
       setTemplateFailureData(templates);
     }
   }, [channelId, queryClient, templates]);
@@ -58,7 +63,8 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
     try {
       await refetchModuleQueryData<ChatVotingPanelState>(queryClient, channelId, "chat_voting", "panel");
       setCurrentFailureData("none");
-    } catch {
+    } catch (failure: unknown) {
+      if (isAbortedRequest(failure)) return;
       // Keep the last known live state visible while the template list loads independently.
       setCurrentFailureData(state);
     }
@@ -104,13 +110,23 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
   };
 
   const reason = templateError
-    ? labels.templatesError
+    ? ""
     : templates === null
       ? labels.loading
       : templates.templates.length === 0
         ? labels.noTemplatesLocked
         : lockReason ?? "";
-  const liveStatus = currentLoadError ? labels.liveLoadError : state === null ? labels.loading : running ? labels.running : labels.idle;
+  const liveStatus = state === null ? labels.loading : running ? labels.running : labels.idle;
+  const liveQueryError = {
+    title: dashboardTexts().errors.dataLoadFailed,
+    message: labels.liveLoadError,
+    onRetry: () => { void refreshVote(); },
+  };
+  const templateQueryError = {
+    title: dashboardTexts().errors.dataLoadFailed,
+    message: labels.templatesError,
+    onRetry: () => { void refreshTemplates(); },
+  };
 
   return <section className="stream-manager-action chat-voting-immediate" aria-label={labels.title}>
     <header className="chat-voting-immediate__header">
@@ -118,24 +134,41 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
       <Led status={running ? "green" : "off"} word={liveStatus} />
       {running ? <Button danger size="compact" disabled={ending} onClick={() => { void end(); }}>{labels.end}</Button> : <span aria-hidden="true" />}
     </header>
-    <div className="chat-voting-immediate__status">
-      <span className="chat-voting-immediate__question" title={vote?.title ?? ""}>{vote?.title || labels.idle}</span>
-      {running ? <span className="chat-voting-immediate__ending mono">{vote.requestedDurationSeconds === null ? labels.open : timeText(vote.closesAt, language)}</span> : null}
-    </div>
+    <LoadState
+      variant="status-row"
+      status={currentLoadError ? "error" : state === null ? "loading" : "success"}
+      loading={<span className="chat-voting-immediate__question">{labels.loading}</span>}
+      empty={null}
+      error={<span />}
+      queryError={liveQueryError}
+      className="chat-voting-immediate__live-state"
+    >
+      <div className="chat-voting-immediate__status">
+        <span className="chat-voting-immediate__question" title={vote?.title ?? ""}>{vote?.title || labels.idle}</span>
+        {running ? <span className="chat-voting-immediate__ending mono">{vote.requestedDurationSeconds === null ? labels.open : timeText(vote.closesAt, language)}</span> : null}
+      </div>
+    </LoadState>
     <div className="chat-voting-immediate__list" aria-label={labels.saved}>
-      {templates === null && !templateError ? <p className="chat-voting-immediate__loading">{labels.loading}</p> : null}
-      {templateError ? <button className="chat-voting-immediate__retry" type="button" onClick={() => { void refreshTemplates(); }}>{labels.retry}</button> : null}
-      {templates !== null ? <ChatVoteTemplateList
-        templates={templates.templates}
-        vote={vote}
-        startsLockedReason={lockReason}
-        canOperate
-        pendingId={pendingId}
-        labels={labels}
-        durationText={(seconds) => chatVoteDurationText(seconds, language)}
-        onSelect={() => undefined}
-        onStart={(template) => { void start(template); }}
-      /> : null}
+      <LoadState
+        variant="compact-64"
+        status={templateError ? "error" : templates === null ? "loading" : "success"}
+        loading={<p className="chat-voting-immediate__loading">{labels.loading}</p>}
+        empty={null}
+        error={<span />}
+        queryError={templateQueryError}
+      >
+        {templates === null ? null : <ChatVoteTemplateList
+          templates={templates.templates}
+          vote={vote}
+          startsLockedReason={lockReason}
+          canOperate
+          pendingId={pendingId}
+          labels={labels}
+          durationText={(seconds) => chatVoteDurationText(seconds, language)}
+          onSelect={() => undefined}
+          onStart={(template) => { void start(template); }}
+        />}
+      </LoadState>
     </div>
     <p className="chat-voting-immediate__reason" title={reason} aria-live="polite">{reason}</p>
   </section>;

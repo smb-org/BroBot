@@ -37,7 +37,7 @@ describe("Text library panel layout slots", () => {
     const addButton = screen.getByRole("button", { name: "Add text block" });
     expect(addButton).toBeDisabled();
     expect(document.querySelector(".list-toolbar__status")).toBeInTheDocument();
-    await waitFor(() => expect(document.querySelector(".ui-load-state")).toHaveAttribute("data-status", "error"));
+    await waitFor(() => expect(document.querySelector(".text-library__list-panel > .ui-load-state")).toHaveAttribute("data-status", "error"));
     expect(screen.getByRole("heading", { level: 2, name: "Text blocks" })).toBeInTheDocument();
     expect(addButton).toBeDisabled();
   });

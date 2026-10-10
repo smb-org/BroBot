@@ -195,7 +195,9 @@ describe("Text command editor", () => {
 
     renderWithQuery(<UiProvider><ToastHost /><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(textCommandsTexts("de").loadError);
+    const loadError = textCommandsTexts("de").loadError;
+    await waitFor(() => expect(document.querySelector(".ui-toast--error")).toHaveTextContent(loadError));
+    expect(document.querySelector(".ui-load-state__content [role=alert]")).toHaveTextContent(loadError);
     expect(document.querySelector(".command-list .form-error")).toBeNull();
     expect(screen.getByRole("button", { name: "Befehl anlegen" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u }));

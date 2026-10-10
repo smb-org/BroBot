@@ -155,7 +155,7 @@ describe("saved chat voting panel", () => {
     expect(view.container.querySelector(".chat-voting-live")).toBeInTheDocument();
   });
 
-  it("notifies once per live-state outage and again after the state recovers", async () => {
+  it("shows the shared inline retry for live-state outages after the state recovers", async () => {
     let unavailable = false;
     const fetcher = fetchHarness({ getCurrent: () => {
       if (unavailable) throw new Error("state unavailable");
@@ -172,16 +172,20 @@ describe("saved chat voting panel", () => {
     await refresh();
     await refresh();
     expect(view.queryClient.getQueryState(key.queryKey)?.status).toBe("error");
-    expect(toastsSnapshot().filter((toast) => toast.message === "The vote could not be loaded.")).toHaveLength(1);
+    expect((await screen.findAllByText("The vote could not be loaded.")).length).toBeGreaterThan(0);
+    expect(view.container.querySelector(".ui-load-state__retry")).toBeVisible();
+    expect(toastsSnapshot().filter((toast) => toast.tone === "error")).toHaveLength(0);
 
     unavailable = false;
     await refresh();
+    await waitFor(() => expect(screen.queryByText("The vote could not be loaded.")).not.toBeInTheDocument());
     unavailable = true;
     await refresh();
-    expect(toastsSnapshot().filter((toast) => toast.message === "The vote could not be loaded.")).toHaveLength(2);
+    expect((await screen.findAllByText("The vote could not be loaded.")).length).toBeGreaterThan(0);
+    expect(toastsSnapshot().filter((toast) => toast.tone === "error")).toHaveLength(0);
   });
 
-  it("does not notify or latch an outage when live, saved, or recent reads are canceled", async () => {
+  it("keeps canceled reads silent and reports later query failures inline", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let phase: "initial" | "cancel" | "failure" = "initial";
     const reads = { current: 0, templates: 0, recent: 0 };
@@ -224,16 +228,16 @@ describe("saved chat voting panel", () => {
       await Promise.all(keys.map((queryKey) => view.queryClient.cancelQueries({ queryKey, exact: true })));
     });
     expect(toastsSnapshot().filter((toast) => toast.tone === "error")).toHaveLength(0);
+    expect(screen.queryByText("The vote could not be loaded.")).not.toBeInTheDocument();
 
     phase = "failure";
     await act(async () => {
       await Promise.all(keys.map((queryKey) => view.queryClient.refetchQueries({ queryKey, exact: true }, { throwOnError: true }).catch(() => undefined)));
     });
-    expect(toastsSnapshot().map((toast) => toast.message)).toEqual(expect.arrayContaining([
-      "The vote could not be loaded.",
-      "Saved votes could not be loaded.",
-      "Recent votes could not be loaded.",
-    ]));
+    expect((await screen.findAllByText("The vote could not be loaded.")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Recent votes could not be loaded.")).toBeVisible();
+    expect(screen.queryByText("Saved votes could not be loaded.")).not.toBeInTheDocument();
+    expect(toastsSnapshot().filter((toast) => toast.tone === "error")).toHaveLength(0);
   });
 
   it("does not report a template read canceled by a successful save", async () => {
@@ -272,7 +276,8 @@ describe("saved chat voting panel", () => {
 
     failNextRead = true;
     await act(async () => { await view.queryClient.refetchQueries(key, { throwOnError: true }).catch(() => undefined); });
-    expect(toastsSnapshot().filter((toast) => toast.message === "Saved votes could not be loaded.")).toHaveLength(1);
+    expect(await screen.findByText("Saved votes could not be loaded.")).toBeVisible();
+    expect(toastsSnapshot().filter((toast) => toast.tone === "error")).toHaveLength(0);
   });
 
   it("refreshes the live, saved, recent, and immediate-action views from panel resource revisions", async () => {

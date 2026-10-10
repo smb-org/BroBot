@@ -452,11 +452,11 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         </>}
         create={{ label: labels.addBlock, onClick: openCreate, disabled: true, ...(!canManage ? { reason: labels.managementLocked } : {}) }}
       />
-      <LoadState status={libraryQuery.isError ? "error" : "loading"} minHeight="calc(var(--s10) * 30)"
+      <LoadState variant="panel-1200" status={libraryQuery.isError ? "error" : "loading"}
         loading={<Skeleton rows={8} height={34} />}
         empty={<div />}
         error={<p>{labels.loadError}</p>}
-        onRetry={() => { void libraryQuery.refetch(); }}
+        queryError={{ message: labels.loadError, onRetry: () => { void libraryQuery.refetch(); } }}
         refreshError={libraryQuery.isRefetchError}
       >{null}</LoadState>
     </section>
@@ -479,12 +479,12 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
 
   return (
     <LoadState
+      variant="panel-1200"
       status="success"
-      minHeight="calc(var(--s10) * 30)"
       loading={<Skeleton rows={8} height={34} />}
       empty={<div />}
       error={<p>{labels.loadError}</p>}
-      onRetry={() => { void libraryQuery.refetch(); }}
+      queryError={{ message: labels.loadError, onRetry: () => { void libraryQuery.refetch(); } }}
       refreshError={libraryQuery.isRefetchError}
     >
     <section className="module-stack text-library" aria-label={labels.library} style={{ minHeight: "calc(var(--s10) * 30)" }}>

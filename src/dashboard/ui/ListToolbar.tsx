@@ -3,6 +3,7 @@ import { useId, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { formatNumber, type DashboardLanguage } from "../locale";
 import { Button } from "./Button";
 import { Field } from "./Field";
+import { LoadState, type QueryError } from "./LoadState";
 
 export interface ListToolbarUsage {
   count: number;
@@ -17,12 +18,6 @@ export interface ListToolbarUsage {
     limitSuffix: string;
     loadedSuffix: string;
   };
-}
-
-export interface ListToolbarQueryError {
-  message: string;
-  retryLabel: string;
-  onRetry: () => void;
 }
 
 export interface ListToolbarProperties {
@@ -43,7 +38,7 @@ export interface ListToolbarProperties {
     reason?: string;
   };
   usage?: ListToolbarUsage;
-  queryError?: ListToolbarQueryError;
+  queryError?: QueryError;
   activeFilters?: string;
   activeFiltersLabel?: string;
   resetLabel?: string;
@@ -128,9 +123,30 @@ export function ListToolbar({
           </div>
         )}
       </div>
-      <div className={`list-toolbar__status${queryError === undefined ? "" : " list-toolbar__status--error"}`}>
-        {queryError === undefined ? <>
-          <span className={`list-toolbar__usage${warning ? " list-toolbar__usage--warning" : ""}`}>
+      <LoadState
+        variant="status-row"
+        status={queryError === undefined ? "success" : "error"}
+        loading={null}
+        empty={null}
+        error={null}
+        {...(queryError === undefined ? {} : { queryError })}
+        trailing={<div className="list-toolbar__status-right">
+          {hasActiveFilters ? (
+            <span className="list-toolbar__active-filters" title={`${activeFiltersLabel ?? ""} ${activeFilterText}`.trim()}>
+              {activeFiltersLabel === undefined ? activeFilterText : `${activeFiltersLabel} ${activeFilterText}`}
+            </span>
+          ) : null}
+          {createReason === undefined ? null : (
+            <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
+          )}
+          {hasActiveFilters && onReset !== undefined && resetLabel !== undefined ? (
+            <button className="list-toolbar__reset" type="button" onClick={onReset}>{resetLabel}</button>
+          ) : null}
+        </div>}
+        className="list-toolbar__status"
+      >
+        <>
+          <span className={`list-toolbar__usage${warning ? " list-toolbar__usage--warning" : ""}`} aria-live="polite">
             {usage === undefined ? null : usageText(usage, language)}
           </span>
           <div className="list-toolbar__status-right">
@@ -148,19 +164,8 @@ export function ListToolbar({
               <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
             ) : null}
           </div>
-        </> : <>
-          <span className="list-toolbar__query-error" role="alert">{queryError.message}</span>
-          <div className="list-toolbar__status-right">
-            {createReason === undefined ? null : (
-              <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
-            )}
-            {hasActiveFilters && onReset !== undefined && resetLabel !== undefined ? (
-              <button className="list-toolbar__reset" type="button" onClick={onReset}>{resetLabel}</button>
-            ) : null}
-            <button className="list-toolbar__reset" type="button" onClick={queryError.onRetry}>{queryError.retryLabel}</button>
-          </div>
-        </>}
-      </div>
+        </>
+      </LoadState>
     </div>
   );
 }

@@ -370,9 +370,12 @@ dieser Steuerelemente vor und nach dem Laden, nicht die Listenhöhe.
   zeigt ihren Status in einer Ellipse mit vollständigem `title`. Verwerfen
   bleibt sichtbar und wird deaktiviert, wenn nichts zu verwerfen ist. Dialoge
   reservieren neben den Aktionen eine Fehlerzeile.
-- **Lade-, Leer- und Fehlerzustand:** `LoadState` hält für alle drei denselben
-  `minHeight`; ein Skeleton nähert den geladenen Inhalt an. Beim Nachladen
-  bleiben vorhandene Werte stehen.
+- **Lade-, Leer- und Fehlerzustand:** `LoadState` verwendet feste, zentral
+  definierte Reservierungsvarianten statt frei geschätzter Höhen am Aufrufort.
+  Laden, leer und initialer Fehler teilen sich dieselbe Fläche; beim
+  Hintergrundfehler bleiben vorhandene Werte stehen und die Wiederholung
+  belegt die dauerhaft reservierte Zeile. Das Warnungs-Feed nutzt die
+  132-px-Variante mit einer einzeiligen Fehlermeldung.
 - **Editor-Abschnitte:** Ein fehlgeschlagener Speicherversuch öffnet keine
   geschlossenen `<details>`. Der Editor scrollt zum Abschnitt, fokussiert seine
   Zusammenfassung und markiert sie mit einem Fehlerabzeichen.

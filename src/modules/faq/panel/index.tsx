@@ -213,11 +213,11 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       <InspectorSection title={labels.title}>
         <Button variant="primary" disabled={!canManage} onClick={openCreate}>{labels.add}</Button>
         {canManage ? null : <p className="lock-reason">{labels.roleLocked}</p>}
-        <LoadState status={listStatus} minHeight="calc(var(--s10) * 18)"
+        <LoadState variant="panel-720" status={listStatus}
           loading={<Skeleton rows={7} height={34} />}
           empty={<p className="muted">{labels.noEntries}</p>}
           error={<p className="muted">{labels.loadError}</p>}
-          onRetry={() => { void query.refetch(); }}
+          queryError={{ message: labels.loadError, onRetry: () => { void query.refetch(); } }}
           refreshError={query.isRefetchError}
         >
         <div className="state-list" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>

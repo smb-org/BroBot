@@ -797,12 +797,12 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       ...(settingsIssue === undefined ? {} : { issue: settingsIssue }),
       content: <>
         <LoadState
+          variant="compact-64"
           status={registeredVariablesQuery.data === undefined ? registeredVariablesQuery.isPending ? "loading" : "error" : "success"}
-          minHeight="var(--s6)"
           loading={<div />}
           empty={<div />}
           error={<p className="muted" role="alert" style={{ height: "var(--s6)", overflow: "hidden", margin: 0, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{labels.templateVariablesLoadError}</p>}
-          onRetry={() => { void registeredVariablesQuery.refetch(); }}
+          queryError={{ message: labels.templateVariablesLoadError, onRetry: () => { void registeredVariablesQuery.refetch(); } }}
           refreshError={registeredVariablesQuery.isRefetchError}
         >{null}</LoadState>
         <Field
@@ -1041,7 +1041,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${labels.saved} ${items.join(" ")}` : items.join(" ")}
       {...(concurrentConflict ? { conflict: {
         message: reloadError ? `${labels.conflictMessage} ${labels.reloadError}` : labels.conflictMessage,
-        reloadLabel: reloadError ? labels.retry : labels.reload,
+        reloadLabel: reloadError ? dashboardCommonTexts(resolvedLanguage).retry : labels.reload,
         onReload: () => { void reloadServer(); },
       } } : {})}
       onSave={() => { void handleSave(); }}
@@ -1243,11 +1243,11 @@ const TextCommandsPanelContent = ({
       }}
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); } })}
     />
-    <LoadState status={listStatus} minHeight="calc(var(--s10) * 15)"
+    <LoadState variant="panel-600" status={listStatus}
       loading={<Skeleton rows={8} height={34} />}
       empty={<p className="empty-state">{commands.length > 0 ? common.noMatches : labels.empty}</p>}
       error={<p className="muted">{labels.loadError}</p>}
-      onRetry={() => { void refetchCommands(); }}
+      queryError={{ message: labels.loadError, onRetry: () => { void refetchCommands(); } }}
       refreshError={commandsQuery.isRefetchError}>
       <div className="table-wrap" style={{ maxHeight: "calc(var(--s10) * 15)", overflowY: "auto" }}><table className="table"><thead><tr>
         <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, EmptyState, ListDetail, ListRow, ListToolbar, LoadState, QueryErrorState, SegmentedControl, SubInspector, notify } from "../../../dashboard/ui";
+import { Button, EmptyState, ListDetail, ListRow, ListToolbar, LoadState, SegmentedControl, SubInspector, notify } from "../../../dashboard/ui";
+import { dashboardTexts } from "../../../dashboard/locale";
 import type { ModulePanelProperties } from "../../contract";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, type ChatVote, type ChatVoteTemplate } from "../contracts";
 import { rankVoteTerms, templateStartProblem } from "../domain";
@@ -23,6 +24,8 @@ const EMPTY_TEMPLATES: readonly ChatVoteTemplate[] = [];
 const voteTotal = (vote: ChatVote): number => vote.kind === "free_text"
   ? vote.voterCount ?? (vote.textResults ?? []).reduce((sum, term) => sum + term.count, 0)
   : vote.voterCount ?? (vote.counts ?? []).reduce((sum, count) => sum + count, 0);
+const isAbortedRequest = (failure: unknown): boolean => typeof failure === "object" && failure !== null &&
+  "name" in failure && (failure.name === "AbortError" || failure.name === "CancelledError");
 
 const winnerFor = (vote: ChatVote, labels: ReturnType<typeof chatVotingSavedPanelTexts>): string => {
   if (vote.kind === "free_text") {
@@ -63,49 +66,14 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   const queryClient = useDashboardQueryClient();
   const fallbackRefetchInterval = realtimeStatus === "connected" ? false : 2_000;
   const [mode, setMode] = useState<ListMode>("saved");
-  const loadErrorsNotified = useRef({ vote: false, templates: false, recent: false });
-  const stateQuery = useModuleQuery(channelId, "chat_voting", "panel", async (signal) => {
-    try {
-      const current = await loadChatVotingState(channelId, signal);
-      loadErrorsNotified.current.vote = false;
-      return current;
-    } catch (failure: unknown) {
-      if (!signal.aborted && !loadErrorsNotified.current.vote) {
-        loadErrorsNotified.current.vote = true;
-        notify({ tone: "error", message: labels.liveLoadError });
-      }
-      throw failure;
-    }
-  }, { refetchInterval: fallbackRefetchInterval });
+  const stateQuery = useModuleQuery(channelId, "chat_voting", "panel", (signal) => loadChatVotingState(channelId, signal), { refetchInterval: fallbackRefetchInterval });
   const templatesQuery = useModuleQuery(channelId, "chat_voting", "templates", async (signal) => {
-    try {
-      const current = mergeChatVoteTemplateLists(
-        queryClient.getQueryData<ChatVoteTemplateListState>(moduleQueryKey(channelId, "chat_voting", "templates")) ?? null,
-        await loadChatVoteTemplates(channelId, signal),
-      );
-      loadErrorsNotified.current.templates = false;
-      return current;
-    } catch (failure: unknown) {
-      if (!signal.aborted && !loadErrorsNotified.current.templates) {
-        loadErrorsNotified.current.templates = true;
-        notify({ tone: "error", message: labels.templatesError });
-      }
-      throw failure;
-    }
+    return mergeChatVoteTemplateLists(
+      queryClient.getQueryData<ChatVoteTemplateListState>(moduleQueryKey(channelId, "chat_voting", "templates")) ?? null,
+      await loadChatVoteTemplates(channelId, signal),
+    );
   }, { refetchInterval: fallbackRefetchInterval });
-  const recentQuery = useModuleQuery(channelId, "chat_voting", "recent", async (signal) => {
-    try {
-      const current = await loadRecentChatVotes(channelId, signal);
-      loadErrorsNotified.current.recent = false;
-      return current;
-    } catch (failure: unknown) {
-      if (!signal.aborted && !loadErrorsNotified.current.recent) {
-        loadErrorsNotified.current.recent = true;
-        notify({ tone: "error", message: labels.recentError });
-      }
-      throw failure;
-    }
-  }, { enabled: mode === "recent", refetchInterval: fallbackRefetchInterval });
+  const recentQuery = useModuleQuery(channelId, "chat_voting", "recent", (signal) => loadRecentChatVotes(channelId, signal), { enabled: mode === "recent", refetchInterval: fallbackRefetchInterval });
   const voteState = stateQuery.data ?? null;
   const templateList = templatesQuery.data ?? null;
   const recentState = recentQuery.data ?? null;
@@ -172,40 +140,31 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     try {
       await refetchModuleQueryData<ChatVotingPanelState>(queryClient, channelId, "chat_voting", "panel");
       setVoteFailureData("none");
-    } catch {
+    } catch (failure: unknown) {
+      if (isAbortedRequest(failure)) return;
       setVoteFailureData(voteState);
-      if (voteState === null && !loadErrorsNotified.current.vote) {
-        loadErrorsNotified.current.vote = true;
-        notify({ tone: "error", message: labels.liveLoadError });
-      }
     }
-  }, [channelId, labels.liveLoadError, queryClient, voteState]);
+  }, [channelId, queryClient, voteState]);
 
   const refreshTemplates = useCallback(async (): Promise<void> => {
     try {
       await refetchModuleQueryData<ChatVoteTemplateListState>(queryClient, channelId, "chat_voting", "templates");
       setTemplateFailureData("none");
-    } catch {
+    } catch (failure: unknown) {
+      if (isAbortedRequest(failure)) return;
       setTemplateFailureData(templateList);
-      if (templateList === null && !loadErrorsNotified.current.templates) {
-        loadErrorsNotified.current.templates = true;
-        notify({ tone: "error", message: labels.templatesError });
-      }
     }
-  }, [channelId, labels.templatesError, queryClient, templateList]);
+  }, [channelId, queryClient, templateList]);
 
   const refreshRecent = useCallback(async (): Promise<void> => {
     try {
       await refetchModuleQueryData<{ votes: readonly ChatVote[] }>(queryClient, channelId, "chat_voting", "recent");
       setRecentFailureData("none");
-    } catch {
+    } catch (failure: unknown) {
+      if (isAbortedRequest(failure)) return;
       setRecentFailureData(recentState);
-      if (recentVotes === null && !loadErrorsNotified.current.recent) {
-        loadErrorsNotified.current.recent = true;
-        notify({ tone: "error", message: labels.recentError });
-      }
     }
-  }, [channelId, labels.recentError, queryClient, recentState, recentVotes]);
+  }, [channelId, queryClient, recentState]);
 
   useEffect(() => {
     const resize = (): void => {
@@ -478,23 +437,28 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     void startTemplate(template);
   };
 
-  const liveStatus = voteState === null
-    ? voteError ? "error" : "loading"
-    : "success";
+  const liveStatus = voteState === null ? voteError ? "error" : "loading" : "success";
   const listStatus = mode === "saved"
     ? templateList === null ? templateError ? "error" : "loading" : templates.length === 0 ? "empty" : "success"
     : recentVotes === null ? recentError ? "error" : "loading" : recentVotes.length === 0 ? "empty" : "success";
 
   const liveLoading = <div className="chat-voting-live__load-text">{labels.loading}</div>;
   const liveEmpty = <div className="chat-voting-live__empty"><EmptyState title={labels.noVoteYet} description="" /></div>;
-  const liveError = <QueryErrorState title={labels.liveLoadError} reason={labels.liveLoadError} retryLabel={labels.retry} onRetry={() => { void refreshVote(); }} />;
-  const loadListStatus = listStatus;
   const listLoading = <div className="chat-voting-list__load-text">{labels.loading}</div>;
   const emptySaved = <EmptyState title={labels.emptySaved} description={labels.emptySavedDescription} action={{ label: labels.create, onClick: createTemplate }} />;
   const emptyRecent = <EmptyState title={labels.emptyRecent} description="" />;
-  const listError = mode === "saved"
-    ? <QueryErrorState title={labels.templatesError} reason={labels.templatesError} retryLabel={labels.retry} onRetry={() => { void refreshTemplates(); }} />
-    : <QueryErrorState title={labels.recentError} reason={labels.recentError} retryLabel={labels.retry} onRetry={() => { void refreshRecent(); }} />;
+  const activeListError = mode === "saved" ? templateError : recentError;
+  const activeListHasData = mode === "saved" ? templateList !== null : recentState !== null;
+  const liveQueryError = {
+    title: dashboardTexts().errors.dataLoadFailed,
+    message: labels.liveLoadError,
+    onRetry: () => { void refreshVote(); },
+  };
+  const listQueryError = {
+    title: dashboardTexts().errors.dataLoadFailed,
+    message: mode === "saved" ? labels.templatesError : labels.recentError,
+    onRetry: () => { void (mode === "saved" ? refreshTemplates() : refreshRecent()); },
+  };
 
   const templateInspector = selectedTemplate === null ? null : <ChatVoteTemplateInspector
     key={templateInspectorKey ?? selectedTemplate.id}
@@ -551,11 +515,13 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   return <section className="module-stack chat-voting-panel" aria-label={labels.title}>
     <div className={voteError && voteState !== null ? "stale" : undefined}>
       <LoadState
+        variant="panel-320"
         status={liveStatus}
-        minHeight="var(--chat-voting-live-height)"
         loading={liveLoading}
         empty={liveEmpty}
-        error={liveError}
+        error={<p role="alert">{labels.liveLoadError}</p>}
+        queryError={liveQueryError}
+        refreshError={voteError && voteState !== null}
       >
         <ChatVotingLiveBlock
           state={voteState}
@@ -591,13 +557,15 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
             copy: { countSuffix: "", filteredInfix: "", filteredSuffix: "", limitInfix: "/", limitSuffix: "", loadedSuffix: "" },
           }}
           activeFilters={activeLockReason ?? ""}
+          {...(activeListError && activeListHasData ? { queryError: listQueryError } : {})}
         />
         <LoadState
-          status={loadListStatus}
-          minHeight={320}
+          variant="panel-320"
+          status={listStatus}
           loading={listLoading}
           empty={mode === "saved" ? emptySaved : emptyRecent}
-          error={listError}
+          error={<p role="alert">{mode === "saved" ? labels.templatesError : labels.recentError}</p>}
+          queryError={listQueryError}
         >
           {mode === "saved" ? <div className={templateError ? "stale" : undefined}><ChatVoteTemplateList
             templates={templates}

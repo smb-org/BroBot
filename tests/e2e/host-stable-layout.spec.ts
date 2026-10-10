@@ -363,14 +363,14 @@ test("event controls stay above growing lists as channel responses arrive", asyn
     await installChannelMocks(page, { [gateName]: { wait: responseGate, started: markResponseStarted } }, responseData);
     await page.goto(`/channels/${channelId}/${section}`);
     await responseStarted;
-    const loadState = page.locator(".ui-load-state");
+    const loadState = page.locator(".ui-load-state--panel");
     await expect(loadState).toHaveAttribute("data-status", "loading");
     const beforeControl = await measureBox(page, controlSelector);
     releaseResponse();
     await expect(loadState).not.toHaveAttribute("data-status", "loading");
     const afterControl = await measureBox(page, controlSelector);
     expect(afterControl).toEqual(beforeControl);
-    const listBox = await measureBox(page, ".ui-load-state");
+    const listBox = await measureBox(page, ".ui-load-state--panel");
     expect(beforeControl[1] + beforeControl[3]).toBeLessThanOrEqual(listBox[1]);
     await page.unrouteAll();
   }
@@ -382,10 +382,10 @@ test("channel audit pagination stays in a sticky 44px footer and the list top fi
     await installChannelMocks(page, {}, { audit: fullAuditPage });
 
     await page.goto(`/channels/${channelId}/audit`);
-    const loadState = page.locator(".ui-load-state");
+    const loadState = page.locator(".ui-load-state--panel");
     await expect(loadState).toHaveAttribute("data-status", "success");
     await expect(page.locator(".audit-page__pagination-slot")).toHaveCount(0);
-    const listTop = await measureDocumentBox(page, ".ui-load-state");
+    const listTop = await measureDocumentBox(page, ".ui-load-state--panel");
     const footer = page.locator(".list-pagination-footer");
     const more = footer.getByRole("button", { name: "Load older entries" });
     await expect(more).toBeVisible();
@@ -396,7 +396,7 @@ test("channel audit pagination stays in a sticky 44px footer and the list top fi
     expect(Math.abs(footerBox[1] + footerBox[3] - (width === 390 ? 844 : 900))).toBeLessThanOrEqual(1);
     await more.click();
     await expect(more).toBeEnabled();
-    expect((await measureDocumentBox(page, ".ui-load-state")).slice(0, 2)).toEqual(listTop.slice(0, 2));
+    expect((await measureDocumentBox(page, ".ui-load-state--panel")).slice(0, 2)).toEqual(listTop.slice(0, 2));
     expect((await measureBox(page, ".list-pagination-footer"))[3]).toBe(44);
     await page.unrouteAll();
   }
@@ -535,11 +535,11 @@ test("setting an event filter leaves the list top fixed at desktop and 390px", a
 
     await page.goto(`/channels/${channelId}/events`);
     await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
-    const listTop = await measureDocumentBox(page, ".ui-load-state");
+    const listTop = await measureDocumentBox(page, ".ui-load-state--panel");
     await page.getByRole("textbox", { name: "Person" }).fill("Operator");
     await expect(page.locator(".event-filter .list-toolbar__active-filters")).toContainText("Operator");
     await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
-    expect(await measureDocumentBox(page, ".ui-load-state")).toEqual(listTop);
+    expect(await measureDocumentBox(page, ".ui-load-state--panel")).toEqual(listTop);
     await page.unrouteAll();
   }
 });
@@ -577,19 +577,18 @@ test("the channel-variable limit and create controls stay above a full list", as
 
   await page.goto(`/channels/${channelId}/variables`);
   await variablesStarted;
-  const limitSlotBefore = await measureBox(page, ".channel-variables-limit-slot");
   const toolbarBefore = await measureBox(page, ".list-toolbar");
   const createActionBefore = await measureBox(page, ".list-toolbar__create");
   const usageBefore = await measureBox(page, ".list-toolbar__status");
   releaseVariables();
   await expect(page.locator(".channel-variables-table tbody tr")).toHaveCount(25);
-  expect(await measureBox(page, ".channel-variables-limit-slot")).toEqual(limitSlotBefore);
   expect(await measureBox(page, ".list-toolbar")).toEqual(toolbarBefore);
   expect(await measureBox(page, ".list-toolbar__create")).toEqual(createActionBefore);
   expect(await measureBox(page, ".list-toolbar__status")).toEqual(usageBefore);
   await expect(page.locator(".list-toolbar__status")).toContainText("25 of 25 variables used");
   await expect(page.getByRole("button", { name: "Create variable" })).toBeDisabled();
-  expect(limitSlotBefore[1] + limitSlotBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".ui-load-state"))[1]);
+  const statusBox = await measureBox(page, ".list-toolbar__status");
+  expect(statusBox[1] + statusBox[3]).toBeLessThanOrEqual((await measureBox(page, ".ui-load-state--panel"))[1]);
 });
 
 test("a failed realtime variable refresh keeps rows visible and offers retry", async ({ page }) => {
@@ -651,7 +650,7 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
 
   await page.goto(`/channels/${channelId}/variables`);
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
-  const retrySlot = page.locator(".channel-variables-limit-slot");
+  const retrySlot = page.locator(".list-toolbar__status");
   const slotBeforeRefreshFailure = await retrySlot.boundingBox();
   const initialVariableRequestCount = variableRequestCount;
   await page.evaluate(() => {
@@ -673,7 +672,7 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
   await expect.poll(() => variableRequestCount).toBeGreaterThan(initialVariableRequestCount);
   await expect(page.locator(".ui-toast--error")).toBeVisible();
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
-  await expect(page.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
+  await expect(page.locator(".ui-load-state--panel")).toHaveAttribute("data-status", "success");
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
   expect(await retrySlot.boundingBox()).toEqual(slotBeforeRefreshFailure);
 
