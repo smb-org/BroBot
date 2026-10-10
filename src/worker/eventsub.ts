@@ -8,6 +8,7 @@ import { refreshAdPrewarning, isAdPrewarningTrigger } from "./ad-prewarning";
 import { eventSubDefinitionForCondition } from "./eventsub-subscriptions";
 import { notifyCommittedResources } from "./panel-resources";
 import { revokeRealtimeUserFromAllChannels } from "./realtime";
+import { clearPendingRealtimeUserRevocation, getPendingRealtimeUserRevocation } from "./db/login-identity";
 import type { EventSubSubscriptionType } from "../contracts/values";
 import {
   hasEventSubMessage,
@@ -285,7 +286,17 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
 
   if (messageType === "revocation" && revocation !== null && notifierChannelId !== null) {
     try {
-      if (await hasEventSubMessage(context.env.DB, messageId)) return response(null, 204);
+      if (await hasEventSubMessage(context.env.DB, messageId)) {
+        const identity = revocation.authorizationIdentity;
+        const pendingRevocation = identity?.kind === "login"
+          ? await getPendingRealtimeUserRevocation(context.env.DB, identity.userId)
+          : null;
+        if (identity?.kind === "login" && pendingRevocation !== null) {
+          await revokeRealtimeUserFromAllChannels(context.env.DB, context.env.CHANNEL, identity.userId);
+          await clearPendingRealtimeUserRevocation(context.env.DB, pendingRevocation);
+        }
+        return response(null, 204);
+      }
       const authorizationConfirmedRevoked = await confirmRevocationAuthorization(context.env, revocation, now);
       const isNew = await rememberEventSubMessageAndRevocation(
         context.env.DB,
@@ -296,15 +307,20 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
       );
       if (!isNew) return response(null, 204);
       if (authorizationConfirmedRevoked && revocation.authorizationIdentity?.kind === "login") {
+        const pendingRevocation = await getPendingRealtimeUserRevocation(
+          context.env.DB,
+          revocation.authorizationIdentity.userId,
+        );
         await revokeRealtimeUserFromAllChannels(
           context.env.DB,
           context.env.CHANNEL,
           revocation.authorizationIdentity.userId,
         );
+        if (pendingRevocation !== null) await clearPendingRealtimeUserRevocation(context.env.DB, pendingRevocation);
       }
       return response(null, 204);
     } finally {
-      await notifyCommittedResources(context.env, notifierChannelId);
+      await notifyCommittedResources(context.env);
     }
   }
 

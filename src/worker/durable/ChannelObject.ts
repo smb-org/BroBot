@@ -36,6 +36,17 @@ import type {
   ModuleScheduleInputChangeReason,
 } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
+import {
+  ACTIVE_CHATTER_EXPIRY_HANDLER,
+  AD_COUNTDOWN_REFRESH_HANDLER,
+  AD_PREWARNING_HANDLER,
+  CHANNEL_HOST_ALARM_HANDLER_KEYS,
+  MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER,
+  SECURITY_RETRY_HANDLER,
+  SECURITY_ROUND_HANDLER,
+  missingAlarmHandlerKeys,
+  moduleAlarmHandlerEntries,
+} from "./module-alarm-registry";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
 import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../../modules/ads/overlay/countdown-action";
@@ -113,7 +124,6 @@ const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
 const ACTIVE_CHATTER_EXPIRY_KEY = "host:active_chatters_expiry";
-const ACTIVE_CHATTER_EXPIRY_HANDLER = "channel.active_chatters_expiry";
 const ACTIVE_CHATTER_RETENTION_MS = 60 * 60 * 1_000;
 const ACTIVE_CHATTER_KEY_ROTATION_MS = 24 * 60 * 60 * 1_000;
 const MODULE_ALARM_OWNER_REVISIONS_KEY = "module_alarm:owner_revisions";
@@ -164,11 +174,6 @@ const AD_PREWARNING_RETRY_DELAYS_MS = [5_000, 10_000] as const;
 // claimed.
 const AD_PREWARNING_CLAIM_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ALARM_HANDLER_RECOVERY_DELAY_MS = 60_000;
-const SECURITY_ROUND_HANDLER = "channel.security_round";
-const SECURITY_RETRY_HANDLER = "channel.security_retry";
-const AD_PREWARNING_HANDLER = "channel.ad_prewarning";
-const AD_COUNTDOWN_REFRESH_HANDLER = "channel.ad_countdown_refresh";
-const MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER = "channel.module_schedule_inputs_changed";
 const MODULE_SCHEDULE_INPUTS_CHANGED_KEY = "host:schedule_inputs_changed";
 const LEGACY_ALARM_DEFINITIONS = [
   { key: SECURITY_DEADLINE_KEY, handler: SECURITY_ROUND_HANDLER, suppressedBy: SECURITY_RETRY_KEY },
@@ -1942,25 +1947,32 @@ export class ChannelObject extends DurableObject<Env> {
         },
       }],
     ]);
-    for (const module of modules) {
-      for (const registration of module.alarms ?? []) {
-        const handler = `module:${module.id}:${registration.key}`;
-        if (handlers.has(handler)) throw new Error(`Duplicate alarm handler ${handler}.`);
-        const modulePrefix = `module:${module.id}:`;
-        handlers.set(handler, {
-          ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
-          handle: async (key, entry) => {
-            const execute = () => registration.handle(
-              this.moduleAlarmContext(module.id, registration, externalFetchBudget),
-              key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
-              entry.deadline,
-              entry.ownerRevision,
-            );
-            await this.runModuleAlarmHandler(module.id, registration.key, execute);
-            return undefined;
-          },
-        });
-      }
+    for (const { moduleId, registration } of moduleAlarmHandlerEntries(modules)) {
+      const handler = `module:${moduleId}:${registration.key}`;
+      if (handlers.has(handler)) throw new Error(`Duplicate alarm handler ${handler}.`);
+      const modulePrefix = `module:${moduleId}:`;
+      handlers.set(handler, {
+        ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
+        handle: async (key, entry) => {
+          const execute = () => registration.handle(
+            this.moduleAlarmContext(moduleId, registration, externalFetchBudget),
+            key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
+            entry.deadline,
+            entry.ownerRevision,
+          );
+          await this.runModuleAlarmHandler(moduleId, registration.key, execute);
+          return undefined;
+        },
+      });
+    }
+    const scheduledHandlers = [
+      ...CHANNEL_HOST_ALARM_HANDLER_KEYS,
+      ...moduleAlarmHandlerEntries(modules).map(({ moduleId, registration }) =>
+        `module:${moduleId}:${registration.key}`),
+    ];
+    const missingHandlers = missingAlarmHandlerKeys(scheduledHandlers, handlers.keys());
+    if (missingHandlers.length > 0) {
+      throw new Error(`Alarm handlers are not registered: ${missingHandlers.join(", ")}.`);
     }
     return handlers;
   }
@@ -2466,6 +2478,18 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async revokeUser(userId: string): Promise<void> {
     for (const webSocket of this.ctx.getWebSockets(`user:${userId}`)) {
+      const principal = readAttachment(webSocket);
+      if (principal?.kind === "panel" && principal.userId === userId) {
+        const channelId = this.ownChannelId();
+        if (channelId !== null && principal.channelId === channelId) {
+          try {
+            if (await this.panelPrincipalIsCurrent(principal, channelId, Date.now())) continue;
+          } catch (error: unknown) {
+            console.error("Realtime panel revocation check failed.", error);
+            throw error;
+          }
+        }
+      }
       closeSocket(webSocket, SOCKET_REVOKED_CODE, "Channel access revoked");
     }
     await this.stopSecurityAlarmIfIdle();

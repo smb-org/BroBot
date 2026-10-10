@@ -50,9 +50,18 @@ import { belaboxModule } from "../../src/modules/belabox";
 import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { getBelaboxStatus } from "../../src/modules/belabox/adapters/d1";
 import { votekickModule } from "../../src/modules/votekick";
-import { chatVotingStartAnnouncementAlarmKey } from "../../src/modules/chat_voting/contracts";
+import { MODULES } from "../../src/modules/registry";
+import {
+  CHAT_VOTING_ALARM_HANDLER,
+  chatVotingStartAnnouncementAlarmKey,
+} from "../../src/modules/chat_voting/contracts";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { ballotVoterHash } from "../../src/worker/durable/ballots";
+import {
+  CHANNEL_HOST_ALARM_HANDLER_KEYS,
+  missingAlarmHandlerKeys,
+  moduleAlarmHandlerEntries,
+} from "../../src/worker/durable/module-alarm-registry";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -3242,12 +3251,59 @@ describe("ChannelObject realtime path", () => {
   it("revokes only the connection of the affected user", async () => {
     const affected = socketFor(validPrincipal());
     const other = socketFor(validPrincipal({ userId: "user-2", sessionId: "session-2" }));
-    const object = objectFor([affected, other]);
+    const database = {
+      prepare: () => ({ bind: () => ({ first: () => Promise.resolve(null) }) }),
+    } as unknown as D1Database;
+    const object = objectFor([affected, other], database);
 
     await object.revokeUser("user-1");
 
     expect(affected.close.mock.calls).toEqual([[4003, "Channel access revoked"]]);
     expect(other.close.mock.calls).toHaveLength(0);
+  });
+
+  it("does not let a delayed user revocation close a newly authorized session", async () => {
+    const oldSession = socketFor(validPrincipal({ sessionId: "old-session" }));
+    const newSession = socketFor(validPrincipal({ sessionId: "new-session" }));
+    let bindings: unknown[] = [];
+    const statement = {
+      bind: vi.fn((...values: unknown[]) => {
+        bindings = values;
+        return statement;
+      }),
+      first: vi.fn(() => Promise.resolve(bindings[1] === "new-session" ? {
+        session_id: "new-session",
+        user_id: "user-1",
+        role: "operator",
+      } : null)),
+    };
+    const database = { prepare: vi.fn(() => statement) } as unknown as D1Database;
+    const object = objectFor([oldSession, newSession], database);
+
+    await object.revokeUser("user-1");
+
+    expect(oldSession.close.mock.calls).toEqual([[4003, "Channel access revoked"]]);
+    expect(newSession.close.mock.calls).toHaveLength(0);
+  });
+
+  it("checks the runtime alarm registry against scheduled host and module handlers", () => {
+    const object = objectFor([]);
+    const runtimeHandlers = (object as unknown as {
+      alarmHandlers: (modules: readonly BotModule[]) => Map<string, unknown>;
+    }).alarmHandlers(MODULES);
+    const scheduledModuleHandlers = moduleAlarmHandlerEntries(MODULES)
+      .map(({ moduleId, registration }) => `module:${moduleId}:${registration.key}`);
+    const scheduledHandlers = [...CHANNEL_HOST_ALARM_HANDLER_KEYS, ...scheduledModuleHandlers];
+
+    expect(missingAlarmHandlerKeys(scheduledHandlers, runtimeHandlers.keys())).toEqual([]);
+    expect(missingAlarmHandlerKeys(
+      scheduledHandlers,
+      [...runtimeHandlers.keys()].filter((key) => key !== `module:chat_voting:${CHAT_VOTING_ALARM_HANDLER}`),
+    )).toContain(`module:chat_voting:${CHAT_VOTING_ALARM_HANDLER}`);
+    expect(missingAlarmHandlerKeys(
+      scheduledHandlers,
+      [...runtimeHandlers.keys()].filter((key) => key !== "channel.security_round"),
+    )).toContain("channel.security_round");
   });
 
   it("keeps two deadlines separate, processes the earlier one and keeps the later one", async () => {

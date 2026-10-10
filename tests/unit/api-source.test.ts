@@ -21,6 +21,7 @@ import { apiSourceRoutes } from "../../src/modules/api_source/routes";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
 import { createTextBlockTemplateValueProvider } from "../../src/modules/text_library/adapters/template-expander";
+import { readPanelResourceRevisions } from "../../src/worker/panel-resources";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -114,10 +115,13 @@ describe("API source URL policy", () => {
 describe("API source outbound fetch", () => {
   it("uses only fixed headers, omits credentials, and caches successful JSON by channel and URL", async () => {
     const database = await createDatabase();
+    await insertChannel(database, "api-source-cache-unrelated");
     const payload = { value: 42 };
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(payload, { "Cache-Control": "max-age=60" }));
     const budget = sharedBudget();
     const db = database as unknown as D1Database;
+    const ownerRevisionBefore = await readPanelResourceRevisions(db, CHANNEL_ID);
+    const unrelatedRevisionBefore = await readPanelResourceRevisions(db, "api-source-cache-unrelated");
     const first = await fetchCachedApiSourceJson(db, CHANNEL_ID, "https://api.sample-provider.net/data", undefined, NOW, budget, fetcher);
     const second = await fetchCachedApiSourceJson(db, CHANNEL_ID, "https://api.sample-provider.net/data", undefined, NOW + 1_000, budget, fetcher);
     const [, request] = fetcher.mock.calls[0] ?? [];
@@ -129,6 +133,12 @@ describe("API source outbound fetch", () => {
     expect([...new Headers(request?.headers).keys()].sort((a, b) => a.localeCompare(b))).toEqual(["accept", "user-agent"]);
     expect(request).toMatchObject({ method: "GET", redirect: "manual", credentials: "omit", referrerPolicy: "no-referrer" });
     expect(budget.count()).toBe(1);
+    const cachedOwner = await db.prepare("SELECT channel_id FROM api_source_cache").first<{ channel_id: string }>();
+    expect(cachedOwner?.channel_id).toBe(CHANNEL_ID);
+    expect((await readPanelResourceRevisions(db, CHANNEL_ID))["channel.library"])
+      .toBeGreaterThan(ownerRevisionBefore["channel.library"] ?? 0);
+    expect((await readPanelResourceRevisions(db, "api-source-cache-unrelated"))["channel.library"])
+      .toBe(unrelatedRevisionBefore["channel.library"]);
   });
 
   it("keeps the same upstream URL isolated between channels", async () => {

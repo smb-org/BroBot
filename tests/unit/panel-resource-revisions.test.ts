@@ -8,6 +8,7 @@ import { MODULES } from "../../src/modules/registry";
 import { dashboardDataKeys, queryKeys } from "../../src/dashboard/data/keys";
 import { reconcileDashboardRealtimeMessage, reconcileDashboardPanelResourceRevisions } from "../../src/dashboard/data/realtime";
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
+import { loadTextLibrary } from "../../src/modules/text_library/panel/service";
 import { authRouter } from "../../src/worker/auth/routes";
 import { eventSubChannelIdForNotification, eventSubRouter } from "../../src/worker/eventsub";
 import { realtimeRouter } from "../../src/worker/realtime";
@@ -44,10 +45,16 @@ const routeHasNotifier = (
   explicitRoutes: ReadonlySet<string>,
   knownWritingGets: ReadonlySet<string> = writingGetRoutes,
   nonPanelWrites: ReadonlySet<string> = new Set(PANEL_RESOURCE_NOTIFIER_COVERAGE.nonPanelWriteRoutes),
-): boolean => !routeNeedsNotifier(route, knownWritingGets) || explicitRoutes.has(`${route.method} ${route.path}`) ||
-  nonPanelWrites.has(`${route.method} ${route.path}`) ||
-  nonPanelAllRoutes.has(`${route.method} ${route.path}`) ||
-  patterns.some((pattern) => routeIsCovered(route.path, pattern));
+  nonPanelReads: ReadonlySet<string> = new Set(PANEL_RESOURCE_NOTIFIER_COVERAGE.nonPanelGetRoutes),
+): boolean => {
+  const routeKey = `${route.method} ${route.path}`;
+  if (explicitRoutes.has(routeKey) || nonPanelWrites.has(routeKey) || nonPanelAllRoutes.has(routeKey)) return true;
+  if (route.method === "GET") {
+    return nonPanelReads.has(route.path) || routeIsCovered(route.path, PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes);
+  }
+  if (!routeNeedsNotifier(route, knownWritingGets)) return true;
+  return patterns.some((pattern) => routeIsCovered(route.path, pattern));
+};
 
 const addChannel = async (database: TestD1Database, channelId: string): Promise<void> => {
   await database.prepare(
@@ -166,7 +173,7 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
       queryKeys.channel(id, "modules"), queryKeys.channel(id, "overview"), queryKeys.channels(),
       dashboardDataKeys.system(id), moduleQueryKey(id, "text_library", "library"),
       dashboardDataKeys.variables(id), moduleQueryKey(id, "chat_voting", "settings"),
-      moduleQueryKey(id, "text_commands", "commands"),
+      moduleQueryKey(id, "chat_voting", "panel"), moduleQueryKey(id, "text_commands", "commands"),
     ],
     write: async (database, id) => {
       await database.prepare(
@@ -311,6 +318,18 @@ describe("panel resource revisions", () => {
       explicitRoutes,
       new Set([...writingGetRoutes, unwrappedWritingGet.path]),
     )).toBe(false);
+    const unnotifiedPlatformWritingGet = { method: "GET", path: "/api/platform/writing-get" };
+    expect(routeHasNotifier(
+      unnotifiedPlatformWritingGet,
+      routePatterns,
+      explicitRoutes,
+      new Set([...writingGetRoutes, unnotifiedPlatformWritingGet.path]),
+    )).toBe(false);
+    expect(routeHasNotifier(
+      { method: "GET", path: "/api/platform/unclassified-read" },
+      routePatterns,
+      explicitRoutes,
+    )).toBe(false);
 
     const moduleMutations = MODULES.flatMap((module) => module.routes?.routes ?? [])
       .filter(({ method }) => writeMethods.has(method));
@@ -345,6 +364,7 @@ describe("panel resource revisions", () => {
     expect(PANEL_RESOURCE_NOTIFIER_COVERAGE.eventSubHandler).toBe("eventSubRouter notification/revocation finally");
 
     const channelObject = readFileSync(resolve(root, "src/worker/durable/ChannelObject.ts"), "utf8");
+    expect(channelObject).toContain("moduleAlarmHandlerEntries(modules)");
     const alarm = /override async alarm\(\): Promise<void>\s+\{([\s\S]*?)\n\s+\}\n\n\s+override webSocketMessage/u.exec(channelObject)?.[1] ?? "";
     expect(alarm).toMatch(/finally \{\s*await this\.notifyCommittedPanelResources\(\);/u);
     expect(alarm).toContain("this.alarmHandlers(MODULES");
@@ -400,7 +420,7 @@ describe("panel resource revisions", () => {
     expect(memberRoutes).toMatch(/if \(!changed\) return[\s\S]*?await revokeRealtimeUser\(context\.env\.CHANNEL, channelId, userId\);/u);
     expect(platformRoutes).toMatch(/if \(!changed\) return[\s\S]*?await revokeRealtimeUser\(context\.env\.CHANNEL, channelId, userId\);/u);
     expect(authSource).toMatch(/await revokeSession\(context\.env\.DB, session\.sessionId, now, "logout"\);\s*await revokeRealtimeSessionForUser/u);
-    expect(loginMaintenance).toMatch(/if \(revoked\) \{\s*await revokeRealtimeUserFromAllChannels/u);
+    expect(loginMaintenance).toMatch(/if \(revoked\) \{\s*const pending = await getPendingRealtimeUserRevocation[\s\S]*?await revokeRealtimeUserFromAllChannels/u);
   });
 
   it("does not enumerate channels for an unauthenticated OAuth callback", async () => {
@@ -539,6 +559,54 @@ describe("panel resource revisions", () => {
       unsubscribe?.();
       writer.clear();
       reader.clear();
+      vi.unstubAllGlobals();
+      database.close();
+    }
+  });
+
+  it("reloads the production text-library query after timezone and location changes", async () => {
+    const database = new TestD1Database();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const channelId = "library-settings-revisions";
+    const queryKey = moduleQueryKey(channelId, "text_library", "library");
+    let unsubscribe: (() => void) | undefined;
+    const requestUrl = (input: RequestInfo | URL): string =>
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    try {
+      await addChannel(database, channelId);
+      const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input);
+        if (url.endsWith("/revisions")) {
+          return new Response(JSON.stringify({ revisions: await readPanelResourceRevisions(database as unknown as D1Database, channelId) }), { status: 200 });
+        }
+        if (url.includes("/modules/text_library/")) {
+          return new Response(JSON.stringify({ blocks: [], categories: [], usage: {} }), { status: 200 });
+        }
+        if (url.endsWith("/template-variables")) return new Response(JSON.stringify({ variables: [] }), { status: 200 });
+        if (url.endsWith("/settings")) return new Response(JSON.stringify({ timeZone: "UTC", revision: 0 }), { status: 200 });
+        throw new Error(`Unexpected library fetch: ${url}`);
+      });
+      vi.stubGlobal("fetch", fetcher);
+      await reconcileDashboardPanelResourceRevisions(queryClient, channelId);
+      const observer = new QueryObserver(queryClient, {
+        queryKey,
+        queryFn: ({ signal }) => loadTextLibrary(channelId, signal),
+        staleTime: Infinity,
+      });
+      unsubscribe = observer.subscribe(() => undefined);
+      const libraryRequestCount = (): number => fetcher.mock.calls.filter(([input]) => requestUrl(input).includes("/modules/text_library/")).length;
+      await vi.waitFor(() => { expect(libraryRequestCount()).toBe(1); });
+
+      await database.prepare("UPDATE channels SET location_time_zone = 'Europe/Berlin' WHERE channel_id = ?").bind(channelId).run();
+      await reconcileDashboardPanelResourceRevisions(queryClient, channelId);
+      await vi.waitFor(() => { expect(libraryRequestCount()).toBe(2); });
+
+      await database.prepare("UPDATE channels SET location_name = 'Berlin', location_latitude = 52.5, location_longitude = 13.4 WHERE channel_id = ?").bind(channelId).run();
+      await reconcileDashboardPanelResourceRevisions(queryClient, channelId);
+      await vi.waitFor(() => { expect(libraryRequestCount()).toBe(3); });
+    } finally {
+      unsubscribe?.();
+      queryClient.clear();
       vi.unstubAllGlobals();
       database.close();
     }
@@ -795,6 +863,8 @@ describe("panel resource revisions", () => {
         `INSERT INTO audit_log (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
          VALUES ('identity-audit', 'identity-owner', '2026-10-10T00:00:00.000Z', 'identity-member-channel', 'channel.updated', '{}', '{}')`,
       ).run();
+      await database.prepare("DELETE FROM channel_members WHERE channel_id = 'identity-member-channel' AND user_id = 'identity-owner'").run();
+      await database.prepare("DELETE FROM panel_resource_pending").run();
       await database.prepare(
         `INSERT INTO twitch_login_identity
           (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, status, created_at, updated_at)
@@ -810,7 +880,7 @@ describe("panel resource revisions", () => {
       expect(ownerAfter["channel.modules"]).toBeGreaterThan(ownerBefore["channel.modules"] ?? 0);
       expect(ownerAfter["module:chat_voting:settings"]).toBeGreaterThan(ownerBefore["module:chat_voting:settings"] ?? 0);
       expect(ownerAfter["module:ads:schedule"]).toBeGreaterThan(ownerBefore["module:ads:schedule"] ?? 0);
-      expect(memberAfter["channel.members"]).toBeGreaterThan(memberBefore["channel.members"] ?? 0);
+      expect(memberAfter["channel.members"]).toBe(memberBefore["channel.members"]);
       expect(memberAfter["channel.audit"]).toBeGreaterThan(memberBefore["channel.audit"] ?? 0);
     } finally {
       database.close();
@@ -885,6 +955,7 @@ describe("panel resource revisions", () => {
         "panel_resource_dependencies",
         "panel_resource_pending",
         "panel_resource_revisions",
+        "pending_realtime_user_revocations",
         "text_command_user_cooldowns",
         "twitch_app_access_token",
       ]);
