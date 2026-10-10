@@ -64,6 +64,14 @@ const invalidateBelaboxLiveQueries = (queryClient: QueryClient, channelId: strin
   }
 };
 
+const invalidateModuleDataQueries = (queryClient: QueryClient, channelId: string, moduleId: string): void => {
+  const moduleQueries = queryClient.getQueryCache().findAll({ queryKey: dashboardDataKeys.module(channelId, moduleId) });
+  for (const query of moduleQueries) {
+    const part = query.queryKey[4];
+    if (typeof part === "string" && part !== "settings") invalidate(queryClient, query.queryKey);
+  }
+};
+
 /** Runs a leading refresh, then limits hints for this key to one refresh per interval. */
 const scheduleRealtimeRefresh = (queryClient: QueryClient, queryKey: readonly unknown[]): void => {
   let refreshes = scheduledRefreshes.get(queryClient);
@@ -109,7 +117,7 @@ export const invalidateDashboardRealtimeMessage = (
     case "event_log.new": {
       invalidate(queryClient, queryKeys.channel(channelId, "events"));
       const moduleIds = new Set(message.payload.entries.map((entry) => entry.moduleId));
-      for (const moduleId of moduleIds) invalidate(queryClient, dashboardDataKeys.module(channelId, moduleId));
+      for (const moduleId of moduleIds) invalidateModuleDataQueries(queryClient, channelId, moduleId);
       break;
     }
     case "variables.changed":

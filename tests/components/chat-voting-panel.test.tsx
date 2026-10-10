@@ -181,6 +181,7 @@ describe("chat voting live panel", () => {
   });
 
   it("uses saved default labels and duration for the next vote", async () => {
+    setDashboardRealtimeStatus("fictional-channel", "connected");
     let serverState = currentState();
     let startPayload: unknown;
     vi.stubGlobal("fetch", fetchFor(

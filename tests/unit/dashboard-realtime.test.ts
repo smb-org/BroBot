@@ -1,5 +1,5 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseRealtimeMessage } from "../../src/dashboard/realtime";
 import { dashboardDataKeys, queryKeys } from "../../src/dashboard/data/keys";
@@ -28,6 +28,7 @@ const addQuery = (queryClient: QueryClient, key: readonly unknown[]): void => {
 
 afterEach(() => {
   setDashboardRealtimeStatus(channelId, "offline");
+  vi.useRealTimers();
 });
 
 describe("dashboard realtime messages", () => {
@@ -64,6 +65,51 @@ describe("dashboard realtime messages", () => {
     expect(queryClient.getQueryState(chatVoting)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(belabox)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(unrelated)?.isInvalidated).toBe(false);
+  });
+
+  it("bounds sustained module hints and does not refresh module settings", async () => {
+    vi.useFakeTimers();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const reads = { events: 0, panel: 0, settings: 0 };
+    const queryKeysByPart = {
+      events: dashboardDataKeys.events(channelId, { origin: null, module: null, tone: null, person: null }),
+      panel: moduleQueryKey(channelId, "chat_voting", "panel"),
+      settings: moduleQueryKey(channelId, "chat_voting", "settings"),
+    } as const;
+    const subscriptions = Object.entries(queryKeysByPart).map(([part, queryKey]) => {
+      queryClient.setQueryData(queryKey, { ready: true });
+      const observer = new QueryObserver(queryClient, {
+        queryKey,
+        queryFn: () => {
+          reads[part as keyof typeof reads] += 1;
+          return Promise.resolve({ ready: true });
+        },
+        staleTime: Infinity,
+      });
+      return observer.subscribe(() => undefined);
+    });
+
+    for (let index = 0; index < 20; index += 1) {
+      invalidateDashboardRealtimeMessage(queryClient, moduleHint("modul.chat_voting.tally", { voteId: "vote-a" }));
+      invalidateDashboardRealtimeMessage(queryClient, moduleHint("event_log.new", {
+        entries: [{
+          eventId: `event-${String(index)}`,
+          createdAt: "2026-10-09T08:00:00.000Z",
+          moduleId: "chat_voting",
+          code: "chat_voting.vote_recorded",
+          actorUserId: null,
+        }],
+      }));
+      await vi.advanceTimersByTimeAsync(50);
+    }
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(reads.panel).toBeLessThanOrEqual(2);
+    expect(reads.events).toBeLessThanOrEqual(2);
+    expect(reads.settings).toBe(0);
+
+    subscriptions.forEach((unsubscribe) => { unsubscribe(); });
+    queryClient.clear();
   });
 
   it("maps variables, overlays, ad schedules, and module hints to their channel data keys", () => {
