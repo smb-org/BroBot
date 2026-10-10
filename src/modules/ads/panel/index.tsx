@@ -104,7 +104,7 @@ export const AdsPanel = ({ channelId, language = "de", canManage = false }: { ch
         style={{ height: "var(--s6)", overflow: "hidden", margin: 0 }} aria-live="polite">
         {canManage ? "" : labels.refreshReadOnly}
       </p>
-      <LoadState status={loadStatus} minHeight="calc(var(--s10) * 24)"
+      <LoadState variant="panel-960" status={loadStatus}
         loading={<div className="module-stack" aria-label={labels.loading}>
           <Skeleton rows={4} height={34} />
           <Skeleton rows={3} height={34} />
@@ -112,7 +112,7 @@ export const AdsPanel = ({ channelId, language = "de", canManage = false }: { ch
         </div>}
         empty={<div style={{ minHeight: "calc(var(--s10) * 24)" }} />}
         error={<p role="alert">{loadError}</p>}
-        onRetry={() => { void scheduleQuery.refetch({ throwOnError: true }).catch(() => undefined); }}
+        queryError={{ message: loadError, onRetry: () => { void scheduleQuery.refetch({ throwOnError: true }).catch(() => undefined); } }}
         refreshError={schedule !== null && scheduleLoadFailed}>
       {schedule === null ? null : <>
       <section className="config-section" aria-label={labels.scheduleSection}>

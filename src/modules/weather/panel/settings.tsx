@@ -61,12 +61,12 @@ function WeatherSettingsPanelContent({ channelId, language, canManage }: ModuleP
   };
 
   return <LoadState
+    variant="panel-640"
     status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
-    minHeight="calc(var(--s10) * 16)"
     loading={<Skeleton rows={4} height={34} />}
     empty={<div />}
     error={<p>{labels.loadFailed}</p>}
-    onRetry={() => { void settingsQuery.refetch(); }}
+    queryError={{ message: labels.loadFailed, onRetry: () => { void settingsQuery.refetch(); } }}
     refreshError={settingsQuery.isRefetchError}
   >
   <div className="module-stack weather-settings" aria-label={labels.settings}>

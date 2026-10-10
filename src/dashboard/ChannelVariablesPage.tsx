@@ -14,7 +14,7 @@ import {
   type PanelChannelVariablesResponse,
   type PanelOverlayElement,
 } from "./api";
-import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage } from "./locale";
+import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage, dashboardTexts } from "./locale";
 import { Button, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 import { dashboardDataKeys } from "./data/keys";
@@ -78,6 +78,9 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const overlaysQuery = useOverlaysQuery(channelId, useOverlayOpen);
   const overlayOptions = (overlaysQuery.data?.overlays ?? []).map(({ id, name, elementCount }) => ({ id, name, elementCount }));
   const refetchVariables = variablesQuery.refetch;
+  const variablesLoadError = variablesQuery.error instanceof PanelApiError
+    ? apiErrorText(variablesQuery.error.code, labels.loadError)
+    : labels.loadError;
   const [overlaySelection, setOverlaySelection] = useState("");
   const [creatingOverlay, setCreatingOverlay] = useState(false);
   const [newOverlayName, setNewOverlayName] = useState("");
@@ -117,9 +120,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
 
   useEffect(() => {
     if (!variablesQuery.isError) return;
-    const loadErrorText = channelVariablesTexts(dashboardLanguage()).loadError;
-    notify({ tone: "error", message: variablesQuery.error instanceof PanelApiError ? apiErrorText(variablesQuery.error.code, loadErrorText) : loadErrorText });
-  }, [variablesQuery.error, variablesQuery.isError]);
+    notify({ tone: "error", message: variablesLoadError });
+  }, [variablesLoadError, variablesQuery.isError]);
 
   const selected = useMemo(() => variables.find((variable) => variable.name === selectedName) ?? null, [selectedName, variables]);
   useLayoutEffect(() => {
@@ -320,9 +322,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     : variables.length === 0 ? loadFailed ? "error" : "empty"
       : visibleVariables.length === 0 ? "empty" : "success";
   const list = <section className="channel-variables-page config-section" aria-label={labels.list}>
-    <div className="channel-variables-limit-slot" aria-live="polite">
-      {loadFailed && variables.length > 0 ? <Button variant="subtle" onClick={() => { void refresh(); }}>{labels.retry}</Button> : null}
-    </div>
     <ListToolbar
       searchLabel={labels.search}
       searchPlaceholder={labels.search}
@@ -331,14 +330,20 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       onSearchChange={setSearch}
       create={{ label: labels.create, onClick: beginCreate, disabled: createDisabled, ...(createReason === undefined ? {} : { reason: createReason }) }}
       usage={{ count: variables.length, maximum, ...(query.length === 0 ? {} : { filteredCount: visibleVariables.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: labels.limitSuffix, loadedSuffix: dashboardCommonTexts().loaded } }}
+      {...(loadFailed && variables.length > 0 ? { queryError: {
+        title: dashboardTexts().errors.dataLoadFailed,
+        message: variablesLoadError,
+        onRetry: () => { void refresh().catch(() => undefined); },
+      } } : {})}
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
     />
     <LoadState
+      variant="panel-360"
       status={listStatus}
-      minHeight={360}
       loading={<Skeleton rows={8} height={34} />}
       empty={<p className="empty-state">{variables.length === 0 ? labels.empty : dashboardCommonTexts().noMatches}</p>}
-      error={<div className="empty-state"><Button variant="neutral" onClick={() => { void refresh(); }}>{labels.retry}</Button></div>}
+      error={<p role="alert">{variablesLoadError}</p>}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: variablesLoadError, onRetry: () => { void refresh().catch(() => undefined); } }}
     >{visibleVariables.length === 0 ? null : <div className="table-wrap channel-variables-table-wrap">
       <table className="table channel-variables-table">
         <thead><tr>

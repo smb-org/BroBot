@@ -110,7 +110,6 @@ export interface TextCommandsTexts {
   issueWarning: string;
   conflictMessage: string;
   reloadError: string;
-  retry: string;
   reload: string;
   managementLocked: string;
   active: string;
@@ -274,7 +273,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln", close: "Schließen",
     save: "Änderungen speichern", create: "Anlegen", discard: "Verwerfen", saved: "Gespeichert.", saving: "Wird gespeichert …",
     pending: "Wird gespeichert …", invalid: "Bitte korrigiere die markierten Felder.", issueError: "Fehler", issueWarning: "Hinweis",
-    conflictMessage: "Inzwischen von jemand anderem geändert.", reloadError: "Der Serverstand konnte nicht geladen werden.", retry: "Erneut versuchen", reload: "Serverstand laden",
+    conflictMessage: "Inzwischen von jemand anderem geändert.", reloadError: "Der Serverstand konnte nicht geladen werden.", reload: "Serverstand laden",
     managementLocked: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.",
     active: "Aktiv", activeImmediately: "wirkt sofort", enabled: "eingeschaltet", disabled: "ausgeschaltet", noAliases: "keine",
     never: "noch nie", secondsAgo: (count) => `vor ${String(count)} s`, minutesAgo: (count) => `vor ${String(count)} min`, hoursAgo: (count) => `vor ${String(count)} h`,
@@ -379,7 +378,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch", close: "Close",
     save: "Save changes", create: "Create", discard: "Discard", saved: "Saved.", saving: "Saving …",
     pending: "Saving …", invalid: "Please correct the marked fields.", issueError: "Error", issueWarning: "Warning",
-    conflictMessage: "This command was changed by someone else.", reloadError: "The server version could not be loaded.", retry: "Retry", reload: "Load server version",
+    conflictMessage: "This command was changed by someone else.", reloadError: "The server version could not be loaded.", reload: "Load server version",
     managementLocked: "Only broadcasters and managers may add, edit, or delete commands.",
     active: "Active", activeImmediately: "takes effect immediately", enabled: "enabled", disabled: "disabled", noAliases: "none",
     never: "never", secondsAgo: (count) => `${String(count)} s ago`, minutesAgo: (count) => `${String(count)} min ago`, hoursAgo: (count) => `${String(count)} h ago`,

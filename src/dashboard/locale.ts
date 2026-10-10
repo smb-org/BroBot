@@ -208,7 +208,6 @@ export interface ChannelVariablesTexts {
   empty: string;
   loading: string;
   loadError: string;
-  retry: string;
   saveError: string;
   deleteError: string;
   name: string;
@@ -268,7 +267,7 @@ export interface ChannelVariablesTexts {
 const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
   de: {
     title: "Kanalvariablen", list: "Variablen", search: "Variablen suchen", countSuffix: "Variablen", limitSuffix: "Variablen belegt", filteredSuffix: "Variablen", create: "Variable anlegen", count: (count, maximum) => `${String(count)} von ${String(maximum)}`,
-    empty: "Noch keine Kanalvariablen angelegt.", loading: "Kanalvariablen werden geladen …", loadError: "Kanalvariablen konnten nicht geladen werden.", retry: "Erneut versuchen",
+    empty: "Noch keine Kanalvariablen angelegt.", loading: "Kanalvariablen werden geladen …", loadError: "Kanalvariablen konnten nicht geladen werden.",
     saveError: "Die Kanalvariable konnte nicht gespeichert werden.", deleteError: "Die Kanalvariable konnte nicht gelöscht werden.",
     name: "Name", nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; höchstens 32 Zeichen.", nameInvalid: "Nur Kleinbuchstaben, Zahlen und Unterstrich.",
     description: "Beschreibung", descriptionHint: "Erscheint in der Variablenauswahl. Höchstens 80 Zeichen.", noDescription: "Keine Beschreibung",
@@ -299,7 +298,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
   },
   en: {
     title: "Channel variables", list: "Variables", search: "Search variables", countSuffix: "variables", limitSuffix: "variables used", filteredSuffix: "variables", create: "Create variable", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
-    empty: "No channel variables yet.", loading: "Loading channel variables …", loadError: "Channel variables could not be loaded.", retry: "Retry",
+    empty: "No channel variables yet.", loading: "Loading channel variables …", loadError: "Channel variables could not be loaded.",
     saveError: "The channel variable could not be saved.", deleteError: "The channel variable could not be deleted.",
     name: "Name", nameHint: "Lowercase letters, numbers, and underscores; up to 32 characters.", nameInvalid: "Use lowercase letters, numbers, and underscores only.",
     description: "Description", descriptionHint: "Shown in the variable picker. Up to 80 characters.", noDescription: "No description",
@@ -873,7 +872,6 @@ export interface DashboardTexts {
     realtimeRenewSession: string;
     realtimeNew: (count: string) => string;
     connectionLost: string;
-    retry: string;
     technicalDetails: string;
     copyId: string;
     copied: string;
@@ -1231,7 +1229,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       realtimeConnecting: "Verbindet …", realtimeConnected: "Verbunden", realtimeReconnecting: "Verbindet neu …",
       realtimeOffline: "Offline", realtimeRenewSession: "Sitzung erneuern", realtimeNew: (count) => `${count} neue Ereignisse`,
       connectionLost: "Verbindung unterbrochen. Die Ereignisse konnten nicht geladen werden.",
-      retry: "Erneut versuchen", technicalDetails: "Technische Details", copyId: "ID kopieren", copied: "Kopiert",
+      technicalDetails: "Technische Details", copyId: "ID kopieren", copied: "Kopiert",
       trigger: "Auslöser", moderator: "Moderator", affectedPerson: "Betroffene Person",
       showCause: (eventLabel) => `Ursache anzeigen: ${eventLabel}`,
       causeTwitchMessage: (message) => `Twitch: ${message}`,
@@ -1552,7 +1550,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       realtimeConnecting: "Connecting …", realtimeConnected: "Connected", realtimeReconnecting: "Reconnecting …",
       realtimeOffline: "Offline", realtimeRenewSession: "Renew session", realtimeNew: (count) => `${count} new events`,
       connectionLost: "Connection lost. The events could not be loaded.",
-      retry: "Retry", technicalDetails: "Technical details", copyId: "Copy ID", copied: "Copied",
+      technicalDetails: "Technical details", copyId: "Copy ID", copied: "Copied",
       trigger: "Trigger", moderator: "Moderator", affectedPerson: "Affected person",
       showCause: (eventLabel) => `Show cause: ${eventLabel}`,
       causeTwitchMessage: (message) => `Twitch: ${message}`,

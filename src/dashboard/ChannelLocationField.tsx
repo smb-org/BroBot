@@ -167,8 +167,8 @@ export const ChannelLocationField = ({
             </Button>
           </div>
           <LoadState
+            variant="panel-178"
             status={resultsStatus}
-            minHeight={178}
             loading={<Skeleton rows={3} height={54} />}
             empty={query.trim().length >= 2 && !searchFailed ? <p className="muted">{labels.locationNoResults}</p> : <span aria-hidden="true" />}
             error={<Skeleton rows={3} height={54} />}

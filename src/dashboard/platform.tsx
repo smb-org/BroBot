@@ -281,8 +281,8 @@ const ChannelInspector = ({
       </>}
       <InspectorSection title={texts.members}>
         <LoadStateView
+          variant="panel-220"
           status={members.data === null ? members.status === "error" ? "error" : "loading" : members.data.members.length === 0 ? "empty" : "success"}
-          minHeight={220}
           loading={<PlatformMembersSkeleton />}
           empty={<MembersTable members={[]} selectedUserId={selectedMemberId} onSelect={(member) => { setSelectedMemberId(member.userId); }} />}
           error={<PlatformMembersSkeleton />}
@@ -443,17 +443,6 @@ const InvitationLink = ({ channel: channel }: { channel: PanelPlatformChannelOve
   );
 };
 
-/** Error state shown inside the reserved load box instead of the skeleton. */
-const PlatformLoadError = ({ message, onRetry }: { message: string | null; onRetry: () => void }): ReactElement => {
-  const texts = platformTexts();
-  return (
-    <div className="empty-state">
-      <p className="muted" role="alert">{message ?? texts.error}</p>
-      <Button variant="neutral" onClick={onRetry}>{texts.retry}</Button>
-    </div>
-  );
-};
-
 const PlatformAudit = ({
   auditState: auditState,
   channels: channels,
@@ -480,11 +469,12 @@ const PlatformAudit = ({
     <section className="config-section" aria-label={texts.audit}>
       <div className="section-heading"><h2>{texts.audit}</h2></div>
       <LoadStateView
+        variant="panel-280"
         status={status}
-        minHeight={280}
         loading={<Skeleton rows={6} height={34} />}
         empty={<p className="muted">{texts.auditEmpty}</p>}
-        error={<PlatformLoadError message={auditState.error} onRetry={onRetry} />}
+        error={<p role="alert">{auditState.error ?? texts.error}</p>}
+        queryError={{ message: auditState.error ?? texts.error, onRetry }}
       >{auditState.data === null || auditState.data.entries.length === 0 ? null : (
         <div className="table-wrap">
           <table className="table">
@@ -619,11 +609,12 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
                 <div>
                   <InspectorHeading level="h2" title={texts.channelOverview} />
                   <LoadStateView
+                    variant="panel-360"
                     status={overviewStatus}
-                    minHeight={360}
                     loading={<Skeleton rows={6} height={34} />}
                     empty={<p className="muted">{texts.noChannels}</p>}
-                    error={<PlatformLoadError message={overview.error} onRetry={() => { void loadOverview(); }} />}
+                    error={<p role="alert">{overview.error ?? texts.error}</p>}
+                    queryError={{ message: overview.error ?? texts.error, onRetry: () => { void loadOverview(); } }}
                   >{overview.data === null || overview.data.length === 0 ? null : (
                     <div className="table-wrap">
                       <table className={`table table--content platform-channel-table${inspectorOpen ? " platform-channel-table--inspector-open" : ""}`}>

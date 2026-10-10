@@ -157,7 +157,7 @@ describe("Overlay composition editor", () => {
       onOverlayCreated={vi.fn()}
     /></UiProvider>);
 
-    expect(await screen.findByRole("button", { name: "Reload" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
     overlayAvailable = true;
     await act(async () => {
       await view.queryClient.refetchQueries({ queryKey: dashboardDataKeys.overlay("kanal-a", "overlay-a"), exact: true });
@@ -191,7 +191,7 @@ describe("Overlay composition editor", () => {
       onOverlayCreated={vi.fn()}
     /></UiProvider>);
 
-    expect(await screen.findByRole("button", { name: "Reload" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
     variablesAvailable = true;
     await act(async () => {
       await view.queryClient.refetchQueries({ queryKey: dashboardDataKeys.variables("kanal-a"), exact: true });
