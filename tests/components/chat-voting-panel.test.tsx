@@ -117,7 +117,12 @@ const fetchHarness = (options: FetchHarnessOptions = {}) => {
         templates = templates.map((entry) => entry.id === templateId ? updated : entry);
         return Promise.resolve(jsonResponse({ template: updated }));
       }
-      if (method === "DELETE") return Promise.resolve(options.onDelete?.(templateId) ?? jsonResponse({ ok: true }));
+      if (method === "DELETE") {
+        return Promise.resolve(options.onDelete?.(templateId) ?? jsonResponse({ ok: true })).then((response) => {
+          if (response.ok) templates = templates.filter((entry) => entry.id !== templateId);
+          return response;
+        });
+      }
     }
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
@@ -404,7 +409,8 @@ describe("saved chat voting panel", () => {
     let deletedId = "";
     mount(fetchHarness({ onDelete: (id) => { deletedId = id; return jsonResponse({ ok: true }); } }));
     await screen.findByRole("textbox", { name: "Question" });
-    fireEvent.click(screen.getByRole("button", { name: "Delete vote" }));
+    fireEvent.click(screen.getByRole("button", { name: "Actions for “Dinner”" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete vote", hidden: true }));
     expect(await screen.findByRole("dialog")).toHaveTextContent("Delete “Dinner”?");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete vote" }));
     await waitFor(() => expect(deletedId).toBe("template-dinner"));

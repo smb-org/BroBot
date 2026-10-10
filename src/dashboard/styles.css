@@ -455,9 +455,11 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-editor__duration-slot .mantine-InputWrapper-error { display: none; }
 .chat-voting-editor__chat-hint { min-height: 20px; margin: 0 0 var(--s3); overflow: hidden; color: var(--text-3); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-voting-template-inspector .chat-voting-editor__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.chat-voting-template-inspector .chat-voting-editor__footer { box-sizing: border-box; height: 64px; min-height: 64px; position: static; flex: none; margin: 0 -16px -18px; padding: 0 16px; border-top: 1px solid var(--line); background: var(--surface-inspector); }
-.chat-voting-template-inspector .chat-voting-editor__footer .ui-save-bar { height: 64px; min-height: 64px; }
-.chat-voting-editor__save-footer { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--s2); min-width: 0; }
+.chat-voting-template-inspector .chat-voting-editor__footer { box-sizing: border-box; display: flex; height: 106px; min-height: 106px; flex: none; flex-direction: column; margin: 0 -16px -18px; padding: 0 16px; border-top: 1px solid var(--line); background: var(--surface-inspector); }
+.chat-voting-editor__start-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s2); height: 41px; min-height: 41px; min-width: 0; border-bottom: 1px solid var(--line); }
+.chat-voting-template-inspector .chat-voting-editor__footer .ui-save-bar { height: 64px; min-height: 64px; margin-top: 0; border-top: 0; }
+.chat-voting-template-inspector .ui-save-bar__buttons { gap: 4px; }
+.chat-voting-template-inspector .ui-save-bar__buttons > .mantine-Button-root { padding-inline: 12px; }
 .chat-voting-editor__start-reason { display: block; box-sizing: border-box; min-width: 0; min-height: 16px; max-height: 16px; margin: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-voting-template-inspector .inspector-content-section .ui-segmented-control__label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .chat-voting-template-inspector .chat-voting-editor__start-button { flex: none; white-space: nowrap; }

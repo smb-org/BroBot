@@ -601,13 +601,14 @@ test("a server shortcut conflict stays on its field and preserves the rest of th
 test("new saved votes remain local until Save", async ({ page }) => {
   const timestamp = "2030-01-01T12:00:00.000Z";
   let createCount = 0;
+  const templates: ChatVoteTemplate[] = [];
   await routeJson(page, "/api/csrf", { token: "csrf" });
   await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
     vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
   });
   await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
     if (route.request().method() === "GET") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: [], count: 0, maximum: 100 }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates, count: templates.length, maximum: 100 }) });
       return;
     }
     if (route.request().method() === "POST") {
@@ -617,6 +618,7 @@ test("new saved votes remain local until Save", async ({ page }) => {
         id: "template-created", channelId: "channel-a", ...draft, revision: 1, legacyAlias: null,
         lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
       };
+      templates.unshift(template);
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ template }) });
       return;
     }
@@ -635,6 +637,189 @@ test("new saved votes remain local until Save", async ({ page }) => {
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => createCount).toBe(1);
   await expect(page.locator(".chat-voting-template-list .list-row")).toContainText("Vote created on save");
+});
+
+test("the automatically opened desktop template keeps its guarded draft across responsive changes", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const templates: ChatVoteTemplate[] = [
+    { id: "template-auto", channelId: "channel-a", shortcut: "auto", title: "Automatically opened", labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
+    { id: "template-next", channelId: "channel-a", shortcut: "next", title: "Next vote", labels: ["Up", "Down"], freeTextMode: null, durationSeconds: 120, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
+  ];
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates, count: templates.length, maximum: 100 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+
+  const inspector = page.locator(".chat-voting-template-inspector");
+  const question = page.getByRole("textbox", { name: "Question" });
+  await expect(question).toHaveValue("Automatically opened");
+  await question.fill("Draft from the implicit selection");
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect(inspector).toBeVisible();
+  await expect(question).toHaveValue("Draft from the implicit selection");
+  await expect(page.getByRole("dialog", { name: "Discard changes?" })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(question).toHaveValue("Draft from the implicit selection");
+  await page.locator(".chat-voting-template-list .list-row__link").nth(1).click();
+  const dialog = page.getByRole("dialog", { name: "Discard changes?" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Continue editing" }).click();
+  await expect(question).toHaveValue("Draft from the implicit selection");
+});
+
+test("a second save preserves edits made while a newly created vote is being acknowledged", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  let template: ChatVoteTemplate | null = null;
+  let releasePatch: () => void = () => undefined;
+  let markPatchStarted: () => void = () => undefined;
+  const patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+  const patchStarted = new Promise<void>((resolve) => { markPatchStarted = resolve; });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
+    if (route.request().method() === "GET") {
+      const templates = template === null ? [] : [template];
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates, count: templates.length, maximum: 100 }) });
+      return;
+    }
+    if (route.request().method() === "POST") {
+      const draft = await route.request().postDataJSON() as Partial<ChatVoteTemplate>;
+      template = {
+        id: "template-created-again", channelId: "channel-a", shortcut: null, title: draft.title ?? "",
+        labels: draft.labels ?? [], freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null,
+        lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+      };
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ template }) });
+      return;
+    }
+    if (route.request().method() === "PATCH") {
+      markPatchStarted();
+      await patchGate;
+      const draft = await route.request().postDataJSON() as Partial<ChatVoteTemplate>;
+      template = { ...(template as ChatVoteTemplate), ...draft, revision: (template?.revision ?? 0) + 1, updatedAt: timestamp };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ template }) });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+  await page.locator(".list-toolbar__create button").click();
+  const question = page.getByRole("textbox", { name: "Question" });
+  await question.fill("First saved version");
+  await page.getByRole("button", { name: "Yes/No", exact: true }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator(".ui-save-bar__status")).toContainText("Saved");
+  await expect(page.locator(".chat-voting-template-list .list-row")).toContainText("First saved version");
+
+  await question.fill("Second save submitted");
+  try {
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await patchStarted;
+    await question.fill("Edited while acknowledgement is pending");
+    releasePatch();
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+    await expect(question).toHaveValue("Edited while acknowledgement is pending");
+  } finally {
+    releasePatch();
+  }
+});
+
+test("template saves and deletes cancel stale reads before publishing their cache updates", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  let template: ChatVoteTemplate | null = {
+    id: "template-ordered-write", channelId: "channel-a", shortcut: "ordered", title: "Original vote",
+    labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  let templateReads = 0;
+  let releaseStaleSaveRead: () => void = () => undefined;
+  let releaseStaleDeleteRead: () => void = () => undefined;
+  let markStaleSaveReadStarted: () => void = () => undefined;
+  let markStaleDeleteReadStarted: () => void = () => undefined;
+  const staleSaveGate = new Promise<void>((resolve) => { releaseStaleSaveRead = resolve; });
+  const staleDeleteGate = new Promise<void>((resolve) => { releaseStaleDeleteRead = resolve; });
+  const staleSaveReadStarted = new Promise<void>((resolve) => { markStaleSaveReadStarted = resolve; });
+  const staleDeleteReadStarted = new Promise<void>((resolve) => { markStaleDeleteReadStarted = resolve; });
+  const realtime = await installChatVotingRealtime(page);
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
+    if (route.request().method() === "GET") {
+      templateReads += 1;
+      const responseTemplates = template === null ? [] : [template];
+      if (templateReads === 2) {
+        markStaleSaveReadStarted();
+        await staleSaveGate;
+        try {
+          await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: responseTemplates, count: responseTemplates.length, maximum: 100 }) });
+        } catch { /* The query may already have been cancelled by the write. */ }
+        return;
+      }
+      if (templateReads === 4) {
+        markStaleDeleteReadStarted();
+        await staleDeleteGate;
+        try {
+          await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: responseTemplates, count: responseTemplates.length, maximum: 100 }) });
+        } catch { /* The query may already have been cancelled by the write. */ }
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: responseTemplates, count: responseTemplates.length, maximum: 100 }) });
+      return;
+    }
+    if (route.request().method() === "PATCH") {
+      const update = await route.request().postDataJSON() as Partial<ChatVoteTemplate>;
+      template = { ...(template as ChatVoteTemplate), ...update, revision: (template?.revision ?? 0) + 1, updatedAt: timestamp };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ template }) });
+      return;
+    }
+    if (route.request().method() === "DELETE") {
+      template = null;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  try {
+    await gotoPanel(page, "chat_voting", "en", true);
+    const question = page.getByRole("textbox", { name: "Question" });
+    await expect(question).toHaveValue("Original vote");
+    await realtime.waitForSocket();
+    realtime.sendHint({ "module:chat_voting:templates": 1 });
+    await staleSaveReadStarted;
+
+    await question.fill("Saved after ordered write");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.locator(".ui-save-bar__status")).toContainText("Saved");
+    await expect(page.locator(".chat-voting-template-list .list-row")).toContainText("Saved after ordered write");
+    releaseStaleSaveRead();
+    await expect(page.locator(".chat-voting-template-list .list-row")).toContainText("Saved after ordered write");
+
+    realtime.sendHint({ "module:chat_voting:templates": 2 });
+    await staleDeleteReadStarted;
+    await page.getByRole("button", { name: "Actions for “Saved after ordered write”" }).click();
+    await page.getByRole("menuitem", { name: "Delete vote" }).click();
+    const deleteDialog = page.getByRole("dialog", { name: "Delete “Saved after ordered write”?" });
+    await expect(deleteDialog).toBeVisible();
+    await deleteDialog.getByRole("button", { name: "Delete vote" }).click();
+    await expect(page.locator(".chat-voting-template-list .list-row")).toHaveCount(0);
+    await expect.poll(() => templateReads).toBe(5);
+    releaseStaleDeleteRead();
+    await expect(page.locator(".chat-voting-template-list .list-row")).toHaveCount(0);
+  } finally {
+    releaseStaleSaveRead();
+    releaseStaleDeleteRead();
+  }
 });
 
 test("discard confirmation cancels selection, close, and dashboard navigation without losing the draft", async ({ page }) => {
@@ -747,7 +932,7 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
     Object.defineProperty(window.navigator, "language", { value: "de-DE" });
     Object.defineProperty(window.navigator, "languages", { value: ["de-DE", "de"] });
   });
-  for (const width of [1440, 1100, 760]) {
+  for (const width of [1440, 1100, 760, 390]) {
     await page.setViewportSize({ width, height: 1200 });
     await gotoPanel(page, "chat_voting", "de");
     await expect(page.locator(".chat-voting-live")).toBeVisible();
@@ -755,6 +940,53 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
     await row.click();
     const inspector = page.locator(".chat-voting-template-inspector");
     await expect(inspector).toContainText("Wer streamt morgen?");
+    const startButton = inspector.getByRole("button", { name: "Abstimmung starten", exact: true });
+    const saveButton = inspector.getByRole("button", { name: "Speichern", exact: true });
+    const discardButton = inspector.getByRole("button", { name: "Verwerfen", exact: true });
+    const expectFooterActionsVisible = async (): Promise<void> => {
+      for (const button of [startButton, saveButton, discardButton]) {
+        const geometry = await button.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const label = element.querySelector<HTMLElement>(".mantine-Button-label");
+          let clipped = false;
+          let ancestor = element.parentElement;
+          while (ancestor !== null) {
+            const style = getComputedStyle(ancestor);
+            const rect = ancestor.getBoundingClientRect();
+            if ((style.overflowX === "hidden" || style.overflowX === "clip") && (bounds.left < rect.left - 1 || bounds.right > rect.right + 1)) clipped = true;
+            if ((style.overflowY === "hidden" || style.overflowY === "clip") && (bounds.top < rect.top - 1 || bounds.bottom > rect.bottom + 1)) clipped = true;
+            ancestor = ancestor.parentElement;
+          }
+          return {
+            width: bounds.width,
+            height: bounds.height,
+            clipped,
+            labelWidth: label?.clientWidth ?? 0,
+            labelScrollWidth: label?.scrollWidth ?? 0,
+          };
+        });
+        expect(geometry.width).toBeGreaterThanOrEqual(44);
+        expect(geometry.height).toBeGreaterThanOrEqual(34);
+        expect(geometry.clipped).toBe(false);
+        expect(geometry.labelScrollWidth).toBeLessThanOrEqual(geometry.labelWidth + 1);
+      }
+    };
+    await expectFooterActionsVisible();
+    await page.getByRole("textbox", { name: "Frage" }).fill("Ungespeicherter Titel");
+    await expectFooterActionsVisible();
+    const statusCopy = inspector.locator(".ui-save-bar__message-copy");
+    await expect(statusCopy).toHaveAttribute("title", "Änderungen ausstehend");
+    const statusTextMetrics = await statusCopy.evaluate((element) => {
+      const font = getComputedStyle(element, "::before").font;
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (context === null) throw new Error("The status text measurement canvas is unavailable.");
+      context.font = font;
+      const measured = context.measureText(element.getAttribute("data-text") ?? "").width;
+      return { fits: measured <= element.clientWidth + 1, available: element.clientWidth, measured, text: element.getAttribute("data-text") };
+    });
+    expect(statusTextMetrics.fits, JSON.stringify({ width, ...statusTextMetrics })).toBe(true);
+    await discardButton.click();
     const inspectorLayout = await page.evaluate(() => {
       const root = document.querySelector(".chat-voting-template-inspector");
       const body = root?.querySelector(".chat-voting-editor__body");
@@ -809,11 +1041,7 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
         && footer.getBoundingClientRect().top >= body.getBoundingClientRect().bottom - 1;
     });
     expect(lastContentIsReachable).toBe(true);
-    if (width >= 1280) {
-      await expect(page.locator(".list-detail")).toHaveClass(/list-detail--open/u);
-    } else {
-      await expect(page.locator(".list-detail")).toHaveClass(/list-detail--open/u);
-    }
+    await expect(page.locator(".list-detail")).toHaveClass(/list-detail--open/u);
   }
 
   await page.setViewportSize({ width: 1440, height: 1200 });
@@ -1348,6 +1576,29 @@ test("an overnight chat voting result keeps its closing time fully visible at 39
   await expect(meta).toContainText(closingTime);
   const dimensions = await meta.evaluate((element) => ({ width: element.clientWidth, contentWidth: element.scrollWidth }));
   expect(dimensions.contentWidth).toBeLessThanOrEqual(dimensions.width);
+});
+
+test("Escape closes the desktop recent-vote inspector", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const vote = {
+    id: "recent-escape", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
+    title: "Dismiss with Escape", status: "closed", openedAt: timestamp, closesAt: timestamp,
+    requestedDurationSeconds: 60, closedAt: timestamp, closeReason: "manual", counts: [2, 1], voterCount: 3,
+  };
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [], count: 0, maximum: 100 });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/recent", { votes: [vote] });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+  await page.getByText("Recent", { exact: true }).click();
+
+  const inspector = page.locator(".chat-voting-recent-inspector");
+  await expect(inspector).toBeVisible();
+  await page.getByRole("button", { name: "Again", exact: true }).focus();
+  await page.keyboard.press("Escape");
+  await expect(inspector).toHaveCount(0);
 });
 
 test("the mobile live vote block keeps its height when the first vote starts", async ({ page }) => {

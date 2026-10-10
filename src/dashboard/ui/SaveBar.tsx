@@ -20,7 +20,6 @@ export interface SaveBarProps {
   warnings?: readonly string[];
   warningStatusLabel?: (warnings: readonly string[], saved: boolean) => ReactNode;
   conflict?: { message: string; reloadLabel: string; onReload: () => void };
-  footerOnConflict?: boolean;
   discardOnConflict?: boolean;
   footer?: ReactNode;
   destructive?: ReactNode;
@@ -47,7 +46,6 @@ export function SaveBar({
   warnings = [],
   warningStatusLabel,
   conflict,
-  footerOnConflict = false,
   discardOnConflict = false,
   footer,
   destructive,
@@ -101,7 +99,7 @@ export function SaveBar({
         <div className="ui-save-bar__message" style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
           {typeof statusText === "string" ? <TruncatedText className="ui-save-bar__message-copy" text={statusText} /> : statusText}
         </div>
-        {footer === undefined || (conflict !== undefined && !footerOnConflict) ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}
+        {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}
       </div>
       {showButtons || destructive !== undefined ? (
         <div className={`ui-save-bar__actions${destructive === undefined ? "" : " ui-save-bar__actions--destructive"}`}>

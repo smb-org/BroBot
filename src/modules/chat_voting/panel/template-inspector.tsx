@@ -1,12 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, ConfirmDialog, Field, InspectorSection, NumberField, SaveBar, SegmentedControl, SubInspector, Switch, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, NumberField, SaveBar, SegmentedControl, SubInspector, Switch, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
 import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
-import { CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
+import { CHAT_VOTE_TEMPLATE_MAXIMUM, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
 import { isValidTemplateShortcut, normalizeFreeTextVoteForMatching, templateStartProblem, voteLabelLength } from "../domain";
 import { chatVotingSavedPanelTexts } from "./locale-saved";
 import { createChatVoteTemplate, loadChatVoteTemplates, saveChatVoteTemplate } from "./service";
+import type { ChatVoteTemplateListState } from "./service";
 
 export interface TemplateInspectorActions {
   guardSwitch: (proceed: () => void, cancel?: () => void) => void;
@@ -23,7 +25,7 @@ export interface ChatVoteTemplateInspectorProperties {
   isRunning: boolean;
   startLockReason: string | null;
   onRegisterActions: (actions: TemplateInspectorActions | null) => void;
-  onTemplateSaved: (template: ChatVoteTemplate, wasNew: boolean) => void;
+  onTemplateSaved: (template: ChatVoteTemplate) => void;
   onClose: () => void;
   onDiscardNew: () => void;
   onStart: (template: ChatVoteTemplate) => Promise<void>;
@@ -61,6 +63,7 @@ export function ChatVoteTemplateInspector({
   onDelete,
 }: ChatVoteTemplateInspectorProperties): ReactElement {
   const labels = chatVotingSavedPanelTexts(language);
+  const queryClient = useDashboardQueryClient();
   const initialDraft = useMemo(() => draftFromTemplate(template), [template]);
   const draft = useDraft(initialDraft);
   const draftValue = useRef(draft.value);
@@ -116,9 +119,26 @@ export function ChatVoteTemplateInspector({
     setSaveError(undefined);
     setSaved(false);
     try {
-      const next = isNew
-        ? await createChatVoteTemplate(channelId, submitted)
-        : await saveChatVoteTemplate(channelId, template.id, baseRevision.current, submitted);
+      const baselineRevision = isNew ? null : baseRevision.current;
+      const next = await runModuleQueryWrite(queryClient, channelId, "chat_voting", "templates", (revision) => {
+        if (revision === null) return createChatVoteTemplate(channelId, submitted);
+        return saveChatVoteTemplate(channelId, template.id, revision, submitted);
+      }, {
+        baselineRevision,
+        updateCache: (current, updated) => {
+          const previous = current === undefined ? {
+            templates: [], count: 0, maximum: CHAT_VOTE_TEMPLATE_MAXIMUM,
+          } : current as ChatVoteTemplateListState;
+          const alreadyListed = previous.templates.some((entry) => entry.id === updated.id);
+          return {
+            ...previous,
+            templates: alreadyListed
+              ? previous.templates.map((entry) => entry.id === updated.id ? updated : entry)
+              : [updated, ...previous.templates],
+            count: isNew && !alreadyListed ? previous.count + 1 : previous.count,
+          };
+        },
+      });
       const acceptedDraft = draftFromTemplate(next);
       const current = draftValue.current;
       baseRevision.current = next.revision;
@@ -133,7 +153,7 @@ export function ChatVoteTemplateInspector({
       setServerShortcutError(null);
       setConflict(false);
       setSaved(true);
-      onTemplateSaved(next, isNew);
+      onTemplateSaved(next);
       return next;
     } catch (error: unknown) {
       if (error instanceof PanelApiError && error.status === 409 && error.code === "chat_vote_template_conflict") {
@@ -203,7 +223,7 @@ export function ChatVoteTemplateInspector({
       setConflict(false);
       setSaveError(undefined);
       setSaved(false);
-      onTemplateSaved(latest, false);
+      onTemplateSaved(latest);
     } catch {
       setSaveError(labels.conflictReloadError);
     }
@@ -224,6 +244,14 @@ export function ChatVoteTemplateInspector({
     <SubInspector
       ariaLabel={labels.question}
       title={labels.editTitle(title)}
+      {...(isNew ? {} : { meta: <ActionMenu
+        label={labels.templateActions(title)}
+        items={[{
+          label: labels.delete,
+          danger: true,
+          onSelect: () => { draftGuard.guardSwitch(() => { setDeleteOpen(true); }); },
+        }]}
+      /> })}
       closeLabel={labels.cancel}
       onClose={() => { draftGuard.guardSwitch(onClose); }}
       className="chat-voting-template-inspector"
@@ -380,6 +408,12 @@ export function ChatVoteTemplateInspector({
       </InspectorSection>
       </div>
       <div className="chat-voting-editor__footer">
+        <div className="chat-voting-editor__start-row">
+          <span className="chat-voting-editor__start-reason" title={invalidReason ?? startLockReason ?? (conflict ? labels.saveConflict : "")}>{invalidReason ?? startLockReason ?? (conflict ? labels.saveConflict : " ")}</span>
+          <Button className="chat-voting-editor__start-button" variant="primary" disabled={startLockReason !== null || invalidReason !== null || saving || starting || conflict} title={invalidReason ?? startLockReason ?? (conflict ? labels.saveConflict : labels.startAction)} onClick={() => { void start(); }}>
+            {starting ? labels.saving : labels.startAction}
+          </Button>
+        </div>
         <SaveBar
           dirty={dirty}
           pending={saving}
@@ -391,15 +425,7 @@ export function ChatVoteTemplateInspector({
           invalid={saveInvalidReason !== null}
           {...(saveInvalidReason === null ? {} : { invalidMessage: saveInvalidReason, onInvalidSave: () => { setSaveError(saveInvalidReason); } })}
           {...(conflict ? { conflict: { message: labels.saveConflict, reloadLabel: labels.conflictReload, onReload: () => { void reloadConflict(); } } } : {})}
-          footerOnConflict
           discardOnConflict
-          destructive={!isNew ? <Button danger="subtle" size="compact" onClick={() => { draftGuard.guardSwitch(() => { setDeleteOpen(true); }); }}>{labels.delete}</Button> : undefined}
-          footer={<div className="chat-voting-editor__save-footer">
-            <Button className="chat-voting-editor__start-button" variant="primary" disabled={startLockReason !== null || invalidReason !== null || saving || starting || conflict} title={invalidReason ?? startLockReason ?? (conflict ? labels.saveConflict : labels.startAction)} onClick={() => { void start(); }}>
-              {starting ? labels.saving : labels.startAction}
-            </Button>
-            <span className="chat-voting-editor__start-reason" title={invalidReason ?? startLockReason ?? (conflict ? labels.saveConflict : "")}>{invalidReason ?? startLockReason ?? (conflict ? labels.saveConflict : " ")}</span>
-          </div>}
           onSave={() => { void saveDraft(); }}
           onDiscard={() => { if (isNew) onDiscardNew(); else resetDraft(); }}
           saveLabel={labels.save}
