@@ -28,15 +28,17 @@ describe("chat voting repository mutation guards", () => {
       await expect(repository.templates.createTemplate("fictional-channel", "template-b", { ...draft, title: "Other" }, "2026-10-04T10:00:01.000Z", authorization))
         .resolves.toBe("conflict");
 
-      await expect(repository.templates.saveTemplate("fictional-channel", "template-a", 1, { ...draft, title: "Pizza?" }, "2026-10-04T10:00:02.000Z", authorization))
-        .resolves.toBe("saved");
+      const firstAcknowledgment = await repository.templates.saveTemplate("fictional-channel", "template-a", 1, { ...draft, title: "Pizza?" }, "2026-10-04T10:00:02.000Z", authorization);
+      expect(firstAcknowledgment).toMatchObject({ status: "saved", template: { title: "Pizza?", revision: 2 } });
       await expect(repository.templates.saveTemplate("fictional-channel", "template-a", 1, draft, "2026-10-04T10:00:03.000Z", authorization))
-        .resolves.toBe("conflict");
-      await expect(repository.templates.template("fictional-channel", "template-a")).resolves.toMatchObject({ title: "Pizza?", revision: 2 });
+        .resolves.toEqual({ status: "conflict" });
+      await repository.templates.saveTemplate("fictional-channel", "template-a", 2, { ...draft, title: "Burger?" }, "2026-10-04T10:00:04.000Z", authorization);
+      expect(firstAcknowledgment).toMatchObject({ template: { title: "Pizza?", revision: 2 } });
+      await expect(repository.templates.template("fictional-channel", "template-a")).resolves.toMatchObject({ title: "Burger?", revision: 3 });
 
       await database.prepare(`UPDATE chat_vote_templates SET legacy_alias = 'yesno' WHERE id = 'template-a'`).run();
       await expect(repository.templates.templateByLegacyAlias("fictional-channel", "yesno")).resolves.toMatchObject({ id: "template-a" });
-      await expect(repository.templates.deleteTemplate("fictional-channel", "template-a", 2, authorization)).resolves.toBe("saved");
+      await expect(repository.templates.deleteTemplate("fictional-channel", "template-a", 3, authorization)).resolves.toBe("saved");
       await expect(repository.templates.template("fictional-channel", "template-a")).resolves.toBeNull();
     } finally {
       database.close();

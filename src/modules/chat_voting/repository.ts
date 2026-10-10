@@ -114,6 +114,12 @@ export const chatVoteTemplateSelectColumns = `id, channel_id, shortcut, title, l
                                              revision, legacy_alias, last_used_at, created_at, updated_at`;
 
 export type ChatVoteTemplateWriteStatus = "saved" | "created" | "limit" | "conflict" | "shortcut_conflict" | "missing" | "unauthorized";
+export type ChatVoteTemplateSaveResult =
+  | { status: "saved"; template: ChatVoteTemplate }
+  | { status: "shortcut_conflict" }
+  | { status: "conflict" }
+  | { status: "missing" }
+  | { status: "unauthorized" };
 
 export interface ChatVoteTemplateRepository {
   templates(channelId: string): Promise<ChatVoteTemplate[]>;
@@ -121,7 +127,7 @@ export interface ChatVoteTemplateRepository {
   templateByShortcut(channelId: string, shortcut: string): Promise<ChatVoteTemplate | null>;
   templateByLegacyAlias(channelId: string, alias: NonNullable<ChatVoteTemplate["legacyAlias"]>): Promise<ChatVoteTemplate | null>;
   createTemplate(channelId: string, id: string, draft: ChatVoteTemplateDraft, createdAt: string, authorization: ModuleMutationAuthorization): Promise<ChatVoteTemplateWriteStatus>;
-  saveTemplate(channelId: string, id: string, revision: number, draft: ChatVoteTemplateDraft, updatedAt: string, authorization: ModuleMutationAuthorization): Promise<ChatVoteTemplateWriteStatus>;
+  saveTemplate(channelId: string, id: string, revision: number, draft: ChatVoteTemplateDraft, updatedAt: string, authorization: ModuleMutationAuthorization): Promise<ChatVoteTemplateSaveResult>;
   deleteTemplate(channelId: string, id: string, revision: number, authorization: ModuleMutationAuthorization): Promise<ChatVoteTemplateWriteStatus>;
   markTemplateUsed(channelId: string, id: string, usedAt: string): Promise<void>;
 }
@@ -204,26 +210,27 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
     return (count?.count ?? 0) >= 100 ? "limit" : "conflict";
   },
   async saveTemplate(channelId, id, revision, draft, updatedAt, authorization) {
-    let result: D1Result;
+    let row: ChatVoteTemplateRow | null;
     try {
-      result = await db.prepare(
+      row = await db.prepare(
         `UPDATE chat_vote_templates
             SET shortcut = ?, title = ?, labels = ?, free_text_mode = ?, duration_seconds = ?,
                 revision = revision + 1, updated_at = ?
-          WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}`,
+          WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}
+          RETURNING ${chatVoteTemplateSelectColumns}`,
       ).bind(draft.shortcut, draft.title, JSON.stringify(draft.labels), draft.freeTextMode,
-        draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values).run();
+        draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values).first<ChatVoteTemplateRow>();
     } catch (error: unknown) {
       if (error instanceof Error && error.message.includes("chat_vote_templates.channel_id, chat_vote_templates.shortcut")) {
-        return "shortcut_conflict";
+        return { status: "shortcut_conflict" };
       }
       throw error;
     }
-    if (result.meta.changes > 0) return "saved";
+    if (row !== null) return { status: "saved", template: mapTemplateRow(row) };
     const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
       .bind(...authorization.values).first<{ authorized: number }>();
-    if (authorized === null) return "unauthorized";
-    return await this.template(channelId, id) === null ? "missing" : "conflict";
+    if (authorized === null) return { status: "unauthorized" };
+    return await this.template(channelId, id) === null ? { status: "missing" } : { status: "conflict" };
   },
   async deleteTemplate(channelId, id, revision, authorization) {
     const result = await db.prepare(

@@ -876,3 +876,105 @@ test("an overnight chat voting result keeps its closing time fully visible at 39
   const dimensions = await meta.evaluate((element) => ({ width: element.clientWidth, contentWidth: element.scrollWidth }));
   expect(dimensions.contentWidth).toBeLessThanOrEqual(dimensions.width);
 });
+
+test("the mobile live vote block keeps its height when the first vote starts", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const title = "A deliberately long live question that must wrap to only two lines on a narrow screen";
+  const template: ChatVoteTemplate = {
+    id: "template-mobile", channelId: "channel-a", shortcut: "mobile", title,
+    labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  let vote: Record<string, unknown> | null = null;
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null,
+      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 60,
+    }) });
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
+    vote = {
+      id: "mobile-vote", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["First", "Second"],
+      title, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
+      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "chat_voting", "en");
+  const live = page.locator(".chat-voting-live");
+  const list = page.locator(".chat-voting-list");
+  const toolbar = page.locator(".chat-voting-list .list-toolbar");
+  const layout = async () => ({ live: await box(live), toolbar: await box(toolbar), list: await box(list) });
+  await expect(page.getByText("No vote yet")).toBeVisible();
+  const before = await layout();
+  await page.getByRole("button", { name: `Start “${title}”` }).click();
+  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+  expect(await layout()).toEqual(before);
+  const question = page.locator(".chat-voting-live__question");
+  await expect(question).toHaveText(title);
+  const questionLayout = await question.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    lineClamp: getComputedStyle(element).webkitLineClamp,
+  }));
+  expect(questionLayout.lineClamp).toBe("2");
+  expect(questionLayout.height).toBeLessThanOrEqual(42);
+});
+
+test("the mobile live state reserves the same height while loading, failed, empty, and populated", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const title = "A stable mobile vote";
+  const template: ChatVoteTemplate = {
+    id: "template-stable-mobile", channelId: "channel-a", shortcut: "stable", title,
+    labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  let vote: Record<string, unknown> | null = null;
+  let releaseFirstRequest: () => void = () => undefined;
+  const firstRequestGate = new Promise<void>((resolve) => { releaseFirstRequest = resolve; });
+  let currentRequests = 0;
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    currentRequests += 1;
+    if (currentRequests === 1) {
+      await firstRequestGate;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "unavailable" }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null,
+      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 60,
+    }) });
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
+    vote = {
+      id: "stable-mobile-vote", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["First", "Second"],
+      title, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
+      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "chat_voting", "en");
+  const liveState = page.locator(".chat-voting-panel > div > .ui-load-state");
+  await expect(liveState).toHaveAttribute("data-status", "loading");
+  const loadingHeight = (await box(liveState)).height;
+  releaseFirstRequest();
+  await expect(liveState).toHaveAttribute("data-status", "error");
+  const errorHeight = (await box(liveState)).height;
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText("No vote yet")).toBeVisible();
+  const emptyHeight = (await box(liveState)).height;
+  await page.getByRole("button", { name: `Start “${title}”` }).click();
+  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+  const populatedHeight = (await box(liveState)).height;
+
+  expect(errorHeight).toBe(loadingHeight);
+  expect(emptyHeight).toBe(loadingHeight);
+  expect(populatedHeight).toBe(loadingHeight);
+});

@@ -122,13 +122,12 @@ chatVotingRoutes.patch("/templates/:id", async (context) => {
   }
   const now = new Date().toISOString();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
-  const status = await createChatVotingRepository(context.env.DB).templates.saveTemplate(channelId, id, body.revision as number, draft, now, authorization);
-  if (status === "unauthorized") return context.json({ error: "chat_voting_not_authorized" }, 403);
-  if (status === "shortcut_conflict") return context.json({ error: "chat_vote_template_shortcut_conflict" }, 409);
-  if (status === "conflict") return context.json({ error: "chat_vote_template_conflict" }, 409);
-  if (status === "missing") return context.json({ error: "chat_vote_template_missing" }, 404);
-  const template = await createChatVotingRepository(context.env.DB).templates.template(channelId, id);
-  return template === null ? context.json({ error: "chat_vote_template_missing" }, 404) : context.json({ template });
+  const result = await createChatVotingRepository(context.env.DB).templates.saveTemplate(channelId, id, body.revision as number, draft, now, authorization);
+  if (result.status === "unauthorized") return context.json({ error: "chat_voting_not_authorized" }, 403);
+  if (result.status === "shortcut_conflict") return context.json({ error: "chat_vote_template_shortcut_conflict" }, 409);
+  if (result.status === "conflict") return context.json({ error: "chat_vote_template_conflict" }, 409);
+  if (result.status === "missing") return context.json({ error: "chat_vote_template_missing" }, 404);
+  return context.json({ template: result.template });
 });
 
 chatVotingRoutes.delete("/templates/:id", async (context) => {

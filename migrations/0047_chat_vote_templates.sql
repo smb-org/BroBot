@@ -89,4 +89,4 @@ INSERT INTO chat_vote_templates (
 SELECT lower(hex(randomblob(16))), channel_id, shortcut, title, labels, NULL, duration_seconds,
        1, legacy_alias, NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
   FROM template_labels
- WHERE label_count >= 2 AND label_count <= 9;
+ WHERE label_count <= 9 AND (legacy_alias <> 'options' OR label_count >= 2);

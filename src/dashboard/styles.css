@@ -391,18 +391,19 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-results__approval { display: flex; min-width: 0; justify-content: flex-end; overflow: hidden; white-space: nowrap; }
 .chat-voting-results__approval .mantine-Button-root { width: 100%; min-width: 0; padding-inline: var(--s2); }
 .chat-voting-panel { gap: var(--s5); }
-.chat-voting-live { display: grid; grid-template-rows: 44px 190px; gap: var(--s2); min-height: 236px; min-width: 0; padding-bottom: var(--s4); border-bottom: 1px solid var(--line); }
-.chat-voting-live--empty { grid-template-rows: 1fr; }
+.chat-voting-panel { --chat-voting-live-height: 259px; }
+.chat-voting-live { --chat-voting-live-header-height: 44px; --chat-voting-live-content-height: 242px; display: grid; grid-template-rows: var(--chat-voting-live-header-height) 190px; gap: var(--s2); min-height: var(--chat-voting-live-height); min-width: 0; padding-bottom: var(--s4); border-bottom: 1px solid var(--line); }
+.chat-voting-live--empty { grid-template-rows: var(--chat-voting-live-content-height); }
 .chat-voting-live__header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--s3); min-width: 0; }
 .chat-voting-live__header > .led { flex: none; }
-.chat-voting-live__question { min-width: 0; margin: 0; overflow: hidden; color: var(--text); font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.chat-voting-live__question { display: -webkit-box; min-width: 0; max-height: 2.8em; margin: 0; overflow: hidden; color: var(--text); font-size: 15px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; text-overflow: ellipsis; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .chat-voting-live__meta { min-width: 0; color: var(--text-3); font-size: 12px; text-align: right; white-space: nowrap; }
 .chat-voting-live__action-slot { display: flex; width: 88px; height: 44px; align-items: center; justify-content: flex-end; }
 .chat-voting-live__rows { display: grid; grid-auto-rows: 34px; align-content: start; gap: var(--s1); min-width: 0; height: 190px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .chat-voting-live__rows .chat-voting-results__row { min-height: 34px; }
 .chat-voting-live__rows--free-text .chat-voting-results__term-row { grid-template-columns: minmax(0, 1fr) minmax(2rem, 2fr) 3rem 3.5rem 7rem; }
 .chat-voting-live__empty { display: grid; min-height: 190px; place-items: center; }
-.chat-voting-live--empty .chat-voting-live__empty { min-height: 236px; }
+.chat-voting-live--empty .chat-voting-live__empty { height: 100%; min-height: 0; }
 .chat-voting-live__empty .empty-state { width: 100%; box-sizing: border-box; margin: 0; text-align: center; }
 .chat-voting-live__load-text { display: grid; min-height: 190px; place-items: center; color: var(--text-3); }
 .chat-voting-list { min-width: 0; }
@@ -1792,9 +1793,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .chat-voting-duration-row:not(.chat-voting-duration-row--custom) { grid-template-columns: minmax(0, 20rem); }
   .chat-voting-results__row { grid-template-columns: 1.5rem minmax(2.5rem, 1fr) minmax(2rem, 1.5fr) 2.5rem 3rem; gap: var(--s2); }
   .chat-voting-results__term-row { grid-template-columns: minmax(0, 1fr) minmax(2rem, 1.5fr) 2.5rem 3rem 5rem; }
-  .chat-voting-live { grid-template-rows: auto 190px; }
-  .chat-voting-live__header { grid-template-columns: auto minmax(0, 1fr) auto; grid-auto-rows: minmax(32px, auto); }
-  .chat-voting-live__question { grid-column: 2; grid-row: 1; white-space: normal; }
+  .chat-voting-panel { --chat-voting-live-height: 291px; }
+  .chat-voting-live { --chat-voting-live-header-height: 76px; --chat-voting-live-content-height: 274px; grid-template-rows: 76px 190px; }
+  .chat-voting-live--empty { grid-template-rows: 274px; }
+  .chat-voting-live__header { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 44px 32px; }
+  .chat-voting-live__question { grid-column: 2; grid-row: 1; }
   .chat-voting-live__meta { grid-column: 1 / 3; grid-row: 2; text-align: left; }
   .chat-voting-live__action-slot { grid-column: 3; grid-row: 1 / 3; align-self: center; }
   .chat-voting-live__rows--free-text .chat-voting-results__term-row { grid-template-columns: minmax(0, 1fr) minmax(2rem, 1.5fr) 2.5rem 3rem 5rem; }

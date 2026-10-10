@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { Button, Led, notify } from "../../../dashboard/ui";
@@ -11,7 +11,7 @@ import { timeText } from "./date-range";
 const ChatVotingImmediateAction = (properties: ModuleImmediateActionProperties): ReactElement =>
   <ChatVotingImmediateActionForChannel key={properties.channelId} {...properties} />;
 
-const ChatVotingImmediateActionForChannel = ({ channelId, canManage = true, availabilityReason }: ModuleImmediateActionProperties): ReactElement => {
+const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: ModuleImmediateActionProperties): ReactElement => {
   const language = typeof navigator === "undefined" || !navigator.language.toLowerCase().startsWith("en") ? "de" : "en";
   const labels = chatVotingSavedPanelTexts(language);
   const [state, setState] = useState<ChatVotingPanelState | null>(null);
@@ -20,22 +20,12 @@ const ChatVotingImmediateActionForChannel = ({ channelId, canManage = true, avai
   const [currentError, setCurrentError] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
+  const previousVote = useRef<{ id: string; status: "open" | "closed" } | null>(null);
   const vote = state?.vote ?? null;
   const running = vote?.status === "open";
-  const lockReason = !canManage ? labels.operatorLocked : availabilityReason ?? (currentError
+  const lockReason = availabilityReason ?? (currentError
     ? labels.liveLoadError
     : state === null ? labels.loading : running ? labels.runningLocked : state.hasOpenBallot ? labels.votekickLocked : null);
-
-  const refreshVote = useCallback(async (): Promise<void> => {
-    try {
-      const current = await loadChatVotingState(channelId);
-      setState(current);
-      setCurrentError(false);
-    } catch {
-      // Keep the last known live state visible while the template list loads independently.
-      setCurrentError(true);
-    }
-  }, [channelId]);
 
   const refreshTemplates = useCallback(async (): Promise<void> => {
     try {
@@ -47,17 +37,37 @@ const ChatVotingImmediateActionForChannel = ({ channelId, canManage = true, avai
     }
   }, [channelId]);
 
+  const refreshVote = useCallback(async (): Promise<void> => {
+    try {
+      const current = await loadChatVotingState(channelId);
+      const nextVote = current.vote;
+      const previous = previousVote.current;
+      const newlyOpened = nextVote?.status === "open" &&
+        (previous === null || previous.status !== "open" || previous.id !== nextVote.id);
+      previousVote.current = nextVote === null ? null : { id: nextVote.id, status: nextVote.status };
+      setState(current);
+      setCurrentError(false);
+      if (newlyOpened) void refreshTemplates();
+    } catch {
+      // Keep the last known live state visible while the template list loads independently.
+      setCurrentError(true);
+    }
+  }, [channelId, refreshTemplates]);
+
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
       void refreshVote();
       void refreshTemplates();
     }, 0);
-    const timer = window.setInterval(() => {
+    const poll = (): void => {
       if (document.visibilityState === "visible") void refreshVote();
-    }, 2_000);
+    };
+    const timer = window.setInterval(poll, 2_000);
+    document.addEventListener("visibilitychange", poll);
     return () => {
       window.clearTimeout(initialLoad);
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
     };
   }, [channelId, refreshTemplates, refreshVote]);
 
@@ -65,7 +75,13 @@ const ChatVotingImmediateActionForChannel = ({ channelId, canManage = true, avai
     if (lockReason !== null || pendingId !== null) return;
     setPendingId(template.id);
     try {
-      await startChatVoting(channelId, { templateId: template.id });
+      const started = await startChatVoting(channelId, { templateId: template.id });
+      setTemplates((current) => current === null ? current : {
+        ...current,
+        templates: current.templates.map((entry) => entry.id === template.id
+          ? { ...entry, lastUsedAt: started.openedAt }
+          : entry),
+      });
       await refreshVote();
     } catch (error: unknown) {
       notify({ tone: "error", message: error instanceof PanelApiError && error.code === "chat_voting_busy" ? labels.runningLocked : labels.startError });
@@ -75,7 +91,7 @@ const ChatVotingImmediateActionForChannel = ({ channelId, canManage = true, avai
   };
 
   const end = async (): Promise<void> => {
-    if (!running || lockReason === labels.operatorLocked || ending) return;
+    if (!running || ending) return;
     setEnding(true);
     try {
       await closeChatVoting(channelId);
@@ -100,7 +116,7 @@ const ChatVotingImmediateActionForChannel = ({ channelId, canManage = true, avai
     <header className="chat-voting-immediate__header">
       <h3>{labels.title}</h3>
       <Led status={running ? "green" : "off"} word={liveStatus} />
-      {running ? <Button danger size="compact" disabled={ending || !canManage} onClick={() => { void end(); }}>{labels.end}</Button> : <span aria-hidden="true" />}
+      {running ? <Button danger size="compact" disabled={ending} onClick={() => { void end(); }}>{labels.end}</Button> : <span aria-hidden="true" />}
     </header>
     <div className="chat-voting-immediate__status">
       <span className="chat-voting-immediate__question" title={vote?.title ?? ""}>{vote?.title || labels.idle}</span>
@@ -113,7 +129,7 @@ const ChatVotingImmediateActionForChannel = ({ channelId, canManage = true, avai
         templates={templates.templates}
         vote={vote}
         startsLockedReason={lockReason}
-        canOperate={canManage}
+        canOperate
         pendingId={pendingId}
         labels={labels}
         durationText={(seconds) => chatVoteDurationText(seconds, language)}

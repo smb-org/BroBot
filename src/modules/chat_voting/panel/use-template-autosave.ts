@@ -5,7 +5,7 @@ import { notify } from "../../../dashboard/ui";
 import { CHAT_VOTE_TEMPLATE_RESERVED_SHORTCUTS, type ChatVoteTemplate, type ChatVoteTemplateDraft } from "../contracts";
 import { isValidTemplateShortcut } from "../domain";
 import { chatVotingSavedPanelTexts } from "./locale-saved";
-import { loadChatVoteTemplates, saveChatVoteTemplate } from "./service";
+import { loadChatVoteTemplates, primeChatVotingCsrfToken, saveChatVoteTemplate } from "./service";
 import type { TemplateSaveState } from "./template-inspector";
 
 const draftFrom = (template: ChatVoteTemplate): ChatVoteTemplateDraft => ({
@@ -21,11 +21,50 @@ const sameDraft = (left: ChatVoteTemplateDraft, right: ChatVoteTemplateDraft): b
   left.durationSeconds === right.durationSeconds && left.labels.length === right.labels.length &&
   left.labels.every((label, index) => label === right.labels[index]);
 
+const isTemplateDraft = (value: unknown): value is ChatVoteTemplateDraft => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const draft = value as Record<string, unknown>;
+  return (draft.shortcut === null || typeof draft.shortcut === "string") &&
+    typeof draft.title === "string" && Array.isArray(draft.labels) && draft.labels.every((label) => typeof label === "string") &&
+    (draft.freeTextMode === null || draft.freeTextMode === "first_word" || draft.freeTextMode === "whole_message") &&
+    typeof draft.durationSeconds === "number" && Number.isSafeInteger(draft.durationSeconds);
+};
+
+const pendingDraftsKey = (channelId: string): string => `chat-voting-template-drafts:${encodeURIComponent(channelId)}`;
+
+const readPendingDrafts = (channelId: string): Map<string, ChatVoteTemplateDraft> => {
+  try {
+    const raw = window.sessionStorage.getItem(pendingDraftsKey(channelId));
+    if (raw === null) return new Map();
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return new Map();
+    return new Map(Object.entries(parsed).filter((entry): entry is [string, ChatVoteTemplateDraft] => isTemplateDraft(entry[1])));
+  } catch { return new Map(); }
+};
+
+const writePendingDraft = (channelId: string, id: string, draft: ChatVoteTemplateDraft): void => {
+  try {
+    const pending = readPendingDrafts(channelId);
+    pending.set(id, draft);
+    window.sessionStorage.setItem(pendingDraftsKey(channelId), JSON.stringify(Object.fromEntries(pending)));
+  } catch { /* Storage can be unavailable in restricted browser contexts. */ }
+};
+
+const clearPendingDraft = (channelId: string, id: string): void => {
+  try {
+    const pending = readPendingDrafts(channelId);
+    pending.delete(id);
+    if (pending.size === 0) window.sessionStorage.removeItem(pendingDraftsKey(channelId));
+    else window.sessionStorage.setItem(pendingDraftsKey(channelId), JSON.stringify(Object.fromEntries(pending)));
+  } catch { /* Storage can be unavailable in restricted browser contexts. */ }
+};
+
 export interface ChatVoteTemplateAutosave {
   draftFor: (template: ChatVoteTemplate) => ChatVoteTemplateDraft;
   stateFor: (template: ChatVoteTemplate) => TemplateSaveState;
   shortcutErrorFor: (template: ChatVoteTemplate) => string | null;
   change: (template: ChatVoteTemplate, update: Partial<ChatVoteTemplateDraft>) => void;
+  markUsed: (templateId: string, openedAt: string) => void;
   flush: (templateId: string, keepalive?: boolean) => Promise<boolean>;
   flushAll: (keepalive?: boolean) => Promise<boolean>;
   reset: (template: ChatVoteTemplate) => void;
@@ -89,6 +128,7 @@ export const useChatVoteTemplateAutosave = (
     };
     if (sameDraft(safeDraft, draftFrom(template))) {
       dirtyRef.current.delete(id);
+      clearPendingDraft(channelId, id);
       updateState(id, "saved");
       setRevision((current) => current + 1);
       return true;
@@ -103,10 +143,14 @@ export const useChatVoteTemplateAutosave = (
         ...latestDraft,
         shortcut: latestProblem === null ? latestDraft.shortcut || null : saved.shortcut,
       };
-      if (sameDraft(latestSafe, draftFrom(saved))) dirtyRef.current.delete(id);
-      updateState(id, "saved");
+      const remainsDirty = !sameDraft(latestSafe, draftFrom(saved));
+      if (remainsDirty) dirtyRef.current.add(id);
+      else dirtyRef.current.delete(id);
+      if (remainsDirty || latestProblem !== null) writePendingDraft(channelId, id, latestDraft);
+      else clearPendingDraft(channelId, id);
+      updateState(id, remainsDirty ? "saving" : "saved");
       setRevision((current) => current + 1);
-      return !dirtyRef.current.has(id);
+      return true;
     };
 
     try {
@@ -145,6 +189,7 @@ export const useChatVoteTemplateAutosave = (
             updateTemplate(latest);
             draftsRef.current.set(id, draftFrom(latest));
             dirtyRef.current.delete(id);
+            clearPendingDraft(channelId, id);
             updateShortcutError(id, null);
             updateState(id, "conflict");
             notify({ tone: "error", message: labels.saveConflictToast(latest.title.trim() || labels.untitled) });
@@ -171,7 +216,9 @@ export const useChatVoteTemplateAutosave = (
 
   const enqueue = useCallback((id: string, keepalive = false): Promise<boolean> => {
     const previous = queuesRef.current.get(id) ?? Promise.resolve(true);
-    const next = previous.catch(() => false).then(() => saveOne(id, keepalive));
+    const next = previous.catch(() => false).then(() => saveOne(id, keepalive)).finally(() => {
+      if (queuesRef.current.get(id) === next) queuesRef.current.delete(id);
+    });
     queuesRef.current.set(id, next);
     return next;
   }, [saveOne]);
@@ -182,16 +229,28 @@ export const useChatVoteTemplateAutosave = (
       window.clearTimeout(timer);
       timersRef.current.delete(id);
     }
-    let attempts = 0;
-    while (dirtyRef.current.has(id) && attempts < 8) {
-      attempts += 1;
+    for (;;) {
+      const pending = queuesRef.current.get(id);
+      if (pending !== undefined) {
+        if (keepalive) {
+          const draft = draftsRef.current.get(id);
+          if (draft !== undefined) writePendingDraft(channelId, id, draft);
+          return false;
+        }
+        if (!await pending) return false;
+      }
+      const nextTimer = timersRef.current.get(id);
+      if (nextTimer !== undefined) {
+        window.clearTimeout(nextTimer);
+        timersRef.current.delete(id);
+      }
+      if (!dirtyRef.current.has(id)) return true;
       if (!await enqueue(id, keepalive)) return false;
     }
-    return !dirtyRef.current.has(id);
-  }, [enqueue]);
+  }, [channelId, enqueue]);
 
   const flushAll = useCallback(async (keepalive = false): Promise<boolean> => {
-    const ids = [...dirtyRef.current];
+    const ids = [...new Set([...dirtyRef.current, ...queuesRef.current.keys()])];
     const results = await Promise.all(ids.map((id) => flush(id, keepalive)));
     return results.every(Boolean);
   }, [flush]);
@@ -204,6 +263,39 @@ export const useChatVoteTemplateAutosave = (
       void flush(id);
     }, 600));
   }, [flush]);
+
+  useEffect(() => {
+    void primeChatVotingCsrfToken();
+  }, []);
+
+  const restoredDraftIds = useRef(new Set<string>());
+  useEffect(() => {
+    const pending = readPendingDrafts(channelId);
+    const restoredErrors: Array<{ id: string; problem: string | null }> = [];
+    const restoredDirtyIds: string[] = [];
+    for (const template of templates) {
+      if (restoredDraftIds.current.has(template.id)) continue;
+      restoredDraftIds.current.add(template.id);
+      const restored = pending.get(template.id);
+      if (restored === undefined) continue;
+      draftsRef.current.set(template.id, restored);
+      const problem = shortcutProblem(template.id, restored.shortcut);
+      restoredErrors.push({ id: template.id, problem });
+      const projected = { ...restored, shortcut: problem === null ? restored.shortcut || null : template.shortcut };
+      if (!sameDraft(projected, draftFrom(template))) {
+        dirtyRef.current.add(template.id);
+        restoredDirtyIds.push(template.id);
+      } else if (problem === null) {
+        draftsRef.current.delete(template.id);
+        clearPendingDraft(channelId, template.id);
+      }
+    }
+    if (restoredErrors.length > 0) window.setTimeout(() => {
+      for (const { id, problem } of restoredErrors) updateShortcutError(id, problem);
+      for (const id of restoredDirtyIds) schedule(id);
+      if (restoredDirtyIds.length > 0) setRevision((current) => current + 1);
+    }, 0);
+  }, [channelId, schedule, shortcutProblem, templates, updateShortcutError]);
 
   const draftFor = useCallback((template: ChatVoteTemplate): ChatVoteTemplateDraft => {
     void revision;
@@ -221,25 +313,32 @@ export const useChatVoteTemplateAutosave = (
     const projected = { ...next, shortcut: problem === null ? next.shortcut || null : latestTemplate.shortcut };
     if (sameDraft(projected, draftFrom(latestTemplate))) dirtyRef.current.delete(template.id);
     else dirtyRef.current.add(template.id);
+    writePendingDraft(channelId, template.id, next);
     setRevision((currentRevision) => currentRevision + 1);
     schedule(template.id);
-  }, [schedule, shortcutProblem, updateShortcutError]);
+  }, [channelId, schedule, shortcutProblem, updateShortcutError]);
+  const markUsed = useCallback((templateId: string, openedAt: string): void => {
+    const current = templatesRef.current.get(templateId);
+    if (current !== undefined) updateTemplate({ ...current, lastUsedAt: openedAt });
+  }, [updateTemplate]);
   const reset = useCallback((template: ChatVoteTemplate): void => {
     draftsRef.current.set(template.id, draftFrom(template));
     dirtyRef.current.delete(template.id);
+    clearPendingDraft(channelId, template.id);
     updateShortcutError(template.id, null);
     updateState(template.id, "saved");
     setRevision((currentRevision) => currentRevision + 1);
-  }, [updateShortcutError, updateState]);
+  }, [channelId, updateShortcutError, updateState]);
   const clear = useCallback((id: string): void => {
     const timer = timersRef.current.get(id);
     if (timer !== undefined) window.clearTimeout(timer);
     timersRef.current.delete(id);
     draftsRef.current.delete(id);
     dirtyRef.current.delete(id);
+    clearPendingDraft(channelId, id);
     updateShortcutError(id, null);
     setStates((current) => { const next = new Map(current); next.delete(id); return next; });
-  }, [updateShortcutError]);
+  }, [channelId, updateShortcutError]);
 
   useEffect(() => {
     const onPageHide = (): void => { void flushAll(true); };
@@ -250,5 +349,5 @@ export const useChatVoteTemplateAutosave = (
     };
   }, [channelId, flushAll]);
 
-  return { draftFor, stateFor, shortcutErrorFor, change, flush, flushAll, reset, clear };
+  return { draftFor, stateFor, shortcutErrorFor, change, markUsed, flush, flushAll, reset, clear };
 };

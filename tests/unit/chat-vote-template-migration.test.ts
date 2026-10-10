@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { templateStartProblem } from "../../src/modules/chat_voting/domain";
 
 const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0047_chat_vote_templates.sql"), "utf8");
 
@@ -64,10 +65,14 @@ describe("chat vote template migration", () => {
       ]);
       const broken = rows.filter((row) => row.channel_id === "broken");
       expect(broken.map((row) => ({ alias: row.legacy_alias, shortcut: row.shortcut, labels: JSON.parse(row.labels) as string[] }))).toEqual([
+        { alias: "yesno", shortcut: "janein", labels: ["Solo"] },
         { alias: "options", shortcut: "optionen", labels: ["Alpha", "", "Gamma"] },
         { alias: "scale", shortcut: "skala", labels: ["Same", "same", "High", "Mid", "Top"] },
       ]);
-      expect(rows.some((row) => row.channel_id === "broken" && row.legacy_alias === "yesno")).toBe(false);
+      const solo = broken.find((row) => row.legacy_alias === "yesno");
+      expect(solo).toBeDefined();
+      expect(templateStartProblem({ labels: JSON.parse(solo?.labels ?? "[]") as string[], freeTextMode: null, durationSeconds: 120 }))
+        .toBe("answers");
       expect(database.prepare("SELECT settings FROM channel_modules WHERE channel_id = 'configured'").get())
         .toEqual({ settings: JSON.stringify({
           autoCloseSeconds: 120,

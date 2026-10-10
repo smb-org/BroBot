@@ -72,6 +72,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
   const announcementSequence = useRef(0);
   const previousVote = useRef<{ id: string; status: "open" | "closed"; title: string | null } | null>(null);
+  const recentRequestSequence = useRef(0);
   const [wide, setWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1280);
   const templates = useMemo(() => templateList?.templates ?? [], [templateList]);
   const voteRef = useRef(voteState);
@@ -112,15 +113,34 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   }, [channelId, labels.templatesError]);
 
   const refreshRecent = useCallback(async (): Promise<void> => {
+    const requestSequence = ++recentRequestSequence.current;
     try {
       const next = await loadRecentChatVotes(channelId);
+      if (requestSequence !== recentRequestSequence.current) return;
       setRecentVotes(next.votes);
       setRecentError(false);
     } catch {
+      if (requestSequence !== recentRequestSequence.current) return;
       setRecentError(true);
       if (recentVotesRef.current === null) notify({ tone: "error", message: labels.recentError });
     }
   }, [channelId, labels.recentError]);
+
+  const refreshTemplateUsage = useCallback(async (): Promise<void> => {
+    try {
+      const latest = await loadChatVoteTemplates(channelId);
+      const usageById = new Map(latest.templates.map((template) => [template.id, template.lastUsedAt]));
+      setTemplateList((current) => current === null ? latest : {
+        ...current,
+        templates: current.templates.map((template) => usageById.has(template.id)
+          ? { ...template, lastUsedAt: usageById.get(template.id) ?? null }
+          : template),
+      });
+    } catch {
+      setTemplateError(true);
+      if (templateListRef.current === null) notify({ tone: "error", message: labels.templatesError });
+    }
+  }, [channelId, labels.templatesError]);
 
   useEffect(() => {
     const resize = (): void => { setWide(window.innerWidth >= 1280); };
@@ -160,8 +180,19 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
       announcementSequence.current += 1;
       setAnnouncement({ key: announcementSequence.current, text: labels.endAnnouncement(previous.title || labels.untitled) });
     }
+    const newlyOpened = current?.status === "open" &&
+      (previous === null || previous.status !== "open" || previous.id !== current.id);
+    if (newlyOpened) void refreshTemplateUsage();
+    const voteClosedOrReplaced = previous?.status === "open" && (current?.status !== "open" || current.id !== previous.id);
+    const newlyObservedClosedVote = current?.status === "closed" && (previous === null || current.id !== previous.id);
+    if (voteClosedOrReplaced || newlyObservedClosedVote) {
+      recentRequestSequence.current += 1;
+      setRecentVotes(null);
+      setRecentError(false);
+      if (mode === "recent") void refreshRecent();
+    }
     previousVote.current = current === null ? null : { id: current.id, status: current.status, title: current.title };
-  }, [labels, voteState]);
+  }, [labels, mode, refreshRecent, refreshTemplateUsage, voteState]);
 
   const activeLockReason = lockReason(voteState, canOperate, labels,
     voteError ? labels.liveLoadError : voteState === null ? labels.loading : null);
@@ -202,7 +233,10 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   const changeMode = async (value: string): Promise<void> => {
     if (selectedTemplate !== null && !await autosave.flush(selectedTemplate.id)) return;
     const next = value as ListMode;
-    if (next === "recent" && recentVotes === null && !recentError) void refreshRecent();
+    if (next === "recent") {
+      setRecentError(false);
+      void refreshRecent();
+    }
     setSelectionCleared(false);
     setMode(next);
     setSelectedTemplateId(null);
@@ -250,7 +284,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
       const problem = templateStartProblem({ labels: draft.labels, freeTextMode: draft.freeTextMode, durationSeconds: draft.durationSeconds });
       if (problem !== null) return;
       const started = await startChatVoting(channelId, { templateId: template.id });
-      replaceTemplate({ ...template, lastUsedAt: started.openedAt });
+      autosave.markUsed(template.id, started.openedAt);
       void refreshVote();
     } catch (error: unknown) {
       const message = error instanceof PanelApiError && error.code === "chat_voting_busy"
@@ -415,7 +449,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     <div className={voteError && voteState !== null ? "stale" : undefined}>
       <LoadState
         status={liveStatus}
-        minHeight={260}
+        minHeight="var(--chat-voting-live-height)"
         loading={liveLoading}
         empty={liveEmpty}
         error={liveError}

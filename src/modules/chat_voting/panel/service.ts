@@ -36,12 +36,24 @@ const readJson = async <Value>(response: Response): Promise<Value> => {
 const route = (channelId: string, path: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/chat_voting${path}`;
 
+let cachedCsrfToken: string | null = null;
+let csrfTokenRequest: Promise<string> | null = null;
+
 export const loadChatVotingState = async (channelId: string): Promise<ChatVotingPanelState> =>
   readJson<ChatVotingPanelState>(await fetch(route(channelId, "/current")));
 
 const csrfHeader = async (): Promise<string> => {
-  const token = await readJson<{ token: string }>(await fetch("/api/csrf"));
-  return token.token;
+  if (cachedCsrfToken !== null) return cachedCsrfToken;
+  csrfTokenRequest ??= (async () => {
+    const { token } = await readJson<{ token: string }>(await fetch("/api/csrf"));
+    cachedCsrfToken = token;
+    return token;
+  })().finally(() => { csrfTokenRequest = null; });
+  return csrfTokenRequest;
+};
+
+export const primeChatVotingCsrfToken = async (): Promise<void> => {
+  try { await csrfHeader(); } catch { /* An active mutation can retry token loading. */ }
 };
 
 export interface StartChatVotingOptions {
@@ -89,7 +101,8 @@ export const saveChatVoteTemplate = async (
   draft: ChatVoteTemplateDraft,
   keepalive = false,
 ): Promise<ChatVoteTemplate> => {
-  const token = await csrfHeader();
+  const token = keepalive ? cachedCsrfToken : await csrfHeader();
+  if (token === null) throw new Error("A cached CSRF token is required for a keepalive save.");
   return (await readJson<{ template: ChatVoteTemplate }>(await fetch(route(channelId, `/templates/${encodeURIComponent(template.id)}`), {
     method: "PATCH",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": token },

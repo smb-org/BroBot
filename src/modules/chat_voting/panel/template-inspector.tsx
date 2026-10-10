@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 
 import { Button, ConfirmDialog, Field, InspectorActions, InspectorSection, NumberField, SegmentedControl, SubInspector, Switch } from "../../../dashboard/ui";
 import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
@@ -48,6 +48,13 @@ export function ChatVoteTemplateInspector({
 }: ChatVoteTemplateInspectorProperties): ReactElement {
   const labels = chatVotingSavedPanelTexts(language);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [durationMode, setDurationMode] = useState(() => durationPreset(draft.durationSeconds));
+  useEffect(() => {
+    const inferredMode = durationPreset(draft.durationSeconds);
+    if (inferredMode !== "custom" && saveState !== "conflict") return;
+    const timer = window.setTimeout(() => setDurationMode(inferredMode), 0);
+    return () => window.clearTimeout(timer);
+  }, [draft.durationSeconds, saveState]);
   const title = draft.title.trim() || labels.untitled;
   const startProblem = templateStartProblem(draft);
   const invalid = startProblem !== null;
@@ -176,8 +183,9 @@ export function ChatVoteTemplateInspector({
         <div className="chat-voting-editor__duration-control">
           <SegmentedControl
             label={labels.duration}
-            value={durationPreset(draft.durationSeconds)}
+            value={durationMode}
             onChange={(value) => {
+              setDurationMode(value);
               if (value === "open") onChange({ durationSeconds: 0 });
               else if (value === "one") onChange({ durationSeconds: 60 });
               else if (value === "two") onChange({ durationSeconds: 120 });
@@ -203,8 +211,8 @@ export function ChatVoteTemplateInspector({
               increaseLabel={labels.increase}
               decreaseLabel={labels.decrease}
               unit="s"
-              {...(durationPreset(draft.durationSeconds) === "custom" ? { hint: labels.durationHint } : {})}
-              disabled={durationPreset(draft.durationSeconds) !== "custom"}
+              {...(durationMode === "custom" ? { hint: labels.durationHint } : {})}
+              disabled={durationMode !== "custom"}
               id={"chat-vote-duration-" + template.id}
               onChange={(value) => { onChange({ durationSeconds: typeof value === "number" ? value : 0 }); }}
             />

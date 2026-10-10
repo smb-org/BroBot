@@ -59,7 +59,7 @@ const templateRepositoryWith = (overrides: Partial<ChatVoteTemplateRepository> =
   templateByShortcut: vi.fn(() => Promise.resolve(null)),
   templateByLegacyAlias: vi.fn(() => Promise.resolve(null)),
   createTemplate: vi.fn(() => Promise.resolve("created" as const)),
-  saveTemplate: vi.fn(() => Promise.resolve("saved" as const)),
+  saveTemplate: vi.fn(() => Promise.resolve({ status: "saved" as const, template: savedTemplate })),
   deleteTemplate: vi.fn(() => Promise.resolve("missing" as const)),
   markTemplateUsed: vi.fn(() => Promise.resolve()),
   ...overrides,
