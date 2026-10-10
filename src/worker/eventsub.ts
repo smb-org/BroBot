@@ -7,6 +7,7 @@ import { dispatchEventSubNotification } from "./dispatch";
 import { refreshAdPrewarning, isAdPrewarningTrigger } from "./ad-prewarning";
 import { eventSubDefinitionForCondition } from "./eventsub-subscriptions";
 import { notifyCommittedResources } from "./panel-resources";
+import { revokeRealtimeUserFromAllChannels } from "./realtime";
 import type { EventSubSubscriptionType } from "../contracts/values";
 import {
   hasEventSubMessage,
@@ -294,9 +295,16 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
         authorizationConfirmedRevoked,
       );
       if (!isNew) return response(null, 204);
+      if (authorizationConfirmedRevoked && revocation.authorizationIdentity?.kind === "login") {
+        await revokeRealtimeUserFromAllChannels(
+          context.env.DB,
+          context.env.CHANNEL,
+          revocation.authorizationIdentity.userId,
+        );
+      }
       return response(null, 204);
     } finally {
-      await notifyCommittedResources(context.env, revocation.channelId);
+      await notifyCommittedResources(context.env, notifierChannelId);
     }
   }
 

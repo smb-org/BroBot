@@ -974,7 +974,11 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async setTwitchRateLimitRetryAfter(retryAfter: number): Promise<void> {
-    await this.ctx.storage.put(TWITCH_RETRY_AFTER_KEY, retryAfter);
+    await this.ctx.storage.transaction(async (transaction) => {
+      await transaction.put(TWITCH_RETRY_AFTER_KEY, retryAfter);
+      await bumpDurablePanelResources(transaction, ["module:ads:schedule"]);
+    });
+    await this.notifyCommittedPanelResources();
   }
 
   private async hasAdCountdownOverlay(channelId: string): Promise<boolean> {
@@ -2074,6 +2078,29 @@ export class ChannelObject extends DurableObject<Env> {
     ).bind(channelId, tokenId, nowIso).first<TokenValidityRow>();
   }
 
+  private async panelPrincipalIsCurrent(
+    principal: Extract<RealtimePrincipal, { kind: "panel" }>,
+    channelId: string,
+    now: number,
+  ): Promise<boolean> {
+    if (isExpired(principal, now)) return false;
+    const row = await this.env.DB.prepare(
+      `SELECT session.session_id, session.user_id, member.role
+         FROM auth_sessions AS session
+         JOIN twitch_login_identity AS identity ON identity.user_id = session.user_id
+         JOIN channel_members AS member
+           ON member.channel_id = ? AND member.user_id = session.user_id
+        WHERE session.session_id = ?
+          AND session.user_id = ?
+          AND member.role = ?
+          AND session.revoked_at IS NULL
+          AND session.expires_at > ?
+          AND identity.status <> 'revoked'`,
+    ).bind(channelId, principal.sessionId, principal.userId, principal.role, new Date(now).toISOString())
+      .first<SessionValidityRow>();
+    return row?.session_id === principal.sessionId && row.user_id === principal.userId && row.role === principal.role;
+  }
+
   private async allowOverlayHandshake(tokenId: string, now: number): Promise<boolean> {
     const key = `overlay_handshakes:${tokenId}`;
     return this.ctx.storage.transaction(async (transaction) => {
@@ -2253,6 +2280,19 @@ export class ChannelObject extends DurableObject<Env> {
       closeSocket(pair[1], OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
       return new Response("Overlay token is now bound.", { status: 403 });
     }
+    if (principal.kind === "panel") {
+      try {
+        // Outer route authorization may have gone stale while the request was
+        // queued for this object. This D1 check is the final await before the
+        // synchronous accept, so revocation prevents even the hello message.
+        if (!await this.panelPrincipalIsCurrent(principal, ownChannelId, Date.now())) {
+          return new Response("Panel authorization revoked.", { status: 403 });
+        }
+      } catch (error: unknown) {
+        console.error("Realtime panel handshake authorization could not be checked.", error);
+        return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
+      }
+    }
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
     pair[1].serializeAttachment(principal);
     await this.scheduleSecurityAlarm();
@@ -2279,7 +2319,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   /** Distributes only within its own channel and only to principals of the requested kind. */
-  public publish(
+  public async publish(
     messages: readonly RealtimeMessage[],
   ): Promise<void> {
     if (messages.length === 0) return Promise.resolve();
@@ -2325,6 +2365,52 @@ export class ChannelObject extends DurableObject<Env> {
           ? [...new Set((envelope.overlayIds ?? []).flatMap((overlayId) => overlaySocketsById.get(overlayId) ?? []))]
           : ordinarySockets,
     }));
+    const panelRecipients = [...new Set(serialized.flatMap(({ sockets }) => sockets)
+      .filter((webSocket) => readAttachment(webSocket)?.kind === "panel"))];
+    const authorizedPanels = new Set<WebSocket>();
+    const unavailablePanels = new Set<WebSocket>();
+    const panelSessions = new Map<string, WebSocket[]>();
+    for (const webSocket of panelRecipients) {
+      const principal = readAttachment(webSocket);
+      if (principal?.kind !== "panel") continue;
+      const sockets = panelSessions.get(principal.sessionId) ?? [];
+      sockets.push(webSocket);
+      panelSessions.set(principal.sessionId, sockets);
+    }
+    for (const sessionIds of chunksOf([...panelSessions.keys()], D1_IDS_PER_QUERY)) {
+      const placeholders = sessionIds.map(() => "?").join(", ");
+      try {
+        const result = await this.env.DB.prepare(
+          `SELECT session.session_id, session.user_id, member.role
+             FROM auth_sessions AS session
+             JOIN twitch_login_identity AS identity ON identity.user_id = session.user_id
+             JOIN channel_members AS member
+               ON member.channel_id = ? AND member.user_id = session.user_id
+            WHERE session.session_id IN (${placeholders})
+              AND session.revoked_at IS NULL
+              AND session.expires_at > ?
+              AND identity.status <> 'revoked'`,
+        ).bind(ownChannelId, ...sessionIds, new Date(now).toISOString()).all<SessionValidityRow>();
+        const validSessions = new Set(result.results.map((row) =>
+          `${row.session_id}:${row.user_id}:${String(row.role)}`));
+        for (const sessionId of sessionIds) {
+          for (const webSocket of panelSessions.get(sessionId) ?? []) {
+            const principal = readAttachment(webSocket);
+            if (principal?.kind === "panel" && validSessions.has(
+              `${principal.sessionId}:${principal.userId}:${principal.role}`,
+            )) authorizedPanels.add(webSocket);
+          }
+        }
+      } catch (error: unknown) {
+        console.error("Realtime panel authorization check failed.", error);
+        for (const sessionId of sessionIds) {
+          for (const webSocket of panelSessions.get(sessionId) ?? []) {
+            unavailablePanels.add(webSocket);
+            closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "authorization check unavailable");
+          }
+        }
+      }
+    }
     for (const message of serialized) {
       const envelope = message.envelope;
       for (const webSocket of message.sockets) {
@@ -2335,6 +2421,11 @@ export class ChannelObject extends DurableObject<Env> {
         }
         if (isExpired(principal, now)) {
           closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
+          continue;
+        }
+        if (principal.kind === "panel" && unavailablePanels.has(webSocket)) continue;
+        if (principal.kind === "panel" && !authorizedPanels.has(webSocket)) {
+          closeSocket(webSocket, SOCKET_REVOKED_CODE, "authorization revoked");
           continue;
         }
         if (envelope.type === "variables.changed" && principal.kind === "overlay" &&

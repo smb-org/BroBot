@@ -7,6 +7,7 @@ import { refreshQuery } from "./refresh";
 import { dispatchDashboardAuthenticationRequired } from "./events";
 
 const REALTIME_REFRESH_INTERVAL_MS = 1_000;
+const PANEL_REVISION_READ_INTERVAL_MS = 250;
 
 interface ScheduledRealtimeRefresh {
   lastStartedAt: number;
@@ -17,8 +18,9 @@ interface ScheduledRealtimeRefresh {
 const scheduledRefreshes = new WeakMap<QueryClient, Map<string, ScheduledRealtimeRefresh>>();
 const panelRevisionSnapshots = new WeakMap<QueryClient, Map<string, Readonly<Record<string, number>>>>();
 interface PanelRevisionFetch {
+  lastStartedAt: number;
   dirty: boolean;
-  promise: Promise<void>;
+  promise: Promise<void> | null;
 }
 
 const panelRevisionFetches = new WeakMap<QueryClient, Map<string, PanelRevisionFetch>>();
@@ -140,18 +142,11 @@ const invalidatePanelResource = (queryClient: QueryClient, channelId: string, re
       invalidate(queryClient, queryKeys.channel(channelId, "overlay-accesses"), scheduledQueryKeys);
       invalidate(queryClient, dashboardDataKeys.legacyOverlayTokens(channelId), scheduledQueryKeys);
       return;
-    case "weather.cache":
-      invalidate(queryClient, queryKeys.module(channelId, "text_library", "library"), scheduledQueryKeys);
-      return;
-    case "api.cache":
-      invalidate(queryClient, queryKeys.module(channelId, "api_source", "sources"), scheduledQueryKeys);
-      return;
     case "channel.library":
       invalidate(queryClient, queryKeys.module(channelId, "text_library", "library"), scheduledQueryKeys);
       invalidate(queryClient, queryKeys.module(channelId, "timers", "panel"), scheduledQueryKeys);
       invalidate(queryClient, queryKeys.module(channelId, "faq", "panel"), scheduledQueryKeys);
       invalidate(queryClient, queryKeys.module(channelId, "text_commands", "template-variables"), scheduledQueryKeys);
-      invalidate(queryClient, queryKeys.module(channelId, "api_source", "sources"), scheduledQueryKeys);
       return;
     default:
       break;
@@ -177,7 +172,7 @@ const validPanelRevisionVector = (value: unknown): value is Readonly<Record<stri
   Object.entries(value).length <= 4_096 && Object.entries(value).every(([resource, revision]) =>
     resource.length <= 128 && Number.isSafeInteger(revision) && Number(revision) >= 0);
 
-/** Fetches and compares the channel vector; duplicate hints share an in-flight read. */
+/** Reads at most once per short interval; hints retain one trailing channel reconciliation. */
 export const reconcileDashboardPanelResourceRevisions = (
   queryClient: QueryClient,
   channelId: string,
@@ -192,15 +187,23 @@ export const reconcileDashboardPanelResourceRevisions = (
     fetches = new Map();
     panelRevisionFetches.set(queryClient, fetches);
   }
-  const inFlight = fetches.get(channelId);
-  if (inFlight !== undefined) {
-    inFlight.dirty = true;
-    return inFlight.promise;
+  let state = fetches.get(channelId);
+  if (state === undefined) {
+    state = { lastStartedAt: Number.NEGATIVE_INFINITY, dirty: false, promise: null };
+    fetches.set(channelId, state);
   }
-  const state: PanelRevisionFetch = { dirty: false, promise: Promise.resolve() };
+  if (state.promise !== null) {
+    state.dirty = true;
+    return state.promise;
+  }
+  const scheduled = state;
   const request = (async (): Promise<void> => {
     do {
-      state.dirty = false;
+      const wait = Math.max(0, PANEL_REVISION_READ_INTERVAL_MS - (Date.now() - scheduled.lastStartedAt));
+      if (wait > 0) await new Promise<void>((resolve) => { setTimeout(resolve, wait); });
+      // All hints received before this read are represented by its authoritative vector.
+      scheduled.dirty = false;
+      scheduled.lastStartedAt = Date.now();
       try {
         const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/revisions`, {
           credentials: "same-origin",
@@ -224,12 +227,11 @@ export const reconcileDashboardPanelResourceRevisions = (
       } catch {
         // The durable vector is compared again on the next hint, reconnect, or focus.
       }
-    } while (revisionFetchWasDirtied(state));
+    } while (revisionFetchWasDirtied(scheduled));
   })().finally(() => {
-    if (fetches.get(channelId) === state) fetches.delete(channelId);
+    scheduled.promise = null;
   });
-  state.promise = request;
-  fetches.set(channelId, state);
+  scheduled.promise = request;
   return request;
 };
 
@@ -264,7 +266,11 @@ const scheduleRealtimeRefresh = (queryClient: QueryClient, queryKey: readonly un
   }, wait);
 };
 
-/** A realtime message is a wake-up; persisted resource revisions decide what to invalidate. */
+/**
+ * A realtime message is a wake-up; persisted resource revisions decide what to invalidate.
+ * `modul.*` messages target overlays only. Chat voting, votekick and BELABOX panels
+ * refresh from D1-backed resource revisions, so their intervals only run offline.
+ */
 export const reconcileDashboardRealtimeMessage = (
   queryClient: QueryClient,
   message: RealtimeMessage,

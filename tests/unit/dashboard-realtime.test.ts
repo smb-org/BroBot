@@ -85,10 +85,11 @@ describe("dashboard realtime messages", () => {
     }))));
     await reconcileDashboardPanelResourceRevisions(queryClient, channelId);
 
+    const reconciliations: Promise<void>[] = [];
     for (let index = 0; index < 20; index += 1) {
       revisions["channel.events"] = (revisions["channel.events"] ?? 0) + 1;
       revisions["module:chat_voting:data"] = (revisions["module:chat_voting:data"] ?? 0) + 1;
-      await reconcileDashboardRealtimeMessage(queryClient, moduleHint("event_log.new", {
+      reconciliations.push(reconcileDashboardRealtimeMessage(queryClient, moduleHint("event_log.new", {
         entries: [{
           eventId: `event-${String(index)}`,
           createdAt: "2026-10-09T08:00:00.000Z",
@@ -96,10 +97,11 @@ describe("dashboard realtime messages", () => {
           code: "chat_voting.vote_recorded",
           actorUserId: null,
         }],
-      }));
+      })));
       await vi.advanceTimersByTimeAsync(50);
     }
     await vi.advanceTimersByTimeAsync(250);
+    await Promise.all(reconciliations);
 
     expect(reads.panel).toBeLessThanOrEqual(2);
     expect(reads.events).toBeLessThanOrEqual(2);
@@ -235,6 +237,7 @@ describe("dashboard realtime messages", () => {
   });
 
   it("rechecks the revision vector when another hint arrives during an in-flight read", async () => {
+    vi.useFakeTimers();
     const revisionChannel = "revision-overlap";
     const reader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const panel = moduleQueryKey(revisionChannel, "chat_voting", "panel");
@@ -267,10 +270,65 @@ describe("dashboard realtime messages", () => {
       status: 200,
       headers: { "Content-Type": "application/json" },
     }));
+    await vi.advanceTimersByTimeAsync(1_000);
     await Promise.all([first, second]);
     expect(revisionReads).toBe(2);
     await vi.waitFor(() => { expect(panelReads).toBe(1); });
     unsubscribe();
+    reader.clear();
+  });
+
+  it("throttles sequential hints beyond request latency and observes the last committed revision", async () => {
+    vi.useFakeTimers();
+    const revisionChannel = "revision-sustained-hints";
+    const reader = new QueryClient();
+    const events = queryKeys.channel(revisionChannel, "events");
+    addQuery(reader, events);
+    let committedRevision = 0;
+    const observedRevisions: number[] = [];
+    const requestStarts: number[] = [];
+    const fetchRevisions = vi.fn(() => {
+      requestStarts.push(Date.now());
+      const revision = committedRevision;
+      observedRevisions.push(revision);
+      return new Promise<Response>((resolve) => {
+        setTimeout(() => {
+          resolve(new Response(JSON.stringify({ revisions: { "channel.events": revision } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }, 5);
+      });
+    });
+    vi.stubGlobal("fetch", fetchRevisions);
+    const reconciliations: Promise<void>[] = [];
+    for (let index = 0; index < 100; index += 1) {
+      committedRevision += 1;
+      reconciliations.push(reconcileDashboardPanelResourceRevisions(reader, revisionChannel));
+      // Each hint arrives after the endpoint would have answered its predecessor.
+      await vi.advanceTimersByTimeAsync(10);
+    }
+    expect(fetchRevisions).toHaveBeenCalledTimes(5);
+    expect(requestStarts.slice(1).every((startedAt, index) =>
+      startedAt - (requestStarts[index] ?? 0) >= 250)).toBe(true);
+    await vi.advanceTimersByTimeAsync(10);
+    await Promise.all(reconciliations);
+    expect(observedRevisions[0]).toBe(1);
+    expect(observedRevisions.at(-1)).toBe(100);
+    expect(reader.getQueryState(events)?.isInvalidated).toBe(true);
+
+    // A new burst in the next window keeps exactly one trailing read after it ends.
+    committedRevision = 101;
+    const next = reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    committedRevision = 102;
+    const trailing = reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    await vi.advanceTimersByTimeAsync(240);
+    expect(fetchRevisions).toHaveBeenCalledTimes(6);
+    await vi.advanceTimersByTimeAsync(5);
+    await Promise.all([next, trailing]);
+    expect(observedRevisions.at(-1)).toBe(102);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fetchRevisions).toHaveBeenCalledTimes(6);
     reader.clear();
   });
 
@@ -280,7 +338,7 @@ describe("dashboard realtime messages", () => {
     const affectedKeys = [
       queryKeys.channel(revisionChannel, "overview"),
       dashboardDataKeys.overlays(revisionChannel),
-      moduleQueryKey(revisionChannel, "api_source", "sources"),
+      moduleQueryKey(revisionChannel, "text_library", "library"),
     ] as const;
     const refetches = affectedKeys.map(() => 0);
     const unsubscribers = affectedKeys.map((queryKey, index) => {
@@ -307,7 +365,6 @@ describe("dashboard realtime messages", () => {
       "channel.overlays": 1,
       "channel.overlay-accesses": 1,
       "channel.library": 1,
-      "api.cache": 1,
     };
     await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
     await vi.waitFor(() => { expect(refetches).toEqual([1, 1, 1]); });
@@ -330,8 +387,6 @@ describe("dashboard realtime messages", () => {
     ["channel.overlays", "overlays"],
     ["channel.overlay-accesses", "overlay-access-list"],
     ["channel.library", "library-catalog"],
-    ["weather.cache", "weather-library"],
-    ["api.cache", "api-source-cache"],
     ["module:chat_voting:panel", "chat-voting"],
     ["module:votekick:panel", "votekick"],
     ["module:belabox:live", "belabox"],
@@ -366,10 +421,7 @@ describe("dashboard realtime messages", () => {
         moduleQueryKey(revisionChannel, "timers", "panel"),
         moduleQueryKey(revisionChannel, "faq", "panel"),
         moduleQueryKey(revisionChannel, "text_commands", "template-variables"),
-        moduleQueryKey(revisionChannel, "api_source", "sources"),
       ],
-      "weather-library": [moduleQueryKey(revisionChannel, "text_library", "library")],
-      "api-source-cache": [moduleQueryKey(revisionChannel, "api_source", "sources")],
       "chat-voting": [moduleQueryKey(revisionChannel, "chat_voting", "panel")],
       votekick: [moduleQueryKey(revisionChannel, "votekick", "panel")],
       belabox: [moduleQueryKey(revisionChannel, "belabox", "streams")],

@@ -10,17 +10,44 @@ import { reconcileDashboardRealtimeMessage, reconcileDashboardPanelResourceRevis
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
 import { authRouter } from "../../src/worker/auth/routes";
 import { eventSubChannelIdForNotification, eventSubRouter } from "../../src/worker/eventsub";
+import { realtimeRouter } from "../../src/worker/realtime";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { moduleRouter } from "../../src/worker/panel/module-routes";
 import { platformRouter } from "../../src/worker/platform/routes";
+import { app } from "../../src/worker/worker-app";
 import { notifyCommittedResources, panelResourceChangedMessage, PANEL_RESOURCE_NOTIFIER_COVERAGE, readCompletePanelResourceRevisions, readPanelResourceRevisions } from "../../src/worker/panel-resources";
 import { TestD1Database } from "./test-d1";
 
 const writeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const nonPanelAllRoutes: ReadonlySet<string> = new Set(PANEL_RESOURCE_NOTIFIER_COVERAGE.nonPanelAllRoutes);
+const writingGetRoutes = new Set(PANEL_RESOURCE_NOTIFIER_COVERAGE.explicitlyCommittedRoutes
+  .map((route) => route.slice("GET ".length)));
 const routeIsCovered = (path: string, pattern: string): boolean => {
-  const prefix = pattern.endsWith("*") ? pattern.slice(0, -1) : pattern;
-  return path.startsWith(prefix);
+  const pathParts = path.split("/").filter(Boolean);
+  const patternParts = pattern.split("/").filter(Boolean);
+  for (let index = 0; index < patternParts.length; index += 1) {
+    const expected = patternParts[index];
+    if (expected === "*") return true;
+    const actual = pathParts[index];
+    if (actual === undefined || (expected !== undefined && !expected.startsWith(":") && expected !== actual)) return false;
+  }
+  return pathParts.length === patternParts.length;
 };
+const routeNeedsNotifier = (
+  route: { method: string; path: string },
+  knownWritingGets: ReadonlySet<string> = writingGetRoutes,
+): boolean => writeMethods.has(route.method) || (route.method === "GET" && knownWritingGets.has(route.path)) ||
+  (route.method === "ALL" && !nonPanelAllRoutes.has(`${route.method} ${route.path}`));
+const routeHasNotifier = (
+  route: { method: string; path: string },
+  patterns: readonly string[],
+  explicitRoutes: ReadonlySet<string>,
+  knownWritingGets: ReadonlySet<string> = writingGetRoutes,
+  nonPanelWrites: ReadonlySet<string> = new Set(PANEL_RESOURCE_NOTIFIER_COVERAGE.nonPanelWriteRoutes),
+): boolean => !routeNeedsNotifier(route, knownWritingGets) || explicitRoutes.has(`${route.method} ${route.path}`) ||
+  nonPanelWrites.has(`${route.method} ${route.path}`) ||
+  nonPanelAllRoutes.has(`${route.method} ${route.path}`) ||
+  patterns.some((pattern) => routeIsCovered(route.path, pattern));
 
 const addChannel = async (database: TestD1Database, channelId: string): Promise<void> => {
   await database.prepare(
@@ -40,6 +67,15 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
     name: "channel overview, settings, system and channel list",
     keys: (id) => [queryKeys.channels(), queryKeys.channel(id, "overview"), queryKeys.channel(id, "settings"), dashboardDataKeys.system(id)],
     write: async (database, id) => { await database.prepare("UPDATE channels SET display_name = 'Changed' WHERE channel_id = ?").bind(id).run(); },
+  },
+  {
+    name: "channel timezone and location library values",
+    keys: (id) => [moduleQueryKey(id, "text_library", "library")],
+    write: async (database, id) => {
+      await database.prepare(
+        "UPDATE channels SET location_name = 'Berlin', location_latitude = 52.5, location_longitude = 13.4, location_time_zone = 'Europe/Berlin' WHERE channel_id = ?",
+      ).bind(id).run();
+    },
   },
   {
     name: "members and their channel summaries",
@@ -116,7 +152,6 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
     keys: (id) => [
       moduleQueryKey(id, "text_library", "library"), moduleQueryKey(id, "timers", "panel"),
       moduleQueryKey(id, "faq", "panel"), moduleQueryKey(id, "text_commands", "template-variables"),
-      moduleQueryKey(id, "api_source", "sources"),
     ],
     write: async (database, id) => {
       await database.prepare(
@@ -129,6 +164,7 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
     name: "module settings and module registry",
     keys: (id) => [
       queryKeys.channel(id, "modules"), queryKeys.channel(id, "overview"), queryKeys.channels(),
+      dashboardDataKeys.system(id), moduleQueryKey(id, "text_library", "library"),
       dashboardDataKeys.variables(id), moduleQueryKey(id, "chat_voting", "settings"),
       moduleQueryKey(id, "text_commands", "commands"),
     ],
@@ -199,7 +235,10 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
   {
     name: "shared weather cache",
     keys: (id) => [moduleQueryKey(id, "text_library", "library")],
-    write: async (database) => {
+    write: async (database, id) => {
+      await database.prepare(
+        "UPDATE channels SET location_latitude = 52.5, location_longitude = 13.4 WHERE channel_id = ?",
+      ).bind(id).run();
       await database.prepare(
         `INSERT INTO weather_cache (provider, location_key, latitude, longitude, payload_json, expires_at, updated_at)
          VALUES ('met_norway', 'test-location', 52.5, 13.4, '{}', '2026-10-10T01:00:00.000Z', '2026-10-10T00:00:00.000Z')`,
@@ -208,31 +247,70 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
   },
   {
     name: "shared API cache",
-    keys: (id) => [moduleQueryKey(id, "api_source", "sources")],
-    write: async (database) => {
+    keys: (id) => [moduleQueryKey(id, "text_library", "library")],
+    write: async (database, id) => {
       await database.prepare(
-        `INSERT INTO api_source_cache (url_hash, payload_json, expires_at, updated_at)
-         VALUES ('${"a".repeat(64)}', '{}', '2026-10-10T01:00:00.000Z', '2026-10-10T00:00:00.000Z')`,
-      ).run();
+        `INSERT INTO api_source_cache (url_hash, channel_id, payload_json, expires_at, updated_at)
+         VALUES ('${"a".repeat(64)}', ?, '{}', '2026-10-10T01:00:00.000Z', '2026-10-10T00:00:00.000Z')`,
+      ).bind(id).run();
     },
   },
 ];
 
 describe("panel resource revisions", () => {
-  it("keeps every registered mutating route and module alarm under a notifier seam", () => {
+  it("guards every assembled mutating route and module alarm with a notifier seam", () => {
     const root = resolve(import.meta.dirname, "../..");
-    const routers = [panelRouter, moduleRouter, platformRouter, authRouter, eventSubRouter];
-    const mutations = routers.flatMap((router) => router.routes)
-      .filter(({ method }) => writeMethods.has(method));
+    const routers = [panelRouter, moduleRouter, platformRouter, authRouter, eventSubRouter, realtimeRouter];
+    const assembledRoutes = app.routes;
+    const mutations = assembledRoutes.filter((route) => routeNeedsNotifier(route));
     expect(mutations.length).toBeGreaterThan(0);
     const routePatterns = [
       PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes,
       PANEL_RESOURCE_NOTIFIER_COVERAGE.platformRoutes,
-      PANEL_RESOURCE_NOTIFIER_COVERAGE.authRoutes,
       PANEL_RESOURCE_NOTIFIER_COVERAGE.eventSubRoute,
     ];
-    const uncovered = mutations.filter(({ path }) => !routePatterns.some((pattern) => routeIsCovered(path, pattern)));
+    const explicitRoutes = new Set(PANEL_RESOURCE_NOTIFIER_COVERAGE.explicitlyCommittedRoutes);
+    const nonPanelGetRoutes = new Set<string>(PANEL_RESOURCE_NOTIFIER_COVERAGE.nonPanelGetRoutes);
+    const nonPanelWrites = new Set<string>(PANEL_RESOURCE_NOTIFIER_COVERAGE.nonPanelWriteRoutes);
+    expect(new Set([...writingGetRoutes].map((path) => `GET ${path}`))).toEqual(explicitRoutes);
+    const uncovered = mutations.filter((route) => !routeHasNotifier(route, routePatterns, explicitRoutes, writingGetRoutes, nonPanelWrites));
     expect(uncovered).toEqual([]);
+    const unaccountedGets = assembledRoutes.filter(({ method, path }) => method === "GET" &&
+      !routeIsCovered(path, PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes) &&
+      !writingGetRoutes.has(path) && !nonPanelGetRoutes.has(path));
+    expect(unaccountedGets).toEqual([]);
+    for (const router of routers) {
+      for (const route of router.routes) {
+        expect(assembledRoutes.some(({ method, path }) => method === route.method && path === route.path),
+          `${route.method} ${route.path} must be mounted in the root app`).toBe(true);
+      }
+    }
+    expect(assembledRoutes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "GET", path: "/healthz" }),
+      expect.objectContaining({ method: "GET", path: "/overlay" }),
+      expect.objectContaining({ method: "GET", path: "/overlay.html" }),
+      expect.objectContaining({ method: "ALL", path: "/api/*" }),
+      expect.objectContaining({ method: "ALL", path: "/*" }),
+    ]));
+    expect(routeHasNotifier(
+      { method: "POST", path: "/api/unwrapped-write" }, routePatterns, explicitRoutes,
+    )).toBe(false);
+    expect(routeHasNotifier(
+      { method: "POST", path: "/unwrapped-root-write" }, routePatterns, explicitRoutes,
+    )).toBe(false);
+    expect(routeHasNotifier(
+      { method: "POST", path: "/api/twitch/eventsub-rogue" }, routePatterns, explicitRoutes,
+    )).toBe(false);
+    expect(routeHasNotifier(
+      { method: "ALL", path: "/api/realtime/unwrapped-write" }, routePatterns, explicitRoutes,
+    )).toBe(false);
+    const unwrappedWritingGet = { method: "GET", path: "/api/realtime/unwrapped-write" };
+    expect(routeHasNotifier(
+      unwrappedWritingGet,
+      routePatterns,
+      explicitRoutes,
+      new Set([...writingGetRoutes, unwrappedWritingGet.path]),
+    )).toBe(false);
 
     const moduleMutations = MODULES.flatMap((module) => module.routes?.routes ?? [])
       .filter(({ method }) => writeMethods.has(method));
@@ -284,11 +362,16 @@ describe("panel resource revisions", () => {
     const scheduled = readFileSync(resolve(root, "src/worker/scheduled.ts"), "utf8");
     expect(scheduled).toContain(".finally(async () => {");
     expect(scheduled).toContain("await notifyCommittedResources(env);");
-    const worker = readFileSync(resolve(root, "src/worker/index.ts"), "utf8");
+    const worker = readFileSync(resolve(root, "src/worker/app-routes.ts"), "utf8");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.platformRoutes");
-    expect(worker).toMatch(/app\.use\(PANEL_RESOURCE_NOTIFIER_COVERAGE\.channelRoutes,[\s\S]*?finally \{\s*const channelId = context\.req\.param\("channelId"\);[\s\S]*?await notifyCommittedResources\(context\.env, channelId\);/u);
+    expect(worker).toMatch(/finally \{\s*const channelId = context\.req\.param\("channelId"\);\s*if \(channelId\.length > 0 && authorizedContextHas\(context, "session"\)\) \{\s*await notifyCommittedResources\(context\.env, channelId\);/u);
+    expect(worker).not.toContain("PANEL_RESOURCE_NOTIFIER_COVERAGE.authRoutes");
     expect(worker).not.toMatch(/context\.res\.status !== 401/u);
+    const rootWorker = readFileSync(resolve(root, "src/worker/worker-app.ts"), "utf8");
+    expect(rootWorker).toContain('app.get("/healthz"');
+    expect(rootWorker).toContain('app.all("/api/*"');
+    expect(rootWorker).toContain('app.all("*"');
     const ballotStorageStart = channelObject.indexOf("private ballotStorage(");
     const ballotStorageEnd = channelObject.indexOf("private async notifyCommittedPanelResources(", ballotStorageStart);
     const ballotStorage = ballotStorageStart < 0 || ballotStorageEnd < 0 ? "" : channelObject.slice(ballotStorageStart, ballotStorageEnd);
@@ -305,10 +388,38 @@ describe("panel resource revisions", () => {
     expect(ballotTermCast).toContain('result.status === "overflow"');
     expect(ballotTermCast).toContain("await this.notifyCommittedPanelResources()");
     const eventSubSource = readFileSync(resolve(root, "src/worker/eventsub.ts"), "utf8");
-    expect(eventSubSource).toMatch(/finally \{\s*await notifyCommittedResources\(context\.env, revocation\.channelId\);/u);
     expect(eventSubSource).toMatch(/finally \{\s*await notifyCommittedResources\(context\.env, notifierChannelId\);/u);
+    expect(eventSubSource).toMatch(/revokeRealtimeUserFromAllChannels\([\s\S]*?revocation\.authorizationIdentity\.userId/u);
     const authSource = readFileSync(resolve(root, "src/worker/auth/routes.ts"), "utf8");
     expect(authSource.match(/finally \{\s*await notifyCommittedResources\(env\);/gu) ?? []).toHaveLength(2);
+    expect(authSource).toMatch(/await upsertBotIdentityAndStatus\([\s\S]*?await notifyCommittedResources\(context\.env\);/u);
+    expect(authSource).toMatch(/await upsertLoginIdentity\([\s\S]*?await notifyCommittedResources\(context\.env\);/u);
+    const memberRoutes = readFileSync(resolve(root, "src/worker/panel/member-routes.ts"), "utf8");
+    const platformRoutes = readFileSync(resolve(root, "src/worker/platform/routes.ts"), "utf8");
+    const loginMaintenance = readFileSync(resolve(root, "src/worker/login-maintenance.ts"), "utf8");
+    expect(memberRoutes).toMatch(/if \(!changed\) return[\s\S]*?await revokeRealtimeUser\(context\.env\.CHANNEL, channelId, userId\);/u);
+    expect(platformRoutes).toMatch(/if \(!changed\) return[\s\S]*?await revokeRealtimeUser\(context\.env\.CHANNEL, channelId, userId\);/u);
+    expect(authSource).toMatch(/await revokeSession\(context\.env\.DB, session\.sessionId, now, "logout"\);\s*await revokeRealtimeSessionForUser/u);
+    expect(loginMaintenance).toMatch(/if \(revoked\) \{\s*await revokeRealtimeUserFromAllChannels/u);
+  });
+
+  it("does not enumerate channels for an unauthenticated OAuth callback", async () => {
+    const prepare = vi.fn();
+    const idFromName = vi.fn((channelId: string) => channelId);
+    const env = {
+      DB: { prepare } as unknown as D1Database,
+      CHANNEL: { idFromName, get: vi.fn() },
+      PUBLIC_ORIGIN: "https://brobot.example",
+    } as unknown as Env;
+
+    const response = await app.fetch(
+      new Request("https://brobot.example/auth/twitch/callback"),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(idFromName).not.toHaveBeenCalled();
   });
 
   it("uses the subscription registry to resolve EventSub notifier channels, including raid directions", () => {
@@ -525,6 +636,187 @@ describe("panel resource revisions", () => {
     }
   });
 
+  it("queues only the owner channel when an API cache commit changes library values", async () => {
+    const database = new TestD1Database();
+    const visitedChannels: string[] = [];
+    try {
+      await addChannel(database, "api-cache-owner");
+      await addChannel(database, "api-cache-other");
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+      const ownerBefore = (await readPanelResourceRevisions(database as unknown as D1Database, "api-cache-owner"))["channel.library"] ?? 0;
+      const otherBefore = (await readPanelResourceRevisions(database as unknown as D1Database, "api-cache-other"))["channel.library"] ?? 0;
+      await database.prepare(
+        `INSERT INTO api_source_cache (url_hash, channel_id, payload_json, expires_at, updated_at)
+         VALUES (?, 'api-cache-owner', '{}', '2026-10-10T01:00:00.000Z', '2026-10-10T00:00:00.000Z')`,
+      ).bind("a".repeat(64)).run();
+      const env = {
+        DB: database as unknown as D1Database,
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: (channelId: string) => ({
+            reconcilePanelResources: () => { visitedChannels.push(channelId); return Promise.resolve(); },
+          }),
+        },
+      } as unknown as Env;
+
+      await notifyCommittedResources(env);
+
+      expect(visitedChannels).toEqual(["api-cache-owner"]);
+      expect((await readPanelResourceRevisions(database as unknown as D1Database, "api-cache-owner"))["channel.library"])
+        .toBe(ownerBefore + 1);
+      expect((await readPanelResourceRevisions(database as unknown as D1Database, "api-cache-other"))["channel.library"])
+        .toBe(otherBefore);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps legacy cache revisions available during migration-before-code rollout", async () => {
+    const database = new TestD1Database();
+    const visitedChannels: string[] = [];
+    try {
+      await addChannel(database, "legacy-cache-a");
+      await addChannel(database, "legacy-cache-b");
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+      const publicationTable = database.sqlite.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'panel_global_resource_publications'",
+      ).get() as { name: string } | undefined;
+      expect(publicationTable?.name).toBe("panel_global_resource_publications");
+      const revision = (resource: string): number => {
+        const row = database.sqlite.prepare(
+          "SELECT revision FROM panel_global_resource_revisions WHERE resource = ?",
+        ).get(resource) as { revision: number };
+        return row.revision;
+      };
+      const apiBefore = revision("api.cache");
+      const weatherBefore = revision("weather.cache");
+      const libraryBefore = new Map([
+        ["legacy-cache-a", (await readPanelResourceRevisions(database as unknown as D1Database, "legacy-cache-a"))["channel.library"] ?? 0],
+        ["legacy-cache-b", (await readPanelResourceRevisions(database as unknown as D1Database, "legacy-cache-b"))["channel.library"] ?? 0],
+      ]);
+
+      await database.prepare(
+        `INSERT INTO api_source_cache (url_hash, payload_json, expires_at, updated_at)
+         VALUES (?, '{}', '2026-10-10T01:00:00.000Z', '2026-10-10T00:00:00.000Z')`,
+      ).bind("b".repeat(64)).run();
+      await database.prepare(
+        `INSERT INTO weather_cache
+          (provider, location_key, latitude, longitude, payload_json, expires_at, updated_at)
+         VALUES ('met_norway', 'legacy-location', 0, 0, '{}', '2026-10-10T01:00:00.000Z', '2026-10-10T00:00:00.000Z')`,
+      ).run();
+
+      expect(revision("api.cache")).toBe(apiBefore + 1);
+      expect(revision("weather.cache")).toBe(weatherBefore + 1);
+
+      const env = {
+        DB: database as unknown as D1Database,
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: (channelId: string) => ({
+            reconcilePanelResources: () => { visitedChannels.push(channelId); return Promise.resolve(); },
+          }),
+        },
+      } as unknown as Env;
+      await notifyCommittedResources(env);
+
+      expect(visitedChannels.sort((left, right) => left.localeCompare(right)))
+        .toEqual(["legacy-cache-a", "legacy-cache-b"]);
+      for (const channelId of visitedChannels) {
+        expect((await readPanelResourceRevisions(database as unknown as D1Database, channelId))["channel.library"])
+          .toBe((libraryBefore.get(channelId) ?? 0) + 1);
+      }
+
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+      const ownedBefore = (await readPanelResourceRevisions(database as unknown as D1Database, "legacy-cache-a"))["channel.library"] ?? 0;
+      const unrelatedBefore = (await readPanelResourceRevisions(database as unknown as D1Database, "legacy-cache-b"))["channel.library"] ?? 0;
+      await database.prepare("UPDATE api_source_cache SET channel_id = 'legacy-cache-a' WHERE url_hash = ?")
+        .bind("b".repeat(64)).run();
+
+      expect((await readPanelResourceRevisions(database as unknown as D1Database, "legacy-cache-a"))["channel.library"])
+        .toBe(ownedBefore + 1);
+      expect((await readPanelResourceRevisions(database as unknown as D1Database, "legacy-cache-b"))["channel.library"])
+        .toBe(unrelatedBefore);
+      expect((database.sqlite.prepare("SELECT DISTINCT channel_id FROM panel_resource_pending").all() as Array<{ channel_id: string }>)
+        .map(({ channel_id }) => channel_id)).toEqual(["legacy-cache-a"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("fans global bot status commits out to each affected channel", async () => {
+    const database = new TestD1Database();
+    const visitedChannels: string[] = [];
+    try {
+      await addChannel(database, "bot-status-a");
+      await addChannel(database, "bot-status-b");
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+      const env = {
+        DB: database as unknown as D1Database,
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: (channelId: string) => ({
+            reconcilePanelResources: () => { visitedChannels.push(channelId); return Promise.resolve(); },
+          }),
+        },
+      } as unknown as Env;
+
+      await database.prepare(
+        `INSERT INTO bot_identity_status (id, status, reason, updated_at)
+         VALUES (1, 'error', 'token_check_failed', '2026-10-10T00:00:00.000Z')`,
+      ).run();
+      await notifyCommittedResources(env);
+
+      expect(visitedChannels.sort((left, right) => left.localeCompare(right))).toEqual(["bot-status-a", "bot-status-b"]);
+      for (const channelId of ["bot-status-a", "bot-status-b"]) {
+        const revisions = await readPanelResourceRevisions(database as unknown as D1Database, channelId);
+        expect(revisions["channel.overview"]).toBeGreaterThan(0);
+        expect(revisions["channel.system"]).toBeGreaterThan(0);
+        expect(revisions["channel.modules"]).toBeGreaterThan(0);
+      }
+    } finally {
+      database.close();
+    }
+  });
+
+  it("revises login identity dependencies in the owner and historical member channels", async () => {
+    const database = new TestD1Database();
+    try {
+      await addChannel(database, "identity-owner");
+      await addChannel(database, "identity-member-channel");
+      await database.prepare(
+        `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
+         VALUES ('identity-member-channel', 'identity-owner', 'operator', '2026-10-10T00:00:00.000Z', '2026-10-10T00:00:00.000Z')`,
+      ).run();
+      await database.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+         VALUES ('identity-owner', 'chat_voting', 1, '{}')`,
+      ).run();
+      await database.prepare(
+        `INSERT INTO audit_log (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+         VALUES ('identity-audit', 'identity-owner', '2026-10-10T00:00:00.000Z', 'identity-member-channel', 'channel.updated', '{}', '{}')`,
+      ).run();
+      await database.prepare(
+        `INSERT INTO twitch_login_identity
+          (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, status, created_at, updated_at)
+         VALUES ('identity-owner', 'old-login', '[]', 'access', 'refresh', '2026-10-11T00:00:00.000Z', 'connected', '2026-10-10T00:00:00.000Z', '2026-10-10T00:00:00.000Z')`,
+      ).run();
+      const ownerBefore = await readPanelResourceRevisions(database as unknown as D1Database, "identity-owner");
+      const memberBefore = await readPanelResourceRevisions(database as unknown as D1Database, "identity-member-channel");
+
+      await database.prepare("UPDATE twitch_login_identity SET login = 'new-login' WHERE user_id = 'identity-owner'").run();
+
+      const ownerAfter = await readPanelResourceRevisions(database as unknown as D1Database, "identity-owner");
+      const memberAfter = await readPanelResourceRevisions(database as unknown as D1Database, "identity-member-channel");
+      expect(ownerAfter["channel.modules"]).toBeGreaterThan(ownerBefore["channel.modules"] ?? 0);
+      expect(ownerAfter["module:chat_voting:settings"]).toBeGreaterThan(ownerBefore["module:chat_voting:settings"] ?? 0);
+      expect(ownerAfter["module:ads:schedule"]).toBeGreaterThan(ownerBefore["module:ads:schedule"] ?? 0);
+      expect(memberAfter["channel.members"]).toBeGreaterThan(memberBefore["channel.members"] ?? 0);
+      expect(memberAfter["channel.audit"]).toBeGreaterThan(memberBefore["channel.audit"] ?? 0);
+    } finally {
+      database.close();
+    }
+  });
+
   it("combines D1 and channel Durable Object revision counters", async () => {
     const database = new TestD1Database();
     try {
@@ -588,9 +880,10 @@ describe("panel resource revisions", () => {
         "eventsub_maintenance_locks",
         "eventsub_messages",
         "oauth_transactions",
-        "panel_global_resource_publications",
         "panel_global_resource_revisions",
+        "panel_global_resource_publications",
         "panel_resource_dependencies",
+        "panel_resource_pending",
         "panel_resource_revisions",
         "text_command_user_cooldowns",
         "twitch_app_access_token",

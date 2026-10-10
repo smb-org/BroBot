@@ -20,6 +20,7 @@ const channelId = "channel-a";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   setDashboardRealtimeStatus(channelId, "offline");
 });
 
@@ -152,23 +153,31 @@ describe("dashboard query data layer", () => {
 
     const view = renderWithQuery(<ModuleProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
     expect(await screen.findByText("1")).toBeInTheDocument();
+    vi.useFakeTimers();
     let revision = 0;
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: { "module:chat_voting:panel": revision } }), {
       status: 200, headers: { "Content-Type": "application/json" },
     }))));
     await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
     revision = 1;
-    await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
+    const firstHint = reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await firstHint;
     await refreshStarted;
     revision = 2;
-    await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
+    const secondHint = reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
     revision = 3;
-    await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
+    const thirdHint = reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.all([secondHint, thirdHint]);
     expect(readCount).toBe(2);
 
-    releaseRefresh?.();
-    await waitFor(() => expect(readCount).toBe(3), { timeout: 2_000 });
-    await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "chat_voting", "panel"))).toBe(3), { timeout: 2_000 });
+    await act(async () => {
+      releaseRefresh?.();
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(readCount).toBe(4);
+    expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "chat_voting", "panel"))).toBe(4);
     view.unmount();
   });
 
@@ -184,20 +193,24 @@ describe("dashboard query data layer", () => {
 
     const view = renderWithQuery(<ModuleProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
     expect(await screen.findByText("1")).toBeInTheDocument();
+    vi.useFakeTimers();
     let revision = 0;
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: { "module:chat_voting:panel": revision } }), {
       status: 200, headers: { "Content-Type": "application/json" },
     }))));
     await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
 
+    const reconciliations: Promise<void>[] = [];
     for (let index = 0; index < 20; index += 1) {
-      await new Promise((resolve) => { setTimeout(resolve, 50); });
       revision += 1;
-      await reconcileDashboardPanelResourceRevisions(view.queryClient, channelId);
+      reconciliations.push(reconcileDashboardPanelResourceRevisions(view.queryClient, channelId));
+      await vi.advanceTimersByTimeAsync(50);
     }
-    await new Promise((resolve) => { setTimeout(resolve, 300); });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.all(reconciliations);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
 
-    // One immediate refresh plus one trailing refresh for the sustained hint burst.
+    // The one-second query throttle bounds the sustained burst to one trailing refresh.
     expect(readCount).toBe(3);
     expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "chat_voting", "panel"))).toBe(readCount);
     view.unmount();

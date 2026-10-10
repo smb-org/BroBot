@@ -44,6 +44,7 @@ export const createDashboardQueryClient = (onAuthenticationRequired?: () => void
         queryFn: requestChannelResource,
         staleTime: 30_000,
         gcTime: 600_000,
+        refetchOnWindowFocus: false,
         placeholderData: keepPreviousData,
         retry: (failureCount, error) =>
           !(error instanceof PanelApiError && error.status === 401) && failureCount < 1,

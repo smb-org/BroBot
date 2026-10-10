@@ -147,6 +147,18 @@ const channelObject = (namespace: Env["CHANNEL"] | undefined, channelId: string)
   return namespace.get(namespace.idFromName(channelId));
 };
 
+const requiredChannelObject = (namespace: Env["CHANNEL"] | undefined, channelId: string) => {
+  const object = channelObject(namespace, channelId);
+  if (object === null) throw new Error("Channel namespace is required to revoke realtime access.");
+  return object;
+};
+
+const awaitAllRevocations = async (revocations: readonly Promise<unknown>[]): Promise<void> => {
+  const results = await Promise.allSettled(revocations);
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure !== undefined) throw failure.reason;
+};
+
 export const publishRealtimeMessages = async (
   namespace: Env["CHANNEL"] | undefined,
   messages: readonly RealtimeMessage[],
@@ -281,12 +293,17 @@ export const revokeRealtimeUser = async (
   channelId: string,
   userId: string,
 ): Promise<void> => {
-  try {
-    const object = channelObject(namespace, channelId);
-    if (object !== null) await object.revokeUser(userId);
-  } catch (error: unknown) {
-    console.warn("Realtime revocation for user failed.", error);
-  }
+  await requiredChannelObject(namespace, channelId).revokeUser(userId);
+};
+
+export const revokeRealtimeUserFromAllChannels = async (
+  db: D1Database,
+  namespace: Env["CHANNEL"] | undefined,
+  userId: string,
+): Promise<void> => {
+  if (namespace === undefined) throw new Error("Channel namespace is required to revoke realtime access.");
+  const channelIds = await listChannelIdsForUser(db, userId);
+  await awaitAllRevocations(channelIds.map((channelId) => revokeRealtimeUser(namespace, channelId, userId)));
 };
 
 export const revokeRealtimeToken = async (
@@ -325,14 +342,8 @@ export const revokeRealtimeSessionForUser = async (
   userId: string,
   sessionId: string,
 ): Promise<void> => {
-  try {
-    if (namespace === undefined) return;
-    const channelIds = await listChannelIdsForUser(db, userId);
-    await Promise.all(channelIds.map(async (channelId) => {
-      const object = channelObject(namespace, channelId);
-      if (object !== null) await object.revokeSession(sessionId);
-    }));
-  } catch (error: unknown) {
-    console.warn("Realtime revocation for session failed.", error);
-  }
+  if (namespace === undefined) throw new Error("Channel namespace is required to revoke realtime access.");
+  const channelIds = await listChannelIdsForUser(db, userId);
+  await awaitAllRevocations(channelIds.map((channelId) =>
+    requiredChannelObject(namespace, channelId).revokeSession(sessionId)));
 };

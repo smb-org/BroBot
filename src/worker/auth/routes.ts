@@ -565,6 +565,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
         createdAt: current?.createdAt ?? now,
         updatedAt: now,
       }, "connected", null, now);
+      await notifyCommittedResources(context.env);
       const maintenance = maintainAfterBotAuthorization(context.env, now);
       try {
         context.executionCtx.waitUntil(maintenance);
@@ -633,6 +634,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
       createdAt: current?.createdAt ?? now,
       updatedAt: now,
     });
+    await notifyCommittedResources(context.env);
 
     const sessionExpiresAt = new Date(Date.parse(now) + SESSION_COOKIE_MAX_AGE_SECONDS * 1000).toISOString();
     const sessionId = randomId();
@@ -684,7 +686,7 @@ authRouter.post("/auth/logout", async (context) => {
   }
   const now = nowIso();
   await revokeSession(context.env.DB, session.sessionId, now, "logout");
-  void revokeRealtimeSessionForUser(context.env.DB, context.env.CHANNEL, session.userId, session.sessionId);
+  await revokeRealtimeSessionForUser(context.env.DB, context.env.CHANNEL, session.userId, session.sessionId);
   context.header("Set-Cookie", clearSessionCookie());
   context.header("Set-Cookie", serializeCsrfCookie("", 0), { append: true });
   return context.body(null, 204);

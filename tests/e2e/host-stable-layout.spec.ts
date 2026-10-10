@@ -958,7 +958,7 @@ test("stream manager waits for module data and keeps its immediate-action strip 
   }
 });
 
-test("background channel refresh keeps populated overview cards through loading and failure", async ({ page }) => {
+test("window visibility changes do not broadly refresh populated overview cards", async ({ page }) => {
   const secondChannel = {
     ...channel,
     channelId: "stable-host-layout-second",
@@ -968,32 +968,21 @@ test("background channel refresh keeps populated overview cards through loading 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installChannelMocks(page, {}, { channelList: [channel, secondChannel] });
+    let channelListRequests = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/channels") channelListRequests += 1;
+    });
     await page.goto("/");
     const grid = page.locator(".module-grid");
     await expect(grid.locator(":scope > .module-tile")).toHaveCount(2);
     const before = await measureDocumentBox(page, ".module-grid");
-
-    let releaseRefresh!: () => void;
-    let markRefreshStarted!: () => void;
-    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
-    const refreshStarted = new Promise<void>((resolve) => { markRefreshStarted = resolve; });
-    await page.route("**/api/channels", async (route) => {
-      markRefreshStarted();
-      await refreshGate;
-      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "channels_unavailable" }) });
-    });
-
+    const initialChannelListRequests = channelListRequests;
     await page.evaluate(() => { document.dispatchEvent(new Event("visibilitychange")); });
-    await refreshStarted;
+    await page.waitForTimeout(300);
     await expect(page.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
     await expect(grid.locator(":scope > .module-tile")).toHaveCount(2);
     expect(await measureDocumentBox(page, ".module-grid")).toEqual(before);
-
-    releaseRefresh();
-    await expect(page.locator(".ui-toast--error")).toBeVisible();
-    await expect(page.locator(".ui-load-state")).toHaveAttribute("data-status", "success");
-    await expect(grid.locator(":scope > .module-tile")).toHaveCount(2);
-    expect(await measureDocumentBox(page, ".module-grid")).toEqual(before);
+    expect(channelListRequests).toBe(initialChannelListRequests);
     await page.unrouteAll();
   }
 });

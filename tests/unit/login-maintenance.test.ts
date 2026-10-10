@@ -23,6 +23,8 @@ const makeEnvironment = async (
     failTokenWriteAfterCommitOnce?: boolean;
     beforeTokenWrite?: () => Promise<void>;
     onSuccessfulTokenWrite?: () => void;
+    memberChannelIds?: readonly string[];
+    revokeUser?: (userId: string) => Promise<void>;
   } = {},
 ) => {
   const keys = parseKeyRing(keyRingSerialized);
@@ -58,7 +60,11 @@ const makeEnvironment = async (
         return statement;
       }),
       all: vi.fn().mockImplementation(() =>
-        sql.includes("FROM twitch_login_identity") ? { results: [row] } : { results: [] }),
+        sql.includes("FROM twitch_login_identity")
+          ? { results: [row] }
+          : sql.includes("FROM channel_members")
+            ? { results: (options.memberChannelIds ?? []).map((channel_id) => ({ channel_id })) }
+            : { results: [] }),
       run: vi.fn().mockImplementation(async () => {
         if (sql.includes("UPDATE twitch_login_identity") && sql.includes("SET token_scopes_json")) {
           const [scopesJson, updatedAt, userId] = values;
@@ -168,6 +174,10 @@ const makeEnvironment = async (
   return {
     environment: {
       DB: { prepare, batch } as unknown as D1Database,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ revokeUser: options.revokeUser ?? (() => Promise.resolve()) }),
+      },
       TWITCH_CLIENT_ID: "client-id",
       TWITCH_CLIENT_SECRET: "client-secret",
       SESSION_ENCRYPTION_KEYS: keyRingSerialized,
@@ -402,6 +412,30 @@ describe("Login token maintenance", () => {
       revoked_at: "2026-09-18T00:00:00.000Z",
       revocation_reason: "authorization_revoked",
     }]);
+  });
+
+  it("surfaces a failed socket close after invalid_grant commits the identity revocation", async () => {
+    const revokeUser = vi.fn(() => Promise.reject(new Error("channel close failed")));
+    const { environment, read } = await makeEnvironment("2026-09-18T00:59:59.000Z", {
+      memberChannelIds: ["channel-a"],
+      revokeUser,
+    });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ user_id: "user-1", login: "tester", expires_in: 3599 }),
+        { status: 200 },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: "invalid_grant", message: "Invalid OAuth token" }),
+        { status: 400 },
+      ));
+    vi.stubGlobal("fetch", fetcher);
+
+    await expect(maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z"))
+      .rejects.toThrow("channel close failed");
+
+    expect(read().status).toBe("revoked");
+    expect(revokeUser).toHaveBeenCalledWith("user-1");
   });
 
   it("refreshes exactly once even after a 401 when expiry is still far off", async () => {

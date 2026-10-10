@@ -16,6 +16,8 @@ import {
   validateBotToken,
   logMaintenanceError,
 } from "./bot-maintenance";
+import { revokeRealtimeUserFromAllChannels } from "./realtime";
+import { notifyCommittedResources } from "./panel-resources";
 
 const markLoginRevoked = async (
   env: Env,
@@ -23,7 +25,7 @@ const markLoginRevoked = async (
   now: string,
   reason: string,
 ): Promise<void> => {
-  await revokeLoginIdentityAndSessionsForUser(
+  const revoked = await revokeLoginIdentityAndSessionsForUser(
     env.DB,
     identity.userId,
     identity.accessTokenCiphertext,
@@ -31,6 +33,10 @@ const markLoginRevoked = async (
     reason,
     now,
   );
+  if (revoked) {
+    await revokeRealtimeUserFromAllChannels(env.DB, env.CHANNEL, identity.userId);
+    await notifyCommittedResources(env);
+  }
 };
 
 const rotateLoginTokensWithRetry = async (

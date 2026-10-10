@@ -1123,7 +1123,7 @@ describe("EventsPage failure cause icon", () => {
       type: "event_log.new",
       payload: { entries: [{ eventId: newRaid.eventId, createdAt: newRaid.createdAt, moduleId: newRaid.moduleId, code: newRaid.code, actorUserId: null }] },
     }));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     expect(fetcher).toHaveBeenCalledTimes(1);
     fetcher.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));

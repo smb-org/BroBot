@@ -1379,15 +1379,6 @@ export const DashboardApp = (): ReactElement => {
   }, [queryClient, reloadChannels, reloadModules, reloadOverview, selectedChannel?.modules, systemChannelId]);
   const refreshChannelStateRef = useRef(refreshChannelState);
   useLayoutEffect(() => { refreshChannelStateRef.current = refreshChannelState; }, [refreshChannelState]);
-  useEffect(() => {
-    const refresh = (): void => {
-      if (document.visibilityState === "visible") void refreshChannelStateRef.current().catch(() => undefined);
-    };
-    document.addEventListener("visibilitychange", refresh);
-    return () => {
-      document.removeEventListener("visibilitychange", refresh);
-    };
-  }, []);
 
   const routeUsesOverview = route.kind === "module" || (route.kind === "channel" && route.section === "overview");
   // Keep the freshest token snapshot per channel. The channels query covers all

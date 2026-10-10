@@ -13,7 +13,31 @@ export const PANEL_RESOURCE_NOTIFIER_COVERAGE = {
   channelRoutes: "/api/channels/:channelId/*",
   moduleRoutes: "channelRoutes",
   platformRoutes: "/api/platform/*",
-  authRoutes: "/auth/*",
+  explicitlyCommittedRoutes: [
+    "GET /auth/twitch/callback",
+    "GET /api/overlay/bootstrap",
+    "GET /api/overlay/variables/:name",
+  ],
+  nonPanelGetRoutes: [
+    "/healthz",
+    "/overlay",
+    "/overlay.html",
+    "/api/channels",
+    "/api/csrf",
+    "/api/platform",
+    "/api/platform/users",
+    "/api/platform/channels",
+    "/api/platform/channels/:channelId/members",
+    "/api/platform/audit",
+    "/auth/login",
+    "/auth/channels/:channelId/channel-bot",
+    "/auth/channels/:channelId/broadcaster-scopes/:moduleId",
+    "/auth/bot/login",
+    "/ws/channels/:channelId",
+    "/ws/overlay",
+  ],
+  nonPanelWriteRoutes: ["POST /auth/logout"],
+  nonPanelAllRoutes: ["ALL /api/*", "ALL /*"],
   eventSubRoute: "/api/twitch/eventsub",
   eventSubHandler: "eventSubRouter notification/revocation finally",
   channelAlarm: "ChannelObject.alarm.finally",
@@ -26,35 +50,31 @@ const reconcileChannelResources = async (
 ): Promise<PanelResourceRevisionVector> => {
   const revisions = await readPanelResourceRevisions(env.DB, channelId);
   await env.CHANNEL.get(env.CHANNEL.idFromName(channelId)).reconcilePanelResources(revisions);
+  await clearDeliveredPanelResources(env.DB, channelId, revisions);
   return revisions;
 };
 
-const publishPendingSharedResourceChanges = async (
-  env: Pick<Env, "DB" | "CHANNEL">,
-  alreadyReconciled = new Map<string, PanelResourceRevisionVector>(),
+const clearDeliveredPanelResources = async (
+  database: D1Database,
+  channelId: string,
+  revisions: PanelResourceRevisionVector,
 ): Promise<void> => {
-  const pending = await env.DB.prepare(
-    `SELECT global.resource, global.revision
-       FROM panel_global_resource_revisions AS global
-       LEFT JOIN panel_global_resource_publications AS published USING (resource)
-      WHERE global.resource IN ('channels', 'weather.cache', 'api.cache')
-        AND global.revision > COALESCE(published.revision, 0)`,
-  ).all<{ resource: string; revision: number }>();
-  if (pending.results.length === 0) return;
-  const channels = await env.DB.prepare("SELECT channel_id FROM channels").all<{ channel_id: string }>();
-  await Promise.all(channels.results
-    .filter(({ channel_id }) => {
-      const vector = alreadyReconciled.get(channel_id);
-      return vector === undefined || pending.results.some(({ resource, revision }) => (vector[resource] ?? 0) < revision);
-    })
-    .map(({ channel_id }) => reconcileChannelResources(env, channel_id)));
-  await env.DB.batch(pending.results.map(({ resource, revision }) => env.DB.prepare(
-    `INSERT INTO panel_global_resource_publications (resource, revision) VALUES (?, ?)
-     ON CONFLICT(resource) DO UPDATE SET revision = MAX(revision, excluded.revision)`,
-  ).bind(resource, revision)));
+  const entries = Object.entries(revisions);
+  if (entries.length === 0) return;
+  await database.batch(entries.map(([resource, revision]) => database.prepare(
+    `DELETE FROM panel_resource_pending
+      WHERE channel_id = ? AND resource = ? AND revision <= ?`,
+  ).bind(channelId, resource, revision)));
 };
 
-/** Reads the durable D1 vector, including cross-channel query resources. */
+const pendingChannelIds = async (database: D1Database): Promise<string[]> => {
+  const result = await database.prepare(
+    "SELECT DISTINCT channel_id FROM panel_resource_pending ORDER BY channel_id",
+  ).all<{ channel_id: string }>();
+  return result.results.map(({ channel_id }) => channel_id);
+};
+
+/** Reads the durable D1 vector for one channel. */
 export const readPanelResourceRevisions = async (
   database: D1Database,
   channelId: string,
@@ -62,10 +82,7 @@ export const readPanelResourceRevisions = async (
   const result = await database.prepare(
     `SELECT resource, revision
        FROM panel_resource_revisions
-      WHERE channel_id = ?
-     UNION ALL
-     SELECT resource, revision
-       FROM panel_global_resource_revisions`,
+      WHERE channel_id = ?`,
   ).bind(channelId).all<PanelResourceRevisionRow>();
   return Object.fromEntries(result.results.map(({ resource, revision }) => [resource, revision]));
 };
@@ -89,12 +106,8 @@ export const readCompletePanelResourceRevisions = async (
 /**
  * D1 triggers and Durable Object transactions each persist revisions beside
  * their own committed data. The panel vector combines both counter domains.
- */
-/**
- * The one panel resource notifier. D1 triggers advance revisions in the same
- * commit as D1 writes; `resources` is for DO-only commits. Publication is a
- * best-effort wake-up because the durable vector repairs a lost hint on the
- * next hint, reconnect, or focus comparison.
+ * D1's pending table is the commit-coupled channel queue, so a request only
+ * visits channels with committed, unpublished changes.
  */
 export const notifyCommittedResources = async (
   env: Pick<Env, "DB" | "CHANNEL">,
@@ -103,35 +116,27 @@ export const notifyCommittedResources = async (
 ): Promise<void> => {
   if (channelId === undefined) {
     try {
-      const channels = await env.DB.prepare("SELECT channel_id FROM channels").all<{ channel_id: string }>();
-      const reconciled = new Map<string, PanelResourceRevisionVector>();
-      await Promise.all(channels.results.map(async ({ channel_id }) => {
-        reconciled.set(channel_id, await reconcileChannelResources(env, channel_id));
-      }));
-      await publishPendingSharedResourceChanges(env, reconciled);
+      await Promise.all((await pendingChannelIds(env.DB)).map((pendingChannelId) =>
+        reconcileChannelResources(env, pendingChannelId)));
     } catch (error: unknown) {
-      console.warn("Cross-channel panel resources could not be published.", error);
+      console.warn("Committed panel resources could not be published.", error);
     }
     return;
   }
-  const reconciled = new Map<string, PanelResourceRevisionVector>();
   try {
-    const exists = await env.DB.prepare("SELECT 1 AS present FROM channels WHERE channel_id = ?")
-      .bind(channelId).first<{ present: number }>();
-    if (exists !== null) {
-      const revisions = reconcileLocal === undefined
-        ? await reconcileChannelResources(env, channelId)
-        : await readPanelResourceRevisions(env.DB, channelId);
-      if (reconcileLocal !== undefined) await reconcileLocal(revisions);
-      reconciled.set(channelId, revisions);
+    const pending = await env.DB.prepare(
+      "SELECT 1 AS present FROM panel_resource_pending WHERE channel_id = ? LIMIT 1",
+    ).bind(channelId).first<{ present: number }>();
+    if (pending === null && reconcileLocal === undefined) return;
+    const revisions = await readPanelResourceRevisions(env.DB, channelId);
+    if (reconcileLocal === undefined) {
+      await env.CHANNEL.get(env.CHANNEL.idFromName(channelId)).reconcilePanelResources(revisions);
+    } else {
+      await reconcileLocal(revisions);
     }
+    await clearDeliveredPanelResources(env.DB, channelId, revisions);
   } catch (error: unknown) {
     console.warn("Committed panel resources could not be published.", error);
-  }
-  try {
-    await publishPendingSharedResourceChanges(env, reconciled);
-  } catch (error: unknown) {
-    console.warn("Shared panel resources could not be published.", error);
   }
 };
 

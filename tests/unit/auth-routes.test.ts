@@ -79,6 +79,10 @@ const makeEnvironment = (
         statements.map((batchStatement) => batchStatement.run()),
       )),
     } as unknown as D1Database,
+    CHANNEL: {
+      idFromName: (channelId: string) => channelId,
+      get: () => ({ revokeSession: () => Promise.resolve() }),
+    },
     TWITCH_CLIENT_ID: "client-id",
     TWITCH_CLIENT_SECRET: "client-secret",
     TWITCH_BOT_LOGIN: "brobot",
@@ -693,6 +697,46 @@ describe("auth routes", () => {
 
     expect(response.status).toBe(204);
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it("does not report logout complete when affected panel sockets cannot be closed", async () => {
+    const { environment, statement } = makeEnvironment({
+      session_id: "session-1",
+      user_id: "user-1",
+      login: "tester",
+      expires_at: "2099-09-19T00:00:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+      updated_at: "2099-09-18T00:00:00.000Z",
+      revoked_at: null,
+      revocation_reason: null,
+    });
+    const revokeSession = vi.fn(() => Promise.reject(new Error("channel unavailable")));
+    environment.CHANNEL = {
+      idFromName: (channelId: string) => channelId,
+      get: () => ({ revokeSession }),
+    } as unknown as Env["CHANNEL"];
+    statement.all.mockResolvedValueOnce({ results: [{ channel_id: "channel-a" }] });
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-1" },
+      environment.SESSION_COOKIE_KEYS,
+      environment.SESSION_ENCRYPTION_KEYS,
+    );
+    const csrfToken = await createCsrfToken("session-1", environment.SESSION_COOKIE_KEYS, freshTimestamp());
+
+    const response = await authRouter.fetch(
+      new Request("https://brobot.example/auth/logout", {
+        method: "POST",
+        headers: {
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrfToken}`,
+          "X-CSRF-Token": csrfToken,
+        },
+      }),
+      environment,
+    );
+
+    expect(response.status).toBe(500);
+    expect(revokeSession).toHaveBeenCalledWith("session-1");
+    expect(statement.run).toHaveBeenCalled();
   });
 
   it.each([
