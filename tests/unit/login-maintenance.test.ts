@@ -23,6 +23,9 @@ const makeEnvironment = async (
     failTokenWriteAfterCommitOnce?: boolean;
     beforeTokenWrite?: () => Promise<void>;
     onSuccessfulTokenWrite?: () => void;
+    memberChannelIds?: readonly string[];
+    revokeUser?: (userId: string) => Promise<void>;
+    pendingRealtimeUserRevocations?: readonly string[];
   } = {},
 ) => {
   const keys = parseKeyRing(keyRingSerialized);
@@ -47,6 +50,10 @@ const makeEnvironment = async (
     revoked_at: null as string | null,
     revocation_reason: null as string | null,
   }];
+  const pendingRealtimeRevocations = new Map(options.pendingRealtimeUserRevocations?.map((userId) => [userId, {
+    requested_at: "2026-09-17T00:00:00.000Z",
+    generation: 1,
+  }]) ?? []);
   const bind = vi.fn().mockReturnThis();
   let tokenWriteAttempts = 0;
   const prepare = vi.fn((sql: string) => {
@@ -58,8 +65,42 @@ const makeEnvironment = async (
         return statement;
       }),
       all: vi.fn().mockImplementation(() =>
-        sql.includes("FROM twitch_login_identity") ? { results: [row] } : { results: [] }),
+        sql.includes("FROM pending_realtime_user_revocations")
+          ? { results: [...pendingRealtimeRevocations].map(([user_id, pending]) => ({ user_id, ...pending })) }
+          : sql.includes("FROM twitch_login_identity")
+            ? { results: row.status === "revoked" ? [] : [row] }
+          : sql.includes("FROM channel_members")
+            ? { results: (options.memberChannelIds ?? []).map((channel_id) => ({ channel_id })) }
+          : { results: [] }),
+      first: vi.fn().mockImplementation(() => {
+        if (!sql.includes("FROM pending_realtime_user_revocations")) return null;
+        const pending = pendingRealtimeRevocations.get(String(values[0]));
+        return pending === undefined ? null : {
+          user_id: String(values[0]),
+          ...pending,
+        };
+      }),
       run: vi.fn().mockImplementation(async () => {
+        if (sql.includes("INSERT INTO pending_realtime_user_revocations")) {
+          const userId = String(values[0]);
+          const previous = pendingRealtimeRevocations.get(userId);
+          pendingRealtimeRevocations.set(userId, {
+            requested_at: typeof values[2] === "string"
+              ? values[2]
+              : previous?.requested_at ?? "2026-09-17T00:00:00.000Z",
+            generation: (previous?.generation ?? 0) + 1,
+          });
+          return { success: true, meta: { changes: 1 } };
+        }
+        if (sql.includes("DELETE FROM pending_realtime_user_revocations")) {
+          const userId = String(values[0]);
+          const pending = pendingRealtimeRevocations.get(userId);
+          if (pending !== undefined && pending.requested_at === values[1] && pending.generation === values[2]) {
+            pendingRealtimeRevocations.delete(userId);
+            return { success: true, meta: { changes: 1 } };
+          }
+          return { success: true, meta: { changes: 0 } };
+        }
         if (sql.includes("UPDATE twitch_login_identity") && sql.includes("SET token_scopes_json")) {
           const [scopesJson, updatedAt, userId] = values;
           if (row.user_id !== userId) return { success: true, meta: { changes: 0 } };
@@ -168,6 +209,10 @@ const makeEnvironment = async (
   return {
     environment: {
       DB: { prepare, batch } as unknown as D1Database,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ revokeUser: options.revokeUser ?? (() => Promise.resolve()) }),
+      },
       TWITCH_CLIENT_ID: "client-id",
       TWITCH_CLIENT_SECRET: "client-secret",
       SESSION_ENCRYPTION_KEYS: keyRingSerialized,
@@ -177,6 +222,7 @@ const makeEnvironment = async (
     getTokenWriteAttempts: () => tokenWriteAttempts,
     read: () => row,
     readSessions: () => sessions,
+    pendingRealtimeRevocations,
     getInitialAccessTokenCiphertext: () => initialAccessTokenCiphertext,
     getInitialRefreshTokenCiphertext: () => initialRefreshTokenCiphertext,
   };
@@ -402,6 +448,57 @@ describe("Login token maintenance", () => {
       revoked_at: "2026-09-18T00:00:00.000Z",
       revocation_reason: "authorization_revoked",
     }]);
+  });
+
+  it("surfaces a failed socket close after invalid_grant commits the identity revocation", async () => {
+    const revokeUser = vi.fn()
+      .mockRejectedValueOnce(new Error("channel close failed"))
+      .mockResolvedValue(undefined);
+    const { environment, read, pendingRealtimeRevocations } = await makeEnvironment("2026-09-18T00:59:59.000Z", {
+      memberChannelIds: ["channel-a"],
+      revokeUser,
+    });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ user_id: "user-1", login: "tester", expires_in: 3599 }),
+        { status: 200 },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: "invalid_grant", message: "Invalid OAuth token" }),
+        { status: 400 },
+      ));
+    vi.stubGlobal("fetch", fetcher);
+
+    await expect(maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z"))
+      .rejects.toThrow("channel close failed");
+
+    expect(read().status).toBe("revoked");
+    expect(revokeUser).toHaveBeenCalledWith("user-1");
+    expect([...pendingRealtimeRevocations.keys()]).toEqual(["user-1"]);
+
+    await maintainLoginIdentities(environment, "2026-09-18T00:01:00.000Z");
+
+    expect(revokeUser).toHaveBeenCalledTimes(2);
+    expect(pendingRealtimeRevocations.size).toBe(0);
+  });
+
+  it("continues retrying later users when one pending socket close fails", async () => {
+    const revokeUser = vi.fn((userId: string) => userId === "user-1"
+      ? Promise.reject(new Error("first user close failed"))
+      : Promise.resolve());
+    const { environment, pendingRealtimeRevocations } = await makeEnvironment(
+      "2099-09-18T00:59:59.000Z",
+      {
+        memberChannelIds: ["channel-a"],
+        pendingRealtimeUserRevocations: ["user-1", "user-2"],
+        revokeUser,
+      },
+    );
+
+    await maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
+
+    expect(revokeUser.mock.calls.map(([userId]) => userId)).toEqual(["user-1", "user-2"]);
+    expect([...pendingRealtimeRevocations.keys()]).toEqual(["user-1"]);
   });
 
   it("refreshes exactly once even after a 401 when expiry is still far off", async () => {

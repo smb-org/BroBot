@@ -173,6 +173,7 @@ const panelCopy: LocaleCatalog<{
   liftTitle: string;
   liftDescription: string;
   confirmLift: string;
+  readOnlyReason: string;
   loadError: string;
   actionError: string;
   lifted: string;
@@ -188,6 +189,7 @@ const panelCopy: LocaleCatalog<{
     cancelDescription: "Die laufende Abstimmung wird geschlossen.", confirmCancel: "Votekick abbrechen", cancelDialogCancel: "Zurück",
     lift: "Timeout aufheben", liftDialogCancel: "Zurück",
     liftTitle: "Timeout aufheben?", liftDescription: "Der Timeout für dieses Ziel wird bei Twitch aufgehoben.", confirmLift: "Timeout aufheben",
+    readOnlyReason: "Deine Kanalrolle darf Votekicks nicht bedienen.",
     loadError: "Votekicks konnten nicht geladen werden.", actionError: "Die Aktion konnte nicht abgeschlossen werden.", lifted: "Timeout aufgehoben.",
     status: { running: "Läuft", passed: "Bestanden", expired: "Abgelaufen", cancelled: "Abgebrochen", failed: "Fehlgeschlagen" },
     duration: (seconds) => seconds === null ? "—" : `${String(seconds)} s`,
@@ -201,6 +203,7 @@ const panelCopy: LocaleCatalog<{
     cancelDescription: "The running ballot will be closed.", confirmCancel: "Cancel votekick", cancelDialogCancel: "Keep running",
     lift: "Lift timeout", liftDialogCancel: "Cancel",
     liftTitle: "Lift timeout?", liftDescription: "This target's timeout will be lifted at Twitch.", confirmLift: "Lift timeout",
+    readOnlyReason: "Your channel role cannot operate votekicks.",
     loadError: "Votekicks could not be loaded.", actionError: "The action could not be completed.", lifted: "Timeout lifted.",
     status: { running: "Running", passed: "Passed", expired: "Expired", cancelled: "Cancelled", failed: "Failed" },
     duration: (seconds) => seconds === null ? "—" : `${String(seconds)} s`,

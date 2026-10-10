@@ -22,10 +22,6 @@ votekickRoutes.get("/votekicks", async (context) => {
   const channelId = requiredParam(context.req.param("channelId"), "channelId");
   const now = new Date().toISOString();
   const repository = createVotekickRepository(context.env.DB);
-  const running = await repository.running(channelId);
-  if (running !== null) {
-    await context.get("runModuleAlarm")(channelId, VOTEKICK_MODULE_ID, "close", `close:${running.id}`);
-  }
   const votekicks = await repository.listRecent(channelId, recentCutoff(now));
   return context.json({ running: votekicks.find((item) => item.status === "running") ?? null, votekicks, now });
 });
@@ -111,5 +107,17 @@ votekickRoutes.post("/votekicks/:id/lift", async (context) => {
         AND target_user_id IS NOT NULL ${authorization.sql}`,
   ).bind(now, channelId, id, ...authorization.values).run();
   if (update.meta.changes === 0) return context.json({ error: "votekick_timeout_unavailable" }, 409);
+  try {
+    const lifted = await repository.byId(channelId, id);
+    if (lifted !== null) {
+      await context.get("publishModuleOverlayMessage")(
+        channelId,
+        VOTEKICK_MODULE_ID,
+        "tally",
+        VOTEKICK_ELEMENT_KIND,
+        votekickOverlayPayload(lifted),
+      );
+    }
+  } catch { /* The panel can reload the persisted lift state on its next read. */ }
   return context.json({ liftedAt: now });
 });

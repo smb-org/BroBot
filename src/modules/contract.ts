@@ -809,6 +809,10 @@ export interface ModuleBallotAccess {
   read: (ballotId: string) => Promise<BallotSnapshot | null>;
   /** Reads whether any module currently owns the channel's exclusive ballot. */
   hasOpenBallot?: () => Promise<boolean>;
+  /** Reads a snapshot without finalizing an expired ballot or changing its alarm. */
+  readSnapshot?: (ballotId: string) => Promise<BallotSnapshot | null>;
+  /** Reads channel-wide availability without finalizing or cleaning up a ballot. */
+  hasOpenBallotSnapshot?: () => Promise<boolean>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
   /** Atomically finalizes using the stored pass rule and returns the outcome and snapshot. */
   finalize: (ballotId: string) => Promise<BallotFinalizeResult>;
@@ -917,6 +921,8 @@ export interface ModuleTemplateConditionContext {
   publicOrigin?: string;
   /** Shared across the providers involved in a single template render. */
   externalFetchBudget?: ModuleExternalFetchBudget;
+  /** Prevents provider lookups or cache fills when resolving a panel read. */
+  readOnly?: boolean;
   now: number;
   commandInput?: { commandName: string; arguments: string; usageText?: string };
   /** Records a source label when a condition uses values from this module. */
@@ -1041,8 +1047,6 @@ export interface ModulePanelProperties {
    *  mount (e.g. text_commands selects the command by name); most modules
    *  ignore it. */
   initialSelection?: string;
-  /** Incremented after a sibling settings editor saves, so panels can reload dependent data. */
-  settingsRefreshToken?: number;
 }
 
 /** Props for one lazily loaded card in the channel's immediate-action row. */
@@ -1167,6 +1171,7 @@ export interface ModuleRouteVariables {
     channelId: string,
     ids: readonly string[],
     now: number,
+    options?: { readOnly?: boolean },
   ) => Promise<Readonly<Record<string, string>>>;
   publishModuleOverlayMessage: (
     channelId: string,
@@ -1360,6 +1365,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
   /** Lazily loaded editor declaration for this module's settings. */
   settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<z.output<SettingsSchema>> }>;
+  /** Module query parts that depend on settings edited by this editor. */
+  settingsEditorRelatedParts?: readonly string[];
   /** Places the settings editor before a potentially long module panel. */
   settingsEditorPlacement?: "before-panel" | "after-panel";
   /** Reconciles one module-owned alarm immediately after settings are saved. */

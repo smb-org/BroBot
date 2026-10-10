@@ -255,7 +255,7 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     ));
     return issues.flat();
   });
-  context.set("resolveTextBlockConditions", async (channelId, ids, now) => {
+  context.set("resolveTextBlockConditions", async (channelId, ids, now, options) => {
     const requested = new Set(ids);
     const channel = await context.env.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")
       .bind(channelId).first<{ time_zone: string }>();
@@ -267,6 +267,7 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
       channelLocation: () => readChannelLocation(context.env.DB, channelId),
       publicOrigin: context.env.PUBLIC_ORIGIN,
       externalFetchBudget: context.get("externalFetchBudget"),
+      readOnly: options?.readOnly ?? false,
       now,
     };
     const resolved: Record<string, string> = {};

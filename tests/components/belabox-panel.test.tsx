@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
+import { renderWithQuery as render } from "../query-test-utils";
 import BelaboxPanel from "../../src/modules/belabox/panel";
+import { moduleQueryKey } from "../../src/dashboard/data/module-query";
+import { reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 
 const mocks = vi.hoisted(() => ({
   loadBelaboxStatus: vi.fn(),
@@ -40,6 +43,8 @@ describe("BELABOX panel", () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
+    setDashboardRealtimeStatus("kanal-a", "offline");
     for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.resetAllMocks();
   });
@@ -48,7 +53,9 @@ describe("BELABOX panel", () => {
     mocks.removeBelaboxStatsUrl.mockRejectedValue(new Error("D1 DELETE failed"));
 
     render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: "Remove stats URL" }));
+    const removeButton = await screen.findByRole("button", { name: "Remove stats URL" });
+    await waitFor(() => { expect(removeButton).toBeEnabled(); });
+    fireEvent.click(removeButton);
 
     const dialog = await screen.findByRole("dialog", { name: "Remove stats URL?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove stats URL" }));
@@ -64,7 +71,9 @@ describe("BELABOX panel", () => {
     mocks.removeBelaboxStatsUrl.mockResolvedValue(undefined);
 
     render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: "Remove stats URL" }));
+    const removeButton = await screen.findByRole("button", { name: "Remove stats URL" });
+    await waitFor(() => { expect(removeButton).toBeEnabled(); });
+    fireEvent.click(removeButton);
     mocks.loadBelaboxStatus.mockRejectedValue(new Error("refresh failed"));
 
     const dialog = await screen.findByRole("dialog", { name: "Remove stats URL?" });
@@ -130,7 +139,7 @@ describe("BELABOX panel", () => {
     expect(mocks.loadBelaboxStreams).not.toHaveBeenCalled();
   });
 
-  it("reloads status after settings save and starts history requests when interval mode is enabled", async () => {
+  it("refreshes status and history after the Belabox resource revision advances", async () => {
     mocks.loadBelaboxStatus
       .mockResolvedValueOnce({
         configured: true, updatedAt: null, mode: "on_demand", sample: null, errorCode: null,
@@ -140,19 +149,49 @@ describe("BELABOX panel", () => {
         configured: true, updatedAt: null, mode: "interval", sample: null, errorCode: null,
         polling: true, pollingDesired: true, intervalSeconds: 15, streamId: "stream-42", belaboxStreamId: "stream-42",
       });
-    const view = render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRefreshToken={0} /></></UiProvider>);
+    let revision = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: { "module:belabox:live": revision } }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }))));
+    const view = render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
 
     await waitFor(() => { expect(mocks.loadBelaboxStatus).toHaveBeenCalledOnce(); });
     expect(mocks.loadBelaboxHistory).not.toHaveBeenCalled();
-    view.rerender(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRefreshToken={1} /></></UiProvider>);
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "channel-a"); });
+    revision = 1;
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "channel-a"); });
 
     await waitFor(() => {
       expect(mocks.loadBelaboxStatus).toHaveBeenCalledTimes(2);
-      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "live", undefined);
+      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "live", undefined, expect.any(AbortSignal));
     });
     expect(mocks.loadBelaboxStreams).toHaveBeenCalledOnce();
     // A status without a finite intervalSeconds makes the refresh timer fire continuously.
     expect(mocks.loadBelaboxStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("notifies once for each Belabox status outage, including after an identical recovery", async () => {
+    setDashboardRealtimeStatus("kanal-a", "connected");
+    const view = render(<UiProvider><><ToastHost /><BelaboxPanel channelId="kanal-a" language="en" canManage /></></UiProvider>);
+    await waitFor(() => { expect(mocks.loadBelaboxStatus).toHaveBeenCalledOnce(); });
+    const key = { queryKey: moduleQueryKey("kanal-a", "belabox", "status"), exact: true };
+    const refresh = async (): Promise<void> => {
+      await act(async () => { await view.queryClient.refetchQueries(key, { throwOnError: true }).catch(() => undefined); });
+    };
+
+    mocks.loadBelaboxStatus.mockRejectedValue(new Error("status unavailable"));
+    await refresh();
+    await refresh();
+    expect(toastsSnapshot().filter((toast) => toast.message === "The connection could not be tested.")).toHaveLength(1);
+
+    mocks.loadBelaboxStatus.mockResolvedValue({
+      configured: true, updatedAt: null, mode: "interval", sample: null, errorCode: null,
+      polling: false, pollingDesired: false, streamId: "stream-s2", belaboxStreamId: null,
+    });
+    await refresh();
+    mocks.loadBelaboxStatus.mockRejectedValue(new Error("status unavailable again"));
+    await refresh();
+    expect(toastsSnapshot().filter((toast) => toast.message === "The connection could not be tested.")).toHaveLength(2);
   });
 
   it("draws the history thresholds and disconnect gaps and can select a stream", async () => {
@@ -195,7 +234,7 @@ describe("BELABOX panel", () => {
     expect(await screen.findByText(/Average 1200/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stream" }));
     await waitFor(() => {
-      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "stream", "stream-42");
+      expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "stream", "stream-42", expect.any(AbortSignal));
     });
   });
 

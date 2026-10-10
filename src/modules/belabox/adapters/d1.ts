@@ -32,6 +32,7 @@ export interface BelaboxRecentPoint {
 export interface BelaboxFetchPhase {
   consecutiveFailures: number;
   failing: boolean;
+  lastAttemptAt?: string;
 }
 
 export interface BelaboxStatus {
@@ -169,7 +170,13 @@ const parseFetchPhase = (value: string): BelaboxFetchPhase => {
     const state = parsed as Readonly<Record<string, unknown>>;
     return Number.isSafeInteger(state.consecutiveFailures) && Number(state.consecutiveFailures) >= 0 &&
       typeof state.fetchFailing === "boolean"
-      ? { consecutiveFailures: Number(state.consecutiveFailures), failing: state.fetchFailing }
+      ? {
+        consecutiveFailures: Number(state.consecutiveFailures),
+        failing: state.fetchFailing,
+        ...(typeof state.lastAttemptAt === "string" && Number.isFinite(Date.parse(state.lastAttemptAt))
+          ? { lastAttemptAt: state.lastAttemptAt }
+          : {}),
+      }
       : EMPTY_FETCH_PHASE;
   } catch {
     return EMPTY_FETCH_PHASE;
@@ -689,8 +696,8 @@ export const reopenCurrentBelaboxStream = async (
   db: D1Database,
   channelId: string,
   expectedModuleRevision: number,
-): Promise<void> => {
-  await db.prepare(
+): Promise<boolean> => {
+  const result = await db.prepare(
     `UPDATE belabox_streams
         SET ended_at = NULL, bitrate_p10 = NULL
       WHERE channel_id = ? AND ended_at IS NOT NULL
@@ -706,6 +713,7 @@ export const reopenCurrentBelaboxStream = async (
              AND revision = ? AND json_extract(settings, '$.mode') = 'interval'
         )`,
   ).bind(channelId, channelId, expectedModuleRevision).run();
+  return result.meta.changes > 0;
 };
 
 export const belaboxStreamExists = async (
@@ -734,6 +742,7 @@ const encodedRecent = (recent: readonly BelaboxRecentPoint[]): string => JSON.st
 const encodedPhase = (phase: BelaboxFetchPhase): string => JSON.stringify({
   consecutiveFailures: phase.consecutiveFailures,
   fetchFailing: phase.failing,
+  ...(phase.lastAttemptAt === undefined ? {} : { lastAttemptAt: phase.lastAttemptAt }),
 });
 
 export const belaboxHistoryStatusGuard = `WHERE EXISTS (
@@ -778,8 +787,8 @@ export const clearBelaboxHistoryBaseline = async (
 export const markBelaboxPollingStarted = async (
   db: D1Database,
   channelId: string,
-): Promise<void> => {
-  await db.prepare(
+): Promise<boolean> => {
+  const result = await db.prepare(
     `INSERT INTO belabox_status
       (channel_id, polling, stream_id, belabox_stream_id, fetch_phase_json, recent_json, revision)
      VALUES (?, 1, NULL, NULL, ?, '[]', 1)
@@ -788,6 +797,7 @@ export const markBelaboxPollingStarted = async (
        revision = belabox_status.revision + 1
      WHERE belabox_status.polling != 1`,
   ).bind(channelId, encodedPhase(EMPTY_FETCH_PHASE)).run();
+  return result.meta.changes > 0;
 };
 
 export const writeBelaboxFetch = async (

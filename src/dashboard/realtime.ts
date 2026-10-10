@@ -1,26 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
-import type {
-  PanelEventFilters,
-} from "../panel-contract";
-import type {
-  RealtimeEnvelope,
-  RealtimeEventLogHint,
-  RealtimeMessage,
-} from "../realtime-contract";
-import type { AdsSchedule } from "../modules/ads/contracts";
 import type { PanelChannelControl, PanelChannelControls } from "../panel-contract";
+import type { RealtimeEnvelope, RealtimeEventLogHint, RealtimeMessage } from "../realtime-contract";
 import { REALTIME_PROTOCOL } from "../realtime-contract";
-import { eventToneEntries, type EventCode } from "./locale";
+import {
+  cancelDashboardRealtimeRetries,
+  invalidateDashboardChannelQueries,
+  reconcileDashboardRealtimeMessage,
+  reconcileDashboardPanelResourceRevisions,
+  setDashboardRealtimeStatus,
+  useDashboardRealtimeStatus,
+} from "./data/realtime";
 
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
-const RECONNECT_GRACE_MS = 400;
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 30_000;
-const BATCH_DELAY_MS = 120;
-const VARIABLE_REFRESH_DELAY_MS = 120;
-const VARIABLE_REFRESH_MAX_WAIT_MS = 1_500;
 
 export type RealtimeFeedStatus = "connecting" | "connected" | "reconnecting" | "offline" | "renew";
 
@@ -46,14 +42,6 @@ const isHint = (value: unknown): value is RealtimeEventLogHint => {
     (value.actorUserId === null || typeof value.actorUserId === "string");
 };
 
-const isAdSchedule = (value: unknown): value is AdsSchedule => isRecord(value) &&
-  (value.nextAdAt === null || typeof value.nextAdAt === "string") &&
-  (value.duration === null || typeof value.duration === "number") &&
-  (value.lastAdAt === null || typeof value.lastAdAt === "string") &&
-  (value.prerollFreeTime === null || typeof value.prerollFreeTime === "number") &&
-  (value.snoozeCount === null || typeof value.snoozeCount === "number") &&
-  (value.snoozeRefreshAt === null || typeof value.snoozeRefreshAt === "string");
-
 const isPanelChannelControl = (value: unknown): value is PanelChannelControl =>
   isRecord(value) && typeof value.active === "boolean" &&
   (value.pending === undefined || typeof value.pending === "boolean") &&
@@ -63,6 +51,12 @@ const isPanelChannelControl = (value: unknown): value is PanelChannelControl =>
 const isPanelChannelControls = (value: unknown): value is PanelChannelControls =>
   isRecord(value) && isPanelChannelControl(value.mute) && isPanelChannelControl(value.pause);
 
+const isVariablesChangedPayload = (value: unknown): boolean => isRecord(value) &&
+  Array.isArray(value.set) && value.set.every((entry) => isRecord(entry) &&
+    typeof entry.name === "string" && entry.name.length > 0 &&
+    typeof entry.value === "number" && Number.isSafeInteger(entry.value)) &&
+  Array.isArray(value.removed) && value.removed.every((name) => typeof name === "string" && name.length > 0);
+
 const isKnownEnvelope = (value: Record<string, unknown>): value is Record<string, unknown> & {
   version: 1;
   id: string;
@@ -70,12 +64,12 @@ const isKnownEnvelope = (value: Record<string, unknown>): value is Record<string
   channelId: string;
   type: RealtimeMessage["type"];
   payload: unknown;
-} => typeof value.version === "number" && value.version === 1 &&
+} => value.version === 1 &&
   typeof value.id === "string" && value.id.length > 0 &&
   typeof value.createdAt === "string" && value.createdAt.length > 0 &&
   typeof value.channelId === "string" && value.channelId.length > 0 &&
-  (value.type === "system.hello" || value.type === "event_log.new" ||
-    value.type === "variables.changed" || value.type === "ads.schedule.updated" ||
+  (value.type === "system.hello" || value.type === "panel.resources.changed" || value.type === "event_log.new" ||
+    value.type === "variables.changed" || value.type === "overlay.changed" ||
     value.type === "stream.state.changed");
 
 export const parseRealtimeMessage = (raw: string, channelId: string): RealtimeParseResult => {
@@ -95,15 +89,25 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
       ? { kind: "message", message: parsed as RealtimeEnvelope<"system.hello"> }
       : { kind: "ignored" };
   }
+  if (parsed.type === "panel.resources.changed") {
+    if (!isRecord(parsed.payload) || !Array.isArray(parsed.payload.resources) ||
+        parsed.payload.resources.length > 128 || !parsed.payload.resources.every((resource) =>
+          typeof resource === "string" && resource.length > 0 && resource.length <= 128) ||
+        !isRecord(parsed.payload.revisions) || Object.keys(parsed.payload.revisions).length > 128 ||
+        !Object.entries(parsed.payload.revisions).every(([resource, revision]) =>
+          resource.length > 0 && resource.length <= 128 && typeof revision === "number" &&
+          Number.isSafeInteger(revision) && revision >= 0)) return { kind: "ignored" };
+    return { kind: "message", message: parsed as RealtimeEnvelope<"panel.resources.changed"> };
+  }
   if (parsed.type === "variables.changed") {
     return isVariablesChangedPayload(parsed.payload)
       ? { kind: "message", message: parsed as RealtimeEnvelope<"variables.changed"> }
       : { kind: "ignored" };
   }
-  if (parsed.type === "ads.schedule.updated") {
-    return isRecord(parsed.payload) && isAdSchedule(parsed.payload.schedule) &&
-      typeof parsed.payload.asOf === "string" && parsed.payload.asOf.length > 0
-      ? { kind: "message", message: parsed as RealtimeEnvelope<"ads.schedule.updated"> }
+  if (parsed.type === "overlay.changed") {
+    return isRecord(parsed.payload) && typeof parsed.payload.overlayId === "string" && parsed.payload.overlayId.length > 0 &&
+      typeof parsed.payload.revision === "number" && Number.isSafeInteger(parsed.payload.revision)
+      ? { kind: "message", message: parsed as RealtimeEnvelope<"overlay.changed"> }
       : { kind: "ignored" };
   }
   if (parsed.type === "stream.state.changed") {
@@ -117,40 +121,11 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
       ? { kind: "message", message: parsed as RealtimeEnvelope<"stream.state.changed"> }
       : { kind: "ignored" };
   }
-  if (!isRecord(parsed.payload) || !Array.isArray(parsed.payload.entries) ||
-      !parsed.payload.entries.every(isHint)) return { kind: "ignored" };
-  return { kind: "message", message: parsed as RealtimeEnvelope<"event_log.new"> };
+  return isRecord(parsed.payload) && Array.isArray(parsed.payload.entries) &&
+    parsed.payload.entries.every(isHint)
+    ? { kind: "message", message: parsed as RealtimeEnvelope<"event_log.new"> }
+    : { kind: "ignored" };
 };
-
-const eventMetadata = (code: string) =>
-  Object.prototype.hasOwnProperty.call(eventToneEntries, code) ? eventToneEntries[code as EventCode] : null;
-
-/** Same origin logic as the event route: operational entries are module diagnostics. */
-export const realtimeHintMatchesFilters = (
-  hint: RealtimeEventLogHint,
-  filters: PanelEventFilters,
-): boolean => {
-  if (filters.module !== null && hint.moduleId !== filters.module) return false;
-  if (filters.person !== null && hint.actorUserId !== filters.person) return false;
-  const metadata = eventMetadata(hint.code);
-  if (filters.origin !== null) {
-    const isModuleDiagnostic = hint.moduleId !== "channel_events";
-    if (filters.origin === "module" !== isModuleDiagnostic) return false;
-  }
-  const selectedTones = filters.tones !== undefined && filters.tones.length > 0
-    ? filters.tones
-    : filters.tone === null ? [] : [filters.tone];
-  if (selectedTones.length > 0 && (metadata === null || metadata.tone === undefined || !selectedTones.includes(metadata.tone))) return false;
-  return true;
-};
-
-const filterKey = (filters: PanelEventFilters): string => [
-  filters.origin ?? "",
-  filters.module ?? "",
-  filters.tone ?? "",
-  [...(filters.tones ?? [])].sort((a, b) => a.localeCompare(b)).join(","),
-  filters.person ?? "",
-].join("\u001f");
 
 const reconnectDelay = (attempt: number): number => Math.min(
   MAX_RECONNECT_DELAY_MS,
@@ -167,372 +142,174 @@ const realtimeUrl = (channelId: string): string => {
   return url.toString();
 };
 
-const relayRealtimeMessage = (message: RealtimeMessage): void => {
-  window.dispatchEvent(new CustomEvent("brobot:realtime", { detail: message }));
+interface PanelSocketConnection {
+  queryClient: QueryClient;
+  socket: WebSocket | null;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  cleanupTimer: ReturnType<typeof setTimeout> | null;
+  reconnectAttempt: number;
+  disposed: boolean;
+  references: number;
+  seenMessageIds: Set<string>;
+}
+
+const panelSocketConnections = new Map<string, PanelSocketConnection>();
+
+const disposePanelSocket = (channelId: string, connection: PanelSocketConnection): void => {
+  if (connection.disposed) return;
+  connection.disposed = true;
+  cancelDashboardRealtimeRetries(connection.queryClient, channelId);
+  if (connection.reconnectTimer !== null) clearTimeout(connection.reconnectTimer);
+  if (connection.cleanupTimer !== null) clearTimeout(connection.cleanupTimer);
+  connection.reconnectTimer = null;
+  connection.cleanupTimer = null;
+  panelSocketConnections.delete(channelId);
+  setDashboardRealtimeStatus(channelId, "offline");
+  const socket = connection.socket;
+  connection.socket = null;
+  try { socket?.close(1000, "Panel channel unmounted"); } catch { /* The socket may already be closed. */ }
 };
 
-/** The shell keeps one panel socket open on pages without their own feed. */
-export const useRealtimePanelMessages = (channelId: string | null, enabled: boolean): void => {
-  useEffect(() => {
-    if (!enabled || channelId === null) return;
-    let disposed = false;
-    let socket: WebSocket | null = null;
-    let reconnectTimer: number | null = null;
-    let reconnectAttempt = 0;
-    const seenMessageIds = new Set<string>();
-
-    const connect = (): void => {
-      if (disposed || typeof window.WebSocket !== "function") return;
-      try {
-        socket = new window.WebSocket(realtimeUrl(channelId), REALTIME_PROTOCOL);
-        socket.addEventListener("open", () => {
-          reconnectAttempt = 0;
-          window.dispatchEvent(new CustomEvent("brobot:realtime-connected", { detail: { channelId } }));
-        });
-        socket.addEventListener("message", (event: MessageEvent<unknown>) => {
-          if (typeof event.data !== "string") return;
-          const parsed = parseRealtimeMessage(event.data, channelId);
-          if (parsed.kind === "foreign-channel") {
-            socket?.close(1008, "Foreign channel");
-            return;
-          }
-          if (parsed.kind !== "message" || seenMessageIds.has(parsed.message.id)) return;
-          seenMessageIds.add(parsed.message.id);
-          relayRealtimeMessage(parsed.message);
-        });
-        socket.addEventListener("close", (event: CloseEvent) => {
-          if (disposed || socketNeedsRenewal(event) || reconnectTimer !== null) return;
-          const delay = reconnectDelay(reconnectAttempt);
-          reconnectAttempt += 1;
-          reconnectTimer = window.setTimeout(() => {
-            reconnectTimer = null;
-            connect();
-          }, delay);
-        });
-      } catch {
-        reconnectTimer = window.setTimeout(() => {
-          reconnectTimer = null;
-          connect();
-        }, reconnectDelay(reconnectAttempt++));
-      }
-    };
-
-    connect();
-    return () => {
-      disposed = true;
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
-      try { socket?.close(1000, "Panel route changed"); } catch { /* socket may already be closed */ }
-    };
-  }, [channelId, enabled]);
+const schedulePanelReconnect = (channelId: string, connection: PanelSocketConnection): void => {
+  if (connection.disposed || connection.reconnectTimer !== null) return;
+  setDashboardRealtimeStatus(channelId, "reconnecting");
+  const delay = reconnectDelay(connection.reconnectAttempt);
+  connection.reconnectAttempt += 1;
+  connection.reconnectTimer = setTimeout(() => {
+    connection.reconnectTimer = null;
+    connectPanelSocket(channelId, connection);
+  }, delay);
 };
 
-const isVariablesChangedPayload = (value: unknown): boolean => isRecord(value) &&
-  Array.isArray(value.set) && value.set.every((entry) => isRecord(entry) &&
-    typeof entry.name === "string" && entry.name.length > 0 &&
-    typeof entry.value === "number" && Number.isSafeInteger(entry.value)) &&
-  Array.isArray(value.removed) && value.removed.every((name) => typeof name === "string" && name.length > 0);
-
-/** Keeps variable definitions and values current while their channel page is open. */
-export const useRealtimeVariableUpdates = ({
-  channelId,
-  refresh,
-}: {
-  channelId: string;
-  refresh: () => Promise<void>;
-}): void => {
-  const refreshRef = useRef(refresh);
-
-  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
-
-  useEffect(() => {
-    let disposed = false;
-    let socket: WebSocket | null = null;
-    let reconnectTimer: number | null = null;
-    let variableRefreshTimer: number | null = null;
-    let maximumVariableRefreshTimer: number | null = null;
-    let variableRefreshInFlight = false;
-    let variableRefreshQueued = false;
-    let reconnectAttempt = 0;
-    let fatalProtocolError = false;
-    const hasPendingVariableRefresh = (): boolean => !disposed && variableRefreshQueued;
-
-    const stopVariableRefreshTimers = (): void => {
-      if (variableRefreshTimer !== null) window.clearTimeout(variableRefreshTimer);
-      if (maximumVariableRefreshTimer !== null) window.clearTimeout(maximumVariableRefreshTimer);
-      variableRefreshTimer = null;
-      maximumVariableRefreshTimer = null;
-    };
-
-    const refreshVariables = async (): Promise<void> => {
-      stopVariableRefreshTimers();
-      if (disposed) return;
-      if (variableRefreshInFlight) {
-        variableRefreshQueued = true;
-        return;
-      }
-      variableRefreshQueued = false;
-      variableRefreshInFlight = true;
-      try {
-        await refreshRef.current();
-      } catch {
-        // A later socket hint or reconnect will retry the refresh.
-      } finally {
-        variableRefreshInFlight = false;
-        if (hasPendingVariableRefresh()) void refreshVariables();
-      }
-    };
-
-    const scheduleVariableRefresh = (): void => {
-      if (variableRefreshTimer !== null) window.clearTimeout(variableRefreshTimer);
-      variableRefreshTimer = window.setTimeout(() => { void refreshVariables(); }, VARIABLE_REFRESH_DELAY_MS);
-      maximumVariableRefreshTimer ??= window.setTimeout(() => { void refreshVariables(); }, VARIABLE_REFRESH_MAX_WAIT_MS);
-    };
-
-    const scheduleReconnect = (): void => {
-      if (disposed || fatalProtocolError || reconnectTimer !== null) return;
-      const delay = reconnectDelay(reconnectAttempt);
-      reconnectAttempt += 1;
-      reconnectTimer = window.setTimeout(() => {
-        reconnectTimer = null;
-        connect();
-      }, delay);
-    };
-
-    const handleMessage = (event: MessageEvent<unknown>): void => {
-      if (typeof event.data !== "string") return;
-      const envelope = parseRealtimeMessage(event.data, channelId);
-      if (envelope.kind === "foreign-channel") {
-        fatalProtocolError = true;
-        try { socket?.close(1008, "Foreign channel"); } catch { /* socket may already be closed */ }
-        return;
-      }
-      if (envelope.kind !== "message") return;
-      relayRealtimeMessage(envelope.message);
-      if (envelope.message.type !== "variables.changed") return;
-      scheduleVariableRefresh();
-    };
-
-    const handleOpen = (): void => {
-      reconnectAttempt = 0;
-      void refreshVariables();
-    };
-
-    const handleClose = (event: CloseEvent): void => {
-      if (event.code === SOCKET_EXPIRED_CODE || event.code === SOCKET_REVOKED_CODE || event.code === 1008) {
-        fatalProtocolError = true;
-        return;
-      }
-      scheduleReconnect();
-    };
-
-    function connect(): void {
-      if (disposed || fatalProtocolError) return;
-      const WebSocketConstructor = window.WebSocket;
-      if (typeof WebSocketConstructor !== "function") return;
-      try {
-        socket = new WebSocketConstructor(realtimeUrl(channelId), REALTIME_PROTOCOL);
-        socket.addEventListener("open", handleOpen);
-        socket.addEventListener("message", handleMessage);
-        socket.addEventListener("close", handleClose);
-      } catch {
-        scheduleReconnect();
-      }
-    }
-
-    connect();
-    return () => {
-      disposed = true;
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
-      stopVariableRefreshTimers();
-      try { socket?.close(1000, "Leaving channel variables"); } catch { /* socket may already be closed */ }
-    };
-  }, [channelId]);
-};
-
-export const useRealtimeEventFeed = ({
-  channelId,
-  filters,
-  refresh,
-  refreshOnReturn,
-  scrollToBeginning,
-  onRealtimeMessage,
-}: {
-  channelId: string;
-  filters: PanelEventFilters;
-  refresh: () => void;
-  refreshOnReturn?: () => void;
-  scrollToBeginning: () => void;
-  onRealtimeMessage?: (message: RealtimeMessage) => void;
-}): RealtimeFeedState => {
-  const currentFilterKey = filterKey(filters);
-  const [status, setStatus] = useState<RealtimeFeedStatus>("connecting");
-  const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<number | null>(null);
-  const reconnectGraceTimerRef = useRef<number | null>(null);
-  const batchTimerRef = useRef<number | null>(null);
-  const reconnectAttemptRef = useRef(0);
-  const hasConnectedRef = useRef(false);
-  const fatalProtocolErrorRef = useRef(false);
-  const seenMessageIdsRef = useRef(new Set<string>());
-  const refreshRef = useRef(refresh);
-  const refreshOnReturnRef = useRef(refreshOnReturn);
-  const scrollToBeginningRef = useRef(scrollToBeginning);
-  const onRealtimeMessageRef = useRef(onRealtimeMessage);
-  const filtersRef = useRef(filters);
-
-  useEffect(() => {
-    refreshRef.current = refresh;
-    refreshOnReturnRef.current = refreshOnReturn;
-    scrollToBeginningRef.current = scrollToBeginning;
-    onRealtimeMessageRef.current = onRealtimeMessage;
-    filtersRef.current = filters;
-  }, [filters, onRealtimeMessage, refresh, refreshOnReturn, scrollToBeginning]);
-
-  const scheduleBatch = useCallback((): void => {
-    if (batchTimerRef.current !== null) return;
-    batchTimerRef.current = window.setTimeout(() => {
-      batchTimerRef.current = null;
-      refreshRef.current();
-    }, BATCH_DELAY_MS);
-  }, []);
-
-  const jumpToBeginning = useCallback((): void => {
-    scrollToBeginningRef.current();
-    if (refreshOnReturnRef.current === undefined) refreshRef.current();
-    else refreshOnReturnRef.current();
-  }, []);
-
-  useEffect(() => {
-    if (batchTimerRef.current !== null) {
-      window.clearTimeout(batchTimerRef.current);
-      batchTimerRef.current = null;
-    }
-  }, [channelId, currentFilterKey]);
-
-  useEffect(() => {
-    let disposed = false;
-    let socket: WebSocket | null = null;
-    reconnectAttemptRef.current = 0;
-    hasConnectedRef.current = false;
-    fatalProtocolErrorRef.current = false;
-    seenMessageIdsRef.current.clear();
-
-    const clearReconnectTimers = (): void => {
-      if (reconnectTimerRef.current !== null) {
-        window.clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
-      if (reconnectGraceTimerRef.current !== null) {
-        window.clearTimeout(reconnectGraceTimerRef.current);
-        reconnectGraceTimerRef.current = null;
-      }
-    };
-
-    const scheduleReconnect = (): void => {
-      if (disposed || fatalProtocolErrorRef.current || reconnectTimerRef.current !== null) return;
-      const delay = reconnectDelay(reconnectAttemptRef.current);
-      reconnectAttemptRef.current += 1;
-      reconnectGraceTimerRef.current = window.setTimeout(() => {
-        reconnectGraceTimerRef.current = null;
-        if (!disposed && !fatalProtocolErrorRef.current) setStatus("reconnecting");
-      }, RECONNECT_GRACE_MS);
-      reconnectTimerRef.current = window.setTimeout(() => {
-        reconnectTimerRef.current = null;
-        connect();
-      }, delay);
-    };
-
-    const closeWithProtocolError = (): void => {
-      fatalProtocolErrorRef.current = true;
-      setStatus("offline");
-      try {
-        socket?.close(1008, "Fremder Kanal");
-      } catch {
-        // The socket may already be closed between receipt and close.
-      }
-    };
-
-    const handleMessage = (event: MessageEvent<unknown>): void => {
+const connectPanelSocket = (channelId: string, connection: PanelSocketConnection): void => {
+  if (connection.disposed) return;
+  const WebSocketConstructor = window.WebSocket;
+  if (typeof WebSocketConstructor !== "function") {
+    setDashboardRealtimeStatus(channelId, "offline");
+    return;
+  }
+  setDashboardRealtimeStatus(channelId, connection.reconnectAttempt === 0 ? "connecting" : "reconnecting");
+  try {
+    const socket = new WebSocketConstructor(realtimeUrl(channelId), REALTIME_PROTOCOL);
+    connection.socket = socket;
+    socket.addEventListener("open", () => {
+      if (connection.disposed) return;
+      const reconnected = connection.reconnectAttempt > 0;
+      connection.reconnectAttempt = 0;
+      setDashboardRealtimeStatus(channelId, "connected");
+      if (reconnected) invalidateDashboardChannelQueries(connection.queryClient, channelId);
+      void reconcileDashboardPanelResourceRevisions(connection.queryClient, channelId);
+    });
+    socket.addEventListener("message", (event: MessageEvent<unknown>) => {
       if (typeof event.data !== "string") return;
       const parsed = parseRealtimeMessage(event.data, channelId);
       if (parsed.kind === "foreign-channel") {
-        closeWithProtocolError();
+        try { socket.close(1008, "Foreign channel"); } catch { /* The socket may already be closed. */ }
         return;
       }
-      if (parsed.kind !== "message" || seenMessageIdsRef.current.has(parsed.message.id)) return;
-      seenMessageIdsRef.current.add(parsed.message.id);
-      onRealtimeMessageRef.current?.(parsed.message);
-      relayRealtimeMessage(parsed.message);
-      if (parsed.message.type !== "event_log.new") return;
-      const hints = parsed.message.payload.entries.filter((hint) => realtimeHintMatchesFilters(hint, filtersRef.current));
-      if (hints.length > 0) scheduleBatch();
-    };
-
-    const handleClose = (event: CloseEvent): void => {
-      socketRef.current = null;
-      if (disposed) return;
-      if (reconnectGraceTimerRef.current !== null) {
-        window.clearTimeout(reconnectGraceTimerRef.current);
-        reconnectGraceTimerRef.current = null;
-      }
-      if (socketNeedsRenewal(event)) {
-        fatalProtocolErrorRef.current = true;
-        setStatus("renew");
+      if (parsed.kind !== "message" || connection.seenMessageIds.has(parsed.message.id)) return;
+      connection.seenMessageIds.add(parsed.message.id);
+      void reconcileDashboardRealtimeMessage(connection.queryClient, parsed.message);
+    });
+    socket.addEventListener("close", (event: CloseEvent) => {
+      if (connection.disposed) return;
+      if (connection.socket === socket) connection.socket = null;
+      if (socketNeedsRenewal(event) || event.code === 1008) {
+        cancelDashboardRealtimeRetries(connection.queryClient, channelId);
+        setDashboardRealtimeStatus(channelId, "renew");
         return;
       }
-      if (!fatalProtocolErrorRef.current) scheduleReconnect();
-    };
+      schedulePanelReconnect(channelId, connection);
+    });
+  } catch {
+    schedulePanelReconnect(channelId, connection);
+  }
+};
 
-    const handleOpen = (): void => {
-      if (disposed) return;
-      window.dispatchEvent(new CustomEvent("brobot:realtime-connected", { detail: { channelId } }));
-      const isReconnection = hasConnectedRef.current;
-      hasConnectedRef.current = true;
-      reconnectAttemptRef.current = 0;
-      if (reconnectGraceTimerRef.current !== null) {
-        window.clearTimeout(reconnectGraceTimerRef.current);
-        reconnectGraceTimerRef.current = null;
-      }
-      setStatus("connected");
-      if (isReconnection) {
-        refreshRef.current();
-      }
+const acquirePanelSocket = (channelId: string, queryClient: QueryClient): (() => void) => {
+  let connection = panelSocketConnections.get(channelId);
+  if (connection !== undefined && connection.queryClient !== queryClient) {
+    disposePanelSocket(channelId, connection);
+    connection = undefined;
+  }
+  if (connection === undefined) {
+    connection = {
+      queryClient,
+      socket: null,
+      reconnectTimer: null,
+      cleanupTimer: null,
+      reconnectAttempt: 0,
+      disposed: false,
+      references: 0,
+      seenMessageIds: new Set(),
     };
+    panelSocketConnections.set(channelId, connection);
+    connectPanelSocket(channelId, connection);
+  }
+  const activeConnection = connection;
+  if (activeConnection.cleanupTimer !== null) {
+    clearTimeout(activeConnection.cleanupTimer);
+    activeConnection.cleanupTimer = null;
+  }
+  activeConnection.references += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeConnection.references -= 1;
+    if (activeConnection.references !== 0 || activeConnection.cleanupTimer !== null) return;
+    // React StrictMode remounts effects synchronously in development. Defer
+    // disposal for one task so the second lease reuses this channel socket.
+    activeConnection.cleanupTimer = setTimeout(() => {
+      if (activeConnection.references === 0) disposePanelSocket(channelId, activeConnection);
+    }, 0);
+  };
+};
 
-    function connect(): void {
-      if (disposed || fatalProtocolErrorRef.current) return;
-      const WebSocketConstructor = window.WebSocket;
-      if (typeof WebSocketConstructor !== "function") {
-        setStatus("offline");
-        return;
+/** The dashboard shell owns the channel socket, independent of the active page. */
+export const useRealtimePanelMessages = (channelId: string | null, enabled: boolean): void => {
+  const queryClient = useQueryClient();
+  const activeChannelId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!enabled || channelId === null) {
+      const channelToDispose = channelId ?? activeChannelId.current;
+      if (channelToDispose !== null) {
+        const connection = panelSocketConnections.get(channelToDispose);
+        if (connection !== undefined && connection.references === 0) disposePanelSocket(channelToDispose, connection);
       }
-      try {
-        socket = new WebSocketConstructor(realtimeUrl(channelId), REALTIME_PROTOCOL);
-        socketRef.current = socket;
-        socket.addEventListener("open", handleOpen);
-        socket.addEventListener("message", handleMessage);
-        socket.addEventListener("close", handleClose);
-      } catch {
-        scheduleReconnect();
-      }
+      activeChannelId.current = null;
+      return;
     }
-
-    connect();
-    return () => {
-      disposed = true;
-      clearReconnectTimers();
-      if (batchTimerRef.current !== null) {
-        window.clearTimeout(batchTimerRef.current);
-        batchTimerRef.current = null;
-      }
-      if (socketRef.current === socket) socketRef.current = null;
-      try {
-        socket?.close(1000, "Panel verlassen");
-      } catch {
-        // The socket may already be closed.
+    activeChannelId.current = channelId;
+    const refreshOnFocus = (): void => {
+      if (document.visibilityState === "visible") {
+        void reconcileDashboardPanelResourceRevisions(queryClient, channelId);
       }
     };
-  }, [channelId, scheduleBatch]);
+    window.addEventListener("focus", refreshOnFocus);
+    const release = acquirePanelSocket(channelId, queryClient);
+    return () => {
+      window.removeEventListener("focus", refreshOnFocus);
+      release();
+    };
+  }, [channelId, enabled, queryClient]);
+};
 
+/** Shares the shell socket state with the event feed without opening another connection. */
+export const useRealtimeEventFeed = ({
+  channelId,
+  scrollToBeginning,
+  refreshOnReturn,
+}: {
+  channelId: string;
+  scrollToBeginning: () => void;
+  refreshOnReturn?: () => void;
+}): RealtimeFeedState => {
+  const status = useDashboardRealtimeStatus(channelId);
+  const jumpToBeginning = useCallback((): void => {
+    scrollToBeginning();
+    refreshOnReturn?.();
+  }, [refreshOnReturn, scrollToBeginning]);
   return { status, jumpToBeginning };
 };

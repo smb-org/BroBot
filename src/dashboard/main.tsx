@@ -57,6 +57,7 @@ import { OverlaysPage } from "./OverlaysPage";
 import { OverlayEditorPage } from "./OverlayEditorPage";
 import { emptyAuditFilter, auditFilterIsActive } from "./audit/model";
 import { useRealtimePanelMessages } from "./realtime";
+import { useDashboardRealtimeStatus } from "./data/realtime";
 import { channelSettingsTexts } from "./channel-settings-locale";
 import { ChannelTimeZoneField } from "./ChannelTimeZoneField";
 import { ChannelLocationField } from "./ChannelLocationField";
@@ -382,10 +383,86 @@ const mergeAndRememberChannelStreamVersion = <T extends ChannelStreamVersion>(
   return merged;
 };
 
-const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
+const useSecondClock = (): number => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => { setNow(Date.now()); }, 1000);
+    return () => { window.clearInterval(id); };
+  }, []);
+  return now;
+};
+
+const ChannelControlExpiryWatcher = ({ controls, onRefresh }: {
+  controls: PanelChannelControls | undefined;
+  onRefresh: () => Promise<void>;
+}): null => {
+  const refreshedExpiryKey = useRef("");
+  const onRefreshRef = useRef(onRefresh);
+  useEffect(() => { onRefreshRef.current = onRefresh; }, [onRefresh]);
+  useEffect(() => {
+    let timer: number | null = null;
+    let retryTimer: number | null = null;
+    const refreshExpiredControl = (expiryKey: string): void => {
+      void onRefreshRef.current().then(() => {
+        refreshedExpiryKey.current = expiryKey;
+      }).catch(() => {
+        retryTimer = window.setTimeout(() => { refreshExpiredControl(expiryKey); }, 30_000);
+      });
+    };
+    const checkExpiry = (): void => {
+      const now = Date.now();
+      const mute = controls?.mute ?? CONTROL_OFF;
+      const pause = controls?.pause ?? CONTROL_OFF;
+      const staleExpiryKey = [mute, pause]
+        .filter((control) => control.active && control.mode === "timed" && control.until !== null && Date.parse(control.until) <= now)
+        .map((control) => control.until)
+        .join("|");
+      if (staleExpiryKey.length === 0) refreshedExpiryKey.current = "";
+      else if (refreshedExpiryKey.current !== staleExpiryKey) {
+        refreshExpiredControl(staleExpiryKey);
+      }
+      const nextExpiry = [mute, pause]
+        .filter((control) => control.active && control.mode === "timed" && control.until !== null)
+        .map((control) => Date.parse(control.until ?? ""))
+        .filter((expiresAt) => Number.isFinite(expiresAt) && expiresAt > now)
+        .sort((left, right) => left - right)[0];
+      if (nextExpiry !== undefined) timer = window.setTimeout(checkExpiry, Math.min(MAX_TIMER_DELAY_MS, Math.max(0, nextExpiry - now)));
+    };
+    checkExpiry();
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
+  }, [controls]);
+  return null;
+};
+
+const ChannelControlStatus = ({ control, kind }: {
+  control: PanelChannelControl;
+  kind: "mute" | "pause";
+}): ReactElement => {
+  const texts = dashboardTexts();
+  const labels = texts.channelControls;
+  const now = useSecondClock();
+  const configured = control.active || control.pending === true;
+  let label: string | null = null;
+  if (control.pending === true) label = labels.pendingUntilStreamStart;
+  else if (control.active && control.mode === "timed" && control.until !== null) {
+    const remaining = Math.ceil((Date.parse(control.until) - now) / 60_000);
+    label = remaining <= 0 ? texts.status.refreshing
+      : kind === "mute" ? labels.muteRemaining(String(remaining)) : labels.pauseRemaining(String(remaining));
+  } else if (control.active && control.mode === "until_stream_end") {
+    label = `${kind === "mute" ? labels.muteActive : labels.pauseActive} · ${labels.untilStreamEnd}`;
+  } else if (control.active) label = kind === "mute" ? labels.muteActive : labels.pauseActive;
+  const timed = control.active && control.mode === "timed" && control.until !== null && Date.parse(control.until) > now;
+  return <span className="dashboard-header__control-state-slot">
+    {configured && label !== null ? <span className="dashboard-header__control-state" title={label}>{timed ? <Icon name="clock-hour-4" size={16} /> : null}<span>{label}</span></span> : null}
+  </span>;
+};
+
+const ChannelControlActions = ({ channelId, controls, onRefresh }: {
   channelId: string;
   controls: PanelChannelControls | undefined;
-  now: number;
   onRefresh: () => Promise<void>;
 }): ReactElement => {
   const texts = dashboardTexts();
@@ -393,27 +470,11 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
   const [dialogControl, setDialogControl] = useState<"mute" | "pause" | null>(null);
   const [duration, setDuration] = useState<ChannelControlDuration>("unlimited");
   const [busy, setBusy] = useState<"mute" | "pause" | null>(null);
-  const refreshRef = useRef(onRefresh);
-  useEffect(() => { refreshRef.current = onRefresh; }, [onRefresh]);
   const mute = controls?.mute ?? CONTROL_OFF;
   const pause = controls?.pause ?? CONTROL_OFF;
   const muteConfigured = mute.active || mute.pending === true;
   const pauseConfigured = pause.active || pause.pending === true;
-  const staleExpiryKey = [mute, pause]
-    .filter((control) => control.active && control.mode === "timed" && control.until !== null && Date.parse(control.until) <= now)
-    .map((control) => control.until)
-    .join("|");
-  const refreshedExpiryKey = useRef("");
-
-  useEffect(() => {
-    if (staleExpiryKey.length === 0) {
-      refreshedExpiryKey.current = "";
-      return;
-    }
-    if (refreshedExpiryKey.current === staleExpiryKey) return;
-    refreshedExpiryKey.current = staleExpiryKey;
-    void refreshRef.current();
-  }, [staleExpiryKey]);
+  const activeChannelControls = controls ?? { mute: CONTROL_OFF, pause: CONTROL_OFF };
 
   const apply = async (kind: "mute" | "pause", next: ChannelControlDuration | null): Promise<void> => {
     if (busy !== null) return;
@@ -421,7 +482,6 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
     try {
       await setChannelControl(channelId, kind, next);
       setDialogControl(null);
-      await onRefresh();
     } catch (requestError: unknown) {
       notify({
         tone: "error",
@@ -429,33 +489,17 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
           ? apiErrorText(requestError.code, labels.failure)
           : labels.failure,
       });
+      setBusy(null);
+      return;
+    }
+    try {
+      await onRefresh();
+    } catch {
+      notify({ tone: "error", message: labels.refreshFailure });
     } finally {
       setBusy(null);
     }
   };
-
-  const activeText = (control: typeof mute, kind: "mute" | "pause"): string | null => {
-    if (control.pending === true) return labels.pendingUntilStreamStart;
-    if (!control.active) return null;
-    if (control.mode === "timed" && control.until !== null) {
-      const remaining = Math.ceil((Date.parse(control.until) - now) / 60_000);
-      if (remaining <= 0) return texts.status.refreshing;
-      return kind === "mute" ? labels.muteRemaining(String(remaining)) : labels.pauseRemaining(String(remaining));
-    }
-    if (control.mode === "until_stream_end") return `${kind === "mute" ? labels.muteActive : labels.pauseActive} · ${labels.untilStreamEnd}`;
-    return kind === "mute" ? labels.muteActive : labels.pauseActive;
-  };
-
-  const controlState = (control: typeof mute, kind: "mute" | "pause", configured: boolean): ReactElement | null => {
-    const label = configured ? activeText(control, kind) : null;
-    if (label === null) return null;
-    const timed = control.active && control.mode === "timed" && control.until !== null && Date.parse(control.until) > now;
-    return <span className="dashboard-header__control-state" title={label}>{timed ? <Icon name="clock-hour-4" size={16} /> : null}<span>{label}</span></span>;
-  };
-
-  const controlStateSlot = (control: typeof mute, kind: "mute" | "pause", configured: boolean): ReactElement => (
-    <span className="dashboard-header__control-state-slot">{controlState(control, kind, configured)}</span>
-  );
 
   const durationOptions = CHANNEL_CONTROL_DURATIONS.map((choice) => ({
     value: choice,
@@ -480,7 +524,7 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
           disabled={busy !== null}
           onClick={() => { if (muteConfigured) void apply("mute", null); else setDialogControl("mute"); }}
         />
-        {controlStateSlot(mute, "mute", muteConfigured)}
+        <ChannelControlStatus control={mute} kind="mute" />
         <Button
           icon={pauseConfigured ? "player-play" : "player-pause"}
           iconOnly
@@ -489,8 +533,9 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
           disabled={busy !== null}
           onClick={() => { if (pauseConfigured) void apply("pause", null); else setDialogControl("pause"); }}
         />
-        {controlStateSlot(pause, "pause", pauseConfigured)}
+        <ChannelControlStatus control={pause} kind="pause" />
       </div>
+      <ChannelControlExpiryWatcher controls={activeChannelControls} onRefresh={onRefresh} />
       <ControlDurationDialog
         opened={dialogControl !== null}
         title={labels.durationTitle(dialogControl === "mute" ? labels.muteName : labels.pauseName)}
@@ -522,22 +567,37 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
  * pixel parity. Upgrade path: a richer `SelectOption` shape in `ui/Select`
  * if the plain label stops being legible enough.
  */
+const DashboardConnectionClock = ({ channel, loadedAt }: {
+  channel: PanelChannelState;
+  loadedAt?: number;
+}): ReactElement => {
+  const texts = dashboardTexts();
+  const now = useSecondClock();
+  const tone = channelStatus(channel, loadedAt, now);
+  const label = tone === "healthy" ? texts.header.connectionRunning : statusText(channel, loadedAt, now);
+  const status = tone === "healthy" ? "green" : tone === "warning" ? "amber" : tone === "error" ? "red" : "off";
+  return <span className="led" data-status={status}><span className="led__dot" aria-hidden="true" /><span>{label}</span></span>;
+};
+
+const DashboardStreamClock = ({ channel }: { channel: PanelChannelState }): ReactElement => {
+  const texts = dashboardTexts();
+  const now = useSecondClock();
+  const streamState = channel.streamState;
+  const streamLabel = streamState === "online"
+    ? texts.header.streamLive(streamDuration(channel.streamStartedAt, now))
+    : streamState === "offline" ? texts.header.streamOffline : texts.header.streamUnknown;
+  return <span className="dashboard-header__stream" data-state={streamState === "online" ? "live" : streamState === "offline" ? "offline" : "unknown"}>
+    <Icon name={streamState === "online" ? "broadcast" : "broadcast-off"} size={20} />
+    <span>{streamLabel}</span>
+    {channel.streamStateCheckedAt === undefined || channel.streamStateCheckedAt === null ||
+        !Number.isFinite(Date.parse(channel.streamStateCheckedAt)) ? null : (
+      <DataAge since={Date.parse(channel.streamStateCheckedAt)} format={texts.header.streamChecked} className="dashboard-header__stream-age" />
+    )}
+  </span>;
+};
+
 const DashboardHeader = ({ route, channels, activeChannel, loadedAt, onNavigate, onLogout, loggingOut, onRefreshState }: DashboardHeaderProperties): ReactElement => {
   const texts = dashboardTexts();
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => { setNow(Date.now()); }, 1000);
-    return () => { window.clearInterval(id); };
-  }, []);
-  const tone = activeChannel === undefined ? "neutral" : channelStatus(activeChannel, loadedAt, now);
-  const connectionLabel = activeChannel === undefined
-    ? null
-    : tone === "healthy" ? texts.header.connectionRunning : statusText(activeChannel, loadedAt, now);
-  const connectionLed = connectionLabel === null ? null : <span className="led" data-status={tone === "healthy" ? "green" : tone === "warning" ? "amber" : tone === "error" ? "red" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionLabel}</span></span>;
-  const streamState = activeChannel?.streamState;
-  const streamLabel = streamState === "online"
-    ? texts.header.streamLive(streamDuration(activeChannel?.streamStartedAt, now))
-    : streamState === "offline" ? texts.header.streamOffline : texts.header.streamUnknown;
   return (
     <div className="dashboard-header">
       <a className="brand-mark dashboard-header__brand" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
@@ -555,18 +615,11 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, onNavigate,
         </div>
       )}
       <div className="dashboard-header__status">
-        {activeChannel === undefined ? null : <span className="dashboard-header__stream" data-state={streamState === "online" ? "live" : streamState === "offline" ? "offline" : "unknown"}>
-          <Icon name={streamState === "online" ? "broadcast" : "broadcast-off"} size={20} />
-          <span>{streamLabel}</span>
-          {activeChannel.streamStateCheckedAt === undefined || activeChannel.streamStateCheckedAt === null ||
-              !Number.isFinite(Date.parse(activeChannel.streamStateCheckedAt)) ? null : (
-            <DataAge since={Date.parse(activeChannel.streamStateCheckedAt)} format={texts.header.streamChecked} className="dashboard-header__stream-age" />
-          )}
-        </span>}
-        {connectionLed}
+        {activeChannel === undefined ? null : <DashboardStreamClock channel={activeChannel} />}
+        {activeChannel === undefined ? null : <DashboardConnectionClock channel={activeChannel} {...(loadedAt === undefined ? {} : { loadedAt })} />}
         {loadedAt === undefined ? null : <DataAge since={loadedAt} />}
       </div>
-      {activeChannel === undefined ? null : <ChannelControlActions channelId={activeChannel.channelId} controls={activeChannel.controls} now={now} onRefresh={onRefreshState} />}
+      {activeChannel === undefined ? null : <ChannelControlActions channelId={activeChannel.channelId} controls={activeChannel.controls} onRefresh={onRefreshState} />}
       <button className="button button--quiet dashboard-header__logout" type="button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? texts.navigation.signingOut : texts.navigation.signOut}</button>
     </div>
   );
@@ -1168,10 +1221,14 @@ export const DashboardApp = (): ReactElement => {
   }, []);
 
   const [route, navigate] = useDashboardRoute();
+  const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
+  const realtimeStatus = useDashboardRealtimeStatus(realtimeChannelId ?? "");
+  const offlineRefetchInterval = realtimeStatus === "connected" ? false : 180_000;
   const routeRef = useRef(route);
   useLayoutEffect(() => { routeRef.current = route; }, [route]);
   const queryClient = useQueryClient();
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const requestLogin = useCallback((): void => { setAuthenticationRequired(true); }, []);
   useEffect(() => {
     window.addEventListener(dashboardAuthenticationRequiredEvent, requestLogin);
@@ -1190,6 +1247,7 @@ export const DashboardApp = (): ReactElement => {
         ),
       };
     },
+    refetchInterval: offlineRefetchInterval,
     enabled: !authenticationRequired,
   });
   const channelsResponse = channelsQuery.data;
@@ -1200,6 +1258,8 @@ export const DashboardApp = (): ReactElement => {
   const selectedChannel = (route.kind !== "channel" && route.kind !== "module") || channels.data === null
     ? null
     : channels.data.find((channel) => channel.channelId === route.channelId) ?? null;
+  const realtimeEnabled = realtimeChannelId !== null && selectedChannel !== null &&
+    !authenticationRequired && !loggingOut;
   const viewerUserId = channelsResponse?.viewerUserId ?? null;
   const isPlatform = channelsResponse?.platformAdmin ?? false;
   const viewerIsBot = channelsResponse?.viewerIsBot ?? false;
@@ -1216,21 +1276,22 @@ export const DashboardApp = (): ReactElement => {
       const response = await fetchChannelOverview(overviewChannelId, signal);
       return mergeAndRememberChannelStreamVersion(response, latestStreamByChannel.current);
     },
+    refetchInterval: overviewChannelId === null ? false : offlineRefetchInterval,
     enabled: !authenticationRequired && overviewChannelId !== null &&
       (route.kind === "module" || (route.kind === "channel" && route.section === "overview")),
     placeholderData: (previousData, previousQuery) =>
       previousQuery?.queryKey[1] === overviewChannelId ? previousData : undefined,
   });
   const overview = loadStateFromQuery(overviewQuery);
-  const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
-  const routeHasOwnRealtimeFeed = route.kind === "channel" &&
-    (route.section === "overview" || route.section === "events" || route.section === "variables");
-  useRealtimePanelMessages(realtimeChannelId, realtimeChannelId !== null && !routeHasOwnRealtimeFeed);
+  useRealtimePanelMessages(realtimeChannelId, realtimeEnabled);
   const systemChannelId = route.kind === "channel" && route.section === "system" ? route.channelId : null;
-  const systemQuery = useSystemQuery(systemChannelId ?? "", !authenticationRequired && systemChannelId !== null);
+  const systemQuery = useSystemQuery(
+    systemChannelId ?? "",
+    !authenticationRequired && systemChannelId !== null,
+    systemChannelId === null ? false : offlineRefetchInterval,
+  );
   const [, setFreshnessTick] = useState(0);
   const routeKey = dashboardRoutePath(route);
-  const [loggingOut, setLoggingOut] = useState(false);
   const [headerModuleBusyKeys, setHeaderModuleBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
   const headerModuleBusy = route.kind === "module" && headerModuleBusyKeys.has(`${route.channelId}:${route.moduleId}`);
   // Spotlight (#164): set right before navigating to a module so its panel
@@ -1258,53 +1319,10 @@ export const DashboardApp = (): ReactElement => {
   useEffect(() => {
     reportLoadError("system", systemChannelId !== null && systemQuery.isError ? errorMessage(systemQuery.error) : null);
   }, [reportLoadError, systemChannelId, systemQuery.error, systemQuery.isError]);
-  useEffect(() => {
-    const handleRealtimeMessage = (event: Event): void => {
-      const detail: unknown = (event as CustomEvent<unknown>).detail;
-      if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return;
-      const message = detail as Record<string, unknown>;
-      if (message.type !== "stream.state.changed" || typeof message.channelId !== "string" ||
-          typeof message.payload !== "object" || message.payload === null || Array.isArray(message.payload)) return;
-      const payload = message.payload as Record<string, unknown>;
-      if ((payload.state !== "online" && payload.state !== "offline") ||
-          (payload.startedAt !== null && typeof payload.startedAt !== "string") ||
-          typeof payload.changedAt !== "string" || !Number.isFinite(Date.parse(payload.changedAt)) ||
-          (payload.checkedAt !== undefined && (typeof payload.checkedAt !== "string" || !Number.isFinite(Date.parse(payload.checkedAt))))) return;
-      const { channelId } = message;
-      const streamVersion = mergeAndRememberChannelStreamVersion({
-        channelId,
-        streamState: payload.state,
-        streamStartedAt: payload.startedAt,
-        streamStateChangedAt: payload.changedAt,
-        streamStateCheckedAt: typeof payload.checkedAt === "string" ? payload.checkedAt : payload.changedAt,
-        ...(payload.controls === undefined ? {} : { controls: payload.controls as PanelChannelControls }),
-      }, latestStreamByChannel.current);
-      queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) =>
-        current === undefined || !current.channels.some((channel) => channel.channelId === channelId)
-          ? current
-          : {
-            ...current,
-            channels: current.channels.map((channel) => channel.channelId !== channelId ? channel : {
-              ...channel,
-              ...mergeChannelStreamVersion({ ...channel, ...streamVersion }, channel),
-            }),
-          },
-      { updatedAt: channelsQuery.dataUpdatedAt });
-      queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
-        current?.channelId !== channelId ? current : {
-          ...current,
-          ...mergeChannelStreamVersion({ ...current, ...streamVersion }, current),
-        },
-      { updatedAt: overviewQuery.dataUpdatedAt });
-    };
-    window.addEventListener("brobot:realtime", handleRealtimeMessage);
-    return () => window.removeEventListener("brobot:realtime", handleRealtimeMessage);
-  }, [channelsQuery.dataUpdatedAt, overviewQuery.dataUpdatedAt, queryClient]);
-
   const reloadChannels = useCallback(async (): Promise<void> => {
     const filter = { queryKey: queryKeys.channels(), exact: true } as const;
     await queryClient.cancelQueries(filter);
-    await queryClient.invalidateQueries(filter);
+    await queryClient.invalidateQueries(filter, { throwOnError: true });
   }, [queryClient]);
 
   const clearProtectedState = (): void => {
@@ -1334,7 +1352,7 @@ export const DashboardApp = (): ReactElement => {
     }
     const filter = { queryKey: queryKeys.channel(route.channelId, "modules"), exact: true } as const;
     await queryClient.cancelQueries(filter);
-    await queryClient.invalidateQueries(filter);
+    await queryClient.invalidateQueries(filter, { throwOnError: true });
   }, [queryClient, reloadChannels, route, selectedChannel]);
 
   const reloadAfterModuleToggle = async (channelId: string): Promise<void> => refreshAfterModuleToggle(queryClient, channelId);
@@ -1343,30 +1361,14 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "module" && !(route.kind === "channel" && route.section === "overview")) return;
     const filter = { queryKey: queryKeys.channel(route.channelId, "overview"), exact: true } as const;
     await queryClient.cancelQueries(filter);
-    await queryClient.invalidateQueries(filter);
+    await queryClient.invalidateQueries(filter, { throwOnError: true });
   }, [queryClient, route]);
-  const reloadOverviewRef = useRef(reloadOverview);
-  useLayoutEffect(() => { reloadOverviewRef.current = reloadOverview; }, [reloadOverview]);
-  useEffect(() => {
-    const reconcileOnSocketConnect = (event: Event): void => {
-      const detail: unknown = (event as CustomEvent<unknown>).detail;
-      if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return;
-      const channelId = Reflect.get(detail, "channelId") as unknown;
-      const currentRoute = routeRef.current;
-      if (typeof channelId === "string" &&
-          (currentRoute.kind === "channel" || currentRoute.kind === "module") &&
-          currentRoute.channelId === channelId) void reloadOverviewRef.current();
-    };
-    window.addEventListener("brobot:realtime-connected", reconcileOnSocketConnect);
-    return () => window.removeEventListener("brobot:realtime-connected", reconcileOnSocketConnect);
-  }, []);
-
   const refreshChannelState = useCallback(async (): Promise<void> => {
     const refreshFallbackModules = selectedChannel?.modules === undefined ? reloadModules() : Promise.resolve();
     const refreshSystem = systemChannelId === null ? Promise.resolve() : (async () => {
       const filter = { queryKey: queryKeys.channel(systemChannelId, "system"), exact: true } as const;
       await queryClient.cancelQueries(filter);
-      await queryClient.invalidateQueries(filter);
+      await queryClient.invalidateQueries(filter, { throwOnError: true });
     })();
     await Promise.all([
       reloadChannels(),
@@ -1377,17 +1379,6 @@ export const DashboardApp = (): ReactElement => {
   }, [queryClient, reloadChannels, reloadModules, reloadOverview, selectedChannel?.modules, systemChannelId]);
   const refreshChannelStateRef = useRef(refreshChannelState);
   useLayoutEffect(() => { refreshChannelStateRef.current = refreshChannelState; }, [refreshChannelState]);
-  useEffect(() => {
-    const refresh = (): void => {
-      if (document.visibilityState === "visible") void refreshChannelStateRef.current();
-    };
-    document.addEventListener("visibilitychange", refresh);
-    const interval = window.setInterval(refresh, 3 * 60 * 1000);
-    return () => {
-      document.removeEventListener("visibilitychange", refresh);
-      window.clearInterval(interval);
-    };
-  }, []);
 
   const routeUsesOverview = route.kind === "module" || (route.kind === "channel" && route.section === "overview");
   // Keep the freshest token snapshot per channel. The channels query covers all
@@ -1433,9 +1424,12 @@ export const DashboardApp = (): ReactElement => {
         return;
       }
       if (expiryRefreshRef.current === expiryRefreshKey) return;
-      expiryRefreshRef.current = expiryRefreshKey;
-      setFreshnessTick((current) => current + 1);
-      void refreshChannelStateRef.current();
+      void refreshChannelStateRef.current().then(() => {
+        expiryRefreshRef.current = expiryRefreshKey;
+        setFreshnessTick((current) => current + 1);
+      }).catch(() => {
+        timer = window.setTimeout(refreshWhenExpired, 30_000);
+      });
     };
     timer = window.setTimeout(refreshWhenExpired, Math.min(Math.max(0, expiryAt - Date.now()), MAX_TIMER_DELAY_MS));
     return () => { if (timer !== null) window.clearTimeout(timer); };

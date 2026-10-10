@@ -15,6 +15,7 @@ export interface AuthenticateOverlayTokenInput {
   token: string;
   pepper: string;
   now: string;
+  onCommittedTouch?: (channelId: string) => Promise<void>;
 }
 
 export interface RevokeOverlayTokenInput {
@@ -63,7 +64,10 @@ export const authenticateOverlayToken = async (
   } catch {
     return record;
   }
-  if (touched) return { ...record, lastUsedAt: input.now };
+  if (touched) {
+    await input.onCommittedTouch?.(record.channelId);
+    return { ...record, lastUsedAt: input.now };
+  }
   return getUsableOverlayToken(db, tokenHash, input.now);
 };
 

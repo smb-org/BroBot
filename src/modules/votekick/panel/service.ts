@@ -20,8 +20,8 @@ const readJson = async <Value,>(response: Response): Promise<Value> => {
 
 const csrf = async (): Promise<string> => (await readJson<{ token: string }>(await fetch("/api/csrf"))).token;
 
-export const loadVotekickPanel = async (channelId: string): Promise<VotekickPanelData> =>
-  readJson<VotekickPanelData>(await fetch(`${basePath(channelId)}/votekicks`));
+export const loadVotekickPanel = async (channelId: string, signal?: AbortSignal): Promise<VotekickPanelData> =>
+  readJson<VotekickPanelData>(await fetch(`${basePath(channelId)}/votekicks`, signal === undefined ? {} : { signal }));
 
 const mutate = async (channelId: string, id: string, action: "cancel" | "lift"): Promise<void> => {
   const token = await csrf();

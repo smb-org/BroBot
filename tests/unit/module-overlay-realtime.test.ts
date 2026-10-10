@@ -179,4 +179,25 @@ describe("module overlay realtime routing", () => {
 
     expect(result).toEqual({ outcome: "no_recipients" });
   });
+
+  it("keeps module overlay payloads out of panel sockets", async () => {
+    const chatVoting: BotModule = {
+      id: "chat_voting",
+      navigationCategory: "chat",
+      settingsSchema: { parse: (value: unknown) => value } as never,
+      defaultSettings: {},
+      overlayElements: [declaration("chat_voting.poll")],
+    };
+
+    const result = await prepareModuleOverlayRealtimeMessage(
+      databaseFor([]).database,
+      "kanal-a",
+      "chat_voting",
+      { kind: "overlay", type: "tally", elementKind: "chat_voting.poll", payload: { pollId: "poll-1" } },
+      false,
+      [chatVoting],
+    );
+
+    expect(result).toEqual({ outcome: "no_recipients" });
+  });
 });

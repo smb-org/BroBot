@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useRef, useState, type ReactElement } from "react";
 
 import { Button, Field, Led, LoadState, notify, NumberField, SegmentedControl, Select, Skeleton, Switch } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
@@ -9,6 +9,8 @@ import { compactDateRange, dateText, timeText } from "./date-range";
 import { chatVotingPanelTexts } from "./locale-panel";
 import type { ChatVotingPanelState } from "./service";
 import { approveChatVotingTerm, closeChatVoting, loadChatVotingState, startChatVoting } from "./service";
+import { refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 
 type DurationPreset = "open" | "one" | "two" | "five" | "custom";
 
@@ -53,41 +55,38 @@ const createVoteDraft = (channelId: string, defaultDurationSeconds: number): Vot
 
 export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true }: ModulePanelProperties): ReactElement => {
   const labels = chatVotingPanelTexts(language);
-  const [state, setState] = useState<ChatVotingPanelState | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [loadErrorNotified, setLoadErrorNotified] = useState(false);
+  const loadErrorNotified = useRef(false);
   const [busy, setBusy] = useState(false);
   const [draftState, setDraftState] = useState<VoteDraft | null>(null);
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const queryClient = useDashboardQueryClient();
+  const stateQuery = useModuleQuery(channelId, "chat_voting", "panel", async (signal) => {
+    try {
+      const response = await loadChatVotingState(channelId, signal);
+      loadErrorNotified.current = false;
+      return response;
+    } catch (failure: unknown) {
+      if (!loadErrorNotified.current) {
+        loadErrorNotified.current = true;
+        notify({ tone: "error", message: labels.loadError });
+      }
+      throw failure;
+    }
+  }, {
+    refetchInterval: realtimeStatus === "connected" ? false : 2_000,
+  });
+  const state = stateQuery.data ?? null;
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
-      const next = await loadChatVotingState(channelId);
-      setState(next);
-      setDraftState((current) => current?.channelId === channelId
-        ? current
-        : createVoteDraft(channelId, next.defaultDurationSeconds));
-      setLoadFailed(false);
-      setLoadErrorNotified(false);
+      await refetchModuleQueryData<ChatVotingPanelState>(queryClient, channelId, "chat_voting", "panel");
     } catch {
-      setLoadFailed(true);
-      if (!loadErrorNotified) {
-        setLoadErrorNotified(true);
+      if (!loadErrorNotified.current) {
+        loadErrorNotified.current = true;
         notify({ tone: "error", message: labels.loadError });
       }
     }
-  }, [channelId, labels.loadError, loadErrorNotified]);
-
-  useEffect(() => { void Promise.resolve().then(() => refresh()); }, [refresh]);
-
-  useEffect(() => {
-    const poll = (): void => { if (document.visibilityState === "visible") void refresh(); };
-    const timer = window.setInterval(poll, 2_000);
-    document.addEventListener("visibilitychange", poll);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", poll);
-    };
-  }, [refresh]);
+  }, [channelId, labels.loadError, queryClient]);
 
   const draft = draftState?.channelId === channelId
     ? draftState
@@ -158,7 +157,7 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
 
   if (state === null) return <section className="module-stack chat-voting-panel" aria-label={labels.title}>
     <LoadState
-      status={loadFailed ? "error" : "loading"}
+      status={stateQuery.isError ? "error" : "loading"}
       minHeight="calc(var(--s10) * 8)"
       loading={<Skeleton rows={8} height={34} />}
       empty={<p className="empty-state">{labels.noVote}</p>}

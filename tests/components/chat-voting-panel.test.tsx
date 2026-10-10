@@ -1,11 +1,15 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { ChatVotingPanel } from "../../src/modules/chat_voting/panel";
+import { chatVotingModule } from "../../src/modules/chat_voting";
+import { moduleQueryKey, runModuleQueryWrite } from "../../src/dashboard/data/module-query";
+import { setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import type { ChatVotePreset } from "../../src/modules/chat_voting/contracts";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const defaultLabels: Record<ChatVotePreset, string[]> = {
   yes_no: ["Yes", "No"],
@@ -44,14 +48,16 @@ const openVote = {
   voterCount: null,
 } as const;
 
+const requestPath = (input: RequestInfo | URL): string => input instanceof Request
+  ? new URL(input.url).pathname
+  : input instanceof URL ? input.pathname : new URL(input, "https://brobot.example").pathname;
+
 const fetchFor = (
   readCurrent: () => unknown = () => currentState(),
   onStart: (body: unknown) => unknown = () => ({ vote: openVote }),
   onClose: () => void = () => {},
 ) => vi.fn<typeof fetch>((input, init) => {
-  const path = input instanceof Request
-    ? new URL(input.url).pathname
-    : new URL(String(input), "https://brobot.example").pathname;
+  const path = requestPath(input);
   if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
   if (path.endsWith("/start")) {
     const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
@@ -84,6 +90,8 @@ const selectOption = async (label: string, option: string): Promise<void> => {
 describe("chat voting live panel", () => {
   afterEach(() => {
     cleanup();
+    setDashboardRealtimeStatus("fictional-channel", "offline");
+    for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.unstubAllGlobals();
   });
 
@@ -121,6 +129,35 @@ describe("chat voting live panel", () => {
     expect(screen.getByRole("spinbutton", { name: "Seconds" })).toBeInTheDocument();
   });
 
+  it("notifies once per state outage even when identical state recovers", async () => {
+    setDashboardRealtimeStatus("fictional-channel", "connected");
+    let readState: "success" | "error" = "success";
+    const fetcher = fetchFor(() => {
+      if (readState === "error") throw new Error("state unavailable");
+      return currentState();
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+    expect(await screen.findByText("No vote yet. Start one in chat with !vote yesno [question].")).toBeInTheDocument();
+    const key = { queryKey: moduleQueryKey("fictional-channel", "chat_voting", "panel"), exact: true };
+    const refresh = async (): Promise<void> => {
+      await act(async () => { await view.queryClient.refetchQueries(key, { throwOnError: true }).catch(() => undefined); });
+    };
+
+    readState = "error";
+    await refresh();
+    await refresh();
+    expect(fetcher.mock.calls.filter(([input]) => requestPath(input).endsWith("/current"))).toHaveLength(3);
+    expect(view.queryClient.getQueryState(key.queryKey)?.status).toBe("error");
+    expect(toastsSnapshot().filter((toast) => toast.message === "The vote could not be loaded.")).toHaveLength(1);
+
+    readState = "success";
+    await refresh();
+    readState = "error";
+    await refresh();
+    expect(toastsSnapshot().filter((toast) => toast.message === "The vote could not be loaded.")).toHaveLength(2);
+  });
+
   it("sends edited answer labels for this vote", async () => {
     let startPayload: unknown;
     let started = false;
@@ -141,6 +178,35 @@ describe("chat voting live panel", () => {
     await waitFor(() => expect(startPayload).toEqual({ kind: "options", optionCount: 2, labels: ["Pizza", "Burger"], durationSeconds: 120 }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("Pizza"));
     expect(screen.getByRole("textbox", { name: "Label for option 2" })).toHaveValue("Burger");
+  });
+
+  it("uses the saved default duration for the next vote", async () => {
+    setDashboardRealtimeStatus("fictional-channel", "connected");
+    let serverState = currentState();
+    let startPayload: unknown;
+    vi.stubGlobal("fetch", fetchFor(
+      () => serverState,
+      (body) => { startPayload = body; return { vote: openVote }; },
+    ));
+    const view = render(<UiProvider><ChatVotingPanel channelId="fictional-channel" language="en" /></UiProvider>);
+
+    expect(await screen.findByRole("button", { name: "Start vote" })).toBeEnabled();
+    serverState = currentState({
+      defaultDurationSeconds: 300,
+    });
+
+    await act(async () => {
+      await runModuleQueryWrite(view.queryClient, "fictional-channel", "chat_voting", "settings", () => Promise.resolve({}), {
+        baselineRevision: 1,
+        updateCache: (_current, result) => result,
+        relatedParts: (chatVotingModule.settingsEditorRelatedParts ?? []).map((part) => ({ moduleId: chatVotingModule.id, part })),
+      });
+    });
+
+    await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey("fictional-channel", "chat_voting", "panel")))
+      .toMatchObject({ defaultDurationSeconds: 300 }));
+    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
+    await waitFor(() => expect(startPayload).toEqual({ kind: "yes_no", labels: ["Yes", "No"], durationSeconds: 300 }));
   });
 
   it("sends a trimmed question and enforces its 80-code-point limit", async () => {

@@ -7,10 +7,6 @@ import streamElementsJs from "../../docs/embedding/streamelements/widget.js?raw"
 import {
   createOverlay,
   deleteOverlay,
-  fetchOverlay,
-  fetchOverlayAccesses,
-  fetchOverlays,
-  fetchOverlayTokens,
   importLegacyOverlay,
   issueOverlayAccess,
   removeOverlayAccess,
@@ -27,6 +23,9 @@ import {
 } from "./api";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
 import { ActionMenu, Button, ConfirmDialog, EmptyCellValue, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
+import { useLegacyOverlayTokensQuery, useOverlayAccessesQuery, useOverlayQuery, useOverlaysQuery } from "./data/lists";
+import { dashboardDataKeys } from "./data/keys";
+import { useDashboardQueryError } from "./data";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -36,6 +35,7 @@ interface OverlaysPageProperties {
 }
 
 const blankOverlayName = "";
+const EMPTY_OVERLAYS: readonly PanelOverlaySummary[] = [];
 const maskOverlaySecret = (overlayUrl: string): string => overlayUrl.replace(/([#&]token=)[^&]*/u, "$1••••••");
 const copyPromiseToClipboard = async (text: Promise<string>): Promise<void> => {
   const clipboard = Reflect.get(navigator, "clipboard") as Clipboard | undefined;
@@ -232,20 +232,20 @@ function OverlaySetupAssistant({
 export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEditor }: OverlaysPageProperties): ReactElement {
   const language = dashboardLanguage();
   const labels = overlaysTexts(language);
-  const [overlays, setOverlays] = useState<readonly PanelOverlaySummary[]>([]);
+  const overlaysQuery = useOverlaysQuery(channelId);
+  const overlays = overlaysQuery.data?.overlays ?? EMPTY_OVERLAYS;
+  const maximum = overlaysQuery.data?.maximum ?? 20;
+  const loading = overlaysQuery.isPending;
+  const loadFailed = overlaysQuery.isError;
   const [search, setSearch] = useState("");
-  const [maximum, setMaximum] = useState(20);
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(initialSelection ?? null);
   const selectedIdRef = useRef<string | null>(initialSelection ?? null);
-  const [selectedOverlayData, setSelectedOverlayData] = useState<{
-    id: string;
-    overlay: PanelOverlay;
-    accesses: readonly PanelOverlayAccess[];
-  } | null>(null);
+  const selectedOverlayQuery = useOverlayQuery(channelId, selectedId ?? "", selectedId !== null);
+  const selectedOverlayAccessesQuery = useOverlayAccessesQuery(channelId, selectedId ?? "", selectedId !== null);
+  const legacyTokensQuery = useLegacyOverlayTokensQuery(channelId);
+  const selectedOverlayError = useDashboardQueryError(dashboardDataKeys.overlay(channelId, selectedId ?? ""));
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState(blankOverlayName);
   const [draftSize, setDraftSize] = useState("1920x1080");
@@ -262,10 +262,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const [setupCopiedSnippet, setSetupCopiedSnippet] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<PanelOverlayAccess | null>(null);
   const [replaceTarget, setReplaceTarget] = useState<PanelOverlayAccess | null>(null);
-  const [legacyTokens, setLegacyTokens] = useState<readonly PanelOverlayToken[]>([]);
-  const [legacyLoading, setLegacyLoading] = useState(true);
-  const [legacyLoadFailed, setLegacyLoadFailed] = useState(false);
-  const [legacyNextOffset, setLegacyNextOffset] = useState<number | null>(null);
   const [legacyError, setLegacyError] = useState<string | null>(null);
   const [legacyRevokeTarget, setLegacyRevokeTarget] = useState<PanelOverlayToken | null>(null);
   const [legacyImportOpen, setLegacyImportOpen] = useState(false);
@@ -273,9 +269,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const [legacyImportError, setLegacyImportError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const requestVersion = useRef(0);
   const secretVersion = useRef(0);
-  const legacyRequestVersion = useRef(0);
   const pageActiveRef = useRef(true);
   const permissionRef = useRef(canManage);
   const channelIdRef = useRef(channelId);
@@ -310,7 +304,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     if (accessContextChanged) invalidateSecret();
     if (channelIdRef.current !== channelId) {
       changeSelection(null);
-      setSelectedOverlayData(null);
     }
     if (accessContextChanged) {
       setLegacyImportOpen(false);
@@ -321,57 +314,33 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     channelIdRef.current = channelId;
   }, [canManage, channelId, changeSelection, invalidateSecret]);
   const selected = useMemo(() => overlays.find((overlay) => overlay.id === selectedId) ?? null, [overlays, selectedId]);
-  const selectedOverlay = selectedOverlayData?.id === selectedId ? selectedOverlayData.overlay : null;
-  const accesses = selectedOverlayData?.id === selectedId ? selectedOverlayData.accesses : [];
+  const refetchOverlays = overlaysQuery.refetch;
+  const selectedOverlay = selectedOverlayQuery.data?.overlay ?? null;
+  const selectedOverlayLoadFailed = selectedOverlayError !== null;
+  const accesses = selectedOverlayAccessesQuery.data?.accesses ?? [];
+  const legacyTokens = legacyTokensQuery.data?.pages.flatMap((page) => page.tokens) ?? [];
   const revokedAccesses = accesses.filter((access) => access.revokedAt !== null);
   const setupAccess = accesses.find((access) => access.tokenId === setupAccessId) ?? null;
 
   const load = useCallback(async (isActive: () => boolean = () => true): Promise<void> => {
-    const version = ++requestVersion.current;
     try {
-      const result = await fetchOverlays(channelId);
-      if (!isActive() || version !== requestVersion.current) return;
-      setOverlays(result.overlays);
-      setMaximum(result.maximum);
-      setLoadFailed(false);
+      const result = await refetchOverlays({ throwOnError: true });
+      if (!isActive() || result.data === undefined) return;
       setError(null);
-      if (selectedIdRef.current === null && initialSelection !== undefined && result.overlays.some((item) => item.id === initialSelection)) {
+      if (selectedIdRef.current === null && initialSelection !== undefined && result.data.overlays.some((item) => item.id === initialSelection)) {
         changeSelection(initialSelection);
       }
     } catch (caught) {
-      if (!isActive() || version !== requestVersion.current) return;
-      setLoadFailed(true);
+      if (!isActive()) return;
       notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
-    } finally {
-      if (isActive() && version === requestVersion.current) setLoading(false);
     }
-  }, [channelId, changeSelection, initialSelection, labels.loadError]);
-
-  const loadLegacyTokens = useCallback(async (offset = 0, append = false): Promise<void> => {
-    const version = ++legacyRequestVersion.current;
-    if (!append) setLegacyLoading(true);
-    try {
-      const result = await fetchOverlayTokens(channelId, offset);
-      if (!pageActiveRef.current || legacyRequestVersion.current !== version || channelIdRef.current !== channelId) return;
-      setLegacyTokens((current) => append ? [...current, ...result.tokens] : result.tokens);
-      setLegacyNextOffset(result.nextOffset);
-      setLegacyLoadFailed(false);
-      setLegacyError(null);
-    } catch (caught) {
-      if (!pageActiveRef.current || legacyRequestVersion.current !== version || channelIdRef.current !== channelId) return;
-      setLegacyLoadFailed(true);
-      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
-    } finally {
-      if (!append && pageActiveRef.current && legacyRequestVersion.current === version) setLegacyLoading(false);
-    }
-  }, [channelId, labels.loadError]);
+  }, [changeSelection, initialSelection, labels.loadError, refetchOverlays]);
 
   useEffect(() => {
     let active = true;
     void Promise.resolve().then(() => load(() => active));
     return () => { active = false; };
   }, [load]);
-  useEffect(() => { void Promise.resolve().then(() => loadLegacyTokens()); }, [loadLegacyTokens]);
   useEffect(() => {
     pageActiveRef.current = true;
     return () => {
@@ -383,40 +352,18 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     return () => { window.clearInterval(timer); };
   }, []);
 
-  useEffect(() => {
-    if (selectedId === null) return;
-    let active = true;
-    const requests: [Promise<{ overlay: PanelOverlay }>, Promise<{ accesses: readonly PanelOverlayAccess[] }>] = [
-      fetchOverlay(channelId, selectedId),
-      fetchOverlayAccesses(channelId, selectedId),
-    ];
-    void Promise.all(requests).then(([overlayResult, accessResult]) => {
-      if (!active) return;
-      setSelectedOverlayData({ id: selectedId, overlay: overlayResult.overlay, accesses: accessResult.accesses });
-      setError(null);
-    }).catch((caught: unknown) => {
-      if (!active) return;
-      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError });
-    });
-    return () => { active = false; };
-  }, [canManage, channelId, labels.loadError, selectedId]);
-
   const refreshSelected = async (): Promise<void> => {
     const overlayId = selectedIdRef.current;
     if (overlayId === null) return;
-    const [overlayResult, accessResult] = await Promise.all([
-      fetchOverlay(channelId, overlayId),
-      fetchOverlayAccesses(channelId, overlayId),
+    await Promise.all([
+      selectedOverlayQuery.refetch({ throwOnError: true }),
+      selectedOverlayAccessesQuery.refetch({ throwOnError: true }),
     ]);
-    if (channelIdRef.current === channelId && selectedIdRef.current === overlayId) {
-      setSelectedOverlayData({ id: overlayId, overlay: overlayResult.overlay, accesses: accessResult.accesses });
-    }
   };
 
   const beginCreate = (): void => {
     setCreating(true);
     changeSelection(null);
-    setSelectedOverlayData(null);
     setDraftName("");
     setDraftSize("1920x1080");
     setDraftWidth(1920);
@@ -443,7 +390,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const closeInspector = (): void => {
     setCreating(false);
     changeSelection(null);
-    setSelectedOverlayData(null);
     setError(null);
   };
 
@@ -455,7 +401,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       const result = await deleteOverlay(channelId, selectedOverlay.id, selectedOverlay.revision);
       setConfirmDelete(false);
       changeSelection(null);
-      setSelectedOverlayData(null);
       await load();
       if (result?.closingPending) notify({ tone: "info", message: labels.revokedPending });
     } catch (caught) {
@@ -664,7 +609,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       notify(result.closingPending
         ? { tone: "info", message: labels.revokedPending }
         : { tone: "success", message: labels.revoked });
-      await loadLegacyTokens();
+      await legacyTokensQuery.refetch({ throwOnError: true });
     } catch (caught) {
       setLegacyError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
     } finally {
@@ -686,7 +631,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       setLegacyImportOpen(false);
       setLegacyImportLink("");
       changeSelection(result.overlay.id);
-      await Promise.all([load(), loadLegacyTokens()]);
+      await Promise.all([load(), legacyTokensQuery.refetch({ throwOnError: true })]);
       notify(result.closingPending
         ? { tone: "info", message: labels.legacyImportClosingPending }
         : { tone: "success", message: labels.legacyImportSuccess(result.overlay.name) });
@@ -743,8 +688,8 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         <table className="table overlays-table">
           <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.elements}</th><th scope="col">{labels.accesses}</th><th scope="col">{labels.lastUsedAt}</th></tr></thead>
           <tbody>{visibleOverlays.map((overlay) => <tr key={overlay.id} tabIndex={0} aria-selected={overlay.id === selectedId}
-            onClick={() => { setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); }}
-            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCreating(false); setSelectedOverlayData(null); changeSelection(overlay.id); } }}>
+            onClick={() => { setCreating(false); changeSelection(overlay.id); }}
+            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCreating(false); changeSelection(overlay.id); } }}>
             <th scope="row">{overlay.name}</th>
             <td>{overlay.elementCount}</td>
             <td>{overlay.accessCount}</td>
@@ -766,7 +711,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         <p className="muted">{labels.legacyDescription}</p>
         <div className="overlay-legacy-links__reason-slot">{manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}</div>
         <LoadState
-          status={legacyLoading && legacyTokens.length === 0 ? "loading" : legacyLoadFailed && legacyTokens.length === 0 ? "error" : legacyTokens.length === 0 ? "empty" : "success"}
+          status={legacyTokensQuery.isPending && legacyTokens.length === 0 ? "loading" : legacyTokensQuery.isError && legacyTokens.length === 0 ? "error" : legacyTokens.length === 0 ? "empty" : "success"}
           minHeight={260}
           loading={<Skeleton rows={4} height={58} />}
           empty={<p className="empty-state">{labels.legacyEmpty}</p>}
@@ -785,9 +730,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
             ]} /></div>
           </li>)}</ul>
         </LoadState>
-        {legacyTokens.length === 0 && legacyNextOffset === null ? null : <ListPaginationFooter loadedCount={legacyTokens.length} loadedLabel={labels.legacyLoaded}>
-          {legacyNextOffset === null ? null : <Button variant="neutral" disabled={pending || legacyLoading}
-            onClick={() => { void loadLegacyTokens(legacyNextOffset, true); }}>{labels.loadMore}</Button>}
+        {legacyTokens.length === 0 && !legacyTokensQuery.hasNextPage ? null : <ListPaginationFooter loadedCount={legacyTokens.length} loadedLabel={labels.legacyLoaded}>
+          {!legacyTokensQuery.hasNextPage ? null : <Button variant="neutral" disabled={pending || legacyTokensQuery.isFetching}
+            onClick={() => { void legacyTokensQuery.fetchNextPage(); }}>{labels.loadMore}</Button>}
         </ListPaginationFooter>}
       </details>
     </section>
@@ -814,7 +759,16 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     </div>
   </SubInspector> : selectedId === null ? null : <SubInspector ariaLabel={labels.title} title={selected?.name ?? labels.title}
     identifier={selected?.id} closeLabel={labels.close} onClose={closeInspector}>
-    {selectedOverlay === null ? <p className="loading-line">{labels.loading}</p> : <div className="overlay-inspector">
+    <LoadState
+      status={selectedOverlay === null ? selectedOverlayQuery.isPending ? "loading" : selectedOverlayLoadFailed ? "error" : "loading" : "success"}
+      minHeight="calc(var(--s10) * 24)"
+      loading={<div aria-label={labels.loading}><Skeleton rows={6} height={34} /></div>}
+      empty={<div />}
+      error={<p role="alert">{labels.loadError}</p>}
+      onRetry={() => { void selectedOverlayQuery.refetch({ throwOnError: true }).catch(() => undefined); }}
+      refreshError={selectedOverlay !== null && selectedOverlayLoadFailed}
+    >
+    {selectedOverlay === null ? null : <div className="overlay-inspector">
       <InspectorSection title={labels.details}>
         <dl className="properties">
           <div><dt>{labels.size}</dt><dd>{selectedOverlay.width} × {selectedOverlay.height}</dd></div>
@@ -911,6 +865,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       </InspectorSection>
       <InspectorActions destructive={<Button danger="subtle" disabled={!canManage || pending} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>} />
     </div>}
+    </LoadState>
   </SubInspector>;
 
   return <>

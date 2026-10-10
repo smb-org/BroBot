@@ -74,6 +74,7 @@ import { hydrateModuleOverlayElements } from "../overlays/module-state";
 import { hydrateCachedAdsCountdownSnapshot } from "../overlays/ads-countdown-cache";
 import { ADS_COUNTDOWN_ELEMENT_KIND } from "../../modules/ads/overlay/kinds";
 import { createOverlayElementContext } from "../overlays/element-context";
+import { notifyCommittedResources, schedulePanelResourceBackgroundWork } from "../panel-resources";
 
 const nowIso = (): string => new Date().toISOString();
 const OVERLAY_VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
@@ -126,14 +127,18 @@ const redirectAfterLogin = (origin: string, path: string | null | undefined): st
 
 const maintainAfterBotAuthorization = async (env: Env, now: string): Promise<void> => {
   try {
-    await maintainBotIdentity(env, now);
-  } catch {
-    // The authorization is already stored; the hourly run remains the safety net.
-  }
-  try {
-    await maintainEventSubSubscriptions(env, now);
-  } catch {
-    // Errors are logged by the maintenance run and must not break the callback.
+    try {
+      await maintainBotIdentity(env, now);
+    } catch {
+      // The authorization is already stored; the hourly run remains the safety net.
+    }
+    try {
+      await maintainEventSubSubscriptions(env, now);
+    } catch {
+      // Errors are logged by the maintenance run and must not break the callback.
+    }
+  } finally {
+    await notifyCommittedResources(env);
   }
 };
 
@@ -142,6 +147,8 @@ const maintainAfterBroadcasterAuthorization = async (env: Env, now: string): Pro
     await maintainEventSubSubscriptions(env, now);
   } catch {
     // The reconciliation is retried in the hourly run; the consent remains stored.
+  } finally {
+    await notifyCommittedResources(env);
   }
 };
 
@@ -271,70 +278,77 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
     token,
     pepper: context.env.OVERLAY_TOKEN_PEPPER,
     now: nowIso(),
+    onCommittedTouch: (channelId) => notifyCommittedResources(context.env, channelId),
   });
   if (record === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
 
-  const overlayId = await getOverlayBindingForToken(context.env.DB, record.channelId, record.tokenId);
-  if (overlayId === null) {
-    return context.json({ language: record.language, overlay: null, variables: {} });
+  try {
+    const overlayId = await getOverlayBindingForToken(context.env.DB, record.channelId, record.tokenId);
+    if (overlayId === null) {
+      return context.json({ language: record.language, overlay: null, variables: {} });
+    }
+    const overlay = await getOverlayForChannel(context.env.DB, record.channelId, overlayId);
+    if (overlay === null) {
+      return context.json({ language: record.language, overlay: null, variables: {} });
+    }
+    if (overlay.elements.some((element) => element.kind === ADS_COUNTDOWN_ELEMENT_KIND)) {
+      await hydrateCachedAdsCountdownSnapshot(context.env, record.channelId);
+    }
+    const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
+    const contextModuleIds = [...new Set(overlay.elements.flatMap((element) => {
+      const declaration = moduleOverlayElementForKind(element.kind);
+      return declaration?.definition.initialStateNeedsContext === true ? [declaration.module.id] : [];
+    }))];
+    const elementContext = contextModuleIds.length === 0 ? undefined : new Map(await Promise.all(
+      contextModuleIds.map(async (moduleId) => [
+        moduleId,
+        await createOverlayElementContext(context.env, record.channelId, moduleId, record.language, Date.now()),
+      ] as const),
+    ));
+    const elements = await hydrateModuleOverlayElements(
+      context.env.DB,
+      record.channelId,
+      overlay.elements,
+      MODULES,
+      elementContext === undefined ? undefined : (moduleId) => elementContext.get(moduleId),
+    );
+    const responseNow = new Date().toISOString();
+    return context.json({
+      language: record.language,
+      overlay: {
+        id: overlay.id,
+        revision: overlay.revision,
+        width: overlay.width,
+        height: overlay.height,
+        css: overlay.css,
+        elements: elements.map((element) => {
+          const state = element.state !== undefined && element.state !== null && typeof element.state.serverNow === "string"
+            ? { ...element.state, serverNow: responseNow }
+            : element.state;
+          return {
+            id: element.id,
+            kind: element.kind,
+            label: element.label,
+            variableName: element.variableName,
+            text: element.text,
+            config: element.config,
+            ...(element.moduleEnabled === undefined ? {} : { moduleEnabled: element.moduleEnabled }),
+            ...(state === undefined ? {} : { state }),
+            x: element.x,
+            y: element.y,
+            scalePercent: element.scalePercent,
+            z: element.z,
+            inComposition: element.inComposition,
+          };
+        }),
+      },
+      variables,
+    });
+  } finally {
+    // Hydration may populate shared API or weather caches after token auth's
+    // own committed-touch notification has already run.
+    await notifyCommittedResources(context.env, record.channelId);
   }
-  const overlay = await getOverlayForChannel(context.env.DB, record.channelId, overlayId);
-  if (overlay === null) {
-    return context.json({ language: record.language, overlay: null, variables: {} });
-  }
-  if (overlay.elements.some((element) => element.kind === ADS_COUNTDOWN_ELEMENT_KIND)) {
-    await hydrateCachedAdsCountdownSnapshot(context.env, record.channelId);
-  }
-  const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
-  const contextModuleIds = [...new Set(overlay.elements.flatMap((element) => {
-    const declaration = moduleOverlayElementForKind(element.kind);
-    return declaration?.definition.initialStateNeedsContext === true ? [declaration.module.id] : [];
-  }))];
-  const elementContext = contextModuleIds.length === 0 ? undefined : new Map(await Promise.all(
-    contextModuleIds.map(async (moduleId) => [
-      moduleId,
-      await createOverlayElementContext(context.env, record.channelId, moduleId, record.language, Date.now()),
-    ] as const),
-  ));
-  const elements = await hydrateModuleOverlayElements(
-    context.env.DB,
-    record.channelId,
-    overlay.elements,
-    MODULES,
-    elementContext === undefined ? undefined : (moduleId) => elementContext.get(moduleId),
-  );
-  const responseNow = new Date().toISOString();
-  return context.json({
-    language: record.language,
-    overlay: {
-      id: overlay.id,
-      revision: overlay.revision,
-      width: overlay.width,
-      height: overlay.height,
-      css: overlay.css,
-      elements: elements.map((element) => {
-        const state = element.state !== undefined && element.state !== null && typeof element.state.serverNow === "string"
-          ? { ...element.state, serverNow: responseNow }
-          : element.state;
-        return {
-          id: element.id,
-          kind: element.kind,
-          label: element.label,
-          variableName: element.variableName,
-          text: element.text,
-          config: element.config,
-          ...(element.moduleEnabled === undefined ? {} : { moduleEnabled: element.moduleEnabled }),
-          ...(state === undefined ? {} : { state }),
-          x: element.x,
-          y: element.y,
-          scalePercent: element.scalePercent,
-          z: element.z,
-          inComposition: element.inComposition,
-        };
-      }),
-    },
-    variables,
-  });
 });
 
 authRouter.get("/api/overlay/variables/:name", async (context) => {
@@ -346,6 +360,7 @@ authRouter.get("/api/overlay/variables/:name", async (context) => {
     token,
     pepper: context.env.OVERLAY_TOKEN_PEPPER,
     now: nowIso(),
+    onCommittedTouch: (channelId) => notifyCommittedResources(context.env, channelId),
   });
   if (record === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
 
@@ -550,13 +565,13 @@ authRouter.get("/auth/twitch/callback", async (context) => {
         createdAt: current?.createdAt ?? now,
         updatedAt: now,
       }, "connected", null, now);
+      await notifyCommittedResources(context.env);
       const maintenance = maintainAfterBotAuthorization(context.env, now);
-      try {
-        context.executionCtx.waitUntil(maintenance);
-      } catch {
-        // In tests or other runtimes without an ExecutionContext, the work continues running anyway.
-        void maintenance;
-      }
+      void schedulePanelResourceBackgroundWork(
+        context.env,
+        maintenance,
+        () => context.executionCtx,
+      );
       return context.redirect(redirectHome(context.env.PUBLIC_ORIGIN), 302);
     }
 
@@ -618,6 +633,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
       createdAt: current?.createdAt ?? now,
       updatedAt: now,
     });
+    await notifyCommittedResources(context.env);
 
     const sessionExpiresAt = new Date(Date.parse(now) + SESSION_COOKIE_MAX_AGE_SECONDS * 1000).toISOString();
     const sessionId = randomId();
@@ -637,11 +653,11 @@ authRouter.get("/auth/twitch/callback", async (context) => {
     context.header("Set-Cookie", serializeSessionCookie(cookie));
     if (state.reconcileEventSub) {
       const maintenance = maintainAfterBroadcasterAuthorization(context.env, now);
-      try {
-        context.executionCtx.waitUntil(maintenance);
-      } catch {
-        void maintenance;
-      }
+      void schedulePanelResourceBackgroundWork(
+        context.env,
+        maintenance,
+        () => context.executionCtx,
+      );
     }
     return context.redirect(redirectAfterLogin(context.env.PUBLIC_ORIGIN, transaction.redirectPath), 302);
   } catch (error) {
@@ -669,7 +685,7 @@ authRouter.post("/auth/logout", async (context) => {
   }
   const now = nowIso();
   await revokeSession(context.env.DB, session.sessionId, now, "logout");
-  void revokeRealtimeSessionForUser(context.env.DB, context.env.CHANNEL, session.userId, session.sessionId);
+  await revokeRealtimeSessionForUser(context.env.DB, context.env.CHANNEL, session.userId, session.sessionId);
   context.header("Set-Cookie", clearSessionCookie());
   context.header("Set-Cookie", serializeCsrfCookie("", 0), { append: true });
   return context.body(null, 204);

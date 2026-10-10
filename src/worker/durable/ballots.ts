@@ -197,6 +197,28 @@ const resultForFinalization = (
   ...(snapshot.termFilterReady === undefined ? {} : { termFilterReady: snapshot.termFilterReady }),
 });
 
+const outcomeForBallot = (ballot: StoredBallot, now: number): Exclude<BallotFinalizeOutcome, "not_open"> => {
+  const existing = finalizationOf(ballot);
+  if (existing !== null) return existing.outcome;
+  const snapshot = snapshotOf(ballot);
+  const rulePassed = ballot.passRule !== undefined &&
+    (snapshot.counts[ballot.passRule.passIf.yes] ?? 0) -
+      (snapshot.counts[ballot.passRule.passIf.no] ?? 0) >= ballot.passRule.passIf.netAtLeast;
+  return ballot.frozen === true || rulePassed ? "passed" : now >= ballot.expiresAt ? "expired" : "open";
+};
+
+const terminalSnapshot = (
+  outcome: Exclude<BallotFinalizeOutcome, "open" | "not_open">,
+  snapshot: Omit<BallotSnapshot, "outcome">,
+): BallotSnapshot => ({
+  counts: [...snapshot.counts],
+  revision: snapshot.revision,
+  ...(snapshot.terms === undefined ? {} : { terms: snapshot.terms.map((entry) => ({ ...entry })) }),
+  ...(snapshot.more === undefined ? {} : { more: snapshot.more }),
+  ...(snapshot.termFilterReady === undefined ? {} : { termFilterReady: snapshot.termFilterReady }),
+  outcome,
+});
+
 const isActiveBallot = (value: unknown): value is ActiveBallot => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const active = value as Partial<ActiveBallot>;
@@ -260,12 +282,7 @@ const finalizeInTransaction = async (
   }
 
   const snapshot = snapshotOf(ballot);
-  const rulePassed = ballot.passRule !== undefined &&
-    (snapshot.counts[ballot.passRule.passIf.yes] ?? 0) -
-      (snapshot.counts[ballot.passRule.passIf.no] ?? 0) >= ballot.passRule.passIf.netAtLeast;
-  const outcome: BallotFinalizeOutcome = ballot.frozen === true || rulePassed
-    ? "passed"
-    : now >= ballot.expiresAt ? "expired" : "open";
+  const outcome = outcomeForBallot(ballot, now);
   if (outcome === "open") return resultForFinalization(outcome, snapshot);
 
   const hardDeleteAt = now + BALLOT_FINALIZATION_RETENTION_MS;
@@ -630,6 +647,24 @@ export const readStoredBallot = async (
   });
 };
 
+/** Reads a ballot snapshot without finalizing it or changing its alarm state. */
+export const readStoredBallotSnapshot = async (
+  storage: BallotStorage,
+  moduleId: string,
+  ballotId: string,
+): Promise<BallotSnapshot | null> => {
+  validId(moduleId, "Module id");
+  validId(ballotId, "Ballot id");
+  return await storage.transaction(async (transaction) => {
+    const ballot = await transaction.get(ballotKey(moduleId, ballotId));
+    if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) return null;
+    const finalization = finalizationOf(ballot);
+    if (finalization !== null) return terminalSnapshot(finalization.outcome, finalization.snapshot);
+    const outcome = outcomeForBallot(ballot, Date.now());
+    return outcome === "open" ? snapshotOf(ballot) : terminalSnapshot(outcome, snapshotOf(ballot));
+  });
+};
+
 /** Reads the channel-wide ballot lock without exposing another module's ballot id. */
 export const hasOpenStoredBallot = async (
   storage: BallotStorage,
@@ -646,6 +681,17 @@ export const hasOpenStoredBallot = async (
     return false;
   }
   return (await finalizeInTransaction(transaction, ballot, Date.now(), onFinalized)).outcome === "open";
+});
+
+/** Reads channel-wide ballot availability without cleaning up or finalizing stored state. */
+export const hasOpenStoredBallotSnapshot = async (
+  storage: BallotStorage,
+): Promise<boolean> => await storage.transaction(async (transaction) => {
+  const active = await transaction.get<ActiveBallot>(ACTIVE_BALLOT_KEY);
+  if (!isActiveBallot(active) || !ID_PATTERN.test(active.moduleId) || !ID_PATTERN.test(active.ballotId)) return false;
+  const ballot = await transaction.get(ballotKey(active.moduleId, active.ballotId));
+  if (!isStoredBallot(ballot) || ballot.moduleId !== active.moduleId || ballot.ballotId !== active.ballotId) return false;
+  return outcomeForBallot(ballot, Date.now()) === "open";
 });
 
 const deleteVoters = async (

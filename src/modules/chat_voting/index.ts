@@ -109,6 +109,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   routes: chatVotingRoutes,
   panel: () => import("./panel"),
   settingsEditor: () => import("./panel/settings-editor"),
+  settingsEditorRelatedParts: ["panel"],
   eventSubTypes: ["channel.chat.message"],
   alarms: [chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition],
   overlayElements: chatVotingOverlayElements.map((element) => ({

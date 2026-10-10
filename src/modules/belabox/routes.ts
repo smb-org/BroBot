@@ -131,19 +131,6 @@ belaboxRoutes.get("/status", async (context) => {
       "SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?",
     ).bind(channelId).first<{ state: string; stream_id: string | null }>(),
   ]);
-  if (moduleState?.enabled === true && moduleState.settings.mode === "on_demand" && secretStatus.configured) {
-    try {
-      await context.get("runModuleAlarm")(
-        channelId,
-        BELABOX_MODULE_ID,
-        BELABOX_POLL_ALARM_KEY,
-        BELABOX_POLL_ALARM_KEY,
-        { reason: "on_demand" },
-      );
-    } catch {
-      // The status response still reports the last persisted sample.
-    }
-  }
   const status = await getBelaboxStatus(context.env.DB, channelId);
   const pollingDesired = moduleState?.enabled === true && moduleState.settings.mode === "interval" &&
     secretStatus.configured && streamState?.state === "online";

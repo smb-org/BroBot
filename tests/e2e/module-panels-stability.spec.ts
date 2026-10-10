@@ -218,6 +218,24 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
 });
 
 test("BELABOX immediate action keeps manual results separate from live notices", async ({ page }) => {
+  await page.addInitScript(() => {
+    class OfflineWebSocket extends EventTarget {
+      readyState = 0;
+      constructor(url: string, protocols?: string | string[]) {
+        super();
+        void url;
+        void protocols;
+        queueMicrotask(() => { this.close(1006, "Offline fallback test"); });
+      }
+      close(code = 1000, reason = "closed"): void {
+        if (this.readyState === 3) return;
+        this.readyState = 3;
+        this.dispatchEvent(new CloseEvent("close", { code, reason }));
+      }
+      send(data: string): void { void data; }
+    }
+    Object.defineProperty(window, "WebSocket", { value: OfflineWebSocket, writable: true, configurable: true });
+  });
   const connectedStatus = {
     configured: true, updatedAt: "2030-01-01T12:00:00.000Z",
     sample: { at: "2030-01-01T12:00:00.000Z", connected: true, bitrateKbps: 3200, rttMs: 41, latencyMs: 115, network: 2, droppedPackets: 0 },

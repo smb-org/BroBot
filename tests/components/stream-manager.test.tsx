@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -8,7 +8,10 @@ import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { PanelChannelOverview } from "../../src/panel-contract";
 import { ChannelNotices, ImmediateActions, WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
+import { reconcileDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import type { RealtimeMessage } from "../../src/realtime-contract";
 import { jsonResponse } from "../unit/fixtures";
+import { renderWithQuery as render } from "../query-test-utils";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider><ToastHost />{element}</UiProvider>);
 
@@ -56,34 +59,6 @@ const expectActionResult = async (message: string, tone: "success" | "error"): P
   expect(resultSlot).toHaveTextContent(message);
   expect(toastsSnapshot()).toContainEqual(expect.objectContaining({ tone, message }));
 };
-
-class FeedWebSocket {
-  static instances: FeedWebSocket[] = [];
-  private readonly listeners = new Map<string, Set<(event: Event) => void>>();
-
-  constructor(readonly url: string, readonly protocols: string | string[]) {
-    FeedWebSocket.instances.push(this);
-  }
-
-  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
-    if (typeof listener !== "function") return;
-    const listeners = this.listeners.get(type) ?? new Set<(event: Event) => void>();
-    listeners.add(listener);
-    this.listeners.set(type, listeners);
-  }
-
-  open(): void {
-    for (const listener of this.listeners.get("open") ?? []) listener(new Event("open"));
-  }
-
-  receive(data: string): void {
-    for (const listener of this.listeners.get("message") ?? []) listener(new MessageEvent("message", { data }));
-  }
-
-  close(code = 1000, reason = ""): void {
-    for (const listener of this.listeners.get("close") ?? []) listener(new CloseEvent("close", { code, reason }));
-  }
-}
 
 describe("Stream Manager immediate actions", () => {
   afterEach(() => {
@@ -394,7 +369,6 @@ describe("Stream Manager immediate actions", () => {
 describe("Stream Manager warnings and errors feed", () => {
   afterEach(() => {
     cleanup();
-    FeedWebSocket.instances = [];
     vi.unstubAllGlobals();
   });
 
@@ -464,7 +438,6 @@ describe("Stream Manager warnings and errors feed", () => {
   });
 
   it("refreshes new warning and error entries from the event log's realtime feed", async () => {
-    vi.stubGlobal("WebSocket", FeedWebSocket);
     const existing = {
       eventId: "existing",
       createdAt: "2026-09-22T10:00:00.000Z",
@@ -478,7 +451,11 @@ describe("Stream Manager warnings and errors feed", () => {
     };
     let requests = 0;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      if (requestUrl(input).pathname === "/api/channels/kanal-a/events") {
+      const pathname = requestUrl(input).pathname;
+      if (pathname === "/api/channels/kanal-a/revisions") {
+        return Promise.resolve(jsonResponse({ revisions: { "channel.events": 1, "module:host:data": 1 } }));
+      }
+      if (pathname === "/api/channels/kanal-a/events") {
         requests += 1;
         const next = {
           eventId: "realtime-error",
@@ -496,20 +473,17 @@ describe("Stream Manager warnings and errors feed", () => {
       return Promise.resolve(jsonResponse({}, 404));
     }));
 
-    renderWithMantine(<WarningsAndErrorsFeed channelId="kanal-a" />);
+    const rendered = renderWithMantine(<WarningsAndErrorsFeed channelId="kanal-a" />);
 
     expect(await screen.findByText("Werbeeinblendung nicht gestartet: Stream ist offline")).toBeInTheDocument();
-    const socket = FeedWebSocket.instances[0];
-    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
-    socket.open();
-    socket.receive(JSON.stringify({
+    await act(async () => { await reconcileDashboardRealtimeMessage(rendered.queryClient, {
       version: 1,
       id: "hint-1",
       createdAt: "2026-09-22T10:01:00.000Z",
       channelId: "kanal-a",
       type: "event_log.new",
       payload: { entries: [{ eventId: "realtime-error", createdAt: "2026-09-22T10:01:00.000Z", moduleId: "host", code: "host.action.failed", actorUserId: null }] },
-    }));
+    } satisfies RealtimeMessage); });
 
     expect(await screen.findByText("Aktion fehlgeschlagen")).toBeInTheDocument();
     expect(requests).toBe(2);

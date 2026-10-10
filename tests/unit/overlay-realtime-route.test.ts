@@ -61,12 +61,14 @@ const setup = async (): Promise<{
     return Promise.resolve(new Response("forwarded"));
   });
   const idFromName = vi.fn((channelId: string) => `object:${channelId}`);
+  const reconcilePanelResources = vi.fn(() => Promise.resolve());
+  const getPanelResourceRevisions = vi.fn(() => Promise.resolve({}));
   const env = {
     DB: database as unknown as D1Database,
     OVERLAY_TOKEN_PEPPER: pepper,
     CHANNEL: {
       idFromName,
-      get: () => ({ fetch: fetchStub }),
+      get: () => ({ fetch: fetchStub, reconcilePanelResources, getPanelResourceRevisions }),
     },
   } as unknown as Env;
   return { database, env, idFromName, fetchStub, forwarded: () => request };
@@ -146,7 +148,6 @@ describe("overlay realtime route", () => {
     }), state.env);
 
     expect(response.status).toBe(200);
-    expect(state.idFromName).toHaveBeenCalledTimes(1);
     expect(state.idFromName).toHaveBeenCalledWith("kanal-b");
     expect(state.fetchStub).toHaveBeenCalledTimes(1);
   });

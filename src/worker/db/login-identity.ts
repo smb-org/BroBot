@@ -314,8 +314,66 @@ export const revokeLoginIdentityAndSessionsForUser = async (
     expectedAccessTokenCiphertext,
     expectedRefreshTokenCiphertext,
   );
-  const results = await db.batch([identityRevocation, sessionRevocation]);
+  const queueSocketRevocation = db.prepare(
+    `INSERT INTO pending_realtime_user_revocations (user_id, requested_at, generation)
+     SELECT user_id, updated_at, 1
+       FROM twitch_login_identity
+      WHERE user_id = ? AND status = 'revoked' AND reason = ? AND updated_at = ?
+     ON CONFLICT(user_id) DO UPDATE SET
+       requested_at = excluded.requested_at,
+       generation = pending_realtime_user_revocations.generation + 1`,
+  ).bind(userId, reason, revokedAt);
+  const results = await db.batch([identityRevocation, sessionRevocation, queueSocketRevocation]);
   return (results[0]?.meta.changes ?? 0) > 0;
+};
+
+export interface PendingRealtimeUserRevocation {
+  userId: string;
+  requestedAt: string;
+  generation: number;
+}
+
+interface PendingRealtimeUserRevocationRow {
+  user_id: string;
+  requested_at: string;
+  generation: number;
+}
+
+const mapPendingRealtimeUserRevocation = (
+  row: PendingRealtimeUserRevocationRow,
+): PendingRealtimeUserRevocation => ({
+  userId: row.user_id,
+  requestedAt: row.requested_at,
+  generation: row.generation,
+});
+
+export const listPendingRealtimeUserRevocations = async (
+  db: D1Database,
+): Promise<PendingRealtimeUserRevocation[]> => {
+  const result = await db.prepare(
+    "SELECT user_id, requested_at, generation FROM pending_realtime_user_revocations ORDER BY requested_at, user_id",
+  ).all<PendingRealtimeUserRevocationRow>();
+  return result.results.map(mapPendingRealtimeUserRevocation);
+};
+
+export const getPendingRealtimeUserRevocation = async (
+  db: D1Database,
+  userId: string,
+): Promise<PendingRealtimeUserRevocation | null> => {
+  const row = await db.prepare(
+    "SELECT user_id, requested_at, generation FROM pending_realtime_user_revocations WHERE user_id = ?",
+  ).bind(userId).first<PendingRealtimeUserRevocationRow>();
+  return row === null ? null : mapPendingRealtimeUserRevocation(row);
+};
+
+export const clearPendingRealtimeUserRevocation = async (
+  db: D1Database,
+  revocation: PendingRealtimeUserRevocation,
+): Promise<void> => {
+  await db.prepare(
+    `DELETE FROM pending_realtime_user_revocations
+      WHERE user_id = ? AND requested_at = ? AND generation = ?`,
+  ).bind(revocation.userId, revocation.requestedAt, revocation.generation).run();
 };
 
 export const rotateLoginTokensForUser = async (

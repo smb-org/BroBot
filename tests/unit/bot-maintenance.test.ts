@@ -104,7 +104,11 @@ const makeMaintenanceEnvironment = async (
         ...identity,
         created_at: "2026-09-17T00:00:00.000Z",
       } : null),
-      all: vi.fn().mockResolvedValue({ results: [{ channel_id: "channel-1" }] }),
+      all: vi.fn().mockImplementation(() => sql.includes("pending_realtime_user_revocations")
+        ? { results: [] }
+        : sql.includes("FROM channel_members")
+          ? { results: [{ channel_id: "channel-1" }] }
+          : { results: [] }),
       run: vi.fn().mockImplementation(async () => {
         if (sql.includes("UPDATE bot_identity") && sql.includes("missing_scopes_json")) {
           const [missingScopes, expectedAccess, expectedRefresh] = values;

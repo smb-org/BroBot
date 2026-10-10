@@ -22,6 +22,10 @@ const platformId = "26876135";
 
 const environmentFor = (database: TestD1Database, platform = [platformId]): Env => ({
   DB: database as unknown as D1Database,
+  CHANNEL: {
+    idFromName: (channelId: string) => channelId,
+    get: () => ({ revokeUser: () => Promise.resolve() }),
+  },
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
   TWITCH_BOT_LOGIN: "brobot",

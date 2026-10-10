@@ -29,8 +29,8 @@ const json = async <T>(response: Response): Promise<T> => {
 const schedulePathFor = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/ads/schedule`;
 
-export const loadAdsSchedule = async (channelId: string): Promise<AdsScheduleResponse> => {
-  const response = await fetch(schedulePathFor(channelId));
+export const loadAdsSchedule = async (channelId: string, signal?: AbortSignal): Promise<AdsScheduleResponse> => {
+  const response = await fetch(schedulePathFor(channelId), signal === undefined ? {} : { signal });
   const loadedResponse = await json<Partial<AdsScheduleResponse> | null>(response);
   const loaded = loadedResponse !== null && typeof loadedResponse === "object" ? loadedResponse : {};
   return {
@@ -39,6 +39,16 @@ export const loadAdsSchedule = async (channelId: string): Promise<AdsScheduleRes
     schedule: { ...emptySchedule.schedule, ...(loaded.schedule ?? {}) },
     recentAdBreaks: loaded.recentAdBreaks ?? [],
   };
+};
+
+export const refreshAdsSchedule = async (channelId: string): Promise<AdsScheduleResponse> => {
+  const csrfResponse = await fetch("/api/csrf");
+  const csrf = await json<{ token: string }>(csrfResponse);
+  const response = await fetch(`${schedulePathFor(channelId)}/refresh`, {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrf.token },
+  });
+  return json<AdsScheduleResponse>(response);
 };
 
 export const snoozeAds = async (channelId: string): Promise<AdsScheduleResponse> => {

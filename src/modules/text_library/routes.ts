@@ -128,7 +128,7 @@ textLibraryRoutes.get("/library", async (context) => {
     context.get("listTextBlockConditions")(channelId),
   ]);
   const conditionIds = [...new Set(data.blocks.flatMap((block) => block.variants.flatMap((variant) => Object.keys(variant.conditions.data ?? {}))))];
-  const dataConditionValues = await context.get("resolveTextBlockConditions")(channelId, conditionIds, Date.now());
+  const dataConditionValues = await context.get("resolveTextBlockConditions")(channelId, conditionIds, Date.now(), { readOnly: true });
   const reservedNames = [...new Set([
     ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name),
     ...registeredVariables.filter(({ moduleId }) => moduleId !== TEXT_LIBRARY_MODULE_ID).map(({ name }) => name),

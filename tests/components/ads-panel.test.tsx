@@ -5,6 +5,8 @@ import { ModulePage } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
 import { toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
+import { moduleQueryKey } from "../../src/dashboard/data/module-query";
+import { reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { renderWithQuery } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -21,11 +23,18 @@ const schedule: AdsScheduleResponse = {
   recentAdBreaks: [],
 };
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
+const requestPath = (input: RequestInfo | URL): string => input instanceof Request
+  ? new URL(input.url).pathname
+  : input instanceof URL ? input.pathname : new URL(input, "https://brobot.example").pathname;
 
-const renderAds = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof renderWithQuery> => {
+const renderAds = (
+  fetcher: typeof fetch,
+  ownRole: "manager" | "operator" = "manager",
+  channelId = "kanal-a",
+): ReturnType<typeof renderWithQuery> => {
   vi.stubGlobal("fetch", fetcher);
   return renderWithQuery(<UiProvider><ModulePage
-    channelId="kanal-a"
+    channelId={channelId}
     moduleId="ads"
     ownRole={ownRole}
     modules={[{ id: "ads", enabled: true, settings: "{}" }]}
@@ -53,6 +62,7 @@ const adsFetch = (
 describe("Ad settings editor declaration", () => {
   afterEach(() => {
     cleanup();
+    setDashboardRealtimeStatus("kanal-a", "offline");
     vi.unstubAllGlobals();
     if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
   });
@@ -92,6 +102,8 @@ describe("Ad settings editor declaration", () => {
     cleanup();
     renderAds(adsFetch(), "operator");
     expect(await screen.findByText("Nur Broadcaster und Verwalter dürfen Ansagen-Einstellungen ändern.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Werbeplan aktualisieren" })).toBeDisabled();
+    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen den Werbeplan aktualisieren.")).toBeInTheDocument();
     const properties = document.querySelector("dl.ui-settings-editor__properties");
     expect(properties).not.toBeNull();
     expect(within(properties as HTMLElement).getByText("Vorwarnung vor der Werbung")).toBeInTheDocument();
@@ -128,6 +140,40 @@ describe("Ad settings editor declaration", () => {
     expect(screen.getByText(/channel:manage:ads fehlt/)).toBeInTheDocument();
   });
 
+  it("preserves the cached schedule and limits load notifications to one per outage", async () => {
+    setDashboardRealtimeStatus("kanal-a", "connected");
+    let scheduleReadFails = false;
+    const baseFetcher = adsFetch();
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path.endsWith("/schedule") && scheduleReadFails) return Promise.resolve(jsonResponse({ error: "schedule_unavailable" }, 503));
+      return baseFetcher(input, init);
+    });
+    const view = renderAds(fetcher);
+    expect(await screen.findByText(/Derzeit ist keine Werbung geplant\./u)).toBeInTheDocument();
+    const key = { queryKey: moduleQueryKey("kanal-a", "ads", "schedule"), exact: true };
+    const refresh = async (): Promise<void> => {
+      await act(async () => { await view.queryClient.refetchQueries(key, { throwOnError: true }).catch(() => undefined); });
+    };
+
+    scheduleReadFails = true;
+    await refresh();
+    await refresh();
+    expect(fetcher.mock.calls.filter(([input]) => requestPath(input).endsWith("/schedule"))).toHaveLength(3);
+    expect(view.queryClient.getQueryState(key.queryKey)?.status).toBe("error");
+    expect(screen.getByText(/Derzeit ist keine Werbung geplant\./u)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Der Werbeplan konnte nicht geladen werden.");
+    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
+    expect(toastsSnapshot().filter((toast) => toast.message === "Der Werbeplan konnte nicht geladen werden.")).toHaveLength(1);
+
+    scheduleReadFails = false;
+    await refresh();
+    scheduleReadFails = true;
+    await refresh();
+    expect(toastsSnapshot().filter((toast) => toast.message === "Der Werbeplan konnte nicht geladen werden.")).toHaveLength(2);
+  });
+
   it("shows a rejected snooze as an error toast without making the settings draft dirty", async () => {
     const fetcher = adsFetch(undefined, schedule, () => jsonResponse({ error: "ad_snooze_failed" }, 500));
     renderAds(fetcher);
@@ -152,64 +198,75 @@ describe("Ad settings editor declaration", () => {
     expect(screen.getByText(/11:00/)).toBeInTheDocument();
   });
 
-  it("updates the cached schedule and its as-of label from panel realtime", async () => {
+  it("updates the cached schedule after its resource revision advances", async () => {
+    const channelId = "ads-revisions-a";
     const original = {
       ...schedule,
       schedule: { ...schedule.schedule, nextAdAt: "2026-09-24T17:00:00.000Z", duration: 60 },
       asOf: "2026-09-24T12:00:00.000Z",
     };
     const formatter = new Intl.DateTimeFormat("de-DE", { dateStyle: "short", timeStyle: "short" });
-    const fetcher = adsFetch(undefined, original);
-    renderAds(fetcher);
-
-    expect(await screen.findByText(`Stand ${formatter.format(new Date(original.asOf))}`)).toBeInTheDocument();
-    window.dispatchEvent(new CustomEvent("brobot:realtime", { detail: {
-      version: 1,
-      id: "ads-schedule-2",
-      createdAt: "2026-09-24T13:00:00.000Z",
-      channelId: "kanal-a",
-      type: "ads.schedule.updated",
-      payload: {
-        schedule: { ...original.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 1 },
-        asOf: "2026-09-24T13:00:00.000Z",
-      },
-    } }));
-
-    expect(await screen.findByText(`Stand ${formatter.format(new Date("2026-09-24T13:00:00.000Z"))}`)).toBeInTheDocument();
-  });
-
-  it("keeps the newest realtime schedule when it arrives before the initial response", async () => {
-    let resolveInitial: ((response: Response) => void) | undefined;
-    const formatter = new Intl.DateTimeFormat("de-DE", { dateStyle: "short", timeStyle: "short" });
-    const initial = { ...schedule, asOf: "2026-09-24T12:00:00.000Z" };
+    let serverSchedule = original;
+    let revision = 1;
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
-      if (path.endsWith("/schedule")) return new Promise<Response>((resolve) => { resolveInitial = resolve; });
+      if (path === `/api/channels/${channelId}/revisions`) return Promise.resolve(jsonResponse({ revisions: { "module:ads:schedule": revision } }));
       if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
-      if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(jsonResponse(initial));
+      if (path.endsWith("/schedule")) return Promise.resolve(jsonResponse(serverSchedule));
+      if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(jsonResponse(serverSchedule));
       return Promise.resolve(jsonResponse({}, 404));
     });
-    renderAds(fetcher);
+    const rendered = renderAds(fetcher, "manager", channelId);
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(rendered.queryClient, channelId); });
+
+    expect(await screen.findByText(`Stand ${formatter.format(new Date(original.asOf))}`)).toBeInTheDocument();
+    serverSchedule = {
+      ...original,
+      schedule: { ...original.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 1 },
+      asOf: "2026-09-24T13:00:00.000Z",
+    };
+    revision = 2;
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(rendered.queryClient, channelId); });
+
+    expect(await screen.findByText(`Stand ${formatter.format(new Date("2026-09-24T13:00:00.000Z"))}`)).toBeInTheDocument();
+    expect(rendered.queryClient.getQueryState(moduleQueryKey(channelId, "ads", "schedule"))?.isInvalidated).toBe(false);
+  });
+
+  it("keeps the newest schedule when its revision advances before the initial response", async () => {
+    const channelId = "ads-revisions-b";
+    const formatter = new Intl.DateTimeFormat("de-DE", { dateStyle: "short", timeStyle: "short" });
+    let serverSchedule = { ...schedule, asOf: "2026-09-24T12:00:00.000Z" };
+    let scheduleCalls = 0;
+    let revision = 1;
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path === `/api/channels/${channelId}/revisions`) return Promise.resolve(jsonResponse({ revisions: { "module:ads:schedule": revision } }));
+      if (path.endsWith("/schedule")) {
+        scheduleCalls += 1;
+        return Promise.resolve(jsonResponse(scheduleCalls === 1 ? { ...serverSchedule, asOf: "2026-09-24T12:00:00.000Z" } : serverSchedule));
+      }
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
+      if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(jsonResponse(serverSchedule));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    const rendered = renderAds(fetcher, "manager", channelId);
+    await waitFor(() => { expect(scheduleCalls).toBe(1); });
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(rendered.queryClient, channelId); });
 
     const newerAsOf = "2026-09-24T13:00:00.000Z";
-    window.dispatchEvent(new CustomEvent("brobot:realtime", { detail: {
-      version: 1,
-      id: "ads-schedule-early",
-      createdAt: newerAsOf,
-      channelId: "kanal-a",
-      type: "ads.schedule.updated",
-      payload: {
-        schedule: { ...schedule.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 0 },
-        asOf: newerAsOf,
-      },
-    } }));
-    act(() => {
-      resolveInitial?.(jsonResponse(initial));
-    });
+    serverSchedule = {
+      ...schedule,
+      schedule: { ...schedule.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 0 },
+      asOf: newerAsOf,
+    };
+    revision = 2;
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(rendered.queryClient, channelId); });
 
     expect(await screen.findByText(`Stand ${formatter.format(new Date(newerAsOf))}`)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Snooze · 0 verfügbar/ })).toBeDisabled();
+    expect(scheduleCalls).toBeGreaterThanOrEqual(2);
   });
 
   it("keeps a cleared prewarning lead time empty and blocks the save", async () => {

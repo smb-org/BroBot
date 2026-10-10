@@ -32,6 +32,7 @@ vi.mock("../../src/worker/module-secrets", () => ({
 
 import type {
   RealtimeEnvelope,
+  RealtimeMessage,
   RealtimeOverlayPrincipal,
   RealtimePanelPrincipal,
   RealtimePrincipal,
@@ -49,9 +50,18 @@ import { belaboxModule } from "../../src/modules/belabox";
 import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { getBelaboxStatus } from "../../src/modules/belabox/adapters/d1";
 import { votekickModule } from "../../src/modules/votekick";
-import { chatVotingStartAnnouncementAlarmKey } from "../../src/modules/chat_voting/contracts";
+import { MODULES } from "../../src/modules/registry";
+import {
+  CHAT_VOTING_ALARM_HANDLER,
+  chatVotingStartAnnouncementAlarmKey,
+} from "../../src/modules/chat_voting/contracts";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { ballotVoterHash } from "../../src/worker/durable/ballots";
+import {
+  CHANNEL_HOST_ALARM_HANDLER_KEYS,
+  missingAlarmHandlerKeys,
+  moduleAlarmHandlerEntries,
+} from "../../src/worker/durable/module-alarm-registry";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -279,10 +289,36 @@ const objectFor = (
     platformAlarm = null;
     return Promise.resolve();
   });
+  let preparedQuery = "";
+  let preparedBindings: unknown[] = [];
   const prepared = {
-    bind: vi.fn(() => prepared),
-    all: vi.fn().mockResolvedValue({ results: [] }),
-    first: vi.fn().mockResolvedValue({ token_id: "token-1", overlay_id: null }),
+    bind: vi.fn((...values: unknown[]) => {
+      preparedBindings = values;
+      return prepared;
+    }),
+    all: vi.fn(() => {
+      if (!/^\s*SELECT session\.session_id, session\.user_id, member\.role/iu.test(preparedQuery)) {
+        return Promise.resolve({ results: [] });
+      }
+      const sessionIds = preparedBindings.slice(1, -1);
+      const channel = preparedBindings[0];
+      return Promise.resolve({
+        results: sockets.flatMap((socket) => {
+          const principal = socket.deserializeAttachment() as RealtimePrincipal | null;
+          return principal?.kind === "panel" && principal.channelId === channel && sessionIds.includes(principal.sessionId)
+            ? [{ session_id: principal.sessionId, user_id: principal.userId, role: principal.role }]
+            : [];
+        }),
+      });
+    }),
+    first: vi.fn(() => Promise.resolve(/^\s*SELECT session\.session_id, session\.user_id, member\.role/iu.test(preparedQuery)
+      ? {
+        session_id: preparedBindings[1],
+        user_id: preparedBindings[2],
+        role: preparedBindings[3],
+      }
+      : { token_id: "token-1", overlay_id: null })),
+    run: vi.fn().mockResolvedValue({ success: true }),
   };
   const getWebSockets = vi.fn((tag?: string) => tag === undefined
     ? sockets
@@ -347,7 +383,10 @@ const objectFor = (
   const object = Object.create(ChannelObject.prototype) as ChannelObject;
   (object as unknown as { ctx: DurableObjectState }).ctx = state;
   (object as unknown as { env: Env }).env = {
-    DB: database ?? ({ prepare: () => prepared } as unknown as D1Database),
+    DB: database ?? ({
+      prepare: (query: string) => { preparedQuery = query; return prepared; },
+      batch: vi.fn(() => Promise.resolve([])),
+    } as unknown as D1Database),
     TWITCH_CLIENT_ID: "client-id",
   } as Env;
   (object as unknown as { overlayStreamDetailsRefreshes: Map<string, Promise<unknown>> }).overlayStreamDetailsRefreshes = new Map();
@@ -643,7 +682,27 @@ describe("ChannelObject realtime path", () => {
       tokenId: "token-1",
       overlayId: null,
       expiresAt: null,
-    })).then((response) => response.status)).resolves.toBe(403);
+      })).then((response) => response.status)).resolves.toBe(403);
+  });
+
+  it("rejects a panel handshake revoked after route authorization but before object acceptance", async () => {
+    const prepare = vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn(() => Promise.resolve(null)),
+      })),
+    }));
+    const database = { prepare } as unknown as D1Database;
+    const object = objectFor([], database);
+    const pair = new WebSocketPair();
+    vi.stubGlobal("WebSocketPair", function WebSocketPairDouble() { return pair; });
+    const state = (object as unknown as { ctx: { acceptWebSocket: ReturnType<typeof vi.fn> } }).ctx;
+
+    const response = await object.fetch(upgradeRequest(validPrincipal()));
+
+    expect(response.status).toBe(403);
+    expect(state.acceptWebSocket).not.toHaveBeenCalled();
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("FROM auth_sessions AS session"));
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("identity.status <> 'revoked'"));
   });
 
   it("rejects a publish for a foreign channel", async () => {
@@ -1158,6 +1217,39 @@ describe("ChannelObject realtime path", () => {
     expect(panel.send.mock.calls).toHaveLength(0);
   });
 
+  it("keeps module overlay messages off panel sockets", async () => {
+    const overlay = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a", expiresAt: null,
+    });
+    const panel = socketFor(validPrincipal());
+    const object = objectFor([overlay, panel]);
+    const overlayMessageTypes = [
+      "modul.chat_voting.opened",
+      "modul.chat_voting.tally",
+      "modul.belabox.state_changed",
+      "modul.belabox.sample",
+      "modul.votekick.opened",
+      "modul.votekick.tally",
+      "modul.text_library.blocks_updated",
+    ];
+    const messages = overlayMessageTypes.map((type, index) => ({
+      version: 1,
+      id: `module-message-${String(index)}`,
+      createdAt: "2026-10-09T08:00:00.000Z",
+      channelId: "kanal-a",
+      type,
+      overlayIds: ["overlay-a"],
+      payload: { messageType: type },
+    } as unknown as RealtimeMessage));
+
+    await object.publish(messages);
+
+    expect(panel.send.mock.calls).toHaveLength(0);
+    expect(overlay.send.mock.calls.map(([serialized]) => typeOfSerializedMessage(serialized))).toEqual([
+      ...overlayMessageTypes,
+    ]);
+  });
+
   it("routes overlay changes by the durable overlay tag after a fresh object instance", async () => {
     const firstOverlay = overlaySocketFor({
       v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a", expiresAt: null,
@@ -1197,7 +1289,7 @@ describe("ChannelObject realtime path", () => {
     expect(panel.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual(["overlay.changed"]);
   });
 
-  it("coalesces ad-schedule refreshes and pushes panel-only updates while reconciling alarms", async () => {
+  it("coalesces ad-schedule refreshes and publishes a revision hint without a custom panel message", async () => {
     const panel = socketFor(validPrincipal());
     const overlay = overlaySocketFor({ v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-1", expiresAt: null });
     const object = objectFor([panel, overlay]);
@@ -1213,8 +1305,10 @@ describe("ChannelObject realtime path", () => {
     expect(first).toEqual(coalesced);
     expect(first.changed).toBe(true);
     expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(1);
-    expect(panel.send.mock.calls).toHaveLength(1);
-    expect(typeOfSerializedMessage(panel.send.mock.calls[0]?.[0] ?? "")).toBe("ads.schedule.updated");
+    expect(panel.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual(["panel.resources.changed"]);
+    expect(JSON.parse(panel.send.mock.calls[0]?.[0] ?? "null")).toMatchObject({
+      payload: { resources: ["module:ads:schedule"] },
+    });
     expect(overlay.send.mock.calls).toHaveLength(0);
 
     mocks.getAdSchedule.mockResolvedValueOnce({ fetched: true, reason: null, detail: {}, schedule });
@@ -1222,9 +1316,53 @@ describe("ChannelObject realtime path", () => {
     expect(second.changed).toBe(false);
     expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(2);
     expect(panel.send.mock.calls).toHaveLength(2);
-    const updated = JSON.parse(panel.send.mock.calls[1]?.[0] ?? "{}") as { payload?: { asOf?: string } };
-    expect(updated.payload?.asOf).toBe(second.cache?.asOf);
+    expect(JSON.parse(panel.send.mock.calls[1]?.[0] ?? "null")).toMatchObject({
+      payload: { resources: ["module:ads:schedule"], revisions: { "module:ads:schedule": 2 } },
+    });
     expect(overlay.send.mock.calls).toHaveLength(0);
+  });
+
+  it("emits an ads revision when an uncached schedule read is rate limited", async () => {
+    const panel = socketFor(validPrincipal());
+    const object = objectFor([panel]);
+    mocks.getAdSchedule.mockResolvedValueOnce({
+      fetched: false,
+      reason: "rate_limited",
+      detail: { retryAfter: 30 },
+      schedule: null,
+    });
+
+    await expect(object.refreshAdSchedule()).resolves.toMatchObject({ cache: null, reason: "rate_limited" });
+
+    expect(await object.getPanelResourceRevisions()).toEqual({ "module:ads:schedule": 1 });
+    expect(panel.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toContain("panel.resources.changed");
+    expect(JSON.parse(panel.send.mock.calls.find(([message]) =>
+      typeOfSerializedMessage(message) === "panel.resources.changed")?.[0] ?? "null")).toMatchObject({
+      payload: { resources: ["module:ads:schedule"] },
+    });
+  });
+
+  it("closes panel sockets whose current D1 membership no longer authorizes delivery", async () => {
+    const panel = socketFor(validPrincipal());
+    const database = {
+      prepare: () => ({
+        bind: () => ({ all: () => Promise.resolve({ results: [] }) }),
+      }),
+    } as unknown as D1Database;
+    const object = objectFor([panel], database);
+    const hint: RealtimeEnvelope<"panel.resources.changed"> = {
+      version: 1,
+      id: "revoked-member-hint",
+      createdAt: "2026-10-10T00:00:00.000Z",
+      channelId: "kanal-a",
+      type: "panel.resources.changed",
+      payload: { resources: ["channel.events"], revisions: { "channel.events": 1 } },
+    };
+
+    await object.publish([hint]);
+
+    expect(panel.close.mock.calls).toEqual([[4003, "authorization revoked"]]);
+    expect(panel.send.mock.calls).toHaveLength(0);
   });
 
   it("does not count chat messages while the channel is offline", async () => {
@@ -1798,10 +1936,12 @@ describe("ChannelObject realtime path", () => {
     const object = objectFor([]);
 
     await expect(object.openBallot("chat_voting", "poll-a", 3, 20_000)).resolves.toEqual({ status: "opened" });
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:chat_voting:panel": 1 });
     await expect(object.openBallot("votekick", "kick-a", 2, 20_000)).resolves.toEqual({
       status: "busy",
       moduleId: "chat_voting",
     });
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:chat_voting:panel": 1 });
   });
 
   it("reports whether a shared ballot is open without requiring its module id", async () => {
@@ -1814,6 +1954,38 @@ describe("ChannelObject realtime path", () => {
     await expect(object.hasOpenBallot()).resolves.toBe(true);
     await object.closeBallot("votekick", "kick-a");
     await expect(object.hasOpenBallot()).resolves.toBe(false);
+  });
+
+  it.each([
+    ["chat_voting", "expired-poll"],
+    ["votekick", "expired-kick"],
+  ])("reads an expired %s ballot snapshot and availability without committing changes", async (moduleId, ballotId) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const panel = socketFor(validPrincipal());
+    const object = objectFor([panel]);
+    await object.openBallot(moduleId, ballotId, 2, 20_000);
+    await object.castBallot(moduleId, ballotId, "viewer-1", 1);
+
+    const storage = storageOf(object);
+    const key = `ballot:${moduleId}:${ballotId}`;
+    const ballotBefore = structuredClone(storage.values.get(key));
+    const activeBefore = structuredClone(storage.values.get("ballot:active"));
+    const revisionsBefore = await object.getPanelResourceRevisions();
+    panel.send.mockClear();
+    vi.setSystemTime(20_000);
+
+    const [snapshot, available] = await Promise.all([
+      object.readBallotSnapshot(moduleId, ballotId),
+      object.hasOpenBallotSnapshot(),
+    ]);
+
+    expect(snapshot).toEqual({ counts: [1, 0], revision: 1, outcome: "expired" });
+    expect(available).toBe(false);
+    expect(storage.values.get(key)).toEqual(ballotBefore);
+    expect(storage.values.get("ballot:active")).toEqual(activeBefore);
+    expect(await object.getPanelResourceRevisions()).toEqual(revisionsBefore);
+    expect(panel.send.mock.calls).toEqual([]);
   });
 
   it("preserves an active ballot alarm when another open uses the same id or invalid arguments", async () => {
@@ -1857,6 +2029,7 @@ describe("ChannelObject realtime path", () => {
     await expect(object.openBallot("chat_voting", "poll-a", 3, 30_000)).rejects.toThrow("storage interrupted");
 
     expect((storage.values.get("channel:alarm_schedule") as Record<string, unknown>)[alarmKey]).toEqual(originalEntry);
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:chat_voting:panel": 1 });
     expect(storage.setAlarm).not.toHaveBeenCalled();
     expect(storage.deleteAlarm).not.toHaveBeenCalled();
   });
@@ -1899,6 +2072,7 @@ describe("ChannelObject realtime path", () => {
       counts: [],
       revision: 0,
     });
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:chat_voting:panel": 3 });
   });
 
   it("stores only hashed term voters, applies blocked filters, and approves terms for one ballot", async () => {
@@ -2324,8 +2498,10 @@ describe("ChannelObject realtime path", () => {
     const first = await object.refreshAdScheduleForCountdown();
     expect(first).toMatchObject({ reason: null, cache: { schedule } });
     expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:ads:schedule": 1 });
 
     await object.storeAdSchedule(schedule, "2026-09-25T11:00:00.000Z");
+    expect(await object.getPanelResourceRevisions()).toMatchObject({ "module:ads:schedule": 2 });
     await expect(object.refreshAdScheduleForCountdown()).resolves.toBeNull();
     expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
     expect(storageOf(object).values.get("ads:countdown_refresh_attempt")).toBe(Date.now());
@@ -3073,6 +3249,70 @@ describe("ChannelObject realtime path", () => {
     expect(hasCapacity({ v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-1", overlayId: null, expiresAt: null })).toBe(true);
   });
 
+  it("rechecks the panel socket cap after concurrent authorization reads", async () => {
+    const pendingAuthorizations: Array<() => void> = [];
+    let deferredAuthorizationReads = 0;
+    const database = {
+      prepare: vi.fn((query: string) => {
+        let bindings: unknown[] = [];
+        const statement = {
+          bind: vi.fn((...values: unknown[]) => { bindings = values; return statement; }),
+          first: vi.fn(() => {
+            if (!query.includes("FROM auth_sessions AS session")) return Promise.resolve(null);
+            const row = {
+              session_id: bindings[1],
+              user_id: bindings[2],
+              role: bindings[3],
+            };
+            return deferredAuthorizationReads < 11
+              ? new Promise((resolve: (value: unknown) => void) => {
+                deferredAuthorizationReads += 1;
+                pendingAuthorizations.push(() => {
+                  resolve(row);
+                });
+              })
+              : Promise.resolve(row);
+          }),
+          all: vi.fn(() => Promise.resolve({ results: [] })),
+          run: vi.fn(() => Promise.resolve({ success: true })),
+        };
+        return statement;
+      }),
+    } as unknown as D1Database;
+    const object = objectFor([], database);
+    const pairs = Array.from({ length: 11 }, (_, index) => ({
+      0: new WebSocketPair()[0],
+      1: {
+        tags: ["kind:panel", "user:shared-panel-user", `session:session-${String(index)}`],
+        accept: vi.fn(),
+        close: vi.fn(),
+        send: vi.fn(),
+        serializeAttachment: vi.fn(),
+        deserializeAttachment: vi.fn(),
+      } as unknown as WebSocket,
+    }));
+    let nextPair = 0;
+    vi.stubGlobal("WebSocketPair", function WebSocketPairDouble() {
+      const pair = pairs[nextPair];
+      nextPair += 1;
+      if (pair === undefined) throw new Error("No test socket pair remains.");
+      return pair;
+    });
+
+    const handshakes = Array.from({ length: 11 }, (_, index) => object.fetch(upgradeRequest(validPrincipal({
+      userId: "shared-panel-user",
+      sessionId: `session-${String(index)}`,
+    }))));
+    await vi.waitFor(() => { expect(pendingAuthorizations).toHaveLength(11); });
+    pendingAuthorizations.splice(0).forEach((release) => { release(); });
+    const responses = await Promise.all(handshakes);
+    const state = (object as unknown as { ctx: { acceptWebSocket: ReturnType<typeof vi.fn> } }).ctx;
+
+    expect(state.acceptWebSocket).toHaveBeenCalledTimes(10);
+    expect(responses.filter(({ status }) => status === 101)).toHaveLength(10);
+    expect(responses.filter(({ status }) => status === 503)).toHaveLength(1);
+  });
+
   it("rate-limits repeated overlay handshakes per token", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-09-21T12:00:00.000Z");
@@ -3107,12 +3347,59 @@ describe("ChannelObject realtime path", () => {
   it("revokes only the connection of the affected user", async () => {
     const affected = socketFor(validPrincipal());
     const other = socketFor(validPrincipal({ userId: "user-2", sessionId: "session-2" }));
-    const object = objectFor([affected, other]);
+    const database = {
+      prepare: () => ({ bind: () => ({ first: () => Promise.resolve(null) }) }),
+    } as unknown as D1Database;
+    const object = objectFor([affected, other], database);
 
     await object.revokeUser("user-1");
 
     expect(affected.close.mock.calls).toEqual([[4003, "Channel access revoked"]]);
     expect(other.close.mock.calls).toHaveLength(0);
+  });
+
+  it("does not let a delayed user revocation close a newly authorized session", async () => {
+    const oldSession = socketFor(validPrincipal({ sessionId: "old-session" }));
+    const newSession = socketFor(validPrincipal({ sessionId: "new-session" }));
+    let bindings: unknown[] = [];
+    const statement = {
+      bind: vi.fn((...values: unknown[]) => {
+        bindings = values;
+        return statement;
+      }),
+      first: vi.fn(() => Promise.resolve(bindings[1] === "new-session" ? {
+        session_id: "new-session",
+        user_id: "user-1",
+        role: "operator",
+      } : null)),
+    };
+    const database = { prepare: vi.fn(() => statement) } as unknown as D1Database;
+    const object = objectFor([oldSession, newSession], database);
+
+    await object.revokeUser("user-1");
+
+    expect(oldSession.close.mock.calls).toEqual([[4003, "Channel access revoked"]]);
+    expect(newSession.close.mock.calls).toHaveLength(0);
+  });
+
+  it("checks the runtime alarm registry against scheduled host and module handlers", () => {
+    const object = objectFor([]);
+    const runtimeHandlers = (object as unknown as {
+      alarmHandlers: (modules: readonly BotModule[]) => Map<string, unknown>;
+    }).alarmHandlers(MODULES);
+    const scheduledModuleHandlers = moduleAlarmHandlerEntries(MODULES)
+      .map(({ moduleId, registration }) => `module:${moduleId}:${registration.key}`);
+    const scheduledHandlers = [...CHANNEL_HOST_ALARM_HANDLER_KEYS, ...scheduledModuleHandlers];
+
+    expect(missingAlarmHandlerKeys(scheduledHandlers, runtimeHandlers.keys())).toEqual([]);
+    expect(missingAlarmHandlerKeys(
+      scheduledHandlers,
+      [...runtimeHandlers.keys()].filter((key) => key !== `module:chat_voting:${CHAT_VOTING_ALARM_HANDLER}`),
+    )).toContain(`module:chat_voting:${CHAT_VOTING_ALARM_HANDLER}`);
+    expect(missingAlarmHandlerKeys(
+      scheduledHandlers,
+      [...runtimeHandlers.keys()].filter((key) => key !== "channel.security_round"),
+    )).toContain("channel.security_round");
   });
 
   it("keeps two deadlines separate, processes the earlier one and keeps the later one", async () => {

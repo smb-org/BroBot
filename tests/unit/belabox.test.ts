@@ -573,7 +573,7 @@ describe("BELABOX secret and route redaction", () => {
     expect(diagnostics.results).toEqual([{ code: "belabox.polling_ensure_failed" }]);
   });
 
-  it("fetches status on demand and then reuses the ten-second cache", async () => {
+  it("returns persisted on-demand status without sampling on GET", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { send } = await createBelaboxRouteHarness(testDatabase);
@@ -587,16 +587,16 @@ describe("BELABOX secret and route redaction", () => {
     const first = await send("/status", "GET");
     const second = await send("/status", "GET");
 
-    expect(await first.json()).toMatchObject({ sample: { connected: true, bitrateKbps: 2_400 }, polling: false });
-    expect(await second.json()).toMatchObject({ sample: { connected: true, bitrateKbps: 2_400 }, polling: false });
-    expect(fetcher).toHaveBeenCalledOnce();
+    expect(await first.json()).toMatchObject({ sample: null, polling: false });
+    expect(await second.json()).toMatchObject({ sample: null, polling: false });
+    expect(fetcher).not.toHaveBeenCalled();
     const history = await send("/history?range=live", "GET");
     await expect(history.json()).resolves.toEqual([]);
     await expect(testDatabase.prepare("SELECT COUNT(*) AS count FROM belabox_minutes WHERE channel_id = ?")
       .bind(CHANNEL_ID).first<{ count: number }>()).resolves.toEqual({ count: 0 });
   });
 
-  it("routes on-demand status, Check now, and connection tests through the poll alarm handler", async () => {
+  it("keeps status reads passive and routes explicit polling actions through the alarm handler", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { runModuleAlarm, send } = await createBelaboxRouteHarness(testDatabase);
@@ -613,9 +613,11 @@ describe("BELABOX secret and route redaction", () => {
     expect((await send("/polling/retry", "POST")).status).toBe(200);
     expect((await send("/test", "POST", {})).status).toBe(200);
 
-    expect(runModuleAlarm).toHaveBeenCalledWith(CHANNEL_ID, "belabox", "poll", "poll", { reason: "on_demand" });
-    expect(runModuleAlarm).toHaveBeenCalledWith(CHANNEL_ID, "belabox", "poll", "poll", { reason: "check_now" });
-    expect(runModuleAlarm).toHaveBeenCalledWith(CHANNEL_ID, "belabox", "poll", "poll", {
+    expect(runModuleAlarm).not.toHaveBeenCalledWith(CHANNEL_ID, "belabox", "poll", "poll", { reason: "on_demand" });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "poll", "poll", { reason: "configuration_changed" });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(3, CHANNEL_ID, "belabox", "poll", "poll", { reason: "check_now" });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(4, CHANNEL_ID, "belabox", "poll", "poll", {
       reason: "connection_test",
       statsUrl: STATS_URL,
     });

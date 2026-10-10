@@ -1,6 +1,9 @@
 import {
+  getPendingRealtimeUserRevocation,
   getLoginIdentity,
   listLoginIdentities,
+  listPendingRealtimeUserRevocations,
+  clearPendingRealtimeUserRevocation,
   revokeLoginIdentityAndSessionsForUser,
   rotateLoginTokensForUser,
   setLoginIdentityTokenScopes,
@@ -16,6 +19,8 @@ import {
   validateBotToken,
   logMaintenanceError,
 } from "./bot-maintenance";
+import { revokeRealtimeUserFromAllChannels } from "./realtime";
+import { notifyCommittedResources } from "./panel-resources";
 
 const markLoginRevoked = async (
   env: Env,
@@ -23,7 +28,7 @@ const markLoginRevoked = async (
   now: string,
   reason: string,
 ): Promise<void> => {
-  await revokeLoginIdentityAndSessionsForUser(
+  const revoked = await revokeLoginIdentityAndSessionsForUser(
     env.DB,
     identity.userId,
     identity.accessTokenCiphertext,
@@ -31,6 +36,28 @@ const markLoginRevoked = async (
     reason,
     now,
   );
+  if (revoked) {
+    const pending = await getPendingRealtimeUserRevocation(env.DB, identity.userId);
+    await revokeRealtimeUserFromAllChannels(env.DB, env.CHANNEL, identity.userId);
+    if (pending !== null) await clearPendingRealtimeUserRevocation(env.DB, pending);
+    await notifyCommittedResources(env);
+  }
+};
+
+const retryPendingRealtimeUserRevocations = async (env: Env): Promise<void> => {
+  const pendingRevocations = await listPendingRealtimeUserRevocations(env.DB);
+  for (const revocation of pendingRevocations) {
+    try {
+      await revokeRealtimeUserFromAllChannels(env.DB, env.CHANNEL, revocation.userId);
+      await clearPendingRealtimeUserRevocation(env.DB, revocation);
+    } catch (error: unknown) {
+      logMaintenanceError({
+        channelId: revocation.userId,
+        subscriptionType: "login-identity",
+        variant: "realtime-revocation",
+      }, error);
+    }
+  }
 };
 
 const rotateLoginTokensWithRetry = async (
@@ -237,6 +264,7 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
 
 export const maintainLoginIdentities = async (env: Env, now: string): Promise<void> => {
   try {
+    await retryPendingRealtimeUserRevocations(env);
     const identities = await listLoginIdentities(env.DB, now);
     const concurrency = 4;
     let nextIndex = 0;

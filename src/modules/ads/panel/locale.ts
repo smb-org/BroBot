@@ -21,6 +21,10 @@ export interface AdsPanelTexts {
   recentTime: (timestamp: string) => string;
   loading: string;
   loadError: string;
+  refreshSchedule: string;
+  refreshReadOnly: string;
+  refreshSuccess: string;
+  refreshError: string;
   immediateTitle: string;
   immediateLength: string;
   immediateLengthHint: string;
@@ -51,6 +55,10 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     recentTime: (timestamp) => timestamp,
     loading: "Werbeplan wird geladen …",
     loadError: "Der Werbeplan konnte nicht geladen werden.",
+    refreshSchedule: "Werbeplan aktualisieren",
+    refreshReadOnly: "Nur Broadcaster und Verwalter dürfen den Werbeplan aktualisieren.",
+    refreshSuccess: "Der Werbeplan wurde aktualisiert.",
+    refreshError: "Der Werbeplan konnte nicht aktualisiert werden.",
     immediateTitle: "Werbung",
     immediateLength: "Werbedauer",
     immediateLengthHint: "Sekunden. Startet sofort.",
@@ -79,6 +87,10 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     recentTime: (timestamp) => timestamp,
     loading: "Loading the ad schedule …",
     loadError: "The ad schedule could not be loaded.",
+    refreshSchedule: "Refresh ad schedule",
+    refreshReadOnly: "Only broadcasters and managers may refresh the ad schedule.",
+    refreshSuccess: "The ad schedule was refreshed.",
+    refreshError: "The ad schedule could not be refreshed.",
     immediateTitle: "Ads",
     immediateLength: "Ad length",
     immediateLengthHint: "Seconds. Starts immediately.",
