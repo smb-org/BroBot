@@ -11,6 +11,8 @@ import {
   saveOverlay,
   updateChannelVariable,
   type PanelChannelVariable,
+  type PanelChannelVariableRecord,
+  type PanelChannelVariablesResponse,
   type PanelOverlayElement,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage } from "./locale";
@@ -85,6 +87,32 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     const result = await refetchVariables({ throwOnError: true });
     if (result.isError) throw result.error;
   }, [refetchVariables]);
+  const commitVariable = (previousName: string | null, record: PanelChannelVariableRecord, usages?: PanelChannelVariable["usages"]): void => {
+    queryClient.setQueryData<PanelChannelVariablesResponse>(dashboardDataKeys.variables(channelId), (current) => {
+      if (current === undefined) return current;
+      const previousIndex = previousName === null ? -1 : current.variables.findIndex((variable) => variable.name === previousName);
+      const existing = previousIndex < 0 ? current.variables.find((variable) => variable.name === record.name) : current.variables[previousIndex];
+      const nextVariable: PanelChannelVariable = { ...record, usages: usages ?? existing?.usages ?? [] };
+      const next = current.variables.filter((variable) => variable.name !== previousName && variable.name !== record.name);
+      next.splice(previousIndex < 0 ? next.length : Math.min(previousIndex, next.length), 0, nextVariable);
+      next.sort((left, right) => left.name.localeCompare(right.name));
+      return {
+        ...current,
+        variables: next,
+        count: previousName === null && existing === undefined ? current.count + 1 : current.count,
+      };
+    });
+  };
+  const commitVariableRemoval = (name: string): void => {
+    queryClient.setQueryData<PanelChannelVariablesResponse>(dashboardDataKeys.variables(channelId), (current) => current === undefined
+      ? current
+      : {
+        ...current,
+        variables: current.variables.filter((variable) => variable.name !== name),
+        count: Math.max(0, current.count - 1),
+      });
+  };
+  const refreshBestEffort = (): void => { void refresh().catch(() => undefined); };
 
   useEffect(() => {
     if (!variablesQuery.isError) return;
@@ -179,19 +207,21 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           description: draftDescription,
           resetOnStreamStart: draftReset,
         });
-        await refresh();
+        commitVariable(null, response.variable, response.usages);
         setCreating(false);
         setSelectedName(response.variable.name);
+        refreshBestEffort();
       } else if (selected !== null) {
         const response = await updateChannelVariable(channelId, selected.name, {
           newName: name,
           description: draftDescription,
           resetOnStreamStart: draftReset,
         });
-        await refresh();
+        commitVariable(selected.name, response.variable, response.usages);
         setSelectedName(response.variable.name);
         setDraftName(response.variable.name);
         if (response.variable.name !== selected.name) setUseOverlayOpen(false);
+        refreshBestEffort();
       }
     } catch (caught) {
       notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError });
@@ -204,8 +234,9 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setPending(true);
     try {
       const response = await changeChannelVariableValue(channelId, selected.name, operation, amount);
-      await refresh();
+      commitVariable(selected.name, response.variable);
       setDraftSetValue(response.variable.value);
+      refreshBestEffort();
       return true;
     } catch (caught) {
       notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError });
@@ -269,7 +300,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       await saveOverlay(channelId, overlay.id, overlay.revision, {
         name: overlay.name, width: overlay.width, height: overlay.height, css: overlay.css, elements,
       }, { elementId: usage.elementId, missingVariableName: selected.name });
-      await refresh();
+      refreshBestEffort();
     } catch (caught) {
       notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError });
     } finally {
@@ -282,8 +313,9 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     try {
       await deleteChannelVariable(channelId, selected.name);
       setConfirmDelete(false);
-      await refresh();
+      commitVariableRemoval(selected.name);
       closeInspector();
+      refreshBestEffort();
     } catch (caught) {
       notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.deleteError) : labels.deleteError });
     } finally {

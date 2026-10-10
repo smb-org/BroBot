@@ -61,7 +61,19 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   const [draftState, setDraftState] = useState<VoteDraft | null>(null);
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const queryClient = useDashboardQueryClient();
-  const stateQuery = useModuleQuery(channelId, "chat_voting", "panel", (signal) => loadChatVotingState(channelId, signal), {
+  const stateQuery = useModuleQuery(channelId, "chat_voting", "panel", async (signal) => {
+    try {
+      const response = await loadChatVotingState(channelId, signal);
+      loadErrorNotified.current = false;
+      return response;
+    } catch (failure: unknown) {
+      if (!loadErrorNotified.current) {
+        loadErrorNotified.current = true;
+        notify({ tone: "error", message: labels.loadError });
+      }
+      throw failure;
+    }
+  }, {
     refetchInterval: realtimeStatus === "connected" ? false : 2_000,
   });
 
@@ -76,14 +88,6 @@ export const ChatVotingPanel = ({ channelId, language = "de", canOperate = true 
   useEffect(() => {
     if (stateQuery.data !== undefined) applyState(stateQuery.data);
   }, [applyState, stateQuery.data]);
-
-  useEffect(() => {
-    if (!stateQuery.isError) return;
-    if (!loadErrorNotified.current) {
-      loadErrorNotified.current = true;
-      notify({ tone: "error", message: labels.loadError });
-    }
-  }, [labels.loadError, stateQuery.error, stateQuery.isError]);
 
   const refresh = useCallback(async (): Promise<void> => {
     try {

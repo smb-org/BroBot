@@ -26,6 +26,8 @@ import {
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
 import { ActionMenu, Button, ConfirmDialog, EmptyCellValue, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
 import { useOverlayQuery, useOverlaysQuery } from "./data/lists";
+import { dashboardDataKeys } from "./data/keys";
+import { useDashboardQueryError } from "./data";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -243,6 +245,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const [selectedId, setSelectedId] = useState<string | null>(initialSelection ?? null);
   const selectedIdRef = useRef<string | null>(initialSelection ?? null);
   const selectedOverlayQuery = useOverlayQuery(channelId, selectedId ?? "", selectedId !== null);
+  const selectedOverlayError = useDashboardQueryError(dashboardDataKeys.overlay(channelId, selectedId ?? ""));
   const [selectedOverlayData, setSelectedOverlayData] = useState<{
     id: string;
     accesses: readonly PanelOverlayAccess[];
@@ -323,6 +326,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const selected = useMemo(() => overlays.find((overlay) => overlay.id === selectedId) ?? null, [overlays, selectedId]);
   const refetchOverlays = overlaysQuery.refetch;
   const selectedOverlay = selectedOverlayQuery.data?.overlay ?? null;
+  const selectedOverlayLoadFailed = selectedOverlayError !== null;
   const accesses = selectedOverlayData?.id === selectedId ? selectedOverlayData.accesses : [];
   const revokedAccesses = accesses.filter((access) => access.revokedAt !== null);
   const setupAccess = accesses.find((access) => access.tokenId === setupAccessId) ?? null;
@@ -804,7 +808,16 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     </div>
   </SubInspector> : selectedId === null ? null : <SubInspector ariaLabel={labels.title} title={selected?.name ?? labels.title}
     identifier={selected?.id} closeLabel={labels.close} onClose={closeInspector}>
-    {selectedOverlay === null ? <p className="loading-line">{labels.loading}</p> : <div className="overlay-inspector">
+    <LoadState
+      status={selectedOverlay === null ? selectedOverlayQuery.isPending ? "loading" : selectedOverlayLoadFailed ? "error" : "loading" : "success"}
+      minHeight="calc(var(--s10) * 24)"
+      loading={<div aria-label={labels.loading}><Skeleton rows={6} height={34} /></div>}
+      empty={<div />}
+      error={<p role="alert">{labels.loadError}</p>}
+      onRetry={() => { void selectedOverlayQuery.refetch({ throwOnError: true }).catch(() => undefined); }}
+      refreshError={selectedOverlay !== null && selectedOverlayLoadFailed}
+    >
+    {selectedOverlay === null ? null : <div className="overlay-inspector">
       <InspectorSection title={labels.details}>
         <dl className="properties">
           <div><dt>{labels.size}</dt><dd>{selectedOverlay.width} × {selectedOverlay.height}</dd></div>
@@ -901,6 +914,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       </InspectorSection>
       <InspectorActions destructive={<Button danger="subtle" disabled={!canManage || pending} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>} />
     </div>}
+    </LoadState>
   </SubInspector>;
 
   return <>

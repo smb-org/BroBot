@@ -10,6 +10,8 @@ import { channelPanelTexts } from "./labels";
 import { eventCause, eventDetail, eventMetadata } from "./events/model";
 import { emptyEventFilter } from "./events/model";
 import { useEventsQuery } from "./data/lists";
+import { dashboardDataKeys } from "./data/keys";
+import { useDashboardQueryError } from "./data";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { Button, LoadState, notify, Popover, Skeleton } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
@@ -250,6 +252,8 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
   const texts = dashboardTexts();
   const filters = { ...emptyEventFilter, tones: ["warning", "error"] as const };
   const query = useEventsQuery(channelId, filters);
+  const eventQueryError = useDashboardQueryError(dashboardDataKeys.events(channelId, filters));
+  const loadErrorNotified = useRef(false);
   const entries = (query.data?.pages[0]?.entries ?? [])
     .filter((entry) => {
       const tone = eventMetadata(entry.code)?.tone;
@@ -264,18 +268,30 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
     filters: { ...emptyEventFilter, tones: ["warning", "error"] },
   };
   useEffect(() => {
-    if (query.isError) notify({ tone: "error", message: texts.events.connectionLost });
-  }, [query.error, query.isError, texts.events.connectionLost]);
+    if (eventQueryError === null) {
+      loadErrorNotified.current = false;
+      return;
+    }
+    if (loadErrorNotified.current) return;
+    loadErrorNotified.current = true;
+    notify({ tone: "error", message: texts.events.connectionLost });
+  }, [eventQueryError, texts.events.connectionLost]);
+  const queryFailed = eventQueryError !== null;
+  const feedStatus = query.data === undefined
+    ? query.isPending ? "loading" : queryFailed ? "error" : "loading"
+    : entries.length === 0 ? "empty" : "success";
 
   return (
     <section className="content-section" aria-label={texts.streamManager.feedTitle}>
       <div className="section-heading"><h2>{texts.streamManager.feedTitle}</h2><a className="stream-manager-feed__all" href={dashboardRoutePath(allAlertsRoute)} onClick={onNavigate === undefined ? undefined : (event) => { event.preventDefault(); onNavigate(allAlertsRoute); }}>{texts.streamManager.feedAll}</a></div>
       <LoadState
-        status={query.isPending ? "loading" : query.isError ? "error" : entries.length === 0 ? "empty" : "success"}
+        status={feedStatus}
         minHeight={132}
         loading={<Skeleton rows={3} height={44} />}
         empty={<p className="stream-manager-feed__empty">{texts.streamManager.feedEmpty}</p>}
-        error={<Skeleton rows={3} height={44} />}
+        error={<p role="alert">{texts.events.connectionLost}</p>}
+        onRetry={() => { void query.refetch({ throwOnError: true }).catch(() => undefined); }}
+        refreshError={query.data !== undefined && queryFailed}
       >
         {entries.length === 0 ? null : <ul className="stream-manager-feed">
           {entries.map((entry) => {

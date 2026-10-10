@@ -126,6 +126,41 @@ describe("Channel variables page", () => {
     expect(requests.find(({ method, body }) => method === "POST" && body?.includes('"operation":"add"'))?.body).toBe(JSON.stringify({ operation: "add", amount: 1 }));
   });
 
+  it("keeps a successful variable increment when the follow-up read fails", async () => {
+    setBrowserLanguage("en-US");
+    let currentValue = variable.value;
+    let variableReads = 0;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables/score/value" && method === "POST") {
+        currentValue += 1;
+        return Promise.resolve(jsonResponse({ variable: { ...variable, value: currentValue } }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables") {
+        variableReads += 1;
+        return variableReads === 1
+          ? Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }))
+          : Promise.reject(new Error("variables revalidation failed"));
+      }
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const view = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.click(screen.getByRole("button", { name: "+1" }));
+
+    await waitFor(() => expect(currentValue).toBe(1235));
+    await waitFor(() => expect(view.queryClient.getQueryData<{ variables: Array<{ value: number }> }>(["channel", "kanal-a", "variables"])?.variables[0]?.value).toBe(1235));
+    await waitFor(() => expect(variableReads).toBe(2));
+    expect(document.querySelector(".channel-variable-value-controls__value")).toHaveTextContent("1,235");
+    const newToasts = toastsSnapshot().filter((toast) => toast.message === "The channel variable could not be saved.");
+    expect(newToasts).toHaveLength(0);
+  });
+
   it("opens an existing overlay editor with the variable as an unsaved draft", async () => {
     const requests: Array<{ path: string; method: string }> = [];
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {

@@ -72,5 +72,6 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   }],
   panel: () => import("./panel"),
   settingsEditor: () => import("./panel/settings-editor"),
+  settingsEditorRelatedParts: ["panel"],
   handleEvent: (event, context) => processVotekickMessage(event, createVotekickRepository(context.DB), context),
 };

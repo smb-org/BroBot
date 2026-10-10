@@ -1041,8 +1041,6 @@ export interface ModulePanelProperties {
    *  mount (e.g. text_commands selects the command by name); most modules
    *  ignore it. */
   initialSelection?: string;
-  /** Incremented after a sibling settings editor saves, so panels can reload dependent data. */
-  settingsRefreshToken?: number;
 }
 
 /** Props for one lazily loaded card in the channel's immediate-action row. */
@@ -1360,6 +1358,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
   /** Lazily loaded editor declaration for this module's settings. */
   settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<z.output<SettingsSchema>> }>;
+  /** Module query parts that depend on settings edited by this editor. */
+  settingsEditorRelatedParts?: readonly string[];
   /** Places the settings editor before a potentially long module panel. */
   settingsEditorPlacement?: "before-panel" | "after-panel";
   /** Reconciles one module-owned alarm immediately after settings are saved. */

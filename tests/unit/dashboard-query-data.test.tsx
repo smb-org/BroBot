@@ -168,8 +168,41 @@ describe("dashboard query data layer", () => {
     expect(readCount).toBe(2);
 
     releaseRefresh?.();
-    await waitFor(() => expect(readCount).toBe(3));
-    await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "chat_voting", "panel"))).toBe(3));
+    await waitFor(() => expect(readCount).toBe(3), { timeout: 2_000 });
+    await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "chat_voting", "panel"))).toBe(3), { timeout: 2_000 });
+    view.unmount();
+  });
+
+  it("throttles sustained realtime hints when each read finishes quickly", async () => {
+    let readCount = 0;
+    function ModuleProbe() {
+      const query = useModuleQuery(channelId, "chat_voting", "panel", () => {
+        readCount += 1;
+        return Promise.resolve(readCount);
+      });
+      return <p>{String(query.data ?? "Loading")}</p>;
+    }
+
+    const view = renderWithQuery(<ModuleProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
+    expect(await screen.findByText("1")).toBeInTheDocument();
+    const message = {
+      version: 1 as const,
+      id: "chat-vote-tally-0",
+      createdAt: "2026-10-09T08:00:00.000Z",
+      channelId,
+      type: "modul.chat_voting.tally" as const,
+      payload: {},
+    };
+
+    for (let index = 0; index < 20; index += 1) {
+      await new Promise((resolve) => { setTimeout(resolve, 50); });
+      invalidateDashboardRealtimeMessage(view.queryClient, { ...message, id: `chat-vote-tally-${String(index + 1)}` });
+    }
+    await new Promise((resolve) => { setTimeout(resolve, 300); });
+
+    // One immediate refresh plus one trailing refresh for the sustained hint burst.
+    expect(readCount).toBe(3);
+    expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "chat_voting", "panel"))).toBe(readCount);
     view.unmount();
   });
 

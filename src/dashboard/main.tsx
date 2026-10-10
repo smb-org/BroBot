@@ -37,6 +37,7 @@ import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, Mo
 import { BroadcasterConsentAction, ChannelNotices, ImmediateActions, ModeratorCheckAction, WarningsAndErrorsFeed } from "./stream-manager";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
 import { useSystemQuery } from "./data/lists";
+import { useDashboardRealtimeStatus } from "./data/realtime";
 import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
@@ -396,8 +397,18 @@ const ChannelControlExpiryWatcher = ({ controls, onRefresh }: {
   onRefresh: () => Promise<void>;
 }): null => {
   const refreshedExpiryKey = useRef("");
+  const onRefreshRef = useRef(onRefresh);
+  useEffect(() => { onRefreshRef.current = onRefresh; }, [onRefresh]);
   useEffect(() => {
     let timer: number | null = null;
+    let retryTimer: number | null = null;
+    const refreshExpiredControl = (expiryKey: string): void => {
+      void onRefreshRef.current().then(() => {
+        refreshedExpiryKey.current = expiryKey;
+      }).catch(() => {
+        retryTimer = window.setTimeout(() => { refreshExpiredControl(expiryKey); }, 30_000);
+      });
+    };
     const checkExpiry = (): void => {
       const now = Date.now();
       const mute = controls?.mute ?? CONTROL_OFF;
@@ -408,8 +419,7 @@ const ChannelControlExpiryWatcher = ({ controls, onRefresh }: {
         .join("|");
       if (staleExpiryKey.length === 0) refreshedExpiryKey.current = "";
       else if (refreshedExpiryKey.current !== staleExpiryKey) {
-        refreshedExpiryKey.current = staleExpiryKey;
-        void onRefresh();
+        refreshExpiredControl(staleExpiryKey);
       }
       const nextExpiry = [mute, pause]
         .filter((control) => control.active && control.mode === "timed" && control.until !== null)
@@ -419,8 +429,11 @@ const ChannelControlExpiryWatcher = ({ controls, onRefresh }: {
       if (nextExpiry !== undefined) timer = window.setTimeout(checkExpiry, Math.min(MAX_TIMER_DELAY_MS, Math.max(0, nextExpiry - now)));
     };
     checkExpiry();
-    return () => { if (timer !== null) window.clearTimeout(timer); };
-  }, [controls, onRefresh]);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
+  }, [controls]);
   return null;
 };
 
@@ -469,7 +482,6 @@ const ChannelControlActions = ({ channelId, controls, onRefresh }: {
     try {
       await setChannelControl(channelId, kind, next);
       setDialogControl(null);
-      await onRefresh();
     } catch (requestError: unknown) {
       notify({
         tone: "error",
@@ -477,6 +489,13 @@ const ChannelControlActions = ({ channelId, controls, onRefresh }: {
           ? apiErrorText(requestError.code, labels.failure)
           : labels.failure,
       });
+      setBusy(null);
+      return;
+    }
+    try {
+      await onRefresh();
+    } catch {
+      notify({ tone: "error", message: labels.refreshFailure });
     } finally {
       setBusy(null);
     }
@@ -1202,6 +1221,8 @@ export const DashboardApp = (): ReactElement => {
   }, []);
 
   const [route, navigate] = useDashboardRoute();
+  const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
+  const realtimeStatus = useDashboardRealtimeStatus(realtimeChannelId ?? "");
   const routeRef = useRef(route);
   useLayoutEffect(() => { routeRef.current = route; }, [route]);
   const queryClient = useQueryClient();
@@ -1215,6 +1236,7 @@ export const DashboardApp = (): ReactElement => {
   const channelsQuery = useQuery<PanelChannelsResponse>({
     queryKey: queryKeys.channels(),
     refetchOnWindowFocus: false,
+    refetchInterval: realtimeStatus === "connected" ? false : 180_000,
     queryFn: async ({ signal }) => {
       const response = await fetchChannels(signal);
       return {
@@ -1245,6 +1267,7 @@ export const DashboardApp = (): ReactElement => {
   const overviewQuery = useQuery<PanelChannelOverview>({
     queryKey: queryKeys.channel(overviewChannelId ?? "", "overview"),
     refetchOnWindowFocus: false,
+    refetchInterval: realtimeStatus === "connected" ? false : 180_000,
     queryFn: async ({ signal }) => {
       if (overviewChannelId === null) throw new Error("An overview query needs a channel ID.");
       const response = await fetchChannelOverview(overviewChannelId, signal);
@@ -1256,10 +1279,13 @@ export const DashboardApp = (): ReactElement => {
       previousQuery?.queryKey[1] === overviewChannelId ? previousData : undefined,
   });
   const overview = loadStateFromQuery(overviewQuery);
-  const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
   useRealtimePanelMessages(realtimeChannelId, realtimeChannelId !== null);
   const systemChannelId = route.kind === "channel" && route.section === "system" ? route.channelId : null;
-  const systemQuery = useSystemQuery(systemChannelId ?? "", !authenticationRequired && systemChannelId !== null);
+  const systemQuery = useSystemQuery(
+    systemChannelId ?? "",
+    !authenticationRequired && systemChannelId !== null,
+    realtimeStatus === "connected" ? false : 180_000,
+  );
   const [, setFreshnessTick] = useState(0);
   const routeKey = dashboardRoutePath(route);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -1293,7 +1319,7 @@ export const DashboardApp = (): ReactElement => {
   const reloadChannels = useCallback(async (): Promise<void> => {
     const filter = { queryKey: queryKeys.channels(), exact: true } as const;
     await queryClient.cancelQueries(filter);
-    await queryClient.invalidateQueries(filter);
+    await queryClient.invalidateQueries(filter, { throwOnError: true });
   }, [queryClient]);
 
   const clearProtectedState = (): void => {
@@ -1323,7 +1349,7 @@ export const DashboardApp = (): ReactElement => {
     }
     const filter = { queryKey: queryKeys.channel(route.channelId, "modules"), exact: true } as const;
     await queryClient.cancelQueries(filter);
-    await queryClient.invalidateQueries(filter);
+    await queryClient.invalidateQueries(filter, { throwOnError: true });
   }, [queryClient, reloadChannels, route, selectedChannel]);
 
   const reloadAfterModuleToggle = async (channelId: string): Promise<void> => refreshAfterModuleToggle(queryClient, channelId);
@@ -1332,14 +1358,14 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "module" && !(route.kind === "channel" && route.section === "overview")) return;
     const filter = { queryKey: queryKeys.channel(route.channelId, "overview"), exact: true } as const;
     await queryClient.cancelQueries(filter);
-    await queryClient.invalidateQueries(filter);
+    await queryClient.invalidateQueries(filter, { throwOnError: true });
   }, [queryClient, route]);
   const refreshChannelState = useCallback(async (): Promise<void> => {
     const refreshFallbackModules = selectedChannel?.modules === undefined ? reloadModules() : Promise.resolve();
     const refreshSystem = systemChannelId === null ? Promise.resolve() : (async () => {
       const filter = { queryKey: queryKeys.channel(systemChannelId, "system"), exact: true } as const;
       await queryClient.cancelQueries(filter);
-      await queryClient.invalidateQueries(filter);
+      await queryClient.invalidateQueries(filter, { throwOnError: true });
     })();
     await Promise.all([
       reloadChannels(),
@@ -1352,7 +1378,7 @@ export const DashboardApp = (): ReactElement => {
   useLayoutEffect(() => { refreshChannelStateRef.current = refreshChannelState; }, [refreshChannelState]);
   useEffect(() => {
     const refresh = (): void => {
-      if (document.visibilityState === "visible") void refreshChannelStateRef.current();
+      if (document.visibilityState === "visible") void refreshChannelStateRef.current().catch(() => undefined);
     };
     document.addEventListener("visibilitychange", refresh);
     return () => {
@@ -1404,9 +1430,12 @@ export const DashboardApp = (): ReactElement => {
         return;
       }
       if (expiryRefreshRef.current === expiryRefreshKey) return;
-      expiryRefreshRef.current = expiryRefreshKey;
-      setFreshnessTick((current) => current + 1);
-      void refreshChannelStateRef.current();
+      void refreshChannelStateRef.current().then(() => {
+        expiryRefreshRef.current = expiryRefreshKey;
+        setFreshnessTick((current) => current + 1);
+      }).catch(() => {
+        timer = window.setTimeout(refreshWhenExpired, 30_000);
+      });
     };
     timer = window.setTimeout(refreshWhenExpired, Math.min(Math.max(0, expiryAt - Date.now()), MAX_TIMER_DELAY_MS));
     return () => { if (timer !== null) window.clearTimeout(timer); };

@@ -57,14 +57,26 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
   const labels = useMemo(() => votekickPanelTexts(resolvedLanguage), [resolvedLanguage]);
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const queryClient = useDashboardQueryClient();
-  const panelQuery = useModuleQuery(channelId, "votekick", "panel", (signal) => loadVotekickPanel(channelId, signal), {
+  const loadErrorNotified = useRef(false);
+  const panelQuery = useModuleQuery(channelId, "votekick", "panel", async (signal) => {
+    try {
+      const panel = await loadVotekickPanel(channelId, signal);
+      loadErrorNotified.current = false;
+      return panel;
+    } catch (error) {
+      if (!loadErrorNotified.current) {
+        loadErrorNotified.current = true;
+        notify({ tone: "error", message: labels.loadError });
+      }
+      throw error;
+    }
+  }, {
     refetchInterval: realtimeStatus === "connected" ? false : 2_000,
   });
   const data = panelQuery.data ?? null;
   const loading = panelQuery.isPending;
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | undefined>();
-  const loadErrorNotified = useRef(false);
   const [cancelTarget, setCancelTarget] = useState<Votekick | null>(null);
   const [liftTarget, setLiftTarget] = useState<Votekick | null>(null);
 
@@ -79,12 +91,6 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
       }
     }
   }, [channelId, labels.loadError, queryClient]);
-  useEffect(() => {
-    if (!panelQuery.isError || loadErrorNotified.current) return;
-    loadErrorNotified.current = true;
-    notify({ tone: "error", message: labels.loadError });
-  }, [labels.loadError, panelQuery.error, panelQuery.isError]);
-
   const cancel = async (): Promise<void> => {
     if (cancelTarget === null) return;
     setBusy(true);

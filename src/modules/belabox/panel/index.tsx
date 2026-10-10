@@ -18,11 +18,26 @@ const statusTimestamp = (value: string, locale: string): string => {
   return Number.isNaN(date.valueOf()) ? "" : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
 
-export default function BelaboxPanel({ channelId, language = "de", canManage = false, settingsRefreshToken = 0 }: ModulePanelProperties): ReactElement {
+export default function BelaboxPanel({ channelId, language = "de", canManage = false }: ModulePanelProperties): ReactElement {
   const labels = belaboxPanelTexts(language);
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const queryClient = useDashboardQueryClient();
-  const statusQuery = useModuleQuery(channelId, "belabox", "status", (signal) => loadBelaboxStatus(channelId, signal), {
+  const loadErrorNotified = useRef(false);
+  const suppressLoadErrorNotification = useRef(false);
+  const readStatus = useCallback(async (signal: AbortSignal): Promise<BelaboxStatusResponse> => {
+    try {
+      const response = await loadBelaboxStatus(channelId, signal);
+      loadErrorNotified.current = false;
+      return response;
+    } catch (failure: unknown) {
+      if (!suppressLoadErrorNotification.current && !loadErrorNotified.current) {
+        loadErrorNotified.current = true;
+        notify({ tone: "error", message: labels.testFailed });
+      }
+      throw failure;
+    }
+  }, [channelId, labels.testFailed]);
+  const statusQuery = useModuleQuery(channelId, "belabox", "status", readStatus, {
     refetchInterval: realtimeStatus === "connected" ? false : (query) => {
       const current = query.state.data;
       return current?.pollingDesired === true
@@ -40,23 +55,18 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const [historyRange, setHistoryRange] = useState<"live" | "stream">("live");
   const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
   const pollingInactive = status?.pollingDesired === true && !status.polling;
-  const loadErrorNotified = useRef(false);
 
   const refresh = useCallback(async (): Promise<void> => {
-    await refetchModuleQueryData<BelaboxStatusResponse>(queryClient, channelId, "belabox", "status");
+    suppressLoadErrorNotification.current = true;
+    try {
+      await refetchModuleQueryData<BelaboxStatusResponse>(queryClient, channelId, "belabox", "status");
+    } catch (failure: unknown) {
+      loadErrorNotified.current = true;
+      throw failure;
+    } finally {
+      suppressLoadErrorNotification.current = false;
+    }
   }, [channelId, queryClient]);
-
-  useEffect(() => {
-    if (settingsRefreshToken === 0) return;
-    void queryClient.invalidateQueries({ queryKey: moduleQueryKey(channelId, "belabox", "status"), exact: true });
-  }, [channelId, queryClient, settingsRefreshToken]);
-
-  useEffect(() => {
-    if (statusQuery.data !== undefined) loadErrorNotified.current = false;
-    if (!statusQuery.isError || loadErrorNotified.current) return;
-    loadErrorNotified.current = true;
-    notify({ tone: "error", message: labels.testFailed });
-  }, [labels.testFailed, statusQuery.data, statusQuery.error, statusQuery.isError]);
 
   useEffect(() => {
     if (pollingInactive) notify({ tone: "error", message: labels.pollingInactive });

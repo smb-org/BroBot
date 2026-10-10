@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardApp } from "../../src/dashboard/main";
 import { dashboardRoutePath, parseDashboardRoute } from "../../src/dashboard/router";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
+import { emptyEventFilter } from "../../src/dashboard/events/model";
+import { WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
+import { UiProvider } from "../../src/dashboard/ui";
 import { queryKeys } from "../../src/dashboard/data/keys";
 import { renderWithQuery as render } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
@@ -606,7 +609,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     const fetcher = stubEventFeedFetch(() => {
       eventRequests += 1;
-      return jsonResponse({ entries: eventRequests === 1 ? [raidAction, incomingRaid] : [newRaid, raidAction, incomingRaid], nextCursor: null });
+      return jsonResponse({ entries: eventRequests <= 2 ? [raidAction, incomingRaid] : [newRaid, raidAction, incomingRaid], nextCursor: null });
     }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
@@ -618,6 +621,7 @@ describe("Dashboard skeleton", () => {
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
+    await waitFor(() => expect(eventRequests).toBe(2));
     socket.receive(JSON.stringify({
       version: 1,
       id: "raid-hint",
@@ -627,8 +631,8 @@ describe("Dashboard skeleton", () => {
       payload: { entries: [{ eventId: newRaid.eventId, createdAt: newRaid.createdAt, moduleId: "channel_events", code: newRaid.code, actorUserId: null }] },
     }));
 
-    expect(await screen.findByText("Raid von freshraid mit 2 Zuschauern")).toBeInTheDocument();
-    expect(eventRequests).toBe(2);
+    expect(await screen.findByText("Raid von freshraid mit 2 Zuschauern", {}, { timeout: 2_000 })).toBeInTheDocument();
+    expect(eventRequests).toBe(3);
   });
 
   it("refreshes while the reader is down without moving the displayed events", async () => {
@@ -655,6 +659,7 @@ describe("Dashboard skeleton", () => {
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
+    await waitFor(() => expect(eventRequests).toBe(2));
     serverEntries = [neu, alt];
     socket.receive(JSON.stringify({ version: 1, id: "message-lower", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
@@ -662,7 +667,7 @@ describe("Dashboard skeleton", () => {
     // The query refreshes while the rows the reader is looking at stay frozen.
     await new Promise((resolve) => { setTimeout(resolve, 400); });
     expect(screen.queryByText("Raid von unbekannt mit 8 Zuschauern")).not.toBeInTheDocument();
-    expect(eventRequests).toBe(2);
+    expect(eventRequests).toBe(3);
     expect(screen.getAllByRole("row")).toHaveLength(2);
 
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0 }) });
@@ -783,7 +788,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     stubEventFeedFetch(() => {
       eventRequests += 1;
-      return Promise.resolve(jsonResponse({ entries: eventRequests === 1 ? [alt] : [neu, alt], nextCursor: null }));
+      return Promise.resolve(jsonResponse({ entries: eventRequests <= 2 ? [alt] : [neu, alt], nextCursor: null }));
     }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
@@ -793,6 +798,7 @@ describe("Dashboard skeleton", () => {
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
+    await waitFor(() => expect(eventRequests).toBe(2));
     socket.close(1006, "Abbruch");
     await act(async () => { await new Promise<void>((resolve) => { setTimeout(resolve, 300); }); });
     const rebuiltSocket = TestWebSocket.instances[1];
@@ -800,7 +806,7 @@ describe("Dashboard skeleton", () => {
     rebuiltSocket.open();
 
     expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
-    expect(eventRequests).toBe(2);
+    expect(eventRequests).toBe(3);
   });
 
   it("refreshes the infinite event query after loading older events", async () => {
@@ -2313,6 +2319,43 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText("Pausiert")).toBeInTheDocument();
   });
 
+  it("retries an expired channel-control refresh after a transient request failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
+    const expiredChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      controls: {
+        mute: { active: true, until: "2026-09-23T08:59:59.000Z", mode: "timed" as const },
+        pause: { active: false, until: null, mode: null },
+      },
+    };
+    const refreshedChannel = { ...expiredChannel, controls: healthyChannel("kanal-a", "Alpha").controls };
+    let channelCalls = 0;
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") {
+        channelCalls += 1;
+        if (channelCalls === 1) return Promise.resolve(jsonResponse({ channels: [expiredChannel], bot: expiredChannel.bot }));
+        if (channelCalls === 2) return Promise.resolve(jsonResponse({ error: "temporary_failure" }, 503));
+        return Promise.resolve(jsonResponse({ channels: [refreshedChannel], bot: refreshedChannel.bot }));
+      }
+      if (path === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(overview(channelCalls >= 3 ? refreshedChannel : expiredChannel)));
+      if (path === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+    render(<DashboardApp />);
+    await flushQueryUpdates();
+
+    expect(channelCalls).toBe(2);
+    expect(screen.getByRole("button", { name: "Stummschaltung aufheben" })).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    await flushQueryUpdates();
+
+    expect(channelCalls).toBe(3);
+  });
+
   it("keeps a control edit's fresher overview state against an older, slower reconnect reload", async () => {
     const pausedChannel = {
       ...healthyChannel("kanal-a", "Alpha"),
@@ -2335,11 +2378,12 @@ describe("Dashboard skeleton", () => {
       }
       if (url.pathname === "/api/channels/kanal-a/overview") {
         overviewRequestCount += 1;
-        // 1st: initial mount load. 2nd: reconnect reload, held open so it
-        // resolves after the control edit's own refresh below (3rd).
+        // 1st: initial mount load. 2nd: first-connect reconciliation.
+        // 3rd: reconnect reload, held open until the control edit's refresh.
         if (overviewRequestCount === 1) return Promise.resolve(jsonResponse(overview(pausedChannel)));
-        if (overviewRequestCount === 2) return reconnectReload;
-        if (overviewRequestCount === 3) return Promise.resolve(jsonResponse(overview({ ...pausedChannel, controls: resumedControls })));
+        if (overviewRequestCount === 2) return Promise.resolve(jsonResponse(overview(pausedChannel)));
+        if (overviewRequestCount === 3) return reconnectReload;
+        if (overviewRequestCount === 4) return Promise.resolve(jsonResponse(overview({ ...pausedChannel, controls: resumedControls })));
         return Promise.resolve(jsonResponse(overview({ ...pausedChannel, controls: resumedControls })));
       }
       return Promise.resolve(jsonResponse({}, 404));
@@ -2352,15 +2396,16 @@ describe("Dashboard skeleton", () => {
     await screen.findByRole("button", { name: "Automatische Aktionen fortsetzen" });
     await waitFor(() => { expect(TestWebSocket.instances).toHaveLength(1); });
     TestWebSocket.instances[0]?.open();
-    await waitFor(() => { expect(overviewRequestCount).toBe(1); });
+    await waitFor(() => { expect(overviewRequestCount).toBe(2); });
+    await waitFor(() => { expect(TestWebSocket.instances[0]?.readyState).toBe(1); });
     TestWebSocket.instances[0]?.close(1006, "socket interruption");
     await waitFor(() => { expect(TestWebSocket.instances).toHaveLength(2); }, { timeout: 2_000 });
     TestWebSocket.instances[1]?.open();
-    await waitFor(() => { expect(overviewRequestCount).toBe(2); });
+    await waitFor(() => { expect(overviewRequestCount).toBe(3); });
 
     fireEvent.click(screen.getByRole("button", { name: "Automatische Aktionen fortsetzen" }));
     await screen.findByRole("button", { name: "Automatische Aktionen pausieren" });
-    await waitFor(() => { expect(overviewRequestCount).toBe(3); });
+    await waitFor(() => { expect(overviewRequestCount).toBe(4); });
 
     await act(async () => {
       resolveReconnectReload?.(jsonResponse(overview(pausedChannel)));
@@ -2434,13 +2479,13 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("button", { name: "Stummschaltung aufheben" })).toBeInTheDocument();
   });
 
-  it("refreshes stale channel queries on visibility change without a timer poll", async () => {
+  it("polls shell queries while realtime is offline and stops polling after connect", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
-    const channel = healthyChannel("kanal-a", "Alpha");
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [] };
     let channelCalls = 0;
     let overviewCalls = 0;
-    let modulesCalls = 0;
+    let systemCalls = 0;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") {
@@ -2451,28 +2496,39 @@ describe("Dashboard skeleton", () => {
         overviewCalls += 1;
         return Promise.resolve(jsonResponse(overview(channel)));
       }
-      if (path === "/api/channels/kanal-a/modules") {
-        modulesCalls += 1;
-        return Promise.resolve(jsonResponse({ modules: [] }));
+      if (path === "/api/channels/kanal-a/system") {
+        systemCalls += 1;
+        return Promise.resolve(jsonResponse(system));
       }
       return Promise.resolve(jsonResponse({}, 404));
     }));
+    vi.stubGlobal("WebSocket", TestWebSocket);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
     await flushQueryUpdates();
-    expect([channelCalls, overviewCalls, modulesCalls]).toEqual([1, 1, 1]);
+    expect([channelCalls, overviewCalls, systemCalls]).toEqual([1, 1, 0]);
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(30_001); });
-    expect([channelCalls, overviewCalls, modulesCalls]).toEqual([1, 1, 1]);
-
-    fireEvent(document, new Event("visibilitychange", { bubbles: true }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 1); });
     await flushQueryUpdates();
-    expect([channelCalls, overviewCalls, modulesCalls]).toEqual([2, 2, 2]);
+    expect([channelCalls, overviewCalls, systemCalls]).toEqual([2, 2, 0]);
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000); });
+    navigateToPath("/channels/kanal-a/system");
     await flushQueryUpdates();
-    expect([channelCalls, overviewCalls, modulesCalls]).toEqual([2, 2, 2]);
+    expect([channelCalls, overviewCalls, systemCalls]).toEqual([2, 2, 1]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 1); });
+    await flushQueryUpdates();
+    expect([channelCalls, overviewCalls, systemCalls]).toEqual([3, 2, 2]);
+
+    expect(TestWebSocket.instances).toHaveLength(1);
+    TestWebSocket.instances[0]?.open();
+    await flushQueryUpdates();
+    const connectedCounts = [channelCalls, overviewCalls, systemCalls];
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 1); });
+    await flushQueryUpdates();
+    expect([channelCalls, overviewCalls, systemCalls]).toEqual(connectedCounts);
   });
 
   it("shows stale token expiry as neutral, reloads, then marks server-confirmed expiry red", async () => {
@@ -2967,6 +3023,51 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("switch", { name: "Shoutout" })).toBeChecked();
   });
 
+  it("retries a token-expiry reconciliation after a transient shell refresh failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
+    const expiry = "2026-09-23T09:00:01.000Z";
+    const freshChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      tokens: { ...healthyChannel("kanal-a", "Alpha").tokens, botExpiresAt: expiry, loginExpiresAt: expiry },
+    };
+    const expiredChannel = {
+      ...freshChannel,
+      tokens: { ...freshChannel.tokens, botExpiresAt: "2026-09-23T09:00:00.000Z", loginExpiresAt: "2026-09-23T09:00:00.000Z" },
+    };
+    let channelCalls = 0;
+    let overviewCalls = 0;
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") {
+        channelCalls += 1;
+        if (channelCalls === 1) return Promise.resolve(jsonResponse({ channels: [freshChannel], bot: freshChannel.bot }));
+        if (channelCalls === 2) return Promise.resolve(jsonResponse({ error: "temporary_failure" }, 503));
+        return Promise.resolve(jsonResponse({ channels: [expiredChannel], bot: expiredChannel.bot }));
+      }
+      if (path === "/api/channels/kanal-a/overview") {
+        overviewCalls += 1;
+        if (overviewCalls === 2) return Promise.resolve(jsonResponse({ error: "temporary_failure" }, 503));
+        return Promise.resolve(jsonResponse(overview(channelCalls >= 3 ? expiredChannel : freshChannel)));
+      }
+      if (path === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+    render(<DashboardApp />);
+    await flushQueryUpdates();
+
+    expect(channelCalls).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushQueryUpdates();
+    expect(channelCalls).toBe(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    await flushQueryUpdates();
+
+    expect(channelCalls).toBe(3);
+  });
+
   it("is the Stream Manager after sign-in: immediate actions, and the warnings feed together, no page change", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "manager" as const };
     let modulesCalls = 0;
@@ -3017,6 +3118,33 @@ describe("Dashboard skeleton", () => {
     // module imports above are slow; the test timeout must exceed the
     // 5 s findBy waits it contains (the 5 s default did not).
   }, 20_000);
+
+  it("keeps cached Stream Manager warnings visible after a failed background refresh", async () => {
+    const entry = {
+      eventId: "cached-warning", createdAt: relativeIso(0), moduleId: "ads", triggerId: "t1",
+      code: "ads.commercial.failed", detail: "{\"reason\":\"rate_limited\"}",
+      actorUserId: null, actorLogin: null, actorDisplayName: null,
+    };
+    let failEvents = false;
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      if (requestUrl(input).pathname === "/api/channels/kanal-a/events") {
+        return Promise.resolve(failEvents ? jsonResponse({ error: "events_unavailable" }, 503) : jsonResponse({ entries: [entry], nextCursor: null }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><WarningsAndErrorsFeed channelId="kanal-a" /></UiProvider>);
+    expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+    const eventKey = dashboardDataKeys.events("kanal-a", { ...emptyEventFilter, tones: ["warning", "error"] });
+    failEvents = true;
+    await act(async () => { await view.queryClient.refetchQueries({ queryKey: eventKey, exact: true }, { throwOnError: true }).catch(() => undefined); });
+
+    expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/events"))).toHaveLength(2);
+    expect(view.queryClient.getQueryState(eventKey)?.status).toBe("error");
+    expect(screen.getByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Verbindung unterbrochen. Die Ereignisse konnten nicht geladen werden.");
+    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
+  });
 
   it("uses the overview stream state for Spotlight actions", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), streamState: "offline" as const };
@@ -3086,6 +3214,7 @@ describe("Dashboard skeleton", () => {
         ? jsonResponse({ error: "internal_error" }, 500)
         : jsonResponse(systemFor("recovered-system"));
     }, [channel]);
+    vi.stubGlobal("WebSocket", TestWebSocket);
     window.history.replaceState({}, "", "/channels/kanal-a/system");
 
     const rendered = render(<DashboardApp />, undefined, {
@@ -3136,7 +3265,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "System", level: 1 })).toBeInTheDocument();
-    await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
+    expect(TestWebSocket.instances).toHaveLength(1);
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
@@ -3220,7 +3349,6 @@ describe("Dashboard skeleton", () => {
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
-    fireEvent(document, new Event("visibilitychange"));
     await waitFor(() => expect(channelsCalls).toBe(2));
 
     const changedAt = relativeIso(1_000);
@@ -3252,13 +3380,12 @@ describe("Dashboard skeleton", () => {
         },
       },
     }));
-    await waitFor(() => expect(channelsCalls).toBe(3));
-    expect(await screen.findByText(/^Live ·/)).toBeInTheDocument();
-
     await act(async () => {
       resolveDelayedChannels?.(jsonResponse({ channels: [channel], bot: channel.bot }));
       await delayedChannels;
     });
+    await waitFor(() => expect(channelsCalls).toBe(3));
+    expect(await screen.findByText(/^Live ·/)).toBeInTheDocument();
 
     expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
     expect(screen.getByText(/^Pausiert ·/)).toBeInTheDocument();
@@ -3357,6 +3484,50 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => {
       expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/overview"))).toHaveLength(2);
     });
+  });
+
+  it("reconciles cached channel data when the socket first connects", async () => {
+    const initialChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      streamStateChangedAt: relativeIso(-10_000),
+      streamStateCheckedAt: relativeIso(-10_000),
+    };
+    let serverChannel = initialChannel;
+    let overviewCalls = 0;
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    const fetcher = stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) {
+        overviewCalls += 1;
+        return jsonResponse(overview(serverChannel));
+      }
+      if (url.pathname.endsWith("/modules")) return jsonResponse({ modules: [] });
+      if (url.pathname.endsWith("/events")) return jsonResponse({ entries: [], nextCursor: null });
+    }, [initialChannel]);
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    await waitFor(() => expect(overviewCalls).toBe(1));
+    await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
+
+    const changedAt = relativeIso(1_000);
+    serverChannel = {
+      ...initialChannel,
+      streamState: "online",
+      streamStartedAt: relativeIso(-60 * 60 * 1_000),
+      streamStateChangedAt: changedAt,
+      streamStateCheckedAt: changedAt,
+      controls: {
+        mute: { active: false, until: null, mode: null },
+        pause: { active: true, until: null, mode: "until_stream_end" },
+      },
+    };
+    TestWebSocket.instances[0]?.open();
+
+    await waitFor(() => expect(overviewCalls).toBe(2));
+    await waitFor(() => expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live"));
+    expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/overview"))).toHaveLength(2);
   });
 
   it("closes an open Spotlight when the route changes channels, then loads the new channel's results", async () => {

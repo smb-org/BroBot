@@ -205,6 +205,7 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   settingsEditorPlacement: "before-panel",
   panel: () => import("./panel/index"),
   settingsEditor: () => import("./panel/settings-editor"),
+  settingsEditorRelatedParts: ["status"],
   immediateActions: { requires: ["streamLive"], load: () => import("./panel/immediate-actions") },
   handleEvent: async (event, context) => {
     if (context.streamStateTransitionAccepted !== true ||

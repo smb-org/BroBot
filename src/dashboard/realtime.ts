@@ -157,7 +157,6 @@ interface PanelSocketConnection {
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   cleanupTimer: ReturnType<typeof setTimeout> | null;
   reconnectAttempt: number;
-  hasConnected: boolean;
   disposed: boolean;
   references: number;
   seenMessageIds: Set<string>;
@@ -203,8 +202,7 @@ const connectPanelSocket = (channelId: string, connection: PanelSocketConnection
     connection.socket = socket;
     socket.addEventListener("open", () => {
       if (connection.disposed) return;
-      if (connection.hasConnected) invalidateDashboardChannelQueries(connection.queryClient, channelId);
-      connection.hasConnected = true;
+      invalidateDashboardChannelQueries(connection.queryClient, channelId);
       connection.reconnectAttempt = 0;
       setDashboardRealtimeStatus(channelId, "connected");
     });
@@ -246,7 +244,6 @@ const acquirePanelSocket = (channelId: string, queryClient: QueryClient): (() =>
       reconnectTimer: null,
       cleanupTimer: null,
       reconnectAttempt: 0,
-      hasConnected: false,
       disposed: false,
       references: 0,
       seenMessageIds: new Set(),

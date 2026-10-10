@@ -191,6 +191,45 @@ describe("EventsPage failure cause icon", () => {
     expect(FakeWebSocket.instances[0]?.close).toHaveBeenCalledTimes(1);
   });
 
+  it("reconciles the cached event query when the first channel socket connects", async () => {
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const cachedEntry = entry({ eventId: "cached-before-connect" });
+    const currentEntry = entry({ eventId: "changed-before-connect", code: "host.chat.sent" });
+    let serverEntries = [cachedEntry];
+    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ entries: serverEntries, nextCursor: null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+    const filters = emptyEventFilter;
+    const view = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={filters} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        staleTime: 0,
+        initialData: [{
+          queryKey: dashboardDataKeys.events("kanal-a", filters),
+          data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] },
+        }],
+      },
+    );
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    serverEntries = [currentEntry];
+    const socket = TestEventsWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime socket was not created.");
+    socket.open();
+
+    await waitFor(() => {
+      expect(view.queryClient.getQueryData(dashboardDataKeys.events("kanal-a", filters))).toMatchObject({
+        pages: [{ entries: [expect.objectContaining({ eventId: "changed-before-connect" })] }],
+      });
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+
   it("does not show another filter's rows while the selected query loads", async () => {
     const initialEntry = entry({ eventId: "all-events" });
     const filteredEntry = entry({ eventId: "channel-events", code: "channel_events.chat.sub", detail: "{\"person\":\"new-subscriber\",\"tier\":\"1000\"}" });
@@ -481,8 +520,8 @@ describe("EventsPage failure cause icon", () => {
     let requestCount = 0;
     const fetcher = vi.fn((): Promise<Response> => {
       requestCount += 1;
-      if (requestCount <= 1) {
-        // The mount responds with cached rows before realtime refreshes begin.
+      if (requestCount <= 2) {
+        // The mount and first-connect reconciliation return the cached rows.
         return Promise.resolve(new Response(JSON.stringify({ entries: [initialEntry], nextCursor: null }), { status: 200, headers: { "Content-Type": "application/json" } }));
       }
       return new Promise<Response>((resolve) => { refreshResponses.push(resolve); });
@@ -508,6 +547,7 @@ describe("EventsPage failure cause icon", () => {
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
+    await waitFor(() => expect(requestCount).toBe(2));
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
     fetcher.mockClear();
     const sendHint = (id: string, event: PanelEventEntry): void => {
@@ -663,7 +703,7 @@ describe("EventsPage failure cause icon", () => {
     fetcher.mockClear();
     serverEntries = [newEntry, additionalEntry, oldEntry];
     emitEventHint(socket, `top-hint-${action}`, newEntry);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1), { timeout: 2_000 });
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
     const refreshedEvents = rendered.queryClient.getQueryData<{ pages: { entries: PanelEventEntry[] }[] }>(queryKey);
     expect(refreshedEvents?.pages.flatMap((page) => page.entries).map((event) => event.eventId)).toEqual([
@@ -993,7 +1033,7 @@ describe("EventsPage failure cause icon", () => {
       fetcher.mockClear();
       serverHasLive = true;
       emitEventHint(socket, "storm-message", live);
-      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
       const cached = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelEventEntry[] }> }>(dashboardDataKeys.events("kanal-a", emptyEventFilter));
       expect(cached?.pages[0]?.entries[0]?.eventId).toBe("live");
       expect(screen.queryByText(/Raid von stormraid/u)).not.toBeInTheDocument();
@@ -1083,7 +1123,7 @@ describe("EventsPage failure cause icon", () => {
         return new Promise<Response>((resolve) => { releaseNextPage = resolve; });
       }
       firstPageRequests += 1;
-      if (firstPageRequests <= 1) {
+      if (firstPageRequests <= 2) {
         return Promise.resolve(new Response(JSON.stringify({ entries: [firstEntry], nextCursor: "cursor-1" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -1103,6 +1143,7 @@ describe("EventsPage failure cause icon", () => {
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
+    await waitFor(() => expect(firstPageRequests).toBe(2));
     await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
     fetcher.mockClear();
     socket.receive(JSON.stringify({

@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { parseRealtimeMessage } from "../../src/dashboard/realtime";
@@ -95,21 +95,53 @@ describe("dashboard realtime messages", () => {
     expect(queryClient.getQueryState(belabox)?.isInvalidated).toBe(true);
   });
 
+  it("refreshes an overlay detail only once when its overlay list also changes", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const overlays = dashboardDataKeys.overlays(channelId);
+    const overlay = dashboardDataKeys.overlay(channelId, "overlay-a");
+    let listReads = 0;
+    let detailReads = 0;
+    queryClient.setQueryData(overlays, { overlays: [] });
+    queryClient.setQueryData(overlay, { overlay: { revision: 1 } });
+    const listObserver = new QueryObserver(queryClient, {
+      queryKey: overlays,
+      queryFn: () => { listReads += 1; return Promise.resolve({ overlays: [] }); },
+      staleTime: Infinity,
+    });
+    const detailObserver = new QueryObserver(queryClient, {
+      queryKey: overlay,
+      queryFn: () => { detailReads += 1; return Promise.resolve({ overlay: { revision: 2 } }); },
+      staleTime: Infinity,
+    });
+    const unsubscribeList = listObserver.subscribe(() => undefined);
+    const unsubscribeDetail = detailObserver.subscribe(() => undefined);
+
+    invalidateDashboardRealtimeMessage(queryClient, moduleHint("overlay.changed", { overlayId: "overlay-a", revision: 2 }));
+    await new Promise((resolve) => { setTimeout(resolve, 320); });
+
+    expect(listReads).toBe(1);
+    expect(detailReads).toBe(1);
+    unsubscribeList();
+    unsubscribeDetail();
+    queryClient.clear();
+  });
+
   it("invalidates the right module cache for each panel live-state hint", () => {
     const hints = [
-      ["chat_voting", "modul.chat_voting.opened"],
-      ["chat_voting", "modul.chat_voting.tally"],
-      ["belabox", "modul.belabox.state_changed"],
-      ["belabox", "modul.belabox.sample"],
-      ["votekick", "modul.votekick.opened"],
-      ["votekick", "modul.votekick.tally"],
+      { moduleId: "chat_voting", type: "modul.chat_voting.opened", parts: ["panel"] },
+      { moduleId: "chat_voting", type: "modul.chat_voting.tally", parts: ["panel"] },
+      { moduleId: "belabox", type: "modul.belabox.state_changed", parts: ["status", "streams", "history-live", "history-stream-42"] },
+      { moduleId: "belabox", type: "modul.belabox.sample", parts: ["status", "streams", "history-live", "history-stream-42"] },
+      { moduleId: "votekick", type: "modul.votekick.opened", parts: ["panel"] },
+      { moduleId: "votekick", type: "modul.votekick.tally", parts: ["panel"] },
     ] as const;
 
-    for (const [moduleId, type] of hints) {
+    for (const { moduleId, type, parts } of hints) {
       const queryClient = new QueryClient();
-      const relevant = moduleQueryKey(channelId, moduleId, "panel");
+      const relevant = parts.map((part) => moduleQueryKey(channelId, moduleId, part));
+      const settings = moduleQueryKey(channelId, moduleId, "settings");
       const unrelated = moduleQueryKey(channelId, "ads", "schedule");
-      [relevant, unrelated].forEach((key) => { addQuery(queryClient, key); });
+      [...relevant, settings, unrelated].forEach((key) => { addQuery(queryClient, key); });
 
       const parsed = parseRealtimeMessage(JSON.stringify({
         version: 1,
@@ -122,7 +154,8 @@ describe("dashboard realtime messages", () => {
       expect(parsed.kind).toBe("message");
       if (parsed.kind === "message") invalidateDashboardRealtimeMessage(queryClient, parsed.message);
 
-      expect(queryClient.getQueryState(relevant)?.isInvalidated).toBe(true);
+      for (const key of relevant) expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(settings)?.isInvalidated).toBe(false);
       expect(queryClient.getQueryState(unrelated)?.isInvalidated).toBe(false);
     }
   });

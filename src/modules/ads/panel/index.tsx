@@ -1,10 +1,11 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useRef, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
+import type { AdsScheduleResponse } from "../contracts";
 import { Button, EmptyCellValue, Icon, LoadState, Skeleton, notify } from "../../../dashboard/ui";
 import { loadAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
-import { runModuleQueryWrite, useModuleQuery } from "../../../dashboard/data";
+import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryError, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardQueryClient } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 
@@ -23,16 +24,30 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
   const loadError = labels.loadError;
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const queryClient = useDashboardQueryClient();
-  const scheduleQuery = useModuleQuery(channelId, "ads", "schedule", (signal) => loadAdsSchedule(channelId, signal), {
+  const scheduleError = useDashboardQueryError(moduleQueryKey(channelId, "ads", "schedule"));
+  const loadErrorNotified = useRef(false);
+  const readSchedule = async (signal: AbortSignal): Promise<AdsScheduleResponse> => {
+    try {
+      const response = await loadAdsSchedule(channelId, signal);
+      loadErrorNotified.current = false;
+      return response;
+    } catch (failure: unknown) {
+      if (!loadErrorNotified.current) {
+        loadErrorNotified.current = true;
+        notify({ tone: "error", message: loadError });
+      }
+      throw failure;
+    }
+  };
+  const scheduleQuery = useModuleQuery(channelId, "ads", "schedule", readSchedule, {
     refetchInterval: realtimeStatus === "connected" ? false : 60_000,
   });
   const schedule = scheduleQuery.data ?? null;
-  const loadStatus = scheduleQuery.isPending ? "loading" : scheduleQuery.isError ? "error" : "success";
+  const scheduleLoadFailed = scheduleError !== null;
+  const loadStatus = schedule === null
+    ? scheduleQuery.isPending ? "loading" : scheduleLoadFailed ? "error" : "loading"
+    : "success";
   const [snoozeBusy, setSnoozeBusy] = useState(false);
-
-  useEffect(() => {
-    if (scheduleQuery.isError) notify({ tone: "error", message: loadError });
-  }, [loadError, scheduleQuery.error, scheduleQuery.isError]);
 
   const snoozeCount = schedule?.schedule.snoozeCount ?? null;
   const snoozeButtonDisabled = schedule === null || snoozeBusy || !schedule.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
@@ -71,9 +86,9 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
           <Skeleton rows={4} height={34} />
         </div>}
         empty={<div style={{ minHeight: "calc(var(--s10) * 24)" }} />}
-        error={<div className="module-stack" aria-label={labels.title}>
-          <Skeleton rows={4} height={34} /><Skeleton rows={3} height={34} /><Skeleton rows={4} height={34} />
-        </div>}>
+        error={<p role="alert">{loadError}</p>}
+        onRetry={() => { void scheduleQuery.refetch({ throwOnError: true }).catch(() => undefined); }}
+        refreshError={schedule !== null && scheduleLoadFailed}>
       {schedule === null ? null : <>
       <section className="config-section" aria-label={labels.scheduleSection}>
         <div className="section-heading"><h2>{labels.scheduleSection}</h2></div>

@@ -39,10 +39,11 @@ export const useEventsQuery = (channelId: string, filters: PanelEventFilters) =>
   });
 };
 
-export const useSystemQuery = (channelId: string, enabled: boolean) => useQuery({
+export const useSystemQuery = (channelId: string, enabled: boolean, refetchInterval: number | false = false) => useQuery({
   queryKey: dashboardDataKeys.system(channelId),
   queryFn: ({ signal }) => fetchSystemOverview(channelId, signal),
   enabled,
+  refetchInterval,
   refetchOnWindowFocus: false,
   placeholderData: (previousData, previousQuery) =>
     previousQuery?.queryKey[1] === channelId ? previousData : undefined,
@@ -69,6 +70,7 @@ export const useOverlayQuery = (channelId: string, overlayId: string, enabled = 
   queryKey: dashboardDataKeys.overlay(channelId, overlayId),
   queryFn: ({ signal }) => fetchOverlay(channelId, overlayId, signal),
   enabled,
+  refetchOnMount: "always",
   refetchOnWindowFocus: false,
   placeholderData: () => undefined,
 });

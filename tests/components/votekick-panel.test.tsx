@@ -1,4 +1,4 @@
-import { act, cleanup, screen } from "@testing-library/react";
+import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -6,6 +6,7 @@ import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store
 import VotekickPanel from "../../src/modules/votekick/panel";
 import type { Votekick } from "../../src/modules/votekick/contracts";
 import { setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
+import { moduleQueryKey } from "../../src/dashboard/data/module-query";
 import { jsonResponse } from "../unit/fixtures";
 import { renderWithQuery as render } from "../query-test-utils";
 
@@ -107,6 +108,35 @@ describe("Votekick panel", () => {
     expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(2);
     const newToasts = toastsSnapshot().filter((toast) => !previousToastIds.has(toast.id));
     expect(newToasts.filter((toast) => toast.message === "Votekicks could not be loaded.")).toHaveLength(1);
+    for (const toast of newToasts) dismissToast(toast.id);
+  });
+
+  it("notifies again when a later refresh fails after a successful recovery", async () => {
+    const previousToastIds = new Set(toastsSnapshot().map((toast) => toast.id));
+    let shouldFail = true;
+    const fetcher = vi.fn<typeof fetch>(() => shouldFail
+      ? Promise.reject(new Error("network unavailable"))
+      : Promise.resolve(jsonResponse({ running: null, votekicks: [], now: "2026-10-04T11:00:00.000Z" })));
+    vi.stubGlobal("fetch", fetcher);
+    setDashboardRealtimeStatus("channel-a", "connected");
+    const view = render(<UiProvider><VotekickPanel channelId="channel-a" language="en" /></UiProvider>);
+
+    await waitFor(() => expect(toastsSnapshot().filter((toast) => !previousToastIds.has(toast.id))).toHaveLength(1));
+    shouldFail = false;
+    await act(async () => {
+      await view.queryClient.refetchQueries({ queryKey: moduleQueryKey("channel-a", "votekick", "panel"), exact: true });
+    });
+    expect(view.queryClient.getQueryState(moduleQueryKey("channel-a", "votekick", "panel"))?.status).toBe("success");
+    expect(await screen.findByText("No votekick yet. Start one in chat with !votekick @user.")).toBeInTheDocument();
+    shouldFail = true;
+    await act(async () => {
+      await view.queryClient.refetchQueries({ queryKey: moduleQueryKey("channel-a", "votekick", "panel"), exact: true });
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(view.queryClient.getQueryState(moduleQueryKey("channel-a", "votekick", "panel"))?.status).toBe("error");
+    const newToasts = toastsSnapshot().filter((toast) => !previousToastIds.has(toast.id));
+    expect(newToasts.filter((toast) => toast.message === "Votekicks could not be loaded.")).toHaveLength(2);
     for (const toast of newToasts) dismissToast(toast.id);
   });
 });

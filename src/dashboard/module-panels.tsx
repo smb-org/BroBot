@@ -176,27 +176,24 @@ interface ModulePanelMountProperties {
   initialSelection?: string;
 }
 
-const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, onSaved }: {
+const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
-  onSaved?: () => void;
 }): ReactElement | null => module.settingsEditor === undefined ? null : <ModuleSettingsEditorQuery
   key={`${channelId}:${module.id}`}
   module={module}
   channelId={channelId}
   canManageContent={canManageContent}
   language={language}
-  {...(onSaved === undefined ? {} : { onSaved })}
 />;
 
-const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language, onSaved }: {
+const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
-  onSaved?: () => void;
 }): ReactElement => {
   const [generation, setGeneration] = useState(0);
   const queryClient = useDashboardQueryClient();
@@ -245,7 +242,6 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       channelVariables={loaded.variables}
       initial={loaded.settings}
       initialRevision={loaded.revision}
-      {...(onSaved === undefined ? {} : { onSaved })}
       onReload={async () => {
         try {
           await refetchModuleQueryData(queryClient, channelId, module.id, "settings");
@@ -259,7 +255,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   </LoadState>;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, retryLabel, channelVariables, initial, initialRevision, onSaved, onReload }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, retryLabel, channelVariables, initial, initialRevision, onReload }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
@@ -269,7 +265,6 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   channelVariables: readonly PanelChannelVariable[];
   initial: Record<string, unknown>;
   initialRevision: number;
-  onSaved?: () => void;
   onReload: () => Promise<boolean>;
 }): ReactElement => {
   const queryClient = useDashboardQueryClient();
@@ -450,6 +445,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
           updateCache: (current, result) => typeof current === "object" && current !== null
             ? { ...current, ...result }
             : current,
+          relatedParts: (module.settingsEditorRelatedParts ?? []).map((part) => ({ moduleId: module.id, part })),
         },
       );
       setValue(response.settings);
@@ -458,7 +454,6 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       setSaved(true);
       setValidationAttempted(false);
       setServerWarnings(response.warnings);
-      onSaved?.();
       return null;
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "module_settings_changed_concurrently") {
@@ -580,16 +575,11 @@ const MountedModuleView = ({ module, Panel, channelId, canManage, canOperate, bo
   botIsModerator: boolean | null;
   initialSelection?: string;
 }): ReactElement => {
-  const [settingsRefreshToken, setSettingsRefreshToken] = useState(0);
-  const onSettingsSaved = useCallback((): void => {
-    setSettingsRefreshToken((current) => current + 1);
-  }, []);
   const settingsEditor = <ModuleSettingsEditor
     module={module}
     channelId={channelId}
     canManageContent={canManage}
     language={dashboardLanguage()}
-    onSaved={onSettingsSaved}
   />;
   return <div className="module-view">
     {module.settingsEditorPlacement === "before-panel" ? settingsEditor : null}
@@ -600,7 +590,6 @@ const MountedModuleView = ({ module, Panel, channelId, canManage, canOperate, bo
       canOperate={canOperate}
       botIsModerator={botIsModerator}
       textBlockConditions={MODULES.flatMap((candidate) => candidate.textBlockConditions ?? [])}
-      settingsRefreshToken={settingsRefreshToken}
       {...(initialSelection === undefined ? {} : { initialSelection })}
     />}
     {module.settingsEditorPlacement === "before-panel" ? null : settingsEditor}

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModulePage } from "../../src/dashboard/module-panels";
@@ -6,7 +6,7 @@ import { UiProvider } from "../../src/dashboard/ui";
 import { toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
-import { invalidateDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import { invalidateDashboardRealtimeMessage, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { renderWithQuery } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
@@ -24,6 +24,9 @@ const schedule: AdsScheduleResponse = {
   recentAdBreaks: [],
 };
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
+const requestPath = (input: RequestInfo | URL): string => input instanceof Request
+  ? new URL(input.url).pathname
+  : input instanceof URL ? input.pathname : new URL(input, "https://brobot.example").pathname;
 
 const renderAds = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof renderWithQuery> => {
   vi.stubGlobal("fetch", fetcher);
@@ -56,6 +59,7 @@ const adsFetch = (
 describe("Ad settings editor declaration", () => {
   afterEach(() => {
     cleanup();
+    setDashboardRealtimeStatus("kanal-a", "offline");
     vi.unstubAllGlobals();
     if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
   });
@@ -129,6 +133,39 @@ describe("Ad settings editor declaration", () => {
 
     expect(await screen.findByRole("button", { name: /Snooze · 0 verfügbar/ })).toBeDisabled();
     expect(screen.getByText(/channel:manage:ads fehlt/)).toBeInTheDocument();
+  });
+
+  it("preserves the cached schedule and limits load notifications to one per outage", async () => {
+    setDashboardRealtimeStatus("kanal-a", "connected");
+    let scheduleReadFails = false;
+    const baseFetcher = adsFetch();
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path.endsWith("/schedule") && scheduleReadFails) return Promise.resolve(jsonResponse({ error: "schedule_unavailable" }, 503));
+      return baseFetcher(input, init);
+    });
+    const view = renderAds(fetcher);
+    expect(await screen.findByText(/Derzeit ist keine Werbung geplant\./u)).toBeInTheDocument();
+    const key = { queryKey: moduleQueryKey("kanal-a", "ads", "schedule"), exact: true };
+    const refresh = async (): Promise<void> => {
+      await act(async () => { await view.queryClient.refetchQueries(key, { throwOnError: true }).catch(() => undefined); });
+    };
+
+    scheduleReadFails = true;
+    await refresh();
+    await refresh();
+    expect(fetcher.mock.calls.filter(([input]) => requestPath(input).endsWith("/schedule"))).toHaveLength(3);
+    expect(view.queryClient.getQueryState(key.queryKey)?.status).toBe("error");
+    expect(screen.getByText(/Derzeit ist keine Werbung geplant\./u)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Der Werbeplan konnte nicht geladen werden.");
+    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
+    expect(toastsSnapshot().filter((toast) => toast.message === "Der Werbeplan konnte nicht geladen werden.")).toHaveLength(1);
+
+    scheduleReadFails = false;
+    await refresh();
+    scheduleReadFails = true;
+    await refresh();
+    expect(toastsSnapshot().filter((toast) => toast.message === "Der Werbeplan konnte nicht geladen werden.")).toHaveLength(2);
   });
 
   it("shows a rejected snooze as an error toast without making the settings draft dirty", async () => {

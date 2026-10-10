@@ -326,7 +326,7 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
       ? apiErrorText(variablesQuery.error.code, labels.editorLoadError)
       : labels.editorLoadError
     : null;
-  const overlayLoadError = overlayId !== "new" && overlayQuery.isError && overlayQuery.data === undefined
+  const overlayLoadError = session === null && overlayId !== "new" && overlayQuery.isError
     ? overlayQuery.error instanceof PanelApiError
       ? apiErrorText(overlayQuery.error.code, labels.editorLoadError)
       : labels.editorLoadError
@@ -342,21 +342,19 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
       const message = variablesQuery.error instanceof PanelApiError
         ? apiErrorText(variablesQuery.error.code, labels.editorLoadError)
         : labels.editorLoadError;
-      initializedSessionKey.current = sessionKey;
       notify({ tone: "error", message });
       return;
     }
     if (variablesQuery.data === undefined) return;
     const variableData = variablesQuery.data;
-    if (overlayId !== "new" && overlayQuery.isError && overlayQuery.data === undefined) {
+    if (overlayId !== "new" && overlayQuery.isError) {
       const message = overlayQuery.error instanceof PanelApiError
         ? apiErrorText(overlayQuery.error.code, labels.editorLoadError)
         : labels.editorLoadError;
-      initializedSessionKey.current = sessionKey;
       notify({ tone: "error", message });
       return;
     }
-    if (overlayId !== "new" && overlayQuery.data === undefined) return;
+    if (overlayId !== "new" && (overlayQuery.data === undefined || overlayQuery.isFetching)) return;
     let disposed = false;
     const overlay = overlayId === "new"
       ? {
@@ -389,7 +387,7 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
         notify({ tone: "error", message });
       });
     return () => { disposed = true; };
-  }, [channelId, initialOverlayName, labels.editorLoadError, loadGeneration, overlayId, overlayQuery.data, overlayQuery.error, overlayQuery.isError, variablesQuery.data, variablesQuery.error, variablesQuery.isError]);
+  }, [channelId, initialOverlayName, labels.editorLoadError, loadGeneration, overlayId, overlayQuery.data, overlayQuery.error, overlayQuery.isError, overlayQuery.isFetching, variablesQuery.data, variablesQuery.error, variablesQuery.isError]);
 
   const reload = useCallback((): void => {
     setSession(null);
