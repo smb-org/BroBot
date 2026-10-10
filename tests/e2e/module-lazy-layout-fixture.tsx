@@ -24,6 +24,7 @@ const content = element !== undefined
       language="en"
       onChange={() => undefined}
     />
+    <div data-testid="layout-sentinel" aria-hidden="true" />
   </div>
     : module === undefined
     ? <p>Unknown lazy view.</p>
@@ -32,6 +33,7 @@ const content = element !== undefined
         channelId={channelId}
         activeModules={[{ moduleId: module.id, settings: "{}" }]}
       />
+      <div data-testid="layout-sentinel" aria-hidden="true" />
     </div>;
 
 createRoot(document.getElementById("root") as HTMLElement).render(

@@ -2,6 +2,7 @@ import { platformTexts } from "./labels";
 import type { DashboardTexts } from "./locale";
 import type { DashboardRoute } from "./router";
 import { modulePermissionsAreMissing } from "./channel-health";
+import type { ChannelRole } from "../contracts/values";
 import { MODULE_NAVIGATION_CATEGORIES, type BotModule, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 
 export type NavPageGroup = "operation" | "channel" | "platform";
@@ -69,13 +70,15 @@ export interface ModuleNavigationState {
   missingBroadcasterScopes?: readonly string[];
 }
 
-/** Module pages are readable by every channel role; only disabled or scope-blocked modules leave the sidebar. */
-export const moduleNavigationIsVisible = (state: ModuleNavigationState): boolean =>
-  state.enabled && !modulePermissionsAreMissing(state);
+/** Module pages are readable by every channel role; missing membership, disabled modules, or missing scopes hide them. */
+export const moduleNavigationIsVisible = (state: ModuleNavigationState, memberRole: ChannelRole | null): boolean =>
+  memberRole !== null && state.enabled && !modulePermissionsAreMissing(state);
 
 /** Shared visibility predicate for sidebar entries and their idle chunk preloads. */
-export const visibleModuleNavigationIds = (moduleStates: readonly ModuleNavigationState[]): ReadonlySet<string> =>
-  new Set(moduleStates.filter(moduleNavigationIsVisible).map((state) => state.id));
+export const visibleModuleNavigationIds = (
+  moduleStates: readonly ModuleNavigationState[],
+  memberRole: ChannelRole | null,
+): ReadonlySet<string> => new Set(moduleStates.filter((state) => moduleNavigationIsVisible(state, memberRole)).map((state) => state.id));
 
 /** Converts module-owned navigation declarations into host routes and labels. */
 export const registeredModuleNavEntries = (
@@ -98,11 +101,12 @@ export const registeredModuleNavEntries = (
 export const enabledModuleNavigationGroups = (
   modules: readonly Pick<BotModule, "id" | "navigationCategory" | "navigationEntries">[],
   moduleStates: readonly ModuleNavigationState[],
+  memberRole: ChannelRole | null,
   channelId: string,
   language: ModuleLanguage,
   fallbackLabel: (moduleId: string) => string,
 ): readonly ModuleSidebarGroup[] => {
-  const enabledModuleIds = visibleModuleNavigationIds(moduleStates);
+  const enabledModuleIds = visibleModuleNavigationIds(moduleStates, memberRole);
   const registeredEntries = registeredModuleNavEntries(modules, channelId, language);
 
   return MODULE_NAVIGATION_CATEGORIES.flatMap((category) => {

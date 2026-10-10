@@ -57,6 +57,22 @@ const installApiRoutes = async (page: Page, channelState: typeof channel = chann
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ sources: [] }) });
       return;
     }
+    if (pathname === `/api/channels/${channelId}/modules/ads/settings`) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        settings: { automatic: "Ad break", manual: "Manual ad break", prewarning: false, leadSeconds: 60, prewarningText: "Ad break in {ads.seconds} seconds." },
+        revision: 1,
+        variables: [],
+      }) });
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/modules/ads/schedule`) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: 0, snoozeRefreshAt: null },
+        snoozeScopeAvailable: true,
+        recentAdBreaks: [],
+      }) });
+      return;
+    }
     await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
   });
 };
@@ -228,82 +244,129 @@ test("cold module navigation keeps the reserved page height and scroll position 
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
 });
 
-test("every lazy module view and overlay editor keeps its reserved box and scroll position during import", async ({ page }) => {
-  const lazyModuleIds = [
-    "text_commands", "faq", "chat_voting", "text_library", "timers", "sun", "moon",
-    "weather", "api_source", "belabox", "ads", "votekick",
-  ];
-  const overlayElements = [
-    { kind: "chat_voting.tally", moduleId: "chat_voting" },
-    { kind: "text_library.block", moduleId: "text_library" },
-    { kind: "belabox.status", moduleId: "belabox" },
-    { kind: "ads.countdown", moduleId: "ads" },
-    { kind: "votekick.tally", moduleId: "votekick" },
-  ];
-  await page.setViewportSize({ width: 1280, height: 600 });
-  await page.route("**/api/**", async (route) => {
-    await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+test("a failed idle settings preload can recover through the module Retry action", async ({ page }) => {
+  await page.addInitScript(() => {
+    type IdleTestWindow = Window & { __idleCallbacks?: Array<() => void> };
+    const idleWindow = window as IdleTestWindow;
+    const pendingCallbacks = new Map<number, () => void>();
+    let nextHandle = 0;
+    idleWindow.__idleCallbacks = [];
+    Object.defineProperty(window, "requestIdleCallback", {
+      configurable: true,
+      value: (callback: () => void) => {
+        nextHandle += 1;
+        pendingCallbacks.set(nextHandle, callback);
+        idleWindow.__idleCallbacks = [...pendingCallbacks.values()];
+        return nextHandle;
+      },
+    });
+    Object.defineProperty(window, "cancelIdleCallback", {
+      configurable: true,
+      value: (handle: number) => {
+        pendingCallbacks.delete(handle);
+        idleWindow.__idleCallbacks = [...pendingCallbacks.values()];
+      },
+    });
+  });
+  await installApiRoutes(page);
+
+  let settingsChunkRequests = 0;
+  await page.route("**/src/modules/ads/panel/settings-editor.ts*", async (route) => {
+    settingsChunkRequests += 1;
+    if (settingsChunkRequests === 1) {
+      await route.fulfill({ status: 503, contentType: "text/plain", body: "temporary chunk failure" });
+      return;
+    }
+    await route.continue();
   });
 
-  for (const moduleId of lazyModuleIds) {
-    let markRequestStarted: () => void = () => undefined;
-    const requestStarted = new Promise<void>((resolve) => { markRequestStarted = resolve; });
-    let releaseRequest: () => void = () => undefined;
-    const responseGate = new Promise<void>((resolve) => { releaseRequest = resolve; });
-    const pattern = `**/src/modules/${moduleId}/panel/**`;
-    const intercept = async (route: Route): Promise<void> => {
-      markRequestStarted();
-      await responseGate;
-      await route.continue();
-    };
-    await page.route(pattern, intercept);
-    await page.goto(`/tests/e2e/module-lazy-layout-fixture.html?module=${moduleId}`);
-    await requestStarted;
-    await expect(page.locator(".module-view-fallback")).toBeVisible();
-    const reservedPage = page.getByTestId("module-route-layout");
-    const heightBefore = await reservedPage.evaluate((element) => element.getBoundingClientRect().height);
-    const minHeightBefore = await reservedPage.evaluate((element) => getComputedStyle(element).minHeight);
-    await page.evaluate(() => { window.scrollTo(0, 120); });
-    const scrollBefore = await page.evaluate(() => window.scrollY);
+  await page.goto(`/channels/${channelId}/modules`);
+  await expect(page.locator(".module-workspace .state-list")).toBeVisible();
+  await page.evaluate(() => {
+    type IdleTestWindow = Window & { __idleCallbacks?: Array<() => void> };
+    const idleWindow = window as IdleTestWindow;
+    idleWindow.__idleCallbacks?.splice(0).forEach((callback) => { callback(); });
+  });
+  await expect.poll(() => settingsChunkRequests).toBe(1);
 
-    releaseRequest();
-    await expect(page.locator(".module-view-fallback")).toHaveCount(0);
-    expect(await reservedPage.evaluate((element) => getComputedStyle(element).minHeight), moduleId).toBe(minHeightBefore);
-    expect(await reservedPage.evaluate((element) => element.getBoundingClientRect().height), moduleId).toBeGreaterThanOrEqual(heightBefore);
-    expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
-    await page.unroute(pattern, intercept);
-  }
+  await page.locator(`.sidebar a[href="/channels/${channelId}/modules/ads"]`).evaluate((element) => {
+    element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+  });
+  await expect(page).toHaveURL(`/channels/${channelId}/modules/ads`);
+  const settings = page.locator(".module-view");
+  const retryButton = settings.getByRole("button", { name: "Retry" });
+  await expect(retryButton).toBeVisible();
+  await expect.poll(() => settingsChunkRequests).toBe(1);
 
-  for (const { kind, moduleId } of overlayElements) {
-    let markRequestStarted: () => void = () => undefined;
-    const requestStarted = new Promise<void>((resolve) => { markRequestStarted = resolve; });
-    let releaseRequest: () => void = () => undefined;
-    const responseGate = new Promise<void>((resolve) => { releaseRequest = resolve; });
-    const editorChunk = kind === "ads.countdown" ? "countdown-editor" : "editor";
-    const pattern = `**/src/modules/${moduleId}/overlay/${editorChunk}.tsx*`;
-    const intercept = async (route: Route): Promise<void> => {
-      markRequestStarted();
-      await responseGate;
-      await route.continue();
-    };
-    await page.route(pattern, intercept);
-    await page.goto(`/tests/e2e/module-lazy-layout-fixture.html?element=${encodeURIComponent(kind)}`, { waitUntil: "commit" });
-    await requestStarted;
-    const editor = page.locator(`.module-overlay-element-editor[data-kind="${kind}"]`);
-    await expect(editor).toBeVisible();
-    const heightBefore = await editor.evaluate((element) => element.getBoundingClientRect().height);
-    await page.evaluate(() => { window.scrollTo(0, 120); });
-    const scrollBefore = await page.evaluate(() => window.scrollY);
+  await retryButton.click();
 
-    releaseRequest();
-    await expect(editor.locator("[data-module-editor-fallback]")).toHaveCount(0);
-    const editorLayout = await editor.evaluate((element) => ({
-      height: element.getBoundingClientRect().height,
-      minHeight: getComputedStyle(element).minHeight,
-      spacingToken: getComputedStyle(element).getPropertyValue("--s10"),
-    }));
-    expect(editorLayout.height, `${kind}: ${JSON.stringify(editorLayout)}`).toBe(heightBefore);
-    expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
-    await page.unroute(pattern, intercept);
-  }
+  await expect(settings.locator(".ui-settings-editor")).toBeVisible();
+  await expect.poll(() => settingsChunkRequests).toBe(2);
+  await expect(retryButton).toHaveCount(0);
 });
+
+const lazyModuleViews = [
+  "text_commands", "faq", "chat_voting", "text_library", "timers", "sun", "moon",
+  "weather", "api_source", "belabox", "ads", "votekick",
+] as const;
+const lazyOverlayEditors = [
+  { kind: "chat_voting.tally", moduleId: "chat_voting", chunk: "editor" },
+  { kind: "text_library.block", moduleId: "text_library", chunk: "editor" },
+  { kind: "belabox.status", moduleId: "belabox", chunk: "editor" },
+  { kind: "ads.countdown", moduleId: "ads", chunk: "countdown-editor" },
+  { kind: "votekick.tally", moduleId: "votekick", chunk: "editor" },
+] as const;
+
+const lazyLayoutCases = [
+  ...lazyModuleViews.map((moduleId) => ({ type: "module" as const, moduleId, label: `${moduleId} panel` })),
+  ...lazyOverlayEditors.map((editor) => ({ type: "editor" as const, ...editor, label: `${editor.kind} editor` })),
+];
+
+for (const lazyCase of lazyLayoutCases) {
+  test(`${lazyCase.label} keeps its reserved box and scroll position during delayed import`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 600 });
+    await page.route("**/api/**", async (route) => {
+      await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+    });
+
+    const pattern = lazyCase.type === "module"
+      ? `**/src/modules/${lazyCase.moduleId}/panel/**`
+      : `**/src/modules/${lazyCase.moduleId}/overlay/${lazyCase.chunk}.tsx*`;
+    let markRequestStarted: () => void = () => undefined;
+    const requestStarted = new Promise<void>((resolve) => { markRequestStarted = resolve; });
+    let releaseRequest: () => void = () => undefined;
+    const responseGate = new Promise<void>((resolve) => { releaseRequest = resolve; });
+    const intercept = async (route: Route): Promise<void> => {
+      markRequestStarted();
+      await responseGate;
+      await route.continue();
+    };
+    await page.route(pattern, intercept);
+    const fixtureUrl = lazyCase.type === "module"
+      ? `/tests/e2e/module-lazy-layout-fixture.html?module=${lazyCase.moduleId}`
+      : `/tests/e2e/module-lazy-layout-fixture.html?element=${encodeURIComponent(lazyCase.kind)}`;
+    await page.goto(fixtureUrl, { waitUntil: "commit" });
+    await requestStarted;
+
+    const reservedBox = page.getByTestId("module-route-layout");
+    const sentinel = page.getByTestId("layout-sentinel");
+    if (lazyCase.type === "module") await expect(page.locator(".module-view-fallback")).toBeVisible();
+    else await expect(page.locator("[data-module-editor-fallback]")).toBeVisible();
+    const boxHeightBefore = await reservedBox.evaluate((element) => element.getBoundingClientRect().height);
+    const minHeightBefore = await reservedBox.evaluate((element) => getComputedStyle(element).minHeight);
+    await page.evaluate(() => { window.scrollTo(0, 120); });
+    const scrollBefore = await page.evaluate(() => window.scrollY);
+    const sentinelTopBefore = await sentinel.evaluate((element) => element.getBoundingClientRect().top);
+
+    releaseRequest();
+    if (lazyCase.type === "module") await expect(page.locator(".module-view-fallback")).toHaveCount(0);
+    else await expect(page.locator("[data-module-editor-fallback]")).toHaveCount(0);
+
+    expect(await reservedBox.evaluate((element) => getComputedStyle(element).minHeight), lazyCase.label).toBe(minHeightBefore);
+    expect(await reservedBox.evaluate((element) => element.getBoundingClientRect().height), lazyCase.label).toBe(boxHeightBefore);
+    if (lazyCase.type === "editor") {
+      expect(await sentinel.evaluate((element) => element.getBoundingClientRect().top), lazyCase.label).toBe(sentinelTopBefore);
+    }
+    expect(await page.evaluate(() => window.scrollY), lazyCase.label).toBe(scrollBefore);
+  });
+}

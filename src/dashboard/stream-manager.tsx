@@ -17,7 +17,7 @@ import { Button, LoadState, notify, Popover, Skeleton } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { collectChannelNoticeFacts, type ChannelNoticeFact } from "./channel-health";
 import { moduleName } from "./module-labels";
-import { loadModuleImmediateActions } from "./module-panel-loaders";
+import { loadModuleImmediateActions, retryModuleChunkLoad } from "./module-panel-loaders";
 import { StateRow } from "./module-panels";
 import { RetryableLazy } from "./RetryableLazy";
 
@@ -200,6 +200,7 @@ const ImmediateActionCard = ({ moduleId, channelId, streamState, canManage, avai
   return <RetryableLazy
     instanceKey={`${moduleId}:immediateActions`}
     load={loadAction}
+    onRetry={retryModuleChunkLoad}
     properties={{ channelId, streamState, canManage, availabilityReason }}
     loadingFallback={<div className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>}
     renderError={(retry) => <div className="stream-manager-action stream-manager-action--loading" role="alert">
