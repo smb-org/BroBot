@@ -917,6 +917,7 @@ export interface DashboardTexts {
     views: string;
     loadingViews: string;
     settingsLoadError: string;
+    componentLoadError: string;
     unsavedChangesTitle: string;
     unsavedChangesDescription: string;
     continueEditing: string;
@@ -1248,6 +1249,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       noView: "Für dieses aktive Modul gibt es noch keine Panel-Ansicht.", views: "Modulansichten",
       loadingViews: "Modulansichten werden geladen …",
       settingsLoadError: "Moduleinstellungen konnten nicht geladen werden.",
+      componentLoadError: "Modulinhalte konnten nicht geladen werden.",
       unsavedChangesTitle: "Ungespeicherte Änderungen",
       unsavedChangesDescription: "Du hast ungespeicherte Moduleinstellungen. Was möchtest du tun?",
       continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln",
@@ -1565,7 +1567,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       active: "Active", inactive: "Inactive", enable: "enable", disable: "disable", moduleList: "Module list",
       moduleOverview: "Module overview",
       managementLocked: "Only broadcasters and managers may change modules.", noneActive: "No modules active.",
-      noView: "This active module does not have a panel view yet.", views: "Module views", loadingViews: "Loading module views …", settingsLoadError: "Module settings could not be loaded.",
+      noView: "This active module does not have a panel view yet.", views: "Module views", loadingViews: "Loading module views …", settingsLoadError: "Module settings could not be loaded.", componentLoadError: "Module content could not be loaded.",
       unsavedChangesTitle: "Unsaved changes",
       unsavedChangesDescription: "You have unsaved module settings. What would you like to do?",
       continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch",

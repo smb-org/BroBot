@@ -100,6 +100,13 @@ vi.mock("../../src/modules/registry", () => ({
       settingsEditor: editorFixture.loader,
     },
     {
+      id: "editor-lazy-fixture",
+      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
+      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
+      templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },
+      settingsEditor: editorFixture.loader,
+    },
+    {
       id: "editor-before-fixture",
       navigationCategory: "chat",
       settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
@@ -144,14 +151,15 @@ const renderSettingsFixture = (
   fetcher: typeof fetch,
   ownRole: "manager" | "operator" = "manager",
   queryOptions: { gcTime?: number; staleTime?: number } = {},
+  moduleId = "editor-fixture",
 ): ReturnType<typeof renderWithQuery> => {
   vi.stubGlobal("fetch", fetcher);
   return renderWithMantine(<ModulePage
     channelId="kanal-a"
-    moduleId="editor-fixture"
+    moduleId={moduleId}
     ownRole={ownRole}
-    modules={[{ id: "editor-fixture", enabled: true, settings: "{}" }]}
-    activeModules={[{ moduleId: "editor-fixture", settings: "{}" }]}
+    modules={[{ id: moduleId, enabled: true, settings: "{}" }]}
+    activeModules={[{ moduleId, settings: "{}" }]}
     onNavigate={vi.fn()}
     onToggle={vi.fn()}
   />, queryOptions);
@@ -585,13 +593,14 @@ describe("Module panel loader", () => {
   });
 
   it("loads a declaration lazily and renders each field with catalog copy before saving only its schema keys", async () => {
+    const moduleId = "editor-lazy-fixture";
     let resolveSettings: ((response: Response) => void) | undefined;
     const deferredSettings = new Promise<Response>((resolve) => { resolveSettings = resolve; });
     let patchBody: unknown;
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
-      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
+      if (path.endsWith(`/modules/${moduleId}/settings`) && init?.method === "PATCH") {
         patchBody = typeof init.body === "string" ? JSON.parse(init.body) as unknown : null;
         const request = patchBody as { revision: number; settings: typeof editorFixtureSettings };
         return Promise.resolve(Response.json({
@@ -600,10 +609,10 @@ describe("Module panel loader", () => {
           warnings: [{ field: "message", code: "unknown_template_variables", unknownVariables: ["ghost"] }],
         }));
       }
-      if (path.endsWith("/modules/editor-fixture/settings")) return deferredSettings;
+      if (path.endsWith(`/modules/${moduleId}/settings`)) return deferredSettings;
       return Promise.resolve(Response.json({}));
     });
-    const view = renderSettingsFixture(fetcher);
+    const view = renderSettingsFixture(fetcher, "manager", {}, moduleId);
 
     expect(view.container.querySelector('.ui-load-state[data-status="loading"]')).not.toBeNull();
     expect(view.container.querySelectorAll(".mantine-Skeleton-root").length).toBeGreaterThan(0);

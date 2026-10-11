@@ -10,6 +10,9 @@ vi.mock("../../src/modules/registry", () => ({
 import { DashboardApp } from "../../src/dashboard/main";
 import { renderWithQuery as render } from "../query-test-utils";
 
+const idleCallbackPropertyNames = ["requestIdleCallback", "cancelIdleCallback"] as const;
+const originalIdleCallbackProperties = idleCallbackPropertyNames.map((name) => [name, Object.getOwnPropertyDescriptor(window, name)] as const);
+
 const channel = {
   channelId: "kanal-a",
   login: "kanal-a",
@@ -38,9 +41,17 @@ describe("Module route during client-side navigation", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    for (const [name, descriptor] of originalIdleCallbackProperties) {
+      if (descriptor === undefined) Reflect.deleteProperty(window, name);
+      else Object.defineProperty(window, name, descriptor);
+    }
   });
 
   it("starts the panel from the cached activity state on navigation", async () => {
+    const idleCallbackScheduled = vi.fn(() => 1);
+    Object.defineProperty(window, "requestIdleCallback", { configurable: true, value: idleCallbackScheduled });
+    Object.defineProperty(window, "cancelIdleCallback", { configurable: true, value: () => undefined });
+
     const activeState = { ...channel, activeModules: [{ moduleId: "aktiv", settings: "{}" }] };
     let overviewAufrufe = 0;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -61,6 +72,7 @@ describe("Module route during client-side navigation", () => {
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
     expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
     const link = await within(nav).findByRole("link", { name: /^aktiv.*Läuft$/ });
+    expect(idleCallbackScheduled).toHaveBeenCalled();
     expect(activeLoader).not.toHaveBeenCalled();
 
     link.click();

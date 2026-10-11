@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
 import { EVENT_TONES, type AuditArea, type EventTone } from "../contracts/values";
 import { isAuditArea } from "./audit/areas";
@@ -219,19 +219,19 @@ export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute, on
       const targetRoute = parseDashboardRoute(window.location.pathname, window.location.search);
       const targetIndex = historyIndexFromState(window.history.state);
       if (suppressNextPopState) {
-        setRoute(targetRoute);
+        startTransition(() => { setRoute(targetRoute); });
         if (targetIndex !== null) historyIndex = targetIndex;
         return;
       }
       if (targetIndex !== null && targetIndex === historyIndex) {
-        setRoute(targetRoute);
+        startTransition(() => { setRoute(targetRoute); });
         return;
       }
       const previousIndex = historyIndex;
       const undoDelta = targetIndex === null || targetIndex < previousIndex ? 1 : -1;
       runDashboardNavigationGuards(() => {
         if (targetIndex !== null) historyIndex = targetIndex;
-        setRoute(targetRoute);
+        startTransition(() => { setRoute(targetRoute); });
       }, () => { window.history.go(undoDelta); });
     };
     window.addEventListener("popstate", onPopState);
@@ -240,7 +240,7 @@ export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute, on
 
   const navigate = (nextRoute: DashboardRoute, onNavigated?: () => void): void => {
     navigateToDashboardRoute(nextRoute, () => {
-      setRoute(nextRoute);
+      startTransition(() => { setRoute(nextRoute); });
       onNavigated?.();
     });
   };
