@@ -23,13 +23,11 @@ export const memoizedModuleLoad = <T,>(moduleId: string, part: string, loader: (
   const key = `${moduleId}:${part}`;
   const cached = moduleLoaderPromises.get(key);
   if (cached !== undefined) return cached as Promise<T>;
-  let loadPromise: Promise<T>;
-  try {
-    loadPromise = loader();
-  } catch (error) {
-    loadPromise = Promise.reject(error instanceof Error ? error : new Error(String(error)));
-  }
   const cacheEntry: { promise: Promise<T> | undefined } = { promise: undefined };
+  // Run the loader now, while converting synchronous throws into rejections.
+  const loadPromise = new Promise<T>((resolve) => {
+    resolve(loader());
+  });
   const promise = loadPromise.catch((error: unknown) => {
     if (moduleLoaderPromises.get(key) === cacheEntry.promise) moduleLoaderPromises.delete(key);
     throw error instanceof ModuleChunkLoadError ? error : new ModuleChunkLoadError(moduleId, part, error);

@@ -35,4 +35,21 @@ describe("module chunk loader cache", () => {
 
     expect(attempts).toBe(2);
   });
+
+  it("evicts a synchronous loader failure so a later attempt can succeed", async () => {
+    let attempts = 0;
+    const moduleId = "recoverable-sync-loader-test";
+
+    await expect(memoizedModuleLoad(moduleId, "panel", () => {
+      attempts += 1;
+      throw new Error("chunk unavailable");
+    })).rejects.toThrow("chunk unavailable");
+
+    await expect(memoizedModuleLoad(moduleId, "panel", () => {
+      attempts += 1;
+      return Promise.resolve("loaded");
+    })).resolves.toBe("loaded");
+
+    expect(attempts).toBe(2);
+  });
 });
