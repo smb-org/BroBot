@@ -846,7 +846,7 @@ ihn gestartet hat.
 
 Die Modulroute startet und beendet Abstimmungen, und ein einzelner
 Modul-Alarm schließt sie nach dem optionalen Timer oder spätestens nach vier
-Stunden. Die Ergebniszeile `chat_votes` speichert nur Voreinstellung,
+Stunden. Die Ergebniszeile `chat_votes` speichert Abstimmungsart,
 Beschriftungen und aggregierte Zähler; einzelne Abstimmende werden nicht in D1
 gespeichert. Das Overlay-Element `chat_voting.tally` lädt den offenen Stand
 beim Start und nimmt Zähler mit monotoner Revision entgegen. Panel und Overlay
