@@ -11,7 +11,7 @@ import { SettingsEditor, UiProvider } from "../../src/dashboard/ui";
 describe("chat voting settings editor", () => {
   afterEach(() => { cleanup(); });
 
-  it("shows defaults as placeholders, keeps empty labels optional, and names a disabled timer", () => {
+  it("removes saved answer labels from settings and keeps the default duration editor", () => {
     const copy = chatVotingSettingsEditorCatalog("en");
     const Harness = () => {
       const [values, setValues] = useState(DEFAULT_CHAT_VOTING_SETTINGS);
@@ -26,20 +26,7 @@ describe("chat voting settings editor", () => {
     };
     render(<Harness />);
 
-    expect(screen.getByRole("textbox", { name: "Yes/no labels" })).toHaveAttribute("placeholder", "Yes|No");
-    const zeroOne = screen.getByRole("textbox", { name: "0/1 labels" });
-    const oneTwo = screen.getByRole("textbox", { name: "1/2 labels" });
-    expect(zeroOne).toHaveAttribute("placeholder", "No|Yes");
-    expect(oneTwo).toHaveAttribute("placeholder", "1|2");
-    expect(zeroOne).not.toBeRequired();
-    expect(oneTwo).not.toBeRequired();
-    fireEvent.change(zeroOne, { target: { value: "Nein|Doch" } });
-    fireEvent.change(oneTwo, { target: { value: "Eins|Zwei" } });
-    expect(zeroOne).toHaveValue("Nein|Doch");
-    expect(oneTwo).toHaveValue("Eins|Zwei");
-    expect(screen.getByRole("textbox", { name: "Scale labels" })).toHaveAttribute("placeholder", "1|2|3|4|5");
-    expect(screen.getByRole("textbox", { name: "Labels for 2–9 options" })).toHaveAttribute("placeholder", "1|2|3|…|9");
-    expect(screen.getByRole("textbox", { name: "Yes/no labels" })).not.toBeRequired();
+    expect(screen.queryByRole("textbox", { name: /labels|beschriftungen/iu })).not.toBeInTheDocument();
     const timer = screen.getByRole("spinbutton", { name: "Default duration" });
     expect(timer).toHaveValue("0");
     expect(timer.parentElement).toHaveTextContent("Off");
@@ -115,26 +102,10 @@ describe("chat voting settings editor", () => {
     expect(screen.queryByRole("spinbutton", { name: "Standarddauer" })).not.toBeInTheDocument();
   });
 
-  it.each([["en", "Yes/no labels"], ["de", "Ja/Nein-Beschriftungen"]] as const)("counts emoji labels as code points in %s and rejects the same overflow as the server", (language, name) => {
-    const copy = chatVotingSettingsEditorCatalog(language);
-    const renderWith = (value: string) => render(<UiProvider><SettingsEditor
-      spec={settingsEditor.spec}
-      sectionId="labels"
-      settings={{ ...DEFAULT_CHAT_VOTING_SETTINGS, yesNoLabels: value }}
-      onChange={() => undefined}
-      texts={copy}
-      templateMessages={copy.templateMessages}
-    /></UiProvider>);
-    const valid = `${"😀".repeat(18)}|${"😀".repeat(18)}`;
-    expect(chatVotingSettingsSchema.safeParse({ yesNoLabels: valid }).success).toBe(true);
-    const view = renderWith(valid);
-    expect(screen.getByRole("textbox", { name })).not.toBeInvalid();
-    expect(view.container).toHaveTextContent("37 / 70");
-    view.unmount();
-    const tooLong = `${"😀".repeat(35)}|${"😀".repeat(35)}`;
-    expect(chatVotingSettingsSchema.safeParse({ yesNoLabels: tooLong }).success).toBe(false);
-    const over = renderWith(tooLong);
-    expect(screen.getByRole("textbox", { name })).toBeInvalid();
-    expect(over.container).toHaveTextContent("71 / 70");
+  it("strips retired label settings from the active settings schema", () => {
+    const parsed = chatVotingSettingsSchema.parse({ yesNoLabels: "Approve|Reject", scaleLabels: "Low|High" });
+    expect(parsed).toEqual(DEFAULT_CHAT_VOTING_SETTINGS);
+    expect(parsed).not.toHaveProperty("yesNoLabels");
+    expect(parsed).not.toHaveProperty("scaleLabels");
   });
 });

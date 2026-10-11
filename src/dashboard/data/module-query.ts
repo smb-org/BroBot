@@ -1,4 +1,5 @@
 import { hashKey, keepPreviousData, useQuery, useQueryClient, type Query, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 
 import { queryKeys } from "./keys";
 
@@ -50,6 +51,14 @@ const readOrderFor = (queryClient: QueryClient, queryKey: readonly unknown[]): R
 
 const readers = new WeakMap<QueryClient, Map<string, ModuleQueryFunction<unknown>>>();
 const queues = new WeakMap<QueryClient, Map<string, Promise<unknown>>>();
+
+/** Tracks an out-of-band manual read failure until the query has newer data. */
+export const useManualQueryFailure = () => {
+  const [failedAt, setFailedAt] = useState<number | null>(null);
+  const clear = useCallback((): void => { setFailedAt(null); }, []);
+  const markFailed = useCallback((dataUpdatedAt: number): void => { setFailedAt(dataUpdatedAt); }, []);
+  return { clear, failedAt, markFailed };
+};
 
 /** Run operations for one query key strictly one after another, whatever each one's outcome. */
 const enqueue = <Result,>(queryClient: QueryClient, queryKey: readonly unknown[], task: () => Promise<Result>): Promise<Result> => {

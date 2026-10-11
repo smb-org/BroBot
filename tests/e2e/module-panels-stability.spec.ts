@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import type { ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 
 const routeJson = async (page: Page, path: string, value: unknown, method?: string): Promise<void> => {
   await page.route(`**${path}`, async (route) => {
@@ -14,8 +15,10 @@ const box = async (locator: Locator): Promise<{ x: number; y: number; width: num
     let scrollY = window.scrollY;
     let ancestor = element.parentElement;
     while (ancestor !== null) {
-      scrollX += ancestor.scrollLeft;
-      scrollY += ancestor.scrollTop;
+      if (ancestor !== document.body && ancestor !== document.documentElement) {
+        scrollX += ancestor.scrollLeft;
+        scrollY += ancestor.scrollTop;
+      }
       ancestor = ancestor.parentElement;
     }
     return { x: rect.x + scrollX, y: rect.y + scrollY, width: rect.width, height: rect.height };
@@ -25,13 +28,41 @@ const box = async (locator: Locator): Promise<{ x: number; y: number; width: num
   };
 };
 
-const gotoPanel = async (page: Page, panel: string): Promise<void> => {
-  await page.goto(`/tests/e2e/module-panels-stability-fixture.html?panel=${panel}`);
+const gotoPanel = async (page: Page, panel: string, language?: "de" | "en", realtime = false): Promise<void> => {
+  const languageQuery = language === undefined ? "" : `&lang=${language}`;
+  const realtimeQuery = realtime ? "&realtime=1" : "";
+    await page.goto(`/tests/e2e/module-panels-stability-fixture.html?panel=${panel}${languageQuery}${realtimeQuery}`);
 };
 
-const chooseOption = async (page: Page, label: string, option: string): Promise<void> => {
-  await page.getByRole("combobox", { name: label }).click();
-  await page.getByRole("option", { name: option }).click();
+const installChatVotingRealtime = async (page: Page) => {
+  let revisions: Readonly<Record<string, number>> = {};
+  let sendHint: ((next: Readonly<Record<string, number>>) => void) | null = null;
+  let messageNumber = 0;
+  await page.routeWebSocket("**/ws/channels/channel-a", (socket) => {
+    socket.onMessage(() => undefined);
+    sendHint = (next) => {
+      revisions = next;
+      messageNumber += 1;
+      socket.send(JSON.stringify({
+        version: 1,
+        id: `chat-voting-revision-${String(messageNumber)}`,
+        createdAt: "2030-01-01T12:00:00.000Z",
+        channelId: "channel-a",
+        type: "panel.resources.changed",
+        payload: { resources: Object.keys(next), revisions: next },
+      }));
+    };
+  });
+  await page.route("**/api/channels/channel-a/revisions", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ revisions }) });
+  });
+  return {
+    waitForSocket: async () => expect.poll(() => sendHint !== null).toBe(true),
+    sendHint: (next: Readonly<Record<string, number>>) => {
+      if (sendHint === null) throw new Error("The chat voting realtime socket is not connected.");
+      sendHint(next);
+    },
+  };
 };
 
 test("API source editor and expression hint keep their boxes stable", async ({ page }) => {
@@ -324,233 +355,936 @@ test("Belabox history keeps its latest twenty streams inside a bounded list", as
   }))).toEqual({ maxHeight: "320px", overflowY: "auto", scrolls: true });
 });
 
-test("chat voting keeps configuration and action stable when results become live", async ({ page }) => {
-  let vote: Record<string, unknown> | null = null;
-  const defaults = {
-    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
-    scale_5: ["1", "2", "3", "4", "5"], options_n: ["1", "2"], free_text: [],
+test("saved chat voting changes stay local until an explicit Save and keep the action slots stable", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  let template: ChatVoteTemplate = {
+    id: "template-dinner", channelId: "channel-a", shortcut: "dinner", title: "Dinner",
+    labels: ["Pizza", "Pasta"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
+  let vote: Record<string, unknown> | null = {
+    id: "vote-previous", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
+    title: "Previous vote", status: "closed", openedAt: "2030-01-01T11:58:00.000Z", closesAt: "2030-01-01T11:59:00.000Z",
+    requestedDurationSeconds: 60, closedAt: "2030-01-01T11:59:00.000Z", closeReason: "manual", counts: [2, 1], voterCount: 3,
+  };
+  let failNextSave = false;
+  let saveRequests = 0;
+  await routeJson(page, "/api/csrf", { token: "csrf" });
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts: vote === null ? null : [3, 1], revision: vote === null ? 1 : 2,
-      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 60, defaultLabels: defaults,
+      vote, counts: vote === null ? null : vote.counts, revision: vote === null ? 1 : 2,
+      terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
     }) });
   });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: [template], count: 1, maximum: 100 }) });
+      return;
+    }
+    if (route.request().method() === "PATCH") {
+      saveRequests += 1;
+      if (failNextSave) {
+        failNextSave = false;
+        await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal_error" }) });
+        return;
+      }
+      const draft = await route.request().postDataJSON() as Partial<ChatVoteTemplate>;
+      template = { ...template, ...draft, revision: template.revision + 1, updatedAt: "2030-01-01T12:01:00.000Z" };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ template }) });
+      return;
+    }
+    await route.fallback();
+  });
   await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
-    const requestBody = await route.request().postDataJSON() as { labels: string[] };
-    expect(requestBody.labels).toEqual(["Yes", "No"]);
+    const body = await route.request().postDataJSON() as { templateId: string };
+    expect(body.templateId).toBe(template.id);
     vote = {
-      id: "vote-a", channelId: "channel-a", preset: "yes_no", optionCount: 2, labels: requestBody.labels,
-      status: "open", openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:01:00.000Z",
-      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [3, 1], voterCount: 4,
+      id: "vote-a", channelId: "channel-a", kind: "options", optionCount: template.labels.length,
+      labels: [...template.labels], title: template.title, status: "open", openedAt: "2030-01-01T12:01:00.000Z",
+      closesAt: "2030-01-01T12:02:00.000Z", requestedDurationSeconds: 60, closedAt: null,
+      closeReason: null, counts: Array<number>(template.labels.length).fill(0), voterCount: 0,
     };
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
   });
-  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/close", async (route) => {
+    vote = { ...(vote ?? {}), status: "closed", closedAt: "2030-01-01T12:02:00.000Z", closeReason: "manual" };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ closing: true, pollId: "vote-a" }) });
+  });
 
-  await page.setViewportSize({ width: 1280, height: 844 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await gotoPanel(page, "chat_voting");
-  const setup = page.locator(".chat-voting-setup");
-  const result = page.locator(".chat-voting-result");
-  const action = page.locator(".chat-voting-action");
-  const hint = page.getByTestId("chat-voting-hint-slot");
-  await expect(action).toBeEnabled();
-  const setupBefore = await box(setup);
-  const resultBefore = await box(result);
-  const actionBefore = await box(action);
-  const hintBefore = await box(hint);
-  expect(setupBefore.x).toBeLessThan(resultBefore.x);
-  expect(setupBefore.y).toBe(resultBefore.y);
+  const live = page.locator(".chat-voting-live");
+  const list = page.locator(".chat-voting-list");
+  const row = page.locator(".chat-voting-template-list .list-row").first();
+  const geometry = async () => ({
+    live: await box(live),
+    action: await box(live.locator(".chat-voting-live__action-slot")),
+    list: await box(list),
+    playSlot: await box(row.locator(".list-row__action")),
+  });
+  await expect(page.locator(".chat-voting-template-list .list-row__action button")).toBeEnabled();
+  const baseline = await geometry();
+  expect(baseline.action.width).toBe(88);
+  expect(baseline.playSlot.width).toBe(36);
 
-  await action.click();
+  await page.locator(".chat-voting-template-list .list-row__action button").click();
   await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
-  await expect(page.locator(".chat-voting-results__row")).toHaveCount(2);
-  expect(await box(setup)).toEqual(setupBefore);
-  expect(await box(action)).toEqual(actionBefore);
-  expect(await box(hint)).toEqual(hintBefore);
-  expect((await box(result)).x).toBe(resultBefore.x);
-  expect((await box(result)).y).toBe(resultBefore.y);
+  await expect.poll(async () => (await box(row.locator(".list-row__action"))).width).toBe(36);
+  expect(await geometry()).toEqual(baseline);
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  const mobileSetup = await box(setup);
-  const mobileResult = await box(result);
-  const mobileAction = await box(action);
-  expect(mobileSetup.y).toBeLessThan(mobileResult.y);
-  expect(mobileAction.y).toBeLessThan(mobileResult.y);
+  await page.getByRole("button", { name: "End vote" }).click();
+  await expect(page.getByRole("button", { name: "End vote" })).toHaveCount(0);
+  expect(await geometry()).toEqual(baseline);
+
+  failNextSave = true;
+  await page.getByRole("textbox", { name: "Question" }).fill("Dinner changed");
+  expect(saveRequests).toBe(0);
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.locator(".ui-save-bar__status")).toContainText("Not saved – retry", { timeout: 5_000 });
+  expect(saveRequests).toBe(1);
+  await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("Dinner changed");
+  expect(await geometry()).toEqual(baseline);
+
+  await page.getByRole("button", { name: "Remove answer 2" }).click();
+  await expect(row).toContainText("2 answers");
+  await expect(row.locator(".list-row__action button")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Start vote", exact: true })).toBeDisabled();
+  expect(await geometry()).toEqual(baseline);
+
+  const addAnswer = page.getByRole("button", { name: "Answer", exact: true });
+  for (let index = 0; index < 8; index += 1) await addAnswer.click();
+  await expect(page.locator(".chat-voting-editor__answer")).toHaveCount(9);
+  await expect(addAnswer).toBeDisabled();
+  await expect(row).toContainText("2 answers");
+  expect(saveRequests).toBe(1);
+  expect(await geometry()).toEqual(baseline);
 });
 
-test("custom duration fits with its controls and unit at desktop and mobile widths", async ({ page }) => {
-  const defaults = {
-    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
-    scale_5: ["1", "2", "3", "4", "5"], options_n: ["1", "2"], free_text: [],
+test("starting a dirty saved vote saves first and does not start after a failed save", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  let template: ChatVoteTemplate = {
+    id: "template-start-save", channelId: "channel-a", shortcut: "dinner", title: "Dinner",
+    labels: ["Pizza", "Pasta"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  let vote: Record<string, unknown> | null = null;
+  let failNextSave = true;
+  const operations: string[] = [];
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+    }) });
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: [template], count: 1, maximum: 100 }) });
+      return;
+    }
+    if (route.request().method() === "PATCH") {
+      const update = await route.request().postDataJSON() as Partial<ChatVoteTemplate>;
+      if (failNextSave) {
+        failNextSave = false;
+        operations.push("save-failed");
+        await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal_error" }) });
+        return;
+      }
+      template = { ...template, ...update, revision: template.revision + 1, updatedAt: "2030-01-01T12:01:00.000Z" };
+      operations.push("save");
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ template }) });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
+    operations.push("start");
+    expect(template.title).toBe("Dinner after edit");
+    vote = {
+      id: "vote-start-save", channelId: "channel-a", kind: "options", optionCount: template.labels.length,
+      labels: [...template.labels], title: template.title, status: "open", openedAt: "2030-01-01T12:01:00.000Z",
+      closesAt: "2030-01-01T12:02:00.000Z", requestedDurationSeconds: 60, closedAt: null, closeReason: null,
+      counts: Array<number>(template.labels.length).fill(0), voterCount: 0,
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+  const question = page.getByRole("textbox", { name: "Question" });
+  await question.fill("Dinner after edit");
+  const start = page.getByRole("button", { name: "Start vote", exact: true });
+  await start.click();
+  await expect(page.locator(".ui-save-bar__status")).toContainText("Not saved – retry");
+  expect(operations).toEqual(["save-failed"]);
+  await expect(question).toHaveValue("Dinner after edit");
+
+  await start.click();
+  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+  expect(operations).toEqual(["save-failed", "save", "start"]);
+  await expect(question).toHaveValue("Dinner after edit");
+});
+
+test("template conflict keeps the draft until Reload accepts the latest version", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  let latest: ChatVoteTemplate = {
+    id: "template-conflict", channelId: "channel-a", shortcut: "conflict", title: "Original",
+    labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  let patchCount = 0;
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: [latest], count: 1, maximum: 100 }) });
+      return;
+    }
+    if (route.request().method() === "PATCH") {
+      patchCount += 1;
+      latest = { ...latest, title: "Remote change", revision: 2, updatedAt: "2030-01-01T12:01:00.000Z" };
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "chat_vote_template_conflict" }) });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+  const question = page.getByRole("textbox", { name: "Question" });
+  await question.fill("Local change");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator(".ui-save-bar__status")).toContainText("Changed elsewhere – reload");
+  expect(patchCount).toBe(1);
+  await expect(question).toHaveValue("Local change");
+  await expect(page.getByRole("button", { name: "Discard", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Reload", exact: true }).click();
+  await expect(question).toHaveValue("Remote change");
+  await expect(page.locator(".ui-save-bar__status")).not.toContainText("Changed elsewhere – reload");
+});
+
+test("a server shortcut conflict stays on its field and preserves the rest of the draft", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const template: ChatVoteTemplate = {
+    id: "template-shortcut-conflict", channelId: "channel-a", shortcut: "first", title: "Original",
+    labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates/template-shortcut-conflict", async (route) => {
+    if (route.request().method() === "PATCH") {
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "chat_vote_template_shortcut_conflict" }) });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+  const question = page.getByRole("textbox", { name: "Question" });
+  await question.fill("Keep this question");
+  await page.getByRole("textbox", { name: "Shortcut" }).fill("taken");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+
+  const shortcutField = page.locator(".chat-voting-template-inspector .ui-field").filter({ has: page.getByRole("textbox", { name: "Shortcut" }) });
+  await expect(shortcutField.locator(".mantine-InputWrapper-error")).toContainText("This shortcut is already in use.");
+  await expect(question).toHaveValue("Keep this question");
+  await expect(page.getByRole("textbox", { name: "Answer 1" })).toHaveValue("First");
+});
+
+test("new saved votes remain local until Save", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  let createCount = 0;
+  const templates: ChatVoteTemplate[] = [];
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates, count: templates.length, maximum: 100 }) });
+      return;
+    }
+    if (route.request().method() === "POST") {
+      createCount += 1;
+      const draft = await route.request().postDataJSON() as Omit<ChatVoteTemplate, "id" | "channelId" | "revision" | "legacyAlias" | "lastUsedAt" | "createdAt" | "updatedAt">;
+      const template: ChatVoteTemplate = {
+        id: "template-created", channelId: "channel-a", ...draft, revision: 1, legacyAlias: null,
+        lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+      };
+      templates.unshift(template);
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ template }) });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+  await page.locator(".list-toolbar__create button").click();
+  await expect(page.locator(".chat-voting-template-inspector")).toBeVisible();
+  expect(createCount).toBe(0);
+  await page.getByRole("textbox", { name: "Question" }).fill("Vote created on save");
+  await page.getByRole("button", { name: "Yes/No", exact: true }).click();
+  expect(createCount).toBe(0);
+
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => createCount).toBe(1);
+  await expect(page.locator(".chat-voting-template-list .list-row")).toContainText("Vote created on save");
+});
+
+test("the automatically opened desktop template keeps its guarded draft across responsive changes", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const templates: ChatVoteTemplate[] = [
+    { id: "template-auto", channelId: "channel-a", shortcut: "auto", title: "Automatically opened", labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
+    { id: "template-next", channelId: "channel-a", shortcut: "next", title: "Next vote", labels: ["Up", "Down"], freeTextMode: null, durationSeconds: 120, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
+  ];
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates, count: templates.length, maximum: 100 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+
+  const inspector = page.locator(".chat-voting-template-inspector");
+  const question = page.getByRole("textbox", { name: "Question" });
+  await expect(question).toHaveValue("Automatically opened");
+  await question.fill("Draft from the implicit selection");
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect(inspector).toBeVisible();
+  await expect(question).toHaveValue("Draft from the implicit selection");
+  await expect(page.getByRole("dialog", { name: "Discard changes?" })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(question).toHaveValue("Draft from the implicit selection");
+  await page.locator(".chat-voting-template-list .list-row__link").nth(1).click();
+  const dialog = page.getByRole("dialog", { name: "Discard changes?" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Continue editing" }).click();
+  await expect(question).toHaveValue("Draft from the implicit selection");
+});
+
+test("a second save preserves edits made while a newly created vote is being acknowledged", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  let template: ChatVoteTemplate | null = null;
+  let releasePatch: () => void = () => undefined;
+  let markPatchStarted: () => void = () => undefined;
+  const patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+  const patchStarted = new Promise<void>((resolve) => { markPatchStarted = resolve; });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
+    if (route.request().method() === "GET") {
+      const templates = template === null ? [] : [template];
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates, count: templates.length, maximum: 100 }) });
+      return;
+    }
+    if (route.request().method() === "POST") {
+      const draft = await route.request().postDataJSON() as Partial<ChatVoteTemplate>;
+      template = {
+        id: "template-created-again", channelId: "channel-a", shortcut: null, title: draft.title ?? "",
+        labels: draft.labels ?? [], freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null,
+        lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+      };
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ template }) });
+      return;
+    }
+    if (route.request().method() === "PATCH") {
+      markPatchStarted();
+      await patchGate;
+      const draft = await route.request().postDataJSON() as Partial<ChatVoteTemplate>;
+      template = { ...(template as ChatVoteTemplate), ...draft, revision: (template?.revision ?? 0) + 1, updatedAt: timestamp };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ template }) });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+  await page.locator(".list-toolbar__create button").click();
+  const question = page.getByRole("textbox", { name: "Question" });
+  await question.fill("First saved version");
+  await page.getByRole("button", { name: "Yes/No", exact: true }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator(".ui-save-bar__status")).toContainText("Saved");
+  await expect(page.locator(".chat-voting-template-list .list-row")).toContainText("First saved version");
+
+  await question.fill("Second save submitted");
+  try {
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await patchStarted;
+    await question.fill("Edited while acknowledgement is pending");
+    releasePatch();
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+    await expect(question).toHaveValue("Edited while acknowledgement is pending");
+  } finally {
+    releasePatch();
+  }
+});
+
+test("template saves and deletes cancel stale reads before publishing their cache updates", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  let template: ChatVoteTemplate | null = {
+    id: "template-ordered-write", channelId: "channel-a", shortcut: "ordered", title: "Original vote",
+    labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  let templateReads = 0;
+  let releaseStaleSaveRead: () => void = () => undefined;
+  let releaseStaleDeleteRead: () => void = () => undefined;
+  let markStaleSaveReadStarted: () => void = () => undefined;
+  let markStaleDeleteReadStarted: () => void = () => undefined;
+  const staleSaveGate = new Promise<void>((resolve) => { releaseStaleSaveRead = resolve; });
+  const staleDeleteGate = new Promise<void>((resolve) => { releaseStaleDeleteRead = resolve; });
+  const staleSaveReadStarted = new Promise<void>((resolve) => { markStaleSaveReadStarted = resolve; });
+  const staleDeleteReadStarted = new Promise<void>((resolve) => { markStaleDeleteReadStarted = resolve; });
+  const realtime = await installChatVotingRealtime(page);
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
+    if (route.request().method() === "GET") {
+      templateReads += 1;
+      const responseTemplates = template === null ? [] : [template];
+      if (templateReads === 2) {
+        markStaleSaveReadStarted();
+        await staleSaveGate;
+        try {
+          await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: responseTemplates, count: responseTemplates.length, maximum: 100 }) });
+        } catch { /* The query may already have been cancelled by the write. */ }
+        return;
+      }
+      if (templateReads === 4) {
+        markStaleDeleteReadStarted();
+        await staleDeleteGate;
+        try {
+          await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: responseTemplates, count: responseTemplates.length, maximum: 100 }) });
+        } catch { /* The query may already have been cancelled by the write. */ }
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: responseTemplates, count: responseTemplates.length, maximum: 100 }) });
+      return;
+    }
+    if (route.request().method() === "PATCH") {
+      const update = await route.request().postDataJSON() as Partial<ChatVoteTemplate>;
+      template = { ...(template as ChatVoteTemplate), ...update, revision: (template?.revision ?? 0) + 1, updatedAt: timestamp };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ template }) });
+      return;
+    }
+    if (route.request().method() === "DELETE") {
+      template = null;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  try {
+    await gotoPanel(page, "chat_voting", "en", true);
+    const question = page.getByRole("textbox", { name: "Question" });
+    await expect(question).toHaveValue("Original vote");
+    await realtime.waitForSocket();
+    realtime.sendHint({ "module:chat_voting:templates": 1 });
+    await staleSaveReadStarted;
+
+    await question.fill("Saved after ordered write");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.locator(".ui-save-bar__status")).toContainText("Saved");
+    await expect(page.locator(".chat-voting-template-list .list-row")).toContainText("Saved after ordered write");
+    releaseStaleSaveRead();
+    await expect(page.locator(".chat-voting-template-list .list-row")).toContainText("Saved after ordered write");
+
+    realtime.sendHint({ "module:chat_voting:templates": 2 });
+    await staleDeleteReadStarted;
+    await page.getByRole("button", { name: "Actions for “Saved after ordered write”" }).click();
+    await page.getByRole("menuitem", { name: "Delete vote" }).click();
+    const deleteDialog = page.getByRole("dialog", { name: "Delete “Saved after ordered write”?" });
+    await expect(deleteDialog).toBeVisible();
+    await deleteDialog.getByRole("button", { name: "Delete vote" }).click();
+    await expect(page.locator(".chat-voting-template-list .list-row")).toHaveCount(0);
+    await expect.poll(() => templateReads).toBe(5);
+    releaseStaleDeleteRead();
+    await expect(page.locator(".chat-voting-template-list .list-row")).toHaveCount(0);
+  } finally {
+    releaseStaleSaveRead();
+    releaseStaleDeleteRead();
+  }
+});
+
+test("discard confirmation cancels selection, close, and dashboard navigation without losing the draft", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const templates: ChatVoteTemplate[] = [
+    { id: "template-one", channelId: "channel-a", shortcut: "one", title: "First", labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
+    { id: "template-two", channelId: "channel-a", shortcut: "two", title: "Second", labels: ["Up", "Down"], freeTextMode: null, durationSeconds: 120, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
+  ];
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates, count: templates.length, maximum: 100 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+  const question = page.getByRole("textbox", { name: "Question" });
+  await question.fill("Unsaved first vote");
+
+  await page.locator(".chat-voting-template-list .list-row__link").nth(1).click();
+  let dialog = page.getByRole("dialog", { name: "Discard changes?" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Continue editing" }).click();
+  await expect(question).toHaveValue("Unsaved first vote");
+
+  await page.locator(".chat-voting-template-list .list-row__link").nth(1).click();
+  dialog = page.getByRole("dialog", { name: "Discard changes?" });
+  await dialog.getByRole("button", { name: "Discard changes" }).click();
+  await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("Second");
+  await page.getByRole("textbox", { name: "Question" }).fill("Unsaved second vote");
+
+  await page.locator(".chat-voting-template-inspector .inspector-close").click();
+  dialog = page.getByRole("dialog", { name: "Discard changes?" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Continue editing" }).click();
+  await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("Unsaved second vote");
+
+  await page.getByRole("button", { name: "Leave panel" }).click();
+  dialog = page.getByRole("dialog", { name: "Discard changes?" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Continue editing" }).click();
+  await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("Unsaved second vote");
+  await expect(page).toHaveURL(/module-panels-stability-fixture\?panel=chat_voting/u);
+});
+
+test("the running notice keeps the question field position when a saved vote starts and ends", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const template: ChatVoteTemplate = {
+    id: "template-running-note", channelId: "channel-a", shortcut: "running", title: "Stable field",
+    labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  let vote: Record<string, unknown> | null = null;
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+    }) });
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
+    vote = {
+      id: "vote-running-note", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
+      title: template.title, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
+      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/close", async (route) => {
+    vote = { ...(vote ?? {}), status: "closed", closedAt: "2030-01-01T12:01:00.000Z", closeReason: "manual" };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ closing: true, pollId: "vote-running-note" }) });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+  const inspector = page.locator(".chat-voting-template-inspector");
+  const note = inspector.locator(".chat-voting-editor__running-note");
+  const question = page.getByRole("textbox", { name: "Question" });
+  await expect(note).toHaveCount(1);
+  const before = await box(question);
+  await page.getByRole("button", { name: "Start vote", exact: true }).click();
+  await expect(note).toHaveText("Changes apply from the next start.");
+  expect(await box(question)).toEqual(before);
+
+  await page.getByRole("button", { name: "End vote" }).click();
+  await expect(note).toHaveText(" ");
+  expect(await box(question)).toEqual(before);
+});
+
+test("saved voting inspector stays open at desktop, overlay, and compact widths", async ({ page }) => {
+  const openedAt = "2030-01-01T12:00:00.000Z";
+  const runningTemplate: ChatVoteTemplate = {
+    id: "template-food", channelId: "channel-a", shortcut: "essen", title: "Was essen?",
+    labels: ["Pizza", "Burger", "Kebab"], freeTextMode: null, durationSeconds: 300, revision: 2,
+    legacyAlias: null, lastUsedAt: openedAt, createdAt: "2030-01-01T11:00:00.000Z", updatedAt: openedAt,
+  };
+  const selectedTemplate: ChatVoteTemplate = {
+    id: "template-stream", channelId: "channel-a", shortcut: "stream", title: "Wer streamt morgen?",
+    labels: ["Ich", "Jemand anderes"], freeTextMode: null, durationSeconds: 120, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: "2030-01-01T10:00:00.000Z", updatedAt: "2030-01-01T10:00:00.000Z",
+  };
+  const vote = {
+    id: "vote-food", channelId: "channel-a", kind: "options", optionCount: 3, labels: ["Pizza", "Burger", "Kebab"],
+    title: "Was essen wir heute?", status: "open", openedAt, closesAt: "2030-01-01T12:05:00.000Z",
+    requestedDurationSeconds: 300, closedAt: null, closeReason: null, counts: [20, 11, 6], voterCount: 37,
   };
   await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
-    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false,
-    defaultDurationSeconds: 120, defaultLabels: defaults,
+    vote, counts: vote.counts, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
   });
-  await routeJson(page, "/api/csrf", { token: "csrf" });
-
-  for (const width of [1280, 390]) {
-    await page.setViewportSize({ width, height: 844 });
-    await gotoPanel(page, "chat_voting");
-    await page.getByRole("spinbutton", { name: "Number of answers" }).fill("2");
-    await chooseOption(page, "Duration", "Custom …");
-    const seconds = page.getByRole("spinbutton", { name: "Seconds" });
-    await seconds.fill("14400");
-    const geometry = await seconds.evaluate((element) => {
-      const rect = element.getBoundingClientRect();
-      const stepper = element.closest(".ui-number-field__stepper") as HTMLElement;
-      const unit = stepper.querySelector(".mantine-Input-section") as HTMLElement;
-      const style = getComputedStyle(element);
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [runningTemplate, selectedTemplate], count: 2, maximum: 100 });
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, "language", { value: "de-DE" });
+    Object.defineProperty(window.navigator, "languages", { value: ["de-DE", "de"] });
+  });
+  for (const width of [1440, 1100, 760, 390]) {
+    await page.setViewportSize({ width, height: 1200 });
+    await gotoPanel(page, "chat_voting", "de");
+    await expect(page.locator(".chat-voting-live")).toBeVisible();
+    const row = page.locator(".chat-voting-template-list .list-row__link").nth(1);
+    await row.click();
+    const inspector = page.locator(".chat-voting-template-inspector");
+    await expect(inspector).toContainText("Wer streamt morgen?");
+    const header = inspector.locator(".inspector-section__heading");
+    const menuButton = header.getByRole("button", { name: /Aktionen für/u });
+    const closeButton = header.locator(".inspector-close");
+    await expect(menuButton).toBeVisible();
+    await expect(closeButton).toBeVisible();
+    const headerControlGeometry = await header.evaluate((element) => {
+      const menu = element.querySelector<HTMLElement>("button:not(.inspector-close)");
+      const close = element.querySelector<HTMLElement>(".inspector-close");
+      if (menu === null || close === null) throw new Error("The inspector header controls are missing.");
+      const menuBounds = menu.getBoundingClientRect();
+      const closeBounds = close.getBoundingClientRect();
+      const headerBounds = element.getBoundingClientRect();
       return {
-        inputWidth: rect.width,
-        contentWidth: rect.width - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight),
-        stepperWidth: stepper.getBoundingClientRect().width,
-        unitFits: unit.getBoundingClientRect().right <= stepper.getBoundingClientRect().right,
-        value: (element as HTMLInputElement).value,
+        menuWidth: menuBounds.width,
+        menuHeight: menuBounds.height,
+        closeWidth: closeBounds.width,
+        closeHeight: closeBounds.height,
+        controlsGap: closeBounds.left - menuBounds.right,
+        rightInset: headerBounds.right - closeBounds.right,
       };
     });
-    expect(geometry.value).toBe("14400");
-    expect(geometry.inputWidth).toBeGreaterThanOrEqual(128);
-    expect(geometry.contentWidth).toBeGreaterThanOrEqual(50);
-    expect(geometry.stepperWidth).toBeGreaterThanOrEqual(220);
-    expect(geometry.unitFits).toBe(true);
-    const label = page.getByRole("textbox", { name: "Label for option 1" });
-    await expect(label).toHaveAttribute("aria-label", "Label for option 1");
-    await expect(page.locator(".chat-voting-labels .mantine-InputWrapper-label")).toHaveCount(0);
+    expect(headerControlGeometry.menuWidth).toBe(44);
+    expect(headerControlGeometry.menuHeight).toBe(44);
+    expect(headerControlGeometry.closeWidth).toBe(44);
+    expect(headerControlGeometry.closeHeight).toBe(44);
+    expect(headerControlGeometry.controlsGap).toBeGreaterThanOrEqual(0);
+    expect(headerControlGeometry.controlsGap).toBeLessThanOrEqual(4.5);
+    expect(headerControlGeometry.rightInset).toBeLessThanOrEqual(1);
+    const startButton = inspector.getByRole("button", { name: "Abstimmung starten", exact: true });
+    const saveButton = inspector.getByRole("button", { name: "Speichern", exact: true });
+    const discardButton = inspector.getByRole("button", { name: "Verwerfen", exact: true });
+    const expectFooterActionsVisible = async (): Promise<void> => {
+      for (const button of [startButton, saveButton, discardButton]) {
+        const geometry = await button.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const label = element.querySelector<HTMLElement>(".mantine-Button-label");
+          let clipped = false;
+          let ancestor = element.parentElement;
+          while (ancestor !== null) {
+            const style = getComputedStyle(ancestor);
+            const rect = ancestor.getBoundingClientRect();
+            if ((style.overflowX === "hidden" || style.overflowX === "clip") && (bounds.left < rect.left - 1 || bounds.right > rect.right + 1)) clipped = true;
+            if ((style.overflowY === "hidden" || style.overflowY === "clip") && (bounds.top < rect.top - 1 || bounds.bottom > rect.bottom + 1)) clipped = true;
+            ancestor = ancestor.parentElement;
+          }
+          return {
+            width: bounds.width,
+            height: bounds.height,
+            clipped,
+            labelWidth: label?.clientWidth ?? 0,
+            labelScrollWidth: label?.scrollWidth ?? 0,
+          };
+        });
+        expect(geometry.width).toBeGreaterThanOrEqual(44);
+        expect(geometry.height).toBeGreaterThanOrEqual(34);
+        expect(geometry.clipped).toBe(false);
+        expect(geometry.labelScrollWidth).toBeLessThanOrEqual(geometry.labelWidth + 1);
+      }
+    };
+    await expectFooterActionsVisible();
+    await page.getByRole("textbox", { name: "Frage" }).fill("Ungespeicherter Titel");
+    await expectFooterActionsVisible();
+    const statusCopy = inspector.locator(".ui-save-bar__message-copy");
+    await expect(statusCopy).toHaveAttribute("title", "Änderungen ausstehend");
+    const inspectorContainerWidth = await inspector.evaluate((element) => Number.parseFloat(getComputedStyle(element).width));
+    const statusTextMetrics = await statusCopy.evaluate((element) => {
+      const font = getComputedStyle(element, "::before").font;
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (context === null) throw new Error("The status text measurement canvas is unavailable.");
+      context.font = font;
+      const measured = context.measureText(element.getAttribute("data-text") ?? "").width;
+      return {
+        fits: measured <= element.clientWidth + 1,
+        hasFontSafetyMargin: element.clientWidth >= measured * 1.2,
+        available: element.clientWidth,
+        measured,
+        text: element.getAttribute("data-text"),
+      };
+    });
+    expect(statusTextMetrics.fits, JSON.stringify({ width, ...statusTextMetrics })).toBe(true);
+    if (inspectorContainerWidth <= 480) {
+      expect(statusTextMetrics.hasFontSafetyMargin, JSON.stringify({ width, inspectorContainerWidth, ...statusTextMetrics })).toBe(true);
+    }
+    await discardButton.click();
+    const inspectorLayout = await page.evaluate(() => {
+      const root = document.querySelector(".chat-voting-template-inspector");
+      const body = root?.querySelector(".chat-voting-editor__body");
+      const footer = root?.querySelector(".chat-voting-editor__footer");
+      if (!(root instanceof HTMLElement) || !(body instanceof HTMLElement) || !(footer instanceof HTMLElement)) {
+        throw new Error("The saved voting inspector body and footer are incomplete.");
+      }
+      const rootBox = root.getBoundingClientRect();
+      const bodyBox = body.getBoundingClientRect();
+      const footerBox = footer.getBoundingClientRect();
+      return {
+        bodyAboveFooter: bodyBox.bottom <= footerBox.top,
+        footerInsideInspector: footerBox.bottom <= rootBox.bottom + 1,
+      };
+    });
+    expect(inspectorLayout.bodyAboveFooter).toBe(true);
+    expect(inspectorLayout.footerInsideInspector).toBe(true);
+    const answerFieldGap = await inspector.locator(".chat-voting-editor__answer").first().evaluate((row) => {
+      const input = row.querySelector("input");
+      const removeButton = row.querySelector(".mantine-Button-root");
+      if (!(input instanceof HTMLElement) || !(removeButton instanceof HTMLElement)) {
+        throw new Error("The answer input and remove button are incomplete.");
+      }
+      return removeButton.getBoundingClientRect().left - input.getBoundingClientRect().right;
+    });
+    expect(answerFieldGap).toBeGreaterThanOrEqual(0);
+    expect(answerFieldGap).toBeLessThanOrEqual(8);
+    const questionCounterGap = await inspector.locator(".chat-voting-editor__counted-field--question").evaluate((field) => {
+      const input = field.querySelector("input");
+      const counter = field.querySelector(".ui-field__count");
+      if (!(input instanceof HTMLElement) || !(counter instanceof HTMLElement)) {
+        throw new Error("The question input and counter are incomplete.");
+      }
+      return counter.getBoundingClientRect().left - input.getBoundingClientRect().right;
+    });
+    expect(questionCounterGap).toBeGreaterThanOrEqual(0);
+    expect(questionCounterGap).toBeLessThanOrEqual(10);
+    await expect(inspector.getByRole("button", { name: "Freitext", exact: true })).toHaveCount(0);
+    await expect(inspector.getByRole("spinbutton", { name: "Sekunden" })).toBeDisabled();
+    await expect(inspector.getByRole("spinbutton", { name: "Sekunden" })).toHaveValue("120");
+    await inspector.locator(".chat-voting-editor__body").evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const lastContentIsReachable = await page.evaluate(() => {
+      const body = document.querySelector(".chat-voting-editor__body");
+      const footer = document.querySelector(".chat-voting-editor__footer");
+      const lastContent = body?.lastElementChild;
+      if (!(body instanceof HTMLElement) || !(footer instanceof HTMLElement) || !(lastContent instanceof HTMLElement)) {
+        throw new Error("The saved voting inspector has no scrollable last section.");
+      }
+      return lastContent.getBoundingClientRect().bottom <= body.getBoundingClientRect().bottom + 1
+        && footer.getBoundingClientRect().top >= body.getBoundingClientRect().bottom - 1;
+    });
+    expect(lastContentIsReachable).toBe(true);
+    await expect(page.locator(".list-detail")).toHaveClass(/list-detail--open/u);
+  }
+
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  await gotoPanel(page, "chat_voting-action", "de");
+  await expect(page.locator(".chat-voting-immediate")).toContainText("Abstimmung");
+  await expect(page.getByRole("button", { name: "Beenden" })).toBeVisible();
+});
+test("chat voting immediate action fits the 192px card with two visible rows and inner scroll", async ({ page }) => {
+  const openedAt = "2030-01-01T12:00:00.000Z";
+  const templates: ChatVoteTemplate[] = Array.from({ length: 6 }, (_, index) => ({
+    id: `template-${String(index)}`, channelId: "channel-a", shortcut: `t${String(index)}`, title: `Vorlage ${String(index + 1)}`,
+    labels: ["Ja", "Nein"], freeTextMode: null, durationSeconds: 120, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: openedAt, updatedAt: openedAt,
+  }));
+  const vote = {
+    id: "vote-a", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Ja", "Nein"],
+    title: "Was essen wir heute Abend?", status: "open", openedAt, closesAt: "2030-01-01T12:02:00.000Z",
+    requestedDurationSeconds: 120, closedAt: null, closeReason: null, counts: [3, 1], voterCount: 4,
+  };
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote, counts: vote.counts, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates, count: 6, maximum: 100 });
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, "language", { value: "de-DE" });
+    Object.defineProperty(window.navigator, "languages", { value: ["de-DE", "de"] });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting-action", "de");
+  const card = page.locator(".chat-voting-immediate");
+  await expect(card.getByRole("button", { name: "Beenden" })).toBeVisible();
+  await expect(card.locator(".list-row")).toHaveCount(6);
+  const metrics = await page.evaluate(() => {
+    const cardElement = document.querySelector(".chat-voting-immediate") as HTMLElement;
+    const list = cardElement.querySelector(".chat-voting-immediate__list") as HTMLElement;
+    const card = cardElement.getBoundingClientRect();
+    const rows = [...list.querySelectorAll(".list-row")].map((row) => row.getBoundingClientRect());
+    const listBox = list.getBoundingClientRect();
+    const children = [...cardElement.children].map((child) => child.getBoundingClientRect());
+    return {
+      cardHeight: card.height,
+      cardOverflows: cardElement.scrollHeight > cardElement.clientHeight,
+      childrenInside: children.every((child) => child.bottom <= card.bottom + 0.5),
+      rowHeight: rows[0]?.height ?? 0,
+      visibleRows: rows.filter((row) => row.top >= listBox.top - 0.5 && row.bottom <= listBox.bottom + 0.5).length,
+      listScrolls: list.scrollHeight > list.clientHeight,
+    };
+  });
+  expect(metrics.cardHeight).toBe(192);
+  expect(metrics.cardOverflows).toBe(false);
+  expect(metrics.childrenInside).toBe(true);
+  expect(metrics.rowHeight).toBeGreaterThanOrEqual(34);
+  expect(metrics.visibleRows).toBe(2);
+  expect(metrics.listScrolls).toBe(true);
+});
+
+test("chat voting panel applies resource revisions and ignores an older pending response", async ({ page }) => {
+  let requests = 0;
+  let startedFirst: () => void = () => undefined;
+  let startedSecond: () => void = () => undefined;
+  let releaseFirst: () => void = () => undefined;
+  const firstStarted = new Promise<void>((resolve) => { startedFirst = resolve; });
+  const secondStarted = new Promise<void>((resolve) => { startedSecond = resolve; });
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const vote = {
+    id: "vote-revision-panel", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
+    title: "Revision update", status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:02:00.000Z",
+    requestedDurationSeconds: 120, closedAt: null, closeReason: null, counts: [2, 1], voterCount: 3,
+  };
+  const realtime = await installChatVotingRealtime(page);
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    requests += 1;
+    if (requests === 1) {
+      startedFirst();
+      await firstGate;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+      }) });
+      return;
+    }
+    if (requests === 2) startedSecond();
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: vote.counts, revision: 2, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+    }) });
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [], count: 0, maximum: 100 });
+  await page.setViewportSize({ width: 390, height: 844 });
+  try {
+    await gotoPanel(page, "chat_voting", "en", true);
+    await firstStarted;
+    await realtime.waitForSocket();
+    realtime.sendHint({ "module:chat_voting:panel": 1 });
+    await secondStarted;
+    await expect(page.locator(".chat-voting-live__question")).toHaveText("Revision update");
+    releaseFirst();
+    await expect(page.locator(".chat-voting-live__question")).toHaveText("Revision update");
+  } finally {
+    releaseFirst();
   }
 });
 
-test("a timer-closed vote leaves the panel draft unchanged", async ({ page }) => {
-  const defaults = {
-    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
-    scale_5: ["1", "2", "3", "4", "5"], options_n: Array.from({ length: 9 }, (_, index) => String(index + 1)), free_text: [],
+test("chat voting immediate action refreshes the live state from resource revisions", async ({ page }) => {
+  let requests = 0;
+  let startedFirst: () => void = () => undefined;
+  let startedSecond: () => void = () => undefined;
+  let releaseFirst: () => void = () => undefined;
+  const firstStarted = new Promise<void>((resolve) => { startedFirst = resolve; });
+  const secondStarted = new Promise<void>((resolve) => { startedSecond = resolve; });
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const vote = {
+    id: "vote-revision-card", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
+    title: "Revision card", status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
+    requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [1, 0], voterCount: 1,
   };
-  let vote: Record<string, unknown> | null = null;
+  const template: ChatVoteTemplate = {
+    id: "template-revision-card", channelId: "channel-a", shortcut: "revision", title: "Revision card",
+    labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  const realtime = await installChatVotingRealtime(page);
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
-    const counts = vote?.kind === "options" ? Array<number>(9).fill(0) : null;
+    requests += 1;
+    if (requests === 1) {
+      startedFirst();
+      await firstGate;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+      }) });
+      return;
+    }
+    if (requests === 2) startedSecond();
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts, revision: vote?.status === "open" ? 2 : 1, terms: null, moreTerms: null,
-      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 120, defaultLabels: defaults,
+      vote, counts: vote.counts, revision: 2, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
     }) });
   });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  try {
+    await gotoPanel(page, "chat_voting-action", "en", true);
+    await firstStarted;
+    await realtime.waitForSocket();
+    realtime.sendHint({ "module:chat_voting:panel": 1 });
+    await secondStarted;
+    await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+    releaseFirst();
+    await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+  } finally {
+    releaseFirst();
+  }
+});
+
+test("the immediate-action card merges refreshed template configuration and membership in session order", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  let vote: Record<string, unknown> | null = null;
+  let templateReads = 0;
+  const templateA: ChatVoteTemplate = { id: "template-a", channelId: "channel-a", shortcut: "a", title: "A", labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp };
+  const templateB: ChatVoteTemplate = { id: "template-b", channelId: "channel-a", shortcut: "b", title: "B", labels: ["Up", "Down"], freeTextMode: null, durationSeconds: 120, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp };
+  const original: ChatVoteTemplate[] = [
+    templateA,
+    templateB,
+    { id: "template-c", channelId: "channel-a", shortcut: "c", title: "C", labels: ["First", "Second"], freeTextMode: null, durationSeconds: 300, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
+  ];
+  const refreshed: ChatVoteTemplate[] = [
+    { id: "template-d", channelId: "channel-a", shortcut: "d", title: "New D", labels: ["One", "Two"], freeTextMode: null, durationSeconds: 0, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
+    { ...templateB, shortcut: "b-v2", title: "B refreshed", labels: ["Only one"], durationSeconds: 90, revision: 2 },
+    { ...templateA, shortcut: "a-v2", title: "A refreshed", labels: ["Yes", "No", "Maybe"], durationSeconds: 180, revision: 2 },
+  ];
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+    }) });
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates", async (route) => {
+    templateReads += 1;
+    const templates = templateReads === 1 ? original : refreshed;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates, count: templates.length, maximum: 100 }) });
+  });
   await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
-    const body = await route.request().postDataJSON() as { kind: string; optionCount: number; durationSeconds: number; labels: string[]; title: string };
-    expect(body).toMatchObject({ kind: "options", optionCount: 9, durationSeconds: 90, title: "Draft question?" });
     vote = {
-      id: "timer-vote", channelId: "channel-a", kind: body.kind, preset: "options_n", optionCount: body.optionCount,
-      labels: body.labels, title: "Timer vote?", textMode: null,
-      status: "open", openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:01:30.000Z",
-      requestedDurationSeconds: body.durationSeconds, closedAt: null, closeReason: null, counts: Array<number>(9).fill(0), voterCount: 0,
+      id: "vote-card-refresh", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
+      title: "A", status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
+      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
     };
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
   });
-  await routeJson(page, "/api/csrf", { token: "csrf" });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await gotoPanel(page, "chat_voting");
 
-  await page.getByRole("textbox", { name: "Question" }).fill("Draft question?");
-  await page.getByRole("spinbutton", { name: "Number of answers" }).fill("9");
-  await page.getByRole("textbox", { name: "Label for option 1" }).fill("First");
-  await chooseOption(page, "Duration", "Custom …");
-  await page.getByRole("spinbutton", { name: "Seconds" }).fill("90");
-  const setup = page.locator(".chat-voting-setup");
-  const action = page.locator(".chat-voting-action");
-
-  await page.getByRole("button", { name: "Start vote" }).click();
-  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("Draft question?");
-  await expect(page.getByRole("spinbutton", { name: "Number of answers" })).toHaveValue("9");
-  await expect(page.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("First");
-  await expect(page.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("90");
-  const setupWhileRunningBefore = await box(setup);
-  const actionWhileRunningBefore = await box(action);
-  vote = { ...(vote as unknown as Record<string, unknown>), status: "closed", closedAt: "2030-01-01T12:01:30.000Z" };
-
-  await expect(page.getByTestId("chat-voting-header-status")).toContainText("Closed", { timeout: 5_000 });
-  await expect(page.getByRole("combobox", { name: "Vote type" })).toHaveCount(0);
-  await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("Draft question?");
-  await expect(page.getByRole("spinbutton", { name: "Number of answers" })).toHaveValue("9");
-  await expect(page.getByRole("textbox", { name: "Label for option 1" })).toHaveValue("First");
-  await expect(page.getByRole("combobox", { name: "Duration" })).toHaveValue("Custom …");
-  await expect(page.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("90");
-  await expect(page.getByRole("button", { name: "Start vote" })).toBeEnabled();
-  expect(await box(setup)).toEqual(setupWhileRunningBefore);
-  expect(await box(action)).toEqual(actionWhileRunningBefore);
-  const metadata = page.locator(".chat-voting-result__meta");
-  const [startTime, endTime] = await page.evaluate(() => [
-    new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(new Date("2030-01-01T12:00:00.000Z")),
-    new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(new Date("2030-01-01T12:01:30.000Z")),
-  ]);
-  await expect(metadata).toContainText(startTime);
-  await expect(metadata).toContainText(endTime);
-  await expect(metadata).not.toContainText("/");
-  expect(await metadata.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-});
-
-test("free-text voting always renders five fixed result rows at desktop and mobile widths", async ({ page }) => {
-  const longTerm = "0123456789012345678901234";
-  const terms = [
-    { term: longTerm, count: 2, approved: false },
-    { term: "second", count: 1, approved: false },
-  ];
-  let approvedTerm: string | null = null;
-  const vote = {
-    id: "text-vote-a", channelId: "channel-a", preset: "free_text", optionCount: 0, labels: [],
-    textMode: "first_word", termFilterReady: true,
-    status: "open", openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:01:00.000Z",
-    requestedDurationSeconds: 60, closedAt: null, closeReason: "timer", counts: [], voterCount: null,
-    textResults: null, moreTerms: null,
-  };
-  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
-    const currentTerms = terms.map((entry) => ({ ...entry, approved: entry.term === approvedTerm }));
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts: [], revision: approvedTerm === null ? 1 : 2, terms: currentTerms,
-      moreTerms: 0, termFilterReady: true, hasOpenBallot: true, defaultDurationSeconds: 60,
-      defaultLabels: { yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"], scale_5: ["1", "2", "3", "4", "5"], options_n: ["1", "2"], free_text: [] },
-    }) });
-  });
-  await page.route("**/api/channels/channel-a/modules/chat_voting/approve-term", async (route) => {
-    const requestBody = await route.request().postDataJSON() as { pollId: string; term: string };
-    expect(requestBody.pollId).toBe(vote.id);
-    approvedTerm = requestBody.term;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ terms, moreTerms: 0, revision: 2 }) });
-  });
-  await routeJson(page, "/api/csrf", { token: "csrf" });
-
-  for (const width of [1280, 390]) {
-    approvedTerm = null;
-    await page.setViewportSize({ width, height: 844 });
-    await gotoPanel(page, "chat_voting");
-    const rows = page.locator(".chat-voting-results__term-row");
-    await expect(rows).toHaveCount(5);
-    expect(await rows.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height))).toEqual(Array<number>(5).fill(34));
-    const fullLabel = rows.first().locator(".chat-voting-results__label");
-    await expect(fullLabel).toHaveAttribute("title", longTerm);
-    expect(await fullLabel.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("nowrap");
-    if (width === 390) expect(await fullLabel.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
-    const setup = page.locator(".chat-voting-setup");
-    const result = page.locator(".chat-voting-result");
-    const action = page.getByRole("button", { name: "End vote" });
-    const setupBefore = await box(setup);
-    const resultBefore = await box(result);
-    const actionBefore = await box(action);
-    if (width === 1280) {
-      expect(setupBefore.x).toBeLessThan(resultBefore.x);
-      expect(setupBefore.y).toBe(resultBefore.y);
-    } else {
-      expect(setupBefore.y).toBeLessThan(resultBefore.y);
-      expect(actionBefore.y).toBeLessThan(resultBefore.y);
-    }
-    await expect(rows.filter({ hasText: "—" })).toHaveCount(3);
-    await page.locator(".chat-voting-results__term-row button").first().click();
-    await expect(rows).toHaveCount(5);
-    await expect(page.getByText("Approved", { exact: true })).toBeVisible();
-    expect(await box(setup)).toEqual(setupBefore);
-    expect(await box(action)).toEqual(actionBefore);
-    if (width === 1280) expect(await box(result)).toEqual(resultBefore);
-    else expect((await box(result)).y).toBeGreaterThan((await box(action)).y);
-  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting-action", "en");
+  await expect(page.getByRole("button", { name: "Start “A”" })).toBeEnabled();
+  await page.getByRole("button", { name: "Start “A”" }).click();
+  await expect.poll(() => templateReads).toBeGreaterThan(1);
+  const rows = page.locator(".chat-voting-immediate .list-row");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toContainText("A refreshed");
+  await expect(rows.nth(0)).toContainText("!vote a-v2");
+  await expect(rows.nth(0)).toContainText("3 answers");
+  await expect(rows.nth(0)).toContainText("3 min");
+  await expect(rows.nth(0)).toContainText("Running");
+  await expect(rows.nth(1)).toContainText("B refreshed");
+  await expect(rows.nth(1)).toContainText("Incomplete");
+  await expect(rows.nth(1).locator(".list-row__action button")).toBeDisabled();
+  await expect(rows.nth(2)).toContainText("New D");
+  await expect(rows.nth(2)).toContainText("!vote d");
 });
 
 test("text command slash help and variable action keep editor boxes stable", async ({ page }) => {
@@ -579,29 +1313,6 @@ test("text command slash help and variable action keep editor boxes stable", asy
   await expect(actionSlot.locator("#command-variable-name")).toBeVisible();
   expect(await box(actionSlot)).toEqual(actionBefore);
   expect(await box(editor)).toEqual(editorBeforeAction);
-});
-
-test("an overnight chat voting result keeps its closing time fully visible at 390px", async ({ page }) => {
-  const defaults = {
-    yes_no: ["Yes", "No"], digit_01: ["0", "1"], digit_12: ["1", "2"],
-    scale_5: ["1", "2", "3", "4", "5"], options_n: ["1", "2"], free_text: [],
-  };
-  const vote = {
-    id: "night-vote", channelId: "channel-a", preset: "yes_no", optionCount: 2, labels: ["Yes", "No"],
-    status: "closed", openedAt: new Date(2030, 9, 6, 23, 50).toISOString(), closesAt: new Date(2030, 9, 7, 0, 10).toISOString(),
-    requestedDurationSeconds: 1200, closedAt: new Date(2030, 9, 7, 0, 10).toISOString(), closeReason: "timer", counts: [3, 1], voterCount: 4,
-  };
-  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
-    vote, counts: [3, 1], revision: 2, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60, defaultLabels: defaults,
-  });
-  await routeJson(page, "/api/csrf", { token: "csrf" });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await gotoPanel(page, "chat_voting");
-
-  const meta = page.locator(".chat-voting-result__meta");
-  await expect(meta).toContainText("(+1)");
-  const clipped = await meta.evaluate((element) => element.scrollWidth > element.clientWidth);
-  expect(clipped).toBe(false);
 });
 
 test("text-library game filter keeps the list position when games are selected and removed at desktop and 390px", async ({ page }) => {
@@ -682,4 +1393,356 @@ test("text-library inspector stays at its sticky offset while the page scrolls a
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(100);
   const top = await inspector.evaluate((element) => element.getBoundingClientRect().top);
   expect(top).toBe(16);
+});
+
+test("custom duration fits with its controls and unit at desktop and mobile widths", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const template: ChatVoteTemplate = {
+    id: "template-custom", channelId: "channel-a", shortcut: "custom", title: "Custom duration",
+    labels: ["First", "Second"], freeTextMode: null, durationSeconds: 90, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await gotoPanel(page, "chat_voting", "en");
+    await page.locator(".chat-voting-template-list .list-row__link").first().click();
+    const inspector = page.locator(".chat-voting-template-inspector");
+    await expect(inspector).toBeVisible();
+    const durationSection = inspector.locator(".inspector-content-section").filter({ hasText: "Duration" }).last();
+    const segments = durationSection.locator(".ui-segmented-control__control");
+    const durationSlot = durationSection.locator(".chat-voting-editor__duration-slot");
+    const numberField = durationSlot.locator(".ui-number-field__stepper");
+    const seconds = page.getByRole("spinbutton", { name: "Seconds" });
+    await expect(seconds).toHaveValue("90");
+    const layout = await page.evaluate(() => {
+      const root = document.querySelector(".chat-voting-template-inspector");
+      const section = [...document.querySelectorAll(".inspector-content-section")].find((element) => element.textContent.includes("Duration"));
+      const controls = section?.querySelector(".ui-segmented-control__control");
+      const slot = section?.querySelector(".chat-voting-editor__duration-slot");
+      const stepper = slot?.querySelector(".ui-number-field__stepper");
+      const field = stepper?.querySelector("input");
+      const unit = stepper?.querySelector(".mantine-Input-section");
+      if (!(root instanceof HTMLElement) || !(controls instanceof HTMLElement) || !(slot instanceof HTMLElement) || !(stepper instanceof HTMLElement) || !(field instanceof HTMLElement) || !(unit instanceof HTMLElement)) {
+        throw new Error("The custom duration field is incomplete.");
+      }
+      const rootBox = root.getBoundingClientRect();
+      const controlsBox = controls.getBoundingClientRect();
+      const slotBox = slot.getBoundingClientRect();
+      const stepperBox = stepper.getBoundingClientRect();
+      const fieldBox = field.getBoundingClientRect();
+      const unitBox = unit.getBoundingClientRect();
+      return {
+        slotBelowControls: slotBox.top >= controlsBox.bottom,
+        slotInsideInspector: slotBox.left >= rootBox.left && slotBox.right <= rootBox.right,
+        slotHeight: slotBox.height,
+        stepperInsideSlot: stepperBox.left >= slotBox.left && stepperBox.right <= slotBox.right,
+        fieldWidth: fieldBox.width,
+        unitInsideStepper: unitBox.left >= stepperBox.left && unitBox.right <= stepperBox.right,
+      };
+    });
+    expect(layout.slotBelowControls).toBe(true);
+    expect(layout.slotInsideInspector).toBe(true);
+    expect(layout.slotHeight).toBe(44);
+    expect(layout.stepperInsideSlot).toBe(true);
+    expect(layout.fieldWidth).toBeGreaterThanOrEqual(96);
+    expect(layout.unitInsideStepper).toBe(true);
+    await expect(segments).toBeVisible();
+    await expect(numberField).toBeVisible();
+  }
+});
+
+test("free-text voting always renders five fixed result rows at desktop and mobile widths", async ({ page }) => {
+  const longTerm = "0123456789012345678901234";
+  const terms = [
+    { term: longTerm, count: 2, approved: false },
+    { term: "second", count: 1, approved: false },
+  ];
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const template: ChatVoteTemplate = {
+    id: "template-free-text", channelId: "channel-a", shortcut: "free", title: "Free text",
+    labels: [], freeTextMode: "first_word", durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: timestamp, createdAt: timestamp, updatedAt: timestamp,
+  };
+  const vote = {
+    id: "text-vote-a", channelId: "channel-a", kind: "free_text", optionCount: 0, labels: [], title: "Free text vote",
+    textMode: "first_word", termFilterReady: true, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
+    requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [], voterCount: 3, textResults: null,
+  };
+  let approvedTerm: string | null = null;
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: [], revision: approvedTerm === null ? 1 : 2,
+      terms: terms.map((entry) => ({ ...entry, approved: entry.term === approvedTerm })),
+      moreTerms: 0, hasOpenBallot: true, defaultDurationSeconds: 60,
+    }) });
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/approve-term", async (route) => {
+    const body = await route.request().postDataJSON() as { pollId: string; term: string };
+    expect(body.pollId).toBe(vote.id);
+    approvedTerm = body.term;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ terms, moreTerms: 0, revision: 2 }) });
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+
+  for (const width of [1440, 390]) {
+    approvedTerm = null;
+    await page.setViewportSize({ width, height: 844 });
+    await gotoPanel(page, "chat_voting", "en");
+    const rows = page.locator(".chat-voting-live__rows--free-text .chat-voting-results__term-row");
+    await expect(rows).toHaveCount(5);
+    expect(await rows.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height))).toEqual(Array<number>(5).fill(34));
+    const emptySlots = page.locator(".chat-voting-live__rows--free-text .chat-voting-results__empty-slot");
+    await expect(emptySlots).toHaveCount(3);
+    await expect(emptySlots.first()).toBeHidden();
+    const fullLabel = rows.first().locator(".chat-voting-results__label");
+    await expect(fullLabel).toHaveAttribute("title", longTerm);
+    expect(await fullLabel.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("nowrap");
+    if (width === 390) expect(await fullLabel.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+
+    const rowsBefore = await box(page.locator(".chat-voting-live__rows"));
+    const endButton = page.getByRole("button", { name: "End vote" });
+    await expect(endButton).toBeVisible();
+    const dangerColors = await endButton.evaluate((element) => ({
+      button: (element as HTMLElement).style.getPropertyValue("--button-bg"),
+      token: getComputedStyle(document.documentElement).getPropertyValue("--error").trim(),
+    }));
+    expect(dangerColors.button).toBe(dangerColors.token);
+    await rows.locator(".mantine-Button-root").first().click();
+    await expect(page.getByText("Approved", { exact: true })).toBeVisible();
+    await expect(rows).toHaveCount(5);
+    expect(await box(page.locator(".chat-voting-live__rows"))).toEqual(rowsBefore);
+  }
+});
+
+test("a timer-closed vote leaves the panel draft unchanged", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const labels = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth"];
+  const template: ChatVoteTemplate = {
+    id: "template-timer", channelId: "channel-a", shortcut: "draft", title: "Draft question?",
+    labels, freeTextMode: null, durationSeconds: 90, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  let vote = null as Record<string, unknown> | null;
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: vote === null ? null : vote.counts, revision: vote?.status === "open" ? 2 : 1,
+      terms: null, moreTerms: null, hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 120,
+    }) });
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates: [template], count: 1, maximum: 100 }) });
+      return;
+    }
+    if (route.request().method() === "PATCH") {
+      const update = await route.request().postDataJSON() as Partial<ChatVoteTemplate>;
+      Object.assign(template, update, { revision: template.revision + 1, updatedAt: "2030-01-01T12:00:01.000Z" });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ template }) });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
+    const body = await route.request().postDataJSON() as { templateId: string };
+    expect(body.templateId).toBe(template.id);
+    vote = {
+      id: "timer-vote", channelId: "channel-a", kind: "options", optionCount: labels.length, labels: [...labels],
+      title: template.title, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:30.000Z",
+      requestedDurationSeconds: 90, closedAt: null, closeReason: null, counts: Array<number>(labels.length).fill(0), voterCount: 0,
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "chat_voting", "en");
+  await page.locator(".chat-voting-template-list .list-row__link").first().click();
+  const question = page.getByRole("textbox", { name: "Question" });
+  const firstAnswer = page.getByRole("textbox", { name: "Answer 1" });
+  const seconds = page.getByRole("spinbutton", { name: "Seconds" });
+  await expect(question).toHaveValue("Draft question?");
+  await expect(firstAnswer).toHaveValue("First");
+  await expect(seconds).toHaveValue("90");
+
+  await page.getByRole("button", { name: "Start vote" }).click();
+  await expect(page.locator(".chat-voting-live__action-slot .mantine-Button-root")).toBeVisible();
+  await expect(question).toHaveValue("Draft question?");
+  await expect(firstAnswer).toHaveValue("First");
+  await expect(seconds).toHaveValue("90");
+  vote = { ...(vote ?? {}), status: "closed", closedAt: "2030-01-01T12:01:30.000Z", closeReason: "timer" };
+  await expect(page.getByText("Ended", { exact: true })).toBeVisible({ timeout: 5_000 });
+  await expect(question).toHaveValue("Draft question?");
+  await expect(firstAnswer).toHaveValue("First");
+  await expect(seconds).toHaveValue("90");
+  await expect(page.getByRole("button", { name: "Start vote" })).toBeEnabled();
+});
+
+test("an overnight chat voting result keeps its closing time fully visible at 390px", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const openedAt = new Date(2030, 9, 6, 23, 50).toISOString();
+  const closedAt = new Date(2030, 9, 7, 0, 10).toISOString();
+  const template: ChatVoteTemplate = {
+    id: "template-night", channelId: "channel-a", shortcut: "night", title: "Night vote",
+    labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 1200, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  const vote = {
+    id: "night-vote", channelId: "channel-a", kind: "yes_no", optionCount: 2, labels: ["Yes", "No"],
+    title: "Night vote", status: "closed", openedAt, closesAt: closedAt, requestedDurationSeconds: 1200,
+    closedAt, closeReason: "timer", counts: [3, 1], voterCount: 4,
+  };
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote, counts: [3, 1], revision: 2, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/recent", { votes: [vote] });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "chat_voting", "de");
+  await page.getByText("Zuletzt", { exact: true }).click();
+  const row = page.locator(".chat-voting-recent-list .list-row__link").first();
+  await row.click();
+  const meta = page.locator(".chat-voting-recent-inspector__meta");
+  await expect(meta).toContainText("(+1)");
+  const closingTime = await page.evaluate((value) => new Intl.DateTimeFormat("de-DE", { timeStyle: "short" }).format(new Date(value)), closedAt);
+  await expect(meta).toContainText(closingTime);
+  const dimensions = await meta.evaluate((element) => ({ width: element.clientWidth, contentWidth: element.scrollWidth }));
+  expect(dimensions.contentWidth).toBeLessThanOrEqual(dimensions.width);
+});
+
+test("Escape closes the desktop recent-vote inspector", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const vote = {
+    id: "recent-escape", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
+    title: "Dismiss with Escape", status: "closed", openedAt: timestamp, closesAt: timestamp,
+    requestedDurationSeconds: 60, closedAt: timestamp, closeReason: "manual", counts: [2, 1], voterCount: 3,
+  };
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [], count: 0, maximum: 100 });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/recent", { votes: [vote] });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoPanel(page, "chat_voting", "en");
+  await page.getByText("Recent", { exact: true }).click();
+
+  const inspector = page.locator(".chat-voting-recent-inspector");
+  await expect(inspector).toBeVisible();
+  await page.getByRole("button", { name: "Again", exact: true }).focus();
+  await page.keyboard.press("Escape");
+  await expect(inspector).toHaveCount(0);
+});
+
+test("the mobile live vote block keeps its height when the first vote starts", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const title = "A deliberately long live question that must wrap to only two lines on a narrow screen";
+  const template: ChatVoteTemplate = {
+    id: "template-mobile", channelId: "channel-a", shortcut: "mobile", title,
+    labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  let vote: Record<string, unknown> | null = null;
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null,
+      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 60,
+    }) });
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
+    vote = {
+      id: "mobile-vote", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["First", "Second"],
+      title, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
+      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "chat_voting", "en");
+  const live = page.locator(".chat-voting-live");
+  const list = page.locator(".chat-voting-list");
+  const toolbar = page.locator(".chat-voting-list .list-toolbar");
+  const layout = async () => ({ live: await box(live), toolbar: await box(toolbar), list: await box(list) });
+  await expect(page.getByText("No vote yet")).toBeVisible();
+  const before = await layout();
+  await page.getByRole("button", { name: `Start “${title}”` }).click();
+  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+  expect(await layout()).toEqual(before);
+  const question = page.locator(".chat-voting-live__question");
+  await expect(question).toHaveText(title);
+  const questionLayout = await question.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    lineClamp: getComputedStyle(element).webkitLineClamp,
+  }));
+  expect(questionLayout.lineClamp).toBe("2");
+  expect(questionLayout.height).toBeLessThanOrEqual(42);
+});
+
+test("the mobile live state reserves the same height while loading, failed, empty, and populated", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const title = "A stable mobile vote";
+  const template: ChatVoteTemplate = {
+    id: "template-stable-mobile", channelId: "channel-a", shortcut: "stable", title,
+    labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  let vote: Record<string, unknown> | null = null;
+  let releaseFirstRequest: () => void = () => undefined;
+  const firstRequestGate = new Promise<void>((resolve) => { releaseFirstRequest = resolve; });
+  let currentRequests = 0;
+  const realtime = await installChatVotingRealtime(page);
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
+    currentRequests += 1;
+    if (currentRequests === 1) {
+      await firstRequestGate;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "unavailable" }) });
+      return;
+    }
+    if (currentRequests === 2) {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "unavailable" }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null,
+      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 60,
+    }) });
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
+    vote = {
+      id: "stable-mobile-vote", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["First", "Second"],
+      title, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
+      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "chat_voting", "en", true);
+  await realtime.waitForSocket();
+  const liveState = page.locator(".chat-voting-panel > div > .ui-load-state");
+  await expect(liveState).toHaveAttribute("data-status", "loading");
+  const loadingHeight = (await box(liveState)).height;
+  releaseFirstRequest();
+  await expect(liveState).toHaveAttribute("data-status", "error");
+  const errorHeight = (await box(liveState)).height;
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText("No vote yet")).toBeVisible();
+  const emptyHeight = (await box(liveState)).height;
+  await page.getByRole("button", { name: `Start “${title}”` }).click();
+  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+  const populatedHeight = (await box(liveState)).height;
+
+  expect(errorHeight).toBe(loadingHeight);
+  expect(emptyHeight).toBe(loadingHeight);
+  expect(populatedHeight).toBe(loadingHeight);
 });

@@ -24,16 +24,7 @@ export const CHAT_VOTING_TITLE_MAX_LENGTH = 80;
 export const CHAT_VOTING_HARD_LIMIT_MS = 4 * 60 * 60 * 1_000;
 export const CHAT_VOTING_BALLOT_RETENTION_MS = 24 * 60 * 60 * 1_000 - 60_000;
 
-// Label lists are measured in Unicode code points, like the per-label rule (an emoji counts as one).
-const labelList = (maxCodePoints: number) =>
-  z.string().refine((value) => Array.from(value).length <= maxCodePoints).default("");
-
 export const chatVotingSettingsSchema = z.object({
-  yesNoLabels: labelList(70),
-  scaleLabels: labelList(175),
-  optionLabels: labelList(315),
-  zeroOneLabels: labelList(70),
-  oneTwoLabels: labelList(70),
   autoCloseSeconds: z.number().int().min(0).max(CHAT_VOTING_HARD_LIMIT_MS / 1_000).default(0),
   startText: z.string().max(500).default(DEFAULT_CHAT_VOTING_START_TEXT),
   announceResult: z.boolean().default(true),
@@ -44,11 +35,6 @@ export const chatVotingSettingsSchema = z.object({
 export type ChatVotingSettings = z.output<typeof chatVotingSettingsSchema>;
 
 export const DEFAULT_CHAT_VOTING_SETTINGS: ChatVotingSettings = {
-  yesNoLabels: "",
-  scaleLabels: "",
-  optionLabels: "",
-  zeroOneLabels: "",
-  oneTwoLabels: "",
   autoCloseSeconds: 0,
   startText: DEFAULT_CHAT_VOTING_START_TEXT,
   announceResult: true,
@@ -81,8 +67,6 @@ export interface ChatVote {
   id: string;
   channelId: string;
   kind: ChatVotingKind;
-  preset: ChatVotingPreset;
-  legacyWritten: boolean;
   optionCount: number;
   labels: readonly string[];
   title: string | null;
@@ -102,4 +86,35 @@ export interface ChatVote {
 
 export interface ChatVoteDraft extends Omit<ChatVote, "status" | "closedAt" | "counts" | "voterCount"> {
   status?: "open";
+}
+
+export const CHAT_VOTE_TEMPLATE_MAXIMUM = 100;
+export const CHAT_VOTE_TEMPLATE_SHORTCUT_MAX_LENGTH = 24;
+export const CHAT_VOTE_TEMPLATE_RESERVED_SHORTCUTS = [
+  "end", "help", "again", "yesno", "scale", "text", "word", "message",
+] as const;
+export const CHAT_VOTE_TEMPLATE_LEGACY_ALIASES = ["yesno", "zeroOne", "oneTwo", "scale", "options"] as const;
+export type ChatVoteTemplateLegacyAlias = (typeof CHAT_VOTE_TEMPLATE_LEGACY_ALIASES)[number];
+
+export interface ChatVoteTemplate {
+  id: string;
+  channelId: string;
+  shortcut: string | null;
+  title: string;
+  labels: readonly string[];
+  freeTextMode: ChatVotingTextMode | null;
+  durationSeconds: number;
+  revision: number;
+  legacyAlias: ChatVoteTemplateLegacyAlias | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatVoteTemplateDraft {
+  shortcut: string | null;
+  title: string;
+  labels: readonly string[];
+  freeTextMode: ChatVotingTextMode | null;
+  durationSeconds: number;
 }

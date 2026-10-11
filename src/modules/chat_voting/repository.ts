@@ -1,13 +1,10 @@
 import type { ModuleMutationAuthorization } from "../contract";
-import { chatVotingKindForPreset, chatVotingPresetForKind } from "./contracts";
-import type { ChatVote, ChatVoteCloseReason, ChatVoteDraft, ChatVoteTerm, ChatVotingKind, ChatVotingPreset, ChatVotingTextMode } from "./contracts";
+import type { ChatVote, ChatVoteCloseReason, ChatVoteDraft, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "./contracts";
 
 interface ChatVoteRow {
   channel_id: string;
   poll_id: string;
-  kind: ChatVotingKind | null;
-  preset: ChatVotingPreset | null;
-  legacy_written: number;
+  kind: ChatVotingKind;
   option_count: number;
   labels_json: string;
   title: string | null;
@@ -23,6 +20,21 @@ interface ChatVoteRow {
   voter_count: number | null;
   text_results_json: string | null;
   more_terms: number | null;
+}
+
+interface ChatVoteTemplateRow {
+  id: string;
+  channel_id: string;
+  shortcut: string | null;
+  title: string;
+  labels: string;
+  free_text_mode: ChatVotingTextMode | null;
+  duration_seconds: number;
+  revision: number;
+  legacy_alias: ChatVoteTemplate["legacyAlias"];
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 const parseStringArray = (value: string | null): string[] | null => {
@@ -61,14 +73,10 @@ const parseTermArray = (value: string | null): ChatVoteTerm[] | null => {
 };
 
 const mapRow = (row: ChatVoteRow): ChatVote => {
-  const kind = row.kind ?? (row.preset === null ? "yes_no" : chatVotingKindForPreset(row.preset));
-  const preset = row.preset ?? chatVotingPresetForKind(kind);
   return {
     id: row.poll_id,
     channelId: row.channel_id,
-    kind,
-    preset,
-    legacyWritten: row.legacy_written === 1,
+    kind: row.kind,
     optionCount: row.option_count,
     labels: parseStringArray(row.labels_json) ?? [],
     title: row.title,
@@ -87,7 +95,44 @@ const mapRow = (row: ChatVoteRow): ChatVote => {
   };
 };
 
-export const chatVoteSelectColumns = `channel_id, poll_id, kind, preset, legacy_written, option_count, labels_json, status,
+const mapTemplateRow = (row: ChatVoteTemplateRow): ChatVoteTemplate => ({
+  id: row.id,
+  channelId: row.channel_id,
+  shortcut: row.shortcut,
+  title: row.title,
+  labels: parseStringArray(row.labels) ?? [],
+  freeTextMode: row.free_text_mode,
+  durationSeconds: row.duration_seconds,
+  revision: row.revision,
+  legacyAlias: row.legacy_alias,
+  lastUsedAt: row.last_used_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+export const chatVoteTemplateSelectColumns = `id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds,
+                                             revision, legacy_alias, last_used_at, created_at, updated_at`;
+
+export type ChatVoteTemplateWriteStatus = "saved" | "created" | "limit" | "conflict" | "shortcut_conflict" | "missing" | "unauthorized";
+export type ChatVoteTemplateSaveResult =
+  | { status: "saved"; template: ChatVoteTemplate }
+  | { status: "shortcut_conflict" }
+  | { status: "conflict" }
+  | { status: "missing" }
+  | { status: "unauthorized" };
+
+export interface ChatVoteTemplateRepository {
+  templates(channelId: string): Promise<ChatVoteTemplate[]>;
+  template(channelId: string, id: string): Promise<ChatVoteTemplate | null>;
+  templateByShortcut(channelId: string, shortcut: string): Promise<ChatVoteTemplate | null>;
+  templateByLegacyAlias(channelId: string, alias: NonNullable<ChatVoteTemplate["legacyAlias"]>): Promise<ChatVoteTemplate | null>;
+  createTemplate(channelId: string, id: string, draft: ChatVoteTemplateDraft, createdAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateWriteStatus>;
+  saveTemplate(channelId: string, id: string, revision: number, draft: ChatVoteTemplateDraft, updatedAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateSaveResult>;
+  deleteTemplate(channelId: string, id: string, revision: number, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateWriteStatus>;
+  markTemplateUsed(channelId: string, id: string, usedAt: string): Promise<void>;
+}
+
+export const chatVoteSelectColumns = `channel_id, poll_id, kind, option_count, labels_json, status,
                                       title, opened_at, closes_at, requested_duration_seconds, closed_at,
                                       close_reason, counts_json, voter_count, text_mode, text_results_json, more_terms,
                                       term_filter_ready`;
@@ -95,6 +140,7 @@ export const chatVoteSelectColumns = `channel_id, poll_id, kind, preset, legacy_
 export interface ChatVotingRepository {
   open(channelId: string): Promise<ChatVote | null>;
   latest(channelId: string): Promise<ChatVote | null>;
+  recent(channelId: string, limit?: number): Promise<ChatVote[]>;
   byId(channelId: string, pollId: string): Promise<ChatVote | null>;
   approveTerm(
     channelId: string,
@@ -105,7 +151,7 @@ export interface ChatVotingRepository {
     authorization: ModuleMutationAuthorization,
   ): Promise<{ authorized: boolean; changed: boolean }>;
   insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization): Promise<boolean>;
-  requestManualClose(channelId: string, pollId: string, authorization?: ModuleMutationAuthorization, legacyOnly?: boolean): Promise<boolean>;
+  requestManualClose(channelId: string, pollId: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
   finish(
     channelId: string,
     pollId: string,
@@ -116,9 +162,112 @@ export interface ChatVotingRepository {
     moreTerms?: number,
     termFilterReady?: boolean | null,
   ): Promise<boolean>;
+  templates: ChatVoteTemplateRepository;
 }
 
+const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
+  async templates(channelId) {
+    const result = await db.prepare(
+      `SELECT ${chatVoteTemplateSelectColumns} FROM chat_vote_templates WHERE channel_id = ?
+        ORDER BY last_used_at DESC, created_at DESC, title COLLATE NOCASE, id`,
+    ).bind(channelId).all<ChatVoteTemplateRow>();
+    return result.results.map(mapTemplateRow);
+  },
+  async template(channelId, id) {
+    const row = await db.prepare(
+      `SELECT ${chatVoteTemplateSelectColumns} FROM chat_vote_templates WHERE channel_id = ? AND id = ? LIMIT 1`,
+    ).bind(channelId, id).first<ChatVoteTemplateRow>();
+    return row === null ? null : mapTemplateRow(row);
+  },
+  async templateByShortcut(channelId, shortcut) {
+    const row = await db.prepare(
+      `SELECT ${chatVoteTemplateSelectColumns} FROM chat_vote_templates WHERE channel_id = ? AND shortcut = ? LIMIT 1`,
+    ).bind(channelId, shortcut).first<ChatVoteTemplateRow>();
+    return row === null ? null : mapTemplateRow(row);
+  },
+  async templateByLegacyAlias(channelId, alias) {
+    const row = await db.prepare(
+      `SELECT ${chatVoteTemplateSelectColumns} FROM chat_vote_templates WHERE channel_id = ? AND legacy_alias = ? LIMIT 1`,
+    ).bind(channelId, alias).first<ChatVoteTemplateRow>();
+    return row === null ? null : mapTemplateRow(row);
+  },
+  async createTemplate(channelId, id, draft, createdAt, authorization, audit) {
+    const mutation = db.prepare(
+      `INSERT INTO chat_vote_templates
+         (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision,
+          legacy_alias, last_used_at, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?
+        WHERE (SELECT COUNT(*) FROM chat_vote_templates WHERE channel_id = ?) < 100 ${authorization.sql}
+       ON CONFLICT (channel_id, shortcut) WHERE shortcut IS NOT NULL DO NOTHING`,
+    ).bind(id, channelId, draft.shortcut, draft.title, JSON.stringify(draft.labels), draft.freeTextMode,
+      draft.durationSeconds, createdAt, createdAt, channelId, ...authorization.values);
+    const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
+    if (result === undefined) throw new Error("Template creation mutation returned no D1 result.");
+    if (result.meta.changes > 0) return "created";
+    const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
+      .bind(...authorization.values).first<{ authorized: number }>();
+    if (authorized === null) return "unauthorized";
+    const count = await db.prepare("SELECT COUNT(*) AS count FROM chat_vote_templates WHERE channel_id = ?")
+      .bind(channelId).first<{ count: number }>();
+    return (count?.count ?? 0) >= 100 ? "limit" : "conflict";
+  },
+  async saveTemplate(channelId, id, revision, draft, updatedAt, authorization, audit) {
+    const existed = await db.prepare(
+      "SELECT 1 AS present FROM chat_vote_templates WHERE channel_id = ? AND id = ? LIMIT 1",
+    ).bind(channelId, id).first<{ present: number }>() !== null;
+    let template: ChatVoteTemplate | null;
+    try {
+      const mutation = db.prepare(
+        `UPDATE chat_vote_templates
+            SET shortcut = ?, title = ?, labels = ?, free_text_mode = ?, duration_seconds = ?,
+                revision = revision + 1, updated_at = ?
+          WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}
+          RETURNING ${chatVoteTemplateSelectColumns}
+        `,
+      ).bind(draft.shortcut, draft.title, JSON.stringify(draft.labels), draft.freeTextMode,
+        draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values);
+      const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
+      if (result === undefined) throw new Error("Template save mutation returned no D1 result.");
+      const row = result.results[0] as ChatVoteTemplateRow | undefined;
+      template = row === undefined ? null : mapTemplateRow(row);
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message.includes("chat_vote_templates.channel_id, chat_vote_templates.shortcut")) {
+        return { status: "shortcut_conflict" };
+      }
+      throw error;
+    }
+    if (template !== null) return { status: "saved", template };
+    const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
+      .bind(...authorization.values).first<{ authorized: number }>();
+    if (authorized === null) return { status: "unauthorized" };
+    return existed ? { status: "conflict" } : { status: "missing" };
+  },
+  async deleteTemplate(channelId, id, revision, authorization, audit) {
+    const mutation = db.prepare(
+      `DELETE FROM chat_vote_templates WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}`,
+    ).bind(channelId, id, revision, ...authorization.values);
+    const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
+    if (result === undefined) throw new Error("Template deletion mutation returned no D1 result.");
+    if (result.meta.changes > 0) return "saved";
+    const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
+      .bind(...authorization.values).first<{ authorized: number }>();
+    if (authorized === null) return "unauthorized";
+    return await this.template(channelId, id) === null ? "missing" : "conflict";
+  },
+  async markTemplateUsed(channelId, id, usedAt) {
+    await db.prepare(
+      `UPDATE chat_vote_templates
+          SET last_used_at = CASE
+            WHEN last_used_at IS NULL OR last_used_at < ? THEN ?
+            ELSE last_used_at
+          END
+        WHERE channel_id = ? AND id = ?`,
+    ).bind(usedAt, usedAt, channelId, id).run();
+  },
+});
+
 export const createChatVotingRepository = (db: D1Database): ChatVotingRepository => ({
+  templates: templateRepository(db),
   async open(channelId) {
     const row = await db.prepare(
       `SELECT ${chatVoteSelectColumns} FROM chat_votes WHERE channel_id = ? AND status = 'open' LIMIT 1`,
@@ -132,6 +281,14 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     ).bind(channelId).first<ChatVoteRow>();
     return row === null ? null : mapRow(row);
   },
+  async recent(channelId, limit = 50) {
+    const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+    const result = await db.prepare(
+      `SELECT ${chatVoteSelectColumns} FROM chat_votes WHERE channel_id = ? AND status = 'closed'
+        ORDER BY closed_at DESC, opened_at DESC LIMIT ?`,
+    ).bind(channelId, boundedLimit).all<ChatVoteRow>();
+    return result.results.map(mapRow);
+  },
   async byId(channelId, pollId) {
     const row = await db.prepare(
       `SELECT ${chatVoteSelectColumns} FROM chat_votes WHERE channel_id = ? AND poll_id = ? LIMIT 1`,
@@ -144,7 +301,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
        SELECT ?, ?, ?, ?, ?
         WHERE EXISTS (
           SELECT 1 FROM chat_votes
-           WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND preset = 'free_text'
+           WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND kind = 'free_text'
         ) ${authorization.sql}
        ON CONFLICT (channel_id, poll_id, term) DO UPDATE SET
          approved_at = excluded.approved_at,
@@ -163,14 +320,13 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `INSERT INTO chat_votes
-         (channel_id, poll_id, kind, preset, legacy_written, option_count, labels_json, title, text_mode, term_filter_ready, status, opened_at, closes_at,
+         (channel_id, poll_id, kind, option_count, labels_json, title, text_mode, term_filter_ready, status, opened_at, closes_at,
           requested_duration_seconds, close_reason)
-       SELECT ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
     ).bind(
       vote.channelId,
       vote.id,
       vote.kind,
-      vote.preset,
       vote.optionCount,
       JSON.stringify(vote.labels),
       vote.title,
@@ -185,13 +341,13 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     const result = await statement.run();
     return result.meta.changes > 0;
   },
-  async requestManualClose(channelId, pollId, authorization, legacyOnly = false) {
+  async requestManualClose(channelId, pollId, authorization) {
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `UPDATE chat_votes
           SET close_reason = 'manual'
         WHERE channel_id = ? AND poll_id = ? AND status = 'open'
-          AND close_reason IN ('timer', 'limit', 'manual') ${legacyOnly ? "AND legacy_written = 1" : ""} ${guard}`,
+          AND close_reason IN ('timer', 'limit', 'manual') ${guard}`,
     ).bind(channelId, pollId, ...(authorization?.values ?? []));
     const result = await statement.run();
     return result.meta.changes > 0;

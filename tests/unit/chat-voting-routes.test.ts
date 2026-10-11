@@ -2,10 +2,11 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleBallotAccess, ModuleRouteEnvironment } from "../../src/modules/contract";
-import { DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
+import { DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteDraft, type ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import { chatVotingRoutes } from "../../src/modules/chat_voting/routes";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
+import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -17,8 +18,6 @@ const openTextVote: ChatVoteDraft = {
   id: "current-text-poll",
   channelId: CHANNEL_ID,
   kind: "free_text",
-  preset: "free_text",
-  legacyWritten: false,
   optionCount: 0,
   labels: [],
   title: null,
@@ -36,7 +35,7 @@ const createDatabase = async (): Promise<TestD1Database> => {
   await insertChannel(database, CHANNEL_ID);
   await database.prepare(
     "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, ?)",
-  ).bind(CHANNEL_ID, JSON.stringify({ ...DEFAULT_CHAT_VOTING_SETTINGS, yesNoLabels: "Approve|Reject", autoCloseSeconds: 120 })).run();
+  ).bind(CHANNEL_ID, JSON.stringify({ ...DEFAULT_CHAT_VOTING_SETTINGS, autoCloseSeconds: 120 })).run();
   await insertLoginIdentityAndSession(database, ACTOR_ID);
   await insertMember(database, CHANNEL_ID, ACTOR_ID, "operator");
   await createChatVotingRepository(database as unknown as D1Database).insertOpen(openTextVote);
@@ -68,6 +67,7 @@ const appFor = (
     context.set("readChannelBlockedTerms", readBlockedTerms);
     context.set("publishModuleOverlayMessage", publish);
     context.set("writeModuleAudit", writeAudit);
+    context.set("prepareModuleAudit", (entry, changedAt) => prepareModuleAudit(context.env.DB, ACTOR_ID, changedAt, entry));
     await next();
   });
   app.route(`/channels/:channelId/modules/chat_voting`, chatVotingRoutes);
@@ -84,6 +84,118 @@ afterEach(() => {
 });
 
 describe("chat voting routes", () => {
+  it("creates and revision-saves templates, retains invalid drafts, and rejects shortcuts and stale writes", async () => {
+    const database = await createDatabase();
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+    const templatesPath = `/channels/${CHANNEL_ID}/modules/chat_voting/templates`;
+    const blankResponse = await app.fetch(new Request(`https://brobot.example${templatesPath}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+    }), { DB: database as unknown as D1Database });
+    expect(blankResponse.status).toBe(400);
+    const whitespaceLabelResponse = await app.fetch(new Request(`https://brobot.example${templatesPath}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "  ", labels: [" ", ""], freeTextMode: null, durationSeconds: 120 }),
+    }), { DB: database as unknown as D1Database });
+    expect(whitespaceLabelResponse.status).toBe(400);
+    const createdResponse = await app.fetch(new Request(`https://brobot.example${templatesPath}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 }),
+    }), {
+      DB: database as unknown as D1Database,
+    });
+    expect(createdResponse.status).toBe(201);
+    const created = await createdResponse.json<{ template: ChatVoteTemplate }>();
+    expect(created.template).toMatchObject({ title: "Dinner", labels: ["Pizza", "Burger"], durationSeconds: 120, revision: 1 });
+    const entryPath = `${templatesPath}/${encodeURIComponent(created.template.id)}`;
+    const savedResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "One answer draft", labels: ["Only one"], freeTextMode: null, durationSeconds: 120, revision: 1 }),
+    }), { DB: database as unknown as D1Database });
+    expect(savedResponse.status).toBe(200);
+    await expect(savedResponse.json()).resolves.toMatchObject({ template: { title: "One answer draft", labels: ["Only one"], revision: 2 } });
+    const blankPatchResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: " ", labels: [" ", ""], freeTextMode: null, durationSeconds: 120, revision: 2 }),
+    }), { DB: database as unknown as D1Database });
+    expect(blankPatchResponse.status).toBe(400);
+    await expect(blankPatchResponse.json()).resolves.toEqual({ error: "chat_vote_template_request_invalid" });
+    const staleResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "Stale", labels: ["A", "B"], freeTextMode: null, durationSeconds: 120, revision: 1 }),
+    }), { DB: database as unknown as D1Database });
+    expect(staleResponse.status).toBe(409);
+    await expect(staleResponse.json()).resolves.toEqual({ error: "chat_vote_template_conflict" });
+    const invalidShortcutResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: "Bad!", title: "Valid title", labels: ["A", "B"], freeTextMode: null, durationSeconds: 120, revision: 2 }),
+    }), { DB: database as unknown as D1Database });
+    expect(invalidShortcutResponse.status).toBe(400);
+    await expect(invalidShortcutResponse.json()).resolves.toEqual({ error: "chat_vote_template_shortcut_invalid" });
+    const deleteResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
+      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: 2 }),
+    }), { DB: database as unknown as D1Database });
+    expect(deleteResponse.status).toBe(200);
+    const auditEntries = await database.prepare(
+      "SELECT action, actor_user_id, before_json, after_json FROM audit_log WHERE channel_id = ? AND action LIKE 'chat_voting.template.%'",
+    ).bind(CHANNEL_ID).all<{ action: string; actor_user_id: string; before_json: string | null; after_json: string | null }>();
+    expect(auditEntries.results).toHaveLength(3);
+    expect(auditEntries.results.map((entry) => entry.action).sort((left, right) => left.localeCompare(right))).toEqual([
+      "chat_voting.template.created",
+      "chat_voting.template.deleted",
+      "chat_voting.template.updated",
+    ]);
+    expect(auditEntries.results.every((entry) => entry.actor_user_id === ACTOR_ID)).toBe(true);
+    const updatedAudit = auditEntries.results.find((entry) => entry.action === "chat_voting.template.updated");
+    expect(updatedAudit?.before_json).toContain('"revision":1');
+    expect(updatedAudit?.after_json).toContain('"name":"One answer draft"');
+    const deletedAudit = auditEntries.results.find((entry) => entry.action === "chat_voting.template.deleted");
+    expect(deletedAudit?.before_json).toContain('"name":"One answer draft"');
+    expect(deletedAudit?.after_json).toBe("null");
+  });
+
+  it("keeps a successful template start successful when usage bookkeeping fails", async () => {
+    const database = await createDatabase();
+    const repository = createChatVotingRepository(database as unknown as D1Database);
+    await repository.finish(CHANNEL_ID, openTextVote.id, "manual", "2026-10-04T10:01:00.000Z", [], [], 0, true);
+    const authorization = authorizeModuleMutation(
+      CHANNEL_ID,
+      { userId: ACTOR_ID, sessionId: `session-${ACTOR_ID}` },
+      "2026-10-04T10:02:00.000Z",
+    );
+    const createStatus = await repository.templates.createTemplate(CHANNEL_ID, "usage-failure-template", {
+      shortcut: "essen", title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120,
+    }, "2026-10-04T10:02:00.000Z", authorization);
+    expect(createStatus).toBe("created");
+    await database.prepare(
+      "CREATE TRIGGER fail_template_usage BEFORE UPDATE OF last_used_at ON chat_vote_templates BEGIN SELECT RAISE(FAIL, 'usage write failed'); END",
+    ).run();
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
+    const namespace = {
+      idFromName: vi.fn(() => ({})),
+      get: vi.fn(() => ({ scheduleModuleAlarm })),
+    } as unknown as Env["CHANNEL"];
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/start`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ templateId: "usage-failure-template" }),
+    }), { DB: database as unknown as D1Database, CHANNEL: namespace });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ vote: { title: "Dinner", status: "open" } });
+    expect(scheduleModuleAlarm).toHaveBeenCalled();
+  });
+
+  it.each(["broadcaster", "manager", "operator"] as const)("allows template CRUD for the %s channel member role", async (role) => {
+    const database = await createDatabase();
+    await database.prepare("UPDATE channel_members SET role = ? WHERE channel_id = ? AND user_id = ?")
+      .bind(role, CHANNEL_ID, ACTOR_ID).run();
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/templates`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 }),
+    }), { DB: database as unknown as D1Database });
+    expect(response.status).toBe(201);
+  });
+
   it.each([
     ["missing", { preset: "yes_no" }],
     ["negative", { preset: "yes_no", durationSeconds: -1 }],
@@ -119,7 +231,7 @@ describe("chat voting routes", () => {
     await expect(response.json()).resolves.toEqual({ error: "chat_voting_request_invalid" });
   });
 
-  it("returns localized default labels for each selectable preset", async () => {
+  it("returns only the default duration now that answer defaults are templates", async () => {
     const database = await createDatabase();
     const app = appFor(ballotAccess(), () => Promise.resolve([]));
     const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/current`), {
@@ -127,20 +239,10 @@ describe("chat voting routes", () => {
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      defaultLabels: {
-        yes_no: ["Approve", "Reject"],
-        digit_01: ["Nein", "Ja"],
-        digit_12: ["1", "2"],
-        scale_5: ["1", "2", "3", "4", "5"],
-        options_n: ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
-        free_text: [],
-      },
-      defaultDurationSeconds: 120,
-    });
+    await expect(response.json()).resolves.toMatchObject({ defaultDurationSeconds: 120 });
   });
 
-  it("reads a legacy open vote without scheduling a close alarm", async () => {
+  it("returns a legacy-written open vote without scheduling a close alarm", async () => {
     const database = await createDatabase();
     await database.prepare("UPDATE chat_votes SET legacy_written = 1 WHERE channel_id = ? AND poll_id = ?")
       .bind(CHANNEL_ID, openTextVote.id).run();
@@ -158,7 +260,7 @@ describe("chat voting routes", () => {
 
     expect(response.status).toBe(200);
     expect(scheduleModuleAlarm).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toMatchObject({ vote: { id: openTextVote.id, status: "open", legacyWritten: true } });
+    await expect(response.json()).resolves.toMatchObject({ vote: { id: openTextVote.id, status: "open" } });
   });
 
   it("starts a panel vote with a trimmed question and Unicode labels counted in code points", async () => {
@@ -178,7 +280,7 @@ describe("chat voting routes", () => {
     const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preset: "yes_no", durationSeconds: 60, labels, title: `  ${title}  ` }),
+      body: JSON.stringify({ kind: "options", optionCount: 2, durationSeconds: 60, labels, title: `  ${title}  ` }),
     }), {
       DB: database as unknown as D1Database,
       CHANNEL: namespace,
@@ -194,7 +296,7 @@ describe("chat voting routes", () => {
     expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "announce_start", expect.stringMatching(/^start:/u), expect.any(Number), 0);
   });
 
-  it.each(["digit_01", "digit_12"])("accepts the legacy %s request without optionCount as a two-answer yes/no vote", async (preset) => {
+  it.each(["digit_01", "digit_12"])("does not accept the retired %s preset wire value", async (preset) => {
     const database = await createDatabase();
     await createChatVotingRepository(database as unknown as D1Database).finish(
       CHANNEL_ID, openTextVote.id, "manual", "2026-10-04T10:01:00.000Z", [], [], 0, true,
@@ -210,8 +312,7 @@ describe("chat voting routes", () => {
       body: JSON.stringify({ preset, durationSeconds: 60, labels: ["Nope", "Sure"] }),
     }), { DB: database as unknown as D1Database, CHANNEL: namespace });
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ vote: { kind: "yes_no", optionCount: 2, labels: ["Nope", "Sure"] } });
+    expect(response.status).toBe(400);
   });
 
   it("rejects an approval from a stale displayed poll before refreshing or mutating ballots", async () => {

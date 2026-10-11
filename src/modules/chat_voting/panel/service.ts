@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { ChatVote, ChatVoteCloseReason, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "../contracts";
+import type { ChatVote, ChatVoteCloseReason, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "../contracts";
 
 export interface ChatVotingPanelState {
   vote: ChatVote | null;
@@ -10,6 +10,45 @@ export interface ChatVotingPanelState {
   hasOpenBallot: boolean;
   defaultDurationSeconds: number;
 }
+
+export interface ChatVoteTemplateListState {
+  templates: readonly ChatVoteTemplate[];
+  count: number;
+  maximum: number;
+}
+
+export interface ChatVoteRecentState {
+  votes: readonly ChatVote[];
+}
+
+export const laterUsageTime = (current: string | null, incoming: string | null): string | null => {
+  if (current === null) return incoming;
+  if (incoming === null) return current;
+  const currentTime = Date.parse(current);
+  const incomingTime = Date.parse(incoming);
+  if (!Number.isFinite(currentTime)) return incoming;
+  if (!Number.isFinite(incomingTime)) return current;
+  return incomingTime > currentTime ? incoming : current;
+};
+
+export const mergeChatVoteTemplateLists = (
+  previous: ChatVoteTemplateListState | null,
+  latest: ChatVoteTemplateListState,
+): ChatVoteTemplateListState => {
+  if (previous === null) return latest;
+  const latestById = new Map(latest.templates.map((template) => [template.id, template]));
+  const ordered = previous.templates.flatMap((template) => {
+    const refreshed = latestById.get(template.id);
+    if (refreshed === undefined) return [];
+    const lastUsedAt = laterUsageTime(template.lastUsedAt, refreshed.lastUsedAt);
+    return [{ ...refreshed, lastUsedAt }];
+  });
+  const included = new Set(ordered.map((template) => template.id));
+  return {
+    ...latest,
+    templates: [...ordered, ...latest.templates.filter((template) => !included.has(template.id))],
+  };
+};
 
 const readJson = async <Value>(response: Response): Promise<Value> => {
   const body: unknown = await response.json().catch(() => null);
@@ -26,12 +65,29 @@ const readJson = async <Value>(response: Response): Promise<Value> => {
 const route = (channelId: string, path: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/chat_voting${path}`;
 
+let csrfTokenRequest: Promise<string> | null = null;
+
 export const loadChatVotingState = async (channelId: string, signal?: AbortSignal): Promise<ChatVotingPanelState> =>
   readJson<ChatVotingPanelState>(await fetch(route(channelId, "/current"), signal === undefined ? {} : { signal }));
 
 const csrfHeader = async (): Promise<string> => {
-  const token = await readJson<{ token: string }>(await fetch("/api/csrf"));
-  return token.token;
+  csrfTokenRequest ??= (async () => {
+    const { token } = await readJson<{ token: string }>(await fetch("/api/csrf"));
+    return token;
+  })().finally(() => { csrfTokenRequest = null; });
+  return csrfTokenRequest;
+};
+
+const csrfMutation = async <Value>(
+  request: (token: string) => Promise<Value>,
+): Promise<Value> => {
+  const token = await csrfHeader();
+  try {
+    return await request(token);
+  } catch (error: unknown) {
+    if (!(error instanceof PanelApiError) || error.status !== 403 || error.code !== "csrf_invalid") throw error;
+    return request(await csrfHeader());
+  }
 };
 
 export interface StartChatVotingOptions {
@@ -43,32 +99,68 @@ export interface StartChatVotingOptions {
   title?: string;
 }
 
-export const startChatVoting = async (channelId: string, options: StartChatVotingOptions): Promise<ChatVote> => {
-  const token = await csrfHeader();
-  return (await readJson<{ vote: ChatVote }>(await fetch(route(channelId, "/start"), {
+export interface StartChatVoteTemplateOptions {
+  templateId: string;
+}
+
+export const startChatVoting = async (channelId: string, options: StartChatVotingOptions | StartChatVoteTemplateOptions): Promise<ChatVote> => {
+  return csrfMutation(async (token) => (await readJson<{ vote: ChatVote }>(await fetch(route(channelId, "/start"), {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
     body: JSON.stringify({
       ...options,
     }),
-}))).vote;
+}))).vote);
+};
+
+export const loadChatVoteTemplates = async (channelId: string, signal?: AbortSignal): Promise<ChatVoteTemplateListState> =>
+  readJson<ChatVoteTemplateListState>(await fetch(route(channelId, "/templates"), signal === undefined ? {} : { signal }));
+
+export const loadRecentChatVotes = async (channelId: string, signal?: AbortSignal): Promise<ChatVoteRecentState> =>
+  readJson<ChatVoteRecentState>(await fetch(route(channelId, "/recent"), signal === undefined ? {} : { signal }));
+
+export const createChatVoteTemplate = async (channelId: string, draft: ChatVoteTemplateDraft): Promise<ChatVoteTemplate> => {
+  return csrfMutation(async (token) => (await readJson<{ template: ChatVoteTemplate }>(await fetch(route(channelId, "/templates"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: JSON.stringify(draft),
+  }))).template);
+};
+
+export const saveChatVoteTemplate = async (
+  channelId: string,
+  templateId: string,
+  baseRevision: number,
+  draft: ChatVoteTemplateDraft,
+): Promise<ChatVoteTemplate> => {
+  return csrfMutation(async (token) => (await readJson<{ template: ChatVoteTemplate }>(await fetch(route(channelId, `/templates/${encodeURIComponent(templateId)}`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: JSON.stringify({ ...draft, revision: baseRevision }),
+  }))).template);
+};
+
+export const deleteChatVoteTemplate = async (channelId: string, template: ChatVoteTemplate): Promise<void> => {
+  await csrfMutation(async (token) => readJson<{ ok: true }>(await fetch(route(channelId, `/templates/${encodeURIComponent(template.id)}`), {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: JSON.stringify({ revision: template.revision }),
+  })));
 };
 
 export const approveChatVotingTerm = async (channelId: string, pollId: string, term: string): Promise<void> => {
-  const token = await csrfHeader();
-  await readJson<{ terms: readonly ChatVoteTerm[]; moreTerms: number; revision: number }>(await fetch(route(channelId, "/approve-term"), {
+  await csrfMutation(async (token) => readJson<{ terms: readonly ChatVoteTerm[]; moreTerms: number; revision: number }>(await fetch(route(channelId, "/approve-term"), {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
     body: JSON.stringify({ pollId, term }),
-  }));
+  })));
 };
 
 export const closeChatVoting = async (channelId: string): Promise<void> => {
-  const token = await csrfHeader();
-  await readJson<{ closing: boolean; pollId: string }>(await fetch(route(channelId, "/close"), {
+  await csrfMutation(async (token) => readJson<{ closing: boolean; pollId: string }>(await fetch(route(channelId, "/close"), {
     method: "POST",
     headers: { "X-CSRF-Token": token },
-  }));
+  })));
 };
 
 export type { ChatVoteCloseReason };

@@ -1,16 +1,17 @@
 import type { ModuleLanguage } from "../../contract";
 import { CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
-import type { ChatVoteTerm, ChatVotingKind, ChatVotingPreset, ChatVotingSettings, ChatVotingTextMode } from "../contracts";
+import { CHAT_VOTE_TEMPLATE_RESERVED_SHORTCUTS } from "../contracts";
+import type { ChatVoteTemplate, ChatVoteTerm, ChatVotingKind, ChatVotingPreset, ChatVotingSettings, ChatVotingTextMode } from "../contracts";
 import { chatVotingFreeTextOptionText } from "../contracts/chat-defaults";
 
 export type VoteCommand =
   | { kind: "start"; voteKind: ChatVotingKind; preset: ChatVotingPreset; optionCount: number; labels?: readonly string[]; textMode?: ChatVotingTextMode; title: string | null; durationSeconds?: number }
+  | { kind: "template"; shortcut: string }
+  | { kind: "legacyAlias"; alias: "yesno" | "scale" | "zeroOne" | "oneTwo"; title: string | null }
   | { kind: "again" }
   | { kind: "end" }
   | { kind: "invalid"; problem: "question" | "questionTooLong" | "answerCount" | "labels" | "duration" }
   | { kind: "help" };
-
-export type VoteLabelSetting = "yesNoLabels" | "scaleLabels" | "optionLabels" | "zeroOneLabels" | "oneTwoLabels";
 
 export const CHAT_VOTING_LABEL_MAX_LENGTH = 32;
 
@@ -38,13 +39,34 @@ export const validateVoteLabels = (
   return new Set(normalized).size === normalized.length;
 };
 
-export const isValidVoteLabelSetting = (value: string, setting: VoteLabelSetting): boolean => {
-  if (value.trim().length === 0) return true;
-  const labels = value.split("|").map((label) => label.trim());
-  const [minimum, maximum] = setting === "yesNoLabels" || setting === "zeroOneLabels" || setting === "oneTwoLabels" ? [2, 2]
-    : setting === "scaleLabels" ? [5, 5]
-      : [2, 9];
-  return validateVoteLabels(labels, minimum, maximum);
+export const isValidTemplateShortcut = (shortcut: string | null): boolean =>
+  shortcut === null || (/^[a-z][a-z0-9_-]{0,23}$/u.test(shortcut) &&
+    !(CHAT_VOTE_TEMPLATE_RESERVED_SHORTCUTS as readonly string[]).includes(shortcut));
+
+export type TemplateStartProblem = "answers" | "duration" | null;
+
+export const templateStartProblem = (
+  template: Pick<ChatVoteTemplate, "labels" | "freeTextMode" | "durationSeconds">,
+): TemplateStartProblem => {
+  if (!Number.isSafeInteger(template.durationSeconds) || template.durationSeconds < 0 || template.durationSeconds > 14_400) {
+    return "duration";
+  }
+  if (template.freeTextMode !== null) return null;
+  return validateVoteLabels(template.labels, 2, 9) ? null : "answers";
+};
+
+export const chatVoteTemplateConfiguration = (
+  template: ChatVoteTemplate,
+  titleOverride?: string | null,
+) => {
+  const voteKind: ChatVotingKind = template.freeTextMode === null ? "options" : "free_text";
+  return {
+    voteKind,
+    optionCount: voteKind === "free_text" ? 0 : template.labels.length,
+    ...(voteKind === "free_text" ? { textMode: template.freeTextMode ?? "first_word" } : { labels: template.labels }),
+    title: normalizeVoteTitle(titleOverride ?? template.title),
+    durationSeconds: template.durationSeconds,
+  };
 };
 
 /** Splits off the first whitespace-delimited token of trimmed text in linear time (no regex backtracking). */
@@ -109,10 +131,11 @@ export const parseVoteCommand = (text: string): VoteCommand | null => {
 
   const [rawArgument, remainder] = splitFirstToken(tail);
   const argument = rawArgument.length === 0 ? undefined : rawArgument.toLowerCase();
-  if (argument === "yesno") return startCommand("yes_no", "yes_no", 2, remainder);
-  if (argument === "scale") return startCommand("options", "scale_5", 5, remainder);
-  if (argument === "01") return startCommand("yes_no", "digit_01", 2, remainder);
-  if (argument === "12") return startCommand("yes_no", "digit_12", 2, remainder);
+  const alias = argument === "yesno" ? "yesno" : argument === "scale" ? "scale" : argument === "01" ? "zeroOne" : argument === "12" ? "oneTwo" : null;
+  if (alias !== null) {
+    const title = normalizeVoteTitle(remainder);
+    return isValidVoteTitle(title ?? "") ? { kind: "legacyAlias", alias, title } : { kind: "invalid", problem: "questionTooLong" };
+  }
   if (argument === "text") {
     const [modeToken, modeRest] = splitFirstToken(remainder);
     const mode = modeToken.toLowerCase();
@@ -125,6 +148,7 @@ export const parseVoteCommand = (text: string): VoteCommand | null => {
     return startCommand("options", "options_n", Number(argument), remainder);
   }
   if (tail.endsWith("?")) return startCommand("yes_no", "yes_no", 2, tail);
+  if (argument !== undefined && remainder.length === 0) return { kind: "template", shortcut: argument };
   return { kind: "help" };
 };
 
@@ -162,34 +186,13 @@ export const configuredLabels = (labels: readonly string[], count: number, allow
     : null;
 };
 
-const labelsFromSetting = (value: string, count: number, allowAdditional = false): string[] | null =>
-  configuredLabels(value.split("|").map((label) => label.trim()), count, allowAdditional);
-
 export const labelsForVote = (
-  settings: ChatVotingSettings,
+  _settings: ChatVotingSettings,
   preset: ChatVotingPreset,
   optionCount: number,
   language: ModuleLanguage,
 ): string[] => {
   if (preset === "free_text") return [];
-  const setting = preset === "yes_no" ? settings.yesNoLabels
-    : preset === "scale_5" ? settings.scaleLabels
-      : preset === "options_n" ? settings.optionLabels
-      : preset === "digit_01" ? settings.zeroOneLabels : settings.oneTwoLabels;
-  if (preset === "options_n" && isValidVoteLabelSetting(setting, "optionLabels") && setting.trim().length > 0) {
-    const configured = setting.split("|").map((label) => label.trim());
-    const labels = Array.from({ length: optionCount }, (_, index) => configured[index] ?? String(index + 1));
-    // Appended key numbers can collide with configured labels; plain numbers are always unique.
-    return validateVoteLabels(labels, optionCount, optionCount)
-      ? labels
-      : Array.from({ length: optionCount }, (_, index) => String(index + 1));
-  }
-  const configured = labelsFromSetting(
-    setting,
-    optionCount,
-    preset === "options_n",
-  );
-  if (configured !== null) return configured;
   if (preset === "yes_no") return language === "de" ? ["Ja", "Nein"] : ["Yes", "No"];
   if (preset === "digit_01") return language === "de" ? ["Nein", "Ja"] : ["No", "Yes"];
   if (preset === "digit_12") return ["1", "2"];
@@ -198,17 +201,14 @@ export const labelsForVote = (
 
 export const formatVoteOptions = (
   vote: {
-    preset: ChatVotingPreset;
+    kind: ChatVotingKind;
     optionCount: number;
     labels: readonly string[];
     textMode?: ChatVotingTextMode | null;
   },
   language: ModuleLanguage,
 ): string => {
-  if (vote.preset === "free_text") return chatVotingFreeTextOptionText(language, vote.textMode);
-  if (vote.preset === "digit_01") {
-    return `0 = ${vote.labels[0] ?? "0"}, 1 = ${vote.labels[1] ?? "1"}`;
-  }
+  if (vote.kind === "free_text") return chatVotingFreeTextOptionText(language, vote.textMode);
   return Array.from({ length: vote.optionCount }, (_, index) =>
     `${String(index + 1)} = ${vote.labels[index] ?? String(index + 1)}`,
   ).join(", ");
