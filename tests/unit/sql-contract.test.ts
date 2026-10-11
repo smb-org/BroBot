@@ -85,7 +85,6 @@ const sqlGetFixtures = new Map<string, string>([
   ["MINIMUM_VALUE_SQL", "-999999999"],
   ["MAXIMUM_VALUE_SQL", "999999999"],
   ["prepareModuleAudit === undefined ? \"\" : \"AND changes() > 0\"", "AND changes() > 0"],
-  ["legacyOnly ? \"AND legacy_written = 1\" : \"\"", "AND legacy_written = 1"],
   ["variableChange === null ? \"\" : \"AND changes() > 0\"", "AND changes() > 0"],
   ["actorGuard(overlayTokenRoles)", actorGuard(overlayTokenRoles)],
   ["overlayTokenSelectColumns", overlayTokenSelectColumns],
@@ -194,8 +193,8 @@ describe("SQL contract", () => {
       ).all() as unknown as SchemaObject[];
       expect(objects.filter((object) => object.type === "table")).toHaveLength(57);
       expect(objects.filter((object) => object.type === "index")).toHaveLength(48);
-      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(127);
-      expect(objects).toHaveLength(232);
+      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(126);
+      expect(objects).toHaveLength(231);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

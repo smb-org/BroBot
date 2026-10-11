@@ -181,9 +181,9 @@ describe("chat voting kind migration", () => {
     `).bind().run();
     await database.prepare(`
       INSERT INTO chat_votes
-        (channel_id, poll_id, kind, preset, legacy_written, option_count, labels_json,
+        (channel_id, poll_id, kind, option_count, labels_json,
          status, opened_at, closes_at, close_reason)
-      VALUES ('race-channel', 'old-poll', 'options', 'digit_01', 1, 2, '["No","Yes"]',
+      VALUES ('race-channel', 'old-poll', 'options', 2, '["No","Yes"]',
               'open', '2026-10-04T10:00:00.000Z', '2026-10-04T14:00:00.000Z', 'limit')
     `).bind().run();
 
@@ -198,9 +198,9 @@ describe("chat voting kind migration", () => {
         `).bind().run();
         await database.prepare(`
           INSERT INTO chat_votes
-            (channel_id, poll_id, kind, preset, legacy_written, option_count, labels_json,
+            (channel_id, poll_id, kind, option_count, labels_json,
              status, opened_at, closes_at, close_reason)
-          VALUES ('race-channel', 'new-poll', 'yes_no', 'yes_no', 0, 2, '["Yes","No"]',
+          VALUES ('race-channel', 'new-poll', 'yes_no', 2, '["Yes","No"]',
                   'open', '2026-10-04T10:02:00.000Z', '2026-10-04T14:02:00.000Z', 'limit')
         `).bind().run();
         return await actual.requestManualClose(channelId, pollId, authorization);
