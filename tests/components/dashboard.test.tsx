@@ -3834,6 +3834,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     let overviewAufrufe = 0;
+    const unmockedRequests: string[] = [];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
@@ -3842,16 +3843,24 @@ describe("Dashboard skeleton", () => {
         return jsonResponse(activeModule);
       }
       if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
+      if (path === "/api/channels/kanal-a/events") return jsonResponse({ entries: [], nextCursor: null });
+      if (path === "/api/channels/kanal-a/settings") return jsonResponse({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 });
+      if (path === "/api/channels/kanal-a/modules/text_commands/commands") return jsonResponse({ commands: [], variables: [] });
+      unmockedRequests.push(path);
       return jsonResponse({}, 404);
     }));
     window.history.replaceState({}, "", "/channels/kanal-a");
 
-    render(<DashboardApp />);
+    const rendered = render(<DashboardApp />);
     const link = await within(screen.getByRole("navigation", { name: "Hauptnavigation" })).findByRole("link", { name: /Textbefehle/ });
-    link.click();
+    await waitFor(() => expect(rendered.queryClient.getQueryData(queryKeys.channel("kanal-a", "overview"))).toEqual(activeModule));
+    expect(overviewAufrufe).toBe(1);
+    fireEvent.click(link);
 
     expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
+    expect(await screen.findByText("Noch keine Textbefehle angelegt.")).toBeInTheDocument();
     expect(overviewAufrufe).toBe(1);
+    expect(unmockedRequests).toEqual([]);
   });
 
   it("reports a disabled module understandably on its subpage", async () => {
