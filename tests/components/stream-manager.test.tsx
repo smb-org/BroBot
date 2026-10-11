@@ -167,9 +167,10 @@ describe("Stream Manager immediate actions", () => {
     vi.stubGlobal("fetch", fetcher);
     renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={RAID_ENABLED} />);
 
-    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "@streamerin" } });
-    expect(screen.getByLabelText("Twitch-Name")).toHaveValue("streamerin");
-    fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
+    const login = await screen.findByLabelText("Twitch-Name");
+    fireEvent.change(login, { target: { value: "@streamerin" } });
+    expect(login).toHaveValue("streamerin");
+    fireEvent.click(await screen.findByRole("button", { name: "Shoutout senden" }));
 
     await expectActionResult("Shoutout an streamerin gesendet", "success");
   });
@@ -211,10 +212,10 @@ describe("Stream Manager immediate actions", () => {
     expect(container.querySelector(".stream-manager-action__header h3")?.textContent).not.toBe("Clip");
   });
 
-  it("disables clip creation with an accessible reason while the stream is offline", () => {
+  it("disables clip creation with an accessible reason while the stream is offline", async () => {
     renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="offline" modules={CLIPS_ENABLED} />);
 
-    const button = screen.getByRole("button", { name: "Clip erstellen" });
+    const button = await screen.findByRole("button", { name: "Clip erstellen" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("aria-describedby", expect.stringContaining("stream-manager-clips-availability-reason"));
     expect(screen.getAllByText("Der Stream ist offline.")).toHaveLength(1);
@@ -276,8 +277,8 @@ describe("Stream Manager immediate actions", () => {
     vi.stubGlobal("fetch", fetcher);
     renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={RAID_ENABLED} />);
 
-    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
-    fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
+    fireEvent.change(await screen.findByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Shoutout senden" }));
 
     await expectActionResult("Shoutout an streamerin gesendet", "success");
   });
@@ -293,8 +294,8 @@ describe("Stream Manager immediate actions", () => {
     }));
     renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={RAID_ENABLED} />);
 
-    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
-    fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
+    fireEvent.change(await screen.findByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Shoutout senden" }));
 
     await expectActionResult("Twitch-Abklingzeit aktiv", "error");
   });
@@ -314,8 +315,8 @@ describe("Stream Manager immediate actions", () => {
     vi.stubGlobal("fetch", fetcher);
     renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={RAID_ENABLED} />);
 
-    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
-    fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
+    fireEvent.change(await screen.findByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Shoutout senden" }));
 
     await expectActionResult(message, "error");
   });
@@ -332,7 +333,7 @@ describe("Stream Manager immediate actions", () => {
     vi.stubGlobal("fetch", fetcher);
     renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={CLIPS_ENABLED} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Clip erstellen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Clip erstellen" }));
 
     await expectActionResult("Clip erstellt", "success");
     const openClip = screen.getByRole("link", { name: "Clip öffnen (öffnet neuen Tab)" });
@@ -353,7 +354,7 @@ describe("Stream Manager immediate actions", () => {
     vi.stubGlobal("fetch", fetcher);
     renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={CLIPS_ENABLED} />);
 
-    const button = screen.getByRole("button", { name: "Clip erstellen" });
+    const button = await screen.findByRole("button", { name: "Clip erstellen" });
     fireEvent.click(button);
     await waitFor(() => { expect(button).toBeDisabled(); });
     fireEvent.click(button);

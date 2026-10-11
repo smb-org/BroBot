@@ -1,7 +1,9 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type LazyExoticComponent, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
+import { loadModulePanel, loadModuleSettingsEditor, ModuleChunkLoadError, retryModuleChunkLoad } from "./module-panel-loaders";
+import { RetryableLazy } from "./RetryableLazy";
 import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
@@ -16,7 +18,6 @@ import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, NavigationIcon, n
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
-const lazyPanels = new Map<string, LazyExoticComponent<ComponentType<ModulePanelProperties>>>();
 const workspaceTexts = moduleWorkspaceTexts;
 
 const moduleDetails = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): { name: string; description: string } => ({
@@ -157,18 +158,10 @@ const ModuleSwitch = ({ moduleId, enabled, disabled, busy, onToggle }: {
   </button>
 );
 
-const getLazyPanel = (module: (typeof MODULES)[number]): LazyExoticComponent<ComponentType<ModulePanelProperties>> | null => {
-  if (module.panel === undefined) return null;
-  const existing = lazyPanels.get(module.id);
-  if (existing !== undefined) return existing;
-  const panel = lazy(module.panel);
-  lazyPanels.set(module.id, panel);
-  return panel;
-};
-
 interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
+  suspendModuleId?: string;
   canManage?: boolean;
   canOperate?: boolean;
   botIsModerator?: boolean | null;
@@ -199,8 +192,10 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   const queryClient = useDashboardQueryClient();
   const settingsQuery = useModuleQuery(channelId, module.id, "settings", async (signal) => {
     if (module.settingsEditor === undefined) throw new Error("Module settings editor is unavailable.");
+    const definitionPromise = loadModuleSettingsEditor(module.id);
+    if (definitionPromise === null) throw new Error("Module settings editor is unavailable.");
     const [definition, response] = await Promise.all([
-      module.settingsEditor(),
+      definitionPromise,
       getChannelModuleSettings(channelId, module.id, signal),
     ]);
     return { definition: definition.default, settings: response.settings, revision: response.revision, variables: response.variables };
@@ -209,14 +204,18 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   const loadError = settingsQuery.error instanceof PanelApiError
     ? apiErrorText(settingsQuery.error.code, dashboardTexts().module.settingsLoadError)
     : dashboardTexts().module.settingsLoadError;
+  const retrySettingsQuery = (): void => {
+    if (settingsQuery.error instanceof ModuleChunkLoadError) retryModuleChunkLoad();
+    else void settingsQuery.refetch();
+  };
   if (loaded === undefined) {
     return <LoadState
       variant="panel-320"
       status={settingsQuery.isPending || settingsQuery.isFetching ? "loading" : "error"}
       loading={<Skeleton rows={3} height={34} />}
       empty={null}
-      error={<p className="muted" role="alert">{loadError}</p>}
-      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}
+      error={null}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: retrySettingsQuery }}
       refreshError={false}
     >{null}</LoadState>;
   }
@@ -227,7 +226,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
     loading={<Skeleton rows={3} height={34} />}
     empty={null}
     error={<p className="muted" role="alert">{dashboardTexts().module.settingsLoadError}</p>}
-    queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}
+    queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: retrySettingsQuery }}
     refreshError={settingsQuery.isRefetchError}
   >
     <LoadedModuleSettingsEditor
@@ -529,13 +528,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   </>;
 };
 
-export const ModulePanelMount = ({ channelId, activeModules, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
-    const panel = getLazyPanel(module);
-    if (panel === null && module.settingsEditor === undefined) return [];
-    return [{ id: activeModule.moduleId, Panel: panel, module }];
+    if (module.panel === undefined && module.settingsEditor === undefined) return [];
+    return [{ id: activeModule.moduleId, module }];
   });
 
   if (registeredViews.length === 0) {
@@ -549,31 +547,30 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true, c
 
   return (
     <section className="module-stack" aria-label={dashboardTexts().module.views}>
-      <Suspense fallback={<p className="muted">{dashboardTexts().module.loadingViews}</p>}>
-        {registeredViews.map(({ id, Panel, module }) => <MountedModuleView
+      {registeredViews.map(({ id, module }) => <MountedModuleView
           key={`${channelId}:${id}`}
           module={module}
-          Panel={Panel}
           channelId={channelId}
           canManage={canManage}
           canOperate={canOperate}
           botIsModerator={botIsModerator}
+          suspendToParent={module.id === suspendModuleId}
           {...(initialSelection === undefined ? {} : { initialSelection })}
         />)}
-      </Suspense>
     </section>
   );
 };
 
-const MountedModuleView = ({ module, Panel, channelId, canManage, canOperate, botIsModerator, initialSelection }: {
+const MountedModuleView = ({ module, channelId, canManage, canOperate, botIsModerator, suspendToParent, initialSelection }: {
   module: (typeof MODULES)[number];
-  Panel: LazyExoticComponent<ComponentType<ModulePanelProperties>> | null;
   channelId: string;
   canManage: boolean;
   canOperate: boolean;
   botIsModerator: boolean | null;
+  suspendToParent: boolean;
   initialSelection?: string;
 }): ReactElement => {
+  const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<ModulePanelProperties> }>, [module]);
   const settingsEditor = <ModuleSettingsEditor
     module={module}
     channelId={channelId}
@@ -582,14 +579,33 @@ const MountedModuleView = ({ module, Panel, channelId, canManage, canOperate, bo
   />;
   return <div className="module-view">
     {module.settingsEditorPlacement === "before-panel" ? settingsEditor : null}
-    {Panel === null ? null : <Panel
-      channelId={channelId}
-      language={dashboardLanguage()}
-      canManage={canManage}
-      canOperate={canOperate}
-      botIsModerator={botIsModerator}
-      textBlockConditions={MODULES.flatMap((candidate) => candidate.textBlockConditions ?? [])}
-      {...(initialSelection === undefined ? {} : { initialSelection })}
+    {module.panel === undefined ? null : <RetryableLazy
+      instanceKey={`${module.id}:panel`}
+      load={loadPanel}
+      suspendToParent={suspendToParent}
+      onRetry={retryModuleChunkLoad}
+      properties={{
+        channelId,
+        language: dashboardLanguage(),
+        canManage,
+        canOperate,
+        botIsModerator,
+        textBlockConditions: MODULES.flatMap((candidate) => candidate.textBlockConditions ?? []),
+        ...(initialSelection === undefined ? {} : { initialSelection }),
+      }}
+      loadingFallback={<div className="module-view-fallback module-view-fallback--rows" aria-hidden="true">
+        <span className="module-view-fallback__row" />
+        <span className="module-view-fallback__row" />
+        <span className="module-view-fallback__row" />
+      </div>}
+      renderError={(retry) => <LoadState
+        variant="panel-320"
+        status="error"
+        loading={null}
+        empty={null}
+        error={null}
+        queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
+      >{null}</LoadState>}
     />}
     {module.settingsEditorPlacement === "before-panel" ? null : settingsEditor}
   </div>;
@@ -776,9 +792,11 @@ interface ModulePageProperties {
   onToggle: () => void;
   /** Deep-link target from Spotlight (#164), e.g. a text command name. */
   initialSelection?: string;
+  /** Lets route transitions retain the previous page until the target panel chunk is ready. */
+  suspendPanelUntilReady?: boolean;
 }
 
-export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, loading = false, error = null, busy = false, botIsModerator = null, onNavigate, onToggle, initialSelection }: ModulePageProperties): ReactElement => {
+export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, loading = false, error = null, busy = false, botIsModerator = null, onNavigate, onToggle, initialSelection, suspendPanelUntilReady = false }: ModulePageProperties): ReactElement => {
   const texts = dashboardTexts();
   const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
@@ -858,7 +876,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {stateMessage === null ? (
           registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
+              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
             </section>
           )
         ) : (

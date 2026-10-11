@@ -1,4 +1,4 @@
-import { Fragment, StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Fragment, StrictMode, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 
@@ -34,6 +34,7 @@ import {
   type PanelChannelSettings,
 } from "./api";
 import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
+import { preloadModulePanel } from "./module-panel-loaders";
 import { BroadcasterConsentAction, ChannelNotices, ImmediateActions, ModeratorCheckAction, WarningsAndErrorsFeed } from "./stream-manager";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
 import { useSystemQuery } from "./data/lists";
@@ -42,11 +43,11 @@ import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { channelPanelTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
-import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration } from "../contracts/values";
+import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration, type ChannelRole } from "../contracts/values";
 import { MODULES } from "../modules/registry";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
-import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading } from "./nav-pages";
+import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading, visibleModuleNavigationIds } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
 import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
@@ -226,6 +227,7 @@ interface PanelSidebarProperties {
   channels: PanelChannelState[];
   platformAdmin: boolean;
   moduleStates: PanelModuleState[] | null;
+  memberRole: ChannelRole | null;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onEntryNavigate: () => void;
@@ -236,11 +238,42 @@ interface PanelSidebarProperties {
  * "Seitenleiste" (docs/input/DESIGN-neu.md): four groups, built from the
  * seam's `Sidebar`. Replaces `Rail` and the breadcrumb switchers.
  */
-const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, collapsed, onToggleCollapsed, onEntryNavigate, onNavigate }: PanelSidebarProperties): ReactElement => {
+const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, memberRole, collapsed, onToggleCollapsed, onEntryNavigate, onNavigate }: PanelSidebarProperties): ReactElement => {
   const texts = dashboardTexts();
   const navigationChannelId = route.kind === "channel" || route.kind === "module"
     ? route.channelId
     : channels[0]?.channelId ?? "";
+
+  useEffect(() => {
+    if (moduleStates === null || memberRole === null) return;
+    const enabledModuleIds = [...visibleModuleNavigationIds(moduleStates, memberRole)];
+    if (enabledModuleIds.length === 0) return;
+
+    let cancelled = false;
+    const preloadEnabledModules = (): void => {
+      if (cancelled) return;
+      for (const moduleId of enabledModuleIds) {
+        void preloadModulePanel(moduleId).catch(() => undefined);
+      }
+    };
+    const idleWindow = window as unknown as {
+      requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (idleWindow.requestIdleCallback !== undefined) {
+      const handle = idleWindow.requestIdleCallback(preloadEnabledModules, { timeout: 1_000 });
+      return () => {
+        cancelled = true;
+        idleWindow.cancelIdleCallback?.(handle);
+      };
+    }
+
+    const handle = window.setTimeout(preloadEnabledModules, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [memberRole, moduleStates]);
 
   const pages = dashboardNavEntries({ isPlatformAdmin: platform }, navigationChannelId, texts);
   const pageEntry = (page: (typeof pages)[number]): SidebarEntry => {
@@ -273,6 +306,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
   const moduleGroups: SidebarGroup[] = enabledModuleNavigationGroups(
     MODULES,
     moduleStates ?? [],
+    memberRole,
     navigationChannelId,
     dashboardLanguage(),
     (moduleId) => moduleName(moduleId),
@@ -289,6 +323,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
       href: dashboardRoutePath(entry.route),
       active: route.kind === "module" && route.moduleId === entry.moduleId,
       onNavigate: () => { onNavigate(entry.route); },
+      onPreload: () => { void preloadModulePanel(entry.moduleId).catch(() => undefined); },
       led: { status: "green" as const, word: statusWord(true) },
     })),
   }));
@@ -1605,7 +1640,7 @@ export const DashboardApp = (): ReactElement => {
     <UiProvider>
         <Shell
           header={<DashboardHeader route={route} channels={channels.data ?? []} activeChannel={activeHeaderChannel} loadedAt={activeHeaderLoadedAt} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} onRefreshState={refreshChannelState} />}
-          navbar={(context) => <PanelSidebar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} moduleStates={sidebarModuleStates} collapsed={context.collapsed} onToggleCollapsed={context.onToggleCollapsed} onEntryNavigate={context.closeMobileNav} onNavigate={navigate} />}
+          navbar={(context) => <PanelSidebar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} moduleStates={sidebarModuleStates} memberRole={selectedChannel?.role ?? null} collapsed={context.collapsed} onToggleCollapsed={context.onToggleCollapsed} onEntryNavigate={context.closeMobileNav} onNavigate={navigate} />}
           navLabel={dashboardTexts().navigation.mainNavigation}
           openSidebarLabel={dashboardTexts().navigation.openSidebar}
           closeSidebarLabel={dashboardTexts().navigation.closeSidebar}
@@ -1681,13 +1716,17 @@ export const DashboardApp = (): ReactElement => {
             }} />
           : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={() => reloadAfterModuleToggle(route.channelId)} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && selectedChannel !== null ? <UiLoadState
-          variant="panel-720"
-          status={overviewPageStatus}
-          loading={<Skeleton rows={8} height={58} />}
-          empty={<Skeleton rows={8} height={58} />}
-          error={<Skeleton rows={8} height={58} />}
-        >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId ? { initialSelection: pendingModuleSelection.value } : {})} /> : null}</UiLoadState> : null}
+        {route.kind === "module" ? <div className="module-route-layout">
+          <Suspense fallback={<div className="module-view-fallback" aria-hidden="true"><Skeleton rows={3} height={58} /></div>}>
+            {!showChannelNotReleased && !showBotBlocking && selectedChannel !== null ? <UiLoadState
+              variant="panel-720"
+              status={overviewPageStatus}
+              loading={<Skeleton rows={8} height={58} />}
+              empty={<Skeleton rows={8} height={58} />}
+              error={<Skeleton rows={8} height={58} />}
+            >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} suspendPanelUntilReady {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId ? { initialSelection: pendingModuleSelection.value } : {})} /> : null}</UiLoadState> : null}
+          </Suspense>
+        </div> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage
           key={route.channelId}
           system={systemQuery.data}

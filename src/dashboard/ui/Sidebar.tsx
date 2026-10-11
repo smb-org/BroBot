@@ -15,6 +15,7 @@ export interface SidebarEntry {
   href: string;
   active: boolean;
   onNavigate: () => void;
+  onPreload?: () => void;
   led?: { status: LedStatus; word: string };
 }
 
@@ -73,6 +74,8 @@ export function Sidebar({ groups, collapsed, onToggleCollapsed, onEntryNavigate,
         active={entry.active}
         aria-current={entry.active ? "page" : undefined}
         className={`sidebar-nav-link${moduleChild ? " sidebar-nav-link--module-child" : ""}`}
+        onMouseEnter={entry.onPreload}
+        onFocus={entry.onPreload}
         onClick={stopAndNavigate(entry.onNavigate, onEntryNavigate)}
       />
     );
