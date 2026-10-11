@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
@@ -8,6 +8,7 @@ vi.mock("../../src/modules/registry", () => ({
 }));
 
 import { DashboardApp } from "../../src/dashboard/main";
+import { queryKeys } from "../../src/dashboard/data/keys";
 import { renderWithQuery as render } from "../query-test-utils";
 
 const idleCallbackPropertyNames = ["requestIdleCallback", "cancelIdleCallback"] as const;
@@ -54,6 +55,7 @@ describe("Module route during client-side navigation", () => {
 
     const activeState = { ...channel, activeModules: [{ moduleId: "aktiv", settings: "{}" }] };
     let overviewAufrufe = 0;
+    const unmockedRequests: string[] = [];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), window.location.origin).pathname;
       if (path === "/api/channels") return response({ channels: [channel], bot: channel.bot });
@@ -64,22 +66,26 @@ describe("Module route during client-side navigation", () => {
       if (path === "/api/channels/kanal-a/modules") {
         return response({ modules: [{ id: "aktiv", enabled: true, settings: "{}" }] });
       }
+      if (path === "/api/channels/kanal-a/events") return response({ entries: [], nextCursor: null });
+      if (path === "/api/channels/kanal-a/settings") return response({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 });
+      unmockedRequests.push(path);
       return response({}, 404);
     }));
     window.history.replaceState({}, "", "/channels/kanal-a");
 
-    render(<DashboardApp />);
+    const rendered = render(<DashboardApp />, undefined, { panelRevisions: {} });
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
     expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
     const link = await within(nav).findByRole("link", { name: /^aktiv.*Läuft$/ });
+    await waitFor(() => expect(rendered.queryClient.getQueryData(queryKeys.channel("kanal-a", "overview"))).toEqual(activeState));
     expect(idleCallbackScheduled).toHaveBeenCalled();
     expect(activeLoader).not.toHaveBeenCalled();
 
-    link.click();
-    expect(activeLoader).not.toHaveBeenCalled();
+    fireEvent.click(link);
 
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
     expect(activeLoader).toHaveBeenCalledTimes(1);
     expect(overviewAufrufe).toBe(1);
+    expect(unmockedRequests).toEqual([]);
   });
 });
