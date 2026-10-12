@@ -60,8 +60,8 @@ export const readUsedKey = (language: "de" | "en"): string => catalog[language][
 `);
 
     expect(unusedLocaleKeys(projectRoot)).toEqual([
-      { catalog: "src/dashboard/locale.ts#FixtureTexts", key: "orphanKey" },
-      { catalog: "src/dashboard/locale.ts#FixtureTexts.nested", key: "nestedOrphanKey" },
+      { catalog: "src/dashboard/locale.ts#catalog", key: "orphanKey" },
+      { catalog: "src/dashboard/locale.ts#catalog.nested", key: "nestedOrphanKey" },
     ]);
   });
 
@@ -92,6 +92,115 @@ export const readLiveLabel = (language: "de" | "en"): string => {
 
     expect(unusedLocaleKeys(projectRoot)).toEqual([
       { catalog: "src/modules/sample/panel/locale.ts#catalog", key: "orphan" },
+    ]);
+  });
+
+  it("resolves referenced catalogue types and destructured property reads", () => {
+    const projectRoot = mkdtempSync(path.join(os.tmpdir(), "brobot-annotated-locale-keys-"));
+    temporaryDirectories.push(projectRoot);
+    mkdirSync(path.join(projectRoot, "src/dashboard"), { recursive: true });
+    writeFileSync(path.join(projectRoot, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2023",
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        strict: true,
+      },
+      include: ["src/**/*.ts"],
+    }));
+    writeFileSync(path.join(projectRoot, "src/dashboard/module-labels.ts"), `
+interface ModuleStatus {
+  running: string;
+  disabled: string;
+  nested: {
+    active: string;
+    orphan: string;
+  };
+}
+
+type LocaleCatalog<T> = { de: T; en: T };
+const moduleStatus: LocaleCatalog<ModuleStatus> = {
+  de: { running: "Läuft", disabled: "Deaktiviert", nested: { active: "Aktiv", orphan: "Ungenutzt" } },
+  en: { running: "Running", disabled: "Disabled", nested: { active: "Active", orphan: "Unused" } },
+};
+
+export const readStatus = (): string => {
+  const { running, nested: { active: nestedActive } } = moduleStatus.de;
+  return running + nestedActive;
+};
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/module-labels.ts#moduleStatus", key: "disabled" },
+      { catalog: "src/dashboard/module-labels.ts#moduleStatus.nested", key: "orphan" },
+    ]);
+  });
+
+  it("does not infer catalogue usage from unrelated objects with similar properties", () => {
+    const projectRoot = mkdtempSync(path.join(os.tmpdir(), "brobot-unrelated-locale-keys-"));
+    temporaryDirectories.push(projectRoot);
+    mkdirSync(path.join(projectRoot, "src/modules/sample/panel"), { recursive: true });
+    writeFileSync(path.join(projectRoot, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2023",
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        strict: true,
+      },
+      include: ["src/**/*.ts"],
+    }));
+    writeFileSync(path.join(projectRoot, "src/modules/sample/panel/locale.ts"), `
+const catalog = {
+  de: { title: "Titel", loading: "Lädt", orphan: "Ungenutzt" },
+  en: { title: "Title", loading: "Loading", orphan: "Unused" },
+} as const;
+
+const unrelated = { title: "Other title", loading: "Other loading", orphan: 42 };
+
+export const readLabels = (): string => catalog.de.title + catalog.en.loading
+  + unrelated.title + unrelated.loading + String(unrelated.orphan);
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/modules/sample/panel/locale.ts#catalog", key: "orphan" },
+    ]);
+  });
+
+  it("tracks inferred catalogue keys through a checker-confirmed type flow", () => {
+    const projectRoot = mkdtempSync(path.join(os.tmpdir(), "brobot-locale-flow-keys-"));
+    temporaryDirectories.push(projectRoot);
+    mkdirSync(path.join(projectRoot, "src/dashboard"), { recursive: true });
+    writeFileSync(path.join(projectRoot, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2023",
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        strict: true,
+      },
+      include: ["src/**/*.ts"],
+    }));
+    writeFileSync(path.join(projectRoot, "src/dashboard/locale.ts"), `
+interface DisplayTexts {
+  used: string;
+  orphan: string;
+}
+
+interface DisplayProps {
+  labels: DisplayTexts;
+}
+
+const catalog = {
+  de: { used: "Verwendet", orphan: "Ungenutzt" },
+  en: { used: "Used", orphan: "Unused" },
+} as const;
+
+const display = ({ labels }: DisplayProps): string => labels.used;
+const props: DisplayProps = { labels: catalog.de };
+export const readUsedLabel = (): string => display(props);
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/locale.ts#catalog", key: "orphan" },
     ]);
   });
 });

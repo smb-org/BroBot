@@ -57,7 +57,7 @@ const makeSettingsCatalog = (language: DashboardLanguage): SettingsEditorCatalog
   const words = de ? {
     title: "Votekick-Einstellungen", readOnly: "Nur Broadcaster und Verwalter dürfen diese Einstellungen ändern.",
     save: "Votekick-Einstellungen speichern", saved: "Einstellungen gespeichert.", pending: "Wird gespeichert …",
-    invalid: "Bitte korrigiere die markierten Felder.", load: "Einstellungen konnten nicht geladen werden.", error: "Einstellungen konnten nicht gespeichert werden.",
+    invalid: "Bitte korrigiere die markierten Felder.", error: "Einstellungen konnten nicht gespeichert werden.",
     conflict: "Einstellungen wurden inzwischen geändert.", reload: "Serverstand laden", settings: "Schwelle und Zeit", messages: "Chat-Nachrichten",
     minVotes: "Mindest-Netto-Ja-Stimmen", percent: "Aktive Chatter in Prozent", window: "Abstimmungsfenster",
     starterRole: "Mindestrolle zum Starten",
@@ -71,7 +71,7 @@ const makeSettingsCatalog = (language: DashboardLanguage): SettingsEditorCatalog
   } : {
     title: "Votekick settings", readOnly: "Only broadcasters and managers may change these settings.",
     save: "Save votekick settings", saved: "Settings saved.", pending: "Saving …",
-    invalid: "Please correct the marked fields.", load: "Settings could not be loaded.", error: "Settings could not be saved.",
+    invalid: "Please correct the marked fields.", error: "Settings could not be saved.",
     conflict: "Settings have changed since they were loaded.", reload: "Load server version", settings: "Threshold and timing", messages: "Chat messages",
     minVotes: "Minimum net yes votes", percent: "Active chatters percent", window: "Voting window",
     starterRole: "Minimum role to start",
@@ -99,7 +99,6 @@ const makeSettingsCatalog = (language: DashboardLanguage): SettingsEditorCatalog
     invalidMessage: words.invalid,
     numberMissing: de ? "Zahl eingeben." : "Enter a number.",
     issueLabels: { error: de ? "Fehler" : "Error", warning: de ? "Hinweis" : "Notice" },
-    loadError: words.load,
     saveError: words.error,
     conflictMessage: words.conflict,
     reloadLabel: words.reload,

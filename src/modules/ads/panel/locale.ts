@@ -146,7 +146,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
     saveLabel: "Ansagen speichern", discardLabel: "Verwerfen", savedLabel: "Ansagen gespeichert.", pendingLabel: "Wird gespeichert …",
     invalidMessage: "Bitte korrigiere die markierten Felder.", numberMissing: "Zahl eingeben",
     issueLabels: { error: "Fehler", warning: "Hinweis" },
-    loadError: "Die Ansagen-Einstellungen konnten nicht geladen werden.", saveError: "Die Ansagen-Einstellungen konnten nicht gespeichert werden.",
+    saveError: "Die Ansagen-Einstellungen konnten nicht gespeichert werden.",
     conflictMessage: "Ansagen-Einstellungen wurden inzwischen geändert.", reloadLabel: "Serverstand laden", enabledLabel: "An", disabledLabel: "Aus",
     templateMessages: templateMessages.de,
     warningLabel: (warning) => warning.code === "unknown_template_variables"
@@ -184,7 +184,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
     saveLabel: "Save announcements", discardLabel: "Discard", savedLabel: "Announcements saved.", pendingLabel: "Saving …",
     invalidMessage: "Please correct the marked fields.", numberMissing: "Enter a number",
     issueLabels: { error: "Error", warning: "Warning" },
-    loadError: "Announcement settings could not be loaded.", saveError: "Announcement settings could not be saved.",
+    saveError: "Announcement settings could not be saved.",
     conflictMessage: "Announcement settings have changed since they were loaded.", reloadLabel: "Load server version", enabledLabel: "On", disabledLabel: "Off",
     templateMessages: templateMessages.en,
     warningLabel: (warning) => warning.code === "unknown_template_variables"

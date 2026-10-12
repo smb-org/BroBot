@@ -69,7 +69,6 @@ export interface SettingsEditorCatalog extends SettingsEditorTexts {
   invalidMessage: string;
   numberMissing: string;
   issueLabels: { error: string; warning: string };
-  loadError: string;
   saveError: string;
   conflictMessage: string;
   reloadLabel: string;

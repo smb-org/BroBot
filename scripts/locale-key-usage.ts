@@ -26,237 +26,386 @@ const listTypeScriptFiles = (directory: string): string[] => {
     });
 };
 
-const isPropertyName = (name: ts.PropertyName | undefined): name is ts.Identifier | ts.StringLiteral | ts.NumericLiteral =>
-  name !== undefined && (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name));
-
-interface CatalogueProperty {
+interface CatalogueRecord {
   catalog: string;
-  property: ts.PropertySignature | ts.PropertyAssignment;
-  ownerType?: ts.Type;
+  key: string;
+  symbols: Set<ts.Symbol>;
 }
 
-interface PropertyRead {
-  name: string;
-  ownerType: ts.Type;
-  declarations: Set<ts.Declaration>;
-}
+const typeParts = (type: ts.Type): ts.Type[] =>
+  type.isUnionOrIntersection() ? type.types.flatMap(typeParts) : [type];
 
-const isCatalogueTypeName = (name: string): boolean => /(?:Texts|Labels|Locale|Catalog)$/u.test(name);
+const propertySymbols = (checker: ts.TypeChecker, types: readonly ts.Type[], name: string): ts.Symbol[] => {
+  const symbols = new Set<ts.Symbol>();
+  for (const type of types) {
+    for (const part of typeParts(type)) {
+      const symbol = checker.getPropertyOfType(part, name);
+      if (symbol !== undefined) symbols.add(symbol);
+    }
+  }
+  return [...symbols];
+};
 
-const catalogueProperties = (
+const propertyType = (checker: ts.TypeChecker, symbol: ts.Symbol, location: ts.Node): ts.Type =>
+  checker.getTypeOfSymbolAtLocation(symbol, location);
+
+const isCatalogPropertyDeclaration = (declaration: ts.Declaration): boolean =>
+  ts.isPropertySignature(declaration)
+  || ts.isPropertyAssignment(declaration)
+  || ts.isPropertyDeclaration(declaration);
+
+const isLocaleTextType = (checker: ts.TypeChecker, type: ts.Type): boolean => {
+  for (const part of typeParts(type)) {
+    if ((part.flags & ts.TypeFlags.StringLike) !== 0) return true;
+    for (const signature of checker.getSignaturesOfType(part, ts.SignatureKind.Call)) {
+      const returnType = checker.getReturnTypeOfSignature(signature);
+      if (typeParts(returnType).some((returnPart) => (returnPart.flags & ts.TypeFlags.StringLike) !== 0)) return true;
+    }
+  }
+  return false;
+};
+
+const addCatalogueProperties = (
+  checker: ts.TypeChecker,
+  catalog: string,
+  types: readonly ts.Type[],
+  location: ts.Node,
+  records: Map<string, CatalogueRecord>,
+  ancestors: Set<ts.Type>,
+): void => {
+  for (const type of types) {
+    for (const part of typeParts(type)) {
+      if (ancestors.has(part)) continue;
+      const nextAncestors = new Set(ancestors);
+      nextAncestors.add(part);
+
+      for (const symbol of checker.getPropertiesOfType(part)) {
+        const declarations = symbol.declarations ?? [];
+        if (!declarations.some(isCatalogPropertyDeclaration)) continue;
+        const valueType = propertyType(checker, symbol, location);
+        const key = symbol.getName();
+        if (isLocaleTextType(checker, valueType)) {
+          const recordId = `${catalog}\u0000${key}`;
+          const record = records.get(recordId) ?? { catalog, key, symbols: new Set<ts.Symbol>() };
+          record.symbols.add(symbol);
+          records.set(recordId, record);
+        } else if (valueType.flags & ts.TypeFlags.Object) {
+          addCatalogueProperties(checker, `${catalog}.${key}`, [valueType], location, records, nextAncestors);
+        }
+      }
+    }
+  }
+};
+
+const collectCatalogueProperties = (
   sourceFile: ts.SourceFile,
   catalogPath: string,
   checker: ts.TypeChecker,
-): CatalogueProperty[] => {
-  const properties: CatalogueProperty[] = [];
-  const collectType = (type: ts.TypeNode | undefined, catalog: string): void => {
-    if (type === undefined) return;
-    if (ts.isParenthesizedTypeNode(type)) {
-      collectType(type.type, catalog);
-      return;
-    }
-    if (ts.isUnionTypeNode(type) || ts.isIntersectionTypeNode(type)) {
-      type.types.forEach((member) => { collectType(member, catalog); });
-      return;
-    }
-    if (ts.isTypeReferenceNode(type)) {
-      type.typeArguments?.forEach((argument) => { collectType(argument, catalog); });
-      return;
-    }
-    if (!ts.isTypeLiteralNode(type)) return;
-    for (const member of type.members) {
-      if (!ts.isPropertySignature(member)) continue;
-      properties.push({ catalog, property: member });
-      collectType(member.type, `${catalog}.${isPropertyName(member.name) ? member.name.text : "inline"}`);
-    }
-  };
-  const visit = (node: ts.Node): void => {
-    if (ts.isInterfaceDeclaration(node) && isCatalogueTypeName(node.name.text)) {
-      const catalog = `${catalogPath}#${node.name.text}`;
-      for (const member of node.members) {
-        if (!ts.isPropertySignature(member)) continue;
-        properties.push({ catalog, property: member });
-        collectType(member.type, `${catalog}.${isPropertyName(member.name) ? member.name.text : "inline"}`);
-      }
-      return;
-    }
-    if (ts.isTypeAliasDeclaration(node) && isCatalogueTypeName(node.name.text)) {
-      collectType(node.type, `${catalogPath}#${node.name.text}`);
-      return;
-    }
-    if (ts.isVariableDeclaration(node)) {
-      const catalogName = ts.isIdentifier(node.name) ? node.name.text : "inline";
-      const catalog = `${catalogPath}#${catalogName}`;
-      collectType(node.type, catalog);
-      if (node.type === undefined && node.initializer !== undefined) {
-        const statement = node.parent;
-        if (ts.isVariableDeclarationList(statement) && ts.isVariableStatement(statement.parent) && statement.parent.parent === sourceFile) {
-          collectInferredObjectProperties(node.initializer, catalog, properties, checker);
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  return properties;
-};
-
-const collectInferredObjectProperties = (
-  node: ts.Node,
-  catalog: string,
-  properties: CatalogueProperty[],
-  checker: ts.TypeChecker,
+  records: Map<string, CatalogueRecord>,
 ): void => {
-  if (ts.isParenthesizedExpression(node)) {
-    collectInferredObjectProperties(node.expression, catalog, properties, checker);
-    return;
-  }
-  if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)) {
-    collectInferredObjectProperties(node.expression, catalog, properties, checker);
-    return;
-  }
-  if (ts.isConditionalExpression(node)) {
-    collectInferredObjectProperties(node.whenTrue, catalog, properties, checker);
-    collectInferredObjectProperties(node.whenFalse, catalog, properties, checker);
-    return;
-  }
-  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-    if (node.type !== undefined) return;
-    if (ts.isBlock(node.body)) {
-      for (const statement of node.body.statements) {
-        if (ts.isReturnStatement(statement) && statement.expression !== undefined) {
-          collectInferredObjectProperties(statement.expression, catalog, properties, checker);
-        }
-      }
-    } else {
-      collectInferredObjectProperties(node.body, catalog, properties, checker);
-    }
-    return;
-  }
-  if (ts.isObjectLiteralExpression(node)) {
-    const ownerType = checker.getTypeAtLocation(node);
-    for (const member of node.properties) {
-      if (!ts.isPropertyAssignment(member) || !isPropertyName(member.name)) continue;
-      const memberType = checker.getTypeAtLocation(member.initializer);
-      if (member.initializer.kind === ts.SyntaxKind.StringLiteral || member.initializer.kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral || (memberType.flags & ts.TypeFlags.StringLike) !== 0 || checker.getSignaturesOfType(memberType, ts.SignatureKind.Call).length > 0) {
-        properties.push({ catalog, property: member, ownerType });
-      }
-      if (ts.isObjectLiteralExpression(member.initializer) || ts.isConditionalExpression(member.initializer)) {
-        const nestedCatalog = member.name.text === "de" || member.name.text === "en" ? catalog : `${catalog}.${member.name.text}`;
-        collectInferredObjectProperties(member.initializer, nestedCatalog, properties, checker);
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name)) continue;
+      const catalog = `${catalogPath}#${declaration.name.text}`;
+      const catalogType = checker.getTypeAtLocation(declaration.name);
+      const languageSymbols = [
+        ...propertySymbols(checker, [catalogType], "de"),
+        ...propertySymbols(checker, [catalogType], "en"),
+      ];
+      if (languageSymbols.length < 2) continue;
+
+      for (const language of ["de", "en"] as const) {
+        const symbols = propertySymbols(checker, [catalogType], language);
+        const languageTypes = symbols.map((symbol) => propertyType(checker, symbol, declaration.name));
+        addCatalogueProperties(checker, catalog, languageTypes, declaration.name, records, new Set());
       }
     }
   }
 };
 
-const markPropertyRead = (
-  checker: ts.TypeChecker,
-  expression: ts.Expression,
-  name: string,
-): PropertyRead => {
-  const declarations = new Set<ts.Declaration>();
-  const visitType = (type: ts.Type): void => {
-    if (type.isUnionOrIntersection()) {
-      type.types.forEach(visitType);
+const literalPropertyNames = (checker: ts.TypeChecker, expression: ts.Expression): string[] => {
+  const names = new Set<string>();
+  const addTypeNames = (type: ts.Type): void => {
+    if (type.isUnion()) {
+      type.types.forEach(addTypeNames);
       return;
     }
-    const symbol = checker.getPropertyOfType(type, name);
-    for (const declaration of symbol?.declarations ?? []) declarations.add(declaration);
+    if ((type.flags & ts.TypeFlags.StringLiteral) !== 0) {
+      names.add((type as ts.StringLiteralType).value);
+    } else if ((type.flags & ts.TypeFlags.NumberLiteral) !== 0) {
+      names.add(String((type as ts.NumberLiteralType).value));
+    } else if ((type.flags & ts.TypeFlags.TypeParameter) !== 0) {
+      const constraint = checker.getBaseConstraintOfType(type);
+      if (constraint !== undefined) addTypeNames(constraint);
+    }
   };
-  const ownerType = checker.getTypeAtLocation(expression);
-  visitType(ownerType);
-  return { name, ownerType, declarations };
+
+  if (ts.isStringLiteralLike(expression) || ts.isNumericLiteral(expression)) names.add(expression.text);
+  if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+    const constantValue = checker.getConstantValue(expression);
+    if (typeof constantValue === "string" || typeof constantValue === "number") names.add(String(constantValue));
+  }
+  addTypeNames(checker.getTypeAtLocation(expression));
+  return [...names];
 };
 
-const propertyReads = (program: ts.Program, checker: ts.TypeChecker, localeKeys: ReadonlySet<string>): Map<string, PropertyRead[]> => {
-  const reads = new Map<string, PropertyRead[]>();
-  const addRead = (read: PropertyRead): void => {
-    const matchingReads = reads.get(read.name) ?? [];
-    matchingReads.push(read);
-    reads.set(read.name, matchingReads);
+const isWriteOnlyAccess = (node: ts.Expression): boolean => {
+  const parent = node.parent;
+  return (ts.isBinaryExpression(parent)
+      && parent.left === node
+      && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken)
+    || (ts.isDeleteExpression(parent) && parent.expression === node);
+};
+
+const markResolvedProperty = (
+  checker: ts.TypeChecker,
+  types: readonly ts.Type[],
+  name: string,
+  catalogueSymbols: ReadonlyMap<ts.Symbol, ReadonlySet<string>>,
+  catalogueDeclarations: ReadonlyMap<ts.Declaration, ReadonlySet<string>>,
+  usedRecords: Set<string>,
+): void => {
+  for (const symbol of propertySymbols(checker, types, name)) {
+    for (const recordId of catalogueSymbols.get(symbol) ?? []) usedRecords.add(recordId);
+    for (const declaration of symbol.declarations ?? []) {
+      for (const recordId of catalogueDeclarations.get(declaration) ?? []) usedRecords.add(recordId);
+    }
+  }
+};
+
+const symbolRecords = (
+  symbol: ts.Symbol,
+  catalogueSymbols: ReadonlyMap<ts.Symbol, ReadonlySet<string>>,
+  catalogueDeclarations: ReadonlyMap<ts.Declaration, ReadonlySet<string>>,
+): Set<string> => {
+  const records = new Set(catalogueSymbols.get(symbol) ?? []);
+  for (const declaration of symbol.declarations ?? []) {
+    for (const recordId of catalogueDeclarations.get(declaration) ?? []) records.add(recordId);
+  }
+  return records;
+};
+
+const bridgeContextualProperties = (
+  checker: ts.TypeChecker,
+  sourceType: ts.Type,
+  targetType: ts.Type,
+  location: ts.Node,
+  catalogueSymbols: Map<ts.Symbol, Set<string>>,
+  catalogueDeclarations: Map<ts.Declaration, Set<string>>,
+  seen: WeakMap<ts.Type, WeakSet<ts.Type>>,
+  localeKeys: ReadonlySet<string>,
+): boolean => {
+  if (!checker.isTypeAssignableTo(sourceType, targetType)) return false;
+  const targets = seen.get(sourceType) ?? new WeakSet<ts.Type>();
+  if (targets.has(targetType)) return false;
+  targets.add(targetType);
+  seen.set(sourceType, targets);
+  let changed = false;
+
+  for (const sourcePart of typeParts(sourceType)) {
+    for (const sourceSymbol of checker.getPropertiesOfType(sourcePart)) {
+      const key = sourceSymbol.getName();
+      if (!localeKeys.has(key)) continue;
+      const records = symbolRecords(sourceSymbol, catalogueSymbols, catalogueDeclarations);
+      const sourceValueType = propertyType(checker, sourceSymbol, location);
+      if (records.size === 0
+        && ((sourceValueType.flags & ts.TypeFlags.Object) === 0
+          || !hasDirectCatalogueProperty(checker, sourceValueType, catalogueSymbols, catalogueDeclarations, localeKeys))) continue;
+      const targetSymbols = propertySymbols(checker, [targetType], key);
+      if (targetSymbols.length === 0) continue;
+
+      for (const targetSymbol of targetSymbols) {
+        if (records.size > 0) {
+          const symbols = catalogueSymbols.get(targetSymbol) ?? new Set<string>();
+          for (const recordId of records) {
+            if (!symbols.has(recordId)) changed = true;
+            symbols.add(recordId);
+          }
+          catalogueSymbols.set(targetSymbol, symbols);
+          for (const declaration of targetSymbol.declarations ?? []) {
+            const declarations = catalogueDeclarations.get(declaration) ?? new Set<string>();
+            for (const recordId of records) {
+              if (!declarations.has(recordId)) changed = true;
+              declarations.add(recordId);
+            }
+            catalogueDeclarations.set(declaration, declarations);
+          }
+        }
+
+        const targetValueType = propertyType(checker, targetSymbol, location);
+        if ((sourceValueType.flags & ts.TypeFlags.Object) !== 0 && (targetValueType.flags & ts.TypeFlags.Object) !== 0) {
+          changed = bridgeContextualProperties(
+            checker,
+            sourceValueType,
+            targetValueType,
+            location,
+            catalogueSymbols,
+            catalogueDeclarations,
+            seen,
+            localeKeys,
+          ) || changed;
+        }
+      }
+    }
+  }
+  return changed;
+};
+
+const hasDirectCatalogueProperty = (
+  checker: ts.TypeChecker,
+  type: ts.Type,
+  catalogueSymbols: ReadonlyMap<ts.Symbol, ReadonlySet<string>>,
+  catalogueDeclarations: ReadonlyMap<ts.Declaration, ReadonlySet<string>>,
+  localeKeys: ReadonlySet<string>,
+): boolean => typeParts(type).some((part) =>
+  checker.getPropertiesOfType(part).some((symbol) =>
+    localeKeys.has(symbol.getName())
+    && symbolRecords(symbol, catalogueSymbols, catalogueDeclarations).size > 0));
+
+const markBindingPattern = (
+  checker: ts.TypeChecker,
+  pattern: ts.BindingName,
+  ownerTypes: readonly ts.Type[],
+  localeKeys: ReadonlySet<string>,
+  catalogueSymbols: ReadonlyMap<ts.Symbol, ReadonlySet<string>>,
+  catalogueDeclarations: ReadonlyMap<ts.Declaration, ReadonlySet<string>>,
+  usedRecords: Set<string>,
+): void => {
+  if (!ts.isObjectBindingPattern(pattern)) return;
+  for (const element of pattern.elements) {
+    if (element.dotDotDotToken !== undefined) continue;
+    const names = element.propertyName === undefined
+      ? (ts.isIdentifier(element.name) ? [element.name.text] : [])
+      : ts.isComputedPropertyName(element.propertyName)
+        ? literalPropertyNames(checker, element.propertyName.expression)
+        : ts.isIdentifier(element.propertyName) || ts.isStringLiteralLike(element.propertyName) || ts.isNumericLiteral(element.propertyName)
+          ? [element.propertyName.text]
+          : [];
+    const nestedTypes: ts.Type[] = [];
+    for (const name of names) {
+      const hasNestedBinding = ts.isObjectBindingPattern(element.name) || ts.isArrayBindingPattern(element.name);
+      if (!localeKeys.has(name) && !hasNestedBinding) continue;
+      const symbols = propertySymbols(checker, ownerTypes, name);
+      if (localeKeys.has(name)) {
+        markResolvedProperty(checker, ownerTypes, name, catalogueSymbols, catalogueDeclarations, usedRecords);
+      }
+      for (const symbol of symbols) nestedTypes.push(propertyType(checker, symbol, element));
+    }
+    if (ts.isObjectBindingPattern(element.name) || ts.isArrayBindingPattern(element.name)) {
+      markBindingPattern(
+        checker,
+        element.name,
+        nestedTypes,
+        localeKeys,
+        catalogueSymbols,
+        catalogueDeclarations,
+        usedRecords,
+      );
+    }
+  }
+};
+
+const isContextualFlowExpression = (node: ts.Expression): boolean => {
+  const parent = node.parent;
+  if (ts.isVariableDeclaration(parent) && parent.initializer === node) return parent.type !== undefined;
+  if (ts.isPropertyAssignment(parent) && parent.initializer === node) return true;
+  if (ts.isJsxExpression(parent) && parent.expression === node && ts.isJsxAttribute(parent.parent)) return true;
+  return ts.isReturnStatement(parent)
+    && parent.expression === node
+    && ts.isFunctionLike(parent.parent)
+    && parent.parent.type !== undefined;
+};
+
+const mayContainCatalogueValue = (expression: ts.Expression): boolean => {
+  if (ts.isParenthesizedExpression(expression)
+    || ts.isAsExpression(expression)
+    || ts.isTypeAssertionExpression(expression)
+    || ts.isSatisfiesExpression(expression)
+    || ts.isNonNullExpression(expression)) return mayContainCatalogueValue(expression.expression);
+  if (ts.isConditionalExpression(expression)) {
+    return mayContainCatalogueValue(expression.whenTrue) || mayContainCatalogueValue(expression.whenFalse);
+  }
+  return ts.isObjectLiteralExpression(expression)
+    || ts.isIdentifier(expression)
+    || ts.isPropertyAccessExpression(expression)
+    || ts.isElementAccessExpression(expression)
+    || ts.isCallExpression(expression);
+};
+
+const propertyReads = (
+  program: ts.Program,
+  checker: ts.TypeChecker,
+  localeKeys: ReadonlySet<string>,
+  catalogueSymbols: Map<ts.Symbol, Set<string>>,
+  catalogueDeclarations: Map<ts.Declaration, Set<string>>,
+): Set<string> => {
+  const usedRecords = new Set<string>();
+  const contextualFlows = new WeakMap<ts.Type, WeakSet<ts.Type>>();
+  const contextualExpressions: ts.Expression[] = [];
+  const collectContextualFlows = (node: ts.Node): void => {
+    if (ts.isExpression(node) && isContextualFlowExpression(node) && mayContainCatalogueValue(node)) {
+      contextualExpressions.push(node);
+    }
+    ts.forEachChild(node, collectContextualFlows);
   };
+  for (const sourceFile of program.getSourceFiles()) {
+    if (!sourceFile.isDeclarationFile) collectContextualFlows(sourceFile);
+  }
+
+  for (const expression of contextualExpressions) {
+    const sourceType = checker.getTypeAtLocation(expression);
+    if (!hasDirectCatalogueProperty(checker, sourceType, catalogueSymbols, catalogueDeclarations, localeKeys)) continue;
+    const contextualType = checker.getContextualType(expression);
+    if (contextualType !== undefined) {
+      bridgeContextualProperties(
+        checker,
+        sourceType,
+        contextualType,
+        expression,
+        catalogueSymbols,
+        catalogueDeclarations,
+        contextualFlows,
+        localeKeys,
+      );
+    }
+  }
+
   const visit = (node: ts.Node): void => {
-    if (ts.isPropertyAccessExpression(node) && localeKeys.has(node.name.text)) {
-      addRead(markPropertyRead(checker, node.expression, node.name.text));
-    } else if (ts.isElementAccessExpression(node)) {
-      const argument = node.argumentExpression;
-      if (ts.isStringLiteral(argument) || ts.isNumericLiteral(argument)) {
-        if (localeKeys.has(argument.text)) addRead(markPropertyRead(checker, node.expression, argument.text));
+    if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && !isWriteOnlyAccess(node)) {
+      if (ts.isPropertyAccessExpression(node)) {
+        if (localeKeys.has(node.name.text)) {
+          const ownerType = checker.getTypeAtLocation(node.expression);
+          markResolvedProperty(checker, [ownerType], node.name.text, catalogueSymbols, catalogueDeclarations, usedRecords);
+        }
       } else {
-        const argumentType = checker.getTypeAtLocation(argument);
-        const keys = argumentType.isUnion() ? argumentType.types : [argumentType];
-        for (const key of keys) {
-          if ((key.flags & ts.TypeFlags.StringLiteral) !== 0 || (key.flags & ts.TypeFlags.NumberLiteral) !== 0) {
-            const name = String((key as ts.StringLiteralType | ts.NumberLiteralType).value);
-            if (localeKeys.has(name)) addRead(markPropertyRead(checker, node.expression, name));
+        const names = literalPropertyNames(checker, node.argumentExpression).filter((name) => localeKeys.has(name));
+        if (names.length > 0) {
+          const ownerType = checker.getTypeAtLocation(node.expression);
+          for (const name of names) {
+            markResolvedProperty(checker, [ownerType], name, catalogueSymbols, catalogueDeclarations, usedRecords);
           }
         }
       }
     }
+
+    if (ts.isVariableDeclaration(node) && !ts.isIdentifier(node.name)) {
+      const sourceType = node.initializer === undefined
+        ? (node.type === undefined ? checker.getTypeAtLocation(node) : checker.getTypeAtLocation(node.type))
+        : checker.getTypeAtLocation(node.initializer);
+      markBindingPattern(checker, node.name, [sourceType], localeKeys, catalogueSymbols, catalogueDeclarations, usedRecords);
+    } else if (ts.isParameter(node) && !ts.isIdentifier(node.name)) {
+      const sourceType = node.type === undefined ? checker.getTypeAtLocation(node) : checker.getTypeAtLocation(node.type);
+      markBindingPattern(checker, node.name, [sourceType], localeKeys, catalogueSymbols, catalogueDeclarations, usedRecords);
+    }
+
     ts.forEachChild(node, visit);
   };
+
   for (const sourceFile of program.getSourceFiles()) {
     if (!sourceFile.isDeclarationFile) visit(sourceFile);
   }
-  return reads;
-};
-
-const isTypeCompatible = (
-  checker: ts.TypeChecker,
-  left: ts.Type,
-  right: ts.Type,
-  cache: WeakMap<ts.Type, WeakMap<ts.Type, boolean>>,
-): boolean => {
-  const cachedResult = cache.get(left)?.get(right);
-  if (cachedResult !== undefined) return cachedResult;
-  const compatible = checker.isTypeAssignableTo(left, right) || checker.isTypeAssignableTo(right, left);
-  const leftCache = cache.get(left) ?? new WeakMap<ts.Type, boolean>();
-  const rightCache = cache.get(right) ?? new WeakMap<ts.Type, boolean>();
-  leftCache.set(right, compatible);
-  rightCache.set(left, compatible);
-  cache.set(left, leftCache);
-  cache.set(right, rightCache);
-  return compatible;
-};
-
-const sharesCatalogueShape = (
-  checker: ts.TypeChecker,
-  left: ts.Type,
-  right: ts.Type,
-  compatibleTypes: WeakMap<ts.Type, WeakMap<ts.Type, boolean>>,
-  shapeCache: WeakMap<ts.Type, WeakMap<ts.Type, boolean>>,
-): boolean => {
-  // Inferred catalogues often flow through narrower structural interfaces, such as a reusable text component's props.
-  const cachedResult = shapeCache.get(left)?.get(right);
-  if (cachedResult !== undefined) return cachedResult;
-  const rightProperties = new Map(checker.getPropertiesOfType(right).map((property) => [property.getName(), property]));
-  let compatibleProperties = 0;
-  for (const leftProperty of checker.getPropertiesOfType(left)) {
-    const rightProperty = rightProperties.get(leftProperty.getName());
-    if (rightProperty === undefined) continue;
-    const leftDeclaration = leftProperty.valueDeclaration ?? leftProperty.declarations?.[0];
-    const rightDeclaration = rightProperty.valueDeclaration ?? rightProperty.declarations?.[0];
-    if (leftDeclaration === undefined || rightDeclaration === undefined) continue;
-    const leftType = checker.getTypeOfSymbolAtLocation(leftProperty, leftDeclaration);
-    const rightType = checker.getTypeOfSymbolAtLocation(rightProperty, rightDeclaration);
-    if (isTypeCompatible(checker, leftType, rightType, compatibleTypes)) compatibleProperties += 1;
-    if (compatibleProperties >= 2) {
-      const leftCache = shapeCache.get(left) ?? new WeakMap<ts.Type, boolean>();
-      const rightCache = shapeCache.get(right) ?? new WeakMap<ts.Type, boolean>();
-      leftCache.set(right, true);
-      rightCache.set(left, true);
-      shapeCache.set(left, leftCache);
-      shapeCache.set(right, rightCache);
-      return true;
-    }
-  }
-  const leftCache = shapeCache.get(left) ?? new WeakMap<ts.Type, boolean>();
-  const rightCache = shapeCache.get(right) ?? new WeakMap<ts.Type, boolean>();
-  leftCache.set(right, false);
-  rightCache.set(left, false);
-  shapeCache.set(left, leftCache);
-  shapeCache.set(right, rightCache);
-  return false;
+  return usedRecords;
 };
 
 /** Find unreferenced properties declared by the dashboard's bilingual text catalogues. */
@@ -268,32 +417,35 @@ export const unusedLocaleKeys = (projectRoot = PROJECT_ROOT): UnusedLocaleKey[] 
   const parsedConfig = ts.parseJsonConfigFileContent(configRead.config, ts.sys, root);
   const program = ts.createProgram(parsedConfig.fileNames, parsedConfig.options);
   const checker = program.getTypeChecker();
+  const catalogueRecords = new Map<string, CatalogueRecord>();
   const catalogueFiles = listTypeScriptFiles(path.join(root, "src"))
     .map((fileName) => ({ fileName, catalog: localeCataloguePath(root, fileName) }))
     .filter((entry): entry is { fileName: string; catalog: string } => entry.catalog !== null);
-  const cataloguePropertiesList = catalogueFiles.flatMap(({ fileName, catalog }) => {
+
+  for (const { fileName, catalog } of catalogueFiles) {
     const sourceFile = program.getSourceFile(fileName);
-    return sourceFile === undefined ? [] : catalogueProperties(sourceFile, catalog, checker);
-  });
-  const localeKeys = new Set(cataloguePropertiesList.flatMap(({ property }) => isPropertyName(property.name) ? [property.name.text] : []));
-  const reads = propertyReads(program, checker, localeKeys);
-  const compatibleTypes = new WeakMap<ts.Type, WeakMap<ts.Type, boolean>>();
-  const shapeCache = new WeakMap<ts.Type, WeakMap<ts.Type, boolean>>();
-  const unused = new Map<string, UnusedLocaleKey>();
-
-  for (const { catalog: catalogName, property, ownerType } of cataloguePropertiesList) {
-    if (!isPropertyName(property.name)) continue;
-    const key = property.name.text;
-    const isUsed = (reads.get(key) ?? []).some((read) =>
-      read.declarations.has(property)
-      || (key === read.name && ownerType !== undefined
-        && (isTypeCompatible(checker, ownerType, read.ownerType, compatibleTypes)
-          || sharesCatalogueShape(checker, ownerType, read.ownerType, compatibleTypes, shapeCache))));
-    if (isUsed) continue;
-
-    unused.set(`${catalogName}:${key}`, { catalog: catalogName, key });
+    if (sourceFile !== undefined) collectCatalogueProperties(sourceFile, catalog, checker, catalogueRecords);
   }
 
-  return [...unused.values()].sort((left, right) =>
-    left.catalog.localeCompare(right.catalog) || left.key.localeCompare(right.key));
+  const catalogueSymbols = new Map<ts.Symbol, Set<string>>();
+  const catalogueDeclarations = new Map<ts.Declaration, Set<string>>();
+  for (const [recordId, record] of catalogueRecords) {
+    for (const symbol of record.symbols) {
+      const symbols = catalogueSymbols.get(symbol) ?? new Set<string>();
+      symbols.add(recordId);
+      catalogueSymbols.set(symbol, symbols);
+      for (const declaration of symbol.declarations ?? []) {
+        const declarations = catalogueDeclarations.get(declaration) ?? new Set<string>();
+        declarations.add(recordId);
+        catalogueDeclarations.set(declaration, declarations);
+      }
+    }
+  }
+
+  const localeKeys = new Set([...catalogueRecords.values()].map(({ key }) => key));
+  const usedRecords = propertyReads(program, checker, localeKeys, catalogueSymbols, catalogueDeclarations);
+  return [...catalogueRecords.entries()]
+    .filter(([recordId]) => !usedRecords.has(recordId))
+    .map(([, { catalog, key }]) => ({ catalog, key }))
+    .sort((left, right) => left.catalog.localeCompare(right.catalog) || left.key.localeCompare(right.key));
 };

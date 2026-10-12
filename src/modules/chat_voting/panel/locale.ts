@@ -41,7 +41,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     saveLabel: "Einstellungen speichern", discardLabel: "Verwerfen", savedLabel: "Einstellungen gespeichert.", pendingLabel: "Wird gespeichert …",
     invalidMessage: "Bitte korrigiere die markierten Felder.", numberMissing: "Zahl eingeben",
     issueLabels: { error: "Fehler", warning: "Hinweis" },
-    loadError: "Die Einstellungen konnten nicht geladen werden.", saveError: "Die Einstellungen konnten nicht gespeichert werden.",
+    saveError: "Die Einstellungen konnten nicht gespeichert werden.",
     conflictMessage: "Die Einstellungen wurden inzwischen geändert.", reloadLabel: "Serverstand laden", enabledLabel: "An", disabledLabel: "Aus",
     templateMessages: templateMessages.de,
     warningLabel: (warning) => warning.code === "unknown_template_variables"
@@ -64,7 +64,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     saveLabel: "Save settings", discardLabel: "Discard", savedLabel: "Settings saved.", pendingLabel: "Saving …",
     invalidMessage: "Please correct the marked fields.", numberMissing: "Enter a number",
     issueLabels: { error: "Error", warning: "Note" },
-    loadError: "Settings could not be loaded.", saveError: "Settings could not be saved.",
+    saveError: "Settings could not be saved.",
     conflictMessage: "Settings have changed since they were loaded.", reloadLabel: "Load server version", enabledLabel: "On", disabledLabel: "Off",
     templateMessages: templateMessages.en,
     warningLabel: (warning) => warning.code === "unknown_template_variables"
