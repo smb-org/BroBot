@@ -112,6 +112,38 @@ export const readLiveLabel = (language: "de" | "en"): string => {
     ]);
   });
 
+  it("resolves catalogue members imported through a namespace", () => {
+    const projectRoot = createLocaleFixture(`
+export const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+`);
+    writeFileSync(path.join(projectRoot, "src/dashboard/usage.ts"), `
+import * as locale from "./locale";
+
+export const readLive = (): string => locale.catalog.en.live;
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/locale.ts#catalog", key: "orphan" },
+    ]);
+  });
+
+  it("counts shorthand catalogue properties as value references", () => {
+    const projectRoot = createLocaleFixture(`
+const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+
+const aggregate = { catalog };
+export const readLive = (): string => aggregate.catalog.en.live;
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
+  });
+
   it("resolves referenced catalogue types and destructured property reads", () => {
     const projectRoot = mkdtempSync(path.join(os.tmpdir(), "brobot-annotated-locale-keys-"));
     temporaryDirectories.push(projectRoot);

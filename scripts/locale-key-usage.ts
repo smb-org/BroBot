@@ -257,7 +257,9 @@ const isWriteOnlyAccess = (node: ts.Expression): boolean => {
 };
 
 const resolvedSymbol = (checker: ts.TypeChecker, node: ts.Node): ts.Symbol | undefined => {
-  const symbol = checker.getSymbolAtLocation(node);
+  const symbol = ts.isIdentifier(node) && ts.isShorthandPropertyAssignment(node.parent)
+    ? checker.getShorthandAssignmentValueSymbol(node.parent)
+    : checker.getSymbolAtLocation(node);
   if (symbol === undefined) return undefined;
   return (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
 };
@@ -278,7 +280,13 @@ const resolveCatalogueValue = (
 
   if (ts.isPropertyAccessExpression(value)) {
     const owner = resolveCatalogueValue(checker, value.expression, roots);
-    if (owner === null) return null;
+    if (owner === null) {
+      const member = resolvedSymbol(checker, value.name);
+      const catalog = member === undefined ? undefined : roots.get(member);
+      return catalog === undefined
+        ? null
+        : { catalog, languageSelected: false, path: [], unknown: false };
+    }
     if (!owner.languageSelected) {
       if (value.name.text !== "de" && value.name.text !== "en") return null;
       return { ...owner, languageSelected: true };
@@ -351,6 +359,7 @@ const markBindingPattern = (
 
 const isDeclarationIdentifier = (node: ts.Node): boolean =>
   ts.isIdentifier(node)
+  && !ts.isShorthandPropertyAssignment(node.parent)
   && (node.parent as ts.Node & { name?: ts.Node }).name === node;
 
 const propertyReads = (
