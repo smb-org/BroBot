@@ -613,8 +613,9 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  const initialize = enabled && existing?.initialized !== true;
   let dependentMutations: readonly D1PreparedStatement[] = [];
-  if (enabled && module.onEnable !== undefined) {
+  if (initialize && module.onEnable !== undefined) {
     dependentMutations = await module.onEnable({
       DB: context.env.DB,
       authorizeMutation: context.get("authorizeManagementMutation"),
@@ -623,17 +624,19 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       now,
     }, channelId) ?? [];
   }
-  const settings = existing === null || enabled ? defaultSettingsJson : existing.settings;
-  const changed = existing === null
-    ? await createChannelModuleWithAudit(
+  const settings = existing === null ? defaultSettingsJson : existing.settings;
+  let changed = true;
+  if (existing === null && enabled) {
+    changed = await createChannelModuleWithAudit(
       context.env.DB,
       actor,
       { channelId, moduleId, enabled, settings },
       action,
       now,
       dependentMutations,
-    )
-    : await updateChannelModuleWithAudit(
+    );
+  } else if (existing !== null) {
+    changed = await updateChannelModuleWithAudit(
       context.env.DB,
       actor,
       channelId,
@@ -643,7 +646,10 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       action,
       now,
       dependentMutations,
+      existing.revision,
+      initialize,
     );
+  }
   if (!changed) return context.json({ error: "module_changed_concurrently" }, 409);
   if (module.id === "belabox" && module.settingsChangedAlarm !== undefined) {
     await runModuleAlarmAfterMutation(

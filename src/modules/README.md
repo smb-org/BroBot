@@ -659,8 +659,9 @@ Ein Modul wird pro Kanal über das Panel aktiviert, nicht per Hand-SQL: Ein Broa
 oder Verwalter des Kanals ruft `GET /api/channels/:channelId/modules` auf, um die
 Registry mit dem gespeicherten Zustand jedes Moduls zu sehen, und schaltet es über
 `PATCH /api/channels/:channelId/modules/:moduleId` mit `{ "enabled": true }` ein oder
-aus. Ein `operator` darf die Liste lesen, aber nicht schreiben. Beim Einschalten
-schreibt der Worker `defaultSettings` des Moduls in `channel_modules.settings`; Einstellungen
+aus. Ein `operator` darf die Liste lesen, aber nicht schreiben. Beim ersten Einschalten
+schreibt der Worker `defaultSettings` des Moduls in `channel_modules.settings`; spätere
+Reaktivierungen behalten die gespeicherten Einstellungen. Einstellungen
 liest der Host über `GET /api/channels/:channelId/modules/:moduleId/settings` und
 schreibt sie über `PATCH` derselben Route (mit `settings` und `revision` im Body, Prüfung gegen
 `settingsSchema`, Verwalter-Berechtigung und Revisionskonflikt); für eigene

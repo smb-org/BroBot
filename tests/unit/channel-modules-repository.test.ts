@@ -25,6 +25,7 @@ const record = (channelId: string, moduleId: string, enabled: boolean): ChannelM
   channelId,
   moduleId,
   enabled,
+  initialized: enabled,
   settings: SETTINGS,
   revision: 1,
 });
@@ -133,7 +134,7 @@ describe("module activation in the repository", () => {
 
     expect(changed).toBe(true);
     await expect(getChannelModuleForChannel(asD1(database), "kanal-a", "test-modul"))
-      .resolves.toEqual({ ...record("kanal-a", "test-modul", false), revision: 2 });
+      .resolves.toEqual({ ...record("kanal-a", "test-modul", false), initialized: true, revision: 2 });
     await expect(auditCount(database)).resolves.toBe(2);
   });
 

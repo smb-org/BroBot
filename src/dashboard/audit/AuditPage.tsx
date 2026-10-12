@@ -119,7 +119,12 @@ const AuditDiffList = ({ rows, moduleCatalog, texts }: {
   </dl>;
 };
 
-/** Loads the field catalogue for an entry whose diff carries settings fields -- lazily, only while its inspector is open (module settings editors are code-split, see `modules/contract.ts`'s `settingsEditor`). Not just `*.settings_changed`: `module.enabled` (first enable, or a re-enable resetting to defaults) carries settings too, so its diff needs the same labels instead of raw keys. */
+/**
+ * Loads the field catalogue for an entry whose diff carries settings fields,
+ * lazily while its inspector is open. A `module.enabled` entry can include
+ * settings when a row is first created, so it needs the same labels as a
+ * settings-change entry.
+ */
 const useModuleFieldCatalog = (entry: PanelAuditEntry | null): SettingsEditorCatalog | null => {
   const [loaded, setLoaded] = useState<{ moduleId: string; catalog: SettingsEditorCatalog } | null>(null);
   const moduleId = entry?.moduleId ?? null;

@@ -211,8 +211,8 @@ export const releasePlatformChannel = async (
   const moduleMutations = MODULES
     .filter((module) => module.defaultEnabled === true)
     .map((module) => db.prepare(
-      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       SELECT ?, ?, 1, ?
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, initialized)
+       SELECT ?, ?, 1, ?, 1
         WHERE changes() > 0
           AND NOT EXISTS (
             SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = ?

@@ -65,7 +65,7 @@ const FETCH_FAILURE_THRESHOLD = 3;
 const INFRASTRUCTURE_RETRY_MAX_MS = 60_000;
 const ON_DEMAND_FAILURE_RETRY_BASE_MS = 1_000;
 
-/** Sets fresh chat templates to the channel language whenever BELABOX is enabled. */
+/** Localizes built-in chat templates while preserving custom text. */
 export const belaboxAlertDefaultsOnEnable = async (
   context: ModuleEnableContext,
   channelId: string,
@@ -74,13 +74,36 @@ export const belaboxAlertDefaultsOnEnable = async (
     .bind(channelId).first<{ language: string }>();
   const language: ModuleLanguage = channel?.language === "en" ? "en" : "de";
   const defaults = belaboxDefaultAlertTexts(language);
+  const germanDefaults = belaboxDefaultAlertTexts("de");
+  const englishDefaults = belaboxDefaultAlertTexts("en");
   const authorization = context.authorizeMutation(channelId, context.actor, context.now);
+  // The host audit precedes this statement in the activation batch and only writes after row creation.
   return [context.DB.prepare(
     `UPDATE channel_modules
-        SET settings = json_set(settings, '$.lowText', ?, '$.disconnectText', ?, '$.recoveryText', ?),
+        SET settings = json_set(
+              settings,
+              '$.lowText', CASE
+                WHEN json_type(settings, '$.lowText') IS NULL
+                  OR json_extract(settings, '$.lowText') IN (?, ?)
+                THEN ? ELSE json_extract(settings, '$.lowText') END,
+              '$.disconnectText', CASE
+                WHEN json_type(settings, '$.disconnectText') IS NULL
+                  OR json_extract(settings, '$.disconnectText') IN (?, ?)
+                THEN ? ELSE json_extract(settings, '$.disconnectText') END,
+              '$.recoveryText', CASE
+                WHEN json_type(settings, '$.recoveryText') IS NULL
+                  OR json_extract(settings, '$.recoveryText') IN (?, ?)
+                THEN ? ELSE json_extract(settings, '$.recoveryText') END
+            ),
             revision = revision + 1
-      WHERE channel_id = ? AND module_id = 'belabox' AND enabled = 1 ${authorization.sql}`,
-  ).bind(defaults.lowText, defaults.disconnectText, defaults.recoveryText, channelId, ...authorization.values)];
+      WHERE channel_id = ? AND module_id = 'belabox' AND enabled = 1
+        AND changes() > 0 ${authorization.sql}`,
+  ).bind(
+    germanDefaults.lowText, englishDefaults.lowText, defaults.lowText,
+    germanDefaults.disconnectText, englishDefaults.disconnectText, defaults.disconnectText,
+    germanDefaults.recoveryText, englishDefaults.recoveryText, defaults.recoveryText,
+    channelId, ...authorization.values,
+  )];
 };
 
 interface StoredModuleSettings {
