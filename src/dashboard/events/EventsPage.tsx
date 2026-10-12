@@ -4,10 +4,10 @@ import type { PanelEventEntry, PanelEventFilters, PanelEventsResponse, PanelModu
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatClockTime, formatNumber, formatTimestamp } from "../locale";
 import { moduleName } from "../module-labels";
-import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
+import { ModuleCount, ModuleHeading } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedState, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, notify, Popover, Select as UiSelect, Skeleton, SubInspector, useInspectorSelection, type QueryError, type SelectOption } from "../ui";
+import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, LoadStateLines, notify, Popover, Select as UiSelect, StatusLed, SubInspector, useInspectorSelection, type QueryError, type SelectOption, type StatusLedState } from "../ui";
 import { PanelApiError } from "../api";
 import { refreshQuery } from "../data/refresh";
 import { dashboardDataKeys } from "../data/keys";
@@ -262,8 +262,8 @@ const EventFeedEnd = ({
   />;
 };
 
-const realtimeLedStatus = (status: RealtimeFeedStatusValue): LedStatus =>
-  status === "connected" ? "green" : status === "renew" ? "red" : status === "offline" ? "off" : "amber";
+const realtimeFeedState = (status: RealtimeFeedStatusValue): StatusLedState =>
+  status === "connected" ? "ok" : status === "renew" ? "error" : status === "offline" ? "off" : "warn";
 
 const RealtimeFeedStatus = ({ status }: { status: RealtimeFeedStatusValue }): ReactElement => {
   const texts = dashboardTexts();
@@ -274,7 +274,7 @@ const RealtimeFeedStatus = ({ status }: { status: RealtimeFeedStatusValue }): Re
       : status === "reconnecting"
         ? texts.events.realtimeReconnecting
         : status === "renew" ? texts.events.realtimeRenewSession : texts.events.realtimeOffline;
-  return <span className="realtime-status" aria-live="polite"><Led status={realtimeLedStatus(status)} label={label} />{status === "renew" ? <a className="profile-link" href="/auth/login">{texts.events.realtimeRenewSession}</a> : null}</span>;
+  return <span className="realtime-status" aria-live="polite"><StatusLed state={realtimeFeedState(status)} label={label} />{status === "renew" ? <a className="profile-link" href="/auth/login">{texts.events.realtimeRenewSession}</a> : null}</span>;
 };
 
 export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange }: {
@@ -510,7 +510,7 @@ const EventsPageFilterState = ({
                 ? "loading"
                 : error !== null && eventEntries.length === 0 ? "error"
                 : eventEntries.length === 0 ? "empty" : "success"}
-              loading={<Skeleton rows={50} height={34} />}
+              loading={<LoadStateLines rows={50} height={34} />}
               empty={filterActive ? (
                 <EmptyState
                   title={texts.events.noMatches}

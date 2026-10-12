@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
 import { LoadState } from "./LoadState";
-import { Skeleton } from "./Skeleton";
+import { LoadStateLines } from "./LoadState";
 
 export interface GamePickerGame {
   id: string;
@@ -161,7 +161,7 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
           <LoadState
             variant="panel-220"
             status={searchStatus}
-            loading={<div role="status"><Skeleton rows={3} height={54} /><span className="sr-only">{messages.loading}</span></div>}
+            loading={<div role="status"><LoadStateLines rows={3} height={54} /><span className="sr-only">{messages.loading}</span></div>}
             empty={<p className="ui-game-picker__status">{messages.empty}</p>}
             error={<p className="form-error" role="alert">{messages.error}</p>}
           >

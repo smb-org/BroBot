@@ -13,7 +13,7 @@ describe("Sidebar", () => {
       href: `/modules/${String(index + 1)}`,
       active: false,
       onNavigate: vi.fn(),
-      led: { status: "green", word: "Running" },
+      led: { status: "ok", word: "Running" },
     }));
     const { container } = render(
       <UiProvider><Sidebar

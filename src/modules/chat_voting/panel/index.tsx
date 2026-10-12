@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, EmptyState, ListDetail, ListRow, ListToolbar, LoadState, SegmentedControl, SubInspector, notify } from "../../../dashboard/ui";
+import { Button, EmptyState, ListDetail, ListRow, ListToolbar, LoadState, SegmentChoice, SubInspector, notify } from "../../../dashboard/ui";
 import { dashboardTexts } from "../../../dashboard/locale";
 import type { ModulePanelProperties } from "../../contract";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, type ChatVote, type ChatVoteTemplate } from "../contracts";
@@ -537,7 +537,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     <ListDetail list={
       <section className="chat-voting-list" aria-label={labels.title}>
         <ListToolbar
-          filters={<SegmentedControl
+          filters={<SegmentChoice
             label={labels.title}
             value={mode}
             onChange={changeMode}

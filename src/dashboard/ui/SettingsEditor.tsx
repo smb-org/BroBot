@@ -8,9 +8,9 @@ import { ChoiceCards } from "./ChoiceCards";
 import { ChatOutputTargetControl } from "./ChatOutputTargetControl";
 import { Field } from "./Field";
 import { InspectorFieldRow, InspectorSection } from "./InspectorParts";
-import { NumberField } from "./NumberField";
+import { UnitInput } from "./UnitInput";
 import { Select } from "./Select";
-import { SegmentedControl } from "./SegmentedControl";
+import { SegmentChoice } from "./SegmentChoice";
 import { Switch } from "./Switch";
 import { TemplateText } from "./TemplateText";
 import { textFieldLength } from "./text-length";
@@ -42,8 +42,6 @@ interface SettingsFieldText {
   requiredError?: string;
   description?: string;
   disabledReason?: string;
-  increaseLabel?: string;
-  decreaseLabel?: string;
   minimumLabel?: string;
   maximumLabel?: string;
   options?: Readonly<Record<string, { label: string; description?: string }>>;
@@ -167,7 +165,7 @@ export function SettingsEditor<Settings extends object>({
         : copy.unit ?? field.unit;
       return (
         <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
-          <NumberField
+          <UnitInput
             id={id}
             label={copy.label}
             {...(unit === undefined ? {} : { unit })}
@@ -175,8 +173,6 @@ export function SettingsEditor<Settings extends object>({
             min={field.min}
             max={field.max}
             step={field.step}
-            increaseLabel={copy.increaseLabel ?? copy.label}
-            decreaseLabel={copy.decreaseLabel ?? copy.label}
             value={typeof fieldValue === "number" ? fieldValue : ""}
             disabled={disabled}
             onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
@@ -259,7 +255,7 @@ export function SettingsEditor<Settings extends object>({
         const options = field.options.map((option) => ({ value: String(option.value), label: copy.options?.[String(option.value)]?.label ?? "" }));
         return (
           <InspectorFieldRow key={field.key} label={copy.label} help={copy.options?.[String(fieldValue)]?.description ?? copy.hint}>
-            <SegmentedControl
+            <SegmentChoice
               label={copy.label}
               value={String(fieldValue ?? "")}
               onChange={(next) => {

@@ -69,18 +69,20 @@ describe("effective ESLint module boundaries", () => {
     expect(rejects(restrictions, "../service.js")).toBe(false);
   });
 
-  it("keeps Tabler imports inside ui/Icon.tsx and out of panels and the overlay", async () => {
+  it("keeps Base UI and lucide imports inside the dashboard UI seam", async () => {
     const panelRestrictions = await restrictionsFor("src/modules/example/panel/view.tsx");
     const overlayRestrictions = await restrictionsFor("src/overlay/main.tsx");
     const workerRestrictions = await restrictionsFor("src/worker/index.ts");
     const testRestrictions = await restrictionsFor("tests/example.test.ts");
     const iconRestrictions = await restrictionsFor("src/dashboard/ui/Icon.tsx");
 
-    expect(rejects(panelRestrictions, "@tabler/icons-react")).toBe(true);
-    expect(rejects(overlayRestrictions, "@tabler/icons-react")).toBe(true);
-    expect(rejects(workerRestrictions, "@tabler/icons-react")).toBe(true);
-    expect(rejects(testRestrictions, "@tabler/icons-react")).toBe(true);
-    expect(rejects(iconRestrictions, "@tabler/icons-react")).toBe(false);
+    for (const dependency of ["@base-ui/react/button", "lucide-react"]) {
+      expect(rejects(panelRestrictions, dependency)).toBe(true);
+      expect(rejects(overlayRestrictions, dependency)).toBe(true);
+      expect(rejects(workerRestrictions, dependency)).toBe(true);
+      expect(rejects(testRestrictions, dependency)).toBe(true);
+      expect(rejects(iconRestrictions, dependency)).toBe(false);
+    }
   });
 
   it("keeps rich-textarea imports inside the dashboard UI seam", async () => {

@@ -59,7 +59,7 @@
 .overlay-editor__element-remove:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .overlay-editor__element-remove:disabled { cursor: not-allowed; opacity: .55; }
 .overlay-editor__zoom { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 11px; }
-.overlay-editor__zoom .ui-number-field { width: 108px; }
+.overlay-editor__zoom .unit-input { width: 108px; }
 .overlay-editor__preview-viewport { position: relative; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-well); }
 .overlay-editor__canvas-frame { position: relative; flex: none; margin: auto; overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--r-control); background-color: var(--surface-inspector); background-image: linear-gradient(45deg, var(--surface-raised) 25%, transparent 25%), linear-gradient(-45deg, var(--surface-raised) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--surface-raised) 75%), linear-gradient(-45deg, transparent 75%, var(--surface-raised) 75%); background-size: var(--s6) var(--s6); background-position: 0 0, 0 var(--s3), var(--s3) calc(0px - var(--s3)), calc(0px - var(--s3)) 0; }
 .overlay-editor__preview-frame { position: absolute; top: 50%; left: 50%; border: 0; background: transparent; transform-origin: center; }
@@ -131,7 +131,7 @@
   .overlay-editor__preview-panel,
   .overlay-editor__properties { padding: 11px; }
   .overlay-editor__zoom { flex-wrap: wrap; justify-content: end; }
-  .overlay-editor__zoom .ui-number-field { width: 92px; }
+  .overlay-editor__zoom .unit-input { width: 92px; }
   .overlay-editor__numeric-fields { grid-template-columns: minmax(0, 1fr); }
   .overlay-editor .ui-save-bar--persistent { padding-inline: 10px; }
 }

@@ -6,7 +6,7 @@ import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVarian
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { blockReferencesInText } from "../../contracts/text-block-references";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Badge, Button, ChatPreview, ConfirmDialog, Field, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, Skeleton, SubInspector, TextArea, notify, useDraftGuard } from "../../../dashboard/ui";
+import { Badge, Button, ChatPreview, ConfirmDialog, Field, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, LoadStateLines, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, SubInspector, TextArea, notify, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
@@ -466,7 +466,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         create={{ label: labels.addBlock, onClick: openCreate, disabled: true, ...(!canManage ? { reason: labels.managementLocked } : {}) }}
       />
       <LoadState variant="panel-1200" status={libraryQuery.isError ? "error" : "loading"}
-        loading={<Skeleton rows={8} height={34} />}
+        loading={<LoadStateLines rows={8} height={34} />}
         empty={<div />}
         error={<p>{labels.loadError}</p>}
         queryError={{ message: labels.loadError, onRetry: () => { void libraryQuery.refetch(); } }}
@@ -494,7 +494,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     <LoadState
       variant="panel-1200"
       status="success"
-      loading={<Skeleton rows={8} height={34} />}
+      loading={<LoadStateLines rows={8} height={34} />}
       empty={<div />}
       error={<p>{labels.loadError}</p>}
       queryError={{ message: labels.loadError, onRetry: () => { void libraryQuery.refetch(); } }}

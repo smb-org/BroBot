@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
-import { Badge, Button, ConfirmDialog, InspectorSection, LoadState, Skeleton, notify } from "../../../dashboard/ui";
+import { Badge, Button, ConfirmDialog, InspectorSection, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
 import { dashboardLanguage } from "../../../dashboard/locale";
 import type { ModulePanelProperties } from "../../contract";
 import type { Votekick } from "../contracts";
@@ -130,7 +130,7 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
     </p>
     <InspectorSection title={labels.running}>
       <div data-testid="votekick-running-slot" style={{ height: "calc(var(--s10) * 7)", overflowY: "auto" }}>
-        {skeleton ? <Skeleton rows={2} height={34} /> : running === null
+        {skeleton ? <LoadStateLines rows={2} height={34} /> : running === null
           ? <p className="muted">{labels.emptyRunning}</p>
           : <article className="timer-row">
               <div className="timer-row__copy">
@@ -148,7 +148,7 @@ export default function VotekickPanel({ channelId, language, canOperate = true }
     <InspectorSection title={labels.history}>
       <div className="state-list" data-testid="votekick-history-list"
         style={{ height: "calc(var(--s10) * 20)", overflowY: "auto" }}>
-        {skeleton ? <Skeleton rows={5} height={34} /> : history.length === 0
+        {skeleton ? <LoadStateLines rows={5} height={34} /> : history.length === 0
           ? <p className="muted">{labels.emptyHistory}</p>
           : history.map((item) => (
               <article key={item.id} className="timer-row" style={{ height: "calc(var(--s10) * 5)", overflow: "hidden" }}>

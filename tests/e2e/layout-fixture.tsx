@@ -1,9 +1,9 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
-import { Field, FormDialog, GamePicker, NumberField, SaveBar, Select, TagInput, TextArea, UiProvider, type GamePickerGame } from "../../src/dashboard/ui";
+import { ChipsInput, Field, FormDialog, GamePicker, SaveBar, Select, TextArea, UiProvider, UnitInput, type GamePickerGame } from "../../src/dashboard/ui";
 import type { TextAreaMessages } from "../../src/dashboard/ui";
-import "../../src/dashboard/styles.css";
+import "../../src/dashboard/ui/tokens.css";
 
 const textAreaMessages: TextAreaMessages = {
   countLabel: (count, max) => `${String(count)}/${String(max)}`,
@@ -57,10 +57,9 @@ export function LayoutFixture() {
         </div>
         <div className="module-stack">
           <Field id="layout-name" label="Name" hint="A short name." value="hello" onChange={() => {}} {...errorProps} maxLength={30} countLabel={(count, max) => `${String(count)}/${String(max)}`} />
-          <NumberField id="layout-number" label="Count" hint="A short count." value={number} onChange={setNumber} {...errorProps} />
-          <NumberField id="layout-stepper" label="Stepped count" hint="A short stepped count." value={number} onChange={setNumber} {...errorProps} min={0} max={10} step={1} increaseLabel="Increase" decreaseLabel="Decrease" />
+          <UnitInput id="layout-number" label="Count" hint="A short count." value={number} onChange={setNumber} {...errorProps} />
           <Select id="layout-select" label="Mode" hint="A short mode." value="one" onChange={() => {}} options={[{ value: "one", label: "One" }]} {...errorProps} />
-          <TagInput id="layout-tags" label="Aliases" hint="A short alias hint." value={tags} onChange={setTags} {...(showIssues ? { error: "A validation error that should remain on one line beside its marker and not cover the warning row." } : {})} {...(showIssues ? { warning: "A duplicate warning that should remain in its own one-line row." } : {})} removeLabel={(entry) => `Remove ${entry}`} listLabel="Alias list" messages={{ countLabel: (count, max) => `${String(count)}/${String(max)}`, atLimitHint: "At limit.", duplicateWarning: (entry) => `${entry} is duplicated.` }} />
+          <ChipsInput id="layout-tags" label="Aliases" hint="A short alias hint." values={tags} onChange={setTags} {...(showIssues ? { error: "A validation error that should remain on one line beside its marker and not cover the warning row." } : {})} {...(showIssues ? { warning: "A duplicate warning that should remain in its own one-line row." } : {})} removeLabel={(entry) => `Remove ${entry}`} listLabel="Alias list" messages={{ countLabel: (count, max) => `${String(count)}/${String(max)}`, atLimitHint: "At limit.", duplicateWarning: (entry) => `${entry} is duplicated.` }} />
           <TextArea id="layout-template" label="Reply" hint="A short reply hint." value={showIssues ? "Hi {missing}" : "Hi there"} onChange={() => {}} {...errorProps} variables={[]} preview={(text) => previewLong ? `${text} ${"long preview ".repeat(30)}` : text} previewLabel="Preview" previewSpeaker="Bot" messages={textAreaMessages} />
         </div>
         <SaveBar dirty={showIssues} pending={savePending} persistent saveLabel="Save" discardLabel="Discard" savedLabel="Saved." pendingLabel="Saving settings …" onSave={() => {}} onDiscard={() => {}} />

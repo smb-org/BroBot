@@ -1,10 +1,15 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
-import { render, type RenderOptions } from "@testing-library/react";
+import { fireEvent, render, type RenderOptions } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { vi } from "vitest";
 
 import { createDashboardQueryClient } from "../src/dashboard/data/client";
 import { dispatchDashboardAuthenticationRequired } from "../src/dashboard/data/events";
+
+export const clickSelectOption = (option: HTMLElement): void => {
+  fireEvent.pointerDown(option, { pointerId: 1, pointerType: "mouse", button: 0 });
+  fireEvent.click(option);
+};
 
 export interface DashboardQueryTestOptions {
   gcTime?: number;

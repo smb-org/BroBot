@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 
 import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
-  Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, EmptyCellValue, Field, FieldPair, ListDetail, ListToolbar, NumberField, Select,
-  GamePicker, InspectorFieldRow, InspectorSection, LoadState, Skeleton, TimeoutDurationRangeFields,
-  registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection, notify,
+  Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, EmptyCellValue, Field, FieldPair, ListDetail, ListToolbar, UnitInput, Select,
+  GamePicker, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, TimeoutDurationRangeFields,
+  registerDashboardNavigationGuard, SegmentChoice, Switch, ChipsInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection, notify,
   type EditorInvalidField,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
@@ -315,7 +315,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const sameNameAlias = draft.aliases.includes(normalizedName);
   const invalidAlias = draft.aliases.find((alias) => !validCommandName(alias));
   const nameError = fieldError?.field === "name" ? fieldError.message : attemptedSave && normalizedName.length === 0 ? labels.nameMissing : attemptedSave && !validCommandName(normalizedName) ? labels.nameInvalid : undefined;
-  const aliasesError = fieldError?.field === "aliases" ? fieldError.message : sameNameAlias ? labels.aliasIsName : invalidAlias !== undefined ? labels.aliasInvalid(invalidAlias) : attemptedSave && draft.aliases.length > TEXT_COMMAND_MAX_ALIASES ? labels.tagInputMessages.atLimitHint : undefined;
+  const aliasesError = fieldError?.field === "aliases" ? fieldError.message : sameNameAlias ? labels.aliasIsName : invalidAlias !== undefined ? labels.aliasInvalid(invalidAlias) : attemptedSave && draft.aliases.length > TEXT_COMMAND_MAX_ALIASES ? labels.chipsInputMessages.atLimitHint : undefined;
   const cooldownInvalid = draft.cooldownSeconds === "" || !Number.isInteger(draft.cooldownSeconds) || draft.cooldownSeconds < 0 || draft.cooldownSeconds > 86400;
   const userCooldownInvalid = draft.userCooldownSeconds === "" || !Number.isInteger(draft.userCooldownSeconds) || draft.userCooldownSeconds < 0 || draft.userCooldownSeconds > 86400;
   const templateFieldNames = Object.keys(templateFields) as CommandTemplateField[];
@@ -413,7 +413,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       id: "command-aliases",
       ...(draft.aliases[0] === undefined ? {} : { focusId: `command-aliases-remove-${encodeURIComponent(draft.aliases[0])}` }),
       label: labels.aliases,
-      message: labels.tagInputMessages.atLimitHint,
+      message: labels.chipsInputMessages.atLimitHint,
       sectionId: "settings",
     });
   }
@@ -481,14 +481,14 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         onChange={(name) => { if (name !== null) setDraftField("variableAction", { ...variableAction, name }); }}
       />
       <FieldPair>
-        <SegmentedControl
+        <SegmentChoice
           label={labels.variableAction}
           hint={labels.variableOperationHelp[variableAction.operation]}
           value={variableAction.operation}
           options={( ["add", "subtract", "set", "set_argument"] as const).map((operation) => ({ value: operation, label: labels.variableOperations[operation] }))}
           disabled={!canManageContent || pending}
           onChange={(operation) => {
-            const nextOperation = operation as typeof variableAction.operation;
+            const nextOperation = operation;
             setValue((current) => ({
               ...current,
               variableAction: {
@@ -502,15 +502,13 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           }}
         />
         <div aria-hidden={variableAction.operation === "set_argument"} style={{ visibility: variableAction.operation === "set_argument" ? "hidden" : "visible" }}>
-          <NumberField
+          <UnitInput
             id="command-variable-amount"
             label={labels.variableAmount}
             hint={labels.variableOperationHelp[variableAction.operation]}
             min={variableAction.operation === "add" || variableAction.operation === "subtract" ? 1 : -999999999}
             max={variableAction.operation === "add" || variableAction.operation === "subtract" ? 1000 : 999999999}
             step={1}
-            increaseLabel={labels.variableAmount}
-            decreaseLabel={labels.variableAmount}
             value={variableAction.amount ?? ""}
             disabled={!canManageContent || pending || variableAction.operation === "set_argument"}
             {...(attemptedSave && variableActionAmountInvalid ? { error: labels.variableActionInvalid } : {})}
@@ -525,14 +523,14 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       <p className="muted" style={{ minHeight: "var(--s6)", margin: 0 }}>{draft.kind === "text" && draft.text.trim().length === 0 ? labels.variableSilentHint : ""}</p>
     </div>}
   </Switch> : null;
-  const responseTypeEditor = draft.kind === "shoutout" ? null : <SegmentedControl
+  const responseTypeEditor = draft.kind === "shoutout" ? null : <SegmentChoice
     label={labels.responseType}
     hint={labels.responseTypeHints[draft.responseType]}
     value={draft.responseType}
     options={( ["say", "reply", "announcement"] as const).map((value) => ({ value, label: labels.responseTypeLabels[value] }))}
     {...(announcementWarning === undefined ? {} : { warning: announcementWarning })}
     disabled={!canManageContent || pending}
-    onChange={(value) => { setDraftField("responseType", value as TextCommandResponseType); }}
+    onChange={(value) => { setDraftField("responseType", value); }}
   />;
   const chatTargetEditor = <ChatOutputTargetControl
     label={labels.chatTarget}
@@ -820,20 +818,20 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           disabled={!canManageContent || pending}
           onChange={(value) => { setDraftField("name", value); }}
         />
-        <TagInput
+        <ChipsInput
           id="command-aliases"
           label={labels.aliases}
           hint={labels.aliasHint}
-          value={draft.aliases}
+          values={draft.aliases}
           onChange={(value) => { setDraftField("aliases", value); }}
-          prefix="!"
+          stripPrefix="!"
           normalize={normalizeCommandName}
           validate={(alias) => !validCommandName(alias) ? labels.aliasInvalid(alias) : alias === normalizedName ? labels.aliasIsName : null}
-          maxTags={TEXT_COMMAND_MAX_ALIASES}
+          max={TEXT_COMMAND_MAX_ALIASES}
           {...(aliasesError === undefined ? {} : { error: aliasesError })}
           invalidValues={[fieldError?.field === "aliases" ? fieldError.invalidAlias ?? "" : "", ...(sameNameAlias ? [normalizedName] : []), ...(invalidAlias === undefined ? [] : [invalidAlias])].filter(Boolean)}
           removeLabel={labels.aliasRemove}
-          messages={labels.tagInputMessages}
+          messages={labels.chipsInputMessages}
           listLabel={labels.aliasList}
           disabled={!canManageContent || pending}
         />
@@ -922,13 +920,13 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         />
         <InspectorSection title={labels.availability}>
           <InspectorFieldRow label={labels.streamCondition} help={labels.streamHints[draft.streamCondition]}>
-            <SegmentedControl
+            <SegmentChoice
               label={labels.streamCondition}
               hint={labels.streamHints[draft.streamCondition]}
               value={draft.streamCondition}
               options={(["any", "online", "offline"] as const).map((value) => ({ value, label: labels.streamLabels[value] }))}
               disabled={!canManageContent || pending}
-              onChange={(value) => { setDraftField("streamCondition", value as TextCommandStreamCondition); }}
+              onChange={(value) => { setDraftField("streamCondition", value); }}
             />
           </InspectorFieldRow>
           <InspectorFieldRow label={labels.gameFilter} help={labels.gameFilterHint}>
@@ -942,7 +940,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           </InspectorFieldRow>
         </InspectorSection>
         <FieldPair>
-          <NumberField
+          <UnitInput
             id="command-cooldown"
             label={labels.cooldown}
             hint={labels.cooldownHint}
@@ -952,12 +950,10 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             step={5}
             value={draft.cooldownSeconds}
             {...(attemptedSave && cooldownInvalid ? { error: labels.numberMissing } : {})}
-            increaseLabel={`${labels.cooldown} +`}
-            decreaseLabel={`${labels.cooldown} −`}
             disabled={!canManageContent || pending}
             onChange={(value) => { setDraftField("cooldownSeconds", value); }}
           />
-          <NumberField
+          <UnitInput
             id="command-user-cooldown"
             label={labels.userCooldown}
             hint={labels.userCooldownHint}
@@ -967,8 +963,6 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             step={5}
             value={draft.userCooldownSeconds}
             {...(attemptedSave && userCooldownInvalid ? { error: labels.numberMissing } : {})}
-            increaseLabel={`${labels.userCooldown} +`}
-            decreaseLabel={`${labels.userCooldown} −`}
             disabled={!canManageContent || pending}
             onChange={(value) => { setDraftField("userCooldownSeconds", value); }}
           />
@@ -1246,7 +1240,7 @@ const TextCommandsPanelContent = ({
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); } })}
     />
     <LoadState variant="panel-600" status={listStatus}
-      loading={<Skeleton rows={8} height={34} />}
+      loading={<LoadStateLines rows={8} height={34} />}
       empty={<p className="empty-state">{commands.length > 0 ? common.noMatches : labels.empty}</p>}
       error={<p className="muted">{labels.loadError}</p>}
       queryError={{ message: labels.loadError, onRetry: () => { void refetchCommands(); } }}

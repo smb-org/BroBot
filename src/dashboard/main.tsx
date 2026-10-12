@@ -33,7 +33,7 @@ import {
   setChannelModuleEnabled,
   type PanelChannelSettings,
 } from "./api";
-import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
+import { ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type StateTone } from "./module-panels";
 import { preloadModulePanel } from "./module-panel-loaders";
 import { BroadcasterConsentAction, ChannelNotices, ImmediateActions, ModeratorCheckAction, WarningsAndErrorsFeed } from "./stream-manager";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
@@ -49,7 +49,7 @@ import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading, visibleModuleNavigationIds } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
 import { readPalette, writePalette } from "./ui/palette";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
@@ -153,8 +153,8 @@ const statusText = (channel: PanelChannelState, loadedAt?: number, now = Date.no
   return texts.status.stateIncomplete;
 };
 
-const channelToneToLedStatus = (tone: StateTone): LedStatus =>
-  tone === "healthy" ? "green" : tone === "warning" ? "amber" : tone === "error" ? "red" : "off";
+const channelToneToStatusState = (tone: StateTone): StatusLedState =>
+  tone === "healthy" ? "ok" : tone === "warning" ? "warn" : tone === "error" ? "error" : "off";
 
 const broadcasterConnectionLabel = (status: PanelChannelState["broadcasterConnection"]): string =>
   status === "connected" ? dashboardTexts().status.connected : dashboardTexts().status.notConnected;
@@ -326,7 +326,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
       active: route.kind === "module" && route.moduleId === entry.moduleId,
       onNavigate: () => { onNavigate(entry.route); },
       onPreload: () => { void preloadModulePanel(entry.moduleId).catch(() => undefined); },
-      led: { status: "green" as const, word: statusWord(true) },
+      led: { status: "ok" as const, word: statusWord(true) },
     })),
   }));
   const platformGroup: SidebarGroup | undefined = platformPage === undefined ? undefined : {
@@ -612,8 +612,7 @@ const DashboardConnectionClock = ({ channel, loadedAt }: {
   const now = useSecondClock();
   const tone = channelStatus(channel, loadedAt, now);
   const label = tone === "healthy" ? texts.header.connectionRunning : statusText(channel, loadedAt, now);
-  const status = tone === "healthy" ? "green" : tone === "warning" ? "amber" : tone === "error" ? "red" : "off";
-  return <span className="led" data-status={status}><span className="led__dot" aria-hidden="true" /><span>{label}</span></span>;
+  return <StatusLed state={channelToneToStatusState(tone)} label={label} />;
 };
 
 const DashboardStreamClock = ({ channel }: { channel: PanelChannelState }): ReactElement => {
@@ -674,9 +673,9 @@ const OverviewPage = ({ channelState, onNavigate }: { channelState: LoadState<Pa
       <UiLoadState
         variant="panel-360"
         status={status}
-        loading={<Skeleton rows={3} height={132} />}
+        loading={<LoadStateLines rows={3} height={132} />}
         empty={<section className="empty-state"><h2>{texts.overview.noChannelAvailable}</h2><p>{texts.overview.noMembership}</p></section>}
-        error={<Skeleton rows={3} height={132} />}
+        error={<LoadStateLines rows={3} height={132} />}
       >
         <div className="module-grid">
           {channels.map((channel) => (
@@ -686,7 +685,7 @@ const OverviewPage = ({ channelState, onNavigate }: { channelState: LoadState<Pa
               moduleId={channel.channelId}
               enabled={channelStatus(channel, channelState.loadedAt) === "healthy"}
               name={channel.displayName}
-              ledStatus={channelToneToLedStatus(channelStatus(channel, channelState.loadedAt))}
+              ledStatus={channelToneToStatusState(channelStatus(channel, channelState.loadedAt))}
               ledLabel={statusText(channel, channelState.loadedAt)}
               route={{ kind: "channel", channelId: channel.channelId, section: "overview" }}
               icon={<NavigationIcon kind="channel" className="module-glyph" />}
@@ -938,7 +937,7 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
                 onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(key); } }}
               >
                 <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
-                <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status, subscription.reason)} /></td>
+                <td><StatusLed state={channelToneToStatusState(tone)} label={subscriptionStatusLabel(subscription.status, subscription.reason)} /></td>
                 <td>{maintenanceReasonText(subscription.reason) ?? <EmptyCellValue />}</td>
               </tr>;
             })}</tbody>
@@ -982,9 +981,9 @@ const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; chi
   const texts = dashboardTexts();
   const allHealthy = entries.length > 0 && entries.every((entry) => entry.tone === "healthy");
   const problemCount = entries.filter((entry) => entry.tone !== "healthy").length;
-  const summaryTone: LedStatus = allHealthy
-    ? "green"
-    : entries.some((entry) => entry.tone === "error") ? "red" : "amber";
+  const summaryTone: StatusLedState = allHealthy
+    ? "ok"
+    : entries.some((entry) => entry.tone === "error") ? "error" : "warn";
   const summary = allHealthy
     ? texts.streamManager.checksHealthy(formatNumber(entries.length))
     : texts.streamManager.checksNeedAttention(formatNumber(problemCount), formatNumber(entries.length));
@@ -992,7 +991,7 @@ const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; chi
   return (
     <details className="channel-state-checks" open={!allHealthy}>
       <summary className="channel-state-checks__summary">
-        <Led status={summaryTone} label={summary} />
+        <StatusLed state={summaryTone} label={summary} />
       </summary>
       <div className="state-list">{entries.map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
       {children}
@@ -1212,8 +1211,8 @@ const SystemPage = ({ system, error, loadedAt, onRetry }: SystemPageProperties):
       <UiLoadState
         variant="panel-720"
         status={system !== undefined ? "success" : error !== null ? "error" : "loading"}
-        loading={<Skeleton rows={8} height={58} />}
-        empty={<Skeleton rows={8} height={58} />}
+        loading={<LoadStateLines rows={8} height={58} />}
+        empty={<LoadStateLines rows={8} height={58} />}
         error={<p role="alert">{error ?? texts.system.loadState}</p>}
         queryError={{ title: texts.errors.dataLoadFailed, message: error ?? texts.system.loadState, onRetry }}
       >
@@ -1654,9 +1653,9 @@ export const DashboardApp = (): ReactElement => {
           <UiLoadState
             variant="panel-720"
             status={channels.status === "error" ? "error" : "loading"}
-            loading={<Skeleton rows={8} height={58} />}
-            empty={<Skeleton rows={8} height={58} />}
-            error={<Skeleton rows={8} height={58} />}
+            loading={<LoadStateLines rows={8} height={58} />}
+            empty={<LoadStateLines rows={8} height={58} />}
+            error={<LoadStateLines rows={8} height={58} />}
           >{null}</UiLoadState>
         ) : null}
         {showChannelNotReleased ? <BlockingState
@@ -1684,9 +1683,9 @@ export const DashboardApp = (): ReactElement => {
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && selectedChannel !== null ? <UiLoadState
           variant="panel-960"
           status={overviewPageStatus}
-          loading={<Skeleton rows={12} height={58} />}
-          empty={<Skeleton rows={12} height={58} />}
-          error={<Skeleton rows={12} height={58} />}
+          loading={<LoadStateLines rows={12} height={58} />}
+          empty={<LoadStateLines rows={12} height={58} />}
+          error={<LoadStateLines rows={12} height={58} />}
         >{overviewMatchesRoute && overview.data !== null && overviewModulesLoaded ? <ChannelOverviewRoute
           key={routeKey}
           routeKey={routeKey}
@@ -1719,13 +1718,13 @@ export const DashboardApp = (): ReactElement => {
           : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={() => reloadAfterModuleToggle(route.channelId)} /> : null}
         {route.kind === "module" ? <div className="module-route-layout">
-          <Suspense fallback={<div className="module-view-fallback" aria-hidden="true"><Skeleton rows={3} height={58} /></div>}>
+          <Suspense fallback={<div className="module-view-fallback" aria-hidden="true"><LoadStateLines rows={3} height={58} /></div>}>
             {!showChannelNotReleased && !showBotBlocking && selectedChannel !== null ? <UiLoadState
               variant="panel-720"
               status={overviewPageStatus}
-              loading={<Skeleton rows={8} height={58} />}
-              empty={<Skeleton rows={8} height={58} />}
-              error={<Skeleton rows={8} height={58} />}
+              loading={<LoadStateLines rows={8} height={58} />}
+              empty={<LoadStateLines rows={8} height={58} />}
+              error={<LoadStateLines rows={8} height={58} />}
             >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} suspendPanelUntilReady {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId ? { initialSelection: pendingModuleSelection.value } : {})} /> : null}</UiLoadState> : null}
           </Suspense>
         </div> : null}

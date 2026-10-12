@@ -37,14 +37,16 @@
     "deploy:production:ci-code-only": "pnpm run build:production && cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy --env production"
   },
   "dependencies": {
+    "@base-ui/react": "1.9.0",
     "@mantine/core": "^9.6.2",
     "@mantine/hooks": "^9.6.2",
     "@mantine/spotlight": "9.6.2",
-    "@tabler/icons-react": "^3.47.0",
     "@tanstack/react-query": "^5.104.1",
+    "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "hono": "^4.13.1",
     "jsonata": "2.2.2",
+    "lucide-react": "1.55.0",
     "re2js": "2.2.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

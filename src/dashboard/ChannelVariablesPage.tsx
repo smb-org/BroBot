@@ -15,7 +15,7 @@ import {
   type PanelOverlayElement,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage, dashboardTexts } from "./locale";
-import { Button, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector, Switch } from "./ui";
+import { Button, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 import { dashboardDataKeys } from "./data/keys";
 import { useDashboardQueryClient } from "./data";
@@ -340,7 +340,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     <LoadState
       variant="panel-360"
       status={listStatus}
-      loading={<Skeleton rows={8} height={34} />}
+      loading={<LoadStateLines rows={8} height={34} />}
       empty={<p className="empty-state">{variables.length === 0 ? labels.empty : dashboardCommonTexts().noMatches}</p>}
       error={<p role="alert">{variablesLoadError}</p>}
       queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: variablesLoadError, onRetry: () => { void refresh().catch(() => undefined); } }}
@@ -393,7 +393,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             <Switch layout="inline" ariaLabel={labels.resetOnStreamStart} checked={draftReset} disabled={!canManageContent || pending} {...(!canManageContent ? { lockedReason: labels.managementLocked } : {})} onChange={setDraftReset} />
           </InspectorFieldRow>
           {creating ? <InspectorFieldRow label={labels.value} help={labels.valueHint}>
-            <NumberField id="channel-variable-initial-value" label={labels.value} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} increaseLabel={labels.increase} decreaseLabel={labels.decrease} value={draftSetValue} disabled={!canManageContent || pending} onChange={setDraftSetValue} />
+            <UnitInput id="channel-variable-initial-value" label={labels.value} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} value={draftSetValue} disabled={!canManageContent || pending} onChange={setDraftSetValue} />
           </InspectorFieldRow> : null}
         </InspectorSection>
         {selected === null ? null : <>
@@ -401,7 +401,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             <InspectorFieldRow className="inspector-field-row--variable-value" label={labels.value} help={labels.valueHint}>
               <div className="channel-variable-value-controls">
                 {editingValue ? <>
-                  <NumberField
+                  <UnitInput
                     id="channel-variable-inline-value"
                     label={labels.value}
                     ariaLabel={labels.value}

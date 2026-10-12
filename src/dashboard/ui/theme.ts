@@ -13,7 +13,7 @@ interface FamilyToken {
 }
 
 // Mantine types `theme.other` as `Record<string, any>`. This augmentation
-// gives `Led` and `Chip` typed access to their token groups under strict
+// gives `StatusLed` typed access to its token groups under strict
 // type checking.
 declare module "@mantine/core" {
   interface MantineThemeOther {
@@ -170,7 +170,7 @@ export const createDashboardTheme = (readCssColor: (variable: string) => string)
       s10: "40px",
       s12: "48px",
       // State and event-family tokens each use one color per state or family,
-      // rather than ten-step Mantine scales. Only `Led` and `Chip` read these.
+      // rather than ten-step Mantine scales. `StatusLed` reads these.
       state: {
         green: { color: colors.green, background: colors.greenFill },
         amber: { color: colors.amber, background: colors.amberFill },

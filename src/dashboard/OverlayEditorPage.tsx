@@ -38,7 +38,7 @@ import { moduleName } from "./module-labels";
 import { OverlayElementPalette, type OverlayElementPaletteOption } from "./OverlayElementPalette";
 import { useChannelVariablesQuery, useOverlayQuery } from "./data/lists";
 import { queryKeys } from "./data/keys";
-import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, NumberField, PageHeader, SaveBar, Select, Switch, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
+import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, UnitInput, PageHeader, SaveBar, Select, Switch, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
 interface OverlayEditorPageProperties {
@@ -811,7 +811,7 @@ function OverlayEditorWorkspace({
     value: number | undefined,
     onChange: (next: number | undefined) => void,
     options: { min?: number; max?: number; unit?: string; ariaLabel?: string } = {},
-  ): ReactElement => <NumberField id={id} label={label} value={value ?? ""}
+  ): ReactElement => <UnitInput id={id} label={label} value={value ?? ""}
     {...(options.min === undefined ? {} : { min: options.min })}
     {...(options.max === undefined ? {} : { max: options.max })}
     {...(options.unit === undefined ? {} : { unit: options.unit })}
@@ -1149,7 +1149,7 @@ function OverlayEditorWorkspace({
       <section className="overlay-editor__preview-panel" aria-label={labels.editorPreview}>
         <div className="overlay-editor__section-heading"><h2>{labels.editorPreview}</h2>
           <div className="overlay-editor__zoom">
-            <NumberField id="overlay-editor-zoom" label={labels.editorZoom} value={previewZoom} min={60} max={200} unit="%"
+            <UnitInput id="overlay-editor-zoom" label={labels.editorZoom} value={previewZoom} min={60} max={200} unit="%"
               onChange={(value) => { if (typeof value === "number") setPreviewZoom(Math.max(60, Math.min(200, Math.round(value / 10) * 10))); }} />
           </div>
         </div>
@@ -1209,13 +1209,13 @@ function OverlayEditorWorkspace({
             countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canEdit}
             onChange={(text) => { updateElement(selectedElement.id, { text }); }} /> : null}
           <div className="overlay-editor__numeric-fields">
-            <NumberField id="overlay-editor-x" label={labels.editorX} value={selectedElement.x} disabled={!canEdit}
+            <UnitInput id="overlay-editor-x" label={labels.editorX} value={selectedElement.x} disabled={!canEdit}
               onChange={(x) => { if (typeof x === "number") updateElement(selectedElement.id, clampDraggedPosition(selectedElement, x, selectedElement.y)); }} />
-            <NumberField id="overlay-editor-y" label={labels.editorY} value={selectedElement.y} disabled={!canEdit}
+            <UnitInput id="overlay-editor-y" label={labels.editorY} value={selectedElement.y} disabled={!canEdit}
               onChange={(y) => { if (typeof y === "number") updateElement(selectedElement.id, clampDraggedPosition(selectedElement, selectedElement.x, y)); }} />
-            <NumberField id="overlay-editor-scale" label={labels.editorScale} min={25} max={400} value={selectedElement.scalePercent} disabled={!canEdit}
+            <UnitInput id="overlay-editor-scale" label={labels.editorScale} min={25} max={400} value={selectedElement.scalePercent} disabled={!canEdit}
               onChange={(scalePercent) => { if (typeof scalePercent === "number") scaleElement(selectedElement, Math.max(25, Math.min(400, Math.round(scalePercent)))); }} />
-            <NumberField id="overlay-editor-z" label={labels.editorZ} value={selectedElement.z} disabled={!canEdit}
+            <UnitInput id="overlay-editor-z" label={labels.editorZ} value={selectedElement.z} disabled={!canEdit}
               onChange={(z) => { if (typeof z === "number") updateElement(selectedElement.id, { z: Math.round(z) }); }} />
           </div>
           <div className="overlay-editor__layer-actions">

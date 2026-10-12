@@ -23,7 +23,7 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, ListPaginationFooter, LoadState as LoadStateView, notify, PageHeader, Select, Skeleton, SubInspector, Switch, Tabs, useInspectorSelection, type SelectOption } from "./ui";
+import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, ListPaginationFooter, LoadState as LoadStateView, LoadStateLines, notify, PageHeader, Select, SubInspector, Switch, Tabs, useInspectorSelection, type SelectOption } from "./ui";
 import { MemberGrantEditor } from "./member-grant-editor";
 import { StateRow, type StateTone } from "./module-panels";
 
@@ -101,21 +101,10 @@ const MembersTable = ({
   );
 };
 
-const PlatformMembersSkeleton = (): ReactElement => {
+const PlatformMembersLoading = (): ReactElement => {
   const texts = platformTexts();
   return (
-    <div className="table-wrap">
-      <table className="table platform-members-table" aria-hidden="true">
-        <thead><tr><th scope="col"><span className="platform-members__skeleton-heading" /></th><th scope="col"><span className="platform-members__skeleton-heading platform-members__skeleton-heading--role" /></th></tr></thead>
-        <tbody>{Array.from({ length: 100 }, (_, index) => (
-          <tr key={index}>
-            <th scope="row"><span className="platform-members__skeleton-name" /><span className="platform-members__skeleton-login" /></th>
-            <td><span className="platform-members__skeleton-role" /></td>
-          </tr>
-        ))}</tbody>
-      </table>
-      <span className="sr-only">{texts.loadMembers}</span>
-    </div>
+    <><LoadStateLines rows={100} height={44} /><span className="sr-only">{texts.loadMembers}</span></>
   );
 };
 
@@ -283,9 +272,9 @@ const ChannelInspector = ({
         <LoadStateView
           variant="panel-220"
           status={members.data === null ? members.status === "error" ? "error" : "loading" : members.data.members.length === 0 ? "empty" : "success"}
-          loading={<PlatformMembersSkeleton />}
+          loading={<PlatformMembersLoading />}
           empty={<MembersTable members={[]} selectedUserId={selectedMemberId} onSelect={(member) => { setSelectedMemberId(member.userId); }} />}
-          error={<PlatformMembersSkeleton />}
+          error={<PlatformMembersLoading />}
       >{members.data === null || members.data.members.length === 0 ? null : <MembersTable
             members={members.data.members}
             selectedUserId={selectedMemberId}
@@ -471,7 +460,7 @@ const PlatformAudit = ({
       <LoadStateView
         variant="panel-280"
         status={status}
-        loading={<Skeleton rows={6} height={34} />}
+        loading={<LoadStateLines rows={6} height={34} />}
         empty={<p className="muted">{texts.auditEmpty}</p>}
         error={<p role="alert">{auditState.error ?? texts.error}</p>}
         queryError={{ message: auditState.error ?? texts.error, onRetry }}
@@ -611,7 +600,7 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
                   <LoadStateView
                     variant="panel-360"
                     status={overviewStatus}
-                    loading={<Skeleton rows={6} height={34} />}
+                    loading={<LoadStateLines rows={6} height={34} />}
                     empty={<p className="muted">{texts.noChannels}</p>}
                     error={<p role="alert">{overview.error ?? texts.error}</p>}
                     queryError={{ message: overview.error ?? texts.error, onRetry: () => { void loadOverview(); } }}

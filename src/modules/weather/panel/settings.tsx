@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { ModulePanelProperties } from "../../contract";
 import { WEATHER_ERROR_TEXT_MAX_LENGTH, type WeatherSettings } from "../contracts";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, Field, InspectorFieldRow, InspectorSection, LoadState, Select, Skeleton, Switch, notify } from "../../../dashboard/ui";
+import { Button, Field, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, Select, Switch, notify } from "../../../dashboard/ui";
 import { weatherModuleCatalog } from "../contracts/catalog";
 import { weatherSettingsTexts } from "./locale";
 import { fetchWeatherSettings, saveWeatherSettings } from "./service";
@@ -63,7 +63,7 @@ function WeatherSettingsPanelContent({ channelId, language, canManage }: ModuleP
   return <LoadState
     variant="panel-640"
     status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
-    loading={<Skeleton rows={4} height={34} />}
+    loading={<LoadStateLines rows={4} height={34} />}
     empty={<div />}
     error={<p>{labels.loadFailed}</p>}
     queryError={{ message: labels.loadFailed, onRetry: () => { void settingsQuery.refetch(); } }}

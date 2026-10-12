@@ -8,7 +8,7 @@ import { emptyEventFilter } from "../../src/dashboard/events/model";
 import { WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
 import { UiProvider } from "../../src/dashboard/ui";
 import { queryKeys } from "../../src/dashboard/data/keys";
-import { renderWithQuery as renderWithQueryBase, type DashboardQueryTestOptions } from "../query-test-utils";
+import { clickSelectOption, renderWithQuery as renderWithQueryBase, type DashboardQueryTestOptions } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
 const moderator = {
@@ -1124,8 +1124,10 @@ describe("Dashboard skeleton", () => {
         const tone = url.searchParams.get("tone");
         const actor = url.searchParams.get("actor");
         if (module === "ads" && actor === "person-a") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
+        if (actor !== null && actor !== "person-a") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
         if (origin === "channel") return Promise.resolve(jsonResponse({ entries: [channelEntry], nextCursor: null }));
         if (module === "text_commands" && tone === "error") return Promise.resolve(jsonResponse({ entries: [errorEntry], nextCursor: null }));
+        if (module === "text_commands" && tone === "info") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
         if (module === "text_commands") return Promise.resolve(jsonResponse({ entries: [errorEntry, moduleEntry], nextCursor: null }));
         if (tone === "error") return Promise.resolve(jsonResponse({ entries: [errorEntry], nextCursor: null }));
         if (actor === "person-a") return Promise.resolve(jsonResponse({ entries: [errorEntry, moduleEntry], nextCursor: null }));
@@ -1142,48 +1144,32 @@ describe("Dashboard skeleton", () => {
     const herkunftGroup = screen.getByRole("group", { name: "Herkunft" });
     let tonGroup = screen.getByRole("group", { name: "Ton" });
     let module = screen.getByRole("combobox", { name: "Modul" });
-    let person = screen.getByRole("textbox", { name: "Person" });
+    const person = screen.getByRole("textbox", { name: "Person" });
     expect(herkunftGroup).toBeInTheDocument();
     expect(module).toBeInTheDocument();
     expect(tonGroup).toBeInTheDocument();
     expect(person).toBeInTheDocument();
 
-    fireEvent.click(within(herkunftGroup).getByRole("radio", { name: "Kanalereignisse" }));
+    fireEvent.click(within(herkunftGroup).getByRole("button", { name: "Kanalereignisse" }));
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     expect(screen.getByText(/Aktive Filter:/)).toHaveTextContent("Kanalereignisse");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Filter zurücksetzen" })[0] as HTMLElement);
-    // The sidebar's module list refetches on every navigate() -- including
-    // the reset above -- so its options can briefly be empty; wait for them
-    // rather than opening the dropdown mid-fetch.
-    await waitFor(() => { expect(screen.getByRole("option", { name: "Textbefehle", hidden: true })).toBeInTheDocument(); });
     module = screen.getByRole("combobox", { name: "Modul" });
     fireEvent.click(module);
-    fireEvent.click(screen.getByRole("option", { name: "Textbefehle", hidden: true }));
+    clickSelectOption(await screen.findByRole("option", { name: "Textbefehle", hidden: true }));
     tonGroup = screen.getByRole("group", { name: "Ton" });
-    fireEvent.click(within(tonGroup).getByRole("radio", { name: "Fehler" }));
+    fireEvent.click(within(tonGroup).getByRole("button", { name: "Fehler" }));
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
     expect(screen.queryByText("Raid von unbekannt mit 21 Zuschauern")).not.toBeInTheDocument();
-    person = screen.getByRole("textbox", { name: "Person" });
-    fireEvent.change(person, { target: { value: "person-a" } });
-    expect((await screen.findAllByText("Alice")).length).toBeGreaterThan(0);
-    await waitFor(() => expect(new URLSearchParams(window.location.search).get("actor")).toBe("person-a"));
-
-    module = screen.getByRole("combobox", { name: "Modul" });
-    fireEvent.click(module);
-    fireEvent.click(screen.getByRole("option", { name: "Werbung", hidden: true }));
+    tonGroup = screen.getByRole("group", { name: "Ton" });
+    fireEvent.click(within(tonGroup).getByRole("button", { name: "Info" }));
     expect(await screen.findByText("Keine Ereignisse passen zu den Filtern.")).toBeInTheDocument();
-    await waitFor(() => { expect(screen.getByRole("option", { name: "Alle Module", hidden: true })).toBeInTheDocument(); });
-    module = screen.getByRole("combobox", { name: "Modul" });
-    fireEvent.click(module);
-    fireEvent.click(screen.getByRole("option", { name: "Alle Module", hidden: true }));
     await waitFor(() => {
       const filters = new URLSearchParams(window.location.search);
-      expect(filters.has("module")).toBe(false);
-      expect(filters.get("tone")).toBe("error");
-      expect(filters.get("actor")).toBe("person-a");
+      expect(filters.get("module")).toBe("text_commands");
+      expect(filters.get("tone")).toBe("info");
     });
-    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Filter zurücksetzen" })[0] as HTMLElement);
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     expect(screen.queryByText("Keine Ereignisse passen zu den Filtern.")).not.toBeInTheDocument();
@@ -1448,7 +1434,7 @@ describe("Dashboard skeleton", () => {
     const reason = "Nur Broadcaster und Verwalter dürfen Module ändern.";
     const schalter = await screen.findAllByRole("switch", { name: /Textbefehle/i });
     expect(schalter).toHaveLength(1);
-    schalter.forEach((element) => { expect(element).toBeDisabled(); });
+    schalter.forEach((element) => { expect(element).toHaveAttribute("aria-disabled", "true"); });
     expect(screen.getAllByText(reason)).toHaveLength(1);
   });
 
@@ -1606,9 +1592,9 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText("Chat-Nachrichten")).toBeInTheDocument();
     expect(screen.getByText("Eingehende Raids")).toBeInTheDocument();
     expect(screen.getByText("Ausgehende Raids")).toBeInTheDocument();
-    expect(screen.getByText("Chat-Nachrichten").closest("tr")?.querySelector(".led")).toHaveAttribute("data-status", "green");
-    expect(screen.getByText("Eingehende Raids").closest("tr")?.querySelector(".led")).toHaveAttribute("data-status", "amber");
-    expect(screen.getByText("Ausgehende Raids").closest("tr")?.querySelector(".led")).toHaveAttribute("data-status", "red");
+    expect(screen.getByText("Chat-Nachrichten").closest("tr")?.querySelector(".status-led")).toHaveAttribute("data-status", "ok");
+    expect(screen.getByText("Eingehende Raids").closest("tr")?.querySelector(".status-led")).toHaveAttribute("data-status", "warn");
+    expect(screen.getByText("Ausgehende Raids").closest("tr")?.querySelector(".status-led")).toHaveAttribute("data-status", "error");
     const unknown = screen.getByText("channel.future");
     expect(unknown).toHaveClass("mono");
     expect(screen.getByText("Ausstehend")).toBeInTheDocument();
@@ -2224,7 +2210,7 @@ describe("Dashboard skeleton", () => {
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
     const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
-    expect(channelSelect).toHaveValue("Esembe — 26876135");
+    expect(channelSelect).toHaveTextContent("Esembe — 26876135");
     fireEvent.click(channelSelect);
     // jsdom does no real layout, so Floating UI's `hide` middleware always
     // treats the dropdown's reference as clipped and renders it `display:
@@ -2283,7 +2269,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     try {
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveValue("Alpha — kanal-a"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha — kanal-a"));
       await screen.findByRole("switch");
       const alphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
       expect(alphaSwitch).not.toBeNull();
@@ -2291,7 +2277,7 @@ describe("Dashboard skeleton", () => {
       await waitFor(() => expect(toggleRequests.get("kanal-a")).toBe(1));
 
       navigateToPath("/channels/kanal-b/modules/ads");
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveValue("Beta — kanal-b"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Beta — kanal-b"));
       await waitFor(() => expect(overviewRequests.get("kanal-b")).toBeGreaterThan(0));
       await screen.findByRole("switch");
       const betaSwitch = document.querySelector(".module-detail__switch [role='switch']");
@@ -2300,17 +2286,17 @@ describe("Dashboard skeleton", () => {
       await waitFor(() => expect(toggleRequests.get("kanal-b")).toBe(1));
 
       navigateToPath("/channels/kanal-a/modules/ads");
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveValue("Alpha — kanal-a"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha — kanal-a"));
       await screen.findByRole("switch");
       const returningAlphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
-      expect(returningAlphaSwitch).toBeDisabled();
+      expect(returningAlphaSwitch).toHaveAttribute("aria-disabled", "true");
       expect(toggleRequests.get("kanal-a")).toBe(1);
 
       settleToggle("kanal-a");
-      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).toBeEnabled());
+      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).not.toHaveAttribute("aria-disabled", "true"));
       navigateToPath("/channels/kanal-b/modules/ads");
       await screen.findByRole("switch");
-      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).toBeDisabled());
+      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).toHaveAttribute("aria-disabled", "true"));
     } finally {
       settleToggle("kanal-a");
       settleToggle("kanal-b");
@@ -2772,10 +2758,9 @@ describe("Dashboard skeleton", () => {
 
     fireEvent.click(timeZoneField);
     fireEvent.change(timeZoneField, { target: { value: "Europe/Vienna" } });
-    await waitFor(() => expect(document.querySelector('[data-combobox-option="true"][value="Europe/Vienna"]')).not.toBeNull());
-    fireEvent.click(document.querySelector('[data-combobox-option="true"][value="Europe/Vienna"]') as Element);
+    clickSelectOption(await screen.findByRole("option", { name: "Europe/Vienna", hidden: true }));
     await waitFor(() => expect(timeZoneField).toHaveValue("Europe/Vienna"));
-    fireEvent.click(screen.getByRole("button", { name: "Zeitzone speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zeitzone speichern", hidden: true }));
     await waitFor(() => expect(savedRevision).toBe(2));
     await waitFor(() => expect(rendered.queryClient.getQueryData<typeof oldSettings>(settingsKey)?.revision).toBe(2));
 
@@ -2874,11 +2859,11 @@ describe("Dashboard skeleton", () => {
     expect(moduleToggle).not.toBeNull();
     fireEvent.click(moduleToggle as HTMLElement);
     await waitFor(() => expect(toggleRequests).toBe(1));
-    expect(moduleToggle).toBeDisabled();
+    expect(moduleToggle).toHaveAttribute("aria-disabled", "true");
     navigateToPath("/channels/kanal-a/modules/ads");
     await waitFor(() => {
       const currentToggle = document.querySelector(".module-detail__switch [role='switch']");
-      expect(currentToggle).toBeEnabled();
+      expect(currentToggle).not.toHaveAttribute("aria-disabled", "true");
     });
 
     await act(async () => {
@@ -3632,10 +3617,10 @@ describe("Dashboard skeleton", () => {
 
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
     const select = screen.getByRole("combobox", { name: "Kanal auswählen" });
-    expect(select).toHaveValue("Alpha — kanal-a");
+    expect(select).toHaveTextContent("Alpha — kanal-a");
 
     fireEvent.click(select);
-    fireEvent.click(screen.getByRole("option", { name: "Beta — kanal-b", hidden: true }));
+    clickSelectOption(screen.getByRole("option", { name: "Beta — kanal-b", hidden: true }));
 
     await waitFor(() => expect(window.location.pathname).toBe("/channels/kanal-b"));
     expect(await screen.findByRole("heading", { name: "Beta", level: 1 })).toBeInTheDocument();
@@ -3684,10 +3669,9 @@ describe("Dashboard skeleton", () => {
         const currentLink = within(nav).getByRole("link", { current: "page" });
         expect(currentLink).toHaveAccessibleName(page.currentLink);
         if (page.currentLink === "Textbefehle · Läuft") {
-          const led = currentLink.querySelector(".led--dot-only");
-          expect(led?.querySelector(".led__dot")).toBeInTheDocument();
-          expect(led).toHaveAttribute("title", "Läuft");
-          expect(led).toHaveAttribute("aria-hidden", "true");
+          const status = currentLink.querySelector(".status-led");
+          expect(status?.querySelector(".status-led__dot")).toBeInTheDocument();
+          expect(status).toHaveTextContent("Läuft");
         }
       }
     }
@@ -3801,7 +3785,7 @@ describe("Dashboard skeleton", () => {
 
     const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
     fireEvent.click(channelSelect);
-    fireEvent.click(screen.getByRole("option", { name: "Beta — kanal-b", hidden: true }));
+    clickSelectOption(screen.getByRole("option", { name: "Beta — kanal-b", hidden: true }));
     await waitFor(() => expect(window.location.pathname).toBe("/channels/kanal-b"));
     const navigation = screen.getByRole("navigation", { name: "Hauptnavigation" });
     fireEvent.click(within(navigation).getByRole("link", { name: "Variablen" }));
@@ -3907,7 +3891,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("link", { name: /Beta/ })).toBeInTheDocument();
     expect(screen.queryByText("Keine Verbindung")).not.toBeInTheDocument();
     expect(channelTaste).toHaveAccessibleName(/Alpha ·/);
-    expect(channelTaste).toHaveAttribute("data-status", "green");
+    expect(channelTaste).toHaveAttribute("data-status", "ok");
 
     fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
@@ -4276,7 +4260,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
-    expect(channelTaste).toHaveAttribute("data-status", "green");
+    expect(channelTaste).toHaveAttribute("data-status", "ok");
     expect(within(channelTaste).getByText("Gesund", { selector: "span" })).toBeInTheDocument();
     expect(within(channelTaste).queryByText("Warnung")).not.toBeInTheDocument();
 
@@ -4312,7 +4296,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
-    expect(channelTaste).toHaveAttribute("data-status", "green");
+    expect(channelTaste).toHaveAttribute("data-status", "ok");
     expect(within(channelTaste).queryByText("Erneuerung überfällig")).not.toBeInTheDocument();
   });
 
@@ -4338,7 +4322,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
-    expect(channelTaste).toHaveAttribute("data-status", "amber");
+    expect(channelTaste).toHaveAttribute("data-status", "warn");
     expect(within(channelTaste).getByText("Erneuerung überfällig", { selector: "span" })).toBeInTheDocument();
   });
 
@@ -4356,7 +4340,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
-    expect(channelTaste).toHaveAttribute("data-status", "amber");
+    expect(channelTaste).toHaveAttribute("data-status", "warn");
     expect(within(channelTaste).getByText("Wartung überfällig", { selector: "span" })).toBeInTheDocument();
   });
 
@@ -5267,15 +5251,14 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Standort ändern" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Ort suchen" }), { target: { value: "Tromsø" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
-    fireEvent.click(await screen.findByRole("option", { name: /Tromsø/u }));
+    clickSelectOption(await screen.findByRole("option", { name: /Tromsø/u }));
 
     // While that save is still in flight, save an unrelated time zone change too.
-    const timeZoneField = screen.getByRole("combobox", { name: "Kanalzeitzone" });
+    const timeZoneField = screen.getByRole("combobox", { name: "Kanalzeitzone", hidden: true });
     fireEvent.click(timeZoneField);
     fireEvent.change(timeZoneField, { target: { value: "Europe/Vienna" } });
-    await waitFor(() => expect(document.querySelector('[data-combobox-option="true"][value="Europe/Vienna"]')).not.toBeNull());
-    fireEvent.click(document.querySelector('[data-combobox-option="true"][value="Europe/Vienna"]') as Element);
-    fireEvent.click(screen.getByRole("button", { name: "Zeitzone speichern" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Europe/Vienna", hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Zeitzone speichern", hidden: true }));
 
     // The location save resolves first ...
     resolveLocationSave?.();

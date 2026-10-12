@@ -3,7 +3,7 @@ import { useOs } from "@mantine/hooks";
 import { spotlight } from "@mantine/spotlight";
 import { type MouseEvent, type ReactNode } from "react";
 
-import { Led, type LedStatus } from "./Led";
+import { StatusLed, type StatusLedState } from "./StatusLed";
 import { Icon } from "./Icon";
 
 export interface SidebarEntry {
@@ -16,7 +16,7 @@ export interface SidebarEntry {
   active: boolean;
   onNavigate: () => void;
   onPreload?: () => void;
-  led?: { status: LedStatus; word: string };
+  led?: { status: StatusLedState; word: string };
 }
 
 export interface SidebarGroup {
@@ -70,7 +70,7 @@ export function Sidebar({ groups, collapsed, onToggleCollapsed, onEntryNavigate,
         title={moduleChild || collapsed ? accessibleName : undefined}
         aria-label={moduleChild || collapsed ? accessibleName : undefined}
         leftSection={entry.icon}
-        rightSection={entry.led === undefined || collapsed ? undefined : <Led status={entry.led.status} word={entry.led.word} dotOnly={moduleChild} />}
+        rightSection={entry.led === undefined || collapsed ? undefined : <StatusLed state={entry.led.status} label={entry.led.word} />}
         active={entry.active}
         aria-current={entry.active ? "page" : undefined}
         className={`sidebar-nav-link${moduleChild ? " sidebar-nav-link--module-child" : ""}`}

@@ -1,4 +1,4 @@
-import { Menu } from "@mantine/core";
+import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { useId, useState } from "react";
 
 import { Button, type ButtonSize } from "./Button";
@@ -12,19 +12,21 @@ export function ActionMenu({ label, items, size = "compact" }: { label: string; 
   const triggerId = useId();
   const dropdownId = useId();
 
-  return <Menu opened={opened} onChange={setOpened} position="bottom-end" withinPortal>
-    <Menu.Target>
-      <Button id={triggerId} size={size} icon="more" iconOnly ariaLabel={label} ariaHasPopup="menu" ariaExpanded={opened} ariaControls={dropdownId} />
-    </Menu.Target>
-    <Menu.Dropdown data-ui="" id={dropdownId} aria-label={label} aria-labelledby={triggerId}>
-      {items.map((item, index) => "divider" in item
-        ? <Menu.Divider key={`divider-${String(index)}`} />
-        : <Menu.Item
-          key={item.label}
-          disabled={item.disabled ?? false}
-          {...(item.danger ? { className: "ui-action-menu__danger" } : {})}
-          onClick={item.onSelect}
-        >{item.label}</Menu.Item>)}
-    </Menu.Dropdown>
-  </Menu>;
+  return <MenuPrimitive.Root open={opened} onOpenChange={setOpened}>
+    <MenuPrimitive.Trigger render={<Button id={triggerId} size={size} icon="more" iconOnly ariaLabel={label} ariaHasPopup="menu" ariaExpanded={opened} ariaControls={dropdownId} />} />
+    <MenuPrimitive.Portal>
+      <MenuPrimitive.Positioner side="bottom" align="end" sideOffset={4} className="z-50">
+        <MenuPrimitive.Popup data-ui="" id={dropdownId} aria-label={label} aria-labelledby={triggerId} className="ui-action-menu__dropdown">
+          {items.map((item, index) => "divider" in item
+            ? <MenuPrimitive.Separator data-ui="" className="ui-action-menu__divider" key={`divider-${String(index)}`} />
+            : <MenuPrimitive.Item
+              key={item.label}
+              disabled={item.disabled ?? false}
+              className={item.danger ? "ui-action-menu__item ui-action-menu__danger" : "ui-action-menu__item"}
+              onClick={item.onSelect}
+            >{item.label}</MenuPrimitive.Item>)}
+        </MenuPrimitive.Popup>
+      </MenuPrimitive.Positioner>
+    </MenuPrimitive.Portal>
+  </MenuPrimitive.Root>;
 }

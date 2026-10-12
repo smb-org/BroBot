@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, NumberField, SaveBar, SegmentedControl, SubInspector, Switch, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, UnitInput, SaveBar, SegmentChoice, SubInspector, Switch, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
 import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
@@ -382,10 +382,10 @@ export function ChatVoteTemplateInspector({
           checked={draft.value.freeTextMode !== null}
           onChange={(checked) => { updateDraft({ freeTextMode: checked ? "first_word" : null }); }}
         >
-          <SegmentedControl
+          <SegmentChoice
             label={labels.textMode}
             value={draft.value.freeTextMode ?? "first_word"}
-            onChange={(value) => { updateDraft({ freeTextMode: value as "first_word" | "whole_message" }); }}
+            onChange={(value) => { updateDraft({ freeTextMode: value }); }}
             options={[{ value: "first_word", label: labels.firstWord }, { value: "whole_message", label: labels.wholeMessage }]}
             size="compact"
           />
@@ -394,7 +394,7 @@ export function ChatVoteTemplateInspector({
 
       <InspectorSection title={labels.duration}>
         <div className="chat-voting-editor__duration-control">
-          <SegmentedControl
+          <SegmentChoice
             label={labels.duration}
             value={durationMode}
             onChange={(value) => {
@@ -415,15 +415,13 @@ export function ChatVoteTemplateInspector({
             size="compact"
           />
           <div className="chat-voting-editor__duration-slot">
-            <NumberField
+            <UnitInput
               label={labels.seconds}
               ariaLabel={labels.seconds}
               value={draft.value.durationSeconds}
               min={0}
               max={14_400}
               step={30}
-              increaseLabel={labels.increase}
-              decreaseLabel={labels.decrease}
               unit="s"
               {...(durationMode === "custom" ? { hint: labels.durationHint } : {})}
               disabled={durationMode !== "custom"}

@@ -15,7 +15,7 @@ import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, Skeleton, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, StatusLed, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption, type StatusLedState } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -27,7 +27,6 @@ const moduleDetails = (moduleId: string, language: DashboardLanguage = dashboard
 });
 
 export type StateTone = "healthy" | "warning" | "error" | "neutral";
-export type LedStatus = "green" | "amber" | "red" | "off";
 
 export { NavigationIcon } from "./ui/NavigationIcon";
 
@@ -43,13 +42,6 @@ const iconFor = (moduleId: string, className = "module-glyph"): ReactElement => 
 
 export const ModuleIcon = ({ moduleId, className }: { moduleId: string; className?: string }): ReactElement => iconFor(moduleId, className);
 
-export const Led = ({ status, label }: { status: LedStatus; label: string }): ReactElement => (
-  <span className="led" data-status={status}>
-    <span className="led__dot" aria-hidden="true" />
-    <span>{label}</span>
-  </span>
-);
-
 export const StateRow = ({ label, tone, word, detail, action, icon }: {
   label: string;
   tone: StateTone;
@@ -58,11 +50,11 @@ export const StateRow = ({ label, tone, word, detail, action, icon }: {
   action?: ReactNode;
   icon?: ReactNode;
 }): ReactElement => {
-  const status: LedStatus = tone === "healthy" ? "green" : tone === "warning" ? "amber" : tone === "error" ? "red" : "off";
+  const state: StatusLedState = tone === "healthy" ? "ok" : tone === "warning" ? "warn" : tone === "error" ? "error" : "off";
   return (
     <article className="state-row" data-status={tone} aria-label={label}>
       <strong className="state-row__label">{icon}{label}</strong>
-      <Led status={status} label={word} />
+      <StatusLed state={state} label={word} />
       {detail === undefined ? null : <span className="state-row__detail">{detail}</span>}
       {action === undefined ? null : <div className="state-row__action">{action}</div>}
     </article>
@@ -96,13 +88,13 @@ export const ModuleTile = ({ channelId, moduleId, enabled, onNavigate, name, ico
   name?: string;
   icon?: ReactElement;
   route?: DashboardRoute;
-  ledStatus?: LedStatus;
+  ledStatus?: StatusLedState;
   ledLabel?: string;
 }): ReactElement => {
   const details = moduleDetails(moduleId);
   const tileRoute: DashboardRoute = route ?? { kind: "module", channelId, moduleId };
   const tileName = name ?? details.name;
-  const tileStatus = ledStatus ?? (enabled ? "green" : "off");
+  const tileStatus = ledStatus ?? (enabled ? "ok" : "off");
   const tileLabel = ledLabel ?? statusWord(enabled);
   const label = `${tileName} · ${tileLabel}`;
   return (
@@ -119,7 +111,7 @@ export const ModuleTile = ({ channelId, moduleId, enabled, onNavigate, name, ico
     >
       <span className="module-tile__icon" aria-hidden="true">{icon ?? iconFor(moduleId)}</span>
       <strong>{tileName}</strong>
-      <Led status={tileStatus} label={tileLabel} />
+      <StatusLed state={tileStatus} label={tileLabel} />
     </a>
   );
 };
@@ -145,18 +137,13 @@ const ModuleSwitch = ({ moduleId, enabled, disabled, busy, onToggle }: {
   busy: boolean;
   onToggle: () => void;
 }): ReactElement => (
-  <button
-    className="switch"
-    type="button"
-    role="switch"
-    aria-label={`${moduleDetails(moduleId).name}: ${statusWord(enabled)}`}
-    aria-checked={enabled}
-    aria-busy={busy}
-    disabled={disabled || busy}
-    onClick={onToggle}
-  >
-        <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
-  </button>
+  <Switch
+    ariaLabel={`${moduleDetails(moduleId).name}: ${statusWord(enabled)}`}
+    checked={enabled}
+    onChange={onToggle}
+    disabled={disabled}
+    pending={busy}
+  />
 );
 
 interface ModulePanelMountProperties {
@@ -213,7 +200,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
     return <LoadState
       variant="panel-320"
       status={settingsQuery.isPending || settingsQuery.isFetching ? "loading" : "error"}
-      loading={<Skeleton rows={3} height={34} />}
+      loading={<LoadStateLines rows={3} height={34} />}
       empty={null}
       error={null}
       queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: retrySettingsQuery }}
@@ -224,7 +211,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   return <LoadState
     variant="panel-320"
     status="success"
-    loading={<Skeleton rows={3} height={34} />}
+    loading={<LoadStateLines rows={3} height={34} />}
     empty={null}
     error={<p className="muted" role="alert">{dashboardTexts().module.settingsLoadError}</p>}
     queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: retrySettingsQuery }}
@@ -663,7 +650,7 @@ const ModuleWorkspaceRow = ({
       description={details.description}
       status={mandatory
         ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={labels.mandatoryReason} />
-        : <Led status={permissionsMissing ? "amber" : effectiveEnabled ? "green" : "off"} label={state} />}
+        : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <Switch
         checked={rawEnabled}
         ariaLabel={details.name}
@@ -848,7 +835,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             <strong>{labels.mainSwitch}</strong>
             {mandatory
               ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={labels.mandatoryReason} />
-              : <Led status={effectiveEnabled ? "green" : "off"} label={statusWord(effectiveEnabled)} />}
+              : <StatusLed state={effectiveEnabled ? "ok" : "off"} label={statusWord(effectiveEnabled)} />}
           </div>
           {mandatory ? null : <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />}
             {disabledReason === null ? null : <p className="lock-reason lock-reason--with-icon"><Icon name="lock" size={16} />{disabledReason}</p>}

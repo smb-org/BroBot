@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, Led, LoadState, notify } from "../../../dashboard/ui";
+import { Button, StatusLed, LoadState, notify } from "../../../dashboard/ui";
 import { dashboardTexts } from "../../../dashboard/locale";
 import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useManualQueryFailure, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
@@ -131,8 +131,8 @@ const ChatVotingImmediateActionForChannel = ({ channelId, availabilityReason }: 
   return <section className="stream-manager-action chat-voting-immediate" aria-label={labels.title}>
     <header className="chat-voting-immediate__header">
       <h3>{labels.title}</h3>
-      <Led status={running ? "green" : "off"} word={liveStatus} />
-      {running ? <Button danger size="compact" disabled={ending} onClick={() => { void end(); }}>{labels.end}</Button> : <span aria-hidden="true" />}
+      <StatusLed state={running ? "ok" : "off"} label={liveStatus} />
+      {running ? <Button size="compact" disabled={ending} onClick={() => { void end(); }}>{labels.end}</Button> : <span aria-hidden="true" />}
     </header>
     <LoadState
       variant="status-row"

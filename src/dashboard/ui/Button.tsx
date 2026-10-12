@@ -1,26 +1,18 @@
-import { Button as MantineButton } from "@mantine/core";
-import { useContext, type CSSProperties, type ReactNode, type Ref } from "react";
+import { useContext, type ReactNode, type Ref } from "react";
 
+import { Button as ButtonPrimitive } from "./primitives/button";
 import { FormDensity } from "./FormDensity";
 import { Icon, type IconName } from "./Icon";
-import { colors } from "./theme";
 
 type ButtonVariant = "primary" | "neutral" | "subtle" | "secondary";
 export type ButtonSize = "md" | "compact";
 
 interface ButtonBaseProps {
   variant?: ButtonVariant;
-  /** "Danger (`danger`, only in `ui/`): red without a border; hover white on
-   *  red" in docs/input/DESIGN-neu.md. A deleting action carries this
-   *  permanently; it overrides `variant` because a danger button is never
-   *  "quiet". */
   danger?: boolean | "subtle";
   disabled?: boolean;
   ariaDisabled?: boolean;
-  /** Points at the reason line for a disabled action -- visible, disabled,
-   *  with its reason at the point of effect (editor-konzept 6). */
   describedBy?: string;
-  /** Adds row-specific context to a repeated text action without changing its visible label. */
   ariaLabel?: string;
   ariaPressed?: boolean;
   ariaHasPopup?: "menu";
@@ -28,7 +20,6 @@ interface ButtonBaseProps {
   ariaControls?: string;
   onClick?: () => void;
   type?: "button" | "submit";
-  /** Initial focus inside a `ConfirmDialog`: Mantine honors the focus target. */
   autoFocus?: boolean;
   title?: string;
   id?: string;
@@ -37,120 +28,46 @@ interface ButtonBaseProps {
   className?: string;
 }
 
-type ButtonWithTextProps = ButtonBaseProps & {
-  children: ReactNode;
-  icon?: IconName;
-  iconOnly?: false;
-};
-
-type ButtonIconOnlyProps = ButtonBaseProps & {
-  children?: never;
-  icon: IconName;
-  iconOnly: true;
-  ariaLabel: string;
-};
-
+type ButtonWithTextProps = ButtonBaseProps & { children: ReactNode; icon?: IconName; iconOnly?: false };
+type ButtonIconOnlyProps = ButtonBaseProps & { children?: never; icon: IconName; iconOnly: true; ariaLabel: string };
 export type ButtonProps = ButtonWithTextProps | ButtonIconOnlyProps;
 
-const subtleStyle: CSSProperties = { "--button-color": colors.text2 } as CSSProperties;
-
-// "There is no Button color=\"red\"" in docs/input/DESIGN-neu.md -- Mantine's
-// `variant="filled"` `color` prop auto-darkens on hover, not what "hover
-// white on red" asks for. `--button-hover-color` is Mantine's own CSS
-// variable (read by its stylesheet's `:hover` rule), set here per-instance
-// instead.
-const dangerStyle: CSSProperties = {
-  "--button-bg": colors.error,
-  "--button-hover": colors.error,
-  "--button-bd": "none",
-  "--button-color": colors.text,
-  "--button-hover-color": "var(--color-on-error)",
-} as CSSProperties;
-
-const subtleDangerStyle: CSSProperties = {
-  "--button-color": colors.errorText,
-  "--button-hover-color": colors.errorText,
-  "--button-bg": "transparent",
-  "--button-hover": colors.errorFill,
-  "--button-bd": `1px solid ${colors.hairlineStrong}`,
-} as CSSProperties;
-
-/**
- * Neutral is Mantine's `default`, primary is `filled` on the brand color,
- * subtle is recolored to Text-2, secondary reuses `default`, and danger is
- * hand-built to preserve its hover rule. Icons always come from the UI seam.
- */
 export function Button(props: ButtonProps) {
   const formDensity = useContext(FormDensity);
   const {
-    variant = "neutral",
-    danger = false,
-    disabled = false,
-    ariaDisabled = false,
-    onClick,
-      type = "button",
-    autoFocus = false,
-    title,
-    id,
-    size = "md",
-    ref,
-    className,
-    describedBy,
-    ariaPressed,
-    ariaHasPopup,
-    ariaExpanded,
-    ariaControls,
+    variant = "neutral", danger = false, disabled = false, ariaDisabled = false, onClick, type = "button", autoFocus = false,
+    title, id, size = "md", ref, className, describedBy, ariaPressed, ariaHasPopup, ariaExpanded, ariaControls,
   } = props;
   const iconOnly = props.iconOnly === true;
   const icon = props.icon;
-  const filledDanger = danger === true;
-  const subtleDanger = danger === "subtle";
-  const mantineVariant = filledDanger ? "filled" : variant === "primary" ? "filled" : variant === "subtle" ? "subtle" : "default";
-  const buttonStyle = filledDanger ? dangerStyle : subtleDanger ? subtleDangerStyle : variant === "subtle" ? subtleStyle : undefined;
-  const fontWeight = filledDanger ? undefined : variant === "primary" ? 600 : 500;
-  const buttonClassName = [className, leadingIconClassName(props), iconOnly ? "ui-button--icon-only" : "", iconOnly && size === "compact" ? "ui-button--icon-only-compact" : ""]
-    .filter(Boolean)
-    .join(" ") || undefined;
-  const style = {
-    ...buttonStyle,
-    ...(formDensity === "form" ? { "--button-fz": "14px" } : undefined),
-    ...(iconOnly ? { width: size === "compact" ? 34 : 44, minWidth: size === "compact" ? 34 : 44, paddingInline: 0 } : undefined),
-    fontWeight,
-    ...(disabled || ariaDisabled ? { opacity: 0.7, cursor: "not-allowed" } : undefined),
-  } as CSSProperties;
-  const label = iconOnly ? undefined : props.children;
-  const leadingIcon = iconOnly || icon === undefined ? undefined : <Icon name={icon} size={16} />;
-  const iconOnlyGlyph = props.iconOnly === true
-    ? <Icon name={props.icon} size={size === "compact" ? 16 : 20} />
-    : undefined;
+  const effectiveVariant = danger === true ? "danger" : danger === "subtle" ? "danger-outline" : variant;
+  const classes = [
+    "ui-button", `ui-button--${variant}`, className,
+    !iconOnly && icon !== undefined ? "ui-button--with-icon" : undefined,
+    iconOnly ? "ui-button--icon-only" : undefined,
+    iconOnly && size === "compact" ? "ui-button--icon-only-compact" : undefined,
+    formDensity === "form" ? "ui-button--form-density" : undefined,
+  ].filter(Boolean).join(" ");
+  const glyph = icon === undefined ? null : <Icon name={icon} size={iconOnly && size === "md" ? 20 : 16} />;
 
-  return (
-    <MantineButton
-      data-ui=""
-      ref={ref}
-      variant={mantineVariant}
-      size={size === "compact" ? "compact-md" : "md"}
-      disabled={disabled}
-      aria-disabled={ariaDisabled || undefined}
-      onClick={onClick}
-      type={type}
-      id={id}
-      aria-label={props.ariaLabel}
-      aria-describedby={describedBy}
+  return <ButtonPrimitive
+    ref={ref}
+    variant={effectiveVariant}
+    size={iconOnly ? "icon" : size}
+    disabled={disabled}
+    aria-disabled={ariaDisabled || undefined}
+    aria-label={props.ariaLabel}
+    aria-describedby={describedBy}
     aria-pressed={ariaPressed}
     aria-haspopup={ariaHasPopup}
     aria-expanded={ariaExpanded}
     aria-controls={ariaControls}
-      title={title}
-      data-autofocus={autoFocus ? true : undefined}
-      className={buttonClassName}
-      leftSection={leadingIcon}
-      style={style}
-    >
-      {iconOnlyGlyph ?? label}
-    </MantineButton>
-  );
+    onClick={onClick}
+    type={type}
+    id={id}
+    title={title}
+    autoFocus={autoFocus}
+    className={classes}
+    data-danger={danger || undefined}
+  >{iconOnly ? glyph : <>{glyph}{props.children}</>}</ButtonPrimitive>;
 }
-
-const leadingIconClassName = (props: ButtonProps): string =>
-  props.iconOnly !== true && props.icon !== undefined ? "ui-button--with-icon" : "";

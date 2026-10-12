@@ -5,7 +5,7 @@ test("field error and warning slots keep their layout boxes stable", async ({ pa
   await expect(page.getByRole("textbox", { name: "Name" })).toBeVisible();
   await expect(page.locator(".ui-textarea__warnings")).toBeVisible();
 
-  const selectors = [".ui-field", ".ui-number-field__control", ".ui-number-field", ".ui-select", ".ui-tag-input", ".ui-textarea"];
+  const selectors = [".ui-field", ".unit-input", ".ui-select", ".chips-input", ".ui-textarea"];
   const before = await Promise.all(selectors.map(async (selector) => {
     const box = await page.locator(selector).first().boundingBox();
     if (box === null) throw new Error(`Missing layout box for ${selector}.`);
@@ -13,15 +13,15 @@ test("field error and warning slots keep their layout boxes stable", async ({ pa
   }));
 
   await page.getByRole("button", { name: "Toggle issues" }).click();
-  await expect(page.locator(".ui-tag-input__warning")).toContainText("A duplicate warning that should");
-  const tagError = page.locator(".ui-tag-input__control .mantine-InputWrapper-error");
-  const tagWarning = page.locator(".ui-tag-input__warning");
+  await expect(page.locator(".chips-input__warning")).toContainText("A duplicate warning that should");
+  const tagError = page.locator(".chips-input .ui-field__error");
+  const tagWarning = page.locator(".chips-input__warning");
   const tagErrorBox = await tagError.boundingBox();
   const tagWarningBox = await tagWarning.boundingBox();
-  if (tagErrorBox === null || tagWarningBox === null) throw new Error("TagInput error and warning rows should have layout boxes.");
+  if (tagErrorBox === null || tagWarningBox === null) throw new Error("ChipsInput error and warning rows should have layout boxes.");
   expect(tagErrorBox.y + tagErrorBox.height).toBeLessThanOrEqual(tagWarningBox.y);
   const markerY = await tagError.locator("[aria-hidden='true']").first().evaluate((element) => Math.round(element.getBoundingClientRect().y));
-  const copyY = await tagError.locator(".ui-truncated-text").evaluate((element) => Math.round(element.getBoundingClientRect().y));
+  const copyY = await tagError.evaluate((element) => Math.round(element.getBoundingClientRect().y));
   expect(Math.abs(copyY - markerY)).toBeLessThanOrEqual(1);
   const after = await Promise.all(selectors.map(async (selector) => {
     const box = await page.locator(selector).first().boundingBox();
@@ -38,7 +38,7 @@ test("field error and warning slots keep their layout boxes stable", async ({ pa
   expect(await preview.locator(".ui-chat-preview__count").evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("nowrap");
 
   await page.getByRole("button", { name: "Open dialog" }).click();
-  const dialog = page.locator(".mantine-Modal-content");
+  const dialog = page.getByRole("dialog", { name: "Layout dialog" });
   await expect(dialog).toBeVisible();
   const dialogHeight = (await dialog.boundingBox())?.height;
   if (dialogHeight === undefined) throw new Error("Dialog should have a stable layout box.");
@@ -61,15 +61,15 @@ test("compact header selects remain 44px when hints and errors change", async ({
   await page.goto("/tests/e2e/layout-fixture.html");
   const select = page.locator("#layout-header-channel").locator("xpath=ancestor::div[contains(@class, 'ui-select')]");
   await expect(select).toBeVisible();
-  expect((await select.boundingBox())?.height).toBe(44);
+  expect((await select.boundingBox())?.height).toBe(32);
 
   await page.getByRole("button", { name: "Toggle issues" }).click();
-  expect((await select.boundingBox())?.height).toBe(44);
+  expect((await select.boundingBox())?.height).toBe(32);
   await page.setViewportSize({ width: 390, height: 844 });
-  expect((await select.boundingBox())?.height).toBe(44);
+  expect((await select.boundingBox())?.height).toBe(32);
 
   await page.getByRole("button", { name: "Toggle issues" }).click();
-  expect((await select.boundingBox())?.height).toBe(44);
+  expect((await select.boundingBox())?.height).toBe(32);
 });
 
 test("save action width stays fixed across pending and idle states on desktop and mobile", async ({ page }) => {
@@ -252,7 +252,7 @@ test("returning from a module keeps the overview loaded at the same header posit
   await page.goto("/channels/stable-channel");
   const pageHeader = page.locator(".main-content .page-header");
   await expect(pageHeader).toBeVisible();
-  await expect(page.locator(".main-content .mantine-Skeleton-root")).toHaveCount(0);
+  await expect(page.locator(".main-content .ui-load-state__reserved-lines")).toHaveCount(0);
   const firstHeaderY = await pageHeader.evaluate((element) => element.getBoundingClientRect().y);
   const initialOverviewRequestCount = overviewRequests;
   expect(initialOverviewRequestCount).toBeGreaterThan(0);
@@ -274,7 +274,7 @@ test("returning from a module keeps the overview loaded at the same header posit
   await expect(page).toHaveURL("/channels/stable-channel");
   expect(await pageHeader.count()).toBe(1);
   expect(await pageHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(firstHeaderY);
-  expect(await page.locator(".main-content .mantine-Skeleton-root").count()).toBe(0);
+  expect(await page.locator(".main-content .ui-load-state__reserved-lines").count()).toBe(0);
   expect(overviewRequests).toBe(initialOverviewRequestCount);
   const socketStats = await page.evaluate(() => {
     const sockets = (window as unknown as Window & { __dashboardRealtimeSockets: Array<{ url: string; readyState: number }> }).__dashboardRealtimeSockets

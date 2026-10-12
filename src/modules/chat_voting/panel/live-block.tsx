@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import { Button, EmptyState, Led } from "../../../dashboard/ui";
+import { Button, EmptyState, StatusLed } from "../../../dashboard/ui";
 import type { ChatVoteTerm } from "../contracts";
 import { rankVoteTerms } from "../domain";
 import type { ChatVotingPanelState } from "./service";
@@ -41,10 +41,10 @@ export function ChatVotingLiveBlock({ state, language, busy, canOperate, onClose
 
   return <section className="chat-voting-live" aria-label={labels.title}>
     <header className="chat-voting-live__header">
-      <Led status={running ? "green" : "off"} word={running ? labels.running : labels.ended} />
+      <StatusLed state={running ? "ok" : "off"} label={running ? labels.running : labels.ended} />
       <h2 className="chat-voting-live__question" title={vote.title ?? ""}>{vote.title ?? labels.untitled}</h2>
       <span className="chat-voting-live__meta mono">{meta}</span>
-      <span className="chat-voting-live__action-slot">{running ? <Button danger onClick={onClose} disabled={busy || !canOperate}>{labels.end}</Button> : null}</span>
+      <span className="chat-voting-live__action-slot">{running ? <Button onClick={onClose} disabled={busy || !canOperate}>{labels.end}</Button> : null}</span>
     </header>
     {vote.kind === "free_text" ? <div className="chat-voting-live__rows chat-voting-live__rows--free-text" role="list" aria-label={labels.answers}>
       {Array.from({ length: 5 }, (_unused, index) => {

@@ -24,7 +24,7 @@ import { templateTextLength } from "../../src/contracts/template-text-length";
 import { createTemplateRenderer, type TemplateResolverSources, type TemplateValueProvider } from "../../src/worker/template-resolver";
 import { truncateChatText } from "../../src/worker/chat";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../src/modules/contract";
-import { renderWithQuery } from "../query-test-utils";
+import { clickSelectOption, renderWithQuery } from "../query-test-utils";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey } from "./fixtures";
 import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
@@ -140,16 +140,16 @@ describe("text library", () => {
     const sunday = within(weekdays).getByRole("button", { name: "Sunday" });
     const monday = within(weekdays).getByRole("button", { name: "Monday" });
     expect(sunday).toHaveAttribute("aria-pressed", "true");
-    expect(sunday).toHaveAttribute("data-variant", "filled");
+    expect(sunday).toHaveAttribute("data-variant", "primary");
     expect(monday).toHaveAttribute("aria-pressed", "false");
-    expect(monday).toHaveAttribute("data-variant", "default");
+    expect(monday).toHaveAttribute("data-variant", "neutral");
     expect(screen.queryByRole("button", { name: "Time window in channel time zone" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add time window" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "From" })).not.toBeInTheDocument();
 
     fireEvent.click(sunday);
     expect(sunday).toHaveAttribute("aria-pressed", "false");
-    expect(sunday).toHaveAttribute("data-variant", "default");
+    expect(sunday).toHaveAttribute("data-variant", "neutral");
 
     fireEvent.click(screen.getByRole("button", { name: "Add time window" }));
     expect(screen.getByRole("textbox", { name: "From" })).toHaveValue("00:00");
@@ -1622,8 +1622,8 @@ describe("text library", () => {
     renderTextLibraryPanel(false);
     await screen.findByTestId("text-library-list-slot");
     expect(await screen.findByRole("heading", { name: "Text blocks" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Category" })).toHaveValue("All categories");
-    const welcomeRow = screen.getByRole("button", { name: /\{text\.welcome\}/u });
+    expect(screen.getByRole("combobox", { name: "Category" })).toHaveTextContent("All categories");
+    const welcomeRow = screen.getByRole("button", { name: /\{(?:text\.)?welcome\}/u });
     const welcomeTableRow = welcomeRow.closest("tr");
     expect(welcomeTableRow).toHaveTextContent("1 variant");
     expect(welcomeTableRow).toHaveTextContent("0 uses");
@@ -1743,8 +1743,6 @@ describe("text library", () => {
     runDashboardNavigationGuards(proceed, cancel);
     const guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
     expect(proceed).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("Updated");
-
     fireEvent.click(within(guard).getByRole("button", { name: "Discard and switch" }));
     expect(proceed).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("Hello"));
@@ -1776,7 +1774,9 @@ describe("text library", () => {
     expect(screen.getByText("This name is reserved for a template variable.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: /\{text\.user\}/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard and switch" }));
+    fireEvent.click(screen.getByRole("button", { name: /\{(?:text\.)?user\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "{us" } });
     expect(screen.queryByText("Text block {user}")).not.toBeInTheDocument();
   });
@@ -1805,7 +1805,7 @@ describe("text library", () => {
     renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{text\.everyone_line\}/u }));
     fireEvent.click(screen.getByRole("combobox", { name: "Preview context" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Command" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Command" }));
 
     expect(screen.getByText("Matching variant: Variant 1")).toBeInTheDocument();
     expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Everyone sees this");

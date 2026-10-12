@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import { Button, Led, ListRow } from "../../../dashboard/ui";
+import { Button, StatusLed, ListRow } from "../../../dashboard/ui";
 import type { ChatVote, ChatVoteTemplate } from "../contracts";
 import { templateStartProblem } from "../domain";
 
@@ -59,7 +59,7 @@ export function ChatVoteTemplateList({
         title={title}
         description={description}
         selected={template.id === selectedId}
-        status={isRunning ? <Led status="green" word={labels.running} /> : problem === null ? null : <span className="chat-voting-template-list__incomplete">{labels.incomplete}</span>}
+        status={isRunning ? <StatusLed state="ok" label={labels.running} /> : problem === null ? null : <span className="chat-voting-template-list__incomplete">{labels.incomplete}</span>}
         action={isRunning ? null : <Button
           icon="player-play"
           iconOnly

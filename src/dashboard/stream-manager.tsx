@@ -13,7 +13,7 @@ import { useEventsQuery } from "./data/lists";
 import { dashboardDataKeys } from "./data/keys";
 import { useDashboardQueryError } from "./data";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
-import { Button, LoadState, notify, Popover, Skeleton } from "./ui";
+import { Button, LoadState, LoadStateLines, notify, Popover } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { collectChannelNoticeFacts, type ChannelNoticeFact } from "./channel-health";
 import { moduleName } from "./module-labels";
@@ -202,7 +202,7 @@ const ImmediateActionCard = ({ moduleId, channelId, streamState, canManage, avai
     load={loadAction}
     onRetry={retryModuleChunkLoad}
     properties={{ channelId, streamState, canManage, availabilityReason }}
-    loadingFallback={<div className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>}
+    loadingFallback={<div className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><LoadStateLines rows={2} height={44} /></div>}
     renderError={(retry) => <div className="stream-manager-action stream-manager-action--loading" role="alert">
       <p>{texts.module.componentLoadError}</p>
       <Button size="compact" variant="neutral" onClick={retry}>{dashboardCommonTexts().retry}</Button>
@@ -245,7 +245,7 @@ export const ImmediateActions = ({ channelId, streamState, canManage = false, mo
         {modulesLoaded ? moduleCards.map(({ id, availabilityReason }) => (
           <ImmediateActionCard key={id} moduleId={id} channelId={channelId} streamState={streamState ?? null} canManage={canManage} availabilityReason={availabilityReason} />
         )) : immediateActionModules.map((module) => (
-          <div key={module.id} className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><Skeleton rows={2} height={44} /></div>
+          <div key={module.id} className="stream-manager-action stream-manager-action--loading" aria-hidden="true"><LoadStateLines rows={2} height={44} /></div>
         ))}
       </div>
     </section>
@@ -296,7 +296,7 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
       <LoadState
         variant="feed-132"
         status={feedStatus}
-        loading={<Skeleton rows={3} height={44} />}
+        loading={<LoadStateLines rows={3} height={44} />}
         empty={<p className="stream-manager-feed__empty">{texts.streamManager.feedEmpty}</p>}
         error={<p role="alert">{texts.events.connectionLost}</p>}
         queryError={{ message: texts.events.connectionLost, onRetry: () => { void query.refetch({ throwOnError: true }).catch(() => undefined); } }}

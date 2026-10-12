@@ -29,10 +29,10 @@ export { GroupedPicker } from "./GroupedPicker";
 export type { GroupedPickerEntry, GroupedPickerGroup, GroupedPickerMessages } from "./GroupedPicker";
 export { FieldPair } from "./FieldPair";
 export { TimeoutDurationRangeFields } from "./TimeoutDurationRangeFields";
-export { SegmentedControl } from "./SegmentedControl";
+export { SegmentChoice } from "./SegmentChoice";
 export { ChoiceCards } from "./ChoiceCards";
-export { TagInput } from "./TagInput";
-export type { TagInputMessages } from "./TagInput";
+export { ChipsInput } from "./ChipsInput";
+export type { ChipsInputMessages } from "./ChipsInput";
 export { TextArea } from "./TextArea";
 export type { TemplateVariableOption, TextAreaMessages } from "./TextArea";
 
@@ -48,6 +48,7 @@ export { ChatPreview } from "./ChatPreview";
 export { EditorShell } from "./EditorShell";
 export type { EditorInvalidField, EditorSection } from "./EditorShell";
 export { SettingsEditor } from "./SettingsEditor";
+export { UnitInput } from "./UnitInput";
 export { textFieldLength } from "./text-length";
 export type {
   SettingsEditorCatalog,
@@ -55,7 +56,6 @@ export type {
   SettingsEditorSpec,
   SettingsFieldSpec,
 } from "./SettingsEditor";
-export { NumberField } from "./NumberField";
 export { Select } from "./Select";
 export type { SelectOption } from "./Select";
 export { Switch } from "./Switch";
@@ -63,15 +63,15 @@ export { Button } from "./Button";
 export { FormDialog } from "./FormDialog";
 export { FormDensity } from "./FormDensity";
 export { Icon } from "./Icon";
+export { StatusLed } from "./StatusLed";
+export type { StatusLedState } from "./StatusLed";
 export type { IconName } from "./Icon";
-export { Led } from "./Led";
 export { ChipGroup } from "./ChipGroup";
 export { ConfirmDialog } from "./ConfirmDialog";
 export { Popover } from "./Popover";
 export { ControlDurationDialog } from "./ControlDurationDialog";
 export { SaveBar } from "./SaveBar";
-export { Skeleton } from "./Skeleton";
-export { LoadState } from "./LoadState";
+export { LoadState, LoadStateLines } from "./LoadState";
 export type { QueryError } from "./LoadState";
 export { notify } from "./toast-store";
 export { EmptyState } from "./EmptyState";

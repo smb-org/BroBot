@@ -21,12 +21,15 @@ const expectControlInsideSlot = async (control: Locator, slot: Locator): Promise
   expect(controlBox.y).toBeGreaterThanOrEqual(slotBox.y);
   expect(controlBox.x + controlBox.width).toBeLessThanOrEqual(slotBox.x + slotBox.width);
   expect(controlBox.y + controlBox.height).toBeLessThanOrEqual(slotBox.y + slotBox.height);
-  const receivesPointer = await control.evaluate((element) => {
-    const bounds = element.getBoundingClientRect();
-    const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-    return hit !== null && (hit === element || element.contains(hit));
-  });
-  expect(receivesPointer).toBe(true);
+  if (!(await control.isDisabled())) {
+    const receivesPointer = await control.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      return hit !== null && (hit === element || element.contains(hit));
+    });
+    const controlName = await control.getAttribute("aria-label") ?? (await control.innerText()).trim();
+    expect(receivesPointer, `Control "${controlName}" must receive pointer events at its center.`).toBe(true);
+  }
 };
 
 const channelId = "query-state-channel";

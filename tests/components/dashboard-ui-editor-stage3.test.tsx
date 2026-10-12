@@ -2,9 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Button, ConfirmDialog, EditorShell, Field, FieldPair, GamePicker, NumberField, SettingsEditor, TagInput, TemplateText, TextArea, UiProvider, type GamePickerGame, type GamePickerMessages, type SettingsEditorSpec, type TextAreaMessages, type TemplateVariableOption } from "../../src/dashboard/ui";
+import { Button, ChipsInput, ConfirmDialog, EditorShell, Field, FieldPair, GamePicker, SegmentChoice, SettingsEditor, TemplateText, TextArea, UiProvider, UnitInput, type GamePickerGame, type GamePickerMessages, type SettingsEditorSpec, type TextAreaMessages, type TemplateVariableOption } from "../../src/dashboard/ui";
 import { ChoiceCards } from "../../src/dashboard/ui/ChoiceCards";
-import { SegmentedControl } from "../../src/dashboard/ui/SegmentedControl";
 import { Switch } from "../../src/dashboard/ui/Switch";
 
 const renderUi = (node: ReactNode): ReturnType<typeof render> => render(<UiProvider>{node}</UiProvider>);
@@ -161,72 +160,67 @@ describe("editor field seam", () => {
     cleanup();
     const { container } = renderUi(<Field label="Name" hint="A short name" value="12345678901" maxLength={10} countLabel={(count, max) => `${String(count)} / ${String(max)}`} onChange={() => {}} />);
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveAttribute("aria-invalid", "true");
-    expect(container.querySelector(".mantine-TextInput-error")).toHaveTextContent("× 11 / 10");
+    expect(container.querySelector(".ui-field__error")).toHaveTextContent("× 11 / 10");
   });
 
   it("renders FieldPair as the container-query grid seam", () => {
     const { container } = renderUi(<FieldPair><Field label="Channel" hint="For the channel." value="5" onChange={() => {}} /><Field label="Viewer" hint="For each viewer." value="30" onChange={() => {}} /></FieldPair>);
-    expect(container.querySelectorAll(".ui-field-pair > .mantine-TextInput-root")).toHaveLength(2);
+    expect(container.querySelectorAll(".ui-field-pair > .ui-field")).toHaveLength(2);
   });
 
   it("places the shared helper description below each control", () => {
     renderUi(<div>
       <Field label="Name" hint="The command name." value="hello" onChange={() => {}} />
-      <NumberField label="Cooldown" hint="Seconds between uses." value={5} onChange={() => {}} />
-      <TagInput label="Aliases" hint="Other names." value={[]} onChange={() => {}} removeLabel={(entry) => `Remove ${entry}`} listLabel="Alias list" messages={{ countLabel: (count, max) => `${String(count)} of ${String(max)}`, atLimitHint: "At the limit.", duplicateWarning: (entry) => `${entry} is already listed.` }} />
-      <SegmentedControl label="Mode" hint="The active mode." value="one" onChange={() => {}} options={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} />
+      <UnitInput label="Cooldown" hint="Seconds between uses." value={5} onChange={() => {}} />
+      <ChipsInput label="Aliases" hint="Other names." values={[]} onChange={() => {}} removeLabel={(entry) => `Remove ${entry}`} listLabel="Alias list" messages={{ countLabel: (count, max) => `${String(count)} of ${String(max)}`, atLimitHint: "At the limit.", duplicateWarning: (entry) => `${entry} is already listed.` }} />
+      <SegmentChoice label="Mode" hint="The active mode." value="one" onChange={() => {}} options={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} />
       <ChoiceCards label="Tier" hint="Who can run it." value="everyone" onChange={() => {}} options={[{ value: "everyone", label: "Everyone", description: "Anyone." }]} />
       <Switch layout="inline" label="Enabled" hint="Takes effect now." checked onChange={() => {}} />
       <TextArea label="Reply" hint="What the bot says." value="Hello" onChange={() => {}} messages={textAreaMessages} />
     </div>);
     expectHelperAfterField(screen.getByRole("textbox", { name: "Name" }), "The command name.");
     expectHelperAfterField(screen.getByRole("spinbutton", { name: "Cooldown" }), "Seconds between uses.");
-    expectHelperAfterField(screen.getByRole("combobox", { name: "Aliases" }), "Other names.");
-    expectHelperAfterField(screen.getByRole("radiogroup", { name: "Mode" }), "The active mode.");
+    expectHelperAfterField(screen.getByRole("textbox", { name: "Aliases" }), "Other names.");
+    expectHelperAfterField(screen.getByRole("group", { name: "Mode" }), "The active mode.");
     expectHelperAfterField(screen.getByRole("radiogroup", { name: "Tier" }), "Who can run it.");
     expectHelperAfterField(screen.getByRole("switch", { name: "Enabled" }), "Takes effect now.");
     expectHelperAfterField(screen.getByRole("textbox", { name: "Reply" }), "What the bot says.");
   });
 
-  it("steps by the requested amount, clamps at the maximum, preserves the unit outside the value, and hides Mantine controls", () => {
+  it("clamps the value on blur and applies a suggested value with the unit outside the input", () => {
     function Harness() {
       const [value, setValue] = useState<number | "">(5);
-      return <NumberField label="Cooldown" hint="From zero to ten" value={value} onChange={setValue} min={0} max={10} step={5} unit="s" increaseLabel="Increase cooldown" decreaseLabel="Decrease cooldown" />;
+      return <UnitInput label="Cooldown" hint="From zero to ten" value={value} onChange={setValue} min={0} max={10} step={5} unit="s" suggestions={[5, 10]} />;
     }
     renderUi(<Harness />);
     const field = screen.getByRole("spinbutton", { name: "Cooldown" });
-    const stepper = field.closest(".ui-number-field__stepper");
-    expect(stepper?.children).toHaveLength(3);
-    expect(stepper?.children[0]).toHaveClass("mantine-Button-root");
-    expect(stepper?.children[1]).toContainElement(field);
-    expect(stepper?.children[2]).toHaveClass("mantine-Button-root");
     const helperId = field.getAttribute("aria-describedby")?.split(" ").find((part) => (document.getElementById(part)?.textContent ?? "").includes("From zero to ten"));
     expect(helperId).toBeDefined();
-    expect(document.getElementById(helperId ?? "")?.closest(".ui-number-field__stepper")).toBe(stepper);
-    fireEvent.click(screen.getByRole("button", { name: "Increase cooldown" }));
-    expect(field).toHaveValue("10");
-    expect(screen.getByRole("button", { name: "Increase cooldown" })).toBeDisabled();
-    fireEvent.keyDown(field, { key: "ArrowDown" });
-    expect(field).toHaveValue("5");
-    expect(field).not.toHaveValue("5 s");
-    expect(document.querySelector(".mantine-NumberInput-controls")).not.toBeInTheDocument();
+    expect(field.closest(".unit-input")).toContainElement(document.getElementById(helperId ?? ""));
+    fireEvent.change(field, { target: { value: "15" } });
+    expect(field).toHaveValue(15);
+    fireEvent.blur(field);
+    expect(field).toHaveValue(10);
+    fireEvent.click(screen.getByRole("button", { name: "5 s" }));
+    expect(field).toHaveValue(5);
+    expect(field.closest(".unit-input__control")).toHaveTextContent("s");
   });
 
   it("renders labelled segments with value-dependent help, arrow navigation, and disabled options", () => {
     function Harness({ disabled = false }: { disabled?: boolean }) {
       const [value, setValue] = useState("reply");
-      return <SegmentedControl label="Response type" hint={value === "say" ? "Write a normal message." : "Reply to the triggering message."} value={value} onChange={setValue} disabled={disabled} options={[{ value: "say", label: "Message" }, { value: "reply", label: "Reply" }]} />;
+      return <SegmentChoice label="Response type" hint={value === "say" ? "Write a normal message." : "Reply to the triggering message."} value={value} onChange={setValue} disabled={disabled} options={[{ value: "say", label: "Message" }, { value: "reply", label: "Reply" }]} />;
     }
     renderUi(<Harness />);
-    const group = screen.getByRole("radiogroup", { name: "Response type" });
+    const group = screen.getByRole("group", { name: "Response type" });
     expect(group).toHaveAccessibleDescription("Reply to the triggering message.");
-    const reply = within(group).getByRole("radio", { name: "Reply" });
+    const reply = within(group).getByRole("button", { name: "Reply" });
     fireEvent.keyDown(reply, { key: "ArrowLeft", code: "ArrowLeft" });
-    expect(within(group).getByRole("radio", { name: "Message" })).toBeChecked();
+    expect(within(group).getByRole("button", { name: "Message" })).toHaveAttribute("aria-pressed", "true");
 
     cleanup();
     renderUi(<Harness disabled />);
-    expect(screen.getAllByRole("radio").every((radio) => (radio as HTMLInputElement).disabled)).toBe(true);
+    expect(screen.getAllByRole("button", { name: /Message|Reply/u }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
   });
 
   it("renders vertically stacked choice cards with accessible descriptions, hidden icons, arrow keys, and disabled options", () => {
@@ -273,35 +267,40 @@ describe("editor field seam", () => {
   it("parses and normalizes tags, retains invalid input, suppresses duplicates, counts tags, and allows removal at the limit", async () => {
     function Harness() {
       const [value, setValue] = useState<string[]>([]);
-      return <TagInput
+      return <ChipsInput
         label="Aliases"
         hint="Extra names for this command."
-        value={value}
+        values={value}
         onChange={setValue}
-        prefix="!"
+        stripPrefix="!"
         normalize={(entry) => entry.toLowerCase()}
         validate={(entry) => /^[a-z0-9_-]+$/u.test(entry) ? null : `!${entry} — letters, numbers, hyphens, and underscores only`}
-        maxTags={2}
+        max={2}
         removeLabel={(entry) => `Remove alias ${entry}`}
         listLabel="Alias list"
         messages={{ countLabel: (count, max) => `${String(count)} von ${String(max)}`, atLimitHint: "At most two aliases.", duplicateWarning: (entry) => `${entry} is already listed.` }}
       />;
     }
     renderUi(<Harness />);
-    const input = screen.getByRole("combobox", { name: "Aliases" });
-    fireEvent.paste(input, { clipboardData: { getData: () => "!Hi, hey" } });
-    expect(await screen.findByText("!hi")).toBeInTheDocument();
-    expect(screen.getByText("!hey")).toBeInTheDocument();
-    expect(document.querySelectorAll(".ui-tag-input__pill-label")).toHaveLength(2);
+    const input = screen.getByRole("textbox", { name: "Aliases" });
+    fireEvent.change(input, { target: { value: "!Hi" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "hey" } });
+    fireEvent.keyDown(input, { key: "," });
+    expect(await screen.findByText("hi")).toBeInTheDocument();
+    expect(screen.getByText("hey")).toBeInTheDocument();
+    expect(document.querySelectorAll(".chips-input__chip-label")).toHaveLength(2);
     expect(screen.getByText("2 von 2")).toBeInTheDocument();
-    expect(input).toBeDisabled();
+    expect(input).toHaveAttribute("readonly");
     expect(screen.getByRole("button", { name: "Remove alias !hi" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Remove alias !hi" }));
     expect(input).toBeEnabled();
-    fireEvent.paste(input, { clipboardData: { getData: () => "!HEY" } });
+    fireEvent.change(input, { target: { value: "!HEY" } });
+    fireEvent.keyDown(input, { key: "Enter" });
     expect(await screen.findByText("!hey is already listed.")).toBeInTheDocument();
-    fireEvent.paste(input, { clipboardData: { getData: () => "!hé" } });
+    fireEvent.change(input, { target: { value: "!hé" } });
+    fireEvent.keyDown(input, { key: "Enter" });
     expect(await screen.findByText(/letters, numbers/)).toBeInTheDocument();
     expect(input).toHaveAttribute("aria-describedby");
     expect(input.getAttribute("aria-describedby")).toMatch(/error/u);
@@ -761,8 +760,8 @@ describe("EditorShell and declaration renderer", () => {
 
     rerender(<UiProvider><EditorShell {...baseProps} dirty warnings={["Unknown variable {viewer}."]} /></UiProvider>);
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Save" })).toHaveAttribute("data-variant", "filled");
-    expect(screen.getByRole("button", { name: "Save" })).toHaveClass("mantine-Button-root");
+    expect(screen.getByRole("button", { name: "Save" })).toHaveAttribute("data-variant", "primary");
+    expect(screen.getByRole("button", { name: "Save" })).toHaveClass("ui-button");
     expect(screen.getByRole("status")).toHaveTextContent("Unknown variable {viewer}.");
     expect(screen.getByRole("status").querySelector("svg")).toHaveAttribute("aria-hidden", "true");
 
@@ -825,9 +824,11 @@ describe("EditorShell and declaration renderer", () => {
     expect(screen.getByRole("button", { name: "Weiter bearbeiten" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Speichern und wechseln" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Verwerfen und wechseln" })).toBeInTheDocument();
+    cleanup();
+    renderUi(<Button icon="remove" danger="subtle">Delete command</Button>);
     const deleteButton = screen.getByRole("button", { name: "Delete command" });
-    expect(deleteButton).toHaveAttribute("data-variant", "default");
-    expect(deleteButton.style.getPropertyValue("--button-bd")).toBe("1px solid var(--line-strong)");
+    expect(deleteButton).toHaveAttribute("data-variant", "danger-outline");
+    expect(deleteButton).toHaveClass("border-[var(--color-error-text)]");
   });
 
   it("renders settings from a typed declaration and catalogue with helper descriptions on every field", () => {
@@ -851,12 +852,12 @@ describe("EditorShell and declaration renderer", () => {
     const texts = {
       sections: { general: "General" },
       fields: {
-        threshold: { label: "Threshold", hint: "Minimum viewer count.", increaseLabel: "Increase threshold", decreaseLabel: "Decrease threshold" },
+        threshold: { label: "Threshold", hint: "Minimum viewer count." },
         shoutoutName: { label: "Shoutout name", hint: "The account sent a shoutout.", countLabel: (count: number, max: number) => `${String(count)} / ${String(max)}` },
         message: { label: "Message", hint: "What the bot writes.", previewLabel: "Preview", previewSpeaker: "BroBot" },
         mode: { label: "Mode", hint: "Select a mode.", options: { one: { label: "One", description: "First choice." }, two: { label: "Two", description: "Second choice." } } },
         enabled: { label: "Shoutout", hint: "Controls the dependent threshold.", description: "Send a shoutout after a large raid.", disabledReason: "Shoutout is off." },
-        dependentThreshold: { label: "Dependent threshold", hint: "Minimum viewer count.", increaseLabel: "Increase dependent threshold", decreaseLabel: "Decrease dependent threshold" },
+        dependentThreshold: { label: "Dependent threshold", hint: "Minimum viewer count." },
       },
     };
     renderUi(<SettingsEditor
@@ -877,6 +878,6 @@ describe("EditorShell and declaration renderer", () => {
       ["Dependent threshold", "Minimum viewer count."],
     ];
     for (const [label, help] of fieldHelp) expect(screen.getByRole("button", { name: `${label}: ${help}` })).toHaveAttribute("title", help);
-    expect(screen.getByRole("radiogroup", { name: "Mode" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Mode" })).toBeInTheDocument();
   });
 });

@@ -28,7 +28,7 @@
 .ui-grouped-picker__key-hint kbd { min-height: 20px; padding: 0 var(--s1); border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--text-2); background: var(--surface); font: inherit; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; line-height: 1.4; }
 .ui-grouped-picker__mobile-header { position: sticky; z-index: 2; top: 0; display: grid; grid-template-columns: 1fr auto; grid-template-rows: 4px auto; gap: var(--s2); align-items: center; padding-bottom: var(--s2); background: var(--surface-raised); }
 .ui-grouped-picker__mobile-header h2 { grid-column: 1; grid-row: 2; margin: var(--s1) 0 0; font-size: 15px; }
-.ui-grouped-picker__mobile-header > .mantine-Button-root { grid-column: 2; grid-row: 2; }
+.ui-grouped-picker__mobile-header > .ui-button { grid-column: 2; grid-row: 2; }
 .ui-grouped-picker__handle { grid-column: 1 / -1; grid-row: 1; justify-self: center; width: 36px; height: 4px; border-radius: var(--r-control); background: var(--line-strong); }
 .ui-grouped-picker--sheet { height: 100%; flex: 1 1 auto; }
 .ui-grouped-picker--sheet .ui-grouped-picker__list { max-height: none; min-height: 0; flex: 1 1 auto; }
