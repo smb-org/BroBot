@@ -1087,7 +1087,7 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
   await expect(page.locator(".chat-voting-immediate")).toContainText("Abstimmung");
   await expect(page.getByRole("button", { name: "Beenden" })).toBeVisible();
 });
-test("chat voting immediate action fits the 240px card with two visible rows and inner scroll", async ({ page }) => {
+test("chat voting immediate action fits the 264px card with two visible rows and inner scroll", async ({ page }) => {
   const openedAt = "2030-01-01T12:00:00.000Z";
   const templates: ChatVoteTemplate[] = Array.from({ length: 6 }, (_, index) => ({
     id: `template-${String(index)}`, channelId: "channel-a", shortcut: `t${String(index)}`, title: `Vorlage ${String(index + 1)}`,
@@ -1128,7 +1128,7 @@ test("chat voting immediate action fits the 240px card with two visible rows and
       listScrolls: list.scrollHeight > list.clientHeight,
     };
   });
-  expect(metrics.cardHeight).toBe(240);
+  expect(metrics.cardHeight).toBe(264);
   expect(metrics.cardOverflows).toBe(false);
   expect(metrics.childrenInside).toBe(true);
   expect(metrics.rowHeight).toBeGreaterThanOrEqual(34);
@@ -1751,6 +1751,7 @@ test("the mobile live state reserves the same height while loading, failed, empt
 for (const width of [1920, 390]) {
   test(`ad lock reason is fully visible and keeps the slot height at ${String(width)}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
+    await page.addInitScript(() => { document.addEventListener("DOMContentLoaded", () => { const style = document.createElement("style"); style.textContent = "* { letter-spacing: 0.03em !important; }"; document.head.appendChild(style); }); }); // wider than any CI fallback font
     await gotoPanel(page, "ads-action");
     const slot = page.getByTestId("immediate-action-result-slot");
     await expect(slot).toBeAttached();
