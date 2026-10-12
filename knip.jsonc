@@ -8,6 +8,8 @@
     "tests/components/**/*.test.{ts,tsx}",
     "tests/e2e/**/*.spec.{ts,tsx}",
     "tests/e2e/fixtures/**/*.{ts,tsx}",
+    "tests/e2e/vite-hmr-counter.tsx",
+    "tests/e2e/vite-hmr-main.tsx",
     "tests/**/*-fixture.{ts,tsx}",
     "tests/worker/**/*.test.{ts,tsx}",
     "wrangler.jsonc"
@@ -20,6 +22,9 @@
   ],
   "ignoreDependencies": [
     // Cloudflare Workers exposes `cloudflare:workers` as a runtime built-in, not an npm dependency.
-    "cloudflare"
+    "cloudflare",
+    // CSS imports in tokens.css are not followed by Knip's TypeScript graph.
+    "tailwindcss",
+    "tw-animate-css"
   ]
 }

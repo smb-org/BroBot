@@ -351,99 +351,97 @@ export type AuditArea = (typeof AUDIT_AREAS)[number];
  * falls back to a generic, per-call-site localized text instead of ever
  * showing raw server text.
  */
-export const API_ERROR_CODES = [
-  "session_missing",
-  "websocket_origin_invalid",
-  "realtime_protocol_unsupported",
-  "csrf_invalid",
-  "channel_missing",
-  "channel_access_denied",
-  "platform_access_denied",
-  "panel_request_not_allowed",
-  "pagination_limit_invalid",
-  "pagination_cursor_invalid",
-  "twitch_login_invalid",
-  "twitch_user_not_found",
-  "twitch_user_search_failed",
-  "channel_not_found",
-  "broadcaster_role_immutable",
-  "broadcaster_role_change_requires_broadcaster",
-  "mutation_failed",
-  "member_changed_concurrently",
-  "release_input_invalid",
-  "channel_already_released",
-  "channel_release_failed",
-  "full_consent_invalid",
-  "full_consent_already_set",
-  "member_or_role_invalid",
-  "member_already_exists",
-  "member_management_denied",
-  "self_membership_denied",
-  "member_add_failed",
-  "role_invalid",
-  "member_not_found",
-  "role_already_set",
-  "self_role_escalation_denied",
-  "last_broadcaster_cannot_be_demoted",
-  "last_broadcaster_cannot_be_removed",
-  "event_origin_invalid",
-  "event_tone_invalid",
-  "audit_area_invalid",
-  "moderator_status_check_denied",
-  "moderator_status_check_rate_limited",
-  "moderator_status_check_failed",
-  "module_management_denied",
-  "module_unknown",
-  "module_not_configured",
-  "module_disabled",
-  "module_settings_invalid",
-  "module_settings_changed_concurrently",
-  "module_enabled_field_invalid",
-  "module_mandatory",
-  "module_changed_concurrently",
-  "command_management_denied",
-  "command_data_invalid",
-  "command_already_exists",
-  "command_alias_conflict",
-  "command_creation_denied",
-  "command_not_found",
-  "command_update_denied",
-  "command_changed_concurrently",
-  "command_delete_denied",
-  "variable_data_invalid",
-  "variable_not_found",
-  "variable_already_exists",
-  "variable_limit_reached",
-  "variable_in_use",
-  "variable_changed_concurrently",
-  "variable_management_denied",
-  "variable_value_change_denied",
-  "ad_schedule_read_failed",
-  "ad_snooze_denied",
-  "ad_snooze_failed",
-  "commercial_length_invalid",
-  "commercial_start_denied",
-  "commercial_start_failed",
-  "commercial_stream_offline",
-  "clip_create_failed",
-  "clip_stream_offline",
-  "channel_control_input_invalid",
-  "channel_control_changed_concurrently",
-  "shoutout_send_failed",
-  "overlay_token_manage_denied",
-  "overlay_expiry_invalid",
-  "overlay_revocation_reason_invalid",
-  "overlay_token_not_found",
-  "overlay_token_invalid",
-  "overlay_variable_not_found",
-  "overlay_management_denied",
-  "overlay_css_invalid",
-  "overlay_data_invalid",
-  "overlay_not_found",
-  "overlay_token_already_bound",
-  "overlay_limit_reached",
-  "overlay_element_limit_reached",
-  "overlay_changed_concurrently",
-  "unknown_api_route",
-] as const;
-export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
+export type ApiErrorCode =
+  | "session_missing"
+  | "websocket_origin_invalid"
+  | "realtime_protocol_unsupported"
+  | "csrf_invalid"
+  | "channel_missing"
+  | "channel_access_denied"
+  | "platform_access_denied"
+  | "panel_request_not_allowed"
+  | "pagination_limit_invalid"
+  | "pagination_cursor_invalid"
+  | "twitch_login_invalid"
+  | "twitch_user_not_found"
+  | "twitch_user_search_failed"
+  | "channel_not_found"
+  | "broadcaster_role_immutable"
+  | "broadcaster_role_change_requires_broadcaster"
+  | "mutation_failed"
+  | "member_changed_concurrently"
+  | "release_input_invalid"
+  | "channel_already_released"
+  | "channel_release_failed"
+  | "full_consent_invalid"
+  | "full_consent_already_set"
+  | "member_or_role_invalid"
+  | "member_already_exists"
+  | "member_management_denied"
+  | "self_membership_denied"
+  | "member_add_failed"
+  | "role_invalid"
+  | "member_not_found"
+  | "role_already_set"
+  | "self_role_escalation_denied"
+  | "last_broadcaster_cannot_be_demoted"
+  | "last_broadcaster_cannot_be_removed"
+  | "event_origin_invalid"
+  | "event_tone_invalid"
+  | "audit_area_invalid"
+  | "moderator_status_check_denied"
+  | "moderator_status_check_rate_limited"
+  | "moderator_status_check_failed"
+  | "module_management_denied"
+  | "module_unknown"
+  | "module_not_configured"
+  | "module_disabled"
+  | "module_settings_invalid"
+  | "module_settings_changed_concurrently"
+  | "module_enabled_field_invalid"
+  | "module_mandatory"
+  | "module_changed_concurrently"
+  | "command_management_denied"
+  | "command_data_invalid"
+  | "command_already_exists"
+  | "command_alias_conflict"
+  | "command_creation_denied"
+  | "command_not_found"
+  | "command_update_denied"
+  | "command_changed_concurrently"
+  | "command_delete_denied"
+  | "variable_data_invalid"
+  | "variable_not_found"
+  | "variable_already_exists"
+  | "variable_limit_reached"
+  | "variable_in_use"
+  | "variable_changed_concurrently"
+  | "variable_management_denied"
+  | "variable_value_change_denied"
+  | "ad_schedule_read_failed"
+  | "ad_snooze_denied"
+  | "ad_snooze_failed"
+  | "commercial_length_invalid"
+  | "commercial_start_denied"
+  | "commercial_start_failed"
+  | "commercial_stream_offline"
+  | "clip_create_failed"
+  | "clip_stream_offline"
+  | "channel_control_input_invalid"
+  | "channel_control_changed_concurrently"
+  | "shoutout_send_failed"
+  | "overlay_token_manage_denied"
+  | "overlay_expiry_invalid"
+  | "overlay_revocation_reason_invalid"
+  | "overlay_token_not_found"
+  | "overlay_token_invalid"
+  | "overlay_variable_not_found"
+  | "overlay_management_denied"
+  | "overlay_css_invalid"
+  | "overlay_data_invalid"
+  | "overlay_not_found"
+  | "overlay_token_already_bound"
+  | "overlay_limit_reached"
+  | "overlay_element_limit_reached"
+  | "overlay_changed_concurrently"
+  | "unknown_api_route";

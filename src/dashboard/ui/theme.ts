@@ -251,8 +251,3 @@ export const createDashboardTheme = (readCssColor: (variable: string) => string)
     },
   });
 };
-
-const readDocumentCssColor = (variable: string): string =>
-  typeof document === "undefined" ? "" : getComputedStyle(document.documentElement).getPropertyValue(variable);
-
-export const theme = createDashboardTheme(readDocumentCssColor);

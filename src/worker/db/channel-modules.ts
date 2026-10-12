@@ -55,17 +55,6 @@ export const getChannelModuleForChannel = async (
   moduleId: string,
 ): Promise<ChannelModuleRecord | null> => getChannelModule(db, channelId, moduleId);
 
-export const listChannelModulesForChannel = async (
-  db: D1Database,
-  channelId: string,
-): Promise<ChannelModuleRecord[]> => {
-  const result = await db.prepare(
-    `SELECT channel_id, module_id, enabled, initialized, settings, revision
-       FROM channel_modules
-      WHERE channel_id = ?`,
-  ).bind(channelId).all<ChannelModuleRow>();
-  return result.results.map(mapChannelModule);
-};
 /**
  * The same role threshold as for member changes: only broadcasters and
  * managers may toggle modules, enforced in the mutation's own actorGuard,
