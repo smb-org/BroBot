@@ -117,6 +117,23 @@ describe("scheduled text validation", () => {
       .resolves.toEqual({ ok: false, reason: "input_dependent" });
   });
 
+  it("uses the host event variable when a module declares the same name as unavailable", async () => {
+    const database = await databaseWithBlocks({});
+    const raidViewersVariable = {
+      name: "viewers",
+      sample: "42",
+      maxLength: 7,
+      group: "event",
+      moduleId: "raid",
+      isTextBlock: false,
+      contexts: ["event"],
+      availableInEventTemplates: false,
+    } satisfies ModuleRegisteredTemplateVariable;
+
+    await expect(validateTimerText(database as unknown as D1Database, "channel-1", "We have {viewers} viewers", [raidViewersVariable]))
+      .resolves.toEqual({ ok: true });
+  });
+
   it("checks nested text blocks for command-input variables", async () => {
     const database = await databaseWithBlocks({ welcome: ["{text.nested}"], nested: ["Hello {target}."] });
     const nestedVariable = {

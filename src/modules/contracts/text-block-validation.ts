@@ -10,10 +10,16 @@ import { blockReferencesInText } from "./text-block-references";
 
 export type EventTextBlockValidation = { ok: true } | { ok: false; reason: "missing" | "input_dependent" };
 
-const inputVariablesForEvent = (registeredVariables: readonly ModuleRegisteredTemplateVariable[]): Set<string> =>
-  new Set([...SYSTEM_TEMPLATE_VARIABLE_LIST, ...registeredVariables]
-    .filter((variable) => !isEventTemplateVariableAvailable(variable))
-    .map((variable) => variable.name));
+const inputVariablesForEvent = (registeredVariables: readonly ModuleRegisteredTemplateVariable[]): Set<string> => {
+  const availabilityByName = new Map<string, boolean>();
+  for (const variable of [...SYSTEM_TEMPLATE_VARIABLE_LIST, ...registeredVariables]) {
+    availabilityByName.set(
+      variable.name,
+      (availabilityByName.get(variable.name) ?? false) || isEventTemplateVariableAvailable(variable),
+    );
+  }
+  return new Set([...availabilityByName].filter(([, available]) => !available).map(([name]) => name));
+};
 
 /** Validates a text block used without chat-command input, including nested blocks. */
 export const validateEventTextBlock = async (

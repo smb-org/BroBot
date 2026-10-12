@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { BotModule, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
+import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleRegisteredTemplateVariable } from "../../src/modules/contract";
 import type { FaqEntry } from "../../src/modules/faq/contracts";
 import { createFaqRepository } from "../../src/modules/faq/adapters/d1";
 import { firstFaqMatch, normalizeFaqText, prepareFaqMatchers, selectFaqMatch, validFaqMatcher } from "../../src/modules/faq/domain";
@@ -53,6 +53,37 @@ const contextFor = (db: TestD1Database, gameId: string | null = null) => ({
 }) as unknown as ModuleExecutionContext;
 
 describe("FAQ literal matcher", () => {
+  it("keeps the host event viewers token available when raid declares a local viewers variable", async () => {
+    const database = new TestD1Database();
+    const raidViewersVariable = {
+      name: "viewers",
+      sample: "42",
+      maxLength: 7,
+      group: "event",
+      moduleId: "raid",
+      isTextBlock: false,
+      contexts: ["event"],
+      availableInEventTemplates: false,
+    } satisfies ModuleRegisteredTemplateVariable;
+
+    try {
+      await insertChannel(database, "channel-a");
+      await database.prepare(
+        `INSERT INTO faq_entries (faq_id, channel_id, name, matcher_json, answer_text, created_at, updated_at)
+         VALUES ('faq-viewers', 'channel-a', 'Viewers', '{"type":"keywords","patterns":["viewers"]}', 'We have {viewers} viewers', ?, ?)`,
+      ).bind(NOW, NOW).run();
+
+      await expect(faqModule.validateTemplateContent?.({
+        DB: database as unknown as D1Database,
+        channelId: "channel-a",
+        candidate: { name: "unused", texts: ["Free text"] },
+        registeredVariables: [raidViewersVariable],
+      })).resolves.toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("exposes answer text as a text-block usage source", async () => {
     const database = new TestD1Database();
     try {

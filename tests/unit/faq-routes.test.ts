@@ -67,6 +67,29 @@ describe("FAQ routes", () => {
 
   afterEach(() => { database.close(); vi.unstubAllGlobals(); });
 
+  it("accepts the host viewers token when raid also declares an unavailable local viewers variable", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-1");
+    await insertMember(database, "channel-a", "manager-1", "manager");
+    await database.prepare("INSERT INTO text_library_settings (channel_id, graph_revision, updated_at) VALUES ('channel-a', 1, '2026-09-18T00:00:00.000Z')").run();
+
+    const response = await panelRouter.fetch(
+      await requestFor("manager-1", "/api/channels/channel-a/modules/faq/entries", "POST", {
+        name: "Viewers",
+        matcher: { type: "keywords", patterns: ["viewers"] },
+        answerText: "We have {viewers} viewers",
+        cooldownSeconds: 30,
+        games: [],
+        chatTarget: "source_only",
+      }),
+      environmentFor(database),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({ entry: { answerText: "We have {viewers} viewers" } });
+  });
+
   it("rejects an FAQ save when its validated block is deleted before the SQL write", async () => {
     database = new TestD1Database();
     await insertChannel(database, "channel-a");

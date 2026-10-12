@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleRouteEnvironment } from "../../src/modules/contract";
+import type { ModuleRegisteredTemplateVariable, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { timerRoutes } from "../../src/modules/timers/routes";
 import { insertChannel } from "./fixtures";
 import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
@@ -28,7 +28,18 @@ const createDatabase = async (): Promise<TestD1Database> => {
 
 type ScheduledAlarm = { moduleId: string; handlerKey: string; alarmKey: string; deadline: number };
 
-const appFor = (database: D1Database): Hono<ModuleRouteEnvironment> => {
+const raidViewersVariable = {
+  name: "viewers",
+  sample: "42",
+  maxLength: 7,
+  group: "event",
+  moduleId: "raid",
+  isTextBlock: false,
+  contexts: ["event"],
+  availableInEventTemplates: false,
+} satisfies ModuleRegisteredTemplateVariable;
+
+const appFor = (database: D1Database, variables: readonly ModuleRegisteredTemplateVariable[] = []): Hono<ModuleRouteEnvironment> => {
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", "manager");
@@ -36,7 +47,7 @@ const appFor = (database: D1Database): Hono<ModuleRouteEnvironment> => {
     context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
     context.set("prepareModuleAudit", () => database.prepare("SELECT 1"));
     context.set("listEventTimeSources", () => [{ id: EVENT_SOURCE_ID, label: { de: "Sonnenaufgang", en: "Sunrise" } }]);
-    context.set("listRegisteredTemplateVariables", () => Promise.resolve([]));
+    context.set("listRegisteredTemplateVariables", () => Promise.resolve(variables));
     // No occurrence within the source's own horizon -- the polar-night case
     // this route must not leave dormant.
     context.set("resolveEventTimes", () => Promise.resolve([]));
@@ -65,7 +76,28 @@ afterEach(() => {
   for (const database of databases.splice(0)) database.close();
 });
 
-describe("before_event timer scheduling routes", () => {
+describe("timer scheduling and validation routes", () => {
+  it("accepts the host viewers token when raid also declares an unavailable local viewers variable", async () => {
+    const database = await createDatabase();
+    const app = appFor(database as unknown as D1Database, [raidViewersVariable]);
+    const response = await app.fetch(
+      new Request(`https://brobot.example/channels/${CHANNEL_ID}/timers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Viewer reminder",
+          messageText: "We have {viewers} viewers",
+          trigger: { type: "interval", minutes: 10 },
+        }),
+      }),
+      environmentFor(database as unknown as D1Database, []),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(database.prepare("SELECT message_text FROM timers WHERE channel_id = ? AND name = ?")
+      .bind(CHANNEL_ID, "Viewer reminder").first()).resolves.toEqual({ message_text: "We have {viewers} viewers" });
+  });
+
   it("schedules a horizon replan instead of going dormant when creating during a source's polar night", async () => {
     const database = await createDatabase();
     const scheduled: ScheduledAlarm[] = [];
