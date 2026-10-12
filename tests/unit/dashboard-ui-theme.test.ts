@@ -5,7 +5,7 @@ import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 
 import { Button, FormDensity, UiProvider } from "../../src/dashboard/ui";
-import { colors, luminanceThreshold, theme } from "../../src/dashboard/ui/theme";
+import { colors, createDashboardTheme, luminanceThreshold } from "../../src/dashboard/ui/theme";
 
 // Mirrors Mantine's own `luminance()`/`isLightColor()` (see
 // @mantine/core/esm/core/MantineProvider/color-functions/luminance) so this
@@ -34,6 +34,7 @@ function contrastRatio(hexA: string, hexB: string): number {
 const WCAG_AA_NORMAL_TEXT = 4.5;
 const legacyStyles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
 const tokenStyles = readFileSync(resolve(process.cwd(), "src/dashboard/ui/tokens.css"), "utf8");
+const designDocument = readFileSync(resolve(process.cwd(), "DESIGN.md"), "utf8");
 
 type PaletteName = "nachtschicht" | "indigo-nacht";
 
@@ -47,10 +48,15 @@ function paletteTokens(palette: PaletteName): Map<string, string> {
 }
 
 function resolveLegacyColor(variable: string): string {
-  const match = new RegExp(`${variable}:\\s*(#[\\da-fA-F]{6})`).exec(legacyStyles);
-  if (!match?.[1]) throw new Error(`Missing color token ${variable}`);
-  return match[1];
+  const value = new RegExp(`${variable}:\\s*([^;]+)`).exec(legacyStyles)?.[1]?.trim();
+  if (value === undefined) throw new Error(`Missing color token ${variable}`);
+  const reference = /^var\((--[\w-]+)\)$/u.exec(value)?.[1];
+  if (reference !== undefined) return resolveLegacyColor(reference);
+  if (!/^#[\da-fA-F]{6}$/u.test(value)) throw new Error(`Color token ${variable} must resolve to a six-digit hex value`);
+  return value;
 }
+
+const theme = createDashboardTheme(resolveLegacyColor);
 
 interface ComponentThemeValues {
   vars?: (theme: unknown, props: { size: string; color?: string; variant?: string }, context: unknown) => { root?: Record<string, string>; wrapper?: Record<string, string> };
@@ -58,6 +64,7 @@ interface ComponentThemeValues {
 }
 
 const componentValues = theme.components as unknown as Record<string, ComponentThemeValues>;
+const mantinePaletteColors = theme.colors as unknown as Record<string, readonly string[]>;
 
 describe("theme contrast rule", () => {
   it("keeps luminanceThreshold at 0.2, not Mantine's 0.3 default", () => {
@@ -100,14 +107,40 @@ describe("theme contrast rule", () => {
     // theme.black backs autoContrast's dark-text branch; it must be
     // onBrand from the active palette, not Mantine's default pure black, so
     // the button text matches the contrast value defined by the design.
-    expect(theme.black).toBe(colors.onBrand);
+    expect(theme.black).toBe(onBrandColor);
 
     const onBrandOnBrand = contrastRatio(onBrandColor, brandColor);
     expect(onBrandOnBrand).toBeGreaterThanOrEqual(WCAG_AA_NORMAL_TEXT);
   });
+
+  it("passes resolved palette colors to Mantine so every color consumer keeps auto-contrast", () => {
+    for (const paletteName of ["dark", "brand"] as const) {
+      const palette = mantinePaletteColors[paletteName];
+      expect(palette, `Mantine must define ${paletteName}`).toBeDefined();
+      for (const color of palette ?? []) {
+        expect(color, `${paletteName} entries must be resolved colors`).not.toMatch(/^var\(/u);
+      }
+    }
+
+    const primaryFill = mantinePaletteColors.brand?.[6] ?? "";
+    const primaryLuminance = primaryFill.startsWith("var(") ? 0 : relativeLuminance(primaryFill);
+    expect(primaryLuminance).toBeGreaterThan(luminanceThreshold);
+    expect(theme.black).toBe(resolveLegacyColor("--on-brand"));
+  });
+});
+
+describe("design token documentation", () => {
+  it("maps the 13px label and section title row to the 13px section token", () => {
+    expect(designDocument).toMatch(/\| Label \/ Abschnittstitel \| 13px \/ 500 in `--color-text` \(Abschnitt: 600\) \| `--text-field-label`, `--text-section` \|/u);
+  });
 });
 
 describe("palette contrast tokens", () => {
+  it("defines the unset overlay content color separately from error contrast", () => {
+    expect(tokenStyles).toContain("--content-default: #ffffff;");
+    expect(tokenStyles).toContain("--color-on-error: #000000;");
+  });
+
   it.each(["nachtschicht", "indigo-nacht"] as const)("keeps every documented filled-control pair AA compliant in %s", (palette) => {
     const values = paletteTokens(palette);
     const pairs = [

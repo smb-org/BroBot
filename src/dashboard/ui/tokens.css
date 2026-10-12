@@ -116,6 +116,7 @@
 :root[data-palette="nachtschicht"],
 :root[data-palette="indigo-nacht"],
 :root:not([data-palette]) {
+  --content-default: #ffffff;
   --content-sun-dawn: #8c88ff;
   --content-sun-sunrise: #ff9f68;
   --content-sun-noon: #ffe16b;

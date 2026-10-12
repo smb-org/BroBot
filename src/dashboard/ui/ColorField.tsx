@@ -15,7 +15,7 @@ export interface ColorFieldProps {
 
 export function ColorField({ id, label, value, unsetLabel, clearLabel, onChange, disabled = false }: ColorFieldProps): ReactElement {
   const disabledReason = useDisabledFieldReason();
-  const defaultColor = getComputedStyle(document.documentElement).getPropertyValue("--color-on-error").trim();
+  const defaultColor = getComputedStyle(document.documentElement).getPropertyValue("--content-default").trim();
   const reasonId = disabledReason === null ? undefined : `${disabledReason.id}-color-${id}`;
   const unsetDescriptionId = `${id}-unset-note`;
   const describedBy = [reasonId, value === undefined ? unsetDescriptionId : undefined].filter((descriptionId) => descriptionId !== undefined).join(" ") || undefined;

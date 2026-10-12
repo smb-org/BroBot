@@ -3,8 +3,10 @@ import { MantineProvider } from "@mantine/core";
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { theme } from "../../src/dashboard/ui/theme";
+import { createDashboardTheme } from "../../src/dashboard/ui/theme";
 import { GroupedPicker, UiProvider, type GroupedPickerGroup, type GroupedPickerMessages } from "../../src/dashboard/ui";
+
+const theme = createDashboardTheme((variable) => getComputedStyle(document.documentElement).getPropertyValue(variable));
 
 afterEach(cleanup);
 

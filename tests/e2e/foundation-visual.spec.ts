@@ -106,6 +106,15 @@ test("captures the stable dashboard routes at desktop and mobile widths", async 
       await page.goto(routePath);
       await expect(page.locator("#root")).toBeVisible();
       await page.waitForTimeout(500);
+      if (routeName === "overview" && viewport.width >= 1280) {
+        const locationReason = page.locator("#channel-location-remove-reason");
+        const immediateActions = page.getByRole("group", { name: "Immediate actions" });
+        const actionsSection = immediateActions.locator("..");
+        await expect(locationReason).toBeVisible();
+        await expect(immediateActions).toBeVisible();
+        await expect.poll(async () => (await actionsSection.boundingBox())?.y).toBe(626.5);
+        await expect(locationReason).toHaveCSS("margin-bottom", "11px");
+      }
       await page.screenshot({
         path: join(outputDirectory, `${routeName}-${viewport.name}.png`),
         animations: "disabled",

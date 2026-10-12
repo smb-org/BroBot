@@ -195,7 +195,7 @@ Schriften: **Archivo** (UI) und **IBM Plex Mono** (Zahlen), selbst gehostet.
 | Stufe | Wert | Token |
 |---|---|---|
 | Body | 14px / 400 / lh 1.45 | `--text-body`, `--leading-normal` |
-| Label / Abschnittstitel | 13px / 500 in `--color-text` (Abschnitt: 600) | `--text-field-label`, `--text-section-title` |
+| Label / Abschnittstitel | 13px / 500 in `--color-text` (Abschnitt: 600) | `--text-field-label`, `--text-section` |
 | Button | 13px / 600 | Mantine `--button-fz` in `src/dashboard/ui/theme.ts` |
 | Spaltenkopf | 11px / 600 | `--text-column-heading` |
 | Zahlen | IBM Plex Mono, tabellarisch | `--font-mono`, `--text-number` |
