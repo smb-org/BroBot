@@ -12,7 +12,8 @@ export const TEXT_BLOCK_MAXIMUMS = {
   textsPerVariant: 10,
   categoriesPerChannel: 25,
   categoryNameLength: 40,
-  textLength: 500,
+  // A 500-character legacy template can gain up to five characters per 3-character `{a}` token.
+  textLength: 1_330,
   renderedLength: 500,
   nestingDepth: 3,
 } as const;
@@ -78,7 +79,7 @@ export interface TextLibrarySettings {
 }
 
 export interface TextBlockUsage {
-  kind: "command" | "faq" | "timer" | "overlay" | "event";
+  kind: "block" | "command" | "faq" | "timer" | "overlay" | "event";
   label: string;
 }
 
@@ -94,6 +95,7 @@ export interface TextLibraryData {
 
 export type TextBlockMutationError =
   | "already_exists"
+  | "in_use"
   | "not_found"
   | "conflict"
   | "category_not_found"

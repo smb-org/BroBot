@@ -262,6 +262,49 @@ describe("text library", () => {
     }, ACTOR, snapshot);
   };
 
+  it("protects a block referenced directly by an otherwise unused parent", async () => {
+    const child = await createBlock("child", [variant("default", "Child text")]);
+    if (!child.ok) throw new Error("Could not create the child block.");
+    const parent = await createBlock("parent", [variant("default", "Nested: {text.child}")]);
+    if (!parent.ok) throw new Error("Could not create the parent block.");
+    const snapshot = await service.list(CHANNEL_ID);
+
+    const result = await service.delete(CHANNEL_ID, "child", child.block.revision, snapshot.settings.graphRevision, ACTOR, new Date(NOW).toISOString());
+
+    expect(result).toMatchObject({ ok: false, reason: "in_use" });
+    await expect(service.find(CHANNEL_ID, "child")).resolves.not.toBeNull();
+  });
+
+  it("rechecks consumer references atomically with block deletion", async () => {
+    const created = await createBlock("timed_text", [variant("default", "Timer text")]);
+    if (!created.ok) throw new Error("Could not create the timer block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    await database.prepare(
+      `INSERT INTO timers (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, revision, created_at, updated_at)
+       VALUES ('timer-race', ?, 'Racing timer', 1, '{text.timed_text}', 'interval', '{"type":"interval","minutes":10}', 1, ?, ?)`,
+    ).bind(CHANNEL_ID, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+
+    const result = await service.delete(CHANNEL_ID, "timed_text", created.block.revision, snapshot.settings.graphRevision, ACTOR, new Date(NOW).toISOString());
+
+    expect(result).toMatchObject({ ok: false, reason: "in_use" });
+    await expect(service.find(CHANNEL_ID, "timed_text")).resolves.not.toBeNull();
+  });
+
+  it("rechecks FAQ references atomically with block deletion", async () => {
+    const created = await createBlock("faq_text", [variant("default", "FAQ text")]);
+    if (!created.ok) throw new Error("Could not create the FAQ block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    await database.prepare(
+      `INSERT INTO faq_entries (faq_id, channel_id, name, matcher_type, matcher_json, answer_text, created_at, updated_at)
+       VALUES ('faq-race', ?, 'Racing FAQ', 'keywords', '{"patterns":["hello"]}', '{text.faq_text}', ?, ?)`,
+    ).bind(CHANNEL_ID, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+
+    const result = await service.delete(CHANNEL_ID, "faq_text", created.block.revision, snapshot.settings.graphRevision, ACTOR, new Date(NOW).toISOString());
+
+    expect(result).toMatchObject({ ok: false, reason: "in_use" });
+    await expect(service.find(CHANNEL_ID, "faq_text")).resolves.not.toBeNull();
+  });
+
   it("persists box art for a text block and its game condition", async () => {
     const game: TwitchGame = {
       id: "123",
@@ -472,7 +515,10 @@ describe("text library", () => {
     await expect(createBlock("detail", [variant("default", "A reusable detail")])).resolves.toMatchObject({ ok: true });
     const snapshot = await service.list(CHANNEL_ID, [{ text: "!faq {text.answer}", kind: "command", label: "!faq" }]);
     expect(snapshot.usages.answer).toEqual([{ kind: "command", label: "!faq" }]);
-    expect(snapshot.usages.detail).toEqual([{ kind: "command", label: "!faq" }]);
+    expect(snapshot.usages.detail).toEqual([
+      { kind: "block", label: "answer" },
+      { kind: "command", label: "!faq" },
+    ]);
   });
 
   it("includes ad and raid templates in generic block usage tracking", async () => {
@@ -889,7 +935,10 @@ describe("text library", () => {
     expect(deleted.status).toBe(409);
     await expect(deleted.json()).resolves.toEqual({
       error: "text_library_block_in_use",
-      usages: [{ kind: "overlay", label: "Welcome" }],
+      usages: [
+        { kind: "block", label: "parent" },
+        { kind: "overlay", label: "Welcome" },
+      ],
     });
     expect(published).toHaveLength(0);
   });

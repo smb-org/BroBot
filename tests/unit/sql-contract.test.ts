@@ -27,7 +27,7 @@ import { overlayElementIdCollisionGuard, referencedVariablesGuard } from "../../
 import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
-import { textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
+import { blockUsageExistsSql, textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { chatVoteSelectColumns, chatVoteTemplateSelectColumns } from "../../src/modules/chat_voting/repository";
 import {
   belaboxExpectedOpenStreamSetGuard,
@@ -114,6 +114,7 @@ const sqlGetFixtures = new Map<string, string>([
                            WHERE channel_id = ?`],
   ["textBlockSelectColumns", textBlockSelectColumns],
   ["textBlockCategorySelectColumns", textBlockCategorySelectColumns],
+  ["blockUsageExistsSql", blockUsageExistsSql],
   ["chatVoteSelectColumns", chatVoteSelectColumns],
   ["chatVoteTemplateSelectColumns", chatVoteTemplateSelectColumns],
   ["belaboxHistoryStatusGuard", belaboxHistoryStatusGuard],

@@ -37,7 +37,7 @@ export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Pro
   ]);
   const [entries, variables] = await Promise.all([
     readJson<{ entries: FaqEntry[] }>(entriesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"] }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     entries: entries.entries,
@@ -46,6 +46,10 @@ export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Pro
       description: variable.description ?? variable.name,
       sample: variable.sample ?? "",
       ...(variable.group === undefined ? {} : { group: variable.group }),
+      ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+      ...(variable.parameters === "currency_pair" || variable.parameters === "api_source_name"
+        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "currency_pair" ? "USD EUR" : "sunset") } }
+        : {}),
       kind: "module",
       ...(variable.isTextBlock === true ? { isTextBlock: true } : {}),
     })),

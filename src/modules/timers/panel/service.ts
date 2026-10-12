@@ -37,7 +37,7 @@ export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): 
   const [timers, sources, variables] = await Promise.all([
     readJson<{ timers: Timer[] }>(timersResponse),
     readJson<{ sources: TimerEventTimeSource[] }>(sourcesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"] }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     timers: timers.timers,
@@ -47,6 +47,10 @@ export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): 
       description: variable.description ?? variable.name,
       sample: variable.sample ?? "",
       ...(variable.group === undefined ? {} : { group: variable.group }),
+      ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+      ...(variable.parameters === "currency_pair" || variable.parameters === "api_source_name"
+        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "currency_pair" ? "USD EUR" : "sunset") } }
+        : {}),
       kind: "module",
       ...(variable.isTextBlock === true ? { isTextBlock: true } : {}),
     })),

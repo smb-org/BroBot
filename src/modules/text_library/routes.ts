@@ -236,6 +236,10 @@ textLibraryRoutes.delete("/blocks/:name", async (context) => {
     await publishBlockInvalidations(context.get("publishModuleOverlayMessage"), channelId, snapshot.blocks, name);
     return context.json({ ok: true });
   }
+  if (result.reason === "in_use") {
+    const currentSnapshot = await service.list(channelId, await context.get("templateUsageSources")(channelId));
+    return context.json({ error: "text_library_block_in_use", usages: currentSnapshot.usages[name] ?? [] }, 409);
+  }
   return context.json({ error: `text_library_${result.reason}`, ...(result.current === undefined ? {} : { current: result.current }) }, result.reason === "conflict" ? 409 : result.reason === "not_authorized" ? 403 : 404);
 });
 

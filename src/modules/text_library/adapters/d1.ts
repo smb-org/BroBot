@@ -44,6 +44,37 @@ const initialBlockRevision = (createdAt: string): number => {
   return Number.isSafeInteger(timestamp) && timestamp >= 1 ? timestamp : 1;
 };
 
+export const blockUsageExistsSql = `(
+  EXISTS (SELECT 1 FROM text_block_variants AS variant
+           WHERE variant.channel_id = ? AND instr(variant.texts_json, ?) > 0)
+  OR EXISTS (SELECT 1 FROM timers AS timer
+              WHERE timer.channel_id = ? AND instr(timer.message_text, ?) > 0)
+  OR EXISTS (SELECT 1 FROM faq_entries AS faq
+              WHERE faq.channel_id = ? AND instr(faq.answer_text, ?) > 0)
+  OR EXISTS (SELECT 1 FROM text_commands AS command
+              WHERE command.channel_id = ? AND (
+                instr(command.response_text, ?) > 0 OR instr(command.template_fields_json, ?) > 0 OR
+                instr(command.timeout_fallback_text, ?) > 0 OR instr(command.timeout_reason, ?) > 0))
+  OR EXISTS (SELECT 1 FROM channel_modules AS module
+              WHERE module.channel_id = ? AND instr(module.settings, ?) > 0)
+  OR EXISTS (SELECT 1 FROM overlay_elements AS element
+              WHERE element.channel_id = ? AND (
+                instr(element.text, ?) > 0 OR instr(element.config_json, ?) > 0 OR
+                (element.kind = 'text_library.block' AND json_extract(element.config_json, '$.blockName') = ?)))
+)`;
+
+const blockUsageValues = (channelId: string, name: string): string[] => {
+  const token = `{text.${name}}`;
+  return [
+    channelId, token,
+    channelId, token,
+    channelId, token,
+    channelId, token, token, token, token,
+    channelId, token,
+    channelId, token, token, name,
+  ];
+};
+
 const parseJson = <T,>(value: string, fallback: T): T => {
   try { return JSON.parse(value) as T; } catch { return fallback; }
 };
@@ -125,6 +156,15 @@ export const createTextBlockRepository = (
     }));
     const usages: Record<string, TextBlockUsage[]> = Object.fromEntries(blocks.map((block) => [block.name, []]));
     const blocksByName = new Map(blocks.map((block) => [block.name, block]));
+    for (const parent of blocks) {
+      const nestedNames = parent.variants.flatMap((variant) => variant.texts.flatMap(blockReferencesInText));
+      for (const name of nestedNames) {
+        if (!blocksByName.has(name)) continue;
+        if (usages[name]?.some((item) => item.kind === "block" && item.label === parent.name) !== true) {
+          usages[name]?.push({ kind: "block", label: parent.name });
+        }
+      }
+    }
     for (const source of usageSources) {
       const pending = blockReferencesInText(source.text).filter((name) => blocksByName.has(name));
       const visited = new Set<string>();
@@ -280,8 +320,9 @@ export const createTextBlockRepository = (
         `UPDATE text_library_settings SET graph_revision = graph_revision + 1
           WHERE channel_id = ? AND graph_revision = ?
             AND EXISTS (SELECT 1 FROM text_blocks WHERE channel_id = ? AND block_name = ? AND revision = ?)
+            AND NOT ${blockUsageExistsSql}
             ${authorization.sql}`,
-      ).bind(channelId, graphRevision, channelId, name, revision, ...authorization.values);
+      ).bind(channelId, graphRevision, channelId, name, revision, ...blockUsageValues(channelId, name), ...authorization.values);
       const mutation = db.prepare("DELETE FROM text_blocks WHERE channel_id = ? AND block_name = ? AND revision = ? AND changes() > 0 " + authorization.sql)
         .bind(channelId, name, revision, ...authorization.values);
       const audit = prepareModuleAudit?.({ channelId, moduleId: MODULE_ID, action: "text_library.block.removed" satisfies AuditAction, before: { name, categoryId: before.categoryId }, after: null }, now);
@@ -289,9 +330,15 @@ export const createTextBlockRepository = (
       const changes = results[1]?.meta.changes ?? 0;
       if (changes > 0) return { ok: true, block: before };
       const current = await find(channelId, name);
+      if (current === null) return { ok: false, reason: "not_found" };
+      if (current.revision !== revision) return { ok: false, reason: "conflict", current };
       const settings = await db.prepare("SELECT graph_revision FROM text_library_settings WHERE channel_id = ?")
         .bind(channelId).first<{ graph_revision: number }>();
-      return { ok: false, reason: settings?.graph_revision === graphRevision ? "not_authorized" : "conflict", ...(current === null ? {} : { current }) };
+      if (settings?.graph_revision !== graphRevision) return { ok: false, reason: "conflict", current };
+      const hasUsage = await db.prepare(`SELECT CASE WHEN ${blockUsageExistsSql} THEN 1 ELSE 0 END AS present`)
+        .bind(...blockUsageValues(channelId, name)).first<{ present: number }>();
+      if (hasUsage?.present === 1) return { ok: false, reason: "in_use", current };
+      return { ok: false, reason: "not_authorized", current };
     },
     async renameCategory(channelId, categoryId, customName, actor, now) {
       const authorization = authorizeMutation(channelId, actor, now);

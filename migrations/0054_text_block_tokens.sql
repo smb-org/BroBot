@@ -32,7 +32,7 @@ UPDATE text_commands
    SET response_text = (SELECT content FROM rewritten WHERE row_id = text_commands.rowid ORDER BY position DESC LIMIT 1);
 
 WITH RECURSIVE rewritten(row_id, content, position) AS (
-  SELECT rowid, json_array(timeout_fallback_text, template_fields_json), 0 FROM text_commands
+  SELECT rowid, json_array(timeout_fallback_text, template_fields_json, timeout_reason), 0 FROM text_commands
   UNION ALL
   SELECT rewritten.row_id,
          replace(rewritten.content, '{' || names.block_name || '}', '{text.' || names.block_name || '}'),
@@ -48,7 +48,10 @@ UPDATE text_commands
        ), '$[0]'),
        template_fields_json = json_extract((
          SELECT content FROM rewritten WHERE row_id = text_commands.rowid ORDER BY position DESC LIMIT 1
-       ), '$[1]');
+       ), '$[1]'),
+       timeout_reason = json_extract((
+         SELECT content FROM rewritten WHERE row_id = text_commands.rowid ORDER BY position DESC LIMIT 1
+       ), '$[2]');
 
 WITH RECURSIVE rewritten(row_id, content, position) AS (
   SELECT rowid, texts_json, 0 FROM text_block_variants

@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { validTextBlock } from "../../src/modules/text_library/domain";
+
 const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 const migrationFiles = readdirSync(migrationsDirectory).filter((name) => name.endsWith(".sql")).sort((a, b) => a.localeCompare(b));
 const readMigration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
@@ -27,8 +29,12 @@ describe("text block token migration", () => {
         VALUES ('channel-a', 'welcome', 'social', 1, '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z');
         INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
         VALUES ('channel-a', 'welcome', 'default', 0, '{}', '["Hello {welcome} {viewers}"]');
-        INSERT INTO text_commands (channel_id, command_name, response_text, template_fields_json, timeout_fallback_text, created_at, updated_at)
-        VALUES ('channel-a', 'hello', 'Hello {welcome}, {viewers}', '{"label":"{welcome} {viewers}"}', 'Try {welcome} again.', '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z');
+        INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at)
+        VALUES ('channel-a', 'long_example', 'social', 1, '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z');
+        INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
+        VALUES ('channel-a', 'long_example', 'default', 0, '{}', '["${"x".repeat(491)}{welcome}"]');
+        INSERT INTO text_commands (channel_id, command_name, response_text, template_fields_json, timeout_fallback_text, created_at, updated_at, timeout_reason)
+        VALUES ('channel-a', 'hello', 'Hello {welcome}, {viewers}', '{"label":"{welcome} {viewers}"}', 'Try {welcome} again.', '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z', 'Blocked by {welcome}.');
         INSERT INTO timers (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision, created_at, updated_at)
         VALUES ('timer-a', 'channel-a', 'Reminder', 1, 'welcome', 'interval', '{"type":"interval","minutes":10}', 1, '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z');
         INSERT INTO faq_entries (faq_id, channel_id, name, matcher_type, matcher_json, answer_block, created_at, updated_at)
@@ -55,8 +61,20 @@ describe("text block token migration", () => {
         .toEqual({ response_text: "Hello {text.welcome}, {viewers}" });
       expect(database.prepare("SELECT timeout_fallback_text, template_fields_json FROM text_commands WHERE command_name = 'hello'").get())
         .toEqual({ timeout_fallback_text: "Try {text.welcome} again.", template_fields_json: '{"label":"{text.welcome} {viewers}"}' });
+      expect(database.prepare("SELECT timeout_reason FROM text_commands WHERE command_name = 'hello'").get())
+        .toEqual({ timeout_reason: "Blocked by {text.welcome}." });
       expect(database.prepare("SELECT texts_json FROM text_block_variants WHERE block_name = 'welcome'").get())
         .toEqual({ texts_json: '["Hello {text.welcome} {viewers}"]' });
+      const migratedLongText = `${"x".repeat(491)}{text.welcome}`;
+      expect(database.prepare("SELECT texts_json FROM text_block_variants WHERE block_name = 'long_example'").get())
+        .toEqual({ texts_json: JSON.stringify([migratedLongText]) });
+      expect(migratedLongText).toHaveLength(505);
+      expect(validTextBlock({
+        name: "long_example",
+        categoryId: "social",
+        games: [],
+        variants: [{ id: "default", conditions: {}, texts: [migratedLongText] }],
+      })).toBe(true);
       expect(database.prepare("SELECT settings FROM channel_modules WHERE module_id = 'ads'").get())
         .toEqual({ settings: '{"automatic":"Before {text.welcome}, {viewers}"}' });
       expect(database.prepare("SELECT text FROM overlay_elements WHERE element_id = 'element-a'").get())
