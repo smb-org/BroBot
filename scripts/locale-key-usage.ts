@@ -336,11 +336,14 @@ const markBindingPattern = (
       continue;
     }
     for (const name of names) {
-      const childPath = [...source.path, name];
+      const selectsLanguage = !source.languageSelected && (name === "de" || name === "en");
+      const child = selectsLanguage
+        ? { ...source, languageSelected: true }
+        : { ...source, path: [...source.path, name] };
       if (ts.isObjectBindingPattern(element.name) || ts.isArrayBindingPattern(element.name)) {
-        markBindingPattern(checker, element.name, { ...source, path: childPath }, markAll);
+        markBindingPattern(checker, element.name, child, markAll);
       } else {
-        markAll({ ...source, path: childPath });
+        markAll(child);
       }
     }
   }
@@ -423,13 +426,14 @@ const propertyReads = (
       const continuesAccess = (ts.isPropertyAccessExpression(node.parent) || ts.isElementAccessExpression(node.parent))
         && node.parent.expression === node;
       const isHandledDestructuringSource = handledDestructuringSources.has(unwrapExpression(node));
-      const isLiteralElementRead = ts.isElementAccessExpression(node)
+      const isLiteralTextRead = ts.isElementAccessExpression(node)
         && literalPropertyNames(checker, node.argumentExpression).length > 0
-        && resolveCatalogueValue(checker, node.expression, roots)?.languageSelected === true;
+        && resolveCatalogueValue(checker, node.expression, roots)?.languageSelected === true
+        && isLocaleTextType(checker, checker.getTypeAtLocation(node));
       if (value !== null
         && !continuesAccess
         && !isHandledDestructuringSource
-        && !isLiteralElementRead
+        && !isLiteralTextRead
         && !isWriteOnlyAccess(node)) {
         markAll(value);
       }

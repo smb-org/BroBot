@@ -355,4 +355,51 @@ export const allValues = (): string => Object.values(catalog.de).join(",");
 
     expect(unusedLocaleKeys(projectRoot)).toEqual([]);
   });
+
+  it("treats bracket-selected groups as consumed when passed, returned, or assigned", () => {
+    const projectRoot = createLocaleFixture(`
+const catalog = {
+  de: { nested: { live: "Verwendet", orphan: "Ungenutzt" } },
+  en: { nested: { live: "Used", orphan: "Unused" } },
+} as const;
+
+declare function consume(values: readonly string[]): void;
+consume(Object.values(catalog.de["nested"]));
+
+export const returnValues = (): string[] => Object.values(catalog.en["nested"]);
+export const assignedValues: string[] = Object.values(catalog.en["nested"]);
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
+  });
+
+  it("omits the language when destructuring a translated text from the catalogue root", () => {
+    const projectRoot = createLocaleFixture(`
+const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+
+const { de: { live } } = catalog;
+export const readLive = (): string => live;
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/locale.ts#catalog", key: "orphan" },
+    ]);
+  });
+
+  it("does not report a translated key accessed through a root-destructured language", () => {
+    const projectRoot = createLocaleFixture(`
+const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+
+const { de } = catalog;
+export const readLive = (): string => de.live;
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
+  });
 });
