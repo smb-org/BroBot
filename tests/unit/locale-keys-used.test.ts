@@ -7,6 +7,23 @@ import { unusedLocaleKeys } from "../../scripts/locale-key-usage";
 
 const temporaryDirectories: string[] = [];
 
+const createLocaleFixture = (source: string): string => {
+  const projectRoot = mkdtempSync(path.join(os.tmpdir(), "brobot-locale-fixture-"));
+  temporaryDirectories.push(projectRoot);
+  mkdirSync(path.join(projectRoot, "src/dashboard"), { recursive: true });
+  writeFileSync(path.join(projectRoot, "tsconfig.json"), JSON.stringify({
+    compilerOptions: {
+      target: "ES2023",
+      module: "ESNext",
+      moduleResolution: "Bundler",
+      strict: true,
+    },
+    include: ["src/**/*.ts"],
+  }));
+  writeFileSync(path.join(projectRoot, "src/dashboard/locale.ts"), source);
+  return projectRoot;
+};
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
@@ -166,7 +183,7 @@ export const readLabels = (): string => catalog.de.title + catalog.en.loading
     ]);
   });
 
-  it("tracks inferred catalogue keys through a checker-confirmed type flow", () => {
+  it("treats nested typed assignments as consuming their catalogue value", () => {
     const projectRoot = mkdtempSync(path.join(os.tmpdir(), "brobot-locale-flow-keys-"));
     temporaryDirectories.push(projectRoot);
     mkdirSync(path.join(projectRoot, "src/dashboard"), { recursive: true });
@@ -199,8 +216,143 @@ const props: DisplayProps = { labels: catalog.de };
 export const readUsedLabel = (): string => display(props);
 `);
 
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
+  });
+
+  it("does not connect unrelated values through shared type symbols", () => {
+    const projectRoot = createLocaleFixture(`
+interface SharedTexts {
+  live: string;
+  orphan: string;
+}
+
+const catalog: Record<"de" | "en", SharedTexts> = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+};
+const unrelated: SharedTexts = { live: "Other", orphan: "Other" };
+
+export const readUnrelated = (): string => unrelated.orphan;
+`);
+
     expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/locale.ts#catalog", key: "live" },
       { catalog: "src/dashboard/locale.ts#catalog", key: "orphan" },
     ]);
+  });
+
+  it("collects concrete keys from index-signature catalogues", () => {
+    const projectRoot = createLocaleFixture(`
+interface NestedIndexedTexts {
+  nested: Record<string, string>;
+}
+
+const catalog: Record<"de" | "en", Record<string, string>> = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+};
+const nestedCatalog: Record<"de" | "en", NestedIndexedTexts> = {
+  de: { nested: { live: "Verwendet", orphan: "Ungenutzt" } },
+  en: { nested: { live: "Used", orphan: "Unused" } },
+};
+
+export const readLive = (): string => catalog.de.live;
+export const readNestedLive = (): string => nestedCatalog.de.nested.live;
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/locale.ts#catalog", key: "orphan" },
+      { catalog: "src/dashboard/locale.ts#nestedCatalog.nested", key: "orphan" },
+    ]);
+  });
+
+  it("treats unsupported catalogue flows as consuming their source values", () => {
+    const projectRoot = createLocaleFixture(`
+interface ArgumentTexts { live: string; orphan: string }
+interface ReturnedTexts { live: string; orphan: string }
+interface AssignedTexts { live: string; orphan: string }
+interface FlowSource { live: string; orphan: string }
+interface FlowTarget { live: string; orphan: string }
+interface DestructuredTexts { live: string; orphan: string }
+interface NestedTexts { live: string; orphan: string }
+
+const argumentCatalog: Record<"de" | "en", ArgumentTexts> = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+};
+declare function consumeArgument(value: ArgumentTexts): void;
+consumeArgument(argumentCatalog.de);
+
+const returnedCatalog: Record<"de" | "en", ReturnedTexts> = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+};
+const returnValue = (): ReturnedTexts => returnedCatalog.de;
+const blockReturn = (): ReturnedTexts => { return returnedCatalog.en; };
+
+const assignedCatalog: Record<"de" | "en", AssignedTexts> = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+};
+let assigned: AssignedTexts;
+assigned = assignedCatalog.de;
+
+const flowCatalog: Record<"de" | "en", FlowSource> = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+};
+function readBeforeSource(): string {
+  const target: FlowTarget = source;
+  return target.live;
+}
+const source: FlowSource = flowCatalog.de;
+
+const destructuredCatalog: Record<"de" | "en", DestructuredTexts> = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+};
+let live: string;
+({ live } = destructuredCatalog.de);
+
+const nestedCatalog: Record<"de" | "en", { nested: NestedTexts }> = {
+  de: { nested: { live: "Verwendet", orphan: "Ungenutzt" } },
+  en: { nested: { live: "Used", orphan: "Unused" } },
+};
+const { nested: nestedGroup } = nestedCatalog.de;
+void nestedGroup.live;
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
+  });
+
+  it("collects nullable nested catalogue groups", () => {
+    const projectRoot = createLocaleFixture(`
+interface NestedTexts { live: string; orphan: string }
+interface NullableTexts { nested: NestedTexts | null }
+
+const catalog: Record<"de" | "en", NullableTexts> = {
+  de: { nested: { live: "Verwendet", orphan: "Ungenutzt" } },
+  en: { nested: { live: "Used", orphan: "Unused" } },
+};
+
+export const readLive = (): string | undefined => catalog.de.nested?.live;
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/locale.ts#catalog.nested", key: "orphan" },
+    ]);
+  });
+
+  it("treats Object.values enumeration as consuming a whole catalogue group", () => {
+    const projectRoot = createLocaleFixture(`
+const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+
+export const allValues = (): string => Object.values(catalog.de).join(",");
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
   });
 });
