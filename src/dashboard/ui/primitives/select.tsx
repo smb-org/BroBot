@@ -20,7 +20,7 @@ function SelectTrigger({ className, children, ...props }: ComponentProps<typeof 
 
 function SelectContent({ className, children, side = "bottom", sideOffset = 4, align = "start", ...props }: ComponentProps<typeof SelectPrimitive.Popup> & Pick<ComponentProps<typeof SelectPrimitive.Positioner>, "side" | "sideOffset" | "align">) {
   return <SelectPrimitive.Portal>
-    <SelectPrimitive.Positioner side={side} sideOffset={sideOffset} align={align} className="z-50">
+    <SelectPrimitive.Positioner side={side} sideOffset={sideOffset} align={align} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
       <SelectPrimitive.Popup data-ui="" data-slot="select-content" className={cn("max-h-[var(--available-height)] min-w-[var(--anchor-width)] overflow-y-auto rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-1 text-[var(--color-text)] shadow-lg outline-none", className)} {...props}>
         <SelectPrimitive.ScrollUpArrow aria-hidden="true" className="flex h-5 items-center justify-center"><ChevronUp className="size-4" /></SelectPrimitive.ScrollUpArrow>
         <SelectPrimitive.List>{children}</SelectPrimitive.List>

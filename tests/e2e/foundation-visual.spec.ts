@@ -112,7 +112,7 @@ test("captures the stable dashboard routes at desktop and mobile widths", async 
         const actionsSection = immediateActions.locator("..");
         await expect(locationReason).toBeVisible();
         await expect(immediateActions).toBeVisible();
-        await expect.poll(async () => (await actionsSection.boundingBox())?.y).toBe(614.5);
+        await expect.poll(async () => (await actionsSection.boundingBox())?.y).toBe(636.5);
         await expect(locationReason).toHaveCSS("margin-bottom", "11px");
       }
       await page.screenshot({

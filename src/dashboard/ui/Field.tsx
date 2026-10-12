@@ -62,13 +62,13 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
   const leading = searchVariant ? <Icon name="search" size={16} /> : leadingLabel === undefined ? icon === undefined ? null : <Icon name={icon} size={16} /> : <span className="ui-field__prefix" aria-hidden="true">{leadingLabel}</span>;
   const describedBy = [hintId, effectiveError == null ? null : errorId, disabledReason?.id].filter((part): part is string => part !== null && part !== undefined).join(" ") || undefined;
 
-  return <div data-ui="" className={["ui-field", searchVariant ? "ui-field--search" : undefined, className, leadingLabel === undefined ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ")}>
+  return <div data-ui="" className={["ui-field", searchVariant ? "ui-field--search" : undefined, className, leading === null ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ")}>
     <label className={`ui-field__label${effectiveLabelHidden ? " sr-only" : ""}`} htmlFor={id}>{label}</label>
     <div className="ui-field__control">
       {leading === null ? null : <span className="ui-field__leading">{leading}</span>}
       <Input
         id={id}
-        aria-label={ariaLabel ?? (labelHidden && !searchVariant ? label : undefined)}
+        aria-label={ariaLabel ?? ((labelHidden || searchVariant) ? label : undefined)}
         aria-describedby={describedBy}
         aria-invalid={effectiveError == null ? undefined : true}
         value={value}
@@ -92,7 +92,7 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
         spellCheck={spellCheck}
         required={required}
         name={name}
-        className={["ui-field__input", mono ? "ui-field__input--mono" : undefined, leadingLabel === undefined && !searchVariant ? undefined : "ui-field__input--with-leading", searchVariant ? "ui-field__input--search" : undefined].filter(Boolean).join(" ")}
+        className={["ui-field__input", mono ? "ui-field__input--mono" : undefined, leading === null && !searchVariant ? undefined : "ui-field__input--with-leading", searchVariant ? "ui-field__input--search" : undefined].filter(Boolean).join(" ")}
       />
       {searchVariant ? <button
         type="button"

@@ -49,6 +49,7 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
   const [searchOpen, setSearchOpen] = useState(false);
   const disabledReason = useDisabledFieldReason();
   const activeSearch = searchValue ?? internalSearch;
+  const filteredOptions = options.filter((option) => `${option.label} ${option.value}`.toLocaleLowerCase().includes(activeSearch.trim().toLocaleLowerCase()));
   const selectedLabel = options.find((option) => option.value === value)?.label ?? value ?? "";
   const selectItems = Object.fromEntries(options.map((option) => [option.value, option.label]));
   const displaySearch = activeSearch.length > 0 ? activeSearch : selectedLabel;
@@ -61,12 +62,13 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
   const errorId = `${controlId}-error`;
   const describedByIds = [describedBy, hint === undefined ? null : descriptionId, error === undefined ? null : errorId, disabledReason?.id].filter((part): part is string => part !== null && part !== undefined).join(" ") || undefined;
   const groups = [...new Set(options.flatMap((option) => option.group === undefined ? [] : [option.group]))];
-  const group = (groupName: string): ReactNode => (
-    <SelectGroup key={groupName}>
+  const group = (groupName: string): ReactNode => {
+    const groupOptions = filteredOptions.filter((option) => option.group === groupName);
+    return groupOptions.length === 0 ? null : <SelectGroup key={groupName}>
       <SelectLabel>{groupName}</SelectLabel>
-      {options.filter((option) => option.group === groupName).map((option) => <SelectItem key={option.value} value={option.value}>{optionContents(option)}</SelectItem>)}
-    </SelectGroup>
-  );
+      {groupOptions.map((option) => <SelectItem key={option.value} value={option.value}>{optionContents(option)}</SelectItem>)}
+    </SelectGroup>;
+  };
 
   return <div data-ui="" className={`ui-select${compact ? " ui-select--compact" : ""}`}>
     {label === undefined ? null : <label className="ui-field__label" htmlFor={controlId}>{label}</label>}
@@ -80,7 +82,7 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
       }}
       items={options.map((option) => option.value)}
       itemToStringLabel={(optionValue) => options.find((option) => option.value === optionValue)?.label ?? optionValue}
-      filteredItems={options.filter((option) => `${option.label} ${option.value}`.toLocaleLowerCase().includes(activeSearch.trim().toLocaleLowerCase())).map((option) => option.value)}
+      filteredItems={filteredOptions.map((option) => option.value)}
       filter={null}
       value={value ?? ""}
       onValueChange={(next) => {
@@ -98,19 +100,19 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
       required={required}
     >
       <div className="ui-select__search-control">
-        <Combobox.Input id={controlId} aria-label={label === undefined ? ariaLabel : undefined} aria-describedby={describedByIds} aria-busy={busy} title={title} placeholder={placeholder} disabled={disabled} onClick={() => { if (!disabled) setSearchOpen(true); }} className="ui-select__search-input" />
+        <Combobox.Input id={controlId} aria-label={ariaLabel ?? label} aria-describedby={describedByIds} aria-busy={busy} title={title} placeholder={placeholder} disabled={disabled} onClick={() => { if (!disabled) setSearchOpen(true); }} className="ui-select__search-input" />
         <Combobox.Trigger aria-label={ariaLabel ?? label} className="ui-select__trigger"><ChevronDown aria-hidden="true" size={16} /></Combobox.Trigger>
       </div>
       <Combobox.Portal>
-        <Combobox.Positioner align="start" sideOffset={4} className="z-50">
+        <Combobox.Positioner align="start" sideOffset={4} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
           <Combobox.Popup data-ui="" className="ui-select__dropdown">
             <Combobox.List className="ui-select__options" aria-label={label ?? ariaLabel}>
-              {options.filter((option) => option.group === undefined).map((option) => <Combobox.Item key={option.value} value={option.value} className="ui-select__combobox-option">{optionContents(option)}<Combobox.ItemIndicator className="ui-select__check"><Check aria-hidden="true" size={14} /></Combobox.ItemIndicator></Combobox.Item>)}
-              {groups.map((groupName) => <div role="group" aria-label={groupName} key={groupName}>
+              {filteredOptions.filter((option) => option.group === undefined).map((option) => <Combobox.Item key={option.value} value={option.value} className="ui-select__combobox-option">{optionContents(option)}<Combobox.ItemIndicator className="ui-select__check"><Check aria-hidden="true" size={14} /></Combobox.ItemIndicator></Combobox.Item>)}
+              {groups.filter((groupName) => filteredOptions.some((option) => option.group === groupName)).map((groupName) => <div role="group" aria-label={groupName} key={groupName}>
                 <div className="ui-select__group-label">{groupName}</div>
-                {options.filter((option) => option.group === groupName).map((option) => <Combobox.Item key={option.value} value={option.value} className="ui-select__combobox-option">{optionContents(option)}<Combobox.ItemIndicator className="ui-select__check"><Check aria-hidden="true" size={14} /></Combobox.ItemIndicator></Combobox.Item>)}
+                {filteredOptions.filter((option) => option.group === groupName).map((option) => <Combobox.Item key={option.value} value={option.value} className="ui-select__combobox-option">{optionContents(option)}<Combobox.ItemIndicator className="ui-select__check"><Check aria-hidden="true" size={14} /></Combobox.ItemIndicator></Combobox.Item>)}
               </div>)}
-              {options.filter((option) => `${option.label} ${option.value}`.toLocaleLowerCase().includes((searchValue ?? "").trim().toLocaleLowerCase())).length === 0 ? <div className="ui-select__empty" role="status">{placeholder}</div> : null}
+              {filteredOptions.length === 0 ? <div className="ui-select__empty" role="status">{placeholder}</div> : null}
             </Combobox.List>
           </Combobox.Popup>
         </Combobox.Positioner>
@@ -125,6 +127,6 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
       </SelectContent>
     </SelectPrimitive.Root>}
     {compact ? null : <span data-ui="" id={descriptionId} className="ui-select__description">{hint === undefined ? null : <TruncatedText text={hint} />}{disabledReason === null ? null : <span className="sr-only">{disabledReason.reason}</span>}</span>}
-    {compact || error === undefined ? null : <span data-ui="" id={errorId} className="ui-select__error" role="alert"><span aria-hidden="true">× </span><TruncatedText text={error} /></span>}
+    {compact ? null : <span data-ui="" id={errorId} className="ui-select__error" aria-live="polite" role={error === undefined || error.length === 0 ? undefined : "alert"}>{error === undefined || error.length === 0 ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span><TruncatedText text={error} /></>}</span>}
   </div>;
 }

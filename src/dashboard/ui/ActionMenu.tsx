@@ -15,7 +15,7 @@ export function ActionMenu({ label, items, size = "compact" }: { label: string; 
   return <MenuPrimitive.Root open={opened} onOpenChange={setOpened}>
     <MenuPrimitive.Trigger render={<Button id={triggerId} size={size} icon="more" iconOnly ariaLabel={label} ariaHasPopup="menu" ariaExpanded={opened} ariaControls={dropdownId} />} />
     <MenuPrimitive.Portal>
-      <MenuPrimitive.Positioner side="bottom" align="end" sideOffset={4} className="z-50">
+      <MenuPrimitive.Positioner side="bottom" align="end" sideOffset={4} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
         <MenuPrimitive.Popup data-ui="" id={dropdownId} aria-label={label} aria-labelledby={triggerId} className="ui-action-menu__dropdown">
           {items.map((item, index) => "divider" in item
             ? <MenuPrimitive.Separator data-ui="" className="ui-action-menu__divider" key={`divider-${String(index)}`} />

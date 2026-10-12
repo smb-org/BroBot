@@ -10,6 +10,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+:root {
+  --layer-inspector-backdrop: 120;
+  --layer-inspector: 121;
+  --layer-dialog-backdrop: 130;
+  --layer-dialog: 131;
+  --layer-popover: 140;
+  --layer-toast: 150;
+}
+
 @layer base {
   :where([data-ui]),
   :where([data-ui] *) {

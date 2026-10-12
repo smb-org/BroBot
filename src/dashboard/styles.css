@@ -17,8 +17,6 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 :root {
-  /* Shell is 100; inspectors sit above it, modals and drawers start at 200, and Spotlight is at 9999. */
-  --layer-overlay: 120;
   /* Warm charcoal page background, chosen for low-light use beside OBS. */
   --background: #141312;
   --rail: #181716;
@@ -1135,11 +1133,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 
 @media (max-width: 1279px) {
   .list-detail--open .list-detail__backdrop {
-    display: block; position: fixed; inset: 0; z-index: var(--layer-overlay); border: 0; padding: 0; margin: 0;
+    display: block; position: fixed; inset: 0; z-index: var(--layer-inspector-backdrop); border: 0; padding: 0; margin: 0;
     background: color-mix(in srgb, var(--surface-depth) 60%, transparent); cursor: default;
   }
   .list-detail--open .list-detail__inspector {
-    position: fixed; top: 0; right: 0; bottom: 0; z-index: var(--layer-overlay); width: min(480px, 100%); overflow-y: auto;
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: var(--layer-inspector); width: min(480px, 100%); overflow-y: auto;
   }
   .list-detail--open .list-detail__inspector > .sub-inspector { min-height: 100%; border-radius: 0; box-shadow: var(--mantine-shadow-xs); }
 }
@@ -1270,8 +1268,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-switch__label { color: var(--text-2); font-size: 12px; }
 .ui-switch .switch-locked-reason { text-align: right; }
 .ui-switch-field { display: grid; gap: 4px; min-width: 0; }
-.ui-switch-field__row { position: relative; min-height: 44px; }
-.ui-switch-field__label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; color: var(--text); font-size: 14px; cursor: pointer; }
+.ui-switch-field__row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.ui-switch-field__label { display: flex; align-items: center; min-height: 44px; color: var(--text); font-size: 14px; cursor: pointer; }
 .ui-switch-field__hint, .ui-switch__hint { color: var(--text-3); font-size: 12px; line-height: 1.4; }
 .ui-switch-card { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: transparent; }
 .ui-switch-card:hover { border-color: var(--line-light); }
@@ -1476,7 +1474,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .ui-select__search-control > .ui-select__trigger { width: 40px; min-width: 40px; height: 40px; min-height: 40px; }
   .ui-field__clear { width: 36px; height: 36px; }
 }
-.ui-toast-host { position: fixed; z-index: calc(var(--layer-overlay) + 2); top: var(--s4); right: var(--s4); display: grid; width: min(40rem, calc(100vw - var(--s4) - var(--s4))); max-height: calc(100vh - var(--s4) - var(--s4)); align-content: start; gap: var(--s2); overflow: auto; pointer-events: none; }
+.ui-toast-host { position: fixed; z-index: var(--layer-toast); top: var(--s4); right: var(--s4); display: grid; width: min(40rem, calc(100vw - var(--s4) - var(--s4))); max-height: calc(100vh - var(--s4) - var(--s4)); align-content: start; gap: var(--s2); overflow: auto; pointer-events: none; }
 .ui-toast-host > * { pointer-events: auto; }
 .ui-toast { display: flex; align-items: center; gap: var(--s2); min-height: 40px; margin: 0; padding: var(--s2) var(--s3); border: 1px solid var(--line-strong); border-radius: var(--r-container); background: var(--surface); box-shadow: var(--mantine-shadow-xs); }
 .ui-toast__message { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
@@ -1549,7 +1547,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .dashboard-filter-bar .event-filter__chips,
 .event-filter .event-filter__chips { flex: 0 0 auto; max-width: 100%; overflow-x: auto; }
 .dashboard-filter-bar .ui-field, .dashboard-filter-bar .ui-select { flex: 1 0 12rem; min-width: 12rem; }
-.dashboard-filter-bar .ui-field__label, .dashboard-filter-bar .ui-field__description, .dashboard-filter-bar .ui-field__error,
+.dashboard-filter-bar .ui-field__description, .dashboard-filter-bar .ui-field__error,
 .dashboard-filter-bar .ui-select__description, .dashboard-filter-bar .ui-select__error { display: none; }
 .dashboard-filter-bar .ui-field__input, .dashboard-filter-bar .ui-select__trigger, .dashboard-filter-bar .ui-chip-group__option { min-height: 32px; }
 .dashboard-filter-bar__summary {
@@ -1590,7 +1588,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .list-toolbar__search { min-width: 0; }
 .list-toolbar__search .ui-field--search { min-width: 0; height: 32px; padding-bottom: 0; }
 .list-toolbar .ui-field, .list-toolbar .ui-select { margin-bottom: 0; }
-.list-toolbar__search .ui-field__label, .list-toolbar__search .ui-field__description, .list-toolbar__search .ui-field__error { display: none; }
+.list-toolbar__search .ui-field__description, .list-toolbar__search .ui-field__error { display: none; }
 .list-toolbar__search .ui-field__input { box-sizing: border-box; height: 32px; min-height: 32px; padding-right: 36px; }
 .list-toolbar__filters { display: flex; align-items: center; gap: var(--s2); min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; }
 .list-toolbar__filters:has(.ui-game-picker__results-slot) { overflow: visible; }
@@ -1709,7 +1707,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .inspector-info { position: relative; display: inline-flex; flex: none; }
 .inspector-field-row__info { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; color: var(--text-3); background: transparent; cursor: pointer; }
 .inspector-field-row__info:focus-visible { border-radius: var(--r-control); outline: 2px solid var(--brand-text); outline-offset: 1px; }
-.inspector-info__tooltip { position: absolute; top: calc(100% + 4px); left: 0; z-index: var(--layer-overlay); width: max-content; max-width: min(20rem, calc(100vw - 48px)); padding: var(--s2) var(--s3); border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--text); background: var(--surface-raised); box-shadow: var(--mantine-shadow-xs); font-size: 12px; font-weight: 400; line-height: 1.5; }
+.inspector-info__tooltip { position: absolute; top: calc(100% + 4px); left: 0; z-index: var(--layer-popover); width: max-content; max-width: min(20rem, calc(100vw - 48px)); padding: var(--s2) var(--s3); border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--text); background: var(--surface-raised); box-shadow: var(--mantine-shadow-xs); font-size: 12px; font-weight: 400; line-height: 1.5; }
 .inspector-field-row__control { min-width: 0; width: 100%; }
 .inspector-field-row__control > *, .inspector-field-row__control .ui-select, .inspector-field-row__control .unit-input { width: 100%; min-width: 0; }
 .inspector-field-row__control .ui-field__label, .inspector-field-row__control .segment-choice-field__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

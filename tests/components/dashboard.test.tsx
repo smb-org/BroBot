@@ -5258,7 +5258,9 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(timeZoneField);
     fireEvent.change(timeZoneField, { target: { value: "Europe/Vienna" } });
     clickSelectOption(await screen.findByRole("option", { name: "Europe/Vienna", hidden: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Zeitzone speichern", hidden: true }));
+    // The location dialog makes the page inert; dispatch directly to the save
+    // control to model the overlapping request without exposing it to a user.
+    fireEvent.click(screen.getByText("Zeitzone speichern", { exact: true }));
 
     // The location save resolves first ...
     resolveLocationSave?.();

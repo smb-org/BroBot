@@ -92,7 +92,7 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, placeholde
           <button className="chips-input__remove" id={`${id}-remove-${encodeURIComponent(entry)}`} type="button" aria-label={removeLabel(prefixed(entry))} disabled={disabled} onClick={() => { onChange(values.filter((value) => value !== entry)); }}><Icon name="close" size={16} /></button>
         </span>)}
       </div>
-      <input data-ui="" id={id} className="chips-input__input" value={draft} placeholder={placeholder} disabled={disabled} readOnly={atLimit} aria-describedby={describedBy} onChange={(event) => { setDraft(event.currentTarget.value); setValidationError(null); setDuplicateWarning(null); }} onKeyDown={handleKeyDown} />
+      <input data-ui="" id={id} className="chips-input__input" value={draft} placeholder={placeholder} disabled={disabled} readOnly={atLimit} aria-describedby={describedBy} onChange={(event) => { setDraft(event.currentTarget.value); setValidationError(null); setDuplicateWarning(null); }} onKeyDown={handleKeyDown} onBlur={add} />
     </div>
     <span data-ui="" id={descriptionId} className="chips-input__description"><span>{currentHint ?? ""}</span>{max === undefined ? null : <span className="chips-input__count">{messages.countLabel(values.length, max)}</span>}{describedHelper(null, disabledReason, `chips-${id}`)}</span>
     <span data-ui="" id={errorId} className="ui-field__error" aria-live="polite">{effectiveError === undefined ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span>{effectiveError}</>}</span>
