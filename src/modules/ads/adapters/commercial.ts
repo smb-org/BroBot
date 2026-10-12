@@ -9,7 +9,7 @@ export type CommercialLength = (typeof COMMERCIAL_LENGTHS)[number];
 
 export interface CommercialResult {
   started: boolean;
-  reason: CommercialFailureReason | null;
+  reason: CommercialFailureReason | "unauthorized" | null;
   detail: Readonly<Record<string, string | number | boolean | null>>;
   length: number | null;
   message: string | null;
@@ -28,7 +28,7 @@ const numberOrNull = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
 const failure = (
-  reason: CommercialFailureReason,
+  reason: CommercialFailureReason | "unauthorized",
   detail: Readonly<Record<string, string | number | boolean | null>> = {},
 ): CommercialResult => ({ started: false, reason, detail, length: null, message: null, retryAfter: null });
 
@@ -47,6 +47,7 @@ export const startCommercial = async (
   length: CommercialLength,
   now: string,
   getAppAccessToken: GetAppAccessToken,
+  isManagementAuthorized: () => Promise<boolean>,
   helixRequest: HelixRequest,
   fetcher: typeof fetch = fetch,
 ): Promise<CommercialResult> => {
@@ -56,6 +57,8 @@ export const startCommercial = async (
   } catch (error: unknown) {
     return failure("app_token_unavailable", { message: error instanceof Error ? error.message : String(error) });
   }
+
+  if (!await isManagementAuthorized()) return failure("unauthorized", { status: null, message: null });
 
   const result = await helixRequest<Record<string, unknown>>({
     method: "POST",

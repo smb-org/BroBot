@@ -126,6 +126,7 @@ export const snoozeNextAd = async (
   channelId: string,
   now: string,
   getAppAccessToken: GetAppAccessToken,
+  isManagementAuthorized: () => Promise<boolean>,
   helixRequest: HelixRequest,
   fetcher: typeof fetch = fetch,
 ): Promise<SnoozeNextAdResult> => {
@@ -140,6 +141,8 @@ export const snoozeNextAd = async (
     }
     return snoozeFailure("app_token_unavailable", { status: null, message: error instanceof Error ? error.message : String(error) });
   }
+
+  if (!await isManagementAuthorized()) return snoozeFailure("unauthorized", { status: null, message: null });
 
   const result = await helixRequest<Record<string, unknown>>({
     method: "POST",

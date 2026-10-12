@@ -144,7 +144,7 @@ describe("Twitch ad schedule", () => {
       }],
     }), { status: 200 }));
 
-    await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, helixRequest, fetcher)).resolves.toEqual({
+    await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, () => Promise.resolve(true), helixRequest, fetcher)).resolves.toEqual({
       snoozed: true,
       reason: null,
       detail: { status: 200, twitchMessage: null },
@@ -175,7 +175,7 @@ describe("Twitch ad schedule", () => {
       { status: 429 },
     ));
 
-    await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, helixRequest, fetcher)).resolves.toEqual({
+    await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, () => Promise.resolve(true), helixRequest, fetcher)).resolves.toEqual({
       snoozed: false,
       reason: "rate_limited",
       detail: { status: 429, twitchMessage: "Twitch-Antwort" },
@@ -189,7 +189,7 @@ describe("Twitch ad schedule", () => {
       { status: 401 },
     ));
 
-    await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, helixRequest, fetcher)).resolves.toEqual({
+    await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, () => Promise.resolve(true), helixRequest, fetcher)).resolves.toEqual({
       snoozed: false,
       reason: "scope_missing",
       detail: { status: 401, twitchMessage: "Missing required scope: channel:manage:ads" },

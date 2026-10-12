@@ -158,6 +158,7 @@ adsRoutes.post("/snooze", async (context) => {
       channelId,
       now,
       context.get("getAppAccessToken"),
+      () => hasManagementAuthorization(context, channelId),
       context.get("helixRequest"),
       fetch,
     )
@@ -167,6 +168,7 @@ adsRoutes.post("/snooze", async (context) => {
       detail: { scope: MANAGE_ADS_SCOPE, status: null, message: null },
       schedule: null,
     };
+  if (result.reason === "unauthorized") return context.json({ error: "ad_snooze_denied" }, 403);
   await log(context, channelId, triggerId, "ads.snooze", snoozeOutcome(result));
 
   const schedule = result.schedule;
@@ -205,6 +207,7 @@ adsRoutes.post("/commercial", async (context) => {
       length,
       now,
       context.get("getAppAccessToken"),
+      () => hasManagementAuthorization(context, channelId),
       context.get("helixRequest"),
       fetch,
     )
@@ -218,6 +221,7 @@ adsRoutes.post("/commercial", async (context) => {
     };
 
   if (!result.started) {
+    if (result.reason === "unauthorized") return context.json({ error: "commercial_start_denied" }, 403);
     await log(context, channelId, triggerId, "ads.commercial.failed", commercialOutcome(result));
     return context.json({
       error: result.reason === "stream_offline" ? "commercial_stream_offline" : "commercial_start_failed",
