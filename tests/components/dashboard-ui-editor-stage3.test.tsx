@@ -800,7 +800,7 @@ describe("EditorShell and declaration renderer", () => {
     expect(screen.getByRole("button", { name: "Verwerfen und wechseln" })).toBeInTheDocument();
     const deleteButton = screen.getByRole("button", { name: "Delete command" });
     expect(deleteButton).toHaveAttribute("data-variant", "default");
-    expect(deleteButton.style.getPropertyValue("--button-bd")).toBe("1px solid #403c38");
+    expect(deleteButton.style.getPropertyValue("--button-bd")).toBe("1px solid var(--line-strong)");
   });
 
   it("renders settings from a typed declaration and catalogue with helper descriptions on every field", () => {

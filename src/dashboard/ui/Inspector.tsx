@@ -21,7 +21,7 @@ export const InspectorHeading = ({ level, title, identifier, meta, action, butto
   const Heading = level;
   const className = level === "h2" ? "section-heading" : "inspector-section__heading";
   return (
-    <div className={className}>
+    <div data-ui="" className={className}>
       <Heading title={identifier}>{title}</Heading>
       {meta}
       {action === undefined ? null : (
@@ -53,7 +53,7 @@ export const SubInspector = ({ ariaLabel, title, identifier, meta, className, cl
   };
 
   return (
-    <section className={`command-inspector sub-inspector${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleKeyDown}>
+    <section data-ui="" className={`command-inspector sub-inspector${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleKeyDown}>
       <InspectorHeading level="h3" title={title} identifier={identifier} meta={meta} action={{ kind: "close", label: closeLabel, onClick: onClose }} />
       {children}
     </section>

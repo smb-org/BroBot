@@ -1,4 +1,5 @@
 import { cloudflare } from "@cloudflare/vite-plugin";
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
@@ -6,7 +7,12 @@ import { defineConfig } from "vite";
 import { assertOverlayBundleHasNoTanstack } from "./scripts/overlay-bundle-check";
 
 export default defineConfig({
-  plugins: [react(), cloudflare({ inspectorPort: false })],
+  resolve: { tsconfigPaths: true },
+  plugins: [
+    tailwindcss(),
+    react({ compiler: { sources: ["/src/dashboard/"] } }),
+    cloudflare({ inspectorPort: false }),
+  ],
   build: {
     assetsDir: "_app",
     manifest: true,

@@ -64,6 +64,7 @@ export function NumberField({
 
   const input = (
     <NumberInput
+      data-ui=""
       className={`ui-number-field__control${unit === undefined ? "" : " ui-number-field--has-unit"}`}
       label={label}
       aria-label={ariaLabel}
@@ -92,7 +93,7 @@ export function NumberField({
 
   return (
     step === undefined ? input : (
-      <div className="ui-number-field">
+      <div data-ui="" className="ui-number-field">
         <div className="ui-number-field__stepper">
           <Button icon="minus" iconOnly ariaLabel={decreaseLabel} disabled={disabled || atMin} onClick={() => { handlers.current?.decrement(); }} />
           {input}

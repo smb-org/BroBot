@@ -130,7 +130,7 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
             <Icon name="cause" size={16} />
           </button>
         </MantinePopover.Target>
-        <MantinePopover.Dropdown ref={dropdownRef} className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`}>
+        <MantinePopover.Dropdown data-ui="" ref={dropdownRef} className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`}>
           <div>
             <h2 id={`${popoverId}-title`} className="sr-only">{common.invalidFieldsTitle}</h2>
             <ul className="ui-save-bar__invalid-fields">
@@ -358,7 +358,7 @@ export function EditorShell({
 
   if (readOnly !== undefined) {
     return (
-      <section className="ui-editor-shell ui-editor-shell--readonly" aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
+      <section data-ui="" className="ui-editor-shell ui-editor-shell--readonly" aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
         <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} />
         <div className="ui-editor-shell__readonly-reason"><Icon name="lock" size={16} /><span>{readOnly.reason}</span></div>
         {readOnly.content}
@@ -368,7 +368,7 @@ export function EditorShell({
 
   return (
     <FormDensity.Provider value="form">
-      <section className={`ui-editor-shell${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
+      <section data-ui="" className={`ui-editor-shell${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
         <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} />
         {sections.length < 2 ? null : (
           <div className="ui-editor-shell__tabs" role="tablist" aria-label={ariaLabel} onKeyDown={handleTabKeyDown}>

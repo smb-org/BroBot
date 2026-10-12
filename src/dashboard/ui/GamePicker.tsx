@@ -125,7 +125,7 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
   const selectionSummary = messages.selectedCount?.(value.length) ?? `${String(value.length)} selected`;
 
   return (
-    <div className={`ui-game-picker${compact ? " ui-game-picker--compact" : ""}`} ref={rootRef}>
+    <div data-ui="" className={`ui-game-picker${compact ? " ui-game-picker--compact" : ""}`} ref={rootRef}>
       <label className={`ui-game-picker__label${visuallyHiddenLabel ? " sr-only" : ""}`} htmlFor={id}>{messages.label}</label>
       <p className="ui-game-picker__hint">{messages.hint}</p>
       <div className="ui-game-picker__selected" aria-live="polite">

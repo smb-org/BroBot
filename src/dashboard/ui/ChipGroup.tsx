@@ -36,7 +36,7 @@ export function ChipGroup({ ariaLabel, value, onChange, selectedValues, onSelect
         value={[...selectedValues]}
         onChange={(next) => { onSelectedValuesChange?.(next); }}
       >
-        <MantineGroup className={className} gap="xs" wrap="nowrap" role="group" aria-label={ariaLabel}>
+        <MantineGroup data-ui="" className={className} gap="xs" wrap="nowrap" role="group" aria-label={ariaLabel}>
           {children}
         </MantineGroup>
       </MantineChip.Group>
@@ -48,7 +48,7 @@ export function ChipGroup({ ariaLabel, value, onChange, selectedValues, onSelect
       value={value ?? ""}
       onChange={(next) => { onChange(typeof next === "string" && next.length > 0 ? next : null); }}
     >
-      <MantineGroup className={className} gap="xs" wrap="nowrap" role="group" aria-label={ariaLabel}>
+      <MantineGroup data-ui="" className={className} gap="xs" wrap="nowrap" role="group" aria-label={ariaLabel}>
         {children}
       </MantineGroup>
     </MantineChip.Group>

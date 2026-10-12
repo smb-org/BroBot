@@ -9,8 +9,8 @@ interface TruncatedTextProps {
 export function TruncatedText({ text, className }: TruncatedTextProps): ReactElement {
   return (
     <>
-      <span className={["ui-truncated-text", className].filter(Boolean).join(" ")} title={text} data-text={text} aria-hidden="true" />
-      <span className="sr-only">{text}</span>
+      <span data-ui="" className={["ui-truncated-text", className].filter(Boolean).join(" ")} title={text} data-text={text} aria-hidden="true" />
+      <span data-ui="" className="sr-only">{text}</span>
     </>
   );
 }

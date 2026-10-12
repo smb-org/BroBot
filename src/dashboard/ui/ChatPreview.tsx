@@ -14,7 +14,7 @@ export interface ChatPreviewProps {
  *  (template text and the command-list preview alike). */
 export function ChatPreview({ label, speaker, text, countLabel }: ChatPreviewProps): ReactElement {
   return (
-    <div className="ui-chat-preview">
+    <div data-ui="" className="ui-chat-preview">
       <div className="ui-chat-preview__heading">
         <span className="ui-chat-preview__label">{label}</span>
         <span className="ui-chat-preview__speaker">{speaker}</span>

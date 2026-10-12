@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 
 export function NavigationIcon({ kind, className = "navigation-icon" }: { kind: string; className?: string }): ReactElement {
   return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <svg data-ui="" className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       {kind === "overview" ? <><path d="M4 12a8 8 0 1 1 16 0" /><path d="m12 12 4-3M6 17h12" /><circle cx="12" cy="12" r="1" /></>
         : kind === "channel" ? <><path d="M5 7.5h14M5 12h14M5 16.5h9" /><circle cx="18" cy="16.5" r="1" />
           </>

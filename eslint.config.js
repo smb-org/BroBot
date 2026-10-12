@@ -150,7 +150,7 @@ export default defineConfig(
     ...config,
     files: ["**/*.{ts,tsx}"],
   })),
-  reactHooks.configs.flat.recommended,
+  reactHooks.configs.flat["recommended-latest"],
   reactRefresh.configs.vite,
   {
     files: ["**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"],

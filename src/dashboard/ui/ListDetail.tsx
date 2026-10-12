@@ -152,7 +152,7 @@ export function ListDetail({ list, inspector, onCloseInspector }: ListDetailProp
   }, []);
 
   return (
-    <div ref={rootRef} className={`list-detail${open ? " list-detail--open" : ""}`}>
+    <div data-ui="" ref={rootRef} className={`list-detail${open ? " list-detail--open" : ""}`}>
       <div
         ref={listRef}
         className="list-detail__list"

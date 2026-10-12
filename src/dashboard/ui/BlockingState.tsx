@@ -35,7 +35,7 @@ export function BlockingState({ tone, title, description, action, contact }: Blo
     ? `1px solid color-mix(in srgb, ${colors.error} 45%, ${colors.hairline})`
     : `1px dashed ${colors.hairlineStrong}`;
   return (
-    <div style={{ display: "flex", justifyContent: "center", padding: "64px 16px" }}>
+    <div data-ui="" style={{ display: "flex", justifyContent: "center", padding: "64px 16px" }}>
       <div
         style={{
           width: "min(30rem, 100%)",

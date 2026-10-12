@@ -15,14 +15,15 @@ export interface ColorFieldProps {
 
 export function ColorField({ id, label, value, unsetLabel, clearLabel, onChange, disabled = false }: ColorFieldProps): ReactElement {
   const disabledReason = useDisabledFieldReason();
+  const defaultColor = getComputedStyle(document.documentElement).getPropertyValue("--content-default").trim();
   const reasonId = disabledReason === null ? undefined : `${disabledReason.id}-color-${id}`;
   const unsetDescriptionId = `${id}-unset-note`;
   const describedBy = [reasonId, value === undefined ? unsetDescriptionId : undefined].filter((descriptionId) => descriptionId !== undefined).join(" ") || undefined;
-  return <div className="ui-color-field">
+  return <div data-ui="" className="ui-color-field">
     <label htmlFor={id}>{label}</label>
     <div className="ui-color-field__controls">
       <span className="ui-color-field__swatch" data-unset={value === undefined} data-disabled={disabled}>
-        <input id={id} type="color" aria-label={label} value={value ?? "#ffffff"} data-unset={value === undefined} disabled={disabled}
+        <input id={id} type="color" aria-label={label} value={value ?? defaultColor} data-unset={value === undefined} disabled={disabled}
           aria-describedby={describedBy}
           onChange={(event) => { onChange(event.currentTarget.value); }} />
         {value === undefined ? <span className="ui-color-field__empty-swatch" aria-hidden="true" /> : null}

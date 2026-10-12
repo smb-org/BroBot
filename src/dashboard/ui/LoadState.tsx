@@ -107,7 +107,7 @@ export function LoadState({ variant, status, loading, empty, error, children, qu
         : variantDefinition.showsRefreshErrorInContent && refreshErrorState ? inlineError(queryError, trailing) : children;
 
   return (
-    <div className={["ui-load-state", `ui-load-state--${variantDefinition.presentation}`, `ui-load-state--${variant}`, hasRefreshSlot ? "ui-load-state--retry" : "", className].filter(Boolean).join(" ")} data-variant={variant} data-status={status} aria-busy={status === "loading"} style={layoutStyle}>
+    <div data-ui="" className={["ui-load-state", `ui-load-state--${variantDefinition.presentation}`, `ui-load-state--${variant}`, hasRefreshSlot ? "ui-load-state--retry" : "", className].filter(Boolean).join(" ")} data-variant={variant} data-status={status} aria-busy={status === "loading"} style={layoutStyle}>
       <div className="ui-load-state__content" style={hasRefreshSlot ? { minHeight: contentMinHeight } : undefined}>{content}</div>
       {!hasRefreshSlot ? null : <div className="ui-load-state__retry-slot">
         {status === "error" || queryError === undefined || !refreshErrorState ? null : inlineError(queryError, trailing)}

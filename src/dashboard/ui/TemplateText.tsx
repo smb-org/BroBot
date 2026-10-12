@@ -21,7 +21,7 @@ export function TemplateText({ value, variables, className }: TemplateTextProps)
   }));
   const pieces = tokenizeTemplate(value, declarations);
   return (
-    <span className={`ui-template-text${className === undefined ? "" : ` ${className}`}`}>
+    <span data-ui="" className={`ui-template-text${className === undefined ? "" : ` ${className}`}`}>
       {pieces.map((piece) => <span key={`${String(piece.start)}-${piece.kind}`} data-kind={piece.kind}>{piece.text}</span>)}
     </span>
   );

@@ -92,7 +92,7 @@ export function ListToolbar({
     searchValue !== undefined && onSearchChange !== undefined;
 
   return (
-    <div className={["list-toolbar", className].filter(Boolean).join(" ")}>
+    <div data-ui="" className={["list-toolbar", className].filter(Boolean).join(" ")}>
       <div className={`list-toolbar__row${hasSearch ? "" : " list-toolbar__row--no-search"}`}>
         {hasSearch ? <div className="list-toolbar__search">
           <Field

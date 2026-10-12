@@ -10,10 +10,10 @@ export type AuditSentenceProps = { sentence: string } | {
 };
 
 export function AuditSentence(props: AuditSentenceProps): ReactElement {
-  if ("sentence" in props) return <span className="audit-sentence">{props.sentence}</span>;
+  if ("sentence" in props) return <span data-ui="" className="audit-sentence">{props.sentence}</span>;
   const { who, action, what, fromLabel, from, to } = props;
   return (
-    <span className="audit-sentence">
+    <span data-ui="" className="audit-sentence">
       <span className="audit-sentence__chip audit-sentence__chip--who">{who}</span>
       <span className="audit-sentence__action">{action}</span>
       {what === null || what === undefined || what.length === 0 ? null : <span className="audit-sentence__chip">{what}</span>}

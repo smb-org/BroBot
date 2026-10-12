@@ -72,7 +72,7 @@ export function ChannelLocationMenu({ location, messages }: {
   };
 
   return (
-    <div className="dashboard-header__location-wrap">
+    <div data-ui="" className="dashboard-header__location-wrap">
       <Menu opened={opened} onChange={setOpened} position="bottom-start" withinPortal closeOnItemClick={false}>
         <Menu.Target>
           <Button
@@ -95,7 +95,7 @@ export function ChannelLocationMenu({ location, messages }: {
             {shortName === location.name ? null : <span className="sr-only">, {location.name}</span>}
           </Button>
         </Menu.Target>
-        <Menu.Dropdown>
+        <Menu.Dropdown data-ui="">
           <Menu.Label>{location.name}</Menu.Label>
           <Menu.Label className="mono">{coordinatesForDisplay(location)}</Menu.Label>
           <Menu.Divider />

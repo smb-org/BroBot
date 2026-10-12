@@ -24,6 +24,7 @@
   --rail: #181716;
   --surface-raised: #1e1c1a;
   --surface: var(--surface-raised);
+  --surface-hover: #262321;
   --surface-inspector: #1a1917;
   --surface-well: #100f0e;
   --surface-depth: #0a0908;
@@ -50,6 +51,7 @@
 
   /* Green, amber, and red are the only status colors. */
   --green: #3ddc84;
+  --green-surface: rgba(61, 220, 132, 0.12);
   --warn: #d9a441;
   --error: #e2564d;
   --error-text: #e8655d;
@@ -61,6 +63,7 @@
   --raid-surface: rgba(244, 162, 211, 0.12);
   --moderation: #5cc9c4;
   --moderation-surface: rgba(92, 201, 196, 0.12);
+  --shadow-floating: 0 8px 24px rgba(0, 0, 0, 0.45);
 
   /* Two corner radii. */
   --r-control: 6px;
@@ -90,7 +93,10 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; background: var(--background); }
-button, select, input, textarea { font: inherit; }
+button:not([class*="mantine-"]),
+select:not([class*="mantine-"]),
+input:not([class*="mantine-"]),
+textarea:not([class*="mantine-"]) { font: inherit; }
 a { color: inherit; }
 h1, h2, h3, p { margin-top: 0; }
 
@@ -1742,6 +1748,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .profile-link { color: var(--brand-text); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--brand-text) 40%, transparent); text-underline-offset: 2px; }
 .profile-link:hover { text-decoration-color: currentColor; }
 .lock-reason { display: block; margin-top: 2px; color: var(--text-2); font-size: 11px; }
+p.lock-reason { margin-bottom: 1em; }
 .lock-reason--with-icon { display: flex; align-items: center; gap: var(--s2); }
 .empty-state h2 { color: var(--text); }
 .empty-state p { margin: var(--s1) 0 0; font-size: 13px; }

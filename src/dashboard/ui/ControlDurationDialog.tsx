@@ -37,7 +37,7 @@ export function ControlDurationDialog({
   onCancel,
 }: ControlDurationDialogProps): ReactElement {
   return (
-    <Modal opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={560} centered closeOnEscape={!pending} trapFocus returnFocus>
+    <Modal data-ui="" opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={560} centered closeOnEscape={!pending} trapFocus returnFocus>
       <p className="ui-control-duration-dialog__description">{description}</p>
       <ChoiceCards label={durationLabel} hint={durationHint} value={value} onChange={onChange} options={options} disabled={pending} />
       <div className="ui-confirm-dialog__actions">

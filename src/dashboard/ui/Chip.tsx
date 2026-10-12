@@ -39,6 +39,7 @@ export function Chip({ tone, filled, mono, children }: ChipProps) {
   if (mono) {
     return (
       <span
+        data-ui=""
         style={{
           ...base,
           fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
@@ -56,7 +57,7 @@ export function Chip({ tone, filled, mono, children }: ChipProps) {
 
   if (tone === "neutral") {
     return (
-      <span style={{ ...base, color: colors.text2, border: `1px solid ${colors.hairlineStrong}` }}>{children}</span>
+      <span data-ui="" style={{ ...base, color: colors.text2, border: `1px solid ${colors.hairlineStrong}` }}>{children}</span>
     );
   }
 
@@ -65,6 +66,7 @@ export function Chip({ tone, filled, mono, children }: ChipProps) {
 
   return (
     <span
+      data-ui=""
       style={{
         ...base,
         color: token.color,

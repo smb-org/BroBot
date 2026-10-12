@@ -10,7 +10,7 @@ interface ReadOnlyTextAreaProperties {
 
 /** A labeled, copyable multiline value that the panel never edits. */
 export function ReadOnlyTextArea({ id, label, value, minRows = 3, className }: ReadOnlyTextAreaProperties) {
-  return <Textarea
+  return <Textarea data-ui=""
     id={id}
     label={label}
     value={value}

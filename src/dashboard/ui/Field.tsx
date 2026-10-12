@@ -102,6 +102,7 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
 
   return (
     <TextInput
+      data-ui=""
       className={["ui-field", searchVariant ? "ui-field--search" : undefined, className, leadingLabel === undefined ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ")}
       label={searchVariant ? label : effectiveLabelHidden ? undefined : label}
       aria-label={ariaLabel ?? (labelHidden && !searchVariant ? label : undefined)}

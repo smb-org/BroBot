@@ -13,7 +13,7 @@ export function ToastHost() {
 
   return (
     <Portal>
-      <div className="ui-toast-host">
+      <div data-ui="" className="ui-toast-host">
         {toasts.map((toast) => (
           <Notification
             key={toast.id}

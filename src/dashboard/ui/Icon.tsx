@@ -33,5 +33,5 @@ type IconSize = 16 | 20 | 25 | 28;
 
 export function Icon({ name, size = 16, className }: { name: IconName; size?: IconSize; className?: string }): ReactElement {
   const Glyph = glyphs[name];
-  return <Glyph size={size} stroke={1.5} aria-hidden="true" focusable="false" className={className === undefined ? "ui-icon" : `ui-icon ${className}`} />;
+  return <Glyph data-ui="" size={size} stroke={1.5} aria-hidden="true" focusable="false" className={className === undefined ? "ui-icon" : `ui-icon ${className}`} />;
 }

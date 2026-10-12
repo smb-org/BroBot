@@ -19,7 +19,7 @@ export interface SkeletonProps {
  */
 export function Skeleton({ rows = 1, height }: SkeletonProps) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+    <div data-ui="" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
       {Array.from({ length: rows }, (_, index) => (
         <MantineSkeleton key={index} height={height} radius="sm" animate={false} styles={{ root: { backgroundColor: colors.well } }} />
       ))}

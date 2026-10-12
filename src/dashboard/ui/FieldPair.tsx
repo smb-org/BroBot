@@ -5,5 +5,5 @@ export interface FieldPairProps {
 }
 
 export function FieldPair({ children }: FieldPairProps): ReactElement {
-  return <div className="ui-field-pair">{children[0]}{children[1]}</div>;
+  return <div data-ui="" className="ui-field-pair">{children[0]}{children[1]}</div>;
 }

@@ -27,6 +27,7 @@ export function ChoiceCards({ label, hint, value, onChange, options, disabled = 
 
   return (
     <Radio.Group
+      data-ui=""
       className="ui-choice-cards"
       label={label}
       description={describedHelper(hint, disabledReason, `choice-${id}`)}

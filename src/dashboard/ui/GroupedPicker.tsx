@@ -270,7 +270,7 @@ export function GroupedPicker<T = unknown>({
     const noResults = typeof messages.noResults === "function" ? messages.noResults(query) : messages.noResults;
 
     return (
-      <div id={surfacePanelId} className={`ui-grouped-picker${surface === "sheet" ? " ui-grouped-picker--sheet" : ""}`}>
+      <div data-ui="" id={surfacePanelId} className={`ui-grouped-picker${surface === "sheet" ? " ui-grouped-picker--sheet" : ""}`}>
         {surface === "sheet" ? (
           <div className="ui-grouped-picker__mobile-header">
             <span className="ui-grouped-picker__handle" aria-hidden="true" />
@@ -381,6 +381,7 @@ export function GroupedPicker<T = unknown>({
         >
           <Popover.Target>{interactiveTrigger}</Popover.Target>
           <Popover.Dropdown
+            data-ui=""
             role="dialog"
             aria-label={messages.title}
             className="ui-grouped-picker__popover"
@@ -396,6 +397,7 @@ export function GroupedPicker<T = unknown>({
         </Popover>
       </span>
       <Drawer
+        data-ui=""
         opened={opened && isSmallScreen}
         onClose={() => close(true)}
         position="bottom"
