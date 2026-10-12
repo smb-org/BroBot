@@ -980,12 +980,12 @@ export interface ModuleVariableRenameGuard {
   updatedAt: string;
 }
 
-export interface ModuleVariableRenamePrecondition {
+interface ModuleVariableRenamePrecondition {
   sql: string;
   values: readonly unknown[];
 }
 
-export interface ModuleVariableRenameValidation {
+interface ModuleVariableRenameValidation {
   usages: readonly ModuleVariableReferenceUsage[];
   precondition: ModuleVariableRenamePrecondition;
 }

@@ -4,10 +4,9 @@ import type {
 } from "../contract";
 import type { Timer, TimerMutationInput } from "./contracts";
 import { TIMER_MESSAGE_MAX_LENGTH, timerTriggerSchema } from "./contracts";
-import { validateEventTemplateContentMutation, validateEventTemplateText, type EventTextBlockValidation } from "../contracts/text-block-validation";
+import { validateEventTemplateContentMutation, validateEventTemplateText } from "../contracts/text-block-validation";
 import { templateTextLength } from "../../contracts/template-text-length";
 
-export type TimerTextValidation = EventTextBlockValidation;
 export const validateTimerText = validateEventTemplateText;
 
 export interface TimerRow {

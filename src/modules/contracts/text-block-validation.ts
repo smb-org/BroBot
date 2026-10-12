@@ -33,7 +33,7 @@ const inputVariablesForEvent = (registeredVariables: readonly ModuleRegisteredTe
 };
 
 /** Validates a text block used without chat-command input, including nested blocks. */
-export const validateEventTextBlock = async (
+const validateEventTextBlock = async (
   db: D1Database,
   channelId: string,
   blockName: string,
