@@ -100,6 +100,23 @@ describe("scheduled text validation", () => {
       .resolves.toEqual({ ok: false, reason: "missing" });
   });
 
+  it("rejects event-local variables that scheduled consumers cannot resolve", async () => {
+    const database = await databaseWithBlocks({});
+    const eventLocalVariable = {
+      name: "votekick.duration",
+      sample: "2 min",
+      maxLength: 16,
+      group: "event",
+      moduleId: "votekick",
+      isTextBlock: false,
+      contexts: ["event"],
+      availableInEventTemplates: false,
+    } satisfies ModuleRegisteredTemplateVariable;
+
+    await expect(validateTimerText(database as unknown as D1Database, "channel-1", "{votekick.duration}", [eventLocalVariable]))
+      .resolves.toEqual({ ok: false, reason: "input_dependent" });
+  });
+
   it("checks nested text blocks for command-input variables", async () => {
     const database = await databaseWithBlocks({ welcome: ["{text.nested}"], nested: ["Hello {target}."] });
     const nestedVariable = {

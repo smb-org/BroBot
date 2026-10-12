@@ -4,21 +4,16 @@ import type {
   ModuleTemplateContentIssue,
   ModuleTemplateContentValidationContext,
 } from "../contract";
-import { templateVariableNames, SYSTEM_TEMPLATE_VARIABLE_LIST, type TemplateVariable } from "../contract";
+import { templateVariableNames, SYSTEM_TEMPLATE_VARIABLE_LIST } from "../contract";
+import { isEventTemplateVariableAvailable } from "../../contracts/event-template-variables";
 import { blockReferencesInText } from "./text-block-references";
 
 export type EventTextBlockValidation = { ok: true } | { ok: false; reason: "missing" | "input_dependent" };
 
-const inputVariablesForEvent = (registeredVariables: readonly ModuleRegisteredTemplateVariable[]): Set<string> => {
-  const allVariables: readonly TemplateVariable[] = [...SYSTEM_TEMPLATE_VARIABLE_LIST, ...registeredVariables];
-  return new Set(allVariables.flatMap((variable) => {
-    const contexts = variable.contexts;
-    return contexts !== undefined && !contexts.includes("event") &&
-      (contexts.includes("chat_command") || variable.unavailableContextText !== undefined)
-      ? [variable.name]
-      : [];
-  }));
-};
+const inputVariablesForEvent = (registeredVariables: readonly ModuleRegisteredTemplateVariable[]): Set<string> =>
+  new Set([...SYSTEM_TEMPLATE_VARIABLE_LIST, ...registeredVariables]
+    .filter((variable) => !isEventTemplateVariableAvailable(variable))
+    .map((variable) => variable.name));
 
 /** Validates a text block used without chat-command input, including nested blocks. */
 export const validateEventTextBlock = async (

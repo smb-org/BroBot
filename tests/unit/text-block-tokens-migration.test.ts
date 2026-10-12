@@ -37,7 +37,7 @@ describe("text block token migration", () => {
         INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at)
         VALUES ('channel-a', 'long_example', 'social', 1, '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z');
         INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
-        VALUES ('channel-a', 'long_example', 'default', 0, '{}', '["${"x".repeat(1321)}{welcome}"]');
+        VALUES ('channel-a', 'long_example', 'default', 0, '{}', '["${"x".repeat(491)}{welcome}"]');
         INSERT INTO text_commands (channel_id, command_name, response_text, template_fields_json, timeout_fallback_text, created_at, updated_at, timeout_reason)
         VALUES ('channel-a', 'hello', 'Hello {welcome}, {viewers}', '{"label":"{welcome} {viewers}"}', 'Try {welcome} again.', '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z', 'Blocked by {welcome}.');
         INSERT INTO text_commands (channel_id, command_name, response_text, template_fields_json, timeout_fallback_text, timeout_reason, created_at, updated_at)
@@ -77,10 +77,10 @@ describe("text block token migration", () => {
       expect(database.prepare("SELECT texts_json FROM text_block_variants WHERE block_name = 'welcome'").get())
         .toEqual({ texts_json: '["Hello {text.welcome} {viewers}"]' });
       expect(database.prepare("SELECT texts_json FROM text_block_variants WHERE block_name = 'long_example'").get())
-        .toEqual({ texts_json: JSON.stringify([`${"x".repeat(1321)}{text.welcome}`]) });
-      const migratedMaximumBlock = `${"x".repeat(1321)}{text.welcome}`;
-      expect(migratedMaximumBlock).toHaveLength(1335);
-      expect(templateTextLength(migratedMaximumBlock)).toBe(1330);
+        .toEqual({ texts_json: JSON.stringify([`${"x".repeat(491)}{text.welcome}`]) });
+      const migratedMaximumBlock = `${"x".repeat(491)}{text.welcome}`;
+      expect(migratedMaximumBlock).toHaveLength(505);
+      expect(templateTextLength(migratedMaximumBlock)).toBe(500);
       expect(validTextBlock({
         name: "long_example",
         categoryId: "social",
@@ -116,5 +116,21 @@ describe("text block token migration", () => {
     } finally {
       database.close();
     }
+  });
+
+  it("limits text block content by semantic length while allowing namespace overhead", () => {
+    const validBoundary = `${"x".repeat(491)}{text.welcome}`;
+    const tooLong = `${"x".repeat(492)}{text.welcome}`;
+    const makeBlock = (text: string) => ({
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: [text] }],
+    });
+
+    expect(templateTextLength(validBoundary)).toBe(500);
+    expect(validTextBlock(makeBlock(validBoundary))).toBe(true);
+    expect(templateTextLength(tooLong)).toBe(501);
+    expect(validTextBlock(makeBlock(tooLong))).toBe(false);
   });
 });

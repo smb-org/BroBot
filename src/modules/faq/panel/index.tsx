@@ -3,8 +3,9 @@ import { useCallback, useState, type ReactElement } from "react";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, NumberField, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
-import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
+import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH } from "../contracts";
+import { inputFromDraft, type FaqDraft } from "./draft";
 import { faqTexts } from "./locale";
 import {
   createFaqEntry,
@@ -20,15 +21,6 @@ import {
   type FaqPanelData,
 } from "./service";
 
-interface FaqDraft {
-  name: string;
-  patterns: string;
-  answerText: string;
-  cooldownSeconds: number | "";
-  games: FaqGame[];
-  chatTarget: FaqEntry["chatTarget"];
-}
-
 const emptyDraft = (): FaqDraft => ({ name: "", patterns: "", answerText: "", cooldownSeconds: FAQ_COOLDOWN_MINIMUM_SECONDS, games: [], chatTarget: "source_only" });
 
 const draftFromEntry = (entry: FaqEntry): FaqDraft => ({
@@ -39,22 +31,6 @@ const draftFromEntry = (entry: FaqEntry): FaqDraft => ({
   games: [...entry.games],
   chatTarget: entry.chatTarget,
 });
-
-const inputFromDraft = (draft: FaqDraft): FaqMutationInput | null => {
-  const patterns = draft.patterns.split("\n").map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0);
-  if (draft.name.trim().length === 0 || draft.answerText.trim().length === 0 || draft.answerText.length > FAQ_ANSWER_MAX_LENGTH || patterns.length === 0 ||
-      patterns.length > FAQ_PATTERN_MAXIMUM_COUNT || patterns.some((pattern) => pattern.length > FAQ_PATTERN_MAX_LENGTH) ||
-      typeof draft.cooldownSeconds !== "number" || !Number.isInteger(draft.cooldownSeconds) ||
-      draft.cooldownSeconds < FAQ_COOLDOWN_MINIMUM_SECONDS || draft.cooldownSeconds > FAQ_COOLDOWN_MAXIMUM_SECONDS) return null;
-  return {
-    name: draft.name.trim(),
-    matcher: { type: "keywords", patterns },
-    answerText: draft.answerText,
-    cooldownSeconds: draft.cooldownSeconds,
-    games: draft.games,
-    chatTarget: draft.chatTarget,
-  };
-};
 
 const faqPanelDataFrom = (value: unknown): FaqPanelData => {
   if (typeof value === "object" && value !== null && "entries" in value && "variables" in value &&

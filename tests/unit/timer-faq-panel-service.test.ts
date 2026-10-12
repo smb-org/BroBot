@@ -8,6 +8,8 @@ const parameterizedVariables = [
   { name: "api_source.value", sample: "18:42", parameters: "api_source_name", parameterDefault: "sunset" },
   { name: "pick", sample: "First", parameters: "choices", contexts: ["event", "chat_command"], parameterDefault: "first|second" },
   { name: "user", sample: "Viewer", contexts: ["chat_command"] },
+  { name: "channel", sample: "samplechannel", contexts: ["chat_command"] },
+  { name: "votekick.duration", sample: "2 min", contexts: ["event"], availableInEventTemplates: false },
 ];
 
 const response = (body: unknown): Response => new Response(JSON.stringify(body), {
@@ -61,5 +63,7 @@ describe("timer and FAQ panel variable loading", () => {
       expect.objectContaining({ name: "pick", parameters: "choices", parameter: { value: "first|second" } }),
     ]));
     expect(panel.variables.some((variable) => variable.name === "user")).toBe(false);
+    expect(panel.variables.some((variable) => variable.name === "channel")).toBe(false);
+    expect(panel.variables.some((variable) => variable.name === "votekick.duration")).toBe(false);
   });
 });

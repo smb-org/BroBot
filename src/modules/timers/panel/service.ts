@@ -1,6 +1,7 @@
 import { PanelApiError } from "../../../contracts/panel-error";
+import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
 import type { TemplateVariableOption } from "../../../dashboard/ui";
-import type { ModuleLanguage } from "../../contract";
+import type { ModuleLanguage, TemplateVariable } from "../../contract";
 import type { Timer, TimerMutationInput } from "../contracts";
 
 interface TimerEventTimeSource {
@@ -37,12 +38,12 @@ export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): 
   const [timers, sources, variables] = await Promise.all([
     readJson<{ timers: Timer[] }>(timersResponse),
     readJson<{ sources: TimerEventTimeSource[] }>(sourcesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; contexts?: readonly string[]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     timers: timers.timers,
     sources: sources.sources,
-    variables: variables.variables.filter((variable) => variable.contexts === undefined || variable.contexts.includes("event")).map((variable) => ({
+    variables: variables.variables.filter(isEventTemplateVariableAvailable).map((variable) => ({
       name: variable.name,
       description: variable.description ?? variable.name,
       sample: variable.sample ?? "",

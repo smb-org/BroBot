@@ -165,6 +165,7 @@ export const registeredTemplateVariablesForChannel = async (
         ...(picker === undefined ? {} : { picker }),
         moduleId: module.id,
         isTextBlock: module.templateVariableNamespace === "text_blocks",
+        availableInEventTemplates: module.resolveTemplateValues !== undefined || module.resolveTemplateParameter !== undefined,
         ...(pickerGroup === undefined ? {} : { pickerGroup }),
       };
     });

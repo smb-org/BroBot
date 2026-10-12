@@ -1,5 +1,7 @@
 import { PanelApiError } from "../../../contracts/panel-error";
+import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
 import type { TemplateVariableOption } from "../../../dashboard/ui";
+import type { TemplateVariable } from "../../contract";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
 
 export interface FaqPanelData {
@@ -37,11 +39,11 @@ export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Pro
   ]);
   const [entries, variables] = await Promise.all([
     readJson<{ entries: FaqEntry[] }>(entriesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; contexts?: readonly string[]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     entries: entries.entries,
-    variables: variables.variables.filter((variable) => variable.contexts === undefined || variable.contexts.includes("event")).map((variable) => ({
+    variables: variables.variables.filter(isEventTemplateVariableAvailable).map((variable) => ({
       name: variable.name,
       description: variable.description ?? variable.name,
       sample: variable.sample ?? "",

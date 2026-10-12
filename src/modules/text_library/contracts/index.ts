@@ -12,8 +12,8 @@ export const TEXT_BLOCK_MAXIMUMS = {
   textsPerVariant: 10,
   categoriesPerChannel: 25,
   categoryNameLength: 40,
-  // A 500-character legacy template can gain up to five characters per 3-character `{a}` token.
-  textLength: 1_330,
+  // Namespaced references count as their legacy bare-name length, but the semantic limit remains 500.
+  textLength: 500,
   renderedLength: 500,
   nestingDepth: 3,
 } as const;

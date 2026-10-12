@@ -21,12 +21,15 @@ export const textBlockWriteGuard = (
 ): TextBlockWriteGuard => {
   const references = [...new Set(texts.flatMap(blockReferencesInText))];
   if (references.length === 0) return { sql: "", values: [], references };
-  const existenceChecks = references.map(() =>
-    "AND EXISTS (SELECT 1 FROM text_blocks WHERE channel_id = ? AND block_name = ?)",
-  ).join("\n");
   return {
-    sql: `AND COALESCE((SELECT graph_revision FROM text_library_settings WHERE channel_id = ?), 1) = ?\n${existenceChecks}`,
-    values: [channelId, expectedGraphRevision, ...references.flatMap((name) => [channelId, name])],
+    sql: `AND COALESCE((SELECT graph_revision FROM text_library_settings WHERE channel_id = ?), 1) = ?
+AND NOT EXISTS (
+  SELECT 1 FROM json_each(?) AS reference
+   WHERE NOT EXISTS (
+     SELECT 1 FROM text_blocks WHERE channel_id = ? AND block_name = reference.value
+   )
+)`,
+    values: [channelId, expectedGraphRevision, JSON.stringify(references), channelId],
     references,
   };
 };

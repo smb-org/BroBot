@@ -1078,6 +1078,8 @@ export const MODULE_TEMPLATE_TIER_CHAT_STATUSES: Readonly<Record<ModuleTemplateM
 export interface ModuleRegisteredTemplateVariable extends TemplateVariable {
   moduleId: string;
   isTextBlock: boolean;
+  /** Whether a generic event template renderer can resolve this module variable. */
+  availableInEventTemplates?: boolean;
   description?: string;
   pickerGroup?: ModuleTemplateVariableGroup & { id: string };
 }
