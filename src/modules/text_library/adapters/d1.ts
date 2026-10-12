@@ -147,7 +147,7 @@ const textBlockRenameWouldOverflow = async (db: D1Database, channelId: string, f
   ];
   if (templateTexts.some((text) => text.includes(oldToken) && templateTextLength(text.replaceAll(oldToken, nextToken)) > 500)) return true;
   return overlayElements.results.some((row) =>
-    (row.text.includes(oldToken) && row.text.replaceAll(oldToken, nextToken).length > 100) ||
+    (row.text.includes(oldToken) && templateTextLength(row.text.replaceAll(oldToken, nextToken)) > 100) ||
     new TextEncoder().encode(row.config_json.replaceAll(oldToken, nextToken)).byteLength > 4_096,
   );
 };
@@ -489,10 +489,19 @@ export const createTextBlockRepository = (
         `{text.${fromName}}`, `{text.${input.name}}`, input.name,
         `{text.${fromName}}`, `{text.${input.name}}`,
         input.channelId, `{text.${fromName}}`, `{text.${fromName}}`, fromName, ...renamedBlockValues);
+      const removeRenamedVariants = db.prepare(
+        `DELETE FROM text_block_variants
+          WHERE channel_id = ? AND block_name = ? AND ${renamedBlockGuard}`,
+      ).bind(input.channelId, input.name, ...renamedBlockValues);
+      const saveRenamedVariants = input.variants.map((variant, position) => db.prepare(
+        `INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
+         SELECT ?, ?, ?, ?, ?, ? WHERE ${renamedBlockGuard}`,
+      ).bind(input.channelId, input.name, variant.id, position,
+        JSON.stringify(variant.conditions), JSON.stringify(variant.texts), ...renamedBlockValues));
       const statements = [advanceGraph, mutation];
       if (audit !== undefined) statements.push(audit);
-      statements.push(rewriteParentRevisions, rewriteVariants, rewriteCommands, rewriteTimers, rewriteFaq,
-        rewriteModuleSettings);
+      statements.push(rewriteParentRevisions, removeRenamedVariants, ...saveRenamedVariants, rewriteVariants,
+        rewriteCommands, rewriteTimers, rewriteFaq, rewriteModuleSettings);
       const overlayUpdateIndex = statements.length;
       statements.push(updateOverlayRevisions, rewriteOverlayElements);
       let results: Awaited<ReturnType<typeof db.batch>>;

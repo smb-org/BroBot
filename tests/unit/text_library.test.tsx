@@ -19,6 +19,7 @@ import { firstMatchingTextBlockVariant, textBlockConditionsMatch } from "../../s
 import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import TextLibraryPanel from "../../src/modules/text_library/panel/index";
 import { textLibraryTexts } from "../../src/modules/text_library/panel/locale";
+import { templateTextLength } from "../../src/contracts/template-text-length";
 import { createTemplateRenderer, type TemplateResolverSources, type TemplateValueProvider } from "../../src/worker/template-resolver";
 import { truncateChatText } from "../../src/worker/chat";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../src/modules/contract";
@@ -1019,6 +1020,105 @@ describe("text library", () => {
       .bind(CHANNEL_ID, "text_library.block.renamed").first()).toEqual({ count: 1 });
   });
 
+  it("persists edited, added, and removed variants when a block is renamed", async () => {
+    const created = await createBlock("welcome", [
+      { id: "weekday", conditions: { stream: "offline" }, texts: ["Welcome"] },
+      { id: "weekend", conditions: { weekdays: [0, 6] }, texts: ["Weekend welcome"] },
+      { id: "default", conditions: {}, texts: ["Fallback welcome"] },
+    ]);
+    if (!created.ok) throw new Error("Could not create the rename variant test block.");
+    await insertLoginIdentityAndSession(database, "manager-variant-rename");
+    await insertMember(database, CHANNEL_ID, "manager-variant-rename", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-variant-rename" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-variant-rename", TEST_SESSION_KEYS, new Date().toISOString());
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+    const response = await panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrf,
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+        },
+        body: JSON.stringify({
+          name: "greeting",
+          categoryId: "social",
+          games: [],
+          variants: [
+            { id: "weekday", conditions: { stream: "online", weekdays: [1] }, texts: ["Edited greeting"] },
+            { id: "evening", conditions: { weekdays: [5] }, texts: ["New evening greeting"] },
+            { id: "default", conditions: {}, texts: ["Fallback greeting"] },
+          ],
+          revision: created.block.revision,
+        }),
+      },
+    ), environment);
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      block: {
+        name: "greeting",
+        variants: [
+          { id: "weekday", conditions: { stream: "online", weekdays: [1] }, texts: ["Edited greeting"] },
+          { id: "evening", conditions: { weekdays: [5] }, texts: ["New evening greeting"] },
+          { id: "default", conditions: {}, texts: ["Fallback greeting"] },
+        ],
+      },
+    });
+    await expect(database.prepare(
+      "SELECT variant_id, position, conditions_json, texts_json FROM text_block_variants WHERE channel_id = ? AND block_name = ? ORDER BY position",
+    ).bind(CHANNEL_ID, "greeting").all()).resolves.toMatchObject({
+      results: [
+        { variant_id: "weekday", position: 0, conditions_json: '{"stream":"online","weekdays":[1]}', texts_json: '["Edited greeting"]' },
+        { variant_id: "evening", position: 1, conditions_json: '{"weekdays":[5]}', texts_json: '["New evening greeting"]' },
+        { variant_id: "default", position: 2, conditions_json: "{}", texts_json: '["Fallback greeting"]' },
+      ],
+    });
+  });
+
+  it("rolls back a rename if saving its submitted variants fails", async () => {
+    const created = await createBlock("welcome", [variant("default", "Welcome")]);
+    if (!created.ok) throw new Error("Could not create the atomic rename test block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    database.sqlite.exec(`
+      CREATE TRIGGER reject_block_variant_insert
+      BEFORE INSERT ON text_block_variants
+      WHEN NEW.variant_id = 'blocked'
+      BEGIN
+        SELECT RAISE(ABORT, 'blocked variant');
+      END;
+    `);
+
+    await expect(repository.rename({
+      channelId: CHANNEL_ID,
+      name: "greeting",
+      categoryId: created.block.categoryId,
+      games: [],
+      variants: [variant("blocked", "Edited welcome")],
+      expectedRevision: created.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date(NOW).toISOString(),
+    }, "welcome", ACTOR)).rejects.toThrow();
+
+    await expect(service.find(CHANNEL_ID, "welcome")).resolves.toMatchObject({
+      name: "welcome",
+      variants: [variant("default", "Welcome")],
+    });
+    await expect(service.find(CHANNEL_ID, "greeting")).resolves.toBeNull();
+    await expect(database.prepare("SELECT graph_revision FROM text_library_settings WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).resolves.toEqual({ graph_revision: snapshot.settings.graphRevision });
+  });
+
   it("rejects a rename that would exceed a consumer template length", async () => {
     const created = await createBlock("welcome", [variant("default", "Hello")]);
     if (!created.ok) throw new Error("Could not create the template length test block.");
@@ -1043,6 +1143,37 @@ describe("text library", () => {
       .bind(CHANNEL_ID).first()).toEqual({ block_name: "welcome" });
     expect(await database.prepare("SELECT message_text FROM timers WHERE timer_id = ?")
       .bind("timer-length").first()).toEqual({ message_text: `${"x".repeat(491)}{text.welcome}` });
+  });
+
+  it("allows a renamed overlay token whose semantic length remains within the limit", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the overlay length test block.");
+    const originalText = `${"x".repeat(86)}{text.welcome}`;
+    const renamedText = originalText.replaceAll("{text.welcome}", "{text.greeting}");
+    expect(originalText.length).toBe(100);
+    expect(renamedText.length).toBeGreaterThan(100);
+    expect(templateTextLength(renamedText)).toBeLessThanOrEqual(100);
+    const now = new Date(NOW).toISOString();
+    await database.prepare("INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .bind("overlay-length", CHANNEL_ID, "Length", now, now).run();
+    await database.prepare("INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, text, config_json) VALUES (?, ?, ?, 'text', ?, '{}')")
+      .bind("element-length", CHANNEL_ID, "overlay-length", originalText).run();
+    const snapshot = await service.list(CHANNEL_ID);
+
+    const result = await repository.rename({
+      channelId: CHANNEL_ID,
+      name: "greeting",
+      categoryId: created.block.categoryId,
+      games: [],
+      variants: [variant("default", "Hello")],
+      expectedRevision: created.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now,
+    }, "welcome", ACTOR);
+
+    expect(result).toMatchObject({ ok: true, block: { name: "greeting" } });
+    await expect(database.prepare("SELECT text FROM overlay_elements WHERE element_id = ?")
+      .bind("element-length").first()).resolves.toEqual({ text: renamedText });
   });
 
   it("rejects a rename when a consumer changes after validation starts", async () => {

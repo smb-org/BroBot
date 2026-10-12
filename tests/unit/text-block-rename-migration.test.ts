@@ -13,9 +13,10 @@ describe("text block rename migration", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
-      const target = "0056_text_block_rename.sql";
+      const target = "0057_text_block_rename.sql";
       const targetIndex = migrationFiles.indexOf(target);
       expect(targetIndex).toBeGreaterThanOrEqual(0);
+      expect(migrationFiles[targetIndex - 1]).toBe("0056_faq_person_cooldowns.sql");
       for (const file of migrationFiles.slice(0, targetIndex)) database.exec(readMigration(file));
 
       database.exec(`

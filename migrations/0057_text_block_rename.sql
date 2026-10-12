@@ -1,3 +1,4 @@
+-- Rebuild variant storage so renaming a block cascades to its variants.
 CREATE TABLE text_block_variants_rename_migration (
   channel_id TEXT NOT NULL,
   block_name TEXT NOT NULL,
