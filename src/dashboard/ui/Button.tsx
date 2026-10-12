@@ -64,9 +64,7 @@ const dangerStyle: CSSProperties = {
   "--button-hover": colors.error,
   "--button-bd": "none",
   "--button-color": colors.text,
-  // Literal white, not a design token: "white on red" is the one place the
-  // document names the color "white" rather than one of its own tokens.
-  "--button-hover-color": "#ffffff",
+  "--button-hover-color": "var(--color-on-error)",
 } as CSSProperties;
 
 const subtleDangerStyle: CSSProperties = {

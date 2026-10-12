@@ -1513,7 +1513,8 @@ test("free-text voting always renders five fixed result rows at desktop and mobi
       button: (element as HTMLElement).style.getPropertyValue("--button-bg"),
       token: getComputedStyle(document.documentElement).getPropertyValue("--error").trim(),
     }));
-    expect(dangerColors.button).toBe(dangerColors.token);
+    expect(dangerColors.button).toBe("var(--error)");
+    expect(dangerColors.token).toBe("#e2564d");
     await rows.locator(".mantine-Button-root").first().click();
     await expect(page.getByText("Approved", { exact: true })).toBeVisible();
     await expect(rows).toHaveCount(5);

@@ -42,52 +42,43 @@ declare module "@mantine/core" {
   }
 }
 
-/**
- * Color tokens transcribed from the dashboard design document ("Colors") and
- * `DESIGN.md`. This is the single source read by `ui/`; no other file in
- * `ui/` duplicates these hex values.
- *
- * The `depth` value has no specified hex value in either document. It is
- * described as the darkest surface behind a modal or drawer, darker than the
- * well at 60% opacity. This value is one step below `well` on the same warm
- * near-black scale. Decided 2026-09-22.
- */
+/** Legacy Mantine styles read existing dashboard tokens through CSS variables. */
 export const colors = {
-  ground: "#141312", // "--background"
-  rail: "#181716", // "--rail"
-  surface: "#1e1c1a", // "--surface"
-  surfaceHover: "#262321", // "--surface-hover"
-  inspector: "#1a1917", // "--surface-inspector"
-  well: "#100f0e", // "--surface-well"
-  depth: "#0a0908", // "--surface-depth" (decided 2026-09-22, see above)
-  hairline: "#312e2b", // "--line"
-  hairlineStrong: "#403c38", // "--line-strong"
-  hairlineLight: "#68615a", // "--line-light"
-  text: "#f2efeb", // "--text"
-  text2: "#b3aca4", // "--text-2"
-  text3: "#8b857e", // "--text-3"
-  text4: "#615c56", // "--text-4"
-  brand: "#538dcc", // "--brand"
-  brandHover: "#659cd7", // "--brand-hover"
-  brandPress: "#4c80bc", // "--brand-press"
-  brandText: "#9bc3ed", // "--brand-text"
-  brandHairline: "#60758c", // "--brand-line"
-  onBrand: "#0a0c10", // "--on-brand"
-  tint1: "#172638", // "--tint-1"
-  tint2: "#14202e", // "--tint-2"
-  green: "#3ddc84", // "--green"
-  greenFill: "rgba(61, 220, 132, 0.12)", // Green status surface
-  amber: "#d9a441", // "--warn"
-  amberFill: "rgba(217, 164, 65, 0.09)", // "--warning-surface"
-  error: "#e2564d", // "--error"
-  errorText: "#e8655d", // "--error-text"
-  errorFill: "rgba(226, 86, 77, 0.09)", // "--error-surface"
-  community: "#c4a3f5", // "--community"
-  communityFill: "rgba(196, 163, 245, 0.12)", // "--community-surface"
-  raid: "#f4a2d3", // "--raid"
-  raidFill: "rgba(244, 162, 211, 0.12)", // "--raid-surface"
-  moderation: "#5cc9c4", // "--moderation"
-  moderationFill: "rgba(92, 201, 196, 0.12)", // "--moderation-surface"
+  ground: "var(--background)",
+  rail: "var(--rail)",
+  surface: "var(--surface)",
+  surfaceHover: "var(--surface-hover)",
+  inspector: "var(--surface-inspector)",
+  well: "var(--surface-well)",
+  depth: "var(--surface-depth)",
+  hairline: "var(--line)",
+  hairlineStrong: "var(--line-strong)",
+  hairlineLight: "var(--line-light)",
+  text: "var(--text)",
+  text2: "var(--text-2)",
+  text3: "var(--text-3)",
+  text4: "var(--text-4)",
+  brand: "var(--brand)",
+  brandHover: "var(--brand-hover)",
+  brandPress: "var(--brand-press)",
+  brandText: "var(--brand-text)",
+  brandHairline: "var(--brand-line)",
+  onBrand: "var(--on-brand)",
+  tint1: "var(--tint-1)",
+  tint2: "var(--tint-2)",
+  green: "var(--green)",
+  greenFill: "var(--green-surface)",
+  amber: "var(--warn)",
+  amberFill: "var(--warning-surface)",
+  error: "var(--error)",
+  errorText: "var(--error-text)",
+  errorFill: "var(--error-surface)",
+  community: "var(--community)",
+  communityFill: "var(--community-surface)",
+  raid: "var(--raid)",
+  raidFill: "var(--raid-surface)",
+  moderation: "var(--moderation)",
+  moderationFill: "var(--moderation-surface)",
 } as const;
 
 // "Color scheme and base tone" in docs/input/DESIGN-neu.md: the warm palette poured into Mantine's ten-step
@@ -109,26 +100,21 @@ const dark: MantineColorsTuple = [
 // shade 7 pressed) lands on today's values. Shades 0/1/3/5/8/9 are unused
 // interpolation steps the document does not name.
 const brand: MantineColorsTuple = [
-  "#e6f0fa",
-  "#c9ddf3",
+  colors.brandText,
+  colors.brandText,
   colors.brandText, // brand.2 -- links, focus ring, active nav entry, command name
-  "#7fb0e2",
+  colors.brandHover,
   colors.brandHover, // brand.4 -- hover of the primary action
-  "#5b95d2",
+  colors.brand,
   colors.brand, // brand.6 -- primary action, selected-row/button brand edge
   colors.brandPress, // brand.7 -- press
-  "#3d6797",
-  "#2d4a6c",
+  colors.brandPress,
+  colors.brandPress,
 ];
 
 /**
- * "The contrast rule" in docs/input/DESIGN-neu.md: Mantine's `autoContrast`
- * default `luminanceThreshold` is 0.3. `{colors.brand}` (#538dcc) has a
- * relative luminance of 0.25 -- below Mantine's default threshold, so
- * `autoContrast` would treat it as "dark enough" and put white text on it:
- * 3.47:1, failing WCAG AA on every primary button. At 0.2, `autoContrast`
- * instead picks `{colors.onBrand}` (5.6:1). This is not a stray override
- * -- raising it back to 0.3 breaks every primary button's contrast.
+ * Keep Mantine's contrast threshold aligned with the existing primary action
+ * while legacy components remain on Mantine.
  */
 export const luminanceThreshold = 0.2;
 
@@ -138,11 +124,7 @@ export const theme: MantineThemeOverride = createTheme({
   primaryShade: 6,
   autoContrast: true,
   luminanceThreshold,
-  // `autoContrast`'s dark branch reaches for `theme.black`, not a
-  // per-color token; without this override it renders pure `#000` instead
-  // of `{colors.onBrand}` on the primary button. Not pure black: the doc
-  // is explicit that the button text is a dark shade of the palette, and
-  // gives its own contrast ratio (5.6:1) against it.
+  // Mantine uses `theme.black` for dark primary-action contrast.
   black: colors.onBrand,
   focusRing: "auto",
   fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif",
@@ -172,7 +154,7 @@ export const theme: MantineThemeOverride = createTheme({
     // belongs only to floating layers (Modal, Drawer, Popover, Menu, the
     // Select dropdown). Every other shadow level falls back to none, so a
     // component's larger default shadow is silenced by the theme itself.
-    xs: "0 8px 24px rgba(0, 0, 0, 0.45)",
+    xs: "var(--shadow-floating)",
     sm: "none",
     md: "none",
     lg: "none",
@@ -205,8 +187,12 @@ export const theme: MantineThemeOverride = createTheme({
   components: {
     Button: {
       defaultProps: { size: "md" },
-      vars: () => ({
+      vars: (_theme: MantineTheme, props: { color?: string; variant?: string }) => ({
         root: {
+          ...(props.color === undefined || props.color === "brand") &&
+            (props.variant === undefined || props.variant === "filled")
+            ? { "--button-color": colors.onBrand }
+            : {},
           "--button-height-md": "44px",
           "--button-height-compact-md": "34px",
           "--button-padding-x-md": "16px",

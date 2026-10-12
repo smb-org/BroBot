@@ -21,6 +21,9 @@
     "noImplicitOverride": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "types": ["vite/client", "@cloudflare/vitest-plugin/types"]
   },
   "include": [

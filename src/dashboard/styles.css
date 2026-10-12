@@ -24,6 +24,7 @@
   --rail: #181716;
   --surface-raised: #1e1c1a;
   --surface: var(--surface-raised);
+  --surface-hover: #262321;
   --surface-inspector: #1a1917;
   --surface-well: #100f0e;
   --surface-depth: #0a0908;
@@ -50,6 +51,7 @@
 
   /* Green, amber, and red are the only status colors. */
   --green: #3ddc84;
+  --green-surface: rgba(61, 220, 132, 0.12);
   --warn: #d9a441;
   --error: #e2564d;
   --error-text: #e8655d;
@@ -61,6 +63,7 @@
   --raid-surface: rgba(244, 162, 211, 0.12);
   --moderation: #5cc9c4;
   --moderation-surface: rgba(92, 201, 196, 0.12);
+  --shadow-floating: 0 8px 24px rgba(0, 0, 0, 0.45);
 
   /* Two corner radii. */
   --r-control: 6px;

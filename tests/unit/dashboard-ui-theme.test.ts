@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
@@ -30,9 +32,16 @@ function contrastRatio(hexA: string, hexB: string): number {
 }
 
 const WCAG_AA_NORMAL_TEXT = 4.5;
+const legacyStyles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
+
+function resolveLegacyColor(variable: string): string {
+  const match = new RegExp(`${variable}:\\s*(#[\\da-fA-F]{6})`).exec(legacyStyles);
+  if (!match?.[1]) throw new Error(`Missing color token ${variable}`);
+  return match[1];
+}
 
 interface ComponentThemeValues {
-  vars?: (theme: unknown, props: { size: string }, context: unknown) => { root?: Record<string, string>; wrapper?: Record<string, string> };
+  vars?: (theme: unknown, props: { size: string; color?: string; variant?: string }, context: unknown) => { root?: Record<string, string>; wrapper?: Record<string, string> };
   styles?: Record<string, Record<string, string | number>>;
 }
 
@@ -48,13 +57,15 @@ describe("theme contrast rule", () => {
   });
 
   it("places {colors.brand}'s luminance between 0.2 and 0.3, where the threshold choice flips the outcome", () => {
-    const brandLuminance = relativeLuminance(colors.brand);
+    expect(colors.brand).toBe("var(--brand)");
+    const brandLuminance = relativeLuminance(resolveLegacyColor("--brand"));
     expect(brandLuminance).toBeGreaterThan(0.2);
     expect(brandLuminance).toBeLessThan(0.3);
   });
 
   it("counter-probe: Mantine's default 0.3 threshold would put white text on brand and fail WCAG AA", () => {
-    const brandLuminance = relativeLuminance(colors.brand);
+    const brandColor = resolveLegacyColor("--brand");
+    const brandLuminance = relativeLuminance(brandColor);
     const defaultThreshold = 0.3;
 
     // Mantine's isLightColor: `luminance(color) > threshold`. Below the
@@ -63,22 +74,23 @@ describe("theme contrast rule", () => {
     const isLightUnderDefault = brandLuminance > defaultThreshold;
     expect(isLightUnderDefault).toBe(false);
 
-    const whiteOnBrand = contrastRatio("#ffffff", colors.brand);
+    const whiteOnBrand = contrastRatio("#ffffff", brandColor);
     expect(whiteOnBrand).toBeLessThan(WCAG_AA_NORMAL_TEXT);
   });
 
   it("at the configured 0.2 threshold, brand reads as light and autoContrast picks the dark on-brand text, which passes AA", () => {
-    const brandLuminance = relativeLuminance(colors.brand);
+    const brandColor = resolveLegacyColor("--brand");
+    const onBrandColor = resolveLegacyColor("--on-brand");
+    const brandLuminance = relativeLuminance(brandColor);
     const isLightUnderConfiguredThreshold = brandLuminance > luminanceThreshold;
     expect(isLightUnderConfiguredThreshold).toBe(true);
 
     // theme.black backs autoContrast's dark-text branch; it must be
-    // onBrand ("marke-auf" in the design document), not Mantine's default
-    // pure black, or the button text doesn't match the document's own
-    // contrast figure.
+    // onBrand from the active palette, not Mantine's default pure black, so
+    // the button text matches the contrast value defined by the design.
     expect(theme.black).toBe(colors.onBrand);
 
-    const onBrandOnBrand = contrastRatio(colors.onBrand, colors.brand);
+    const onBrandOnBrand = contrastRatio(onBrandColor, brandColor);
     expect(onBrandOnBrand).toBeGreaterThanOrEqual(WCAG_AA_NORMAL_TEXT);
   });
 });
@@ -108,6 +120,7 @@ describe("form density size step", () => {
         UiProvider,
         null,
         createElement(Button, null, "Outside"),
+        createElement(Button, { variant: "primary", iconOnly: false, children: "Primary" }),
         createElement(FormDensity.Provider, { value: "form" }, createElement(Button, null, "Inside")),
       ),
     );
@@ -115,6 +128,7 @@ describe("form density size step", () => {
 
     expect(componentValues.Button?.vars?.(theme, { size: "md" }, {}).root?.["--button-fz"]).toBe("13px");
     expect(buttons[0]?.style.getPropertyValue("--button-fz")).toBe("13px");
+    expect(screen.getByRole("button", { name: "Primary" }).style.getPropertyValue("--button-color")).toBe(colors.onBrand);
     expect(screen.getByRole("button", { name: "Inside" }).style.getPropertyValue("--button-fz")).toBe("14px");
   });
 });

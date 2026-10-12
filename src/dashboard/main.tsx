@@ -50,6 +50,7 @@ import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, u
 import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading, visibleModuleNavigationIds } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
 import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, notify, Select as UiSelect, Shell, Sidebar, Skeleton, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup } from "./ui";
+import { readPalette, writePalette } from "./ui/palette";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
@@ -67,7 +68,8 @@ import { loadingState, type LoadState } from "./load-state";
 import { queryKeys } from "./data/keys";
 import { dashboardAuthenticationRequiredEvent, dispatchDashboardAuthenticationRequired } from "./data/events";
 import { DashboardDataProvider } from "./data/provider";
-import "./styles.css";
+
+writePalette(readPalette());
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 

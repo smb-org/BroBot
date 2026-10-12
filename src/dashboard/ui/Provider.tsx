@@ -1,4 +1,4 @@
-import "@mantine/core/styles.css";
+import "./tokens.css";
 
 import { MantineProvider } from "@mantine/core";
 import type { ReactNode } from "react";

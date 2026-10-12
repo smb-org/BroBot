@@ -29,13 +29,13 @@ describe("BlockingState", () => {
     render(<BlockingState tone="neutral" title="Kanal nicht freigegeben" description="Andere Kanäle sind nicht betroffen." contact="Nur der Betreiber kann freigeben." />);
 
     const title = screen.getByRole("heading", { name: "Kanal nicht freigegeben" });
-    expect(title).toHaveStyle({ color: "rgb(242, 239, 235)" });
+    expect(title).toHaveStyle({ color: "var(--text)" });
   });
 
   it("marks the bot outage in error red on the title", () => {
     render(<BlockingState tone="error" title="Der Bot ist nicht angemeldet" description="Nichts empfängt Ereignisse." contact="Wende dich an den Betreiber der Installation." />);
 
     const title = screen.getByRole("heading", { name: "Der Bot ist nicht angemeldet" });
-    expect(title).toHaveStyle({ color: "rgb(226, 86, 77)" });
+    expect(title).toHaveStyle({ color: "var(--error)" });
   });
 });
