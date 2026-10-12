@@ -4,6 +4,7 @@ import type { ModulePanelProperties } from "../../contract";
 import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
 import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
+import { blockReferencesInText } from "../../contracts/text-block-references";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { Badge, Button, ChatPreview, ConfirmDialog, Field, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, Skeleton, SubInspector, TextArea, notify, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
@@ -254,7 +255,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     if (visited.has(name)) return [];
     visited.add(name);
     const variants = draft !== null && name === draft.name ? draft.variants : blockByName.get(name)?.variants ?? [];
-    const nestedNames = [...new Set(variants.flatMap((variant) => variant.texts.flatMap((text) => [...text.matchAll(/\{([a-z0-9_]{1,32})\}/gu)].flatMap((match) => match[1] === undefined ? [] : [match[1]]))))];
+    const nestedNames = [...new Set(variants.flatMap((variant) => variant.texts.flatMap(blockReferencesInText)))];
     return [...variants, ...nestedNames.flatMap((nestedName) => nestedVariants(nestedName, new Set(visited)))];
   };
   const variantsInDraftTree = draft === null ? [] : nestedVariants(draft.name);
@@ -267,6 +268,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     templateVariableNames(text).some((name) => commandInputVariables.has(name)),
   )) &&
     (data?.usages[draft.name] ?? []).some((usage) => usage.kind !== "command");
+  const blockUsages = draft === null ? [] : data?.usages[draft.name] ?? [];
 
   // Bumped on every editor switch; an obsolete save/delete must not touch the newer editor.
   const editorSwitch = useRef(0);
@@ -625,7 +627,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                         {variant.texts.map((text, textIndex) => (
                           <div className="text-library__text-field" key={`${variant.id}-${String(textIndex)}`}>
                             <TextArea label={`${labels.text}${variant.texts.length > 1 ? ` ${String(textIndex + 1)}` : ""}`} hint={labels.textHint} value={text} onChange={(value) => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.map((current, currentIndex) => currentIndex === textIndex ? value : current) })) })} maxLength={TEXT_BLOCK_MAXIMUMS.textLength} disabled={pending} variables={[
-                              ...data.templateVariables.filter((variable) => !data.blocks.some((block) => block.name === variable.name)).flatMap((variable) => {
+                              ...data.templateVariables.filter((variable) => !variable.isTextBlock).flatMap((variable) => {
                                 if (variable.group === undefined) return [];
                                 const pickerCopy = variable.picker?.[resolvedLanguage];
                                 const systemCopy = variable.source === "system"
@@ -645,7 +647,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                                   ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
                                 }];
                               }),
-                              ...data.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => ({ name: block.name, label: block.name, description: labels.variableDescription(block.name), sample: block.variants.flatMap((entry) => entry.texts)[0] ?? "", group: "channel" as const, isTextBlock: true })),
+                              ...data.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => ({ name: `text.${block.name}`, label: `text.${block.name}`, description: labels.variableDescription(block.name), sample: block.variants.flatMap((entry) => entry.texts)[0] ?? "", group: "channel" as const, isTextBlock: true })),
                             ]} messages={{
                               countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
                               previewCountLabel: (count) => String(count),
@@ -711,11 +713,12 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
 
               <InspectorSection title={labels.uses}>
                 <div data-testid="text-library-usage-slot" style={{ height: "calc(var(--s10) * 7)", overflowY: "auto" }}>
-                  {(data.usages[draft.name] ?? []).length === 0 ? <p className="muted">{labels.noUsages}</p> : <ul className="text-library__usages">{(data.usages[draft.name] ?? []).map((usage, index) => <li key={`${usage.kind}-${usage.label}-${String(index)}`}><span>{labels.usageKind[usage.kind]}</span><span>{usage.label}</span></li>)}</ul>}
+                  {blockUsages.length === 0 ? <p className="muted">{labels.noUsages}</p> : <ul className="text-library__usages">{blockUsages.map((usage, index) => <li key={`${usage.kind}-${usage.label}-${String(index)}`}><span>{labels.usageKind[usage.kind]}</span><span>{usage.label}</span></li>)}</ul>}
+                  {blockUsages.length === 0 ? null : <p className="muted">{labels.deleteBlocked}</p>}
                 </div>
               </InspectorSection>
 
-              <InspectorActions destructive={isCreate ? undefined : <Button danger="subtle" disabled={!canManage || pending} onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>}>
+              <InspectorActions destructive={isCreate ? undefined : <Button danger="subtle" disabled={!canManage || pending || blockUsages.length > 0} onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>}>
                 {canManage ? <Button variant="primary" disabled={pending || !valid || (isCreate && atBlockLimit)} onClick={() => { void saveDraftWithToast(); }}>{isCreate ? labels.create : labels.save}</Button> : null}
                 {canManage ? <Button variant="subtle" disabled={pending} onClick={closeEditor}>{labels.discard}</Button> : null}
               </InspectorActions>

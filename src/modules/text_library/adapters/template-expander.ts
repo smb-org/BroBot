@@ -83,7 +83,7 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
     allVariantRows.push(...variantRows);
     const nextReferences = [...new Set(variantRows.flatMap((row) =>
       parseJson<string[]>(row.texts_json, []).flatMap(blockReferencesInText),
-    ))].filter((name) => !context.knownTemplateVariableNames.has(name) && !blockRows.has(name));
+    ))].filter((name) => !context.knownTemplateVariableNames.has(`text.${name}`) && !blockRows.has(name));
     if (depth >= 2 || nextReferences.length === 0) break;
     const nestedRows = await loadBlockRows(nextReferences);
     for (const row of nestedRows) blockRows.set(row.block_name, row);
@@ -174,7 +174,7 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
     budget: number,
   ): Promise<{ text: string; complete: boolean }> => {
     if (budget <= 0) return { text: "", complete: source.length === 0 };
-    const tokens = [...source.matchAll(/\{([a-z0-9_]{1,32})\}/gu)];
+    const tokens = [...source.matchAll(/\{text\.([a-z0-9_]{1,32})\}/gu)];
     if (tokens.length === 0) {
       const resolved = await resolveHostFragment(source);
       return { text: resolved.slice(0, budget), complete: resolved.length <= budget };
@@ -192,7 +192,7 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
       if (remainingSteps < 0) return { text: result, complete: false };
       const name = token[1];
       const start = token.index;
-      if (name === undefined || context.knownTemplateVariableNames.has(name) || ancestry.includes(name) || ancestry.length >= 3) continue;
+      if (name === undefined || context.knownTemplateVariableNames.has(`text.${name}`) || ancestry.includes(name) || ancestry.length >= 3) continue;
       const block = blocks.get(name);
       if (block === undefined) continue;
       if (!append(await resolveHostFragment(source.slice(offset, start)))) return { text: result, complete: false };

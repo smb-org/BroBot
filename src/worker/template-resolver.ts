@@ -419,7 +419,9 @@ export const createTemplateRenderer = (
       .filter((variable) => variable.contexts?.includes(context) ?? true)
       .map((variable) => variable.name));
     const requestedNames = provider.templateVariableNamespace === "text_blocks"
-      ? renderNames.filter((name) => TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name) && !knownVariableNames.has(name) && !Object.hasOwn(moduleValues, name))
+      ? renderNames.flatMap((name) => name.startsWith("text.") && TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name.slice("text.".length))
+        ? [name.slice("text.".length)]
+        : []).filter((name) => !Object.hasOwn(moduleValues, `text.${name}`))
       : renderNames.filter((name) => declaredNames.has(name) && !Object.hasOwn(moduleValues, name));
     if (requestedNames.length === 0) continue;
     if (provider.resolveTemplateValues === undefined) continue;
@@ -439,8 +441,9 @@ export const createTemplateRenderer = (
     }
     for (const name of requestedNames) {
       const value: unknown = resolved[name];
-      if (typeof value === "string") values[name] = value;
-      else if (mode === "overlay") addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
+      const tokenName = provider.templateVariableNamespace === "text_blocks" ? `text.${name}` : name;
+      if (typeof value === "string") values[tokenName] = value;
+      else if (mode === "overlay") addDiagnostic({ code: "template.lookup_unavailable", detail: { name: tokenName } });
     }
   }
   const parameterValuesByToken = new Map<string, string>();

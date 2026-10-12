@@ -1,10 +1,10 @@
 import { useCallback, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, NumberField, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
-import { FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH } from "../contracts";
+import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH } from "../contracts";
 import { faqTexts } from "./locale";
 import {
   createFaqEntry,
@@ -23,18 +23,18 @@ import {
 interface FaqDraft {
   name: string;
   patterns: string;
-  answerBlock: string;
+  answerText: string;
   cooldownSeconds: number | "";
   games: FaqGame[];
   chatTarget: FaqEntry["chatTarget"];
 }
 
-const emptyDraft = (): FaqDraft => ({ name: "", patterns: "", answerBlock: "", cooldownSeconds: FAQ_COOLDOWN_MINIMUM_SECONDS, games: [], chatTarget: "source_only" });
+const emptyDraft = (): FaqDraft => ({ name: "", patterns: "", answerText: "", cooldownSeconds: FAQ_COOLDOWN_MINIMUM_SECONDS, games: [], chatTarget: "source_only" });
 
 const draftFromEntry = (entry: FaqEntry): FaqDraft => ({
   name: entry.name,
   patterns: entry.matcher.type === "keywords" ? entry.matcher.patterns.join("\n") : "",
-  answerBlock: entry.answerBlock,
+  answerText: entry.answerText,
   cooldownSeconds: entry.cooldownSeconds,
   games: [...entry.games],
   chatTarget: entry.chatTarget,
@@ -42,14 +42,14 @@ const draftFromEntry = (entry: FaqEntry): FaqDraft => ({
 
 const inputFromDraft = (draft: FaqDraft): FaqMutationInput | null => {
   const patterns = draft.patterns.split("\n").map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0);
-  if (draft.name.trim().length === 0 || draft.answerBlock.length === 0 || patterns.length === 0 ||
+  if (draft.name.trim().length === 0 || draft.answerText.trim().length === 0 || draft.answerText.length > FAQ_ANSWER_MAX_LENGTH || patterns.length === 0 ||
       patterns.length > FAQ_PATTERN_MAXIMUM_COUNT || patterns.some((pattern) => pattern.length > FAQ_PATTERN_MAX_LENGTH) ||
       typeof draft.cooldownSeconds !== "number" || !Number.isInteger(draft.cooldownSeconds) ||
       draft.cooldownSeconds < FAQ_COOLDOWN_MINIMUM_SECONDS || draft.cooldownSeconds > FAQ_COOLDOWN_MAXIMUM_SECONDS) return null;
   return {
     name: draft.name.trim(),
     matcher: { type: "keywords", patterns },
-    answerBlock: draft.answerBlock,
+    answerText: draft.answerText,
     cooldownSeconds: draft.cooldownSeconds,
     games: draft.games,
     chatTarget: draft.chatTarget,
@@ -57,11 +57,11 @@ const inputFromDraft = (draft: FaqDraft): FaqMutationInput | null => {
 };
 
 const faqPanelDataFrom = (value: unknown): FaqPanelData => {
-  if (typeof value === "object" && value !== null && "entries" in value && "blocks" in value &&
-      Array.isArray(value.entries) && Array.isArray(value.blocks)) {
+  if (typeof value === "object" && value !== null && "entries" in value && "variables" in value &&
+      Array.isArray(value.entries) && Array.isArray(value.variables)) {
     return value as FaqPanelData;
   }
-  return { entries: [], blocks: [] };
+  return { entries: [], variables: [] };
 };
 
 const withFaqEntry = (current: unknown, entry: FaqEntry): FaqPanelData => {
@@ -144,8 +144,8 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     } catch (failure: unknown) {
       const code = faqErrorCode(failure);
       setError(code === "faq_cooldown_too_short" ? labels.cooldownMinError
-        : code === "faq_block_input_dependent" ? labels.inputDependentBlock
-        : code === "faq_block_missing" ? labels.missingBlock
+        : code === "faq_text_input_dependent" ? labels.inputDependentText
+        : code === "faq_text_block_missing" ? labels.missingTextBlock
           : code === "faq_entry_limit_reached" ? labels.entryLimit : labels.saveError);
     } finally { setPending(false); }
   };
@@ -204,7 +204,6 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     finally { setTestBusy(false); }
   };
 
-  const blockOptions = (data?.blocks ?? []).map((name) => ({ value: name, label: name }));
   const orderedEntries = data?.entries ?? [];
   const listStatus = query.isPending ? "loading" : data === undefined ? "error" : orderedEntries.length === 0 ? "empty" : "success";
 
@@ -226,7 +225,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
               <div className="timer-row__copy">
                 <strong>{entry.name}</strong>
                 <span>{entry.matcher.type === "keywords" ? entry.matcher.patterns.join(" · ") : entry.matcher.pattern}</span>
-                <span>{labels.answer} · <code>{entry.answerBlock}</code></span>
+                <span>{labels.answer} · {entry.answerText}</span>
                 <span>{labels.cooldown} · {String(entry.cooldownSeconds)} s</span>
                 {entry.games.length === 0 ? null : <span>{labels.games} · {entry.games.map((game) => game.name).join(", ")}</span>}
               </div>
@@ -281,7 +280,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
         onConfirm={() => { void save(); }}
         onCancel={closeDialog}
         pending={pending}
-        confirmDisabled={blockOptions.length === 0}
+        confirmDisabled={draft === null || inputFromDraft(draft) === null}
         {...(error === null ? {} : { error })}
       >
         {draft === null ? null : <div className="module-stack">
@@ -297,16 +296,18 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             disabled={pending}
             required
           />
-          <Select
+          <TextArea
             label={labels.answer}
-            value={draft.answerBlock || null}
-            onChange={(answerBlock) => patchDraft({ answerBlock: answerBlock ?? "" })}
-            options={blockOptions}
-            placeholder={labels.answer}
+            hint={labels.answerHint}
+            value={draft.answerText}
+            onChange={(answerText) => patchDraft({ answerText })}
+            maxLength={FAQ_ANSWER_MAX_LENGTH}
+            variables={data?.variables ?? []}
+            messages={labels.textAreaMessages}
+            minRows={2}
             disabled={pending}
             required
           />
-          {blockOptions.length === 0 ? <p className="muted">{labels.noBlocks}</p> : null}
           <NumberField
             label={labels.cooldown}
             hint={labels.cooldownHint}

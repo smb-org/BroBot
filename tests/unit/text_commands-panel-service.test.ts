@@ -22,7 +22,7 @@ describe("text command text-block picker", () => {
   it("offers only registrations marked as text blocks", () => {
     expect(textBlockNamesForPicker([
       registration("raid", "channel", false),
-      registration("text_library", "1hello", true),
-    ])).toEqual(["1hello"]);
+      registration("text_library", "text.hello", true),
+    ])).toEqual(["text.hello"]);
   });
 });

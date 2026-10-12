@@ -19,13 +19,13 @@ describe("embedded text block length warnings", () => {
   it("does not warn when the referenced block expansion stays within 500 characters", () => {
     const blocks = new Map<string, readonly TextBlockVariant[]>([["welcome", [variant("Hello")]]]);
 
-    expect(estimateEmbeddedBlockOverflow([`${"x".repeat(480)}{welcome}`], blocks, [])).toBeNull();
+    expect(estimateEmbeddedBlockOverflow([`${"x".repeat(480)}{text.welcome}`], blocks, [])).toBeNull();
   });
 
   it("warns only when an embedded block makes a variant exceed 500 and names that block", () => {
     const blocks = new Map<string, readonly TextBlockVariant[]>([["welcome", [variant("y".repeat(30))]]]);
 
-    expect(estimateEmbeddedBlockOverflow([`${"x".repeat(480)}{welcome}`], blocks, [])).toEqual({
+    expect(estimateEmbeddedBlockOverflow([`${"x".repeat(480)}{text.welcome}`], blocks, [])).toEqual({
       length: 510,
       blockNames: ["welcome"],
     });
@@ -35,7 +35,7 @@ describe("embedded text block length warnings", () => {
     const blocks = new Map<string, readonly TextBlockVariant[]>([["welcome", [variant("Hello")]]]);
 
     expect(estimateEmbeddedBlockOverflow(
-      [`${"x".repeat(460)}{sun.rise} {welcome}`],
+      [`${"x".repeat(460)}{sun.rise} {text.welcome}`],
       blocks,
       [{ name: "sun.rise", maxLength: 645 }],
     )).toBeNull();

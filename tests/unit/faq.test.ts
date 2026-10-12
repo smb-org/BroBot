@@ -18,7 +18,7 @@ const faqEntry = (overrides: Partial<FaqEntry> = {}): FaqEntry => ({
   name: "Sunset FAQ",
   enabled: true,
   matcher: { type: "keywords", patterns: ["get dark"] },
-  answerBlock: "sun",
+  answerText: "The sun sets at {sun.set}",
   cooldownSeconds: 60,
   games: [],
   chatTarget: "source_only",
@@ -53,6 +53,22 @@ const contextFor = (db: TestD1Database, gameId: string | null = null) => ({
 }) as unknown as ModuleExecutionContext;
 
 describe("FAQ literal matcher", () => {
+  it("exposes answer text as a text-block usage source", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "channel-a");
+      await database.prepare(
+        `INSERT INTO faq_entries (faq_id, channel_id, name, matcher_json, answer_text, created_at, updated_at)
+         VALUES ('faq-usage', 'channel-a', 'Greeting', '{"type":"keywords","patterns":["hello"]}', 'Hello {text.welcome}', ?, ?)`,
+      ).bind(NOW, NOW).run();
+
+      await expect(faqModule.templateUsageSources?.(database as unknown as D1Database, "channel-a"))
+        .resolves.toEqual([{ text: "Hello {text.welcome}", kind: "faq", label: "Greeting" }]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("normalizes case and accents while keeping Unicode word boundaries", () => {
     expect(normalizeFaqText("  CAFÉ\tbei Nacht  ")).toBe("cafe bei nacht");
     expect(normalizeFaqText("Straße ẞ")).toBe("strasse ss");
@@ -82,15 +98,15 @@ describe("FAQ literal matcher", () => {
       await insertChannel(database, "channel-a");
       await database.prepare(
         `INSERT INTO faq_entries
-          (faq_id, channel_id, name, matcher_json, answer_block, created_at, updated_at)
-         VALUES ('defaulted', 'channel-a', 'Defaulted', '{"type":"keywords","patterns":["hello"]}', 'sun', ?, ?)`,
+          (faq_id, channel_id, name, matcher_json, answer_text, created_at, updated_at)
+         VALUES ('defaulted', 'channel-a', 'Defaulted', '{"type":"keywords","patterns":["hello"]}', 'Hello from the sunset FAQ.', ?, ?)`,
       ).bind(NOW, NOW).run();
       await expect(database.prepare("SELECT cooldown_seconds FROM faq_entries WHERE faq_id = 'defaulted'")
         .first<{ cooldown_seconds: number }>()).resolves.toEqual({ cooldown_seconds: 30 });
       await expect(database.prepare(
         `INSERT INTO faq_entries
-          (faq_id, channel_id, name, matcher_json, answer_block, cooldown_seconds, created_at, updated_at)
-         VALUES ('too-short', 'channel-a', 'Too short', '{"type":"keywords","patterns":["hello"]}', 'sun', 29, ?, ?)`,
+          (faq_id, channel_id, name, matcher_json, answer_text, cooldown_seconds, created_at, updated_at)
+         VALUES ('too-short', 'channel-a', 'Too short', '{"type":"keywords","patterns":["hello"]}', 'Hello from the sunset FAQ.', 29, ?, ?)`,
       ).bind(NOW, NOW).run()).rejects.toThrow();
     } finally {
       database.close();
@@ -161,9 +177,9 @@ describe("FAQ literal matcher", () => {
       await insertChannel(database, "channel-a");
       await database.prepare(
         `INSERT INTO faq_entries
-          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
            games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
-         VALUES ('faq-1', 'channel-a', 'Sunset', 1, 'keywords', ?, 'sun', 60, '[]', 'source_only', 0, 1, NULL, ?, ?)`,
+         VALUES ('faq-1', 'channel-a', 'Sunset', 1, 'keywords', ?, 'The sun block answer.', 60, '[]', 'source_only', 0, 1, NULL, ?, ?)`,
       ).bind(JSON.stringify({ type: "keywords", patterns: ["get dark"] }), NOW, NOW).run();
       const repository = createFaqRepository(database as unknown as D1Database);
       const context = contextFor(database);
@@ -188,9 +204,9 @@ describe("FAQ literal matcher", () => {
       await insertChannel(database, "channel-a");
       await database.prepare(
         `INSERT INTO faq_entries
-          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
            games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
-         VALUES ('faq-1', 'channel-a', 'Sunset', 1, 'keywords', ?, 'sun', 30, ?, 'source_only', 0, 1, NULL, ?, ?)`,
+         VALUES ('faq-1', 'channel-a', 'Sunset', 1, 'keywords', ?, 'The sun block answer.', 30, ?, 'source_only', 0, 1, NULL, ?, ?)`,
       ).bind(JSON.stringify({ type: "keywords", patterns: ["get dark"] }), JSON.stringify([{ id: "77", name: "Game" }]), NOW, NOW).run();
       const repository = createFaqRepository(database as unknown as D1Database);
       const context = contextFor(database, null);
@@ -217,11 +233,11 @@ describe("FAQ literal matcher", () => {
       await insertChannel(database, "channel-a");
       await database.prepare(
         `INSERT INTO faq_entries
-          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
            games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
          VALUES
-          ('any-game', 'channel-a', 'Any game', 1, 'keywords', ?, 'sun', 30, '[]', 'source_only', 0, 1, NULL, ?, ?),
-          ('boss-fight', 'channel-a', 'Boss fight', 1, 'keywords', ?, 'night', 30, ?, 'source_only', 1, 1, NULL, ?, ?)`,
+          ('any-game', 'channel-a', 'Any game', 1, 'keywords', ?, 'General answer', 30, '[]', 'source_only', 0, 1, NULL, ?, ?),
+          ('boss-fight', 'channel-a', 'Boss fight', 1, 'keywords', ?, 'Boss fight answer', 30, ?, 'source_only', 1, 1, NULL, ?, ?)`,
       ).bind(
         JSON.stringify({ type: "keywords", patterns: ["get dark"] }), NOW, NOW,
         JSON.stringify({ type: "keywords", patterns: ["boss fight"] }), JSON.stringify([{ id: "77", name: "Game" }]), NOW, NOW,
@@ -242,7 +258,7 @@ describe("FAQ literal matcher", () => {
 
       // Matches only the game-bound entry: exactly one lookup, only now.
       const result = await processFaqMessage({ ...eventFor("any boss fight tips?"), triggerId: "game-bound" }, repository, context);
-      expect(result.actions).toMatchObject([{ kind: "chat", text: "{night}" }]);
+      expect(result.actions).toMatchObject([{ kind: "chat", text: "Boss fight answer" }]);
       expect(context.channelGameId).toHaveBeenCalledTimes(1);
     } finally {
       database.close();
@@ -255,11 +271,11 @@ describe("FAQ literal matcher", () => {
       await insertChannel(database, "channel-a");
       await database.prepare(
         `INSERT INTO faq_entries
-          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
            games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
          VALUES
-          ('wrong-game', 'channel-a', 'Other game', 1, 'keywords', ?, 'sun', 30, ?, 'source_only', 0, 1, NULL, ?, ?),
-          ('eligible', 'channel-a', 'Any game', 1, 'keywords', ?, 'night', 30, '[]', 'source_only', 1, 1, NULL, ?, ?)`,
+          ('wrong-game', 'channel-a', 'Other game', 1, 'keywords', ?, 'Sun answer', 30, ?, 'source_only', 0, 1, NULL, ?, ?),
+          ('eligible', 'channel-a', 'Any game', 1, 'keywords', ?, 'Night answer', 30, '[]', 'source_only', 1, 1, NULL, ?, ?)`,
       ).bind(
         JSON.stringify({ type: "keywords", patterns: ["get dark"] }), JSON.stringify([{ id: "77", name: "Other" }]), NOW, NOW,
         JSON.stringify({ type: "keywords", patterns: ["get dark"] }), NOW, NOW,
@@ -267,7 +283,7 @@ describe("FAQ literal matcher", () => {
       const repository = createFaqRepository(database as unknown as D1Database);
       const context = contextFor(database, "88");
       const result = await processFaqMessage(eventFor("When does it get dark?"), repository, context);
-      expect(result.actions).toMatchObject([{ kind: "chat", text: "{night}" }]);
+      expect(result.actions).toMatchObject([{ kind: "chat", text: "Night answer" }]);
     } finally {
       database.close();
     }
@@ -279,11 +295,11 @@ describe("FAQ literal matcher", () => {
       await insertChannel(database, "channel-a");
       await database.prepare(
         `INSERT INTO faq_entries
-          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
            games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
          VALUES
-          ('boss-fight', 'channel-a', 'Boss fight', 1, 'keywords', ?, 'boss', 30, ?, 'source_only', 0, 1, NULL, ?, ?),
-          ('any-game', 'channel-a', 'Any game', 1, 'keywords', ?, 'generic', 30, '[]', 'source_only', 1, 1, NULL, ?, ?)`,
+          ('boss-fight', 'channel-a', 'Boss fight', 1, 'keywords', ?, 'Boss fight answer', 30, ?, 'source_only', 0, 1, NULL, ?, ?),
+          ('any-game', 'channel-a', 'Any game', 1, 'keywords', ?, 'General answer', 30, '[]', 'source_only', 1, 1, NULL, ?, ?)`,
       ).bind(
         JSON.stringify({ type: "keywords", patterns: ["get dark"] }), JSON.stringify([{ id: "77", name: "Game" }]), NOW, NOW,
         JSON.stringify({ type: "keywords", patterns: ["get dark"] }), NOW, NOW,
@@ -294,7 +310,7 @@ describe("FAQ literal matcher", () => {
       // no-game scan would have found the unrestricted entry first.
       const context = contextFor(database, "77");
       const result = await processFaqMessage(eventFor("When does it get dark?"), repository, context);
-      expect(result.actions).toMatchObject([{ kind: "chat", text: "{boss}" }]);
+      expect(result.actions).toMatchObject([{ kind: "chat", text: "Boss fight answer" }]);
       expect(context.channelGameId).toHaveBeenCalledTimes(1);
     } finally {
       database.close();
@@ -307,9 +323,9 @@ describe("FAQ literal matcher", () => {
       await insertChannel(database, "channel-a");
       await database.prepare(
         `INSERT INTO faq_entries
-          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
            games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
-         VALUES ('wrong-game', 'channel-a', 'Other game', 1, 'keywords', ?, 'sun', 30, ?, 'source_only', 0, 1, NULL, ?, ?)`,
+         VALUES ('wrong-game', 'channel-a', 'Other game', 1, 'keywords', ?, 'Sun answer', 30, ?, 'source_only', 0, 1, NULL, ?, ?)`,
       ).bind(JSON.stringify({ type: "keywords", patterns: ["get dark"] }), JSON.stringify([{ id: "77", name: "Other" }]), NOW, NOW).run();
       const repository = createFaqRepository(database as unknown as D1Database);
 
@@ -331,9 +347,9 @@ describe("FAQ literal matcher", () => {
       await insertChannel(database, "channel-a");
       await database.prepare(
         `INSERT INTO faq_entries
-          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
            games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
-         VALUES ('faq-1', 'channel-a', 'Sunset', 1, 'keywords', ?, 'sun', 30, '[]', 'source_only', 0, 1, NULL, ?, ?)`,
+         VALUES ('faq-1', 'channel-a', 'Sunset', 1, 'keywords', ?, 'The sun block answer.', 30, '[]', 'source_only', 0, 1, NULL, ?, ?)`,
       ).bind(JSON.stringify({ type: "keywords", patterns: ["get dark"] }), NOW, NOW).run();
       const repository = createFaqRepository(database as unknown as D1Database);
       const context = contextFor(database);

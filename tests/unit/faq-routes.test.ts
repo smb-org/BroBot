@@ -43,7 +43,7 @@ const requestFor = async (
 const insertFaqEntry = async (database: TestD1Database): Promise<void> => {
   await database.prepare(
     `INSERT INTO faq_entries
-      (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+      (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
        games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
      VALUES ('entry-1', 'channel-a', 'Greeting', 1, 'keywords', ?, 'sun', 30, '[]', 'source_only', 0, 1, NULL, ?, ?)`,
   ).bind(JSON.stringify({ type: "keywords", patterns: ["hello"] }), "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
@@ -52,7 +52,7 @@ const insertFaqEntry = async (database: TestD1Database): Promise<void> => {
 const insertRestrictedFaqEntry = async (database: TestD1Database): Promise<void> => {
   await database.prepare(
     `INSERT INTO faq_entries
-      (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+      (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
        games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
      VALUES ('entry-2', 'channel-a', 'Boss fight', 1, 'keywords', ?, 'sun', 30, ?, 'source_only', 1, 1, NULL, ?, ?)`,
   ).bind(
@@ -89,7 +89,7 @@ describe("FAQ routes", () => {
       await requestFor("operator-1", "/api/channels/channel-a/modules/faq/entries/entry-1", "PATCH", {
         name: "Changed",
         matcher: { type: "keywords", patterns: ["hello"] },
-        answerBlock: "sun",
+        answerText: "Sunset is at {sun.set}",
         cooldownSeconds: 30,
         games: [],
         chatTarget: "source_only",

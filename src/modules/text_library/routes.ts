@@ -227,10 +227,13 @@ textLibraryRoutes.delete("/blocks/:name", async (context) => {
   if (!Number.isSafeInteger(revision) || revision < 1) return context.json({ error: "text_library_block_invalid" }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const channelId = param(context, "channelId");
-  const snapshot = await service.list(channelId);
-  const result = await service.delete(channelId, param(context, "name"), revision, snapshot.settings.graphRevision, context.get("actor"), nowIso());
+  const snapshot = await service.list(channelId, await context.get("templateUsageSources")(channelId));
+  const name = param(context, "name");
+  const usages = snapshot.usages[name] ?? [];
+  if (usages.length > 0) return context.json({ error: "text_library_block_in_use", usages }, 409);
+  const result = await service.delete(channelId, name, revision, snapshot.settings.graphRevision, context.get("actor"), nowIso());
   if (result.ok) {
-    await publishBlockInvalidations(context.get("publishModuleOverlayMessage"), channelId, snapshot.blocks, param(context, "name"));
+    await publishBlockInvalidations(context.get("publishModuleOverlayMessage"), channelId, snapshot.blocks, name);
     return context.json({ ok: true });
   }
   return context.json({ error: `text_library_${result.reason}`, ...(result.current === undefined ? {} : { current: result.current }) }, result.reason === "conflict" ? 409 : result.reason === "not_authorized" ? 403 : 404);

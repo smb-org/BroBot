@@ -32,6 +32,10 @@ describe("template helpers", () => {
     expect(renderTemplate("{weather.current.temperature}", { "weather.current.temperature": "18 °C" })).toBe("18 °C");
   });
 
+  it("parses namespaced text blocks whose names begin with a digit or underscore", () => {
+    expect(templateVariableNames("{text.1hello} {text._hello} {welcome}")).toEqual(["text.1hello", "text._hello", "welcome"]);
+  });
+
   it("only suggests close names", () => {
     expect(closestTemplateVariable("viewr", variables)).toBe("viewers");
     expect(closestTemplateVariable("donations", [...variables, { name: "var.donations", sample: "0", maxLength: 10 }])).toBe("var.donations");

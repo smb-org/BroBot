@@ -318,15 +318,18 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
       module.templateUsageSources?.(context.env.DB, channelId) ?? Promise.resolve([]),
     ));
     const overlayRows = await context.env.DB.prepare(
-      `SELECT overlay.name AS overlay_name, element.label, element.text, element.config_json
+      `SELECT overlay.name AS overlay_name, element.label, element.text, element.config_json,
+              CASE WHEN element.kind = 'text_library.block'
+                   THEN COALESCE('{text.' || json_extract(element.config_json, '$.blockName') || '}', '')
+                   ELSE '' END AS referenced_text_block
          FROM overlay_elements AS element JOIN overlays AS overlay
            ON overlay.channel_id = element.channel_id AND overlay.overlay_id = element.overlay_id
         WHERE element.channel_id = ? ORDER BY overlay.name, element.label`,
-    ).bind(channelId).all<{ overlay_name: string; label: string; text: string; config_json: string }>();
+    ).bind(channelId).all<{ overlay_name: string; label: string; text: string; config_json: string; referenced_text_block: string }>();
     return [
       ...moduleSources.flat(),
       ...overlayRows.results.map((row) => ({
-        text: `${row.text} ${row.config_json}`,
+        text: `${row.text} ${row.config_json} ${row.referenced_text_block}`,
         kind: "overlay" as const,
         label: row.label || row.overlay_name,
       })),

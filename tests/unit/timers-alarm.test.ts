@@ -20,7 +20,7 @@ const insertChannel = async (): Promise<void> => {
 const insertTimer = async (input: {
   id?: string;
   name?: string;
-  blockName?: string;
+  messageText?: string;
   trigger: unknown;
   triggerType: "interval" | "stream_start" | "time_of_day" | "before_event";
   chatTarget?: "all_chats" | "source_only";
@@ -29,14 +29,14 @@ const insertTimer = async (input: {
 }): Promise<void> => {
   await database.prepare(
     `INSERT INTO timers
-      (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
+      (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
        next_run_at, last_run_at, last_chat_activity_count, created_at, updated_at)
      VALUES (?, ?, ?, 1, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?)`,
   ).bind(
     input.id ?? timerId,
     channelId,
     input.name ?? "Scheduled message",
-    input.blockName ?? "welcome",
+    input.messageText ?? "Scheduled message",
     input.triggerType,
     JSON.stringify(input.trigger),
     input.chatTarget ?? "source_only",

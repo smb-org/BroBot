@@ -29,11 +29,12 @@ const EXISTING_BARE_MODULE_VARIABLES: Readonly<Record<string, ReadonlySet<string
 };
 export const validateModuleTemplateVariable = (module: BotModule, name: string): void => {
   if (module.templateVariableNamespace === "text_blocks") {
-    if (!TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name)) {
-      throw new Error(`Text block variable ${name} must be a bare block name.`);
+    const blockName = name.startsWith("text.") ? name.slice("text.".length) : "";
+    if (!TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(blockName)) {
+      throw new Error(`Text block variable ${name} must use the text.<name> format.`);
     }
-    if (HOST_TEMPLATE_VARIABLE_NAMES.has(name)) {
-      throw new Error(`Text block variable ${name} is reserved by the host.`);
+    if (HOST_TEMPLATE_VARIABLE_NAMES.has(blockName)) {
+      throw new Error(`Text block variable ${blockName} is reserved by the host.`);
     }
     return;
   }

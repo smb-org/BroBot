@@ -9,6 +9,17 @@ import { blockReferencesInText } from "./text-block-references";
 
 export type EventTextBlockValidation = { ok: true } | { ok: false; reason: "missing" | "input_dependent" };
 
+const inputVariablesForEvent = (registeredVariables: readonly ModuleRegisteredTemplateVariable[]): Set<string> => {
+  const allVariables: readonly TemplateVariable[] = [...SYSTEM_TEMPLATE_VARIABLE_LIST, ...registeredVariables];
+  return new Set(allVariables.flatMap((variable) => {
+    const contexts = variable.contexts;
+    return contexts !== undefined && !contexts.includes("event") &&
+      (contexts.includes("chat_command") || variable.unavailableContextText !== undefined)
+      ? [variable.name]
+      : [];
+  }));
+};
+
 /** Validates a text block used without chat-command input, including nested blocks. */
 export const validateEventTextBlock = async (
   db: D1Database,
@@ -17,18 +28,8 @@ export const validateEventTextBlock = async (
   registeredVariables: readonly ModuleRegisteredTemplateVariable[],
   candidate?: ModuleTemplateContentCandidate,
 ): Promise<EventTextBlockValidation> => {
-  if (!/^[a-z][a-z0-9_]{0,31}$/u.test(blockName)) return { ok: false, reason: "missing" };
-  const inputVariables = new Set<string>();
-  const allVariables: readonly TemplateVariable[] = [...SYSTEM_TEMPLATE_VARIABLE_LIST, ...registeredVariables];
-  for (const variable of allVariables) {
-    const contexts = variable.contexts;
-    if (contexts !== undefined && !contexts.includes("event") &&
-        (contexts.includes("chat_command") || variable.unavailableContextText !== undefined)) {
-      inputVariables.add(variable.name);
-    }
-  }
-  const textBlockNames = new Set(registeredVariables.filter((variable) => variable.isTextBlock).map(({ name }) => name));
-  const knownNames = new Set(allVariables.map(({ name }) => name).filter((name) => !textBlockNames.has(name)));
+  if (!/^[a-z0-9_]{1,32}$/u.test(blockName)) return { ok: false, reason: "missing" };
+  const inputVariables = inputVariablesForEvent(registeredVariables);
   const visited = new Set<string>();
   const visit = async (name: string, depth: number): Promise<EventTextBlockValidation> => {
     if (visited.has(name)) return { ok: true };
@@ -56,8 +57,7 @@ export const validateEventTextBlock = async (
       if (templateVariableNames(text).some((variable) => inputVariables.has(variable))) {
         return { ok: false, reason: "input_dependent" };
       }
-      const nested = blockReferencesInText(text).filter((reference) => !knownNames.has(reference));
-      for (const nestedName of nested) {
+      for (const nestedName of blockReferencesInText(text)) {
         const result = await visit(nestedName, depth + 1);
         if (!result.ok) return result;
       }
@@ -67,17 +67,36 @@ export const validateEventTextBlock = async (
   return await visit(blockName, 1);
 };
 
+/** Validates a free-text template and every text block it embeds for event use. */
+export const validateEventTemplateText = async (
+  db: D1Database,
+  channelId: string,
+  text: string,
+  registeredVariables: readonly ModuleRegisteredTemplateVariable[],
+  candidate?: ModuleTemplateContentCandidate,
+): Promise<EventTextBlockValidation> => {
+  const inputVariables = inputVariablesForEvent(registeredVariables);
+  if (templateVariableNames(text).some((name) => inputVariables.has(name))) {
+    return { ok: false, reason: "input_dependent" };
+  }
+  for (const blockName of blockReferencesInText(text)) {
+    const validation = await validateEventTextBlock(db, channelId, blockName, registeredVariables, candidate);
+    if (!validation.ok) return validation;
+  }
+  return { ok: true };
+};
+
 /** Implements the generic template-content validation contract for one module's consumers. */
-export const validateEventTextBlockMutation = async (
+export const validateEventTemplateContentMutation = async (
   context: ModuleTemplateContentValidationContext,
-  consumers: readonly { name: string; blockName: string }[],
+  consumers: readonly { name: string; text: string }[],
 ): Promise<readonly ModuleTemplateContentIssue[]> => {
   const issues: ModuleTemplateContentIssue[] = [];
   for (const consumer of consumers) {
-    const validation = await validateEventTextBlock(
+    const validation = await validateEventTemplateText(
       context.DB,
       context.channelId,
-      consumer.blockName,
+      consumer.text,
       context.registeredVariables,
       context.candidate,
     );

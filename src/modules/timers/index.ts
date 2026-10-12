@@ -25,7 +25,7 @@ const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
 
 const listTimers = async (db: D1Database, channelId: string): Promise<Timer[]> => {
   const result = await db.prepare(
-    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
+    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
             next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
   ).bind(channelId).all<TimerRow>();
@@ -234,7 +234,7 @@ export const handleTimerAlarm = async (
     : "";
   const isEventTimeRefresh = refreshAt >= 0;
   const row = timerId.length === 0 ? null : await context.DB.prepare(
-    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
+    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
             next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(context.channelId, timerId).first<TimerRow>();
@@ -307,7 +307,7 @@ export const handleTimerAlarm = async (
       }
     }
     if (shouldSend) {
-      const rendered = await context.renderTemplate(`{${timer.blockName}}`, now);
+      const rendered = await context.renderTemplate(timer.messageText, now);
       const idempotencyKey = timerOccurrenceKey(timer.id, deadline, occurrence.streamId);
       const result = await context.sendChat(rendered.text, idempotencyKey, rendered.attributions, async () => {
         const current = await context.DB.prepare(
@@ -385,10 +385,10 @@ const refreshSchedules = async (
 };
 
 const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
-  const result = await db.prepare("SELECT timer_id, name, block_name FROM timers WHERE channel_id = ?")
-    .bind(channelId).all<{ timer_id: string; name: string; block_name: string }>();
+  const result = await db.prepare("SELECT timer_id, name, message_text FROM timers WHERE channel_id = ?")
+    .bind(channelId).all<{ timer_id: string; name: string; message_text: string }>();
   return result.results.map((row) => ({
-    text: `{${row.block_name}}`,
+    text: row.message_text,
     kind: "timer",
     label: row.name || row.timer_id,
   }));

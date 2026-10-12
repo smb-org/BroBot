@@ -78,7 +78,7 @@ export interface TextLibrarySettings {
 }
 
 export interface TextBlockUsage {
-  kind: "command" | "timer" | "overlay" | "event";
+  kind: "command" | "faq" | "timer" | "overlay" | "event";
   label: string;
 }
 

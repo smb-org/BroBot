@@ -11,7 +11,7 @@ export interface EmbeddedBlockOverflow {
   blockNames: readonly string[];
 }
 
-const TOKEN_PATTERN = /\{([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)\}/gu;
+const TOKEN_PATTERN = /\{(text\.[a-z0-9_]{1,32})\}|\{([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)\}/gu;
 
 export const estimateEmbeddedBlockOverflow = (
   texts: readonly string[],
@@ -26,16 +26,18 @@ export const estimateEmbeddedBlockOverflow = (
     let length = text.length;
     const embeddedBlocks: string[] = [];
     for (const match of text.matchAll(TOKEN_PATTERN)) {
-      const name = match[1];
+      const blockName = match[1]?.slice("text.".length);
+      const variableName = match[2];
+      const name = blockName ?? variableName;
       if (name === undefined) continue;
-      const variants = blocks.get(name);
+      const variants = blockName === undefined ? undefined : blocks.get(blockName);
       const replacementLength = variants === undefined
         ? variableLength(name, match[0].length)
         : resolveBlocks
-          ? estimateBlock(name, path).length
+          ? estimateBlock(blockName as string, path).length
           : match[0].length;
       length += replacementLength - match[0].length;
-      if (variants !== undefined) embeddedBlocks.push(name);
+      if (variants !== undefined && blockName !== undefined) embeddedBlocks.push(blockName);
     }
     return { length, embeddedBlocks };
   };

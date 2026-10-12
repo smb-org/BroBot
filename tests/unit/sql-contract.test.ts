@@ -108,7 +108,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["channelStateQuery", channelStateQuery],
   ["textCommandSelectColumns", textCommandSelectColumns],
   ["rowColumns", "votekick_id, target_user_id, target_login, initiator_user_id, status, threshold, yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at"],
-  ["selectFaqEntries", `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+  ["selectFaqEntries", `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
                                  games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at
                             FROM faq_entries
                            WHERE channel_id = ?`],

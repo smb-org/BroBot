@@ -1,6 +1,6 @@
 import { z } from "zod";
-import type { BotModule, ModuleTemplateContentValidationContext } from "../contract";
-import { validateEventTextBlockMutation } from "../contracts/text-block-validation";
+import type { BotModule, ModuleTemplateContentValidationContext, ModuleTemplateUsageSource } from "../contract";
+import { validateEventTemplateContentMutation } from "../contracts/text-block-validation";
 import { createFaqRepository } from "./adapters/d1";
 import { FAQ_MODULE_ID } from "./contracts";
 import { faqRoutes } from "./routes";
@@ -10,9 +10,15 @@ const settingsSchema = z.object({});
 
 const validateFaqTemplateMutation = async (context: ModuleTemplateContentValidationContext) => {
   const rows = await context.DB.prepare(
-    "SELECT name, answer_block FROM faq_entries WHERE channel_id = ? ORDER BY sort_order, faq_id",
-  ).bind(context.channelId).all<{ name: string; answer_block: string }>();
-  return validateEventTextBlockMutation(context, rows.results.map((row) => ({ name: row.name, blockName: row.answer_block })));
+    "SELECT name, answer_text FROM faq_entries WHERE channel_id = ? ORDER BY sort_order, faq_id",
+  ).bind(context.channelId).all<{ name: string; answer_text: string }>();
+  return validateEventTemplateContentMutation(context, rows.results.map((row) => ({ name: row.name, text: row.answer_text })));
+};
+
+const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
+  const rows = await db.prepare("SELECT faq_id, name, answer_text FROM faq_entries WHERE channel_id = ? ORDER BY sort_order, faq_id")
+    .bind(channelId).all<{ faq_id: string; name: string; answer_text: string }>();
+  return rows.results.map((row) => ({ text: row.answer_text, kind: "faq", label: row.name || row.faq_id }));
 };
 export const faqModule: BotModule<typeof settingsSchema> = {
   id: FAQ_MODULE_ID,
@@ -22,6 +28,7 @@ export const faqModule: BotModule<typeof settingsSchema> = {
   settingsSchema,
   defaultSettings: {},
   templateContext: "event",
+  templateUsageSources,
   validateTemplateContent: validateFaqTemplateMutation,
   navigationEntries: [{
     id: "faq",

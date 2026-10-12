@@ -1,11 +1,13 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
+import type { TextAreaMessages } from "../../../dashboard/ui";
 
 export interface TimersTexts {
   title: string;
   add: string;
   name: string;
+  message: string;
+  messageHint: string;
   trigger: string;
-  block: string;
   chatTarget: string;
   chatTargetLabels: Record<"all_chats" | "source_only", string>;
   interval: string;
@@ -38,10 +40,10 @@ export interface TimersTexts {
   loadError: string;
   saveError: string;
   deleteError: string;
-  blockMissing: string;
-  inputDependentBlock: string;
+  missingTextBlock: string;
+  inputDependentText: string;
   limitReached: string;
-  noBlocks: string;
+  textAreaMessages: TextAreaMessages;
   roleLocked: string;
   noNextRun: string;
   weekdaysNames: readonly string[];
@@ -52,8 +54,9 @@ const catalog: LocaleCatalog<TimersTexts> = {
     title: "Timer",
     add: "Timer anlegen",
     name: "Name",
+    message: "Nachricht",
+    messageHint: "Freitext mit Variablen und Textbausteinen im Format {text.name}.",
     trigger: "Auslöser",
-    block: "Textbaustein",
     chatTarget: "Chat-Ziel",
     chatTargetLabels: { all_chats: "Alle Chats", source_only: "Nur unser Chat" },
     interval: "Intervall",
@@ -86,10 +89,16 @@ const catalog: LocaleCatalog<TimersTexts> = {
     loadError: "Timer konnten nicht geladen werden.",
     saveError: "Der Timer konnte nicht gespeichert werden.",
     deleteError: "Der Timer konnte nicht entfernt werden.",
-    blockMissing: "Der ausgewählte Textbaustein existiert nicht mehr.",
-    inputDependentBlock: "Dieser Textbaustein benötigt Eingaben aus einem Chatbefehl und kann nicht geplant werden.",
+    missingTextBlock: "Ein verwendeter Textbaustein existiert nicht mehr.",
+    inputDependentText: "Geplante Nachrichten können keine Eingaben aus einem Chatbefehl verwenden.",
     limitReached: "Ein Kanal kann höchstens 50 Timer haben.",
-    noBlocks: "Lege zuerst einen Textbaustein in der Textbibliothek an.",
+    textAreaMessages: {
+      countLabel: (count, max) => `${String(count)}/${String(max)}`,
+      previewCountLabel: (count) => count,
+      unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable: ${name}` : `Unbekannte Variable: ${name}. Meintest du ${suggestion}?`,
+      insertSuggestionLabel: (name) => `${name} einfügen`,
+      worstCaseLength: (length, maximum) => `${String(length)} Zeichen, höchstens ${String(maximum)}.`,
+    },
     roleLocked: "Nur Broadcaster und Verwalter dürfen Timer bearbeiten.",
     noNextRun: "Kein Lauf geplant",
     weekdaysNames: ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"],
@@ -98,8 +107,9 @@ const catalog: LocaleCatalog<TimersTexts> = {
     title: "Timers",
     add: "Create timer",
     name: "Name",
+    message: "Message",
+    messageHint: "Free text with variables and text blocks in the {text.name} format.",
     trigger: "Trigger",
-    block: "Text block",
     chatTarget: "Chat target",
     chatTargetLabels: { all_chats: "All chats", source_only: "Only our chat" },
     interval: "Interval",
@@ -132,10 +142,16 @@ const catalog: LocaleCatalog<TimersTexts> = {
     loadError: "Timers could not be loaded.",
     saveError: "The timer could not be saved.",
     deleteError: "The timer could not be removed.",
-    blockMissing: "The selected text block no longer exists.",
-    inputDependentBlock: "This text block needs input from a chat command and cannot be scheduled.",
+    missingTextBlock: "A referenced text block no longer exists.",
+    inputDependentText: "Scheduled messages cannot use input from a chat command.",
     limitReached: "A channel can have up to 50 timers.",
-    noBlocks: "Create a text block in the text library first.",
+    textAreaMessages: {
+      countLabel: (count, max) => `${String(count)}/${String(max)}`,
+      previewCountLabel: (count) => count,
+      unknownVariable: (name, suggestion) => suggestion === null ? `Unknown template variable: ${name}` : `Unknown template variable: ${name}. Did you mean ${suggestion}?`,
+      insertSuggestionLabel: (name) => `Insert ${name}`,
+      worstCaseLength: (length, maximum) => `${String(length)} characters, maximum ${String(maximum)}.`,
+    },
     roleLocked: "Only broadcasters and managers can edit timers.",
     noNextRun: "No run scheduled",
     weekdaysNames: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],

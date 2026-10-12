@@ -24,7 +24,7 @@ export const textLibraryModule: BotModule<typeof settingsSchema> = {
   templateVariables: async (db, channelId) => {
     const result = await db.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ? ORDER BY block_name")
       .bind(channelId).all<{ block_name: string }>();
-    return result.results.map(({ block_name }) => ({ name: block_name, sample: "", maxLength: 500 }));
+    return result.results.map(({ block_name }) => ({ name: `text.${block_name}`, sample: "", maxLength: 500 }));
   },
   navigationEntries: [{
     id: "texts",

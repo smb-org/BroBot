@@ -372,7 +372,7 @@ describe("text library", () => {
       chatStatus: ["viewer"],
     };
     const commands = createTextCommandRepository(database as unknown as D1Database, authorize);
-    await commands.create({ channelId: CHANNEL_ID, name: "guide", text: "{greeting}", kind: "text", cooldownSeconds: 0, now: new Date(NOW).toISOString() }, ACTOR);
+    await commands.create({ channelId: CHANNEL_ID, name: "guide", text: "{text.greeting}", kind: "text", cooldownSeconds: 0, now: new Date(NOW).toISOString() }, ACTOR);
     const runCommand = async (isLive: boolean): Promise<string | undefined> => {
       const result = await processTextCommandMessage(commandEvent, commands, {
         renderTemplate: await createRenderer("chat_command", isLive, commandEvent),
@@ -383,8 +383,8 @@ describe("text library", () => {
     await expect(runCommand(false)).resolves.toBe("Hello offline");
 
     const event: ModuleEvent = { ...commandEvent, subscriptionType: "channel.raid", payload: {}, actor: null, chatStatus: null };
-    await expect((await createRenderer("event", true, event))("{greeting}", {})).resolves.toMatchObject({ text: "Hello live" });
-    await expect((await createRenderer("event", false, event))("{greeting}", {})).resolves.toMatchObject({ text: "Hello offline" });
+    await expect((await createRenderer("event", true, event))("{text.greeting}", {})).resolves.toMatchObject({ text: "Hello live" });
+    await expect((await createRenderer("event", false, event))("{text.greeting}", {})).resolves.toMatchObject({ text: "Hello offline" });
   });
 
   it.each(["1hello", "_hello"]) ("discovers and renders block names beginning with %s", async (name) => {
@@ -399,7 +399,7 @@ describe("text library", () => {
       actor: null,
       chatStatus: null,
     };
-    await expect(renderWithBlocks(`{${name}}`, event, "event")).resolves.toMatchObject({ text: `Rendered ${name}` });
+    await expect(renderWithBlocks(`{text.${name}}`, event, "event")).resolves.toMatchObject({ text: `Rendered ${name}` });
   });
 
   it("fully resolves host variables (dotted, parameterized) that follow or sit inside a block", async () => {
@@ -423,11 +423,11 @@ describe("text library", () => {
     }));
 
     // A dotted channel variable right after a block, in the same command text (#252).
-    await expect((await createRenderer())("{welcome} {var.points}", {})).resolves.toMatchObject({ text: "Hello 42" });
+    await expect((await createRenderer())("{text.welcome} {var.points}", {})).resolves.toMatchObject({ text: "Hello 42" });
     // A parameterized system variable nested inside a block's own text.
-    await expect((await createRenderer())("{roll}", {})).resolves.toMatchObject({ text: "You rolled 2" });
+    await expect((await createRenderer())("{text.roll}", {})).resolves.toMatchObject({ text: "You rolled 2" });
     // A dotted channel variable nested inside a block's own text.
-    await expect((await createRenderer())("{stats}", {})).resolves.toMatchObject({ text: "Points: 42" });
+    await expect((await createRenderer())("{text.stats}", {})).resolves.toMatchObject({ text: "Points: 42" });
   });
 
   it("does not treat viewer arguments as text block references", async () => {
@@ -436,7 +436,7 @@ describe("text library", () => {
       channelId: CHANNEL_ID,
       subscriptionType: "channel.chat.message",
       triggerId: "fictional-command-trigger",
-      payload: { message: { text: "!echo {welcome}" }, chatter_user_login: "esembe" },
+      payload: { message: { text: "!echo {text.welcome}" }, chatter_user_login: "esembe" },
       settings: {},
       receivedAt: new Date(NOW).toISOString(),
       actor: { userId: "fictional-user", login: "esembe", role: null },
@@ -444,33 +444,33 @@ describe("text library", () => {
     };
     const rendered = await createTemplateRenderer(event, "chat_command", [], await sourcesFor())(
       "{args}",
-      { args: "{welcome}" },
+      { args: "{text.welcome}" },
     );
 
-    expect(rendered.text).toBe("{welcome}");
+    expect(rendered.text).toBe("{text.welcome}");
   });
 
   it("rejects cycles and nesting deeper than three blocks when saving", async () => {
-    await expect(createBlock("cycle_a", [variant("default", "{cycle_b}")])).resolves.toMatchObject({ ok: true });
-    await expect(createBlock("cycle_b", [variant("default", "{cycle_a}")])).resolves.toMatchObject({
+    await expect(createBlock("cycle_a", [variant("default", "{text.cycle_b}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("cycle_b", [variant("default", "{text.cycle_a}")])).resolves.toMatchObject({
       ok: false,
       reason: "reference_cycle",
       path: ["cycle_a", "cycle_b", "cycle_a"],
     });
 
-    await expect(createBlock("root", [variant("default", "{middle}")])).resolves.toMatchObject({ ok: true });
-    await expect(createBlock("middle", [variant("default", "{leaf}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("root", [variant("default", "{text.middle}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("middle", [variant("default", "{text.leaf}")])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("leaf", [variant("default", "done")])).resolves.toMatchObject({ ok: true });
-    await expect(createBlock("too_deep", [variant("default", "{root}")])).resolves.toMatchObject({
+    await expect(createBlock("too_deep", [variant("default", "{text.root}")])).resolves.toMatchObject({
       ok: false,
       reason: "reference_depth_exceeded",
     });
   });
 
   it("reports direct and nested uses supplied by generic module contracts", async () => {
-    await expect(createBlock("answer", [variant("default", "{detail}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("answer", [variant("default", "{text.detail}")])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("detail", [variant("default", "A reusable detail")])).resolves.toMatchObject({ ok: true });
-    const snapshot = await service.list(CHANNEL_ID, [{ text: "!faq {answer}", kind: "command", label: "!faq" }]);
+    const snapshot = await service.list(CHANNEL_ID, [{ text: "!faq {text.answer}", kind: "command", label: "!faq" }]);
     expect(snapshot.usages.answer).toEqual([{ kind: "command", label: "!faq" }]);
     expect(snapshot.usages.detail).toEqual([{ kind: "command", label: "!faq" }]);
   });
@@ -478,9 +478,9 @@ describe("text library", () => {
   it("includes ad and raid templates in generic block usage tracking", async () => {
     await expect(createBlock("answer", [variant("default", "A reusable answer")])).resolves.toMatchObject({ ok: true });
     await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, ?)")
-      .bind(CHANNEL_ID, "ads", JSON.stringify({ ...adsModule.defaultSettings, automatic: "{answer}" })).run();
+      .bind(CHANNEL_ID, "ads", JSON.stringify({ ...adsModule.defaultSettings, automatic: "{text.answer}" })).run();
     await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, ?)")
-      .bind(CHANNEL_ID, "raid", JSON.stringify({ ...raidModule.defaultSettings, textLong: "{answer}" })).run();
+      .bind(CHANNEL_ID, "raid", JSON.stringify({ ...raidModule.defaultSettings, textLong: "{text.answer}" })).run();
 
     const sources = [
       ...(await adsModule.templateUsageSources?.(database as unknown as D1Database, CHANNEL_ID) ?? []),
@@ -624,13 +624,13 @@ describe("text library", () => {
       chatStatus: null,
     };
     const renderRandom = async (): Promise<string> =>
-      (await renderWithBlocks("{random_line}", randomEvent, "event")).text;
+      (await renderWithBlocks("{text.random_line}", randomEvent, "event")).text;
     const results = await Promise.all(Array.from({ length: 8 }, renderRandom));
     for (let index = 1; index < results.length; index += 1) {
       expect(results[index]).not.toBe(results[index - 1]);
     }
 
-    await expect(createBlock("long_line", [variant("default", "x".repeat(400) + "{long_child}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("long_line", [variant("default", "x".repeat(400) + "{text.long_child}")])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("long_child", [variant("default", "y".repeat(200))])).resolves.toMatchObject({ ok: true });
     const event: ModuleEvent = {
       channelId: CHANNEL_ID,
@@ -642,12 +642,12 @@ describe("text library", () => {
       actor: null,
       chatStatus: null,
     };
-    const longResult = await renderWithBlocks("{long_line}", event, "event");
+    const longResult = await renderWithBlocks("{text.long_line}", event, "event");
     expect(longResult.text).toHaveLength(500);
     expect(longResult.text.endsWith("…")).toBe(true);
 
     await expect(createBlock("full_line", [variant("default", "z".repeat(500))])).resolves.toMatchObject({ ok: true });
-    const message = await renderWithBlocks("{full_line} tail", event, "event");
+    const message = await renderWithBlocks("{text.full_line} tail", event, "event");
     expect(message.text).toHaveLength(505);
     expect(message.text.endsWith(" tail")).toBe(true);
     expect(truncateChatText(message.text)).toMatchObject({ truncated: true, text: `${"z".repeat(499)}…` });
@@ -668,9 +668,9 @@ describe("text library", () => {
       chatStatus: null,
     };
 
-    await renderWithBlocks("{single_line}", event, "event");
-    await renderWithBlocks("{multi_line}", event, "event", {}, "preview");
-    await renderWithBlocks("{multi_line}", event, "event", {}, "overlay");
+    await renderWithBlocks("{text.single_line}", event, "event");
+    await renderWithBlocks("{text.multi_line}", event, "event", {}, "preview");
+    await renderWithBlocks("{text.multi_line}", event, "event", {}, "overlay");
 
     const rows = await database.prepare(
       "SELECT block_name, last_chosen_index FROM text_block_variants WHERE channel_id = ? ORDER BY block_name",
@@ -683,7 +683,7 @@ describe("text library", () => {
 
   it("preserves suffix text when host variables shrink nested expansion below the output limit", async () => {
     await expect(createBlock("args_leaf", [variant("default", "{args}".repeat(83))])).resolves.toMatchObject({ ok: true });
-    await expect(createBlock("args_root", [variant("default", "{args_leaf}TAIL")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("args_root", [variant("default", "{text.args_leaf}TAIL")])).resolves.toMatchObject({ ok: true });
 
     const event: ModuleEvent = {
       channelId: CHANNEL_ID,
@@ -697,7 +697,7 @@ describe("text library", () => {
     };
     const rendered = await createTemplateRenderer(event, "chat_command", [], await sourcesFor({
       streamState: () => Promise.resolve("offline"),
-    }))("{args_root}", { args: "" });
+    }))("{text.args_root}", { args: "" });
 
     expect(rendered.text).toBe("TAIL");
   });
@@ -714,7 +714,7 @@ describe("text library", () => {
       .bind(CHANNEL_ID, "status_line").run();
 
     const render = async (stream: "online" | "offline"): Promise<string> => {
-      return (await renderWithBlocks("{status_line}", {
+      return (await renderWithBlocks("{text.status_line}", {
         channelId: CHANNEL_ID,
         subscriptionType: "channel.raid",
         triggerId: "fictional-status-trigger",
@@ -731,12 +731,12 @@ describe("text library", () => {
   });
 
   it("bounds expansion while resolving exponentially repeated nested references", async () => {
-    const repeated = (name: string): string => Array.from({ length: 166 }, () => `{${name}}`).join("");
+    const repeated = (name: string): string => Array.from({ length: 166 }, () => `{text.${name}}`).join("");
     await expect(createBlock("a", [variant("default", repeated("b"))])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("b", [variant("default", repeated("c"))])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("c", [variant("default", "x".repeat(500))])).resolves.toMatchObject({ ok: true });
 
-    const result = await renderWithBlocks("{a}", {
+    const result = await renderWithBlocks("{text.a}", {
       channelId: CHANNEL_ID,
       subscriptionType: "channel.raid",
       triggerId: "fictional-depth-trigger",
@@ -811,10 +811,10 @@ describe("text library", () => {
     await expect(reserved.json()).resolves.toEqual({ error: "text_library_block_reserved_name" });
   });
 
-  it("invalidates overlay blocks that transitively reference an edited or deleted block", async () => {
+  it("invalidates edited overlay blocks and refuses to delete a block used by an overlay", async () => {
     const created = await createBlock("welcome", [variant("default", "Before edit")]);
     if (!created.ok) throw new Error("Could not create the realtime test block.");
-    const parent = await createBlock("parent", [variant("default", "Nested: {welcome}")]);
+    const parent = await createBlock("parent", [variant("default", "Nested: {text.welcome}")]);
     if (!parent.ok) throw new Error("Could not create the parent realtime test block.");
     await insertLoginIdentityAndSession(database, "manager-overlay-edit");
     await insertMember(database, CHANNEL_ID, "manager-overlay-edit", "manager");
@@ -886,13 +886,12 @@ describe("text library", () => {
       },
     ), environment);
 
-    expect(deleted.status).toBe(200);
-    expect(published).toHaveLength(1);
-    expect(published[0]).toMatchObject({
-      type: "modul.text_library.blocks_updated",
-      payload: { blockName: "parent" },
-      overlayIds: ["overlay-welcome"],
+    expect(deleted.status).toBe(409);
+    await expect(deleted.json()).resolves.toEqual({
+      error: "text_library_block_in_use",
+      usages: [{ kind: "overlay", label: "Welcome" }],
     });
+    expect(published).toHaveLength(0);
   });
 
   it("measures a three-block render with ten conditional variants under the 10 ms CPU budget", async () => {
@@ -924,7 +923,7 @@ describe("text library", () => {
       actor: { userId: "fictional-user", login: "esembe", role: "broadcaster" },
       chatStatus: ["broadcaster"],
     };
-    const render = () => renderWithBlocks("{top}", event, "chat_command", {
+    const render = () => renderWithBlocks("{text.top}", event, "chat_command", {
       channelGameId: () => Promise.resolve(currentGame.id),
       streamState: () => Promise.resolve("offline"),
     });

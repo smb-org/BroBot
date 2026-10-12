@@ -1,9 +1,10 @@
 import { PanelApiError } from "../../../contracts/panel-error";
+import type { TemplateVariableOption } from "../../../dashboard/ui";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
 
 export interface FaqPanelData {
   entries: FaqEntry[];
-  blocks: string[];
+  variables: TemplateVariableOption[];
 }
 
 export interface FaqTestResult {
@@ -36,11 +37,18 @@ export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Pro
   ]);
   const [entries, variables] = await Promise.all([
     readJson<{ entries: FaqEntry[] }>(entriesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"] }[] }>(variablesResponse),
   ]);
   return {
     entries: entries.entries,
-    blocks: variables.variables.filter((variable) => variable.isTextBlock === true).map(({ name }) => name),
+    variables: variables.variables.map((variable) => ({
+      name: variable.name,
+      description: variable.description ?? variable.name,
+      sample: variable.sample ?? "",
+      ...(variable.group === undefined ? {} : { group: variable.group }),
+      kind: "module",
+      ...(variable.isTextBlock === true ? { isTextBlock: true } : {}),
+    })),
   };
 };
 

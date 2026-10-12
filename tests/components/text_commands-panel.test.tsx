@@ -51,7 +51,7 @@ const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMut
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
     if (url.pathname.endsWith("/template-variables") && method === "GET") return Promise.resolve(jsonResponse({ variables: templateVariables ?? [
-      { name: "welcome", moduleId: "text_library", isTextBlock: true },
+      { name: "text.welcome", moduleId: "text_library", isTextBlock: true },
       ...TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES.map((variable) => ({ ...variable, moduleId: "text_commands", isTextBlock: false })),
     ] }));
     if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: [] }));
@@ -560,13 +560,13 @@ describe("Text command editor", () => {
     const picker = templateEditorFor("text").querySelector(".command-library-picker");
     if (!(picker instanceof HTMLElement)) throw new Error("Text-library picker is missing");
     fireEvent.click(within(picker).getByRole("combobox", { name: "Text aus Bibliothek" }));
-    const welcomeOptions = await screen.findAllByText("{welcome}");
+    const welcomeOptions = await screen.findAllByText("{text.welcome}");
     const welcomeOption = welcomeOptions[0];
     if (welcomeOption === undefined) throw new Error("Text-library option is missing");
     fireEvent.click(welcomeOption);
     fireEvent.click(within(picker).getByRole("button", { name: "Text einsetzen" }));
 
-    expect(within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" })).toHaveValue("Hallo {user} aus {channel} {welcome}");
+    expect(within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" })).toHaveValue("Hallo {user} aus {channel} {text.welcome}");
   });
 
   it("orders timeout fields before advanced settings and accepts silent timeout text", async () => {

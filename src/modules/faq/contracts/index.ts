@@ -5,6 +5,7 @@ export const FAQ_ENTRY_MAXIMUM_COUNT = 100;
 export const FAQ_ENTRY_NAME_MAX_LENGTH = 60;
 export const FAQ_PATTERN_MAXIMUM_COUNT = 20;
 export const FAQ_PATTERN_MAX_LENGTH = 80;
+export const FAQ_ANSWER_MAX_LENGTH = 500;
 export const FAQ_COOLDOWN_MAXIMUM_SECONDS = 86_400;
 export const FAQ_COOLDOWN_MINIMUM_SECONDS = 30;
 export const FAQ_GAME_MAXIMUM_COUNT = 10;
@@ -26,7 +27,7 @@ export interface FaqEntry {
   name: string;
   enabled: boolean;
   matcher: FaqMatcher;
-  answerBlock: string;
+  answerText: string;
   cooldownSeconds: number;
   games: readonly FaqGame[];
   chatTarget: ChatOutputTarget;
@@ -40,7 +41,7 @@ export interface FaqEntry {
 export interface FaqMutationInput {
   name: string;
   matcher: FaqMutationMatcher;
-  answerBlock: string;
+  answerText: string;
   cooldownSeconds: number;
   games: readonly FaqGame[];
   chatTarget: ChatOutputTarget;

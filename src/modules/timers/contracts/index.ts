@@ -3,7 +3,7 @@ import type { ChatOutputTarget } from "../../contract";
 
 export const TIMER_MAXIMUM_COUNT = 50;
 const TIMER_MINUTES_MAXIMUM = 24 * 60;
-export const TIMER_BLOCK_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
+export const TIMER_MESSAGE_MAX_LENGTH = 500;
 
 const minutes = z.number().int().min(1).max(TIMER_MINUTES_MAXIMUM);
 
@@ -25,7 +25,7 @@ export interface Timer {
   id: string;
   name: string;
   enabled: boolean;
-  blockName: string;
+  messageText: string;
   chatTarget: Exclude<ChatOutputTarget, "where_asked">;
   trigger: TimerTrigger;
   revision: number;
@@ -39,7 +39,7 @@ export interface Timer {
 
 export interface TimerMutationInput {
   name: string;
-  blockName: string;
+  messageText: string;
   chatTarget: Exclude<ChatOutputTarget, "where_asked">;
   trigger: TimerTrigger;
 }

@@ -1,14 +1,13 @@
 import { Hono, type Context } from "hono";
 import { canManage, type AuditAction } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
-import { validateEventTextBlock } from "../contracts/text-block-validation";
+import { validateEventTemplateText } from "../contracts/text-block-validation";
 import { createFaqRepository, mapFaqEntryRow, type FaqEntryRow } from "./adapters/d1";
-import { FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_MAXIMUM_COUNT, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_GAME_MAXIMUM_COUNT, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_MODULE_ID } from "./contracts";
+import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_MAXIMUM_COUNT, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_GAME_MAXIMUM_COUNT, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_MODULE_ID } from "./contracts";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "./contracts";
 import { validFaqMatcher } from "./domain";
 import { testFaqMessage } from "./service";
 
-const BLOCK_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 const nowIso = (): string => new Date().toISOString();
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -41,7 +40,7 @@ const parseGames = (value: unknown): FaqGame[] | null => {
 const parseMutation = (value: unknown): FaqMutationInput | null => {
   if (!isRecord(value) || typeof value.name !== "string" || value.name.trim().length < 1 ||
       value.name.trim().length > FAQ_ENTRY_NAME_MAX_LENGTH || !validFaqMatcher(value.matcher) ||
-      typeof value.answerBlock !== "string" || !BLOCK_NAME_PATTERN.test(value.answerBlock) ||
+      typeof value.answerText !== "string" || value.answerText.trim().length === 0 || value.answerText.length > FAQ_ANSWER_MAX_LENGTH ||
       !Number.isSafeInteger(value.cooldownSeconds) || (value.cooldownSeconds as number) < FAQ_COOLDOWN_MINIMUM_SECONDS ||
       (value.cooldownSeconds as number) > FAQ_COOLDOWN_MAXIMUM_SECONDS ||
       (value.chatTarget !== "all_chats" && value.chatTarget !== "source_only" && value.chatTarget !== "where_asked")) return null;
@@ -52,7 +51,7 @@ const parseMutation = (value: unknown): FaqMutationInput | null => {
   return {
     name: value.name.trim(),
     matcher: { type: "keywords", patterns },
-    answerBlock: value.answerBlock,
+    answerText: value.answerText,
     cooldownSeconds: value.cooldownSeconds as number,
     games,
     chatTarget: value.chatTarget,
@@ -61,37 +60,37 @@ const parseMutation = (value: unknown): FaqMutationInput | null => {
 
 const readEntry = async (context: FaqRouteContext, channelId: string, id: string): Promise<FaqEntry | null> => {
   const row = await context.env.DB.prepare(
-    `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+    `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
             games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at
        FROM faq_entries WHERE channel_id = ? AND faq_id = ?`,
   ).bind(channelId, id).first<FaqEntryRow>();
   return row === null ? null : mapFaqEntryRow(row);
 };
 
-const snapshot = (entry: Pick<FaqEntry, "id" | "name" | "enabled" | "matcher" | "answerBlock" | "cooldownSeconds" | "games" | "chatTarget" | "order">) => ({
+const snapshot = (entry: Pick<FaqEntry, "id" | "name" | "enabled" | "matcher" | "answerText" | "cooldownSeconds" | "games" | "chatTarget" | "order">) => ({
   entryId: entry.id,
   name: entry.name,
   enabled: entry.enabled,
   matcherType: entry.matcher.type,
   patterns: entry.matcher.type === "keywords" ? entry.matcher.patterns : [entry.matcher.pattern],
-  answerBlock: entry.answerBlock,
+  answerText: entry.answerText,
   cooldownSeconds: entry.cooldownSeconds,
   games: entry.games.map((game) => game.id),
   chatTarget: entry.chatTarget,
   order: entry.order,
 });
 
-const blockError = (reason: "missing" | "input_dependent"): string =>
-  reason === "input_dependent" ? "faq_block_input_dependent" : "faq_block_missing";
+const textValidationError = (reason: "missing" | "input_dependent"): string =>
+  reason === "input_dependent" ? "faq_text_input_dependent" : "faq_text_block_missing";
 
 const validateAnswer = async (
   context: FaqRouteContext,
   channelId: string,
-  blockName: string,
+  text: string,
 ): Promise<string | null> => {
   const variables = await context.get("listRegisteredTemplateVariables")(channelId);
-  const validation = await validateEventTextBlock(context.env.DB, channelId, blockName, variables);
-  return validation.ok ? null : blockError(validation.reason);
+  const validation = await validateEventTemplateText(context.env.DB, channelId, text, variables);
+  return validation.ok ? null : textValidationError(validation.reason);
 };
 
 const authorizationFor = (context: FaqRouteContext, channelId: string, now: string) =>
@@ -136,8 +135,8 @@ faqRoutes.post("/entries", async (context) => {
   if (cooldownTooShort(body)) return context.json({ error: "faq_cooldown_too_short" }, 400);
   const input = parseMutation(body);
   if (input === null) return context.json({ error: "faq_entry_invalid" }, 400);
-  const invalidBlock = await validateAnswer(context, channelId, input.answerBlock);
-  if (invalidBlock !== null) return context.json({ error: invalidBlock }, 400);
+  const invalidText = await validateAnswer(context, channelId, input.answerText);
+  if (invalidText !== null) return context.json({ error: invalidText }, 400);
   const count = await context.env.DB.prepare("SELECT COUNT(*) AS count FROM faq_entries WHERE channel_id = ?")
     .bind(channelId).first<{ count: number }>();
   if ((count?.count ?? 0) >= FAQ_ENTRY_MAXIMUM_COUNT) return context.json({ error: "faq_entry_limit_reached" }, 409);
@@ -150,11 +149,11 @@ faqRoutes.post("/entries", async (context) => {
   const authorization = authorizationFor(context, channelId, now);
   const mutation = context.env.DB.prepare(
     `INSERT INTO faq_entries
-      (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+      (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
        games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
      SELECT ?, ?, ?, 1, 'keywords', ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?
       WHERE (SELECT COUNT(*) FROM faq_entries WHERE channel_id = ?) < ? ${authorization.sql}`,
-  ).bind(entryId, channelId, input.name, JSON.stringify(input.matcher), input.answerBlock, input.cooldownSeconds,
+  ).bind(entryId, channelId, input.name, JSON.stringify(input.matcher), input.answerText, input.cooldownSeconds,
     JSON.stringify(input.games), input.chatTarget, order, now, now, channelId, FAQ_ENTRY_MAXIMUM_COUNT, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
@@ -188,16 +187,16 @@ faqRoutes.patch("/entries/:entryId", async (context) => {
   if (cooldownTooShort(body)) return context.json({ error: "faq_cooldown_too_short" }, 400);
   const input = parseMutation(body);
   if (input === null) return context.json({ error: "faq_entry_invalid" }, 400);
-  const invalidBlock = await validateAnswer(context, channelId, input.answerBlock);
-  if (invalidBlock !== null) return context.json({ error: invalidBlock }, 400);
+  const invalidText = await validateAnswer(context, channelId, input.answerText);
+  if (invalidText !== null) return context.json({ error: invalidText }, 400);
   const now = nowIso();
   const authorization = authorizationFor(context, channelId, now);
   const mutation = context.env.DB.prepare(
     `UPDATE faq_entries
-        SET name = ?, matcher_type = 'keywords', matcher_json = ?, answer_block = ?, cooldown_seconds = ?,
+        SET name = ?, matcher_type = 'keywords', matcher_json = ?, answer_text = ?, cooldown_seconds = ?,
             games_json = ?, chat_target = ?, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND faq_id = ? AND revision = ? ${authorization.sql}`,
-  ).bind(input.name, JSON.stringify(input.matcher), input.answerBlock, input.cooldownSeconds, JSON.stringify(input.games),
+  ).bind(input.name, JSON.stringify(input.matcher), input.answerText, input.cooldownSeconds, JSON.stringify(input.games),
     input.chatTarget, now, channelId, entryId, body.revision, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,

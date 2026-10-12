@@ -44,8 +44,8 @@ export type TemplateWarning =
   | { field: string; code: "template_parameters_invalid"; invalidVariables: readonly string[] }
   | { field: string; code: "template_worst_case_too_long"; worstCaseLength: number };
 
-const strictTemplateName = `(?:${TEMPLATE_BARE_VARIABLE_NAME_SOURCE}|${TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE})`;
-const candidateTemplateName = "(?:[A-Za-z0-9_]{1,32}|[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+)";
+const strictTemplateName = `(?:${TEMPLATE_BARE_VARIABLE_NAME_SOURCE}|${TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE}|text\\.${TEMPLATE_BARE_VARIABLE_NAME_SOURCE})`;
+const candidateTemplateName = "(?:[A-Za-z0-9_]{1,32}|[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+|text\\.[A-Za-z0-9_]{1,32})";
 export const TEMPLATE_VARIABLE_PATTERN = new RegExp(`\\{(${strictTemplateName})(?: ([^{}\\n]{1,200}))?\\}`, "gu");
 const TEMPLATE_TOKEN_CANDIDATE_PATTERN = new RegExp(`\\{(${candidateTemplateName})(?: ([^{}\\n]{1,200}))?\\}`, "gu");
 

@@ -854,7 +854,7 @@ export interface ModuleTemplateVariableGroup {
 /** A module-owned source of text that can contain template-variable references. */
 export interface ModuleTemplateUsageSource {
   text: string;
-  kind: "command" | "timer" | "overlay" | "event";
+  kind: "command" | "faq" | "timer" | "overlay" | "event";
   label: string;
 }
 

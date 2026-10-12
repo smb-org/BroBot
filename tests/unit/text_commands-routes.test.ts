@@ -667,7 +667,7 @@ describe("Text commands panel", () => {
 
     const createdCommand = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "greeting", text: "Hello {welcome}", cooldownSeconds: 0,
+        name: "greeting", text: "Hello {text.welcome}", cooldownSeconds: 0,
       }),
       environmentFor(database),
     );

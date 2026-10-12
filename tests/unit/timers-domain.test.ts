@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ModuleRegisteredTemplateVariable } from "../../src/modules/contract";
 import { isDailyTimerDeadlineCurrent, nextDailyTimerAt, nextBeforeEventAt, nextIntervalAt, nextStreamStartAt, timerOccurrenceKey } from "../../src/modules/timers/domain";
-import { validateTimerBlock, validateTimerTemplateMutation } from "../../src/modules/timers/service";
+import { validateTimerText, validateTimerTemplateMutation } from "../../src/modules/timers/service";
 import { TestD1Database } from "./test-d1";
 
 const berlin = "Europe/Berlin";
@@ -67,7 +67,7 @@ describe("timer scheduling", () => {
   });
 });
 
-describe("scheduled text block validation", () => {
+describe("scheduled text validation", () => {
   const databases: TestD1Database[] = [];
   afterEach(() => { for (const database of databases.splice(0)) database.close(); });
 
@@ -87,22 +87,26 @@ describe("scheduled text block validation", () => {
     return database;
   };
 
-  it("accepts event variables and rejects direct command-input variables", async () => {
-    const database = await databaseWithBlocks({ welcome: ["Welcome, {date}."] , personalized: ["Hello {target}: {args}"] });
+  it("accepts free text and event variables, and rejects command-input variables", async () => {
+    const database = await databaseWithBlocks({ welcome: ["Welcome, {date}."], personalized: ["Hello {target}: {args}"] });
 
-    await expect(validateTimerBlock(database as unknown as D1Database, "channel-1", "welcome", []))
+    await expect(validateTimerText(database as unknown as D1Database, "channel-1", "A free reminder.", []))
       .resolves.toEqual({ ok: true });
-    await expect(validateTimerBlock(database as unknown as D1Database, "channel-1", "personalized", []))
+    await expect(validateTimerText(database as unknown as D1Database, "channel-1", "Welcome, {date}.", []))
+      .resolves.toEqual({ ok: true });
+    await expect(validateTimerText(database as unknown as D1Database, "channel-1", "Hello {target}: {args}", []))
       .resolves.toEqual({ ok: false, reason: "input_dependent" });
+    await expect(validateTimerText(database as unknown as D1Database, "channel-1", "{text.missing}", []))
+      .resolves.toEqual({ ok: false, reason: "missing" });
   });
 
   it("checks nested text blocks for command-input variables", async () => {
-    const database = await databaseWithBlocks({ welcome: ["{nested}"], nested: ["Hello {target}."] });
+    const database = await databaseWithBlocks({ welcome: ["{text.nested}"], nested: ["Hello {target}."] });
     const nestedVariable = {
-      name: "nested", sample: "Hello", maxLength: 80, group: "context", moduleId: "text_library", isTextBlock: true,
+      name: "text.nested", sample: "Hello", maxLength: 80, group: "context", moduleId: "text_library", isTextBlock: true,
     } satisfies ModuleRegisteredTemplateVariable;
 
-    await expect(validateTimerBlock(database as unknown as D1Database, "channel-1", "welcome", [nestedVariable]))
+    await expect(validateTimerText(database as unknown as D1Database, "channel-1", "{text.welcome}", [nestedVariable]))
       .resolves.toEqual({ ok: false, reason: "input_dependent" });
   });
 
@@ -110,8 +114,8 @@ describe("scheduled text block validation", () => {
     const database = await databaseWithBlocks({ welcome: ["Welcome, {date}."] });
     await database.prepare(
       `INSERT INTO timers
-        (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision, created_at, updated_at)
-       VALUES ('timer-1', 'channel-1', 'Community reminder', 1, 'welcome', 'interval', ?, 1, ?, ?)`,
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, revision, created_at, updated_at)
+       VALUES ('timer-1', 'channel-1', 'Community reminder', 1, '{text.welcome}', 'interval', ?, 1, ?, ?)`,
     ).bind(JSON.stringify({ type: "interval", minutes: 10 }), "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z").run();
 
     await expect(validateTimerTemplateMutation({

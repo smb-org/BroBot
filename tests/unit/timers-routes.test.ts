@@ -79,7 +79,7 @@ describe("before_event timer scheduling routes", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Sunrise reminder",
-          blockName: "welcome",
+          messageText: "Welcome to the chat!",
           trigger: { type: "before_event", sourceId: EVENT_SOURCE_ID, minutes: 30 },
         }),
       }),
@@ -103,11 +103,11 @@ describe("timer edit keeps the stream id in sync with next_run_at", () => {
     const realDatabase = await createDatabase();
     await realDatabase.prepare(
       `INSERT INTO timers
-        (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision,
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, revision,
          next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
        VALUES (?, ?, ?, 1, ?, ?, ?, 1, ?, ?, NULL, ?, ?)`,
     ).bind(
-      "timer-1", CHANNEL_ID, "Reminder", "welcome", "interval", JSON.stringify({ type: "interval", minutes: 10 }),
+      "timer-1", CHANNEL_ID, "Reminder", "Welcome back!", "interval", JSON.stringify({ type: "interval", minutes: 10 }),
       new Date("2026-09-27T12:10:00.000Z").toISOString(), "stream-1",
       "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z",
     ).run();
@@ -134,7 +134,7 @@ describe("timer edit keeps the stream id in sync with next_run_at", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Reminder (edited)",
-          blockName: "welcome",
+          messageText: "New free text",
           trigger: { type: "interval", minutes: 10 },
           revision: 1,
         }),

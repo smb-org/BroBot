@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { formatTimestamp } from "../../../dashboard/locale";
-import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, notify } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { Timer, TimerMutationInput, TimerTrigger } from "../contracts";
 import { timersTexts } from "./locale";
@@ -10,7 +10,7 @@ import {
   createTimer,
   deleteTimer,
   loadTimersPanel,
-  previewTimerBlock,
+  previewTimerText,
   setTimerEnabled,
   timerErrorCode,
   updateTimer,
@@ -21,7 +21,7 @@ type TriggerType = TimerTrigger["type"];
 
 interface TimerDraft {
   name: string;
-  blockName: string;
+  messageText: string;
   chatTarget: Timer["chatTarget"];
   type: TriggerType;
   minutes: number | "";
@@ -35,7 +35,7 @@ interface TimerDraft {
 
 const emptyDraft = (sources: TimersPanelData["sources"]): TimerDraft => ({
   name: "",
-  blockName: "",
+  messageText: "",
   chatTarget: "source_only",
   type: "interval",
   minutes: 30,
@@ -50,26 +50,26 @@ const emptyDraft = (sources: TimersPanelData["sources"]): TimerDraft => ({
 const draftFromTimer = (timer: Timer): TimerDraft => {
   const trigger = timer.trigger;
   if (trigger.type === "interval") return {
-    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, chatTarget: timer.chatTarget, type: trigger.type,
+    ...emptyDraft([]), name: timer.name, messageText: timer.messageText, chatTarget: timer.chatTarget, type: trigger.type,
     minutes: trigger.minutes, useMinimumMessages: trigger.minimumMessages !== undefined,
     minimumMessages: trigger.minimumMessages ?? 10,
   };
   if (trigger.type === "stream_start") return {
-    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, chatTarget: timer.chatTarget, type: trigger.type, minutes: trigger.minutes,
+    ...emptyDraft([]), name: timer.name, messageText: timer.messageText, chatTarget: timer.chatTarget, type: trigger.type, minutes: trigger.minutes,
   };
   if (trigger.type === "time_of_day") return {
-    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, chatTarget: timer.chatTarget, type: trigger.type,
+    ...emptyDraft([]), name: timer.name, messageText: timer.messageText, chatTarget: timer.chatTarget, type: trigger.type,
     time: trigger.time, weekdays: [...trigger.weekdays], alsoOffline: trigger.alsoOffline,
   };
   return {
-    ...emptyDraft([]), name: timer.name, blockName: timer.blockName, chatTarget: timer.chatTarget, type: trigger.type,
+    ...emptyDraft([]), name: timer.name, messageText: timer.messageText, chatTarget: timer.chatTarget, type: trigger.type,
     minutes: trigger.minutes, sourceId: trigger.sourceId,
   };
 };
 
 const inputFromDraft = (draft: TimerDraft): TimerMutationInput | null => {
   if (typeof draft.minutes !== "number" && draft.type !== "time_of_day") return null;
-  if (draft.name.trim().length === 0 || draft.blockName.length === 0) return null;
+  if (draft.name.trim().length === 0 || draft.messageText.trim().length === 0 || draft.messageText.length > 500) return null;
   let trigger: TimerTrigger;
   if (draft.type === "interval") {
     trigger = {
@@ -85,15 +85,15 @@ const inputFromDraft = (draft: TimerDraft): TimerMutationInput | null => {
     if (draft.sourceId.length === 0) return null;
     trigger = { type: "before_event", sourceId: draft.sourceId, minutes: draft.minutes as number };
   }
-  return { name: draft.name.trim(), blockName: draft.blockName, chatTarget: draft.chatTarget, trigger };
+  return { name: draft.name.trim(), messageText: draft.messageText, chatTarget: draft.chatTarget, trigger };
 };
 
 const timersPanelDataFrom = (value: unknown): TimersPanelData => {
-  if (typeof value === "object" && value !== null && "timers" in value && "sources" in value && "blocks" in value &&
-      Array.isArray(value.timers) && Array.isArray(value.sources) && Array.isArray(value.blocks)) {
+  if (typeof value === "object" && value !== null && "timers" in value && "sources" in value && "variables" in value &&
+      Array.isArray(value.timers) && Array.isArray(value.sources) && Array.isArray(value.variables)) {
     return value as TimersPanelData;
   }
-  return { timers: [], sources: [], blocks: [] };
+  return { timers: [], sources: [], variables: [] };
 };
 
 const withTimer = (current: unknown, timer: Timer): TimersPanelData => {
@@ -160,7 +160,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     value: source.id,
     label: source.label[language ?? "de"],
   })), [data?.sources, language]);
-  const blockOptions = useMemo(() => (data?.blocks ?? []).map((name) => ({ value: name, label: name })), [data?.blocks]);
 
   const openCreate = (): void => {
     setEditing(null);
@@ -172,10 +171,10 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     setDraft(draftFromTimer(timer));
   };
 
-  const preview = async (blockName: string): Promise<void> => {
-    if (blockName.length === 0) return;
+  const preview = async (messageText: string): Promise<void> => {
+    if (messageText.trim().length === 0) return;
     setPreviewBusy(true);
-    try { setPreviewText(await previewTimerBlock(channelId, blockName)); }
+    try { setPreviewText(await previewTimerText(channelId, messageText)); }
     catch { setPreviewText(labels.saveError); }
     finally { setPreviewBusy(false); }
   };
@@ -199,8 +198,8 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
       setEditing(null);
     } catch (failure: unknown) {
       const code = timerErrorCode(failure);
-      setError(code === "timer_block_input_dependent" ? labels.inputDependentBlock
-        : code === "timer_block_missing" ? labels.blockMissing
+      setError(code === "timer_text_input_dependent" ? labels.inputDependentText
+        : code === "timer_text_block_missing" ? labels.missingTextBlock
           : code === "timer_limit_reached" ? labels.limitReached : labels.saveError);
     } finally { setPending(false); }
   };
@@ -263,7 +262,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                 <strong>{timer.name}</strong>
                 <span>{labels.trigger} · {triggerTitle(timer.trigger.type, labels)}</span>
                 <span>{triggerDetail(timer, data as TimersPanelData, labels, language ?? "de")}</span>
-                <span>{labels.block} · <code>{timer.blockName}</code></span>
+                <span>{labels.message} · {timer.messageText}</span>
                 <span>{labels.chatTarget} · {labels.chatTargetLabels[timer.chatTarget]}</span>
                 <span>{labels.nextRun} · {timer.nextRunAt === null ? labels.noNextRun : formatTimestamp(timer.nextRunAt)}</span>
               </div>
@@ -275,7 +274,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                   pending={busyTimerId === timer.id}
                   onChange={(enabled) => { void toggle(timer, enabled); }}
                 />
-                <Button variant="subtle" onClick={() => { void preview(timer.blockName); }}>{labels.preview}</Button>
+                <Button variant="subtle" onClick={() => { void preview(timer.messageText); }} disabled={timer.messageText.trim().length === 0}>{labels.preview}</Button>
                 <Button variant="neutral" disabled={!canManage} onClick={() => { openEdit(timer); }}>{labels.edit}</Button>
                 <Button variant="subtle" danger onClick={() => { setDeleteTarget(timer); setDeleteError(null); }} disabled={!canManage}>{labels.delete}</Button>
               </div>
@@ -294,17 +293,21 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
         onConfirm={() => { void save(); }}
         onCancel={() => { if (!pending) { setDraft(null); setEditing(null); setError(null); } }}
         pending={pending}
-        confirmDisabled={blockOptions.length === 0}
+        confirmDisabled={draft === null || inputFromDraft(draft) === null}
         {...(error === null ? {} : { error })}
       >
         {draft === null ? null : <div className="module-stack">
           <Field label={labels.name} value={draft.name} onChange={(name) => patchDraft({ name })} maxLength={60} countLabel={(count, max) => `${String(count)}/${String(max)}`} required />
-          <Select
-            label={labels.block}
-            value={draft.blockName || null}
-            onChange={(blockName) => patchDraft({ blockName: blockName ?? "" })}
-            options={blockOptions}
-            placeholder={labels.block}
+          <TextArea
+            label={labels.message}
+            hint={labels.messageHint}
+            value={draft.messageText}
+            onChange={(messageText) => patchDraft({ messageText })}
+            maxLength={500}
+            variables={data?.variables ?? []}
+            messages={labels.textAreaMessages}
+            minRows={2}
+            disabled={pending}
             required
           />
           <ChatOutputTargetControl
@@ -313,7 +316,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             disabled={pending}
             onChange={(chatTarget) => { if (chatTarget !== "where_asked") patchDraft({ chatTarget }); }}
           />
-          {blockOptions.length === 0 ? <p className="muted">{labels.noBlocks}</p> : null}
           <Select
             label={labels.trigger}
             value={draft.type}
@@ -362,7 +364,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
           </> : null}
 
           <div className="inspector-actions">
-            <Button type="button" variant="neutral" onClick={() => { void preview(draft.blockName); }} disabled={draft.blockName.length === 0 || previewBusy}>{labels.preview}</Button>
+            <Button type="button" variant="neutral" onClick={() => { void preview(draft.messageText); }} disabled={draft.messageText.trim().length === 0 || previewBusy}>{labels.preview}</Button>
           </div>
         </div>}
       </FormDialog>
