@@ -109,6 +109,7 @@ export const updateChannelModuleWithAudit = async (
   dependentMutations: readonly D1PreparedStatement[] = [],
   expectedRevision?: number,
   markInitialized = false,
+  textBlockGuard?: { sql: string; values: readonly (string | number)[] },
 ): Promise<boolean> => {
   const before = await getChannelModule(db, channelId, moduleId);
   if (before === null) return false;
@@ -125,6 +126,7 @@ export const updateChannelModuleWithAudit = async (
         SET enabled = ?, settings = ?, initialized = ?, revision = revision + 1
       WHERE channel_id = ? AND module_id = ?
         AND revision = ?
+        ${textBlockGuard?.sql ?? ""}
       ${actorGuard(MANAGING_ROLES)}`,
   ).bind(
     after.enabled ? 1 : 0,
@@ -133,6 +135,7 @@ export const updateChannelModuleWithAudit = async (
     after.channelId,
     after.moduleId,
     expectedRevision ?? before.revision,
+    ...(textBlockGuard?.values ?? []),
     ...bindActorGuard(actor, after.channelId, changedAt),
   );
   const audit = prepareHostModuleAudit(db, actor.userId, changedAt, {

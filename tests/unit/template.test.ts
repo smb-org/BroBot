@@ -6,11 +6,17 @@ import {
   parseTemplateRange,
   renderTemplate,
   templateVariableNames,
+  templateTextLength,
   tokenizeTemplate,
   unknownTemplateVariables,
   worstCaseTemplateLength,
   type TemplateVariable,
 } from "../../src/template";
+import { adsSettingsSchema } from "../../src/modules/ads/contracts";
+import { BELABOX_DEFAULT_SETTINGS, belaboxSettingsSchema } from "../../src/modules/belabox/contracts";
+import { chatVotingSettingsSchema } from "../../src/modules/chat_voting/contracts";
+import { raidSettingsSchema } from "../../src/modules/raid/contracts";
+import { DEFAULT_VOTEKICK_SETTINGS, votekickSettingsSchema } from "../../src/modules/votekick/contracts";
 
 const variables: readonly TemplateVariable[] = [
   { name: "user", group: "context", sample: "viewer", maxLength: 25, source: "system" },
@@ -21,6 +27,30 @@ const variables: readonly TemplateVariable[] = [
 ];
 
 describe("template helpers", () => {
+  it("counts namespaced text-block references at their bare-name length", () => {
+    expect(templateTextLength("Hello {text.welcome}! {text.a_2}")).toBe("Hello {welcome}! {a_2}".length);
+    expect(templateTextLength("{text.welcome} {text.welcome}")).toBe("{welcome} {welcome}".length);
+    expect(templateTextLength("{text.welcome ")).toBe("{text.welcome ".length);
+  });
+
+  it("accepts migrated-length block tokens in module template settings", () => {
+    const migratedValue = `${"x".repeat(491)}{text.welcome}`;
+
+    expect(adsSettingsSchema.safeParse({ automatic: migratedValue, manual: migratedValue, prewarningText: migratedValue }).success).toBe(true);
+    expect(raidSettingsSchema.safeParse({ textLong: migratedValue, textShort: migratedValue }).success).toBe(true);
+    expect(belaboxSettingsSchema.safeParse({ ...BELABOX_DEFAULT_SETTINGS, lowText: migratedValue, disconnectText: migratedValue, recoveryText: migratedValue }).success).toBe(true);
+    expect(chatVotingSettingsSchema.safeParse({ startText: migratedValue, resultText: migratedValue }).success).toBe(true);
+    expect(votekickSettingsSchema.safeParse({
+      ...DEFAULT_VOTEKICK_SETTINGS,
+      startText: migratedValue,
+      passText: migratedValue,
+      failText: migratedValue,
+      expiredText: migratedValue,
+      protectedText: migratedValue,
+      busyText: migratedValue,
+    }).success).toBe(true);
+  });
+
   it("finds strict variable names and reports near-miss candidates", () => {
     expect(templateVariableNames("{user} {viewers} {User} {1} {_hello}")).toEqual(["user", "viewers", "1", "_hello"]);
     expect(unknownTemplateVariables("{user} {zzz} {User} {User}", variables)).toEqual(["zzz", "User"]);
@@ -90,5 +120,6 @@ describe("template helpers", () => {
     ];
     expect(worstCaseTemplateLength("Pause", duration)).toBe(20);
     expect(worstCaseTemplateLength("Pause {duration}", duration)).toBe("Pause ".length + 4);
+    expect(worstCaseTemplateLength("{text.welcome}", [{ name: "text.welcome", sample: "hi", maxLength: 10 }])).toBe(10);
   });
 });

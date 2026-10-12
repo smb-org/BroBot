@@ -10,6 +10,7 @@ import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, set
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
+import { templateTextLength } from "../template";
 import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
@@ -357,7 +358,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
           } else if (field.kind === "text" && field.validate !== undefined &&
               (includeUntouched || validationAttempted || touchedFields.has(field.key)) && !field.validate(current)) {
             errors[field.key] = copy.fields[field.key]?.invalidError ?? copy.invalidMessage;
-          } else if (field.kind === "template" && current.length > 500) {
+          } else if (field.kind === "template" && templateTextLength(current) > 500) {
             errors[field.key] = copy.invalidMessage;
           }
         }

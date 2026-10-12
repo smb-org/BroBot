@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 
 import { OVERLAY_ELEMENT_MAXIMUM_COUNT } from "../contracts/values";
+import { templateTextLength } from "../template";
 import { sanitizeOverlayCss } from "../contracts/overlay-css";
 import type { PanelModuleState } from "../panel-contract";
 import { OverlayCanvas } from "../overlay/canvas";
@@ -1204,7 +1205,7 @@ function OverlayEditorWorkspace({
           <Field id="overlay-editor-label" label={labels.editorLabel} value={selectedElement.label} maxLength={40}
             countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canEdit}
             onChange={(label) => { updateElement(selectedElement.id, { label }); }} />
-          {selectedElement.kind === "variable" ? <Field id="overlay-editor-text" label={labels.editorDisplayText} hint={labels.editorTextHint} value={selectedElement.text} maxLength={100}
+          {selectedElement.kind === "variable" ? <Field id="overlay-editor-text" label={labels.editorDisplayText} hint={labels.editorTextHint} value={selectedElement.text} maxLength={100} countLength={templateTextLength}
             countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canEdit}
             onChange={(text) => { updateElement(selectedElement.id, { text }); }} /> : null}
           <div className="overlay-editor__numeric-fields">

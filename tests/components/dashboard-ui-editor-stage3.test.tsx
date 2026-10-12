@@ -404,6 +404,33 @@ describe("template field", () => {
   });
 
   it.each([
+    ["currency.convert", "{currency.c", "{currency.convert USD EUR}"],
+    ["api_source.value", "{api_source.v", "{api_source.value sunset}"],
+    ["pick", "{pi", "{pick first|second}"],
+  ])("keeps the supplied parameter default when completing %s inline", async (name, initialValue, expectedValue) => {
+    const variables: readonly TemplateVariableOption[] = [
+      { name: "currency.convert", description: "Convert currency", sample: "11,50 €", parameters: "currency_pair", parameter: { value: "USD EUR" } },
+      { name: "api_source.value", description: "API source", sample: "18:42", parameters: "api_source_name", parameter: { value: "sunset" } },
+      { name: "pick", description: "Choose an option", sample: "First", parameters: "choices", parameter: { value: "first|second" } },
+    ];
+    function Harness() {
+      const [value, setValue] = useState(initialValue);
+      return <TextArea label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={textAreaMessages} />;
+    }
+
+    renderUi(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Reply" });
+    if (!(input instanceof HTMLTextAreaElement)) throw new TypeError("Expected a template textarea.");
+    input.setSelectionRange(initialValue.length, initialValue.length);
+    fireEvent.select(input);
+    await waitFor(() => expect(input).toHaveAttribute("aria-expanded", "true"));
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(input).toHaveValue(expectedValue));
+    expect(variables.some((variable) => variable.name === name)).toBe(true);
+  });
+
+  it.each([
     ["{sun.s}", 6, "{sun.set}"],
     ["{sun.s", 6, "{sun.set}"],
     ["{sun.set} rest", 6, "{sun.set} rest"],

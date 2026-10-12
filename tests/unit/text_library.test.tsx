@@ -91,6 +91,24 @@ describe("text library", () => {
     expect(textLibraryTexts("en").usesCount(2)).toBe("2 uses");
   });
 
+  it("uses the block text as its template variable catalogue example", async () => {
+    const snapshot = await service.list(CHANNEL_ID);
+    const created = await service.create({
+      channelId: CHANNEL_ID,
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: ["Welcome to the stream", "Thanks for joining"] }],
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date(NOW).toISOString(),
+    }, ACTOR, snapshot);
+    expect(created.ok).toBe(true);
+
+    const variables = await textLibraryModule.templateVariables?.(database as unknown as D1Database, CHANNEL_ID);
+
+    expect(variables).toContainEqual({ name: "text.welcome", sample: "Welcome to the stream", maxLength: 500 });
+  });
+
   it("shows selected weekday conditions as a visible toggle state", async () => {
     const timestamp = new Date(NOW).toISOString();
     stubTextLibraryPanelApi({

@@ -6,7 +6,7 @@ import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { faqTexts } from "../../src/modules/faq/panel/locale";
 import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const keys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: testKey(1) }, retired: [] }),
@@ -66,6 +66,79 @@ describe("FAQ routes", () => {
   let database: TestD1Database;
 
   afterEach(() => { database.close(); vi.unstubAllGlobals(); });
+
+  it("rejects an FAQ save when its validated block is deleted before the SQL write", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-1");
+    await insertMember(database, "channel-a", "manager-1", "manager");
+    await database.prepare("INSERT INTO text_library_settings (channel_id, graph_revision, updated_at) VALUES ('channel-a', 1, '2026-09-18T00:00:00.000Z')").run();
+    await database.prepare("INSERT INTO text_library_categories (channel_id, category_id, created_at, updated_at) VALUES ('channel-a', 'social', '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')").run();
+    await database.prepare("INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at) VALUES ('channel-a', 'welcome', 'social', 1, '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')").run();
+    await database.prepare("INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json) VALUES ('channel-a', 'welcome', 'default', 0, '{}', '[\"Welcome\"]')").run();
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("SELECT variant.texts_json"),
+      async () => {
+        await database.batch([
+          database.prepare("UPDATE text_library_settings SET graph_revision = graph_revision + 1 WHERE channel_id = 'channel-a'"),
+          database.prepare("DELETE FROM text_blocks WHERE channel_id = 'channel-a' AND block_name = 'welcome'"),
+        ]);
+      },
+    );
+
+    const response = await panelRouter.fetch(
+      await requestFor("manager-1", "/api/channels/channel-a/modules/faq/entries", "POST", {
+        name: "Greeting",
+        matcher: { type: "keywords", patterns: ["hello"] },
+        answerText: "{text.welcome}",
+        cooldownSeconds: 30,
+        games: [],
+        chatTarget: "source_only",
+      }),
+      environmentFor(interleavedDatabase as unknown as TestD1Database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "faq_entry_conflict" });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM faq_entries WHERE channel_id = 'channel-a'").first<{ count: number }>())
+      .resolves.toEqual({ count: 0 });
+  });
+
+  it("rejects a module-settings save when a referenced block is deleted before the SQL write", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-1");
+    await insertMember(database, "channel-a", "manager-1", "manager");
+    await database.prepare("INSERT INTO text_library_settings (channel_id, graph_revision, updated_at) VALUES ('channel-a', 1, '2026-09-18T00:00:00.000Z')").run();
+    await database.prepare("INSERT INTO text_library_categories (channel_id, category_id, created_at, updated_at) VALUES ('channel-a', 'social', '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')").run();
+    await database.prepare("INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at) VALUES ('channel-a', 'welcome', 'social', 1, '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')").run();
+    await database.prepare("INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json) VALUES ('channel-a', 'welcome', 'default', 0, '{}', '[\"Welcome\"]')").run();
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('channel-a', 'ads', 1, '{\"automatic\":\"Before\",\"manual\":\"Manual\"}')").run();
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("FROM text_blocks AS block"),
+      async () => {
+        await database.batch([
+          database.prepare("UPDATE text_library_settings SET graph_revision = graph_revision + 1 WHERE channel_id = 'channel-a'"),
+          database.prepare("DELETE FROM text_blocks WHERE channel_id = 'channel-a' AND block_name = 'welcome'"),
+        ]);
+      },
+    );
+
+    const response = await panelRouter.fetch(
+      await requestFor("manager-1", "/api/channels/channel-a/modules/ads/settings", "PATCH", {
+        revision: 1,
+        settings: { automatic: "{text.welcome}", manual: "Manual" },
+      }),
+      environmentFor(interleavedDatabase as unknown as TestD1Database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "module_settings_changed_concurrently" });
+    await expect(database.prepare("SELECT settings, revision FROM channel_modules WHERE channel_id = 'channel-a' AND module_id = 'ads'").first())
+      .resolves.toEqual({ settings: '{"automatic":"Before","manual":"Manual"}', revision: 1 });
+  });
 
   it("lets operators toggle an existing entry while keeping content edits restricted", async () => {
     database = new TestD1Database();

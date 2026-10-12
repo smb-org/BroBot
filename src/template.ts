@@ -3,8 +3,10 @@ import {
   TEMPLATE_BARE_VARIABLE_NAME_SOURCE,
   TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE,
 } from "./contracts/template-names";
+import { templateTextLength } from "./contracts/template-text-length";
 
 export type { TemplateContext } from "./contracts/values";
+export { templateTextLength } from "./contracts/template-text-length";
 
 interface TemplateVariablePickerLocale {
   label: string;
@@ -242,7 +244,7 @@ export const worstCaseTemplateLength = (
 ): number => {
   const variables = new Map(declared.map((variable) => [variable.name, variable]));
   const present = new Set<string>();
-  let length = text.length;
+  let length = templateTextLength(text);
   for (const token of matches(text, TEMPLATE_VARIABLE_PATTERN)) {
     const name = token[1];
     if (name === undefined) continue;
@@ -256,7 +258,7 @@ export const worstCaseTemplateLength = (
         : variable.parameters === "choices"
           ? Math.max(0, ...token[2].split("|").map((choice) => choice.length))
           : token[0].length;
-    length += replacementLength - token[0].length;
+    length += replacementLength - templateTextLength(token[0]);
   }
   for (const variable of declared) if (!present.has(variable.name)) length += variable.fallbackWhenAbsent ?? 0;
   return length;

@@ -37,18 +37,18 @@ export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Pro
   ]);
   const [entries, variables] = await Promise.all([
     readJson<{ entries: FaqEntry[] }>(entriesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; contexts?: readonly string[]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     entries: entries.entries,
-    variables: variables.variables.map((variable) => ({
+    variables: variables.variables.filter((variable) => variable.contexts === undefined || variable.contexts.includes("event")).map((variable) => ({
       name: variable.name,
       description: variable.description ?? variable.name,
       sample: variable.sample ?? "",
       ...(variable.group === undefined ? {} : { group: variable.group }),
       ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
-      ...(variable.parameters === "currency_pair" || variable.parameters === "api_source_name"
-        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "currency_pair" ? "USD EUR" : "sunset") } }
+      ...(variable.parameters === "choices" || variable.parameters === "currency_pair" || variable.parameters === "api_source_name"
+        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "choices" ? "a|b|c" : variable.parameters === "currency_pair" ? "USD EUR" : "sunset") } }
         : {}),
       kind: "module",
       ...(variable.isTextBlock === true ? { isTextBlock: true } : {}),

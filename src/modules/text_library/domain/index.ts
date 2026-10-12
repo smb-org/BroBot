@@ -4,6 +4,7 @@ import type { TextBlock, TextBlockConditions, TextBlockVariant, TwitchGame } fro
 import { TEXT_BLOCK_MAXIMUMS, TEXT_BLOCK_NAME_PATTERN } from "../contracts";
 import { blockReferencesInText } from "../../contracts/text-block-references";
 import { localMidnightInTimeZone, nextLocalMidnightInTimeZone, wallTimeInstantsInTimeZone } from "../../contract";
+import { templateTextLength } from "../../../contracts/template-text-length";
 
 export { blockReferencesInText } from "../../contracts/text-block-references";
 
@@ -46,7 +47,7 @@ export const validTextBlock = (block: Pick<TextBlock, "name" | "categoryId" | "g
   block.variants.length >= 1 && block.variants.length <= TEXT_BLOCK_MAXIMUMS.variantsPerBlock &&
   block.variants.every((variant) => variant.id.length > 0 && validTextBlockConditions(variant.conditions) &&
     variant.texts.length >= 1 && variant.texts.length <= TEXT_BLOCK_MAXIMUMS.textsPerVariant &&
-    variant.texts.every((text) => text.trim().length > 0 && text.length <= TEXT_BLOCK_MAXIMUMS.textLength)) &&
+    variant.texts.every((text) => text.trim().length > 0 && templateTextLength(text) <= TEXT_BLOCK_MAXIMUMS.textLength)) &&
   block.variants.filter((variant) => Object.keys(variant.conditions).length === 0).length === 1 &&
   Object.keys(block.variants.at(-1)?.conditions ?? {}).length === 0;
 

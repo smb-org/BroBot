@@ -201,3 +201,36 @@ export const createReadBarrierDatabase = (
   } as unknown as D1Database;
   return { database: databaseBinding, started };
 };
+
+/** Runs an interleaved mutation after one selected read has returned its snapshot. */
+export const createReadInterleavingDatabase = (
+  database: TestD1Database,
+  identify: (sql: string) => boolean,
+  afterRead: () => Promise<void>,
+): D1Database => {
+  let triggered = false;
+  return {
+    prepare: (sql: string) => {
+      const statement = database.prepare(sql);
+      if (triggered || !identify(sql)) return statement;
+      const wrapped = {
+        bind: (...values: Parameters<TestPreparedStatement["bind"]>) => {
+          statement.bind(...values);
+          return wrapped;
+        },
+        first: <T>() => statement.first<T>(),
+        all: async <T>(...typeHint: readonly T[]) => {
+          const result = await statement.all<T>(...typeHint);
+          if (!triggered) {
+            triggered = true;
+            await afterRead();
+          }
+          return result;
+        },
+        run: () => statement.run(),
+      };
+      return wrapped;
+    },
+    batch: database.batch.bind(database),
+  } as unknown as D1Database;
+};

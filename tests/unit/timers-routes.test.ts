@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
 import { timerRoutes } from "../../src/modules/timers/routes";
 import { insertChannel } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "timers-route-channel";
 const ACTOR_ID = "timers-route-actor";
@@ -15,6 +15,8 @@ const createDatabase = async (): Promise<TestD1Database> => {
   const database = new TestD1Database();
   databases.push(database);
   await insertChannel(database, CHANNEL_ID);
+  await database.prepare("INSERT INTO text_library_settings (channel_id, graph_revision, updated_at) VALUES (?, 1, ?)")
+    .bind(CHANNEL_ID, "2026-01-01T00:00:00.000Z").run();
   await database.prepare("INSERT INTO text_library_categories (channel_id, category_id, created_at, updated_at) VALUES (?, ?, ?, ?)")
     .bind(CHANNEL_ID, "custom", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z").run();
   await database.prepare("INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)")
@@ -95,6 +97,34 @@ describe("before_event timer scheduling routes", () => {
     const row = await database.prepare("SELECT next_run_at FROM timers WHERE channel_id = ? AND timer_id = ?")
       .bind(CHANNEL_ID, body.timer.id).first<{ next_run_at: string | null }>();
     expect(row).toEqual({ next_run_at: null });
+  });
+
+  it("rejects a timer save when its validated block is deleted before the SQL write", async () => {
+    const database = await createDatabase();
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("SELECT variant.texts_json"),
+      async () => {
+        await database.batch([
+          database.prepare("UPDATE text_library_settings SET graph_revision = graph_revision + 1 WHERE channel_id = ?").bind(CHANNEL_ID),
+          database.prepare("DELETE FROM text_blocks WHERE channel_id = ? AND block_name = ?").bind(CHANNEL_ID, "welcome"),
+        ]);
+      },
+    );
+    const app = appFor(interleavedDatabase);
+    const response = await app.fetch(
+      new Request(`https://brobot.example/channels/${CHANNEL_ID}/timers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Reminder", messageText: "{text.welcome}", trigger: { type: "interval", minutes: 10 } }),
+      }),
+      environmentFor(interleavedDatabase, []),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "timer_conflict" });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM timers WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ count: number }>()).resolves.toEqual({ count: 0 });
   });
 });
 

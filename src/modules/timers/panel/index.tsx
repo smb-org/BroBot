@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { templateTextLength } from "../../../contracts/template-text-length";
 import { formatTimestamp } from "../../../dashboard/locale";
 import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
@@ -69,7 +70,7 @@ const draftFromTimer = (timer: Timer): TimerDraft => {
 
 const inputFromDraft = (draft: TimerDraft): TimerMutationInput | null => {
   if (typeof draft.minutes !== "number" && draft.type !== "time_of_day") return null;
-  if (draft.name.trim().length === 0 || draft.messageText.trim().length === 0 || draft.messageText.length > 500) return null;
+  if (draft.name.trim().length === 0 || draft.messageText.trim().length === 0 || templateTextLength(draft.messageText) > 500) return null;
   let trigger: TimerTrigger;
   if (draft.type === "interval") {
     trigger = {

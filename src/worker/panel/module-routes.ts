@@ -23,7 +23,7 @@ import { getAppAccessToken } from "../app-token";
 import { writeModuleDiagnostics } from "../event-log";
 import { helixRequest } from "../twitch/helix";
 import { readChannelBlockedTerms } from "../twitch/blocked-terms";
-import { effectiveTemplateVariables, templateWarnings, type TemplateVariable } from "../../template";
+import { effectiveTemplateVariables, templateTextLength, templateWarnings, type TemplateVariable } from "../../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { listChannelVariables } from "../db/channel-variables";
 import { findChannelVariable } from "../db/channel-variables";
@@ -40,6 +40,7 @@ import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { moduleBallots } from "../module-ballots";
 import { createModuleSecretAccess, createModuleSecretReadAccess } from "../module-secrets";
 import { liftModerationBan } from "../moderation";
+import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -95,7 +96,7 @@ const runModuleAlarmAfterMutation = async (
 };
 
 const previewSchema = z.object({
-  text: z.string().max(500),
+  text: z.string().refine((value) => templateTextLength(value) <= 500),
   templateContext: z.enum(["event", "chat_command"]),
   streamState: z.enum(["online", "offline", "unknown"]),
   game: z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().max(100) }).nullable(),
@@ -546,6 +547,13 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   const expectedRevision = Reflect.get(body, "revision") as number;
   const settings = module.settingsSchema.safeParse(Reflect.get(body, "settings"));
   if (!settings.success) return context.json({ error: "module_settings_invalid" }, 400);
+  const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
+  const settingsRecord = settings.data as Readonly<Record<string, unknown>>;
+  const templateTexts = Object.keys(module.templateFields ?? {}).flatMap((field) => {
+    const value = settingsRecord[field];
+    return typeof value === "string" ? [value] : [];
+  });
+  const blockGuard = textBlockWriteGuard(channelId, graphRevision, templateTexts);
   const channelVariables = (await listChannelVariables(context.env.DB, channelId)).map((variable) => ({
     name: `var.${variable.name}`, group: "channel" as const, sample: String(variable.value), maxLength: 10, source: "channel" as const,
   }));
@@ -567,6 +575,8 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     nowIso(),
     [],
     expectedRevision,
+    false,
+    blockGuard.references.length === 0 ? undefined : blockGuard,
   );
   if (!changed) {
     const current = await getChannelModuleForChannel(context.env.DB, channelId, module.id);

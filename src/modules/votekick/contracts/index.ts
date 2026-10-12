@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { timeoutDurationRangeSchema } from "../../contracts/moderation";
 import { VOTEKICK_DEFAULT_TEXTS } from "./chat-defaults";
+import { templateTextLength } from "../../../contracts/template-text-length";
 
 export const VOTEKICK_MODULE_ID = "votekick";
 export const VOTEKICK_WINDOW_MS = 10 * 60 * 1000;
@@ -18,12 +19,12 @@ export const votekickSettingsSchema = z.object({
   channelCooldownSeconds: z.number().int().min(60).max(86_400),
   targetCooldownSeconds: z.number().int().min(60).max(86_400),
   chatTarget: z.enum(["all_chats", "source_only"]),
-  startText: z.string().max(500),
-  passText: z.string().max(500),
-  failText: z.string().max(500),
-  expiredText: z.string().max(500),
-  protectedText: z.string().max(500),
-  busyText: z.string().max(500),
+  startText: z.string().refine((text) => templateTextLength(text) <= 500),
+  passText: z.string().refine((text) => templateTextLength(text) <= 500),
+  failText: z.string().refine((text) => templateTextLength(text) <= 500),
+  expiredText: z.string().refine((text) => templateTextLength(text) <= 500),
+  protectedText: z.string().refine((text) => templateTextLength(text) <= 500),
+  busyText: z.string().refine((text) => templateTextLength(text) <= 500),
 });
 
 export type VotekickSettings = z.output<typeof votekickSettingsSchema>;

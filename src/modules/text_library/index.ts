@@ -22,9 +22,15 @@ export const textLibraryModule: BotModule<typeof settingsSchema> = {
   settingsSchema,
   defaultSettings: {},
   templateVariables: async (db, channelId) => {
-    const result = await db.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ? ORDER BY block_name")
-      .bind(channelId).all<{ block_name: string }>();
-    return result.results.map(({ block_name }) => ({ name: `text.${block_name}`, sample: "", maxLength: 500 }));
+    const result = await db.prepare(
+      `SELECT block.block_name,
+              (SELECT json_extract(variant.texts_json, '$[0]')
+                 FROM text_block_variants AS variant
+                WHERE variant.channel_id = block.channel_id AND variant.block_name = block.block_name
+                ORDER BY variant.position LIMIT 1) AS sample
+         FROM text_blocks AS block WHERE block.channel_id = ? ORDER BY block.block_name`,
+    ).bind(channelId).all<{ block_name: string; sample: string | null }>();
+    return result.results.map(({ block_name, sample }) => ({ name: `text.${block_name}`, sample: sample ?? "", maxLength: 500 }));
   },
   navigationEntries: [{
     id: "texts",

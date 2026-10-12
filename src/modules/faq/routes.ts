@@ -2,6 +2,8 @@ import { Hono, type Context } from "hono";
 import { canManage, type AuditAction } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { validateEventTemplateText } from "../contracts/text-block-validation";
+import { templateTextLength } from "../../contracts/template-text-length";
+import { readTextBlockGraphRevision, textBlockGraphRevisionChanged, textBlockWriteGuard } from "../contracts/text-block-write-guard";
 import { createFaqRepository, mapFaqEntryRow, type FaqEntryRow } from "./adapters/d1";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_MAXIMUM_COUNT, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_GAME_MAXIMUM_COUNT, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_MODULE_ID } from "./contracts";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "./contracts";
@@ -40,7 +42,7 @@ const parseGames = (value: unknown): FaqGame[] | null => {
 const parseMutation = (value: unknown): FaqMutationInput | null => {
   if (!isRecord(value) || typeof value.name !== "string" || value.name.trim().length < 1 ||
       value.name.trim().length > FAQ_ENTRY_NAME_MAX_LENGTH || !validFaqMatcher(value.matcher) ||
-      typeof value.answerText !== "string" || value.answerText.trim().length === 0 || value.answerText.length > FAQ_ANSWER_MAX_LENGTH ||
+      typeof value.answerText !== "string" || value.answerText.trim().length === 0 || templateTextLength(value.answerText) > FAQ_ANSWER_MAX_LENGTH ||
       !Number.isSafeInteger(value.cooldownSeconds) || (value.cooldownSeconds as number) < FAQ_COOLDOWN_MINIMUM_SECONDS ||
       (value.cooldownSeconds as number) > FAQ_COOLDOWN_MAXIMUM_SECONDS ||
       (value.chatTarget !== "all_chats" && value.chatTarget !== "source_only" && value.chatTarget !== "where_asked")) return null;
@@ -135,8 +137,10 @@ faqRoutes.post("/entries", async (context) => {
   if (cooldownTooShort(body)) return context.json({ error: "faq_cooldown_too_short" }, 400);
   const input = parseMutation(body);
   if (input === null) return context.json({ error: "faq_entry_invalid" }, 400);
+  const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
   const invalidText = await validateAnswer(context, channelId, input.answerText);
   if (invalidText !== null) return context.json({ error: invalidText }, 400);
+  const blockGuard = textBlockWriteGuard(channelId, graphRevision, [input.answerText]);
   const count = await context.env.DB.prepare("SELECT COUNT(*) AS count FROM faq_entries WHERE channel_id = ?")
     .bind(channelId).first<{ count: number }>();
   if ((count?.count ?? 0) >= FAQ_ENTRY_MAXIMUM_COUNT) return context.json({ error: "faq_entry_limit_reached" }, 409);
@@ -152,9 +156,9 @@ faqRoutes.post("/entries", async (context) => {
       (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
        games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
      SELECT ?, ?, ?, 1, 'keywords', ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?
-      WHERE (SELECT COUNT(*) FROM faq_entries WHERE channel_id = ?) < ? ${authorization.sql}`,
+      WHERE (SELECT COUNT(*) FROM faq_entries WHERE channel_id = ?) < ? ${blockGuard.sql} ${authorization.sql}`,
   ).bind(entryId, channelId, input.name, JSON.stringify(input.matcher), input.answerText, input.cooldownSeconds,
-    JSON.stringify(input.games), input.chatTarget, order, now, now, channelId, FAQ_ENTRY_MAXIMUM_COUNT, ...authorization.values);
+    JSON.stringify(input.games), input.chatTarget, order, now, now, channelId, FAQ_ENTRY_MAXIMUM_COUNT, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: FAQ_MODULE_ID,
@@ -164,6 +168,9 @@ faqRoutes.post("/entries", async (context) => {
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);
   if (results[0]?.meta.changes === 0) {
+    if (await textBlockGraphRevisionChanged(context.env.DB, channelId, graphRevision)) {
+      return context.json({ error: "faq_entry_conflict" }, 409);
+    }
     const currentCount = await context.env.DB.prepare("SELECT COUNT(*) AS count FROM faq_entries WHERE channel_id = ?")
       .bind(channelId).first<{ count: number }>();
     return (currentCount?.count ?? 0) >= FAQ_ENTRY_MAXIMUM_COUNT
@@ -187,17 +194,19 @@ faqRoutes.patch("/entries/:entryId", async (context) => {
   if (cooldownTooShort(body)) return context.json({ error: "faq_cooldown_too_short" }, 400);
   const input = parseMutation(body);
   if (input === null) return context.json({ error: "faq_entry_invalid" }, 400);
+  const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
   const invalidText = await validateAnswer(context, channelId, input.answerText);
   if (invalidText !== null) return context.json({ error: invalidText }, 400);
+  const blockGuard = textBlockWriteGuard(channelId, graphRevision, [input.answerText]);
   const now = nowIso();
   const authorization = authorizationFor(context, channelId, now);
   const mutation = context.env.DB.prepare(
     `UPDATE faq_entries
         SET name = ?, matcher_type = 'keywords', matcher_json = ?, answer_text = ?, cooldown_seconds = ?,
             games_json = ?, chat_target = ?, revision = revision + 1, updated_at = ?
-      WHERE channel_id = ? AND faq_id = ? AND revision = ? ${authorization.sql}`,
+      WHERE channel_id = ? AND faq_id = ? AND revision = ? ${blockGuard.sql} ${authorization.sql}`,
   ).bind(input.name, JSON.stringify(input.matcher), input.answerText, input.cooldownSeconds, JSON.stringify(input.games),
-    input.chatTarget, now, channelId, entryId, body.revision, ...authorization.values);
+    input.chatTarget, now, channelId, entryId, body.revision, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: FAQ_MODULE_ID,

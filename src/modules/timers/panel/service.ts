@@ -37,19 +37,19 @@ export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): 
   const [timers, sources, variables] = await Promise.all([
     readJson<{ timers: Timer[] }>(timersResponse),
     readJson<{ sources: TimerEventTimeSource[] }>(sourcesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; contexts?: readonly string[]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     timers: timers.timers,
     sources: sources.sources,
-    variables: variables.variables.map((variable) => ({
+    variables: variables.variables.filter((variable) => variable.contexts === undefined || variable.contexts.includes("event")).map((variable) => ({
       name: variable.name,
       description: variable.description ?? variable.name,
       sample: variable.sample ?? "",
       ...(variable.group === undefined ? {} : { group: variable.group }),
       ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
-      ...(variable.parameters === "currency_pair" || variable.parameters === "api_source_name"
-        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "currency_pair" ? "USD EUR" : "sunset") } }
+      ...(variable.parameters === "choices" || variable.parameters === "currency_pair" || variable.parameters === "api_source_name"
+        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "choices" ? "a|b|c" : variable.parameters === "currency_pair" ? "USD EUR" : "sunset") } }
         : {}),
       kind: "module",
       ...(variable.isTextBlock === true ? { isTextBlock: true } : {}),

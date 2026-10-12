@@ -20,6 +20,7 @@ import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboa
 import type { TextCommandPanelData } from "./service";
 import { textCommandsTexts } from "./locale";
 import { convertLeadingSlashCommand, parseLeadingSlashCommand, SLASH_COMMAND_NAMES } from "./slash-command";
+import { templateTextLength } from "../../../contracts/template-text-length";
 
 const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
 
@@ -140,13 +141,13 @@ const commandDraftIsValid = (draft: CommandDraft, channelVariables: readonly Tex
     ? timeout !== null && typeof timeout.minSeconds === "number" && Number.isInteger(timeout.minSeconds) &&
       typeof timeout.maxSeconds === "number" && Number.isInteger(timeout.maxSeconds) && timeout.minSeconds >= 1 &&
       timeout.minSeconds <= timeout.maxSeconds && timeout.maxSeconds <= MODERATION_TIMEOUT_MAX_SECONDS &&
-      timeout.fallbackText.length <= 500 && timeout.reason.length <= 500
+      templateTextLength(timeout.fallbackText) <= 500 && templateTextLength(timeout.reason) <= 500
     : timeout === null;
   const responseRequired = draft.kind !== "list" && draft.kind !== "timeout" && variable === null && draft.text.trim().length === 0;
   return validCommandName(name) && draft.aliases.every(validCommandName) && !draft.aliases.includes(name) && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES &&
     typeof draft.cooldownSeconds === "number" && Number.isInteger(draft.cooldownSeconds) && draft.cooldownSeconds >= 0 && draft.cooldownSeconds <= 86400 &&
     typeof draft.userCooldownSeconds === "number" && Number.isInteger(draft.userCooldownSeconds) && draft.userCooldownSeconds >= 0 && draft.userCooldownSeconds <= 86400 &&
-    validVariable && validTimeout && !responseRequired && draft.text.length <= 500 && (draft.kind === "list" || draft.usageText.length <= 500);
+    validVariable && validTimeout && !responseRequired && templateTextLength(draft.text) <= 500 && (draft.kind === "list" || templateTextLength(draft.usageText) <= 500);
 };
 
 const tierDescription = (tier: TextCommandMinimumTier, labels: ReturnType<typeof textCommandsTexts>): string => {
@@ -308,7 +309,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const validationResponseInvalid = Object.keys(validationTemplateFields).some((field) => {
     const value = validationTemplateValue(field);
     const optionalTimeoutText = validationDraft.kind === "timeout" && (field === "text" || field === "timeoutFallbackText");
-    return (value.trim().length === 0 && !optionalTimeoutText && !(field === "text" && validationDraft.variableAction !== null && validationDraft.timeoutAction === null) && field !== "usageText") || value.length > 500;
+    return (value.trim().length === 0 && !optionalTimeoutText && !(field === "text" && validationDraft.variableAction !== null && validationDraft.timeoutAction === null) && field !== "usageText") || templateTextLength(value) > 500;
   });
   const normalizedName = normalizeCommandName(draft.name);
   const sameNameAlias = draft.aliases.includes(normalizedName);
@@ -320,7 +321,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const templateFieldNames = Object.keys(templateFields) as CommandTemplateField[];
   const responseFieldError = slashInput.status === "invalid"
     ? labels.slashSyntaxError(slashInput.command)
-    : validationDraft.text.length > 500
+    : templateTextLength(validationDraft.text) > 500
     ? labels.fieldTooLong
     : attemptedSave && validationDraft.kind !== "timeout" && validationDraft.kind !== "list" && validationDraft.variableAction === null && validationDraft.text.trim().length === 0
       ? labels.responseMissing
@@ -329,8 +330,8 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     typeof validationDraft.timeoutAction.minSeconds !== "number" || !Number.isInteger(validationDraft.timeoutAction.minSeconds) || validationDraft.timeoutAction.minSeconds < 1 ||
     typeof validationDraft.timeoutAction.maxSeconds !== "number" || !Number.isInteger(validationDraft.timeoutAction.maxSeconds) ||
     validationDraft.timeoutAction.minSeconds > validationDraft.timeoutAction.maxSeconds || validationDraft.timeoutAction.maxSeconds > MODERATION_TIMEOUT_MAX_SECONDS);
-  const timeoutReasonError = validationDraft.timeoutAction !== null && validationDraft.timeoutAction.reason.length > 500 ? labels.fieldTooLong : undefined;
-  const timeoutFallbackError = validationDraft.timeoutAction !== null && validationDraft.timeoutAction.fallbackText.length > 500 ? labels.fieldTooLong : undefined;
+  const timeoutReasonError = validationDraft.timeoutAction !== null && templateTextLength(validationDraft.timeoutAction.reason) > 500 ? labels.fieldTooLong : undefined;
+  const timeoutFallbackError = validationDraft.timeoutAction !== null && templateTextLength(validationDraft.timeoutAction.fallbackText) > 500 ? labels.fieldTooLong : undefined;
   const variableActionInvalid = !validCommandVariableAction(validationDraft.variableAction, channelVariables);
   const variableActionNameInvalid = validationDraft.variableAction !== null && !channelVariables.some((entry) => entry.name === validationDraft.variableAction?.name);
   const variableActionAmountInvalid = validationDraft.variableAction !== null && (
@@ -385,7 +386,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     ? "error" as const
     : undefined;
   const settingsIssue = nameError !== undefined || aliasesError !== undefined || responseFieldError !== undefined ||
-    timeoutReasonError !== undefined || timeoutFallbackError !== undefined || (validationDraft.kind !== "list" && validationDraft.usageText.length > 500) ||
+    timeoutReasonError !== undefined || timeoutFallbackError !== undefined || (validationDraft.kind !== "list" && templateTextLength(validationDraft.usageText) > 500) ||
     (attemptedSave && (timeoutRangeInvalid || variableActionInvalid))
     ? "error" as const
     : announcementWarning !== undefined || localWarnings.length > 0 || serverWarnings.length > 0
@@ -428,7 +429,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   if (attemptedSave && timeoutFallbackError !== undefined) {
     invalidFields.push({ id: "command-timeoutFallbackText", label: labels.timeoutFallbackTextOptional, message: timeoutFallbackError, sectionId: "settings" });
   }
-  if (attemptedSave && validationDraft.kind !== "list" && validationDraft.usageText.length > 500) {
+  if (attemptedSave && validationDraft.kind !== "list" && templateTextLength(validationDraft.usageText) > 500) {
     invalidFields.push({ id: "command-usageText", label: labels.templateFieldLabels.usageText, message: labels.fieldTooLong, sectionId: "settings" });
   }
   if (attemptedSave && variableActionNameInvalid) {
@@ -869,6 +870,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
               hint={labels.timeoutReasonHint}
               value={draft.timeoutAction.reason}
               maxLength={500}
+              countLength={templateTextLength}
               {...(timeoutReasonError === undefined ? {} : { error: timeoutReasonError })}
               countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
               disabled={!canManageContent || pending}

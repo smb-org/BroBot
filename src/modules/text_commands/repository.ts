@@ -28,7 +28,7 @@ export interface TextCommandRepository {
   list(channelId: string): Promise<TextCommand[]>;
   find(channelId: string, name: string): Promise<TextCommand | null>;
   findByAlias(channelId: string, alias: string): Promise<TextCommand | null>;
-  create(input: NewTextCommand, actor: TextCommandActor): Promise<TextCommandMutationResult>;
+  create(input: NewTextCommand, actor: TextCommandActor, expectedGraphRevision?: number): Promise<TextCommandMutationResult>;
   change(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult>;
   delete(
     channelId: string,

@@ -124,6 +124,7 @@ export interface TextCommandChange {
   variableAction?: TextCommandVariableAction | null;
   timeoutAction?: TextCommandTimeoutAction | null;
   expectedRevision?: number;
+  expectedGraphRevision?: number;
   now: string;
 }
 

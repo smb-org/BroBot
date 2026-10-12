@@ -37,6 +37,7 @@ import {
   belaboxStreamSessionGuard,
 } from "../../src/modules/belabox/adapters/d1";
 import { MANAGING_ROLES } from "../../src/contracts/values";
+import { textBlockWriteGuard } from "../../src/modules/contracts/text-block-write-guard";
 import { ANY_MEMBER_ROLES } from "../../src/worker/db/guards";
 
 interface SchemaObject {
@@ -126,6 +127,8 @@ const sqlGetFixtures = new Map<string, string>([
   ["guard", authorizeModuleMutation("channel-id", actor, now).sql],
   ["channelBotConsentCondition(\"channel\")", channelBotConsentCondition("channel")],
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
+  ["blockGuard.sql", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
+  ["textBlockGuard?.sql ?? \"\"", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
 ]);
 
 // Wrangler manages this table itself and doesn't create it via our migrations.

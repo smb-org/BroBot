@@ -10,6 +10,7 @@ import { Badge, Button, ChatPreview, ConfirmDialog, Field, GamePicker, Inspector
 import { templateVariableNames } from "../../contract";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { templateTextLength } from "../../../contracts/template-text-length";
 import { textLibraryTexts } from "./locale";
 import { estimateEmbeddedBlockOverflow } from "./embedded-block-overflow";
 import {
@@ -197,7 +198,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   const variantInvalid = draft === null || draft.variants.length === 0 || draft.variants.length > TEXT_BLOCK_MAXIMUMS.variantsPerBlock ||
     draft.variants.filter((variant) => Object.keys(variant.conditions).length === 0).length !== 1 ||
     Object.keys(draft.variants.at(-1)?.conditions ?? {}).length !== 0 ||
-    draft.variants.some((variant) => !validTextBlockConditions(variant.conditions) || variant.texts.length === 0 || variant.texts.length > TEXT_BLOCK_MAXIMUMS.textsPerVariant || variant.texts.some((text) => text.trim().length === 0 || text.length > TEXT_BLOCK_MAXIMUMS.textLength));
+    draft.variants.some((variant) => !validTextBlockConditions(variant.conditions) || variant.texts.length === 0 || variant.texts.length > TEXT_BLOCK_MAXIMUMS.textsPerVariant || variant.texts.some((text) => text.trim().length === 0 || templateTextLength(text) > TEXT_BLOCK_MAXIMUMS.textLength));
   const valid = draft !== null && !nameInvalid && !nameTaken && !nameReserved && !variantInvalid && draft.categoryId.length > 0;
   const dirty = draft !== null && baselineDraft !== null && JSON.stringify(draft) !== JSON.stringify(baselineDraft);
   const blockVariants = new Map((data?.blocks ?? [])

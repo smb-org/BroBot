@@ -5,6 +5,7 @@ import type {
 import type { Timer, TimerMutationInput } from "./contracts";
 import { TIMER_MESSAGE_MAX_LENGTH, timerTriggerSchema } from "./contracts";
 import { validateEventTemplateContentMutation, validateEventTemplateText, type EventTextBlockValidation } from "../contracts/text-block-validation";
+import { templateTextLength } from "../../contracts/template-text-length";
 
 export type TimerTextValidation = EventTextBlockValidation;
 export const validateTimerText = validateEventTemplateText;
@@ -60,7 +61,7 @@ export const timerMutationInput = (value: unknown): TimerMutationInput | null =>
   const record = value as Record<string, unknown>;
   if (typeof record.name !== "string" || record.name.trim().length < 1 || record.name.trim().length > 60 ||
       typeof record.messageText !== "string" || record.messageText.trim().length === 0 ||
-      record.messageText.length > TIMER_MESSAGE_MAX_LENGTH) return null;
+      templateTextLength(record.messageText) > TIMER_MESSAGE_MAX_LENGTH) return null;
   const parsed = timerTriggerSchema.safeParse(record.trigger);
   if (!parsed.success) return null;
   const chatTarget = record.chatTarget === undefined ? "source_only" : record.chatTarget;

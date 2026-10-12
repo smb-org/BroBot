@@ -10,6 +10,7 @@ import type { TextBlockInput } from "./repository";
 import { createTextLibraryService } from "./service";
 import { TEXT_BLOCK_OVERLAY_ELEMENT_KIND } from "./overlay/element";
 import { MODULE_TEMPLATE_MINIMUM_TIERS, SYSTEM_TEMPLATE_VARIABLE_LIST, type ModuleRouteEnvironment, type ModuleTextBlockConditionDefinition } from "../contract";
+import { templateTextLength } from "../../contracts/template-text-length";
 
 const TEXT_LIBRARY_MODULE_ID = "text_library";
 
@@ -39,7 +40,7 @@ const conditionsSchema = z.object({
 const variantSchema = z.object({
   id: z.string().min(1).max(80),
   conditions: conditionsSchema.default({}),
-  texts: z.array(z.string().trim().min(1).max(TEXT_BLOCK_MAXIMUMS.textLength)).min(1).max(TEXT_BLOCK_MAXIMUMS.textsPerVariant),
+  texts: z.array(z.string().trim().min(1).refine((text) => templateTextLength(text) <= TEXT_BLOCK_MAXIMUMS.textLength)).min(1).max(TEXT_BLOCK_MAXIMUMS.textsPerVariant),
 });
 const blockSchema = z.object({
   name: z.string(),

@@ -1,5 +1,6 @@
 import { TEXT_BLOCK_MAXIMUMS, type TextBlockVariant } from "../contracts";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../contract";
+import { templateTextLength } from "../../../contracts/template-text-length";
 
 interface TemplateLengthVariable {
   name: string;
@@ -23,7 +24,7 @@ export const estimateEmbeddedBlockOverflow = (
     SYSTEM_TEMPLATE_VARIABLE_LIST.find((variable) => variable.name === name)?.maxLength ?? tokenLength;
 
   const estimateText = (text: string, path: readonly string[], resolveBlocks: boolean): { length: number; embeddedBlocks: string[] } => {
-    let length = text.length;
+    let length = templateTextLength(text);
     const embeddedBlocks: string[] = [];
     for (const match of text.matchAll(TOKEN_PATTERN)) {
       const blockName = match[1]?.slice("text.".length);
@@ -31,12 +32,13 @@ export const estimateEmbeddedBlockOverflow = (
       const name = blockName ?? variableName;
       if (name === undefined) continue;
       const variants = blockName === undefined ? undefined : blocks.get(blockName);
+      const tokenLength = templateTextLength(match[0]);
       const replacementLength = variants === undefined
-        ? variableLength(name, match[0].length)
+        ? variableLength(name, tokenLength)
         : resolveBlocks
           ? estimateBlock(blockName as string, path).length
-          : match[0].length;
-      length += replacementLength - match[0].length;
+          : templateTextLength(match[0]);
+      length += replacementLength - tokenLength;
       if (variants !== undefined && blockName !== undefined) embeddedBlocks.push(blockName);
     }
     return { length, embeddedBlocks };

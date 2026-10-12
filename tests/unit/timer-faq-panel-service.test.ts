@@ -6,6 +6,8 @@ import { loadTimersPanel } from "../../src/modules/timers/panel/service";
 const parameterizedVariables = [
   { name: "currency.convert", sample: "11,50 €", parameters: "currency_pair", parameterDefault: "USD EUR" },
   { name: "api_source.value", sample: "18:42", parameters: "api_source_name", parameterDefault: "sunset" },
+  { name: "pick", sample: "First", parameters: "choices", contexts: ["event", "chat_command"], parameterDefault: "first|second" },
+  { name: "user", sample: "Viewer", contexts: ["chat_command"] },
 ];
 
 const response = (body: unknown): Response => new Response(JSON.stringify(body), {
@@ -45,5 +47,19 @@ describe("timer and FAQ panel variable loading", () => {
       expect.objectContaining({ name: "currency.convert", parameters: "currency_pair", parameter: { value: "USD EUR" } }),
       expect.objectContaining({ name: "api_source.value", parameters: "api_source_name", parameter: { value: "sunset" } }),
     ]));
+  });
+
+  it.each([
+    ["timer", loadTimersPanel],
+    ["FAQ", loadFaqPanel],
+  ] as const)("keeps choices defaults and filters chat-only variables in the %s picker", async (_label, loadPanel) => {
+    stubPanelFetch();
+
+    const panel = await loadPanel("channel-a");
+
+    expect(panel.variables).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "pick", parameters: "choices", parameter: { value: "first|second" } }),
+    ]));
+    expect(panel.variables.some((variable) => variable.name === "user")).toBe(false);
   });
 });
