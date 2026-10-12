@@ -18,10 +18,12 @@ describe("text block token migration", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
-      const target = "0054_text_block_tokens.sql";
+      const target = "0055_text_block_tokens.sql";
       const targetIndex = migrationFiles.indexOf(target);
       expect(targetIndex).toBeGreaterThanOrEqual(0);
-      for (const file of migrationFiles.slice(0, targetIndex)) database.exec(readMigration(file));
+      const priorMigrations = migrationFiles.slice(0, targetIndex);
+      expect(priorMigrations).toContain("0054_channel_module_initialization.sql");
+      for (const file of priorMigrations) database.exec(readMigration(file));
 
       database.exec(`
         INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
