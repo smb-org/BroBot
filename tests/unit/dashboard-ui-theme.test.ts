@@ -33,6 +33,18 @@ function contrastRatio(hexA: string, hexB: string): number {
 
 const WCAG_AA_NORMAL_TEXT = 4.5;
 const legacyStyles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
+const tokenStyles = readFileSync(resolve(process.cwd(), "src/dashboard/ui/tokens.css"), "utf8");
+
+type PaletteName = "nachtschicht" | "indigo-nacht";
+
+function paletteTokens(palette: PaletteName): Map<string, string> {
+  const selector = palette === "nachtschicht"
+    ? /:root\[data-palette="nachtschicht"\],\s*:root:not\(\[data-palette\]\)\s*\{([^}]*)\}/u
+    : /:root\[data-palette="indigo-nacht"\]\s*\{([^}]*)\}/u;
+  const declarations = selector.exec(tokenStyles)?.[1];
+  if (declarations === undefined) throw new Error(`Missing token block for ${palette}`);
+  return new Map(Array.from(declarations.matchAll(/(--[\w-]+):\s*(#[\da-f]{6})\s*;/giu), ([, name, value]) => [name ?? "", value ?? ""]));
+}
 
 function resolveLegacyColor(variable: string): string {
   const match = new RegExp(`${variable}:\\s*(#[\\da-fA-F]{6})`).exec(legacyStyles);
@@ -92,6 +104,53 @@ describe("theme contrast rule", () => {
 
     const onBrandOnBrand = contrastRatio(onBrandColor, brandColor);
     expect(onBrandOnBrand).toBeGreaterThanOrEqual(WCAG_AA_NORMAL_TEXT);
+  });
+});
+
+describe("palette contrast tokens", () => {
+  it.each(["nachtschicht", "indigo-nacht"] as const)("keeps every documented filled-control pair AA compliant in %s", (palette) => {
+    const values = paletteTokens(palette);
+    const pairs = [
+      { foreground: "--color-brand-on", backgrounds: ["--color-brand", "--color-brand-hover", "--color-brand-press"] },
+      { foreground: "--color-on-gold", backgrounds: ["--color-gold", "--color-gold-hover", "--color-gold-press"] },
+      { foreground: "--color-orange-on", backgrounds: ["--color-orange"] },
+      { foreground: "--color-on-error", backgrounds: ["--color-error"] },
+    ];
+
+    for (const { foreground, backgrounds } of pairs) {
+      const textColor = values.get(foreground);
+      expect(textColor, `${palette} must define ${foreground}`).toBeDefined();
+      for (const background of backgrounds) {
+        const fillColor = values.get(background);
+        expect(fillColor, `${palette} must define ${background}`).toBeDefined();
+        expect(
+          contrastRatio(textColor ?? "", fillColor ?? ""),
+          `${palette}: ${foreground} on ${background}`,
+        ).toBeGreaterThanOrEqual(WCAG_AA_NORMAL_TEXT);
+      }
+    }
+  });
+});
+
+describe("legacy dashboard CSS compatibility", () => {
+  it("keeps the generic font reset away from Mantine controls", () => {
+    expect(tokenStyles).toContain('@import "../styles.css";');
+    expect(tokenStyles).not.toContain('@import "../styles.css" layer(');
+    for (const control of ["button", "select", "input", "textarea"]) {
+      expect(legacyStyles).toContain(`${control}:not([class*="mantine-"])`);
+    }
+  });
+
+  it("leaves legacy surface variables owned by styles.css", () => {
+    const legacySurfaceTokens = [
+      "--background", "--rail", "--surface-raised", "--surface", "--surface-hover",
+      "--surface-inspector", "--surface-well", "--surface-depth", "--line", "--line-strong", "--line-light",
+    ];
+    for (const token of legacySurfaceTokens) {
+      expect(legacyStyles).toMatch(new RegExp(`${token}:\\s*[^;]+;`, "u"));
+      expect(tokenStyles).not.toMatch(new RegExp(`(?:^|\\s)${token}:`, "u"));
+    }
+    expect(legacyStyles).toContain("--background: #141312;");
   });
 });
 

@@ -1,18 +1,28 @@
 ---
 name: BroBot Panel
-description: Verbindliches Zielsystem der Dashboard-Neugestaltung, abgeleitet aus dem fertigen Prototyp (docs/input/prototype) – zwei Themes (Nachtschicht, Indigo-Nacht), Farbrollen, Kit-Bauteile, Seitentypen, Durchsetzung
+description: Dashboard UI design target for the implemented palette foundation and planned page migrations
 status: verbindlich für die Umsetzung
 ---
 
 # BroBot Panel – Zielsystem
 
-Quelle der Wahrheit ist, was der Prototyp ausliefert: `prototype/src/theme.css`,
-`src/dashboard/ui/*`, `src/dashboard/ui/*`, `src/dashboard/live/*`, `src/pages/**` und die erzwingenden
-Tests in `prototype/e2e/*.spec.ts`. Wo diese Datei und der Prototyp abweichen,
-steht es in Abschnitt 16; dort gilt das Ziel.
+Die aktuelle Implementierung liegt in `src/dashboard/ui/tokens.css`,
+`src/dashboard/styles.css`, `src/dashboard/ui/theme.ts` und `src/dashboard/router.ts`.
+Die verbindlichen Tests liegen unter `tests/unit/` und `tests/e2e/`. Dieses Dokument
+beschreibt das Zielsystem; Anforderungen ohne verlinkten Implementierungs- oder
+Testbeleg sind geplant und noch keine Aussage über das heutige Produkt.
 
 Bezeichner im Code sind englisch, Anzeigetexte deutsch (zweisprachige Kataloge).
 Beispiele hier sind fiktiv (`kanal_demo`, `nachtfalke`, `pixelpilz`).
+
+## Implementierungsstand
+
+- `src/dashboard/ui/tokens.css` enthält die englischen Palette-Tokens und die Werte für `nachtschicht` und `indigo-nacht`.
+- `src/dashboard/styles.css` enthält weiterhin die bestehenden warmen Oberflächen-Tokens wie `--background`, `--surface` und `--line`. Palette-Tokens mit Präfix `--color-` überschreiben diese Legacy-Tokens nicht.
+- `src/dashboard/ui/theme.ts` bindet Mantine an die bestehenden Legacy-Farben. Die Migration bestehender Seiten auf die neuen Palette-Tokens ist geplant.
+- `tests/unit/theme-color-lint.test.ts` prüft Farb-Literale in `.ts`, `.tsx` und `.css` unter `src/dashboard/ui/`; nur `src/dashboard/ui/tokens.css` ist ausgenommen.
+- `tests/unit/dashboard-ui-theme.test.ts` prüft Mantine-Formgrößen und die dokumentierten gefüllten Farbpaare beider Paletten.
+- `tests/e2e/foundation-visual.spec.ts` kann Dashboard-Routen als Screenshots erfassen. Es vergleicht diese Screenshots nicht automatisch.
 
 ## 1. Produktprinzipien
 
@@ -36,31 +46,30 @@ Zwei Themes, Wahl im Kontomenü unter „Darstellung“ (Menü-Radio), gespeiche
 | **Nachtschicht** | `nachtschicht` (Standard, auch ohne Speicher) | Default | neutrales Fast-Schwarz, fette weiße Titel, Zeilen nur durch Haarlinien getrennt, farbige Kategorie-/Zustands-/Typ-Badges je Navigationsgruppe |
 | **Indigo-Nacht** | `indigo-nacht` | einzige Alternative | marineblaue Flächen, Hierarchie über Flächenstufen, Indigo als Ortsfarbe |
 
-Mechanik (verbindlich):
+Aktuelle Palette-Mechanik:
 
-- `src/dashboard/ui/tokens.css` definiert Tailwind-Tokens in `@theme` und Farbwerte auf `:root[data-palette]`. Nachtschicht ist der Standard; Indigo-Nacht überschreibt nur abweichende Farb-Tokens. Badges, Inhaltsfarben, Typografie, Radien und Abstände bleiben gemeinsam.
-- Theme-spezifische Strukturregeln stehen unter `:root[data-palette="nachtschicht"] …` (Zeilen ohne Kasten, runde Badges, 3px-Kategorieleiste im Feed). Unterschiede gehören zuerst in Tokens; Strukturregeln nur, wo ein Token nicht reicht.
-- **Keine fest codierten Farben außerhalb von Theme-Tokens und Inhaltsfarb-Sets.** Erzwungen von `tests/unit/theme-color-lint.test.ts`: `#hex`, `rgb(`, `rgba(` und `hsl(` in `src/dashboard/ui/**/*.{ts,tsx}` sind Fehler; Theme-Werte liegen in `src/dashboard/ui/tokens.css`.
+- `src/dashboard/ui/tokens.css` definiert die Palette-Tokens auf `:root[data-palette]`. Nachtschicht ist der Standard; Indigo-Nacht überschreibt seine abweichenden Werte. Die Werte sind verfügbar, aber bestehende Seiten verwenden weiterhin die Legacy-Tokens aus `src/dashboard/styles.css`.
+- Theme-spezifische Strukturregeln sind geplant. Unterschiede sollen zuerst in Tokens ausgedrückt werden; Strukturregeln sind nur nötig, wo ein Token nicht reicht.
+- **Keine fest codierten Farben außerhalb von Theme-Tokens und Inhaltsfarb-Sets.** Der aktuelle Lint in `tests/unit/theme-color-lint.test.ts` weist `#hex`, `rgb(`, `rgba(` und `hsl(` in `.ts`, `.tsx` und `.css` unter `src/dashboard/ui/` zurück; die zentrale Token-Datei `src/dashboard/ui/tokens.css` ist ausgenommen.
 
-- **Jedes Theme muss die Kontrast-Specs bestehen** (Abschnitt 14). Ein neues Theme ist erst fertig, wenn `palette-comparison.spec.ts` und `run-j.spec.ts` es abdecken.
-- Umschalten bewegt kein Layout: `page-stage` hat vor und nach dem Wechsel dieselbe Box (getestet).
+- Der aktuelle Kontrasttest prüft die gefüllten Farbpaare aus Abschnitt 14 in beiden Paletten. Weitere Kontrast- und Layoutanforderungen aus diesem Dokument sind geplant, bis ein konkreter Test sie abdeckt.
 
 ## 3. Farbrollen
 
 | Rolle | Farbe | Bedeutung | Erlaubt |
 |---|---|---|---|
-| **Gold** | `--color-gold` | die eine nächste Aktion je Bereich | Primärbutton, aktiver Schritt, Fortschritt, Slider, gewählter Tab in einem Ablauf |
-| **Ort** | `--color-marke*` (Nachtschicht blau, Indigo-Nacht indigo) | wo du bist / was gewählt ist | aktive Navigation, gewähltes Listenelement (Rahmen + linke Leiste), Fokusring, Links, Schalter „an“, Checkboxen, Variablen-Token |
-| **Orange** | `--color-orange*` | „du bist dran“ (selten) | Hinweisbanner, Werbung in < 2 min, fehlende Berechtigung, Ungespeichert-Anzeige |
-| **Rot** | `--color-fehler*` | Fehler / Zerstörendes | Fehlerzeilen, Löschen (umrandet); gefüllt nur im Bestätigungsdialog |
-| **Grün** | `--color-gruen*` | läuft wirklich | LED + Wort, „Verbunden“ |
-| Neutral | `--color-taste*`, `--color-text*` | alles übrige | „Beenden“, „Abbrechen“, „Verwerfen“ |
+| **Gold** | `--color-gold`, `--color-gold-hover`, `--color-gold-press`, `--color-on-gold` | die eine nächste Aktion je Bereich | Primärbutton, aktiver Schritt, Fortschritt, Slider, gewählter Tab in einem Ablauf |
+| **Brand** | `--color-brand*` | wo du bist / was gewählt ist | aktive Navigation, gewähltes Listenelement, Fokusring, Links, Schalter „an“, Checkboxen, Variablen-Token |
+| **Orange** | `--color-orange`, `--color-orange-on`, `--color-orange-soft`, `--color-orange-border`, `--color-orange-text` | „du bist dran“ (selten) | Hinweisbanner, Werbung in < 2 min, fehlende Berechtigung, Ungespeichert-Anzeige |
+| **Rot** | `--color-error`, `--color-error-text`, `--color-error-surface`, `--color-error-border`, `--color-on-error` | Fehler / Zerstörendes | Fehlerzeilen, Löschen (umrandet); gefüllt nur im Bestätigungsdialog |
+| **Grün** | `--color-success`, `--color-success-text`, `--color-success-surface`, `--color-success-border` | läuft wirklich | LED + Wort, „Verbunden“ |
+| Neutral | `--color-surface*`, `--color-text*`, `--color-border*` | alles übrige | „Beenden“, „Abbrechen“, „Verwerfen“ |
 
 Regeln:
 
-- **Höchstens ein goldener Primärbutton je Aktionsbereich.** Bereiche: Dialog, Speicher-Cluster, Seitenaktionen, Listen-Werkzeugleiste, Aktionsrahmen-Fuß, Popover-Aktionen. Erzwungen von `run-j.spec.ts` („Gold hat höchstens eine Primäraktion …“) über `data-primary-action="gold"`.
-- Hilfe-Links („So funktioniert’s“) nutzen die **Linkfarbe** (`--color-marke-text`), nie Gold (Test `stepped-dialog.spec.ts`).
-- Orange und Gold bleiben nebeneinander unterscheidbar (Farbton ≥ 12°, RGB-Abstand ≥ 45; Test Indigo-Nacht).
+- **Geplant:** höchstens ein goldener Primärbutton je Aktionsbereich. Ein automatischer Prüftest dafür existiert derzeit nicht.
+- Hilfe-Links („So funktioniert’s“) nutzen die **Linkfarbe** (`--color-brand-text`), nie Gold.
+- Orange und Gold sollen nebeneinander unterscheidbar bleiben (Farbton ≥ 12°, RGB-Abstand ≥ 45); ein automatischer Test dafür ist geplant.
 - Normales „Beenden“/„Abbrechen“ ist neutral (`ghost`/`outline`), nie rot.
 - Grün steht nie ohne Wort. Rot und Orange nie als einziger Hinweis.
 - Gold ist nie Auswahl, nie Status, nie Link.
@@ -71,10 +80,10 @@ Regeln:
 
 | Leiste | Zustand | Token |
 |---|---|---|
-| grün | läuft (`is-running`) | `--color-gruen` |
+| grün | läuft (`is-running`) | `--color-success` |
 | orange | jetzt handeln (`is-imminent`) | `--color-orange` |
-| rot | defekt (`is-error`) | `--color-fehler` |
-| blau/Ort | Einrichtungshinweis | `--color-marke` |
+| rot | defekt (`is-error`) | `--color-error` |
+| blau/Brand | Einrichtungshinweis | `--color-brand` |
 
 Ruhende Blöcke haben keine Leiste. Die Ortsleiste an gewähltem Listenelement und aktivem Navigationspunkt bedeutet „hier bist du“, nie Zustand.
 
@@ -92,9 +101,9 @@ Inhaltsfarben gehören zum dargestellten Gegenstand, nicht zum Chrom. **Nie** au
 | Abstimmung | `--content-vote-1..6` = `#5b8cff #ff9f43 #2ed3a3 #ff6fae #ffd45c #a47bff` | Standard-Antwortfarben |
 | Overlay-Design | frei wählbar (Hex im Editor) | Overlay-Elemente |
 
-- **Abstimmungsfarben:** Standardpalette aus 6 Farben, je Antwort änderbar („Farbe für Antwort N“ + eigene Hex-Farbe). Gleiche Farbe in Panel-Vorschau, Cockpit-Ergebnis und Overlay. Jede Farbe ≥ 3:1 gegen die Balkenspur, alle 6 unterscheidbar (getestet). Führende Antwort: fett + Wort „führt“ (Ziel, siehe 16).
-- Hex-Werte für Inhaltsfarben nur in `data/overlay.ts`, `data/voting.ts`, `OverlayEditor.tsx`, `Voting.tsx`; sonst über `--content-*`.
-- `--chart-*` mappt auf Inhaltsfarben, nie auf Rollenfarben.
+- **Abstimmungsfarben:** geplante Standardpalette aus 6 Farben, je Antwort änderbar („Farbe für Antwort N“ + eigene Hex-Farbe). Gleiche Farbe in Panel-Vorschau, Cockpit-Ergebnis und Overlay. Ziel: jede Farbe ≥ 3:1 gegen die Balkenspur und alle 6 unterscheidbar; ein automatischer Test ist geplant.
+- Inhaltsfarben verwenden die `--content-*`-Tokens. Frei gewählte Overlay-Farben sind Nutzereingaben und werden getrennt vom UI-Chrom behandelt.
+- `--color-chart-1` bis `--color-chart-5` mappen auf Inhaltsfarben, nie auf Rollenfarben.
 
 ## 5. Farb-Tokens
 
@@ -102,61 +111,61 @@ Inhaltsfarben gehören zum dargestellten Gegenstand, nicht zum Chrom. **Nie** au
 
 | Token | Nachtschicht | Indigo-Nacht | Rolle |
 |---|---|---|---|
-| `--color-tiefe` | `#06080B` | `#060a14` | Dialog-Hinterlegung, dunkelster Wert |
-| `--color-rinne` | `#090C10` | `#0a1020` | Eingabefelder, vertiefte Flächen |
-| `--color-grund` | `#0D1015` | `#0d1426` | Seitengrund |
-| `--color-rail` | `#11151B` | `#111a2f` | Kopfleiste, Seitenleiste, Toast |
-| `--color-inspektor` (= `flaeche-1`) | `#151A21` | `#152038` | Detail-/Kartenfläche |
-| `--color-taste` (= `flaeche-2`) | `#1C222B` | `#1b2843` | Buttons, Popover, Chips |
-| `--color-taste-hover` (= `flaeche-3`) | `#242B36` | `#233352` | Hover, Selected-Füllung |
-| `--color-linie` | `#262D38` | `#22304b` | Haarlinie |
-| `--color-linie-stark` | `#353E4B` | `#34466a` | stärkere Trennung |
-| `--color-linie-control` (= `linie-hell`) | `#6B7686` | `#5a6e94` | Feldrand (≥ 3:1 auf Rinne) |
+| `--color-depth` | `#06080B` | `#060A14` | Dialog-Hinterlegung, dunkelster Wert |
+| `--color-well` | `#090C10` | `#0A1020` | Eingabefelder, vertiefte Flächen |
+| `--color-background` | `#0D1015` | `#0D1426` | Palette-Hintergrund |
+| `--color-rail` | `#11151B` | `#111A2F` | Kopfleiste, Seitenleiste, Toast |
+| `--color-inspector` | `#151A21` | `#152038` | Detail-/Kartenfläche |
+| `--color-surface` | `#1C222B` | `#1B2843` | Buttons, Popover, Chips |
+| `--color-surface-hover` | `#242B36` | `#233352` | Hover, Selected-Füllung |
+| `--color-border` | `#262D38` | `#22304B` | Haarlinie |
+| `--color-border-strong` | `#353E4B` | `#34466A` | stärkere Trennung |
+| `--color-border-control` | `#6B7686` | `#5A6E94` | Feldrand (Ziel: ≥ 3:1 auf `--color-well`) |
 
-Beide Themes verwenden sechs Flächenstufen (tiefe, rinne, grund, rail, inspektor, taste). `--color-taste-hover` ist die separate Interaktionsfläche für Hoverzustände, keine siebte Flächenstufe. Hierarchie entsteht durch die Flächenstufen, nicht durch Rahmen.
+Beide Paletten verwenden die Flächen-Tokens `--color-depth`, `--color-well`, `--color-background`, `--color-rail`, `--color-inspector` und `--color-surface`. `--color-surface-hover` ist die separate Interaktionsfläche für Hoverzustände. Hierarchie entsteht durch Flächen, nicht durch Rahmen.
 
 ### 5.2 Text
 
 | Token | Nachtschicht | Indigo-Nacht | Verwendung | Kontrast auf Grund (N / I) |
 |---|---|---|---|---|
-| `--color-text` | `#F2F5F9` | `#f3f6fc` | Titel, Werte | 17,4 / 16,9 |
-| `--color-text-2` | `#C9D1DB` | `#c3ccdd` | Feldnamen, Beschreibung | 12,4 / 11,4 |
-| `--color-text-3` | `#8D98A7` | `#96a3bc` | Metazeilen, Platzhalter | 6,5 / 7,2 |
-| `--color-text-4` | `#7A8595` | `#8291ac` | nur Deko, Trenner, inaktive Punkte – nie Fließtext | 5,1 / 5,8 |
+| `--color-text` | `#F2F5F9` | `#F3F6FC` | Titel, Werte | |
+| `--color-text-2` | `#C9D1DB` | `#C3CCDD` | Feldnamen, Beschreibung | |
+| `--color-text-3` | `#8D98A7` | `#96A3BC` | Metazeilen, Platzhalter | |
+| `--color-text-4` | `#7A8595` | `#8291AC` | nur Deko, Trenner, inaktive Punkte – nie Fließtext | |
 
-`text-4` unterschreitet in Nachtschicht auf `taste` 4,5:1 (4,28) und wird vom Test nicht geprüft: **nie Text**.
+`--color-text-4` ist für Dekoration vorgesehen, nicht für Fließtext. Kontraste der Text-Tokens über alle Flächen sind eine künftige Testanforderung.
 
 ### 5.3 Ort, Gold, Orange, Rot, Grün
 
 | Token | Nachtschicht | Indigo-Nacht | Rolle | Kontrast |
 |---|---|---|---|---|
-| `--color-marke` | `#4C9AFF` | `#4a62f2` | Ort, gefüllt | Text darauf ≥ 4,5 (7,0 / 4,9) |
-| `--color-marke-auf` | `#06080B` | `#ffffff` | Text auf Ort-Füllung | |
-| `--color-marke-text` | `#4C9AFF` | `#9db0ff` | Links, aktiver Text | auf Grund 6,7 / 8,8 |
-| `--color-marke-linie` | `#4C9AFF` | `#6a84ff` | Ortsrand | |
-| `--color-fokus` | `#4C9AFF` | `#a9b9ff` | Fokusring (2px, Offset 2px) | ≥ 3:1 auf allen Flächen (6,7 / 9,7) |
-| `--color-auswahl-rand` / `-grund` | `#4C9AFF` / `#1C222B` | `#6a84ff` / `#1e2a5c` | gewähltes Element | Rand ≥ 3:1, Text ≥ 4,5 |
-| `--color-gold` (`-hover` / `-pressed`) | `#E8B93C` (`#F2CA59` / `#D4A72C`) | `#E3B341` (`#F0C75B` / `#D2A12F`) | Primärbutton | |
-| `--color-auf-signal` | `#14100A` | `#11131A` | Text auf Gold | ≥ 7:1 (10,3 / 9,5) |
-| `--color-gold-soft` / `-text` | `#2B2414` / `#E8B93C` | `#342B17` / `#F2C75C` | weiche Goldfläche | Text ≥ 4,5 |
+| `--color-brand` | `#4C9AFF` | `#4A62F2` | Brand-Fläche | foreground pairs in Abschnitt 14 |
+| `--color-brand-on` | `#06080B` | `#FFFFFF` | Text auf Brand-Füllung | |
+| `--color-brand-text` | `#4C9AFF` | `#9DB0FF` | Links, aktiver Text | |
+| `--color-brand-border` | `#4C9AFF` | `#6A84FF` | Brand-Rand | |
+| `--color-focus` | `#4C9AFF` | `#A9B9FF` | Fokusring (Ziel: 2px, Offset 2px) | |
+| `--color-selection-border` / `--color-selection-surface` | `#4C9AFF` / `#1C222B` | `#6A84FF` / `#1E2A5C` | gewähltes Element | |
+| `--color-gold`, `--color-gold-hover`, `--color-gold-press` | `#E8B93C`, `#F2CA59`, `#D4A72C` | `#E3B341`, `#F0C75B`, `#D2A12F` | Primärbutton | |
+| `--color-on-gold` | `#06080B` | `#11131A` | Text auf Gold | |
+| `--color-gold-soft` / `--color-gold-text` | `#2B2414` / `#E8B93C` | `#342B17` / `#F2C75C` | weiche Goldfläche | |
 | `--color-orange` | `#FF8A3D` | `#FF8A3D` | Du-bist-dran | |
 | `--color-orange-on` | `#06080B` | `#11131A` | Text auf Orange | ≥ 4,5 (8,6 / 7,9) |
 | `--color-orange-soft` / `-border` / `-text` | `#2C2018` / `#76502F` / `#FF8A3D` | `#321F18` / `#94502E` / `#FFAA83` | Banner, Ungespeichert | Text ≥ 4,5 |
-| `--color-fehler` / `-text` | `#FF6B6B` / `#FF6B6B` | `#d93a42` / `#ff8a8f` | Fehler | Text auf Grund 6,9 / 8,1 |
-| `--color-fehler-grund` / `-rand` | `#281719` / `#63353A` | `#2e1520` / `#7a2b36` | Fehlerfläche | |
-| `--color-auf-fehler` | `#FFFFFF` | `#ffffff` | Text auf gefülltem Rot | ≥ 4,5 (Indigo-Nacht knapp: 4,5) |
-| `--color-gruen` / `-word` | `#3FCF7F` / `#3FCF7F` | `#34d399` / `#4ade9a` | Läuft | auf Grund 9,5 / 10,7 |
-| `--color-gruen-grund` / `-rand` | `#14271D` / `#286647` | `#0f2a26` / `#1f5a47` | Läuft-Fläche | |
+| `--color-error` / `--color-error-text` | `#FF6B6B` / `#FF6B6B` | `#D93A42` / `#FF8A8F` | Fehler | |
+| `--color-error-surface` / `--color-error-border` | `#281719` / `#63353A` | `#2E1520` / `#7A2B36` | Fehlerfläche | |
+| `--color-on-error` | `#000000` | `#000000` | Text auf gefülltem Rot | aktuell im Unit-Test: ≥ 4,5:1 |
+| `--color-success` / `--color-success-text` | `#3FCF7F` / `#3FCF7F` | `#34D399` / `#4ADE9A` | Läuft | |
+| `--color-success-surface` / `--color-success-border` | `#14271D` / `#286647` | `#0F2A26` / `#1F5A47` | Läuft-Fläche | |
 
-`--color-tint-1/-2` sind identisch mit `taste` (Altlast, nicht neu verwenden).
+`--tint-1` und `--tint-2` gehören zu den Legacy-Tokens in `src/dashboard/styles.css`; sie sind nicht Palette-Tokens.
 
 ### 5.4 Semantik für Befehle und Variablen
 
-`--semantic-command`, `-username`, `-countdown` = `text`; `--semantic-variable` = Ortsfarbe; `--semantic-module` = `text-2`. Variablen-Token im Textfeld sind Ortsfarbe (nie Gold).
+`--semantic-command`, `--semantic-username` und `--semantic-countdown` verwenden die Textfarbe; `--semantic-variable` verwendet Brand; `--semantic-module` verwendet `--color-text-2`. Variablen-Tokens im Textfeld sind Brand (nie Gold).
 
 ## 6. Kategorie-Badges (Nachtschicht)
 
-Pro Navigationsgruppe ein Farbton; Token-Dreier `--badge-<x>` (Schrift), `-fill`, `-line`. Schrift auf Füllung ≥ 4,5:1 (getestet für alle 16 Paare).
+Pro Navigationsgruppe ein Farbton; Token-Dreier wie `--badge-chat`, `--badge-chat-fill` und `--badge-chat-line`. Schriftkontrast von Badge-Tokens ≥ 4,5:1 ist ein Ziel; ein Test dafür ist geplant.
 
 | Gruppe (`data-module-group`) | Schrift | Füllung | Linie |
 |---|---|---|---|
@@ -175,9 +184,9 @@ Weitere Badge-Familien (gleiche Mechanik):
 | Zustand | aktiv (grün), pausiert (grau `#8D98A7`), Fehler (rot), fehlt (orange) |
 | Befehlstyp | automatisch (`#3FD0C9`), Regex (`#B48CFF`), Text (`#8FA8C8`) |
 
-Verwendung der Kategorie-Badges (`.p2-module-card__badge`, `.command-module-badge`, `.template-variable-picker__module-badge`, `.p2-log-row__category`): Modul-Badges in Listen, Feed-Leiste (3px je Kategorie), Modulkarten, Variablen-Picker-Gruppen, Protokoll. Die Zuordnung kommt aus `src/data/palette.ts` (`paletteGroupForModule`, `…ForVariable`, `…ForArea`), nie aus Namensmustern. Kategoriefarbe ist **nie** Zustand: Grün/Rot/Orange gehören den Zustands-Badges.
+Kategorie-Badges sind ein geplantes Muster für Listen, Karten und Picker-Gruppen. Die Palette-Auswahl wird in `src/dashboard/ui/palette.ts` gespeichert; eine Modul-zu-Badge-Zuordnung ist noch nicht implementiert. Kategoriefarbe ist **nie** Zustand: Grün/Rot/Orange gehören den Zustands-Badges.
 
-Indigo-Nacht: Badges erben die Nachtschicht-Tokens (kein eigener Satz); die `[data-palette="nachtschicht"]`-Strukturregeln gelten dort nicht, Badges sind neutral (`taste` + `text-3`).
+Indigo-Nacht verwendet derzeit dieselben Badge-Tokens wie Nachtschicht; palette-spezifische Badge-Werte sind geplant.
 
 ## 7. Typografie
 
@@ -186,13 +195,13 @@ Schriften: **Archivo** (UI) und **IBM Plex Mono** (Zahlen), selbst gehostet.
 | Stufe | Wert | Token |
 |---|---|---|
 | Body | 14px / 400 / lh 1.45 | `--text-body`, `--leading-normal` |
-| Label / Abschnittstitel | 13px / 500 in `text` (Abschnitt: 600) | `--text-feldname`, `--text-abschnitt` |
-| Button | 13px / 600 | Button-Variante |
-| Spaltenkopf | 11px / 600, +.04em | `--text-spaltenkopf` |
-| Zahlen | Plex Mono 500, tabellarisch | `--font-zahl` |
-| Seitentitel | 22px / 600, −0.015em, lh 1.25 (Nachtschicht: 700) | `--text-seitentitel` |
-| Bereichstitel | 15px | `--text-bereichstitel` |
-| Nav-/Meta-Etikett, LED-Wort | 11–12px | `--text-navetikett`, `--text-led-wort` |
+| Label / Abschnittstitel | 13px / 500 in `--color-text` (Abschnitt: 600) | `--text-field-label`, `--text-section-title` |
+| Button | 13px / 600 | Mantine `--button-fz` in `src/dashboard/ui/theme.ts` |
+| Spaltenkopf | 11px / 600 | `--text-column-heading` |
+| Zahlen | IBM Plex Mono, tabellarisch | `--font-mono`, `--text-number` |
+| Seitentitel | 22px / 600, −0.015em, lh 1.25 | `--text-page-title` |
+| Bereichstitel | 15px | `--text-section-title` |
+| Nav-/Meta-Etikett, LED-Wort | 11–12px | `--text-nav-label`, `--text-status-label` |
 
 - Mono nur für Werte, die man abliest oder eintippt (Zähler, IDs, Befehlstoken, Zeiten); nie für Namen oder Beschreibungen.
 - Keine Eyebrow-Zeile (Vorzeile in Versalien) über Titeln. Kein Text unter 11px.
@@ -205,15 +214,17 @@ Schriften: **Archivo** (UI) und **IBM Plex Mono** (Zahlen), selbst gehostet.
 - **Rahmen:** 1px Haarlinie; kräftige Rahmen nur an Eingaben (`linie-control`). Leerzustände gestrichelt.
 - **Schatten:** nur auf schwebenden Ebenen (Dialog, Popover, Menü, Toast); im Fluss keine. Tiefe entsteht durch Flächenstufen.
 - **Bewegung:** kurze Übergänge (≤ 160ms), unter `prefers-reduced-motion` aus. Kein Schimmer, keine animierten Skelette.
-- **Symbole:** Lucide, einheitliche Strichstärke; Emoji nirgends im UI.
+- **Symbole:** Tabler Icons über `src/dashboard/ui/Icon.tsx`, einheitliche Strichstärke; Emoji nirgends im UI.
 - **Dichte:** Controls 32px hoch, auch `UnitInput`; Abstand zwischen Abschnitten 20px, innerhalb eines Abschnitts 12px. Vorlagen-Textfelder haben zwei Zeilen, FAQ-Antworten und Textbausteine drei. Chatvorschauen zeigen zwei reservierte Zeilen. Vorlagenfeld und Vorschau stehen in Timer, Textbefehlen, FAQ, Textbausteinen, Raid, Werbung, Votekick und BELABOX nebeneinander. Einrichtungsseiten gruppieren Felder nicht in eigene Rahmen.
 
 ## 9. Layout und Navigation
 
-### 9.1 Zwei Modi
+Die folgenden Abschnitte beschreiben geplante Navigation und Seitenmuster. Die aktuell gültigen Routen stehen in `src/dashboard/router.ts`.
 
-- **Live-Cockpit** (`/live`): Betrieb während des Streams, ohne Seitenleiste, Raster aus Sofortaktionen, Live-Kacheln, Ereignisfeed (`.app-shell--live`).
-- **Einrichten** (`/setup/*`): Konfiguration mit Seitenleiste (`.app-shell--setup`).
+### 9.1 Zwei Modi (geplant)
+
+- **Live-Cockpit** (geplante Route `/live`): Betrieb während des Streams, ohne Seitenleiste, Raster aus Sofortaktionen, Live-Kacheln, Ereignisfeed (`.app-shell--live`).
+- **Einrichten** (geplante Routen `/setup/*`): Konfiguration mit Seitenleiste (`.app-shell--setup`).
 - Umschalter in der Kopfleiste (`.mode-switch`, „Live“ / „Einrichten“).
 
 ### 9.2 Kopfleiste (`.topbar`, 64px)
@@ -224,7 +235,7 @@ Links: Marke, Kanalwahl (`kanal_demo`, Popover „Kanal wechseln“). Mitte: Mod
 
 Sechs Gruppen, je Gruppe ein Badge-Farbton (Abschnitt 6). Aktiver Punkt: Ortsfarbe + linke Leiste (Nachtschicht: `taste`-Fläche + `inset 2px` Ort).
 
-| Gruppe | Seiten (Route unter `/setup/`) |
+| Gruppe | geplante Seiten (Route unter `/setup/`) |
 |---|---|
 | Chat | Textbefehle (`text-commands`), FAQ & Auto-Antworten (`faq`), Textbausteine (`text-library`), Timer (`timers`) |
 | Mitmachen | Abstimmung (`voting`), Votekick (`votekick`), Clips (`clips`) |
@@ -245,7 +256,7 @@ Sechs Gruppen, je Gruppe ein Badge-Farbton (Abschnitt 6). Aktiver Punkt: Ortsfar
 | **Einstellungen** | `SettingsPage` | 1–4 Spalten unter dem Seitenkopf | Ort & Wetter, Raid, Votekick, Werbung, BELABOX, System, Module |
 | **Werkzeug** | `ToolPage` | volle Fläche, Kopf + Arbeitsfläche | Overlay-Editor, Protokoll |
 
-- Die Seite scrollt nie als Ganzes (`scrollHeight ≤ innerHeight` bei 1440/1920/2560, getestet); innere Bereiche scrollen und lassen ihren letzten Inhalt frei erreichen (`save-header.spec.ts`).
+- Ziel: Die Seite scrollt nie als Ganzes (`scrollHeight ≤ innerHeight` bei 1440/1920/2560); ein automatischer Test dafür ist geplant.
 - Kein horizontaler Seitenscroll bei 1440 und 1920px.
 - Zielbreite ab 1440px; darunter stapeln Sammlung und Spalten.
 - Gemeinsame Listenbreite: 360px bis 1600px Inhaltsbreite, 420px von 1680px bis 2199px und 480px ab 2200px. Keine seitenspezifischen Breitenregeln.
@@ -257,12 +268,12 @@ links:  Titel (h1) | An/Aus-Schalter | aussagekräftige Badges   /   Metazeile d
 rechts: Speicher-Cluster | Seitenaktionen | „…“ (Weitere Aktionen)
 ```
 
-- **Speicher-Cluster** (`SaveStatus`) im Seiten- bzw. Detailkopf, **nie** als Fußleiste. Reihenfolge: Statustext, „Verwerfen“ (ghost), „Speichern“ (gold, Strg/Cmd+S). Feste Breite (430px), ragt bei 1440/1920px nie aus dem Bild (getestet).
+- **Geplanter Speicher-Cluster** im Seiten- bzw. Detailkopf, **nie** als Fußleiste. Reihenfolge: Statustext, „Verwerfen“ (ghost), „Speichern“ (gold, Strg/Cmd+S). Zielbreite 430px; Überlauf- und Größenprüfungen sind geplant.
 - **Seitenaktionen** nach dem Cluster; höchstens ein Goldbutton.
 - Bei Abstimmung, Votekick und Clips steht zusätzlich „Chatbefehle · n“ rechts neben dem Speicher-Cluster. Andere Module zeigen diesen Knopf nicht.
 - **„…“-Menü** ganz rechts: seltene und zerstörerische Aktionen (Löschen, Zurücksetzen), jede mit Bestätigung.
-- Titel < Cluster < Aktionen von links nach rechts (getestet).
-- Der Kopf bleibt beim Zustandswechsel (lädt, Fehler, bereit) an derselben Stelle (getestet für Timer).
+- Titel < Cluster < Aktionen von links nach rechts.
+- Der Kopf soll beim Zustandswechsel (lädt, Fehler, bereit) an derselben Stelle bleiben; ein Layouttest ist geplant.
 
 ### 9.6 Listen
 
@@ -280,66 +291,66 @@ Nebeneinander stehende Spalten richten sich zeilenweise aus: jedes Steuerelement
 
 ### 9.8 Overlays über dem Fluss
 
-Popover, Menüs, Toasts und Dialoge rendern **über ein Portal** und werden nie von Scroll-Containern beschnitten (getestet: Chat-Ziel-Popover bleibt im Viewport und außerhalb von `.collection-detail__scroll`).
+Popover, Menüs, Toasts und Dialoge sollen **über ein Portal** rendern und nicht von Scroll-Containern beschnitten werden. Ein automatischer Portal- und Viewport-Test ist geplant.
 
-## 10. Rückmeldung
+## 10. Geplante Rückmeldung
 
-- **Toasts:** unten rechts (`Sonner`, `.toaster`, z-index 150), Radius 12px, Fläche `rail`, 3px-Leiste links nach Rolle: Erfolg grün, Fehler rot, Info Ortsfarbe, Warnung orange. **Fehler-Toasts bleiben stehen**, bis sie geschlossen werden. Meldungen mit Folgehandlung („Rückgängig“ bei Module an/aus) sind Toasts, nie eingeschobene Zeilen.
+- **Toasts:** unten rechts, Radius 12px, Fläche `--color-rail`, Leiste links nach Rolle: Erfolg grün, Fehler rot, Info Brand, Warnung orange. **Fehler-Toasts bleiben stehen**, bis sie geschlossen werden. Meldungen mit Folgehandlung sind Toasts, nie eingeschobene Zeilen.
 - **Feldfehler:** reservierte Zeile unter dem Feld (`FieldError`, `aria-live="polite"`, `&nbsp;` wenn leer); die Seite springt nie.
 - **Speicherfehler:** im Speicher-Cluster (rote Leiste, „Erneut versuchen“), Kopf bleibt stehen.
 - **Ladezustand:** vorhandene Werte stehen lassen, Hinweistext in reserviertem Bereich; Kacheln bewegen sich nicht.
 - **Sperren:** `LockedReason` reserviert die Zeile immer (leer = `&nbsp;`); der Grund steht direkt am gesperrten Bedienelement.
 
-## 11. Kit-Bauteile (`src/dashboard/ui/`)
+## 11. Geplante Kit-Verträge
 
-Jedes Bauteil liest den Seitenzustand über `useControlState()` (`state.ts`: `disabled`, `loading`, `locked`) und rendert alle Zustände ohne Layoutsprung.
+Die Namen in der Tabelle bezeichnen gewünschte UI-Rollen, keine vorhandenen Dateien. Die aktuellen wiederverwendbaren Komponenten liegen in `src/dashboard/ui/`; die Migration der hier beschriebenen Verträge ist geplant.
 
-| Bauteil (Datei) | Zweck | Regeln | Nicht verwenden für |
+| Bauteil (Zielname) | Zweck | geplante Regeln | Nicht verwenden für |
 |---|---|---|---|
-| **PageHeader** / `ModuleStatusSwitch` (`PageHeader.tsx`) | Kopf einer Modulseite: Titel, An/Aus, Badges, Meta, Aktionen | Reihenfolge 9.5; Schalter beschriftet „Aktiv“/„Pausiert“; Sperrhinweis in der Metazeile | Seiten ohne Modul (direkt `ToolPage`/`SettingsPage`) |
-| **SaveStatus** (`SaveStatus.tsx`) | Speicher-Cluster: Statustext, Verwerfen, Speichern, Strg/Cmd+S, Fehler + „Erneut versuchen“ | feste Breite; Zustände `saved`/`dirty`/`saving`/`error` (`data-state`); Gold nur „Speichern“; Shortcut nur wenn sichtbar und ungespeichert | Sofortaktionen, Module an/aus (kein Entwurf) |
-| **HeaderActions** (`HeaderActions.tsx`) | rechte Kopfseite: Cluster + Seitenaktionen + „…“-Popover | „…“ per Portal, schließt bei Klick | Aktionen, die immer sichtbar sein müssen |
-| **CollectionPage** (`CollectionPage.tsx`) | Liste + Detail | Liste 360px, Werkzeugleiste oben; Detail scrollt intern; Leerzustand integriert | Seiten mit nur einem Objekt |
-| **SettingsPage** (`SettingsPage.tsx`) | Spaltenseite mit Kopf | 1–4 Spalten, jede scrollt intern | Liste/Detail |
-| **ToolPage** (`ToolPage.tsx`) | Werkzeug mit voller Fläche | Kopf wie 9.5, `tool-page__body` füllt den Rest | Formularseiten |
-| **Section** (`Section.tsx`) | Abschnitt mit Titel (13px/600) und Haarlinie | `h2`; keine Section in Section | Gruppierung einzelner Felder |
-| **TemplateTextField** (`TemplateTextField.tsx`) | Mehrzeiliges Textfeld mit Variablen | Variablen als Token (Ortsfarbe, Tooltip beim Überfahren, Textfarbe bleibt); `{` öffnet Picker (Listbox „Variablen auswählen“, Suche, nach Modul gruppiert: „Dieses Modul“, „Eigene Variablen“ …); Pfeile/Enter/Esc; unbekannte Variable unterstrichen + feste Fehlerzeile „Unbekannte Variable {usr} – meintest du {user}?“ + Korrektur-Button; **kein RE2 hier** | Regex-Eingaben, einzeilige Namen |
-| **Field** (`Field.tsx`) | Einheitlicher Feldrahmen für Eingaben | Label, Feldinhalt, feste Hinweis-/Fehlerzeile; 32px Controls; keine Sonderrahmen um Feldgruppen | Abschnittsgruppierung |
-| **SwitchRow** (`SwitchRow.tsx`) | Einheitliche einfache Zeilenschalter | Gleiche Schalterdarstellung für gleichrangige Optionen | Felder, die beim Einschalten Inhalt zeigen |
-| **SwitchSection** (`SwitchSection.tsx`) | Optionale Felder unter einem Abschnittsschalter | Schalter in der Überschrift; aus = Überschrift + eine Hinweiszeile, an = Felder darunter; keine Platzhalterhöhe | Sofortige Modulaktivierung |
-| **RoleThreshold** (`RoleThreshold.tsx`) | Mindestrolle für Chataktionen | Select „Mindestrolle“ plus statische, 11px hohe Zeile mit eingeschlossenen Rollen; Abonnenten schließen VIP ohne Abo aus; Votekick folgt seiner Rangfolge | Modulinterne Rollenlisten |
-| **ChatPreview** (`ChatPreview.tsx`) | „Vorschau“ mit Beispieldaten | zwei reservierte Zeilen, nur Anzeige (`resolveTemplatePreview`) | echte Nachrichten |
-| **ChatTargetField** (`ChatTargetField.tsx`) | Ein gemeinsames „Chat-Ziel“-Feld | Portal-Popover mit Auswahl und Erklärung je Ziel | andere Auswahlen |
-| **DataTable** (`DataTable.tsx`) | Protokoll, Kanalereignisse und Live-Ereignisse | eine Filterzeile; 40px-Zeilen; Zeit, Modul, Wer/Was, Art; relative Zeit bleibt sichtbar, Datum/Uhrzeit stehen als Tooltip und zugängliches Label bereit; Tagesüberschriften bleiben sticky | Formulare |
-| **ChatCommandsHelp** (`ChatCommandsHelp.tsx`) | Syntaxhilfe für eingebaute Chatbefehle | „Chatbefehle · n“ im Seitenkopf, Beschreibung, Mindestrolle, Argumente und Kopieraktion; Daten entsprechen den Moduldeklarationen | Module ohne Chatbefehle |
-| **TokenChip** (`TokenChip.tsx`) | Sichtbarer Vorlagen-Token | kompakte Chipdarstellung, z. B. `{api.sonnenuntergang}` | Fließtext |
-| **UnitInput** (`UnitInput.tsx`) | Zahl + Einheit (`min`, `s`, `%`, `Mbit/s`, `Zuschauer`) mit Schnellchips | Einheit fest im Feld, Chips als Vorschläge, reservierte Ladezeile | Freitext |
-| **SegmentChoice** (`SegmentChoice.tsx`) | 2–4 gleichwertige Optionen, eine aktiv | `aria-pressed`; aktive Option Ortsfarbe | Aktionen, > 4 Optionen |
-| **ChoiceCards** (`ChoiceCards.tsx`) | wenige Optionen mit Erklärung | Titel + Beschreibung + Haken; gewählt = Ort-Rahmen | Optionen ohne Erklärung (dann `SegmentChoice`) |
-| **ChipsInput** (`ChipsInput.tsx`) | Liste kurzer Werte (z. B. Aliasse) | Enter/Komma fügt hinzu, Backspace entfernt letzten, führendes `!` entfällt, Chips mit X | Spiele (dann `GameMultiSelect`) |
-| **GameMultiSelect** (`GameMultiSelect.tsx`) | Twitch-Kategorien wählen | Chips im Feld; Vorschläge „Aktuelle Kategorie“ / „Zuletzt gestreamt“; Suche mit Status; **max. 10**; **leer = alle Spiele** („n von 10“); Tastatur | andere Mehrfachauswahlen |
-| **StepDialog** (`StepDialog.tsx`) | geführte Einrichtung in Schritten | Abschnitt 11.1 | Einzelne Eingaben, Bestätigungen |
-| **StatusLed** (`StatusLed.tsx`) | Punkt (8px) + Wort | Zustände `ok`/`loading`/`warn`/`error`/`off`; Wort immer | Kategorie-Badges |
-| **FieldError** (`FieldError.tsx`) | reservierte Fehlerzeile | immer gerendert | seitenweite Fehler |
-| **LockedReason** (`LockedReason.tsx`) | Sperrgrund mit Schloss | reserviert Platz auch ohne Sperre | allgemeine Hinweise |
-| **RuleNote** (`RuleNote.tsx`) | Regelhinweis (Info-Symbol, neutrale linke Leiste) | neutral, keine Zustandsfarbe | Warnungen, Fehler |
-| **TwitchReconnectDialog** (`TwitchReconnectDialog.tsx`) | `StepDialog` „Twitch neu verbinden“ (Berechtigungen, Bestätigung, Ergebnis) | erreichbar aus System und aus gesperrter Werbung | andere Verbindungen |
+| **PageHeader** / `ModuleStatusSwitch` | Kopf einer Modulseite: Titel, An/Aus, Badges, Meta, Aktionen | Reihenfolge 9.5; Schalter beschriftet „Aktiv“/„Pausiert“; Sperrhinweis in der Metazeile | Seiten ohne Modul (direkt `ToolPage`/`SettingsPage`) |
+| **SaveStatus** | Speicher-Cluster: Statustext, Verwerfen, Speichern, Strg/Cmd+S, Fehler + „Erneut versuchen“ | feste Breite; Zustände `saved`/`dirty`/`saving`/`error`; Gold nur „Speichern“; Shortcut nur wenn sichtbar und ungespeichert | Sofortaktionen, Module an/aus (kein Entwurf) |
+| **HeaderActions** | rechte Kopfseite: Cluster + Seitenaktionen + „…“-Popover | „…“ per Portal, schließt bei Klick | Aktionen, die immer sichtbar sein müssen |
+| **CollectionPage** | Liste + Detail | Liste 360px, Werkzeugleiste oben; Detail scrollt intern; Leerzustand integriert | Seiten mit nur einem Objekt |
+| **SettingsPage** | Spaltenseite mit Kopf | 1–4 Spalten, jede scrollt intern | Liste/Detail |
+| **ToolPage** | Werkzeug mit voller Fläche | Kopf wie 9.5, `tool-page__body` füllt den Rest | Formularseiten |
+| **Section** | Abschnitt mit Titel (13px/600) und Haarlinie | `h2`; keine Section in Section | Gruppierung einzelner Felder |
+| **TemplateTextField** | Mehrzeiliges Textfeld mit Variablen | Variablen als Token (Brand, Tooltip beim Überfahren, Textfarbe bleibt); `{` öffnet Picker; unbekannte Variable erhält Fehlerzeile und Korrekturaktion; **kein RE2 hier** | Regex-Eingaben, einzeilige Namen |
+| **Field** | Einheitlicher Feldrahmen für Eingaben | Label, Feldinhalt, feste Hinweis-/Fehlerzeile; 32px Controls; keine Sonderrahmen um Feldgruppen | Abschnittsgruppierung |
+| **SwitchRow** | Einheitliche einfache Zeilenschalter | Gleiche Schalterdarstellung für gleichrangige Optionen | Felder, die beim Einschalten Inhalt zeigen |
+| **SwitchSection** | Optionale Felder unter einem Abschnittsschalter | Schalter in der Überschrift; aus = Überschrift + eine Hinweiszeile, an = Felder darunter | Sofortige Modulaktivierung |
+| **RoleThreshold** | Mindestrolle für Chataktionen | Select „Mindestrolle“ plus Zeile mit eingeschlossenen Rollen | Modulinterne Rollenlisten |
+| **ChatPreview** | „Vorschau“ mit Beispieldaten | zwei reservierte Zeilen, nur Anzeige | echte Nachrichten |
+| **ChatTargetField** | Ein gemeinsames „Chat-Ziel“-Feld | Portal-Popover mit Auswahl und Erklärung je Ziel | andere Auswahlen |
+| **DataTable** | Protokoll, Kanalereignisse und Live-Ereignisse | eine Filterzeile; Zeit, Modul, Wer/Was, Art; relative Zeit bleibt sichtbar | Formulare |
+| **ChatCommandsHelp** | Syntaxhilfe für eingebaute Chatbefehle | „Chatbefehle · n“ im Seitenkopf, Beschreibung, Mindestrolle, Argumente und Kopieraktion | Module ohne Chatbefehle |
+| **TokenChip** | Sichtbarer Vorlagen-Token | kompakte Chipdarstellung, z. B. `{api.sonnenuntergang}` | Fließtext |
+| **UnitInput** | Zahl + Einheit mit Schnellchips | Einheit fest im Feld, Chips als Vorschläge, reservierte Ladezeile | Freitext |
+| **SegmentChoice** | 2–4 gleichwertige Optionen, eine aktiv | `aria-pressed`; aktive Option Brand | Aktionen, > 4 Optionen |
+| **ChoiceCards** | wenige Optionen mit Erklärung | Titel + Beschreibung + Haken; gewählt = Brand-Rahmen | Optionen ohne Erklärung |
+| **ChipsInput** | Liste kurzer Werte (z. B. Aliasse) | Enter/Komma fügt hinzu, Backspace entfernt letzten, Chips mit X | Spiele (dann `GameMultiSelect`) |
+| **GameMultiSelect** | Twitch-Kategorien wählen | Chips im Feld; Vorschläge und Suche mit Status; Tastatur | andere Mehrfachauswahlen |
+| **StepDialog** | geführte Einrichtung in Schritten | Abschnitt 11.1 | Einzelne Eingaben, Bestätigungen |
+| **StatusLed** | Punkt (8px) + Wort | Zustände `ok`/`loading`/`warn`/`error`/`off`; Wort immer | Kategorie-Badges |
+| **FieldError** | reservierte Fehlerzeile | immer gerendert | seitenweite Fehler |
+| **LockedReason** | Sperrgrund mit Schloss | reserviert Platz auch ohne Sperre | allgemeine Hinweise |
+| **RuleNote** | Regelhinweis (Info-Symbol, neutrale linke Leiste) | neutral, keine Zustandsfarbe | Warnungen, Fehler |
+| **TwitchReconnectDialog** | geführte Wiederverbindung (Berechtigungen, Bestätigung, Ergebnis) | erreichbar aus System und aus gesperrter Werbung | andere Verbindungen |
 
 ### 11.1 StepDialog
 
 - Aufbau von oben: Titel, Schritttitel (`step-dialog__step-title`), Untertitel, **Schrittanzeige** (`ol[aria-label="Dialogfortschritt"]`, aktiver Schritt `aria-current="step"`, Zahl bzw. Haken), **Hilfezeile** („So funktioniert’s“, Linkfarbe), Inhalt, Fuß.
-- **Stabile Höhe:** Dialog `min(760px, 100dvh − 32px)` hoch; Schrittwechsel ändert weder Dialog- noch Inhaltshöhe (getestet).
-- Fuß: links „Zurück“ (outline, im ersten Schritt deaktiviert) und „Abbrechen“ (ghost); rechts **goldenes** „Weiter“ bzw. „Fertig“ (`data-primary-action="gold"`, Text `auf-signal`).
+- **Ziel:** Dialog `min(760px, 100dvh − 32px)` hoch; Schrittwechsel ändert weder Dialog- noch Inhaltshöhe. Ein entsprechender Test ist geplant.
+- Fuß: links „Zurück“ (outline, im ersten Schritt deaktiviert) und „Abbrechen“ (ghost); rechts **goldenes** „Weiter“ bzw. „Fertig“ (Text `--color-on-gold`).
 - Enter in einem Eingabefeld geht weiter; Esc oder X fragt vor dem Verwerfen nach, sobald Schritt > 1 oder editiert („Einrichtung abbrechen?“ / „Weiter bearbeiten“ / „Verwerfen“).
-- **Höchstens zwei verschachtelte Rahmen:** Dialog → Inhaltsfläche; `step-dialog__card` hat keinen eigenen Rahmen (`border-top-width: 0`, getestet). Keine Karte in Karte in Karte.
+- **Ziel:** höchstens zwei verschachtelte Rahmen. Ein entsprechender Test ist geplant.
 - Unter 640px entfällt die Schrittbeschriftung, der Fuß stapelt.
 - Einsatz: **In OBS einbinden** (Overlay wählen, Link kopieren, Verbindung testen), **Neue Datenquelle** (Adresse, Wert im JSON-Baum wählen, Name), **Twitch neu verbinden**, **Kanal einrichten** (Standort, Module wählen, Erster Textbefehl).
 
-## 12. Cockpit-Bauteile (`src/dashboard/live/`)
+## 12. Geplantes Live-Cockpit
 
-### 12.1 Sofortaktionen-Vertrag (`contract.ts`)
+### 12.1 Sofortaktionen-Vertrag (geplant)
 
-Module stellen Sofortaktionen bereit (`ImmediateAction`): `id`, `moduleId`, `label`, `icon`, `requires: ("live" | "moduleEnabled")[]`, `role: "bediener" | "verwalter"`, optional `lockedReason()`, optional `content` (`size: "popover" | "dialog"`, `title`, `submitLabel`, `Component` mit `onValidChange`), `run()`. Kacheln (`LiveTile`): `id`, `moduleId`, `active()`, `Component`. Registrierung zentral in `actions/definitions.tsx` und `tiles/index.tsx`; das Cockpit kennt keine Modullogik.
+Das Zielsystem sieht Sofortaktionen (`ImmediateAction`) und Live-Kacheln (`LiveTile`) vor. Ein Vertrag, eine zentrale Registrierung und das Live-Cockpit sind noch nicht implementiert.
 
 - Eine Aktion ist **aktiv**, wenn alle `requires` erfüllt sind (Stream an, Modul an), die Rolle reicht und keine Sperre greift.
 - Eine gesperrte Aktion bleibt sichtbar und nennt den **Grund direkt am Knopf** (`action-card__reason`, reservierte Zeile).
@@ -349,12 +360,12 @@ Module stellen Sofortaktionen bereit (`ImmediateAction`): `id`, `moduleId`, `lab
 
 | Bauteil | Zweck | Regeln |
 |---|---|---|
-| **ActionGrid** (`ActionGrid.tsx`) | Raster der Sofortaktionen (3 Spalten) mit Rollenanzeige | Rolle/Sperre/Zustand ergeben `reason`; Zähler „n Aktionen“ |
-| **ActionFrame** (`ActionFrame.tsx`) | Rahmen einer Aktion (Karte + Popover/Dialog) | Kopf, Inhalt, reservierte Fehlerzeile (`action-frame__error`), Fuß „Abbrechen“ + ein Goldbutton mit `submitLabel`; Esc schließt und gibt den Fokus an den Auslöser zurück (getestet); Busy „Wird ausgeführt …“ |
-| **LiveTiles** (`tiles/*`: Voting, Votekick, Ads, Upcoming, Warning) | laufende Vorgänge | Zustandsleiste nach 3.1; Kachelpositionen ändern sich beim Zustandswechsel nicht (getestet) |
-| **EventFeed** (`EventFeed.tsx`) | Ereignisliste | Nachtschicht: 3px-Kategorieleiste je Ereignis (raid → Twitch, support/moderation → Mitmachen, command → Chat, system → Stream), Nutzername fett |
-| **CockpitHeader** (`CockpitHeader.tsx`) | Live-Pille, Laufzeit, Zuschauer, Streamtitel/Kategorie (Popover), Gesundheits-LEDs | Streamtitel nur für Verwalter änderbar; Offline zeigt „Twitch neu verbinden“ an fester Stelle |
-| **Statuszeile** (`cockpit-message`) | `aria-live="polite"` Systemmeldung am Seitenende | fester Platz, kein Einschub |
+| **ActionGrid** | Raster der Sofortaktionen (3 Spalten) mit Rollenanzeige | Rolle/Sperre/Zustand ergeben `reason`; Zähler „n Aktionen“ |
+| **ActionFrame** | Rahmen einer Aktion (Karte + Popover/Dialog) | Kopf, Inhalt, reservierte Fehlerzeile, Fuß „Abbrechen“ + ein Goldbutton; Esc schließt und gibt den Fokus zurück |
+| **LiveTiles** | Kacheln für laufende Vorgänge | Zustandsleiste nach 3.1; Kachelpositionen bleiben stabil |
+| **EventFeed** | Ereignisliste | Kategorieleiste je Ereignis; Nutzername fett |
+| **CockpitHeader** | Live-Pille, Laufzeit, Zuschauer, Streamtitel/Kategorie, Gesundheits-LEDs | Streamtitel nur für Verwalter änderbar; Offline zeigt „Twitch neu verbinden“ an fester Stelle |
+| **Statuszeile** | `aria-live="polite"` Systemmeldung am Seitenende | fester Platz, kein Einschub |
 
 ## 13. Weitere Bausteine
 
@@ -365,46 +376,51 @@ Module stellen Sofortaktionen bereit (`ImmediateAction`): `id`, `moduleId`, `lab
 - Spezialelemente können Farben aus der Abstimmung übernehmen („Farben aus Abstimmung übernehmen“).
 - Dynamische Werte (Wetter, Zähler) kommen über Variablen, nie als feste Zahlen.
 
-### 13.2 Befehlspalette (`CommandPalette.tsx`)
+### 13.2 Befehlspalette (geplant)
 
 Cmd/Strg+K, Dialog „Seite suchen“, genau ein Suchsymbol, Fokusring 2px/Offset 2px, filtert Seiten, Pfeile + Enter öffnen. Auswahl: Rahmen + linke Ortsleiste. Nicht für Aktionen (dafür Sofortaktionen).
 
 ### 13.3 Bestätigungsdialog
 
-`UnsavedChangesDialog` („Änderungen verwerfen?“) und Löschbestätigungen: Standardweg „Weiter bearbeiten“ (ghost), destruktiver Button rot. **Nur hier ist Rot gefüllt**; außerhalb des Dialogs ist der Löschbutton rot umrandet (`.detail-delete-button`, Text `fehler-text`). Dialoge dienen Bestätigungen und geführten Abläufen, nie Formularen.
+`UnsavedChangesDialog` („Änderungen verwerfen?“) und Löschbestätigungen: Standardweg „Weiter bearbeiten“ (ghost), destruktiver Button rot. **Nur hier ist Rot gefüllt**; außerhalb des Dialogs ist der Löschbutton rot umrandet (`.detail-delete-button`, Text `--color-error-text`). Dialoge dienen Bestätigungen und geführten Abläufen, nie Formularen.
 
 
-## 14. Barrierefreiheit (durch Tests erzwungen)
+## 14. Barrierefreiheit: aktuelle Tests und künftige Anforderungen
 
-Quellen: `palette-comparison.spec.ts` (beide Themes), `run-j.spec.ts` (Indigo-Nacht, ausführlich), `visual-colors.spec.ts`.
+Aktuell erzwungen ist der Kontrasttest in `tests/unit/dashboard-ui-theme.test.ts`. Er prüft die folgenden gefüllten Farbpaare für beide Palette-Blöcke:
 
 | Paar | Minimum |
 |---|---|
-| `text`, `text-2`, `text-3` auf `grund`, `flaeche-1`, `taste` (Indigo-Nacht zusätzlich `tiefe`, `rinne`, `rail`, `flaeche-2/3`, Auswahl-/Gold-/Orange-/Fehler-/Grün-Soft) | 4,5:1 |
-| Feldrand `linie-control` auf `grund`, `rinne` | 3:1 |
-| Fokus auf allen Flächen | 3:1 |
-| `auf-signal` auf `gold`, `-hover`, `-pressed` | 7:1 |
-| `gold-text` auf `gold-soft` und `grund` | 4,5:1 |
-| `orange-on` auf `orange`; `orange-text` auf `orange-soft` und `grund` | 4,5:1 |
-| `auf-fehler` auf `fehler` | 4,5:1 |
-| `marke-auf` auf `marke`; `marke-text` auf `grund` und `auswahl-grund` | 4,5:1 |
-| `auswahl-rand` auf `auswahl-grund` | 3:1 |
-| Badge-Schrift auf Badge-Füllung (16 Paare, Nachtschicht) | 4,5:1 |
+| `--color-brand-on` auf `--color-brand`, `--color-brand-hover`, `--color-brand-press` | 4,5:1 |
+| `--color-on-gold` auf `--color-gold`, `--color-gold-hover`, `--color-gold-press` | 4,5:1 |
+| `--color-orange-on` auf `--color-orange` | 4,5:1 |
+| `--color-on-error` auf `--color-error` | 4,5:1 |
+
+Die folgenden Prüfungen sind **künftige Anforderungen** und werden derzeit nicht durch Tests erzwungen:
+
+| Paar | Zielminimum |
+|---|---|
+| `--color-text`, `--color-text-2`, `--color-text-3` auf den Flächen-Tokens | 4,5:1 |
+| `--color-border-control` auf `--color-background` und `--color-well` | 3:1 |
+| `--color-focus` auf allen Flächen | 3:1 |
+| `--color-gold-text` auf `--color-gold-soft` und `--color-background` | 4,5:1 |
+| `--color-orange-text` auf `--color-orange-soft` und `--color-background` | 4,5:1 |
+| Badge-Schrift auf Badge-Füllung | 4,5:1 |
 | Abstimmungsfarben auf Balkenspur | 3:1 |
 | Gold gegen Orange | Farbton ≥ 12°, RGB-Abstand ≥ 45 |
 
-Weitere Pflichten:
+Weitere geplante Pflichten:
 
 - **Fokus:** sichtbar, 2px, Offset 2px (Suchfelder: Ring am Wrapper); Fokus kehrt nach Popover/Dialog an den Auslöser zurück.
 - **Farbe nie allein:** LED mit Wort, Zustands-Badge mit Wort, Gewählt mit Rahmen/Leiste/Haken, Fehler mit Text + Symbol, Abstimmung mit Beschriftung.
 - **Tastatur:** Picker (`{`, Pfeile, Enter, Esc), `GameMultiSelect`, `StepDialog` (Enter/Esc), Strg/Cmd+S, Cmd/Strg+K.
-- **Trefferfläche:** Bedienelemente ≥ 24px; Desktop-Prototyp: Button und Eingabe 32px, `sm` 28px nur in Listenzeilen; bei `(pointer: coarse)` beträgt die Trefferfläche mindestens 40px.
+- **Trefferfläche:** Bedienelemente ≥ 24px; geplantes Ziel: Button und Eingabe 32px, `sm` 28px nur in Listenzeilen; bei `(pointer: coarse)` mindestens 40px.
 - `aria-live="polite"` für Fehlerzeilen, Statuszeile, Speicherstatus; `aria-busy` beim Laden; `aria-pressed`, `aria-current`, `role="switch"` nach Rolle.
 - Kein Text unter 11px (siehe 16).
 
 ## 15. Durchsetzung
 
-Jede UI-Änderung folgt dieser Datei; Abweichungen stehen ausdrücklich in der PR-Beschreibung. Automatisch geprüft: Farb-Lint (`theme-color-lint`), Kontrast (`palette-comparison`, `run-j`), ein Goldbutton je Bereich (`run-j`), kein Seitenscroll/Beschnitt (`save-header`, `prototype`), Kopfreihenfolge (`save-header`), Layoutstabilität (`prototype`), StepDialog-Höhe (`stepped-dialog`).
+Der aktuelle Check führt `tests/unit/theme-color-lint.test.ts` und `tests/unit/dashboard-ui-theme.test.ts` aus. `tests/e2e/foundation-visual.spec.ts` kann Screenshots erfassen, aber keine Pixelvergleiche oder Layoutanforderungen automatisch bestätigen. Tests für Goldbutton-Anzahl, Seitenhöhe, Beschnitt, Kopfreihenfolge, Layoutstabilität und Dialoghöhe sind geplant.
 
 ### Checkliste für Reviewer
 
@@ -425,9 +441,9 @@ Jede UI-Änderung folgt dieser Datei; Abweichungen stehen ausdrücklich in der P
 - [ ] **Alle Zustände** (bereit, lädt, Fehler, gesperrt, nicht verbunden, neu) ohne Sprung darstellbar?
 - [ ] **Tastatur und Fokus** funktionieren, Farbe nie allein?
 
-## 16. Gemeinsame Muster der Konsistenzrunde S
+## 16. Geplante gemeinsame Seitenmuster
 
-Diese verbindlichen Ergänzungen vereinheitlichen alle vorhandenen Prototypseiten und haben Vorrang vor älteren, seitenspezifischen Beschreibungen oben.
+Diese Zielvorgaben beschreiben künftige Konsistenzregeln für die bestehenden Dashboard-Bereiche; sie belegen nicht, dass die jeweiligen Seiten bereits migriert sind.
 
 ### 16.1 Antworten und optionale Inhalte
 
@@ -454,7 +470,7 @@ Diese verbindlichen Ergänzungen vereinheitlichen alle vorhandenen Prototypseite
 
 - Protokoll, Kanalereignisse und Live-Ereignisse verwenden dieselbe rahmenlose Filterzeile und `DataTable`. Keine Zebraflächen. Zeit bleibt in jeder Zeile sichtbar als kurze deutsche relative Zeit (`Intl.RelativeTimeFormat`); der Tooltip und das zugängliche Label enthalten Datum und Uhrzeit. Zeiten über etwa sechs Stunden dürfen zusätzlich die Uhrzeit zeigen. Der Protokoll-Detailbereich verändert die Tabellenbreite nicht.
 - Modulzustand erscheint als StatusLED: Punkt und Wort, ohne Statuskarte. Schalter einer gemeinsamen Art teilen eine `SwitchRow`-Darstellung. `ChatTargetField` heißt überall „Chat-Ziel“.
-- Datensätze, Beispielkonten, URLs und Chatverläufe im Prototyp sind fiktiv. Inhalte und Statusänderungen lassen keine Ansicht selbstständig springen.
+- Datensätze, Beispielkonten, URLs und Chatverläufe in Beispielen sind fiktiv. Inhalte und Statusänderungen sollen keine Ansicht selbstständig springen.
 
 ### 16.5 Seitenmuster
 
