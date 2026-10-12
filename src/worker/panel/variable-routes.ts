@@ -157,6 +157,18 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
   const newName = parsed.data.newName ?? name;
   const description = parsed.data.description ?? before.description;
   const resetOnStreamStart = parsed.data.resetOnStreamStart ?? before.resetOnStreamStart;
+  const referenceModules = newName === name ? [] : MODULES.filter((module) => module.variableReferences !== undefined);
+  const renameValidations = newName === name ? [] : await Promise.all(referenceModules.map((module) =>
+    module.variableReferences?.validateRename?.(context.env.DB, channelId, name, newName) ?? Promise.resolve(null),
+  ));
+  const renamePreconditions = renameValidations.flatMap((validation) =>
+    validation === null ? [] : [validation.precondition]);
+  const renamePreconditionSql = renamePreconditions.map(({ sql }) => `AND (${sql})`).join("\n        ");
+  const renamePreconditionValues = renamePreconditions.flatMap(({ values }) => values);
+  const invalidUsages = renameValidations.flatMap((validation) => validation?.usages ?? []);
+  if (invalidUsages.length > 0) {
+    return context.json({ error: "variable_rename_template_too_long", usages: invalidUsages }, 400);
+  }
   if (newName === name && description === before.description && resetOnStreamStart === before.resetOnStreamStart) {
     return context.json({ variable: before, usages: await referencesFor(context.env.DB, channelId, name) });
   }
@@ -168,10 +180,11 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
       WHERE channel_id = ? AND name = ?
         AND value = ? AND description = ? AND reset_on_stream_start = ? AND created_at = ? AND updated_at = ?
         AND (name = ? OR NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?))
+        ${renamePreconditionSql}
         ${authorization.sql}`,
   ).bind(newName, description, resetOnStreamStart ? 1 : 0, now, channelId, name,
     before.value, before.description, before.resetOnStreamStart ? 1 : 0, before.createdAt, before.updatedAt,
-    name, channelId, newName, ...authorization.values);
+    name, channelId, newName, ...renamePreconditionValues, ...authorization.values);
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, now, channelId, null, "channel.variable.renamed",
     recordSnapshot(before), { name: newName, value: before.value, description, resetOnStreamStart });
   const references = prepareChannelVariableOverlayReferences(context.env.DB, channelId, [name]);
@@ -194,14 +207,31 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
       RETURNING overlay_id, revision`,
   ).bind(now, channelId, channelId, name, channelId, newName, before.value, before.createdAt, now, newName,
     ...authorization.values)];
-  const referenceUpdates = newName === name ? [] : MODULES.flatMap((module) =>
-    module.variableReferences?.rename(context.env.DB, channelId, name, newName) ?? []);
+  const renameGuard = {
+    value: before.value,
+    description,
+    resetOnStreamStart,
+    createdAt: before.createdAt,
+    updatedAt: now,
+  };
+  const referenceUpdates = referenceModules.flatMap((module) =>
+    module.variableReferences?.rename(context.env.DB, channelId, name, newName, renameGuard) ?? []);
   const results = await context.env.DB.batch([references, mutation, audit, ...overlayRevisionUpdates, ...referenceUpdates]);
   if ((results[1]?.meta.changes ?? 0) === 0) {
     if (await findChannelVariable(context.env.DB, channelId, newName) !== null) {
       return context.json({ error: "variable_already_exists" }, 409);
     }
+    const currentValidations = await Promise.all(referenceModules.map((module) =>
+      module.variableReferences?.validateRename?.(context.env.DB, channelId, name, newName) ?? Promise.resolve(null),
+    ));
+    const currentInvalidUsages = currentValidations.flatMap((validation) => validation?.usages ?? []);
+    if (currentInvalidUsages.length > 0) {
+      return context.json({ error: "variable_rename_template_too_long", usages: currentInvalidUsages }, 400);
+    }
     return context.json({ error: "variable_changed_concurrently" }, 409);
+  }
+  for (const module of referenceModules) {
+    module.variableReferences?.afterRename?.(context.env.DB, channelId, name, newName);
   }
   const variable = await findChannelVariable(context.env.DB, channelId, newName);
   const overlayRows = newName === name ? [] : (results[3]?.results ?? []) as Array<{ overlay_id: string; revision: number }>;

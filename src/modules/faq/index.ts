@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { columnVariableReferences } from "../contract";
 import type { BotModule, ModuleTemplateContentValidationContext, ModuleTemplateUsageSource } from "../contract";
 import { validateEventTemplateContentMutation } from "../contracts/text-block-validation";
 import { createFaqRepository } from "./adapters/d1";
@@ -20,6 +21,21 @@ const templateUsageSources = async (db: D1Database, channelId: string): Promise<
     .bind(channelId).all<{ faq_id: string; name: string; answer_text: string }>();
   return rows.results.map((row) => ({ text: row.answer_text, kind: "faq", label: row.name || row.faq_id }));
 };
+
+const faqVariableReferences = {
+  ...columnVariableReferences({
+    moduleId: FAQ_MODULE_ID,
+    tableName: "faq_entries",
+    idColumn: "faq_id",
+    itemNameColumn: "name",
+    textColumn: "answer_text",
+    maxTextLength: 500,
+  }),
+  afterRename(db: D1Database, channelId: string) {
+    createFaqRepository(db).invalidate(channelId);
+  },
+};
+
 export const faqModule: BotModule<typeof settingsSchema> = {
   id: FAQ_MODULE_ID,
   navigationCategory: "chat",
@@ -29,6 +45,7 @@ export const faqModule: BotModule<typeof settingsSchema> = {
   defaultSettings: {},
   templateContext: "event",
   templateUsageSources,
+  variableReferences: faqVariableReferences,
   validateTemplateContent: validateFaqTemplateMutation,
   navigationEntries: [{
     id: "faq",

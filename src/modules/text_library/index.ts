@@ -1,13 +1,109 @@
 import { z } from "zod";
 
-import type { BotModule } from "../contract";
+import { moduleVariableRenameTarget } from "../contract";
+import type { BotModule, ModuleVariableReferences } from "../contract";
 import { textLibraryModuleCatalog } from "./catalog";
 import { textLibraryRoutes } from "./routes";
 import { createTextBlockTemplateValueProvider } from "./adapters/template-expander";
 import { textBlockOverlayElement, TEXT_BLOCK_OVERLAY_ELEMENT_KIND } from "./overlay/element";
 import { textBlockOverlayState } from "./overlay/state";
+import { templateTextLength } from "../../contracts/template-text-length";
 
 const settingsSchema = z.object({});
+
+const variableReferences: ModuleVariableReferences = {
+  async usages(db, channelId, name) {
+    const token = `{var.${name}}`;
+    const rows = await db.prepare(
+      `SELECT DISTINCT block_name
+         FROM text_block_variants
+        WHERE channel_id = ? AND instr(texts_json, ?) > 0
+        ORDER BY block_name`,
+    ).bind(channelId, token).all<{ block_name: string }>();
+    return rows.results.map(({ block_name }) => ({
+      moduleId: "text_library",
+      itemName: block_name,
+      kind: "template" as const,
+    }));
+  },
+  async validateRename(db, channelId, from, to) {
+    const oldToken = `{var.${from}}`;
+    const nextToken = `{var.${to}}`;
+    const rows = await db.prepare(
+      `SELECT block_name, variant_id, texts_json
+         FROM text_block_variants
+        WHERE channel_id = ? AND instr(texts_json, ?) > 0
+        ORDER BY block_name, variant_id`,
+    ).bind(channelId, oldToken).all<{ block_name: string; variant_id: string; texts_json: string }>();
+    const snapshot = rows.results.map(({ block_name, variant_id, texts_json }) => [block_name, variant_id, texts_json]);
+    const blocks = new Set<string>();
+    for (const row of rows.results) {
+      let texts: unknown;
+      try { texts = JSON.parse(row.texts_json) as unknown; } catch { continue; }
+      if (!Array.isArray(texts)) continue;
+      if (texts.some((text) => typeof text === "string" && text.includes(oldToken) &&
+          templateTextLength(text.replaceAll(oldToken, nextToken)) > 500)) {
+        blocks.add(row.block_name);
+      }
+    }
+    const snapshotJson = JSON.stringify(snapshot);
+    return {
+      usages: [...blocks].map((itemName) => ({
+        moduleId: "text_library",
+        itemName,
+        kind: "template" as const,
+      })),
+      precondition: {
+        sql: `NOT EXISTS (
+          SELECT 1 FROM (
+            SELECT source.block_name, source.variant_id, source.texts_json
+              FROM text_block_variants AS source
+             WHERE source.channel_id = ? AND instr(source.texts_json, ?) > 0
+            EXCEPT
+            SELECT json_extract(snapshot.value, '$[0]'), json_extract(snapshot.value, '$[1]'), json_extract(snapshot.value, '$[2]')
+              FROM json_each(?) AS snapshot
+          )
+        ) AND NOT EXISTS (
+          SELECT 1 FROM (
+            SELECT json_extract(snapshot.value, '$[0]'), json_extract(snapshot.value, '$[1]'), json_extract(snapshot.value, '$[2]')
+              FROM json_each(?) AS snapshot
+            EXCEPT
+            SELECT source.block_name, source.variant_id, source.texts_json
+              FROM text_block_variants AS source
+             WHERE source.channel_id = ? AND instr(source.texts_json, ?) > 0
+          )
+        )`,
+        values: [channelId, oldToken, snapshotJson, snapshotJson, channelId, oldToken],
+      },
+    };
+  },
+  rename(db, channelId, from, to, guard) {
+    const oldToken = `{var.${from}}`;
+    const nextToken = `{var.${to}}`;
+    const target = moduleVariableRenameTarget(channelId, to, guard);
+    const updateBlockRevisions = db.prepare(
+      `UPDATE text_blocks
+          SET revision = revision + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE channel_id = ?
+          AND EXISTS (
+            SELECT 1 FROM text_block_variants AS variant
+             WHERE variant.channel_id = text_blocks.channel_id
+               AND variant.block_name = text_blocks.block_name
+               AND instr(variant.texts_json, ?) > 0
+          )
+          AND ${target.sql}
+          AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
+    ).bind(channelId, oldToken, ...target.values, channelId, from);
+    const rewriteVariants = db.prepare(
+      `UPDATE text_block_variants
+          SET texts_json = replace(texts_json, ?, ?)
+        WHERE channel_id = ? AND instr(texts_json, ?) > 0
+          AND ${target.sql}
+          AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
+    ).bind(oldToken, nextToken, channelId, oldToken, ...target.values, channelId, from);
+    return [updateBlockRevisions, rewriteVariants];
+  },
+};
 
 export const textLibraryModule: BotModule<typeof settingsSchema> = {
   id: "text_library",
@@ -21,6 +117,7 @@ export const textLibraryModule: BotModule<typeof settingsSchema> = {
   defaultEnabled: true,
   settingsSchema,
   defaultSettings: {},
+  variableReferences,
   templateVariables: async (db, channelId) => {
     const result = await db.prepare(
       `SELECT block.block_name,

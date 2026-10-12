@@ -146,6 +146,62 @@ describe("timer alarm execution", () => {
     expect(targets).toEqual(["all_chats"]);
   });
 
+  it("uses the renamed template when a scheduled alarm carries the previous revision", async () => {
+    await prepareDatabase();
+    await database.prepare("UPDATE timers SET message_text = ?, revision = 2 WHERE timer_id = ?")
+      .bind("Score: {var.points}", timerId).run();
+    const renderedTemplates: string[] = [];
+    const sends: string[] = [];
+    const deadlines: number[] = [];
+    const context = contextFor(() => 13, sends, deadlines, {
+      renderTemplate: (template) => {
+        renderedTemplates.push(template);
+        return Promise.resolve({ text: template });
+      },
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    await handleTimerAlarm(context, `timer:${timerId}`, firstDueAt, 1);
+
+    expect(renderedTemplates).toEqual(["Score: {var.points}"]);
+    expect(sends).toEqual([`${timerId}:${String(firstDueAt)}`]);
+    expect(deadlines).toEqual([secondDueAt]);
+  });
+
+  it("retries the due occurrence with the renamed template when a rename lands during rendering", async () => {
+    await prepareDatabase();
+    await database.prepare("UPDATE timers SET message_text = ? WHERE timer_id = ?")
+      .bind("Score: {var.score}", timerId).run();
+    const renderedTemplates: string[] = [];
+    const sends: string[] = [];
+    const deadlines: number[] = [];
+    const context = contextFor(() => 13, sends, deadlines, {
+      renderTemplate: async (template) => {
+        renderedTemplates.push(template);
+        if (renderedTemplates.length === 1) {
+          await database.prepare("UPDATE timers SET message_text = ?, revision = 2 WHERE timer_id = ?")
+            .bind("Score: {var.points}", timerId).run();
+        }
+        return { text: template };
+      },
+      sendChat: async (text, idempotencyKey, _attributions, stillValid) => {
+        const valid = await (stillValid?.() ?? Promise.resolve(true));
+        if (!valid) return { sent: false, reason: "stale_before_send", retryable: false };
+        sends.push(`${text}:${idempotencyKey}`);
+        return { sent: true, reason: null, retryable: false };
+      },
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    await handleTimerAlarm(context, `timer:${timerId}`, firstDueAt, 1);
+
+    expect(renderedTemplates).toEqual(["Score: {var.score}", "Score: {var.points}"]);
+    expect(sends).toEqual([`Score: {var.points}:${timerId}:${String(firstDueAt)}`]);
+    expect(deadlines).toEqual([secondDueAt]);
+  });
+
   it("does not send an interval post if the stream ends between the due-occurrence check and the send", async () => {
     await insertChannel();
     await insertTimer({

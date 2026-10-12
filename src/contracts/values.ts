@@ -416,6 +416,7 @@ export type ApiErrorCode =
   | "variable_limit_reached"
   | "variable_in_use"
   | "variable_changed_concurrently"
+  | "variable_rename_template_too_long"
   | "variable_management_denied"
   | "variable_value_change_denied"
   | "ad_schedule_read_failed"

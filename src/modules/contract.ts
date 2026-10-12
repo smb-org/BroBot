@@ -5,6 +5,7 @@ import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariable
 import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 import type { ModerationResult, ModerationTimeoutExpectation } from "./contracts/moderation";
+import { templateTextLength } from "../contracts/template-text-length";
 export type { PanelTemplateWarning } from "../panel-contract";
 export type { ChatOutputTarget } from "../contracts/values";
 
@@ -955,8 +956,57 @@ export interface ModuleVariableReferenceUsage {
 
 export interface ModuleVariableReferences {
   usages: (db: D1Database, channelId: string, name: string) => Promise<readonly ModuleVariableReferenceUsage[]>;
-  rename: (db: D1Database, channelId: string, from: string, to: string) => readonly D1PreparedStatement[];
+  validateRename?: (
+    db: D1Database,
+    channelId: string,
+    from: string,
+    to: string,
+  ) => Promise<ModuleVariableRenameValidation>;
+  rename: (
+    db: D1Database,
+    channelId: string,
+    from: string,
+    to: string,
+    guard?: ModuleVariableRenameGuard,
+  ) => readonly D1PreparedStatement[];
+  afterRename?: (db: D1Database, channelId: string, from: string, to: string) => void;
 }
+
+export interface ModuleVariableRenameGuard {
+  value: number;
+  description: string;
+  resetOnStreamStart: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModuleVariableRenamePrecondition {
+  sql: string;
+  values: readonly unknown[];
+}
+
+export interface ModuleVariableRenameValidation {
+  usages: readonly ModuleVariableReferenceUsage[];
+  precondition: ModuleVariableRenamePrecondition;
+}
+
+export const moduleVariableRenameTarget = (
+  channelId: string,
+  name: string,
+  guard?: ModuleVariableRenameGuard,
+): { sql: string; values: readonly unknown[] } => guard === undefined
+  ? {
+    sql: "EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)",
+    values: [channelId, name],
+  }
+  : {
+    sql: `EXISTS (
+      SELECT 1 FROM channel_variables
+       WHERE channel_id = ? AND name = ? AND value = ? AND description = ?
+         AND reset_on_stream_start = ? AND created_at = ? AND updated_at = ?
+    )`,
+    values: [channelId, name, guard.value, guard.description, guard.resetOnStreamStart ? 1 : 0, guard.createdAt, guard.updatedAt],
+  };
 
 export interface ModuleChannelVariable {
   name: string;
@@ -998,18 +1048,134 @@ export const settingsVariableReferences = (
         : [];
     });
   },
-  rename(db, channelId, from, to) {
+  rename(db, channelId, from, to, guard) {
     const oldToken = `{var.${from}}`;
     const nextToken = `{var.${to}}`;
+    const target = moduleVariableRenameTarget(channelId, to, guard);
     return [db.prepare(
       `UPDATE channel_modules
           SET settings = replace(settings, ?, ?), revision = revision + 1
         WHERE channel_id = ? AND module_id = ? AND instr(settings, ?) > 0
-          AND EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)
+          AND ${target.sql}
           AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
-    ).bind(oldToken, nextToken, channelId, moduleId, oldToken, channelId, to, channelId, from)];
+    ).bind(oldToken, nextToken, channelId, moduleId, oldToken, ...target.values, channelId, from)];
   },
 });
+
+export interface ModuleColumnVariableReferencesOptions {
+  moduleId: string;
+  tableName: string;
+  idColumn: string;
+  itemNameColumn: string;
+  textColumn: string;
+  maxTextLength?: number;
+  revisionColumn?: string | null;
+  updatedAtColumn?: string | null;
+}
+
+const sqlIdentifier = (value: string): string => {
+  if (!/^[a-z][a-z0-9_]*$/u.test(value)) {
+    throw new Error("Module variable-reference SQL identifiers must be lowercase ASCII identifiers.");
+  }
+  return `"${value}"`;
+};
+
+/** Finds and rewrites channel-variable references in a text column on module-owned rows. */
+export const columnVariableReferences = ({
+  moduleId,
+  tableName,
+  idColumn,
+  itemNameColumn,
+  textColumn,
+  maxTextLength = 500,
+  revisionColumn = "revision",
+  updatedAtColumn = "updated_at",
+}: ModuleColumnVariableReferencesOptions): ModuleVariableReferences => {
+  const quotedTableName = sqlIdentifier(tableName);
+  const quotedIdColumn = sqlIdentifier(idColumn);
+  const quotedItemNameColumn = sqlIdentifier(itemNameColumn);
+  const quotedTextColumn = sqlIdentifier(textColumn);
+  const quotedRevisionColumn = revisionColumn === null ? null : sqlIdentifier(revisionColumn);
+  const quotedUpdatedAtColumn = updatedAtColumn === null ? null : sqlIdentifier(updatedAtColumn);
+
+  return {
+    async usages(db, channelId, name): Promise<readonly ModuleVariableReferenceUsage[]> {
+      const token = `{var.${name}}`;
+      const rows = await db.prepare(
+        `SELECT ${quotedIdColumn} AS item_id, ${quotedItemNameColumn} AS item_name
+           FROM ${quotedTableName}
+          WHERE channel_id = ? AND instr(${quotedTextColumn}, ?) > 0
+          ORDER BY ${quotedItemNameColumn}, ${quotedIdColumn}`,
+      ).bind(channelId, token).all<{ item_id: string; item_name: string }>();
+      return rows.results.map((row) => ({
+        moduleId,
+        itemName: row.item_name || row.item_id,
+        kind: "template" as const,
+      }));
+    },
+    async validateRename(db, channelId, from, to): Promise<ModuleVariableRenameValidation> {
+      const oldToken = `{var.${from}}`;
+      const nextToken = `{var.${to}}`;
+      const rows = await db.prepare(
+        `SELECT ${quotedIdColumn} AS item_id, ${quotedItemNameColumn} AS item_name, ${quotedTextColumn} AS template_text
+           FROM ${quotedTableName}
+          WHERE channel_id = ? AND instr(${quotedTextColumn}, ?) > 0
+          ORDER BY ${quotedItemNameColumn}, ${quotedIdColumn}`,
+      ).bind(channelId, oldToken).all<{ item_id: string; item_name: string; template_text: string }>();
+      const snapshot = rows.results.map((row) => ({ itemId: row.item_id, text: row.template_text }));
+      const usages = rows.results.filter((row) =>
+        templateTextLength(row.template_text.replaceAll(oldToken, nextToken)) > maxTextLength,
+      ).map((row) => ({
+        moduleId,
+        itemName: row.item_name || row.item_id,
+        kind: "template" as const,
+      }));
+      const snapshotJson = JSON.stringify(snapshot);
+      return {
+        usages,
+        precondition: {
+          sql: `NOT EXISTS (
+            SELECT 1 FROM (
+              SELECT source.${quotedIdColumn} AS item_id, source.${quotedTextColumn} AS template_text
+                FROM ${quotedTableName} AS source
+               WHERE source."channel_id" = ? AND instr(source.${quotedTextColumn}, ?) > 0
+              EXCEPT
+              SELECT json_extract(snapshot.value, '$.itemId'), json_extract(snapshot.value, '$.text')
+                FROM json_each(?) AS snapshot
+            )
+          ) AND NOT EXISTS (
+            SELECT 1 FROM (
+              SELECT json_extract(snapshot.value, '$.itemId'), json_extract(snapshot.value, '$.text')
+                FROM json_each(?) AS snapshot
+              EXCEPT
+              SELECT source.${quotedIdColumn}, source.${quotedTextColumn}
+                FROM ${quotedTableName} AS source
+               WHERE source."channel_id" = ? AND instr(source.${quotedTextColumn}, ?) > 0
+            )
+          )`,
+          values: [channelId, oldToken, snapshotJson, snapshotJson, channelId, oldToken],
+        },
+      };
+    },
+    rename(db, channelId, from, to, guard) {
+      const oldToken = `{var.${from}}`;
+      const nextToken = `{var.${to}}`;
+      const columnUpdates = [
+        `${quotedTextColumn} = replace(${quotedTextColumn}, ?, ?)`,
+        ...(quotedRevisionColumn === null ? [] : [`${quotedRevisionColumn} = ${quotedRevisionColumn} + 1`]),
+        ...(quotedUpdatedAtColumn === null ? [] : [`${quotedUpdatedAtColumn} = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`]),
+      ];
+      const target = moduleVariableRenameTarget(channelId, to, guard);
+      return [db.prepare(
+        `UPDATE ${quotedTableName}
+            SET ${columnUpdates.join(", ")}
+          WHERE channel_id = ? AND instr(${quotedTextColumn}, ?) > 0
+            AND ${target.sql}
+            AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
+      ).bind(oldToken, nextToken, channelId, oldToken, ...target.values, channelId, from)];
+    },
+  };
+};
 
 /** Infrastructure for one-time initial data when a module is enabled. */
 export interface ModuleEnableContext {

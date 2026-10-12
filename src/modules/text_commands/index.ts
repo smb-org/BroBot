@@ -12,6 +12,7 @@ import { TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, TEXT_COMMAND_TEMPLATE_VARIABLE
 import { createTextCommandRepository, initializeListCommand, listTextCommandTemplateUsageSources } from "./adapters/d1";
 import { textCommandRoutes } from "./routes";
 import { processTextCommandMessage } from "./service";
+import { moduleVariableRenameTarget } from "../contract";
 import type { ModuleVariableReferences } from "../contract";
 
 const variableReferences: ModuleVariableReferences = {
@@ -41,9 +42,10 @@ const variableReferences: ModuleVariableReferences = {
         : []),
     ]);
   },
-  rename(db, channelId, from, to) {
+  rename(db, channelId, from, to, guard) {
     const oldToken = `{var.${from}}`;
     const nextToken = `{var.${to}}`;
+    const target = moduleVariableRenameTarget(channelId, to, guard);
     return [db.prepare(
       `UPDATE text_commands
           SET response_text = replace(response_text, ?, ?),
@@ -54,10 +56,10 @@ const variableReferences: ModuleVariableReferences = {
               revision = revision + 1
         WHERE channel_id = ?
           AND (variable_name = ? OR instr(response_text, ?) > 0 OR instr(template_fields_json, ?) > 0 OR instr(timeout_fallback_text, ?) > 0 OR instr(timeout_reason, ?) > 0)
-          AND EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)
+          AND ${target.sql}
           AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
     ).bind(oldToken, nextToken, oldToken, nextToken, oldToken, nextToken, oldToken, nextToken, channelId, to, oldToken, oldToken, oldToken, oldToken,
-      channelId, to, channelId, from)];
+      ...target.values, channelId, from)];
   },
 };
 
