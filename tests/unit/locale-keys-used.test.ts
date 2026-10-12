@@ -515,4 +515,19 @@ export const readLive = (): string => de.live;
 
     expect(unusedLocaleKeys(projectRoot)).toEqual([]);
   });
+
+  it("keeps the conservative fallback for a bracket read of mixed text and group members", () => {
+    const projectRoot = createLocaleFixture(`
+const catalog = {
+  de: { label: "Titel", nested: { live: "Verwendet" } },
+  en: { label: "Title", nested: { live: "Used" } },
+};
+export const read = (key: "label" | "nested"): string => {
+  const value = catalog.en[key];
+  return typeof value === "string" ? value : value.live;
+};
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
+  });
 });

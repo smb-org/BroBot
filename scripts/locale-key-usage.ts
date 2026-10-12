@@ -46,16 +46,18 @@ const isCatalogPropertyDeclaration = (declaration: ts.Declaration): boolean =>
   || ts.isPropertyAssignment(declaration)
   || ts.isPropertyDeclaration(declaration);
 
-const isLocaleTextType = (checker: ts.TypeChecker, type: ts.Type): boolean => {
-  for (const part of typeParts(type)) {
-    if ((part.flags & ts.TypeFlags.StringLike) !== 0) return true;
-    for (const signature of checker.getSignaturesOfType(part, ts.SignatureKind.Call)) {
-      const returnType = checker.getReturnTypeOfSignature(signature);
-      if (typeParts(returnType).some((returnPart) => (returnPart.flags & ts.TypeFlags.StringLike) !== 0)) return true;
-    }
-  }
-  return false;
+const isLocaleTextPart = (checker: ts.TypeChecker, part: ts.Type): boolean => {
+  if ((part.flags & ts.TypeFlags.StringLike) !== 0) return true;
+  return checker.getSignaturesOfType(part, ts.SignatureKind.Call).some((signature) =>
+    typeParts(checker.getReturnTypeOfSignature(signature)).some((returnPart) => (returnPart.flags & ts.TypeFlags.StringLike) !== 0));
 };
+
+const isLocaleTextType = (checker: ts.TypeChecker, type: ts.Type): boolean =>
+  typeParts(type).some((part) => isLocaleTextPart(checker, part));
+
+/** True only when every union member is a text leaf; a mixed text/group union must keep the conservative fallback. */
+const isOnlyLocaleTextType = (checker: ts.TypeChecker, type: ts.Type): boolean =>
+  typeParts(type).every((part) => isLocaleTextPart(checker, part));
 
 const literalPropertyNames = (checker: ts.TypeChecker, expression: ts.Expression): string[] => {
   const names = new Set<string>();
@@ -527,7 +529,7 @@ const propertyReads = (
       const isLiteralTextRead = ts.isElementAccessExpression(node)
         && literalPropertyNames(checker, node.argumentExpression).length > 0
         && resolveValue(node.expression)?.languageSelected === true
-        && isLocaleTextType(checker, checker.getTypeAtLocation(node));
+        && isOnlyLocaleTextType(checker, checker.getTypeAtLocation(node));
       if (value !== null
         && !continuesAccess
         && !isHandledDestructuringSource
