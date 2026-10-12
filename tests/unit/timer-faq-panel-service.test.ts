@@ -9,6 +9,7 @@ const parameterizedVariables = [
   { name: "pick", sample: "First", parameters: "choices", contexts: ["event", "chat_command"], parameterDefault: "first|second" },
   { name: "user", sample: "Viewer", contexts: ["chat_command"] },
   { name: "channel", sample: "samplechannel", contexts: ["chat_command"] },
+  { name: "viewers", sample: "42", contexts: ["chat_command", "event", "system"] },
   { name: "votekick.duration", sample: "2 min", contexts: ["event"], availableInEventTemplates: false },
 ];
 
@@ -65,5 +66,18 @@ describe("timer and FAQ panel variable loading", () => {
     expect(panel.variables.some((variable) => variable.name === "user")).toBe(false);
     expect(panel.variables.some((variable) => variable.name === "channel")).toBe(false);
     expect(panel.variables.some((variable) => variable.name === "votekick.duration")).toBe(false);
+  });
+
+  it.each([
+    ["timer", loadTimersPanel],
+    ["FAQ", loadFaqPanel],
+  ] as const)("offers host {viewers} in the %s event picker", async (_label, loadPanel) => {
+    stubPanelFetch();
+
+    const panel = await loadPanel("channel-a");
+
+    expect(panel.variables).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "viewers", sample: "42" }),
+    ]));
   });
 });

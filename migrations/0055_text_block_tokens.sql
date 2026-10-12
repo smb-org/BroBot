@@ -16,7 +16,7 @@ ALTER TABLE timers ADD COLUMN message_text TEXT NOT NULL DEFAULT '' CHECK (
   length(message_text) - 5 * ((length(message_text) - length(replace(message_text, '{text.', ''))) / 6) <= 500
 );
 UPDATE timers
-   SET message_text = '{text.' || block_name || '}', revision = revision + 1,
+   SET message_text = '{text.' || block_name || '}',
        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
 ALTER TABLE timers DROP COLUMN block_name;
 

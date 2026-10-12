@@ -10,15 +10,26 @@ import { blockReferencesInText } from "./text-block-references";
 
 export type EventTextBlockValidation = { ok: true } | { ok: false; reason: "missing" | "input_dependent" };
 
-const inputVariablesForEvent = (registeredVariables: readonly ModuleRegisteredTemplateVariable[]): Set<string> => {
-  const availabilityByName = new Map<string, boolean>();
-  for (const variable of [...SYSTEM_TEMPLATE_VARIABLE_LIST, ...registeredVariables]) {
-    availabilityByName.set(
-      variable.name,
-      (availabilityByName.get(variable.name) ?? false) || isEventTemplateVariableAvailable(variable),
-    );
+/** Keeps an event-resolvable declaration when a later declaration with the same name is unavailable. */
+export const effectiveEventTemplateDeclarations = <Declaration extends {
+  name: string;
+  contexts?: readonly ("chat_command" | "event" | "system")[];
+  availableInEventTemplates?: boolean;
+}>(declarations: readonly Declaration[]): Declaration[] => {
+  const byName = new Map<string, Declaration>();
+  for (const declaration of declarations) {
+    const current = byName.get(declaration.name);
+    if (current === undefined || isEventTemplateVariableAvailable(declaration) || !isEventTemplateVariableAvailable(current)) {
+      byName.set(declaration.name, declaration);
+    }
   }
-  return new Set([...availabilityByName].filter(([, available]) => !available).map(([name]) => name));
+  return [...byName.values()];
+};
+
+const inputVariablesForEvent = (registeredVariables: readonly ModuleRegisteredTemplateVariable[]): Set<string> => {
+  return new Set(effectiveEventTemplateDeclarations([...SYSTEM_TEMPLATE_VARIABLE_LIST, ...registeredVariables])
+    .filter((variable) => !isEventTemplateVariableAvailable(variable))
+    .map((variable) => variable.name));
 };
 
 /** Validates a text block used without chat-command input, including nested blocks. */

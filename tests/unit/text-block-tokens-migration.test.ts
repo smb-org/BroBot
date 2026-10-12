@@ -2,19 +2,21 @@ import { DatabaseSync } from "node:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { validTextBlock } from "../../src/modules/text_library/domain";
 import { templateTextLength } from "../../src/template";
+import { handleTimerAlarm } from "../../src/modules/timers";
 import { adsSettingsSchema } from "../../src/modules/ads/contracts";
 import { raidSettingsSchema } from "../../src/modules/raid/contracts";
+import { TestPreparedStatement } from "./test-d1";
 
 const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 const migrationFiles = readdirSync(migrationsDirectory).filter((name) => name.endsWith(".sql")).sort((a, b) => a.localeCompare(b));
 const readMigration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
 
 describe("text block token migration", () => {
-  it("moves timer and FAQ content to free text and namespaces stored block references", () => {
+  it("moves timer and FAQ content to free text and preserves pending stream-start alarms", async () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
@@ -44,8 +46,8 @@ describe("text block token migration", () => {
         VALUES ('channel-a', 'hello', 'Hello {welcome}, {viewers}', '{"label":"{welcome} {viewers}"}', 'Try {welcome} again.', '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z', 'Blocked by {welcome}.');
         INSERT INTO text_commands (channel_id, command_name, response_text, template_fields_json, timeout_fallback_text, timeout_reason, created_at, updated_at)
         VALUES ('channel-a', 'long', '${"x".repeat(491)}{welcome}', '${JSON.stringify({ label: `${"x".repeat(491)}{welcome}` })}', '${"x".repeat(491)}{welcome}', '${"x".repeat(491)}{welcome}', '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z');
-        INSERT INTO timers (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision, created_at, updated_at)
-        VALUES ('timer-a', 'channel-a', 'Reminder', 1, 'welcome', 'interval', '{"type":"interval","minutes":10}', 1, '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z');
+        INSERT INTO timers (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision, next_run_at, next_run_stream_id, created_at, updated_at)
+        VALUES ('timer-a', 'channel-a', 'Reminder', 1, 'welcome', 'stream_start', '{"type":"stream_start","minutes":10}', 7, '2026-10-12T00:10:00.000Z', 'stream-a', '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z');
         INSERT INTO faq_entries (faq_id, channel_id, name, matcher_type, matcher_json, answer_block, created_at, updated_at)
         VALUES ('faq-a', 'channel-a', 'Greeting', 'keywords', '{"patterns":["hello"]}', 'welcome', '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z');
         INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
@@ -102,7 +104,7 @@ describe("text block token migration", () => {
       expect(templateTextLength(migratedCommand.response_text)).toBe(500);
       expect(adsSettingsSchema.safeParse(JSON.parse((database.prepare("SELECT settings FROM channel_modules WHERE module_id = 'ads'").get() as { settings: string }).settings)).success).toBe(true);
       expect(raidSettingsSchema.safeParse(JSON.parse((database.prepare("SELECT settings FROM channel_modules WHERE module_id = 'raid'").get() as { settings: string }).settings)).success).toBe(true);
-      expect(database.prepare("SELECT revision FROM timers WHERE timer_id = 'timer-a'").get()).toEqual({ revision: 2 });
+      expect(database.prepare("SELECT revision FROM timers WHERE timer_id = 'timer-a'").get()).toEqual({ revision: 7 });
       expect(database.prepare("SELECT revision FROM faq_entries WHERE faq_id = 'faq-a'").get()).toEqual({ revision: 2 });
       expect(database.prepare("SELECT revision FROM text_blocks WHERE block_name = 'long_example'").get()).toEqual({ revision: 2 });
       expect(database.prepare("SELECT revision FROM text_blocks WHERE block_name = 'welcome'").get()).toEqual({ revision: 2 });
@@ -115,6 +117,34 @@ describe("text block token migration", () => {
         .toEqual({ text: `${"x".repeat(91)}{text.welcome}` });
       expect(database.prepare("SELECT revision FROM overlays WHERE overlay_id = 'overlay-a'").get()).toEqual({ revision: 2 });
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+
+      const d1Database = {
+        prepare: (sql: string) => new TestPreparedStatement(database, database.prepare(sql), sql),
+      } as unknown as D1Database;
+      const sends: string[] = [];
+      const alarmContext = {
+        DB: d1Database,
+        channelId: "channel-a",
+        clear: () => Promise.resolve(),
+        schedule: () => Promise.resolve(),
+        streamState: () => Promise.resolve("online"),
+        streamStartedAt: () => Promise.resolve({ streamId: "stream-a", startedAt: "2026-10-12T00:00:00.000Z" }),
+        renderTemplate: () => Promise.resolve({ text: "Migrated reminder" }),
+        sendChat: (_text: string, idempotencyKey: string) => {
+          sends.push(idempotencyKey);
+          return Promise.resolve({ sent: true, reason: null, retryable: false });
+        },
+      } as unknown as Parameters<typeof handleTimerAlarm>[0];
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(Date.parse("2026-10-12T00:10:00.000Z"));
+        await handleTimerAlarm(alarmContext, "timer:timer-a", Date.parse("2026-10-12T00:10:00.000Z"), 7);
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(sends).toHaveLength(1);
+      expect(database.prepare("SELECT next_run_at FROM timers WHERE timer_id = 'timer-a'").get())
+        .toEqual({ next_run_at: null });
     } finally {
       database.close();
     }

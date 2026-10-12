@@ -41,6 +41,7 @@ import { moduleBallots } from "../module-ballots";
 import { createModuleSecretAccess, createModuleSecretReadAccess } from "../module-secrets";
 import { liftModerationBan } from "../moderation";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
+import { effectiveEventTemplateDeclarations } from "../../modules/contracts/text-block-validation";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -389,7 +390,7 @@ moduleRouter.get("/api/channels/:channelId/template-variables", async (context) 
     context.get("listRegisteredTemplateVariables")(channelId),
     context.get("listChannelVariables")(channelId),
   ]);
-  const variables = [
+  const variables = effectiveEventTemplateDeclarations([
     ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => ({ ...variable, moduleId: "host", isTextBlock: false })),
     ...moduleVariables,
     ...channelVariables.map((variable) => ({
@@ -402,9 +403,8 @@ moduleRouter.get("/api/channels/:channelId/template-variables", async (context) 
       maxLength: 10,
       source: "channel" as const,
     })),
-  ];
-  const unique = new Map(variables.map((variable) => [variable.name, variable]));
-  return context.json({ variables: [...unique.values()], defaultTimeZone: DEFAULT_CHANNEL_TIME_ZONE });
+  ]);
+  return context.json({ variables, defaultTimeZone: DEFAULT_CHANNEL_TIME_ZONE });
 });
 
 moduleRouter.post("/api/channels/:channelId/template-preview", async (context) => {
