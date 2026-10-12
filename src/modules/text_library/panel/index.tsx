@@ -524,7 +524,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                   const category = data.categories.find((entry) => entry.id === block.categoryId);
                   const usages = data.usages[block.name] ?? [];
                   return <tr key={block.name} aria-selected={selectedName === block.name}>
-                    <th scope="row"><button type="button" className="text-library__name-button mono" aria-current={selectedName === block.name ? "true" : undefined} onClick={(event) => { event.currentTarget.focus(); selectBlock(block); }}>{`{${block.name}}`}</button></th>
+                    <th scope="row"><button type="button" className="text-library__name-button mono" aria-current={selectedName === block.name ? "true" : undefined} onClick={(event) => { event.currentTarget.focus(); selectBlock(block); }}>{`{text.${block.name}}`}</button></th>
                     <td>{category === undefined ? block.categoryId : categoryLabel(category, labels)}</td>
                     <td><Badge>{labels.variantsCount(block.variants.length)}</Badge></td>
                     <td><Badge tone={usages.length === 0 ? "neutral" : "brand"}>{labels.usesCount(usages.length)}</Badge></td>

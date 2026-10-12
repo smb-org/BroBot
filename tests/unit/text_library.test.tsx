@@ -132,7 +132,7 @@ describe("text library", () => {
     });
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{schedule\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.schedule\}/u }));
 
     const weekdays = screen.getByRole("group", { name: "Weekdays" });
     const sunday = within(weekdays).getByRole("button", { name: "Sunday" });
@@ -180,12 +180,12 @@ describe("text library", () => {
     }
 
     renderWithQuery(<TogglePanel />, undefined, { gcTime: 600_000 });
-    expect(await screen.findByRole("button", { name: /\{cached_text\}/u })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /\{text\.cached_text\}/u })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle panel" }));
     fireEvent.click(screen.getByRole("button", { name: "Toggle panel" }));
 
-    expect(screen.getByRole("button", { name: /\{cached_text\}/u })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /\{text\.cached_text\}/u })).toBeInTheDocument();
   });
 
   it("accepts a committed block from a recreated resource generation", async () => {
@@ -230,13 +230,13 @@ describe("text library", () => {
       undefined,
       { gcTime: 600_000 },
     );
-    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Client draft" } });
     fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("New generation"));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(screen.getByRole("button", { name: /\{text\.welcome\}/u }));
 
     expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("New generation");
   });
@@ -854,7 +854,7 @@ describe("text library", () => {
     }));
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
     fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(patchStatus).toBe(200));
@@ -1033,11 +1033,11 @@ describe("text library", () => {
     await screen.findByTestId("text-library-list-slot");
     expect(await screen.findByRole("heading", { name: "Text blocks" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Category" })).toHaveValue("All categories");
-    const welcomeRow = screen.getByRole("button", { name: /\{welcome\}/u });
+    const welcomeRow = screen.getByRole("button", { name: /\{text\.welcome\}/u });
     const welcomeTableRow = welcomeRow.closest("tr");
     expect(welcomeTableRow).toHaveTextContent("1 variant");
     expect(welcomeTableRow).toHaveTextContent("0 uses");
-    fireEvent.click(screen.getByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(screen.getByRole("button", { name: /\{text\.welcome\}/u }));
     expect(screen.getAllByText("Only broadcasters and managers can change text blocks and categories.")).toHaveLength(2);
     expect(document.querySelector(".text-library__read-only-properties")).toHaveTextContent("Hello");
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
@@ -1086,7 +1086,7 @@ describe("text library", () => {
     }));
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Updated" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -1104,7 +1104,7 @@ describe("text library", () => {
     guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
     fireEvent.click(within(guard).getByRole("button", { name: "Continue editing" }));
 
-    fireEvent.click(screen.getByRole("button", { name: /\{faq\}/u }));
+    fireEvent.click(screen.getByRole("button", { name: /\{text\.faq\}/u }));
     guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
     fireEvent.click(within(guard).getByRole("button", { name: "Save and switch" }));
     await waitFor(() => expect(patchBodies).toHaveLength(1));
@@ -1113,7 +1113,7 @@ describe("text library", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(document.querySelector(".list-detail__inspector")).not.toBeInTheDocument());
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: /\{faq\}/u }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /\{text\.faq\}/u }));
   });
 
   it("registers its dirty-draft guard with the dashboard router so router-driven navigation is blocked", async () => {
@@ -1143,7 +1143,7 @@ describe("text library", () => {
     }));
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Updated" } });
 
     // Simulates the router running its registered guards for sidebar navigation
@@ -1186,7 +1186,7 @@ describe("text library", () => {
     expect(screen.getByText("This name is reserved for a template variable.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: /\{user\}/u }));
+    fireEvent.click(screen.getByRole("button", { name: /\{text\.user\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "{us" } });
     expect(screen.queryByText("Text block {user}")).not.toBeInTheDocument();
   });
@@ -1213,7 +1213,7 @@ describe("text library", () => {
     });
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{everyone_line\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.everyone_line\}/u }));
     fireEvent.click(screen.getByRole("combobox", { name: "Preview context" }));
     fireEvent.click(await screen.findByRole("option", { name: "Command" }));
 
@@ -1255,7 +1255,7 @@ describe("text library", () => {
     vi.stubGlobal("fetch", fetcher);
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.preview_line\}/u }));
     await waitFor(() => expect(fetcher.mock.calls.filter(([input]) => new URL(input instanceof Request ? input.url : String(input), window.location.href).pathname.endsWith("/template-preview"))).toHaveLength(1));
     await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
 
@@ -1316,7 +1316,7 @@ describe("text library", () => {
     vi.stubGlobal("fetch", fetcher);
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.preview_line\}/u }));
     await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
 
     vi.useFakeTimers();
@@ -1370,7 +1370,7 @@ describe("text library", () => {
     vi.stubGlobal("fetch", fetcher);
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.preview_line\}/u }));
     await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
 
     vi.useFakeTimers();

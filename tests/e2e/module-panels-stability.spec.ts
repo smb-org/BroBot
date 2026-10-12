@@ -1384,7 +1384,7 @@ test("text-library inspector stays at its sticky offset while the page scrolls a
 
   await page.setViewportSize({ width: 1400, height: 800 });
   await gotoPanel(page, "text_library");
-  await page.getByRole("button", { name: "{block_1}" }).click();
+  await page.getByRole("button", { name: "{text.block_1}" }).click();
   const inspector = page.locator(".list-detail__inspector");
   await expect(inspector).toBeVisible();
   await page.evaluate(() => { window.scrollTo(0, 100); });
