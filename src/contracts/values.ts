@@ -288,6 +288,7 @@ export const AUDIT_ACTIONS = [
   "faq.entry.reordered",
   "text_library.block.created",
   "text_library.block.updated",
+  "text_library.block.renamed",
   "text_library.block.removed",
   "text_library.category.created",
   "text_library.category.renamed",

@@ -2,9 +2,10 @@ import type { AuditAction } from "../../../contracts/values";
 import type { AuthorizeModuleMutation, PrepareModuleAudit } from "../../contract";
 import type { TextBlock, TextBlockCategory, TextBlockVariant, TextLibrarySettings, TextBlockUsage, TwitchGame } from "../contracts";
 import { DEFAULT_TEXT_BLOCK_CATEGORIES, TEXT_BLOCK_MAXIMUMS } from "../contracts";
-import type { TextBlockRepository, TextLibrarySnapshot } from "../repository";
+import type { TextBlockRenameInput, TextBlockRepository, TextLibrarySnapshot } from "../repository";
 import type { ModuleTemplateUsageSource } from "../../contract";
 import { blockReferencesInText } from "../domain";
+import { templateTextLength } from "../../../contracts/template-text-length";
 
 const MODULE_ID = "text_library";
 
@@ -98,6 +99,62 @@ const mapSettings = (row: SettingsRow): TextLibrarySettings => ({
   graphRevision: row.graph_revision,
   updatedAt: row.updated_at,
 });
+
+const stringsFromJson = (raw: string): string[] => {
+  let value: unknown;
+  try { value = JSON.parse(raw) as unknown; } catch { return []; }
+  const visit = (entry: unknown): string[] => {
+    if (typeof entry === "string") return [entry];
+    if (Array.isArray(entry)) return entry.flatMap(visit);
+    if (typeof entry === "object" && entry !== null) return Object.values(entry).flatMap(visit);
+    return [];
+  };
+  return visit(value);
+};
+
+const textBlockRenameWouldOverflow = async (db: D1Database, channelId: string, from: string, to: string): Promise<boolean> => {
+  const oldToken = `{text.${from}}`;
+  const nextToken = `{text.${to}}`;
+  const [variants, commands, timers, faqEntries, modules, overlayElements] = await Promise.all([
+    db.prepare("SELECT texts_json FROM text_block_variants WHERE channel_id = ? AND instr(texts_json, ?) > 0")
+      .bind(channelId, oldToken).all<{ texts_json: string }>(),
+    db.prepare(`SELECT response_text, template_fields_json, timeout_fallback_text, timeout_reason
+                  FROM text_commands WHERE channel_id = ? AND (
+                    instr(response_text, ?) > 0 OR instr(template_fields_json, ?) > 0 OR
+                    instr(COALESCE(timeout_fallback_text, ''), ?) > 0 OR instr(COALESCE(timeout_reason, ''), ?) > 0
+                  )`).bind(channelId, oldToken, oldToken, oldToken, oldToken)
+      .all<{ response_text: string; template_fields_json: string; timeout_fallback_text: string | null; timeout_reason: string | null }>(),
+    db.prepare("SELECT message_text FROM timers WHERE channel_id = ? AND instr(message_text, ?) > 0")
+      .bind(channelId, oldToken).all<{ message_text: string }>(),
+    db.prepare("SELECT answer_text FROM faq_entries WHERE channel_id = ? AND instr(answer_text, ?) > 0")
+      .bind(channelId, oldToken).all<{ answer_text: string }>(),
+    db.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND instr(settings, ?) > 0")
+      .bind(channelId, oldToken).all<{ settings: string }>(),
+    db.prepare("SELECT text, config_json FROM overlay_elements WHERE channel_id = ? AND (instr(text, ?) > 0 OR instr(config_json, ?) > 0)")
+      .bind(channelId, oldToken, oldToken).all<{ text: string; config_json: string }>(),
+  ]);
+  const templateTexts = [
+    ...variants.results.flatMap((row) => stringsFromJson(row.texts_json)),
+    ...commands.results.flatMap((row) => [
+      row.response_text,
+      ...stringsFromJson(row.template_fields_json),
+      ...(row.timeout_fallback_text === null ? [] : [row.timeout_fallback_text]),
+      ...(row.timeout_reason === null ? [] : [row.timeout_reason]),
+    ]),
+    ...timers.results.map((row) => row.message_text),
+    ...faqEntries.results.map((row) => row.answer_text),
+    ...modules.results.flatMap((row) => stringsFromJson(row.settings)),
+  ];
+  if (templateTexts.some((text) => text.includes(oldToken) && templateTextLength(text.replaceAll(oldToken, nextToken)) > 500)) return true;
+  return overlayElements.results.some((row) =>
+    (row.text.includes(oldToken) && row.text.replaceAll(oldToken, nextToken).length > 100) ||
+    new TextEncoder().encode(row.config_json.replaceAll(oldToken, nextToken)).byteLength > 4_096,
+  );
+};
+
+const channelLibraryRevision = async (db: D1Database, channelId: string): Promise<number> =>
+  (await db.prepare("SELECT revision FROM panel_resource_revisions WHERE channel_id = ? AND resource = 'channel.library'")
+    .bind(channelId).first<{ revision: number }>())?.revision ?? 0;
 
 export const textBlockSelectColumns = `channel_id, block_name, category_id, games_json,
                      revision, created_at, updated_at`;
@@ -310,6 +367,172 @@ export const createTextBlockRepository = (
       }
       const block = await find(input.channelId, input.name);
       return block === null ? { ok: false, reason: "invalid_block" } : { ok: true, block };
+    },
+    async rename(input: TextBlockRenameInput, fromName, actor) {
+      const before = await find(input.channelId, fromName);
+      if (before === null) {
+        const settings = await db.prepare("SELECT graph_revision FROM text_library_settings WHERE channel_id = ?")
+          .bind(input.channelId).first<{ graph_revision: number }>();
+        return { ok: false, reason: settings?.graph_revision === input.expectedGraphRevision ? "not_found" : "conflict" };
+      }
+      if (before.revision !== input.expectedRevision) return { ok: false, reason: "conflict", current: before };
+      if (await find(input.channelId, input.name) !== null) return { ok: false, reason: "already_exists" };
+      const startLibraryRevision = await channelLibraryRevision(db, input.channelId);
+      if (await textBlockRenameWouldOverflow(db, input.channelId, fromName, input.name)) {
+        return { ok: false, reason: "template_too_long" };
+      }
+      const expectedLibraryRevision = await channelLibraryRevision(db, input.channelId);
+      if (startLibraryRevision !== expectedLibraryRevision) return { ok: false, reason: "conflict", current: before };
+      const authorization = authorizeMutation(input.channelId, actor, input.now);
+      const nextRevision = before.revision + 1;
+      const renamedBlockGuard = `EXISTS (
+        SELECT 1 FROM text_blocks
+         WHERE channel_id = ? AND block_name = ? AND revision = ? AND updated_at = ?
+      )`;
+      const renamedBlockValues = [input.channelId, input.name, nextRevision, input.now];
+      const advanceGraph = db.prepare(
+        `UPDATE text_library_settings SET graph_revision = graph_revision + 1
+          WHERE channel_id = ? AND graph_revision = ?
+            AND EXISTS (SELECT 1 FROM text_blocks WHERE channel_id = ? AND block_name = ? AND revision = ?)
+            AND NOT EXISTS (SELECT 1 FROM text_blocks WHERE channel_id = ? AND block_name = ?)
+            AND EXISTS (SELECT 1 FROM text_library_categories WHERE channel_id = ? AND category_id = ?)
+            AND COALESCE((SELECT revision FROM panel_resource_revisions WHERE channel_id = ? AND resource = 'channel.library'), 0) = ?
+            ${authorization.sql}`,
+      ).bind(input.channelId, input.expectedGraphRevision, input.channelId, fromName, before.revision,
+        input.channelId, input.name, input.channelId, input.categoryId, input.channelId, expectedLibraryRevision,
+        ...authorization.values);
+      const mutation = db.prepare(
+        `UPDATE text_blocks
+            SET block_name = ?, category_id = ?, games_json = ?, revision = ?, updated_at = ?
+          WHERE channel_id = ? AND block_name = ? AND revision = ? AND changes() > 0
+            AND NOT EXISTS (SELECT 1 FROM text_blocks WHERE channel_id = ? AND block_name = ?)
+            AND EXISTS (SELECT 1 FROM text_library_categories WHERE channel_id = ? AND category_id = ?)
+            ${authorization.sql}`,
+      ).bind(input.name, input.categoryId, JSON.stringify(input.games), nextRevision, input.now,
+        input.channelId, fromName, before.revision, input.channelId, input.name, input.channelId, input.categoryId,
+        ...authorization.values);
+      const audit = prepareModuleAudit?.({
+        channelId: input.channelId,
+        moduleId: MODULE_ID,
+        action: "text_library.block.renamed" satisfies AuditAction,
+        before: { name: before.name, categoryId: before.categoryId, variantCount: before.variants.length },
+        after: { name: input.name, categoryId: input.categoryId, variantCount: input.variants.length },
+      }, input.now);
+      const rewriteParentRevisions = db.prepare(
+        `UPDATE text_blocks
+            SET revision = revision + 1, updated_at = ?
+          WHERE channel_id = ? AND block_name <> ?
+            AND EXISTS (
+              SELECT 1 FROM text_block_variants AS variant
+               WHERE variant.channel_id = text_blocks.channel_id
+                 AND variant.block_name = text_blocks.block_name
+                 AND instr(variant.texts_json, ?) > 0
+            )
+            AND ${renamedBlockGuard}`,
+      ).bind(input.now, input.channelId, input.name, `{text.${fromName}}`, ...renamedBlockValues);
+      const rewriteVariants = db.prepare(
+        `UPDATE text_block_variants
+            SET texts_json = replace(texts_json, ?, ?)
+          WHERE channel_id = ? AND instr(texts_json, ?) > 0 AND ${renamedBlockGuard}`,
+      ).bind(`{text.${fromName}}`, `{text.${input.name}}`, input.channelId, `{text.${fromName}}`, ...renamedBlockValues);
+      const rewriteCommands = db.prepare(
+        `UPDATE text_commands
+            SET response_text = replace(response_text, ?, ?),
+                template_fields_json = replace(template_fields_json, ?, ?),
+                timeout_fallback_text = replace(timeout_fallback_text, ?, ?),
+                timeout_reason = replace(timeout_reason, ?, ?),
+                revision = revision + 1, updated_at = ?
+          WHERE channel_id = ?
+            AND (instr(response_text, ?) > 0 OR instr(template_fields_json, ?) > 0 OR
+                 instr(COALESCE(timeout_fallback_text, ''), ?) > 0 OR instr(COALESCE(timeout_reason, ''), ?) > 0)
+            AND ${renamedBlockGuard}`,
+      ).bind(`{text.${fromName}}`, `{text.${input.name}}`, `{text.${fromName}}`, `{text.${input.name}}`,
+        `{text.${fromName}}`, `{text.${input.name}}`, `{text.${fromName}}`, `{text.${input.name}}`, input.now,
+        input.channelId, `{text.${fromName}}`, `{text.${fromName}}`, `{text.${fromName}}`, `{text.${fromName}}`,
+        ...renamedBlockValues);
+      const rewriteTimers = db.prepare(
+        `UPDATE timers SET message_text = replace(message_text, ?, ?), revision = revision + 1, updated_at = ?
+          WHERE channel_id = ? AND instr(message_text, ?) > 0 AND ${renamedBlockGuard}`,
+      ).bind(`{text.${fromName}}`, `{text.${input.name}}`, input.now, input.channelId, `{text.${fromName}}`, ...renamedBlockValues);
+      const rewriteFaq = db.prepare(
+        `UPDATE faq_entries SET answer_text = replace(answer_text, ?, ?), revision = revision + 1, updated_at = ?
+          WHERE channel_id = ? AND instr(answer_text, ?) > 0 AND ${renamedBlockGuard}`,
+      ).bind(`{text.${fromName}}`, `{text.${input.name}}`, input.now, input.channelId, `{text.${fromName}}`, ...renamedBlockValues);
+      const rewriteModuleSettings = db.prepare(
+        `UPDATE channel_modules SET settings = replace(settings, ? , ?), revision = revision + 1
+          WHERE channel_id = ? AND instr(settings, ?) > 0 AND ${renamedBlockGuard}`,
+      ).bind(`{text.${fromName}}`, `{text.${input.name}}`, input.channelId, `{text.${fromName}}`, ...renamedBlockValues);
+      const updateOverlayRevisions = db.prepare(
+        `UPDATE overlays SET revision = revision + 1, updated_at = ?
+          WHERE channel_id = ? AND EXISTS (
+            SELECT 1 FROM overlay_elements AS element
+             WHERE element.channel_id = overlays.channel_id AND element.overlay_id = overlays.overlay_id
+               AND (instr(element.text, ?) > 0 OR instr(element.config_json, ?) > 0 OR
+                    (element.kind = 'text_library.block' AND json_extract(element.config_json, '$.blockName') = ?))
+          )
+            AND ${renamedBlockGuard}
+          RETURNING overlay_id, revision`,
+      ).bind(input.now, input.channelId, `{text.${fromName}}`, `{text.${fromName}}`, fromName, ...renamedBlockValues);
+      const rewriteOverlayElements = db.prepare(
+        `UPDATE overlay_elements
+            SET text = replace(text, ?, ?),
+                config_json = CASE
+                  WHEN kind = 'text_library.block' AND json_extract(config_json, '$.blockName') = ?
+                    THEN json_set(replace(config_json, ?, ?), '$.blockName', ?)
+                  ELSE replace(config_json, ?, ?)
+                END
+          WHERE channel_id = ?
+            AND (instr(text, ?) > 0 OR instr(config_json, ?) > 0 OR
+                 (kind = 'text_library.block' AND json_extract(config_json, '$.blockName') = ?))
+            AND ${renamedBlockGuard}`,
+      ).bind(`{text.${fromName}}`, `{text.${input.name}}`, fromName,
+        `{text.${fromName}}`, `{text.${input.name}}`, input.name,
+        `{text.${fromName}}`, `{text.${input.name}}`,
+        input.channelId, `{text.${fromName}}`, `{text.${fromName}}`, fromName, ...renamedBlockValues);
+      const statements = [advanceGraph, mutation];
+      if (audit !== undefined) statements.push(audit);
+      statements.push(rewriteParentRevisions, rewriteVariants, rewriteCommands, rewriteTimers, rewriteFaq,
+        rewriteModuleSettings);
+      const overlayUpdateIndex = statements.length;
+      statements.push(updateOverlayRevisions, rewriteOverlayElements);
+      let results: Awaited<ReturnType<typeof db.batch>>;
+      try {
+        results = await db.batch(statements);
+      } catch (error: unknown) {
+        if (await textBlockRenameWouldOverflow(db, input.channelId, fromName, input.name)) {
+          return { ok: false, reason: "template_too_long" };
+        }
+        throw error;
+      }
+      if ((results[1]?.meta.changes ?? 0) === 0) {
+        if (await find(input.channelId, input.name) !== null) return { ok: false, reason: "already_exists" };
+        const current = await find(input.channelId, fromName);
+        if (current === null) {
+          const settings = await db.prepare("SELECT graph_revision FROM text_library_settings WHERE channel_id = ?")
+            .bind(input.channelId).first<{ graph_revision: number }>();
+          return { ok: false, reason: settings?.graph_revision === input.expectedGraphRevision ? "not_found" : "conflict" };
+        }
+        if (current.revision !== input.expectedRevision) return { ok: false, reason: "conflict", current };
+        const settings = await db.prepare("SELECT graph_revision FROM text_library_settings WHERE channel_id = ?")
+          .bind(input.channelId).first<{ graph_revision: number }>();
+        const currentLibraryRevision = await channelLibraryRevision(db, input.channelId);
+        return {
+          ok: false,
+          reason: settings?.graph_revision === input.expectedGraphRevision && currentLibraryRevision === expectedLibraryRevision
+            ? "not_authorized"
+            : "conflict",
+          current,
+        };
+      }
+      const block = await find(input.channelId, input.name);
+      if (block === null) return { ok: false, reason: "invalid_block" };
+      const updatedOverlays: { overlayId: string; revision: number }[] = (results[overlayUpdateIndex]?.results ?? []).flatMap((row: unknown) => {
+        if (typeof row !== "object" || row === null) return [];
+        const overlayId = "overlay_id" in row ? row.overlay_id : undefined;
+        const revision = "revision" in row ? row.revision : undefined;
+        return typeof overlayId === "string" && typeof revision === "number" ? [{ overlayId, revision }] : [];
+      });
+      return { ok: true, block, updatedOverlays };
     },
     async delete(channelId, name, revision, graphRevision, actor, now) {
       const before = await find(channelId, name);

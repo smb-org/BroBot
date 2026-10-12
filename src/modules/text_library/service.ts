@@ -1,6 +1,6 @@
 import type { TextBlock, TextBlockCategory } from "./contracts";
 import type { TextBlockActor } from "./types";
-import type { TextBlockInput, TextBlockMutationResult, TextBlockRepository, TextLibrarySnapshot } from "./repository";
+import type { TextBlockInput, TextBlockMutationResult, TextBlockRenameInput, TextBlockRenameResult, TextBlockRepository, TextLibrarySnapshot } from "./repository";
 import { validateTextBlockGraph, type TextBlockGraphError } from "./domain";
 import type { ModuleTemplateUsageSource } from "../contract";
 
@@ -17,6 +17,7 @@ export interface TextLibraryService {
   find(channelId: string, name: string): Promise<TextBlock | null>;
   create(input: TextBlockInput, actor: TextBlockActor, snapshot: TextLibrarySnapshot): Promise<TextBlockMutationResult>;
   change(input: TextBlockInput, actor: TextBlockActor, snapshot: TextLibrarySnapshot): Promise<TextBlockMutationResult>;
+  rename(input: TextBlockRenameInput, fromName: string, actor: TextBlockActor, snapshot: TextLibrarySnapshot): Promise<TextBlockRenameResult>;
   delete(channelId: string, name: string, revision: number, graphRevision: number, actor: TextBlockActor, now: string): Promise<TextBlockMutationResult>;
   createCategory(channelId: string, name: string, actor: TextBlockActor, now: string): Promise<TextBlockCategory | null>;
   renameCategory(channelId: string, categoryId: string, name: string, actor: TextBlockActor, now: string): Promise<{ ok: boolean }>;
@@ -35,6 +36,11 @@ export const createTextLibraryService = (repository: TextBlockRepository): TextL
     const invalid = graphError(snapshot.blocks, input);
     if (invalid !== null) return { ok: false, reason: invalid.reason, path: invalid.path };
     return repository.change(input, actor);
+  },
+  async rename(input, fromName, actor, snapshot) {
+    const invalid = graphError(snapshot.blocks.filter((block) => block.name !== fromName), input);
+    if (invalid !== null) return { ok: false, reason: invalid.reason, path: invalid.path };
+    return repository.rename(input, fromName, actor);
   },
   delete: (channelId, name, revision, graphRevision, actor, now) =>
     repository.delete(channelId, name, revision, graphRevision, actor, now),

@@ -248,7 +248,7 @@ const sentencePartValue = (action: string, before: Record<string, unknown> | nul
     const to = recordValue(after, "value");
     return { from: typeof from === "number" ? String(from) : null, to: typeof to === "number" ? String(to) : null };
   }
-  if (action === "channel.variable.renamed" || action === "text_library.category.renamed") {
+  if (action === "channel.variable.renamed" || action === "text_library.category.renamed" || action === "text_library.block.renamed") {
     return { from: recordText(before, "name"), to: recordText(after, "name") };
   }
   if (action === "text_library.settings.updated" || action === "channel.time_zone.updated") {
