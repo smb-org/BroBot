@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, NumberField, UnitInput, Select, Switch, TextArea, notify } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, Switch, TextArea, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
@@ -305,7 +305,6 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             disabled={pending}
             required
           />
-          {blockOptions.length === 0 ? <p className="muted">{labels.noBlocks}</p> : null}
           <UnitInput
             label={labels.cooldown}
             hint={labels.cooldownHint}
@@ -317,7 +316,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             disabled={pending}
             required
           />
-          <NumberField
+          <UnitInput
             label={labels.userCooldown}
             hint={labels.userCooldownHint}
             value={draft.userCooldownSeconds}

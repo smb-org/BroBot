@@ -1,4 +1,4 @@
-import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 
 import { Icon } from "./Icon";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
@@ -50,24 +50,59 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, placeholde
   const warningId = `${id}-warning`;
   const prefixed = (entry: string): string => `${stripPrefix ?? ""}${entry}`;
 
+  const commitEntries = (entries: readonly string[], remainder = ""): void => {
+    const nextValues = [...values];
+    const rejected: string[] = [];
+    let nextError: string | null = null;
+    let nextWarning: string | null = null;
+    for (const rawEntry of entries) {
+      const nextValue = normalizeEntry(rawEntry.trim(), stripPrefix, normalize);
+      if (nextValue.length === 0) continue;
+      if (nextValues.includes(nextValue)) {
+        nextWarning ??= messages.duplicateWarning(prefixed(nextValue));
+        continue;
+      }
+      if (max !== undefined && nextValues.length >= max) continue;
+      const invalid = validate?.(nextValue) ?? null;
+      if (invalid !== null) {
+        rejected.push(rawEntry.trim());
+        nextError ??= invalid;
+        continue;
+      }
+      nextValues.push(nextValue);
+    }
+    if (nextValues.length !== values.length) onChange(nextValues);
+    setDraft([...rejected, remainder].filter((entry) => entry.length > 0).join(", "));
+    setValidationError(nextError);
+    setDuplicateWarning(nextWarning);
+  };
+
   const add = (): void => {
-    const nextValue = normalizeEntry(draft.trim(), stripPrefix, normalize);
-    if (nextValue.length === 0) return;
-    if (values.includes(nextValue)) {
-      setDuplicateWarning(messages.duplicateWarning(prefixed(nextValue)));
+    commitEntries(draft.split(/[ ,]+/u));
+  };
+
+  const handleDraftChange = (next: string): void => {
+    const entries = next.split(/[ ,]+/u);
+    if (entries.length === 1) {
+      setDraft(next);
       setValidationError(null);
+      setDuplicateWarning(null);
       return;
     }
-    if (max !== undefined && values.length >= max) return;
-    const invalid = validate?.(nextValue) ?? null;
-    if (invalid !== null) {
-      setValidationError(invalid);
-      return;
-    }
-    onChange([...values, nextValue]);
-    setDraft("");
-    setValidationError(null);
-    setDuplicateWarning(null);
+    const trailingSeparator = /[ ,]$/u.test(next);
+    const remainder = trailingSeparator ? "" : entries.pop() ?? "";
+    commitEntries(entries, remainder);
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLInputElement>): void => {
+    const pasted = event.clipboardData.getData("text");
+    if (!/[ ,]/u.test(pasted)) return;
+    event.preventDefault();
+    const input = event.currentTarget;
+    const start = input.selectionStart ?? draft.length;
+    const end = input.selectionEnd ?? start;
+    const next = `${draft.slice(0, start)}${pasted}${draft.slice(end)}`;
+    commitEntries(next.split(/[ ,]+/u));
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
@@ -92,7 +127,7 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, placeholde
           <button className="chips-input__remove" id={`${id}-remove-${encodeURIComponent(entry)}`} type="button" aria-label={removeLabel(prefixed(entry))} disabled={disabled} onClick={() => { onChange(values.filter((value) => value !== entry)); }}><Icon name="close" size={16} /></button>
         </span>)}
       </div>
-      <input data-ui="" id={id} className="chips-input__input" value={draft} placeholder={placeholder} disabled={disabled} readOnly={atLimit} aria-describedby={describedBy} onChange={(event) => { setDraft(event.currentTarget.value); setValidationError(null); setDuplicateWarning(null); }} onKeyDown={handleKeyDown} onBlur={add} />
+      <input data-ui="" id={id} className="chips-input__input" value={draft} placeholder={placeholder} disabled={disabled} readOnly={atLimit} aria-describedby={describedBy} onChange={(event) => { handleDraftChange(event.currentTarget.value); }} onPaste={handlePaste} onKeyDown={handleKeyDown} onBlur={add} />
     </div>
     <span data-ui="" id={descriptionId} className="chips-input__description"><span>{currentHint ?? ""}</span>{max === undefined ? null : <span className="chips-input__count">{messages.countLabel(values.length, max)}</span>}{describedHelper(null, disabledReason, `chips-${id}`)}</span>
     <span data-ui="" id={errorId} className="ui-field__error" aria-live="polite">{effectiveError === undefined ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span>{effectiveError}</>}</span>

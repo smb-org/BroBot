@@ -47,12 +47,13 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
   const controlId = id ?? generatedId;
   const [internalSearch, setInternalSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchInputActive, setSearchInputActive] = useState(false);
   const disabledReason = useDisabledFieldReason();
   const activeSearch = searchValue ?? internalSearch;
   const filteredOptions = options.filter((option) => `${option.label} ${option.value}`.toLocaleLowerCase().includes(activeSearch.trim().toLocaleLowerCase()));
   const selectedLabel = options.find((option) => option.value === value)?.label ?? value ?? "";
   const selectItems = Object.fromEntries(options.map((option) => [option.value, option.label]));
-  const displaySearch = activeSearch.length > 0 ? activeSearch : selectedLabel;
+  const displaySearch = activeSearch.length > 0 || searchInputActive ? activeSearch : selectedLabel;
   const updateSearch = (next: string): void => {
     setInternalSearch(next);
     onSearchChange?.(next);
@@ -78,7 +79,10 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
       open={searchOpen}
       onOpenChange={(next) => {
         setSearchOpen(next);
-        if (!next) clearSearch();
+        if (!next) {
+          setSearchInputActive(false);
+          clearSearch();
+        }
       }}
       items={options.map((option) => option.value)}
       itemToStringLabel={(optionValue) => options.find((option) => option.value === optionValue)?.label ?? optionValue}
@@ -88,12 +92,14 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
       onValueChange={(next) => {
         onChange(next === null || next.length === 0 ? null : next);
         setSearchOpen(false);
+        setSearchInputActive(false);
         clearSearch();
       }}
       inputValue={displaySearch}
       onInputValueChange={(next) => {
-        updateSearch(next === selectedLabel ? "" : next);
-        if (next.length > 0) setSearchOpen(true);
+        updateSearch(next);
+        setSearchInputActive(true);
+        setSearchOpen(true);
       }}
       disabled={disabled}
       name={name}

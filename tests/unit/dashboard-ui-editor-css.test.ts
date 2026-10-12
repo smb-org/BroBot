@@ -30,7 +30,9 @@ describe("editor seam styles", () => {
     expect(styles).toContain(".unit-input__control { position: relative; min-width: 0; }");
     expect(styles).toContain(".unit-input__input { padding-right: 4rem; font-family: \"IBM Plex Mono\", ui-monospace, monospace; }");
     expect(styles).toContain(".unit-input__unit { position: absolute; top: 0; right: 10px;");
-    expect(styles).toContain(".ui-field--prefixed .ui-field__input, .ui-field__input--with-leading { padding-left: 34px; }");
+    expect(styles).toContain(".ui-field__input--with-leading:not(.ui-field__input--with-prefix) { padding-left: 34px; }");
+    expect(styles).toContain(".ui-field__leading--prefix { position: static; display: flex; flex: 0 0 auto; width: auto; padding: 0 8px; }");
+    expect(styles).toContain(".ui-field__input--with-prefix { flex: 1 1 0%; width: auto; min-width: 0; padding-left: 0; }");
     expect(styles).toContain(".ui-confirm-dialog__actions { display: flex; flex-wrap: wrap;");
     expect(styles).toContain("@media (max-width: 600px)");
     expect(styles).toContain(".ui-confirm-dialog__actions { flex-direction: column; align-items: stretch; }");
