@@ -42,7 +42,6 @@ const placeFor = async (
   const lookup = await geocodeWeatherPlace(requestedPlace, await context.channelLanguage());
   return lookup.kind === "found" ? { location: lookup.location, unknownPlace: false } : { location: null, unknownPlace: true };
 };
-
 const valuesFor = async (
   names: readonly string[],
   context: ModuleTemplateValueContext,
@@ -172,8 +171,3 @@ export const weatherModule: BotModule<typeof settingsSchema> = {
   }],
   panel: () => import("./panel/settings"),
 };
-
-export { fetchCachedWeather } from "./adapters/cache";
-export { metNorwayWeather, openMeteoWeather } from "./adapters/providers";
-export { geocodeWeatherPlace, validWeatherPlaceName } from "./adapters/geocoding";
-export { resolveWeatherValues, weatherConditionFromMetSymbol, weatherConditionFromWmoCode } from "./domain";

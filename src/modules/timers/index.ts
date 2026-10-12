@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import type { BotModule, ModuleScheduleInputChangeReason, ModuleTemplateUsageSource } from "../contract";
 import type { Timer } from "./contracts";
-import { timerTriggerSchema } from "./contracts";
 import { timersModuleCatalog } from "./contracts/catalog";
 import { mapTimerRow, validateTimerTemplateMutation, type TimerRow } from "./service";
 import {
@@ -32,7 +31,6 @@ const listTimers = async (db: D1Database, channelId: string): Promise<Timer[]> =
   ).bind(channelId).all<TimerRow>();
   return result.results.map(mapTimerRow);
 };
-
 type TimerAlarmContext = Parameters<NonNullable<BotModule["alarms"]>[number]["handle"]>[0];
 
 /**
@@ -454,6 +452,3 @@ export const timersModule: BotModule<typeof settingsSchema> = {
     return { actions: [], diagnostics: [] };
   },
 };
-
-export { timerTriggerSchema };
-export type { Timer, TimerMutationInput, TimerTrigger } from "./contracts";

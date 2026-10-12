@@ -1,6 +1,3 @@
-export type { ChannelEventDiagnostic, ChannelEventDetail } from "./contracts";
-export { diagnoseChannelEvent } from "./domain";
-
 import { z } from "zod";
 
 import type { EventSubSubscriptionType } from "../../contracts/values";

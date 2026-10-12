@@ -24,7 +24,7 @@ export type AdsSettings = Omit<z.output<typeof adsSettingsSchema>, "automaticTar
   prewarningTarget?: "all_chats" | "source_only";
 };
 
-export const ADS_VARIABLES = {
+const ADS_VARIABLES = {
   duration: { name: "ads.duration", group: "event", contexts: ["event"], sample: "90", maxLength: 4, fallbackWhenAbsent: 15, picker: { de: adsTemplateVariableCatalog.de["ads.duration"], en: adsTemplateVariableCatalog.en["ads.duration"] } },
   seconds: { name: "ads.seconds", group: "event", contexts: ["event"], sample: "60", maxLength: 3, picker: { de: adsTemplateVariableCatalog.de["ads.seconds"], en: adsTemplateVariableCatalog.en["ads.seconds"] } },
 } as const satisfies Record<string, TemplateVariable>;

@@ -19,7 +19,7 @@ export const TEXT_COMMAND_STREAM_CONDITIONS = ["any", "online", "offline"] as co
 export type TextCommandStreamCondition = (typeof TEXT_COMMAND_STREAM_CONDITIONS)[number];
 export const TEXT_COMMAND_MAX_ALIASES = 10;
 
-export interface TextCommandTimeoutAction extends TimeoutDurationRange {
+interface TextCommandTimeoutAction extends TimeoutDurationRange {
   fallbackText: string;
   reason?: string;
 }

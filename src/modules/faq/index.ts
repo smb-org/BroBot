@@ -14,7 +14,6 @@ const validateFaqTemplateMutation = async (context: ModuleTemplateContentValidat
   ).bind(context.channelId).all<{ name: string; answer_block: string }>();
   return validateEventTextBlockMutation(context, rows.results.map((row) => ({ name: row.name, blockName: row.answer_block })));
 };
-
 export const faqModule: BotModule<typeof settingsSchema> = {
   id: FAQ_MODULE_ID,
   navigationCategory: "chat",
@@ -36,5 +35,3 @@ export const faqModule: BotModule<typeof settingsSchema> = {
   panel: () => import("./panel"),
   handleEvent: (event, context) => processFaqMessage(event, createFaqRepository(context.DB), context),
 };
-
-export type { FaqEntry, FaqGame, FaqMatcher, FaqMutationInput } from "./contracts";

@@ -54,7 +54,3 @@ export const textLibraryModule: BotModule<typeof settingsSchema> = {
     }
     : { actions: [], diagnostics: [] },
 };
-
-export { TEXT_BLOCK_MAXIMUMS } from "./contracts";
-export type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVariant, TwitchGame } from "./contracts";
-export { firstMatchingTextBlockVariant, textBlockConditionsMatch, validateTextBlockGraph } from "./domain";

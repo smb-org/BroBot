@@ -17,7 +17,7 @@ export type RaidSettings = Omit<z.output<typeof raidSettingsSchema>, "textLongTa
   textShortTarget?: "all_chats" | "source_only";
 };
 
-export const RAID_VARIABLES = {
+const RAID_VARIABLES = {
   channel: { name: "channel", group: "event", sample: "samplechannel", maxLength: 25, picker: { de: raidTemplateVariableCatalog.de.channel, en: raidTemplateVariableCatalog.en.channel } },
   viewers: { name: "viewers", group: "event", sample: "42", maxLength: 7, picker: { de: raidTemplateVariableCatalog.de.viewers, en: raidTemplateVariableCatalog.en.viewers } },
 } as const satisfies Record<string, TemplateVariable>;

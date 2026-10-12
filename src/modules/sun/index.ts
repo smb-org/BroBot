@@ -270,6 +270,4 @@ export const sunModule: BotModule<typeof settingsSchema> = {
   panel: () => import("./panel/settings"),
 };
 
-export { calculateSunDay, resolveSunTemplateValues } from "./domain";
-export type { SunDay } from "./domain";
-export type { SunSettings } from "./contracts";
+export { resolveSunTemplateValues } from "./domain";

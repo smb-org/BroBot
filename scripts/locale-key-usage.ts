@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
@@ -26,47 +26,28 @@ const listTypeScriptFiles = (directory: string): string[] => {
     });
 };
 
-const createLanguageService = (projectRoot: string): ts.LanguageService => {
-  const configPath = path.join(projectRoot, "tsconfig.json");
-  const configRead = ts.readConfigFile(configPath, (fileName) => ts.sys.readFile(fileName));
-  if (configRead.error !== undefined) {
-    throw new Error(`Unable to read TypeScript configuration at ${configPath}`);
-  }
-
-  const parsedConfig = ts.parseJsonConfigFileContent(configRead.config, ts.sys, projectRoot);
-  const host: ts.LanguageServiceHost = {
-    getScriptFileNames: () => parsedConfig.fileNames,
-    getScriptVersion: () => "0",
-    getScriptSnapshot: (fileName) => {
-      const content = ts.sys.readFile(fileName);
-      return content === undefined ? undefined : ts.ScriptSnapshot.fromString(content);
-    },
-    getCurrentDirectory: () => projectRoot,
-    getCompilationSettings: () => parsedConfig.options,
-    getDefaultLibFileName: ts.getDefaultLibFilePath,
-    fileExists: (fileName) => ts.sys.fileExists(fileName),
-    readFile: (fileName) => ts.sys.readFile(fileName),
-    readDirectory: (rootDir, extensions, excludes, includes, depth) => ts.sys.readDirectory(rootDir, extensions, excludes, includes, depth),
-    directoryExists: (directory) => ts.sys.directoryExists(directory),
-    getDirectories: (directory) => ts.sys.getDirectories(directory),
-    useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
-    getNewLine: () => ts.sys.newLine,
-  };
-
-  return ts.createLanguageService(host, ts.createDocumentRegistry());
-};
-
 const isPropertyName = (name: ts.PropertyName | undefined): name is ts.Identifier | ts.StringLiteral | ts.NumericLiteral =>
   name !== undefined && (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name));
 
 interface CatalogueProperty {
   catalog: string;
-  property: ts.PropertySignature;
+  property: ts.PropertySignature | ts.PropertyAssignment;
+  ownerType?: ts.Type;
+}
+
+interface PropertyRead {
+  name: string;
+  ownerType: ts.Type;
+  declarations: Set<ts.Declaration>;
 }
 
 const isCatalogueTypeName = (name: string): boolean => /(?:Texts|Labels|Locale|Catalog)$/u.test(name);
 
-const propertySignatures = (sourceFile: ts.SourceFile, catalogPath: string): CatalogueProperty[] => {
+const catalogueProperties = (
+  sourceFile: ts.SourceFile,
+  catalogPath: string,
+  checker: ts.TypeChecker,
+): CatalogueProperty[] => {
   const properties: CatalogueProperty[] = [];
   const collectType = (type: ts.TypeNode | undefined, catalog: string): void => {
     if (type === undefined) return;
@@ -105,7 +86,14 @@ const propertySignatures = (sourceFile: ts.SourceFile, catalogPath: string): Cat
     }
     if (ts.isVariableDeclaration(node)) {
       const catalogName = ts.isIdentifier(node.name) ? node.name.text : "inline";
-      collectType(node.type, `${catalogPath}#${catalogName}`);
+      const catalog = `${catalogPath}#${catalogName}`;
+      collectType(node.type, catalog);
+      if (node.type === undefined && node.initializer !== undefined) {
+        const statement = node.parent;
+        if (ts.isVariableDeclarationList(statement) && ts.isVariableStatement(statement.parent) && statement.parent.parent === sourceFile) {
+          collectInferredObjectProperties(node.initializer, catalog, properties, checker);
+        }
+      }
     }
     ts.forEachChild(node, visit);
   };
@@ -113,34 +101,197 @@ const propertySignatures = (sourceFile: ts.SourceFile, catalogPath: string): Cat
   return properties;
 };
 
-const hasReadReference = (
-  languageService: ts.LanguageService,
-  fileName: string,
-  propertyName: ts.Identifier | ts.StringLiteral | ts.NumericLiteral,
+const collectInferredObjectProperties = (
+  node: ts.Node,
+  catalog: string,
+  properties: CatalogueProperty[],
+  checker: ts.TypeChecker,
+): void => {
+  if (ts.isParenthesizedExpression(node)) {
+    collectInferredObjectProperties(node.expression, catalog, properties, checker);
+    return;
+  }
+  if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)) {
+    collectInferredObjectProperties(node.expression, catalog, properties, checker);
+    return;
+  }
+  if (ts.isConditionalExpression(node)) {
+    collectInferredObjectProperties(node.whenTrue, catalog, properties, checker);
+    collectInferredObjectProperties(node.whenFalse, catalog, properties, checker);
+    return;
+  }
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+    if (node.type !== undefined) return;
+    if (ts.isBlock(node.body)) {
+      for (const statement of node.body.statements) {
+        if (ts.isReturnStatement(statement) && statement.expression !== undefined) {
+          collectInferredObjectProperties(statement.expression, catalog, properties, checker);
+        }
+      }
+    } else {
+      collectInferredObjectProperties(node.body, catalog, properties, checker);
+    }
+    return;
+  }
+  if (ts.isObjectLiteralExpression(node)) {
+    const ownerType = checker.getTypeAtLocation(node);
+    for (const member of node.properties) {
+      if (!ts.isPropertyAssignment(member) || !isPropertyName(member.name)) continue;
+      const memberType = checker.getTypeAtLocation(member.initializer);
+      if (member.initializer.kind === ts.SyntaxKind.StringLiteral || member.initializer.kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral || (memberType.flags & ts.TypeFlags.StringLike) !== 0 || checker.getSignaturesOfType(memberType, ts.SignatureKind.Call).length > 0) {
+        properties.push({ catalog, property: member, ownerType });
+      }
+      if (ts.isObjectLiteralExpression(member.initializer) || ts.isConditionalExpression(member.initializer)) {
+        const nestedCatalog = member.name.text === "de" || member.name.text === "en" ? catalog : `${catalog}.${member.name.text}`;
+        collectInferredObjectProperties(member.initializer, nestedCatalog, properties, checker);
+      }
+    }
+  }
+};
+
+const markPropertyRead = (
+  checker: ts.TypeChecker,
+  expression: ts.Expression,
+  name: string,
+): PropertyRead => {
+  const declarations = new Set<ts.Declaration>();
+  const visitType = (type: ts.Type): void => {
+    if (type.isUnionOrIntersection()) {
+      type.types.forEach(visitType);
+      return;
+    }
+    const symbol = checker.getPropertyOfType(type, name);
+    for (const declaration of symbol?.declarations ?? []) declarations.add(declaration);
+  };
+  const ownerType = checker.getTypeAtLocation(expression);
+  visitType(ownerType);
+  return { name, ownerType, declarations };
+};
+
+const propertyReads = (program: ts.Program, checker: ts.TypeChecker, localeKeys: ReadonlySet<string>): Map<string, PropertyRead[]> => {
+  const reads = new Map<string, PropertyRead[]>();
+  const addRead = (read: PropertyRead): void => {
+    const matchingReads = reads.get(read.name) ?? [];
+    matchingReads.push(read);
+    reads.set(read.name, matchingReads);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyAccessExpression(node) && localeKeys.has(node.name.text)) {
+      addRead(markPropertyRead(checker, node.expression, node.name.text));
+    } else if (ts.isElementAccessExpression(node)) {
+      const argument = node.argumentExpression;
+      if (ts.isStringLiteral(argument) || ts.isNumericLiteral(argument)) {
+        if (localeKeys.has(argument.text)) addRead(markPropertyRead(checker, node.expression, argument.text));
+      } else {
+        const argumentType = checker.getTypeAtLocation(argument);
+        const keys = argumentType.isUnion() ? argumentType.types : [argumentType];
+        for (const key of keys) {
+          if ((key.flags & ts.TypeFlags.StringLiteral) !== 0 || (key.flags & ts.TypeFlags.NumberLiteral) !== 0) {
+            const name = String((key as ts.StringLiteralType | ts.NumberLiteralType).value);
+            if (localeKeys.has(name)) addRead(markPropertyRead(checker, node.expression, name));
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  for (const sourceFile of program.getSourceFiles()) {
+    if (!sourceFile.isDeclarationFile) visit(sourceFile);
+  }
+  return reads;
+};
+
+const isTypeCompatible = (
+  checker: ts.TypeChecker,
+  left: ts.Type,
+  right: ts.Type,
+  cache: WeakMap<ts.Type, WeakMap<ts.Type, boolean>>,
 ): boolean => {
-  const groups = languageService.findReferences(fileName, propertyName.getStart());
-  return groups?.some((group) => group.references.some((reference) => !reference.isDefinition && !reference.isWriteAccess)) ?? false;
+  const cachedResult = cache.get(left)?.get(right);
+  if (cachedResult !== undefined) return cachedResult;
+  const compatible = checker.isTypeAssignableTo(left, right) || checker.isTypeAssignableTo(right, left);
+  const leftCache = cache.get(left) ?? new WeakMap<ts.Type, boolean>();
+  const rightCache = cache.get(right) ?? new WeakMap<ts.Type, boolean>();
+  leftCache.set(right, compatible);
+  rightCache.set(left, compatible);
+  cache.set(left, leftCache);
+  cache.set(right, rightCache);
+  return compatible;
+};
+
+const sharesCatalogueShape = (
+  checker: ts.TypeChecker,
+  left: ts.Type,
+  right: ts.Type,
+  compatibleTypes: WeakMap<ts.Type, WeakMap<ts.Type, boolean>>,
+  shapeCache: WeakMap<ts.Type, WeakMap<ts.Type, boolean>>,
+): boolean => {
+  // Inferred catalogues often flow through narrower structural interfaces, such as a reusable text component's props.
+  const cachedResult = shapeCache.get(left)?.get(right);
+  if (cachedResult !== undefined) return cachedResult;
+  const rightProperties = new Map(checker.getPropertiesOfType(right).map((property) => [property.getName(), property]));
+  let compatibleProperties = 0;
+  for (const leftProperty of checker.getPropertiesOfType(left)) {
+    const rightProperty = rightProperties.get(leftProperty.getName());
+    if (rightProperty === undefined) continue;
+    const leftDeclaration = leftProperty.valueDeclaration ?? leftProperty.declarations?.[0];
+    const rightDeclaration = rightProperty.valueDeclaration ?? rightProperty.declarations?.[0];
+    if (leftDeclaration === undefined || rightDeclaration === undefined) continue;
+    const leftType = checker.getTypeOfSymbolAtLocation(leftProperty, leftDeclaration);
+    const rightType = checker.getTypeOfSymbolAtLocation(rightProperty, rightDeclaration);
+    if (isTypeCompatible(checker, leftType, rightType, compatibleTypes)) compatibleProperties += 1;
+    if (compatibleProperties >= 2) {
+      const leftCache = shapeCache.get(left) ?? new WeakMap<ts.Type, boolean>();
+      const rightCache = shapeCache.get(right) ?? new WeakMap<ts.Type, boolean>();
+      leftCache.set(right, true);
+      rightCache.set(left, true);
+      shapeCache.set(left, leftCache);
+      shapeCache.set(right, rightCache);
+      return true;
+    }
+  }
+  const leftCache = shapeCache.get(left) ?? new WeakMap<ts.Type, boolean>();
+  const rightCache = shapeCache.get(right) ?? new WeakMap<ts.Type, boolean>();
+  leftCache.set(right, false);
+  rightCache.set(left, false);
+  shapeCache.set(left, leftCache);
+  shapeCache.set(right, rightCache);
+  return false;
 };
 
 /** Find unreferenced properties declared by the dashboard's bilingual text catalogues. */
 export const unusedLocaleKeys = (projectRoot = PROJECT_ROOT): UnusedLocaleKey[] => {
   const root = path.resolve(projectRoot);
-  const languageService = createLanguageService(root);
+  const configPath = path.join(root, "tsconfig.json");
+  const configRead = ts.readConfigFile(configPath, (fileName) => ts.sys.readFile(fileName));
+  if (configRead.error !== undefined) throw new Error(`Unable to read TypeScript configuration at ${configPath}`);
+  const parsedConfig = ts.parseJsonConfigFileContent(configRead.config, ts.sys, root);
+  const program = ts.createProgram(parsedConfig.fileNames, parsedConfig.options);
+  const checker = program.getTypeChecker();
   const catalogueFiles = listTypeScriptFiles(path.join(root, "src"))
     .map((fileName) => ({ fileName, catalog: localeCataloguePath(root, fileName) }))
     .filter((entry): entry is { fileName: string; catalog: string } => entry.catalog !== null);
+  const cataloguePropertiesList = catalogueFiles.flatMap(({ fileName, catalog }) => {
+    const sourceFile = program.getSourceFile(fileName);
+    return sourceFile === undefined ? [] : catalogueProperties(sourceFile, catalog, checker);
+  });
+  const localeKeys = new Set(cataloguePropertiesList.flatMap(({ property }) => isPropertyName(property.name) ? [property.name.text] : []));
+  const reads = propertyReads(program, checker, localeKeys);
+  const compatibleTypes = new WeakMap<ts.Type, WeakMap<ts.Type, boolean>>();
+  const shapeCache = new WeakMap<ts.Type, WeakMap<ts.Type, boolean>>();
   const unused = new Map<string, UnusedLocaleKey>();
 
-  for (const { fileName, catalog } of catalogueFiles) {
-    const sourceText = readFileSync(fileName, "utf8");
-    const sourceFile = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true);
-    for (const { catalog: catalogName, property } of propertySignatures(sourceFile, catalog)) {
-      if (!isPropertyName(property.name)) continue;
-      if (hasReadReference(languageService, fileName, property.name)) continue;
+  for (const { catalog: catalogName, property, ownerType } of cataloguePropertiesList) {
+    if (!isPropertyName(property.name)) continue;
+    const key = property.name.text;
+    const isUsed = (reads.get(key) ?? []).some((read) =>
+      read.declarations.has(property)
+      || (key === read.name && ownerType !== undefined
+        && (isTypeCompatible(checker, ownerType, read.ownerType, compatibleTypes)
+          || sharesCatalogueShape(checker, ownerType, read.ownerType, compatibleTypes, shapeCache))));
+    if (isUsed) continue;
 
-      const key = property.name.text;
-      unused.set(`${catalogName}:${key}`, { catalog: catalogName, key });
-    }
+    unused.set(`${catalogName}:${key}`, { catalog: catalogName, key });
   }
 
   return [...unused.values()].sort((left, right) =>

@@ -1,24 +1,9 @@
 export type {
-  NewTextCommand,
   TextCommand,
   TextCommandKind,
   TextCommandMinimumTier,
-  TextCommandChange,
-  TextCommandClaim,
-  TextCommandActor,
-  TextCommandResponseType,
-  TextCommandStreamCondition,
-} from "./contracts";
-export {
-  TEXT_COMMAND_MAX_ALIASES,
-  TEXT_COMMAND_MINIMUM_TIERS,
-  TEXT_COMMAND_RESPONSE_TYPES,
-  TEXT_COMMAND_STREAM_CONDITIONS,
-  TEXT_COMMAND_TEMPLATE_FIELDS,
-  TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES,
 } from "./contracts";
 export type { TextCommandRepository } from "./repository";
-export type { TextCommandTimeoutAction } from "./contracts";
 
 import { z } from "zod";
 
