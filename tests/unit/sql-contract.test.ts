@@ -170,7 +170,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["textBlockGuard?.sql ?? \"\"", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["renamedBlockGuard", `EXISTS (
         SELECT 1 FROM text_blocks
-         WHERE channel_id = ? AND block_name = ? AND revision = ? AND updated_at = ?
+         WHERE channel_id = ? AND block_name = ? AND revision = ?
       )`],
 ]);
 

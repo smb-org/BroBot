@@ -529,6 +529,29 @@ describe("text library", () => {
     });
   });
 
+  it("rejects a rename that creates a cycle after references are rewritten", async () => {
+    const welcome = await createBlock("welcome", [variant("default", "Welcome")]);
+    if (!welcome.ok) throw new Error("Could not create the rename cycle test block.");
+    await expect(createBlock("parent", [variant("default", "Nested {text.welcome}")]))
+      .resolves.toMatchObject({ ok: true });
+    const snapshot = await service.list(CHANNEL_ID);
+
+    const result = await service.rename({
+      channelId: CHANNEL_ID,
+      name: "greeting",
+      categoryId: welcome.block.categoryId,
+      games: [],
+      variants: [variant("default", "Nested {text.parent}")],
+      expectedRevision: welcome.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date(NOW).toISOString(),
+    }, "welcome", ACTOR, snapshot);
+
+    expect(result).toMatchObject({ ok: false, reason: "reference_cycle" });
+    await expect(service.find(CHANNEL_ID, "welcome")).resolves.toMatchObject({ name: "welcome" });
+    await expect(service.find(CHANNEL_ID, "greeting")).resolves.toBeNull();
+  });
+
   it("reports direct and nested uses supplied by generic module contracts", async () => {
     await expect(createBlock("answer", [variant("default", "{text.detail}")])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("detail", [variant("default", "A reusable detail")])).resolves.toMatchObject({ ok: true });
@@ -1084,6 +1107,111 @@ describe("text library", () => {
         { variant_id: "default", position: 2, conditions_json: "{}", texts_json: '["Fallback greeting"]' },
       ],
     });
+  });
+
+  it("keeps the winning variants when overlapping renames share a target and timestamp", async () => {
+    const created = await createBlock("welcome", [variant("default", "Original")]);
+    if (!created.ok) throw new Error("Could not create the overlapping rename test block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    let resolveFirstAtBatch!: () => void;
+    let resolveSecondAtBatch!: () => void;
+    let resolveFirstBatchFinished!: () => void;
+    const firstAtBatch = new Promise<void>((resolve) => { resolveFirstAtBatch = resolve; });
+    const secondAtBatch = new Promise<void>((resolve) => { resolveSecondAtBatch = resolve; });
+    const firstBatchFinished = new Promise<void>((resolve) => { resolveFirstBatchFinished = resolve; });
+    let batchCount = 0;
+    const interleavedDatabase = {
+      prepare: (sql: string) => database.prepare(sql),
+      batch: async (statements: Parameters<TestD1Database["batch"]>[0]) => {
+        batchCount += 1;
+        if (batchCount === 1) {
+          resolveFirstAtBatch();
+          await secondAtBatch;
+          const result = await database.batch(statements);
+          resolveFirstBatchFinished();
+          return result;
+        }
+        resolveSecondAtBatch();
+        await firstBatchFinished;
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const interleavedRepository = createTextBlockRepository(interleavedDatabase, authorize);
+    const now = new Date(NOW).toISOString();
+    const rename = (text: string) => interleavedRepository.rename({
+      channelId: CHANNEL_ID,
+      name: "greeting",
+      categoryId: created.block.categoryId,
+      games: [],
+      variants: [variant("default", text)],
+      expectedRevision: created.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now,
+    }, "welcome", ACTOR);
+
+    const winnerPromise = rename("Winning variant");
+    await firstAtBatch;
+    const loserPromise = rename("Losing variant");
+    const [winner, loser] = await Promise.all([winnerPromise, loserPromise]);
+
+    expect(winner).toMatchObject({ ok: true, block: { name: "greeting" } });
+    expect(loser).toMatchObject({ ok: false });
+    await expect(database.prepare(
+      "SELECT texts_json FROM text_block_variants WHERE channel_id = ? AND block_name = ? AND variant_id = ?",
+    ).bind(CHANNEL_ID, "greeting", "default").first()).resolves.toEqual({ texts_json: '["Winning variant"]' });
+    await expect(database.prepare(
+      "SELECT revision FROM text_blocks WHERE channel_id = ? AND block_name = ?",
+    ).bind(CHANNEL_ID, "greeting").first()).resolves.toEqual({ revision: created.block.revision + 1 });
+  });
+
+  it("validates timer compatibility against renamed block content", async () => {
+    const created = await createBlock("welcome", [variant("default", "Welcome")]);
+    if (!created.ok) throw new Error("Could not create the template compatibility test block.");
+    await database.prepare(`INSERT INTO timers
+      (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
+      VALUES (?, ?, ?, 1, 'interval', '{}', ?, ?, ?)`)
+      .bind("timer-rename-compatibility", CHANNEL_ID, "Reminder", "Use {text.welcome}", new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+    await insertLoginIdentityAndSession(database, "manager-rename-compatibility");
+    await insertMember(database, CHANNEL_ID, "manager-rename-compatibility", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-rename-compatibility" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-rename-compatibility", TEST_SESSION_KEYS, new Date().toISOString());
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrf,
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+        },
+        body: JSON.stringify({
+          name: "greeting",
+          categoryId: "social",
+          games: [],
+          variants: [variant("default", "{args}")],
+          revision: created.block.revision,
+        }),
+      },
+    ), environment);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "text_library_template_usage_invalid",
+      issues: [{ reason: "input_dependent", consumerName: "Reminder" }],
+    });
+    await expect(service.find(CHANNEL_ID, "welcome")).resolves.toMatchObject({ name: "welcome" });
+    await expect(service.find(CHANNEL_ID, "greeting")).resolves.toBeNull();
   });
 
   it("rolls back a rename if saving its submitted variants fails", async () => {

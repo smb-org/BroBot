@@ -6,7 +6,7 @@ import type {
 } from "../contract";
 import { templateVariableNames, SYSTEM_TEMPLATE_VARIABLE_LIST } from "../contract";
 import { isEventTemplateVariableAvailable } from "../../contracts/event-template-variables";
-import { blockReferencesInText } from "./text-block-references";
+import { blockReferencesInText, rewriteTextBlockReference } from "./text-block-references";
 
 export type EventTextBlockValidation = { ok: true } | { ok: false; reason: "missing" | "input_dependent" };
 
@@ -104,13 +104,23 @@ export const validateEventTemplateContentMutation = async (
   consumers: readonly { name: string; text: string }[],
 ): Promise<readonly ModuleTemplateContentIssue[]> => {
   const issues: ModuleTemplateContentIssue[] = [];
+  const renamedFrom = context.candidate.renamedFrom;
+  const candidate = renamedFrom === undefined
+    ? context.candidate
+    : {
+      ...context.candidate,
+      texts: context.candidate.texts.map((text) =>
+        rewriteTextBlockReference(text, renamedFrom, context.candidate.name)),
+    };
   for (const consumer of consumers) {
     const validation = await validateEventTemplateText(
       context.DB,
       context.channelId,
-      consumer.text,
+      renamedFrom === undefined
+        ? consumer.text
+        : rewriteTextBlockReference(consumer.text, renamedFrom, context.candidate.name),
       context.registeredVariables,
-      context.candidate,
+      candidate,
     );
     if (!validation.ok && validation.reason === "input_dependent") {
       issues.push({ reason: "input_dependent", consumerName: consumer.name });

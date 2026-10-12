@@ -387,9 +387,9 @@ export const createTextBlockRepository = (
       const nextRevision = before.revision + 1;
       const renamedBlockGuard = `EXISTS (
         SELECT 1 FROM text_blocks
-         WHERE channel_id = ? AND block_name = ? AND revision = ? AND updated_at = ?
+         WHERE channel_id = ? AND block_name = ? AND revision = ?
       )`;
-      const renamedBlockValues = [input.channelId, input.name, nextRevision, input.now];
+      const renamedBlockValues = [input.channelId, input.name, nextRevision];
       const advanceGraph = db.prepare(
         `UPDATE text_library_settings SET graph_revision = graph_revision + 1
           WHERE channel_id = ? AND graph_revision = ?
@@ -491,16 +491,17 @@ export const createTextBlockRepository = (
         input.channelId, `{text.${fromName}}`, `{text.${fromName}}`, fromName, ...renamedBlockValues);
       const removeRenamedVariants = db.prepare(
         `DELETE FROM text_block_variants
-          WHERE channel_id = ? AND block_name = ? AND ${renamedBlockGuard}`,
+          WHERE channel_id = ? AND block_name = ? AND changes() > 0 AND ${renamedBlockGuard}`,
       ).bind(input.channelId, input.name, ...renamedBlockValues);
       const saveRenamedVariants = input.variants.map((variant, position) => db.prepare(
         `INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
-         SELECT ?, ?, ?, ?, ?, ? WHERE ${renamedBlockGuard}`,
+         SELECT ?, ?, ?, ?, ?, ? WHERE changes() > 0 AND ${renamedBlockGuard}`,
       ).bind(input.channelId, input.name, variant.id, position,
         JSON.stringify(variant.conditions), JSON.stringify(variant.texts), ...renamedBlockValues));
       const statements = [advanceGraph, mutation];
+      statements.push(removeRenamedVariants, ...saveRenamedVariants);
       if (audit !== undefined) statements.push(audit);
-      statements.push(rewriteParentRevisions, removeRenamedVariants, ...saveRenamedVariants, rewriteVariants,
+      statements.push(rewriteParentRevisions, rewriteVariants,
         rewriteCommands, rewriteTimers, rewriteFaq, rewriteModuleSettings);
       const overlayUpdateIndex = statements.length;
       statements.push(updateOverlayRevisions, rewriteOverlayElements);

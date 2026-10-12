@@ -729,6 +729,8 @@ export type ModuleScheduleInputChangeReason = "event_times" | "channel_time_zone
 export interface ModuleTemplateContentCandidate {
   name: string;
   texts: readonly string[];
+  /** Existing consumer references are rewritten to this candidate during a text-block rename. */
+  renamedFrom?: string;
 }
 
 /** A generic reason a module consumer rejects a proposed template-content edit. */

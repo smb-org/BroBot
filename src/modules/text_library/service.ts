@@ -3,6 +3,7 @@ import type { TextBlockActor } from "./types";
 import type { TextBlockInput, TextBlockMutationResult, TextBlockRenameInput, TextBlockRenameResult, TextBlockRepository, TextLibrarySnapshot } from "./repository";
 import { validateTextBlockGraph, type TextBlockGraphError } from "./domain";
 import type { ModuleTemplateUsageSource } from "../contract";
+import { rewriteTextBlockReference } from "../contracts/text-block-references";
 
 const graphError = (blocks: readonly TextBlock[], candidate: TextBlockInput): TextBlockGraphError | null => {
   const graph = new Map<string, Pick<TextBlock, "name" | "variants">>(
@@ -38,7 +39,22 @@ export const createTextLibraryService = (repository: TextBlockRepository): TextL
     return repository.change(input, actor);
   },
   async rename(input, fromName, actor, snapshot) {
-    const invalid = graphError(snapshot.blocks.filter((block) => block.name !== fromName), input);
+    const renamedBlocks = snapshot.blocks.map((block) => ({
+      ...block,
+      name: block.name === fromName ? input.name : block.name,
+      variants: block.variants.map((variant) => ({
+        ...variant,
+        texts: variant.texts.map((text) => rewriteTextBlockReference(text, fromName, input.name)),
+      })),
+    }));
+    const renamedInput = {
+      ...input,
+      variants: input.variants.map((variant) => ({
+        ...variant,
+        texts: variant.texts.map((text) => rewriteTextBlockReference(text, fromName, input.name)),
+      })),
+    };
+    const invalid = graphError(renamedBlocks, renamedInput);
     if (invalid !== null) return { ok: false, reason: invalid.reason, path: invalid.path };
     return repository.rename(input, fromName, actor);
   },

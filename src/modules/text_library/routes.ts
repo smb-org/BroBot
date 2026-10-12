@@ -209,6 +209,7 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
   const templateIssues = await context.get("validateTemplateContentMutation")(channelId, {
     name: parsed.name,
     texts: parsed.variants.flatMap((variant) => variant.texts),
+    ...(parsed.name === oldName ? {} : { renamedFrom: oldName }),
   });
   if (templateIssues.length > 0) return context.json({ error: "text_library_template_usage_invalid", issues: templateIssues }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
