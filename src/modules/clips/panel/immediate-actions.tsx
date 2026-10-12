@@ -34,8 +34,8 @@ const ClipAction = ({ channelId, availabilityReason }: ModuleImmediateActionProp
       <Button className="stream-manager-action__button" icon="clip" variant="primary" disabled={pending || availabilityReason !== null} {...(availabilityReason !== null ? { describedBy: availabilityReasonId } : {})} onClick={() => { void run(); }}>
         {labels.create}
       </Button>
-      <p className="lock-reason" id={availabilityReasonId} data-testid="immediate-action-result-slot"
-        style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite"
+      <p className="lock-reason stream-manager-action__result" id={availabilityReasonId} data-testid="immediate-action-result-slot"
+        aria-live="polite"
         title={availabilityReason ?? outcome?.message}>
         {availabilityReason ?? (outcome === null ? "" : <>{outcome.message}{outcome.editUrl === null ? null : <> <a href={outcome.editUrl} target="_blank" rel="noreferrer" aria-label={`${labels.open} (${labels.opensNewTab})`}>{labels.open}<Icon name="external" size={16} /></a></>}</>)}
       </p>

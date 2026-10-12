@@ -104,6 +104,8 @@ describe("Ad settings editor declaration", () => {
     expect(await screen.findByText("Nur Broadcaster und Verwalter dürfen Ansagen-Einstellungen ändern.")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Werbeplan aktualisieren" })).toBeDisabled();
     expect(screen.getByText("Nur Broadcaster und Verwalter dürfen den Werbeplan aktualisieren.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ })).toBeDisabled();
+    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen Werbepausen verschieben.")).toBeInTheDocument();
     const properties = document.querySelector("dl.ui-settings-editor__properties");
     expect(properties).not.toBeNull();
     expect(within(properties as HTMLElement).getByText("Vorwarnung vor der Werbung")).toBeInTheDocument();

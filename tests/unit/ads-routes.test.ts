@@ -119,6 +119,9 @@ const requestFor = async (
   });
 };
 
+const requestUrl = (input: RequestInfo | URL): string =>
+  typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
 const scheduleBody = (nextAdAt: string | null = "2026-09-21T12:05:00Z"): string => JSON.stringify({
   data: [{
     next_ad_at: nextAdAt,
@@ -129,6 +132,11 @@ const scheduleBody = (nextAdAt: string | null = "2026-09-21T12:05:00Z"): string 
     snooze_refresh_at: "2026-09-21T11:30:00Z",
   }],
 });
+
+const expireAppAccessToken = async (database: TestD1Database): Promise<void> => {
+  await database.prepare("UPDATE twitch_app_access_token SET expires_at = ? WHERE id = 1")
+    .bind("2000-01-01T00:00:00.000Z").run();
+};
 
 describe("ad routes", () => {
   let database: TestD1Database;
@@ -171,8 +179,8 @@ describe("ad routes", () => {
     return environmentFor(database, schedule as unknown as () => void, clear as unknown as () => void, initialCache);
   };
 
-  it("lets an operator snooze and writes the outcome to the event log", async () => {
-    const environment = await setup("operator");
+  it.each(["broadcaster", "manager"] as const)("lets a %s snooze and writes the outcome to the event log", async (role) => {
+    const environment = await setup(role);
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody(), { status: 200 })));
 
     const response = await panelRouter.fetch(
@@ -188,8 +196,55 @@ describe("ad routes", () => {
     expect(schedule).toHaveBeenCalled();
   });
 
-  it("keeps Twitch's own message under the API's message key on a failed snooze (issue #201 follow-up)", async () => {
+  it("denies an operator snoozing before calling Twitch or writing a diagnostic", async () => {
     const environment = await setup("operator");
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/snooze", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "ad_snooze_denied" });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(schedule).not.toHaveBeenCalled();
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 0 });
+  });
+
+  it("denies a manager downgraded during app-token refresh before snoozing", async () => {
+    const environment = await setup("manager");
+    await expireAppAccessToken(database);
+    const helixUrls: string[] = [];
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = requestUrl(input);
+      if (url === "https://id.twitch.tv/oauth2/token") {
+        await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
+          .bind("kanal-a", "user-1").run();
+        return new Response(JSON.stringify({ access_token: "refreshed-app-token", expires_in: 3600 }), { status: 200 });
+      }
+      helixUrls.push(url);
+      return new Response(scheduleBody(), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/snooze", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "ad_snooze_denied" });
+    expect(helixUrls).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 0 });
+  });
+
+  it("keeps Twitch's own message under the API's message key on a failed snooze (issue #201 follow-up)", async () => {
+    const environment = await setup("manager");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "slow down" }),
       { status: 429 },
@@ -210,6 +265,36 @@ describe("ad routes", () => {
     expect(body).toMatchObject({ error: "ad_snooze_failed", reason: "rate_limited" });
     expect(body.detail.message).toBe("slow down");
     expect(body.detail.twitchMessage).toBeUndefined();
+  });
+
+  it("reports Twitch authentication failures as snooze failures with diagnostics", async () => {
+    const environment = await setup("manager");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "Invalid OAuth token" }),
+      { status: 401 },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/snooze", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "ad_snooze_failed",
+      reason: "unauthorized",
+      detail: { status: 401, message: "Invalid OAuth token" },
+    });
+    const diagnostic = await database.prepare(
+      "SELECT code, detail_json FROM event_log WHERE channel_id = 'kanal-a'",
+    ).first<{ code: string; detail_json: string }>();
+    expect(diagnostic?.code).toBe("ads.snooze");
+    expect(JSON.parse(diagnostic?.detail_json ?? "{}") as unknown).toMatchObject({
+      outcome: "failed",
+      reason: "unauthorized",
+      status: 401,
+      twitchMessage: "Invalid OAuth token",
+    });
   });
 
   it("separates snooze operation from the managing settings threshold", async () => {
@@ -446,10 +531,8 @@ describe("start commercial", () => {
     return environmentFor(database, schedule as unknown as () => void, clear as unknown as () => void);
   };
 
-  // "Betrieblich" per 0006: an immediate action open to every channel role,
-  // the same as ads snooze -- an operator may run it without escalation.
-  it("lets an operator start a commercial and writes an audit entry", async () => {
-    const environment = await setup("operator");
+  it.each(["broadcaster", "manager"] as const)("lets a %s start a commercial and writes an audit entry", async (role) => {
+    const environment = await setup(role);
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ data: [{ length: 90, message: "", retry_after: 480 }] }),
       { status: 200 },
@@ -467,8 +550,80 @@ describe("start commercial", () => {
     ).first()).resolves.toEqual({ action: "ads.commercial_started", module_id: "ads" });
   });
 
+  it("denies an operator starting a commercial before calling Twitch or auditing it", async () => {
+    const environment = await setup("operator");
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "commercial_start_denied" });
+    expect(fetcher).not.toHaveBeenCalled();
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 0 });
+  });
+
+  it("rechecks the manager role in D1 after reading the commercial request", async () => {
+    const environment = await setup("manager");
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    const request = await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 });
+    Object.defineProperty(request, "text", {
+      value: async () => {
+        await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
+          .bind("kanal-a", "user-1").run();
+        return JSON.stringify({ length: 90 });
+      },
+    });
+
+    const response = await panelRouter.fetch(request, environment);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "commercial_start_denied" });
+    expect(fetcher).not.toHaveBeenCalled();
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 0 });
+  });
+
+  it("denies a manager downgraded during app-token refresh before starting a commercial", async () => {
+    const environment = await setup("manager");
+    await expireAppAccessToken(database);
+    const helixUrls: string[] = [];
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = requestUrl(input);
+      if (url === "https://id.twitch.tv/oauth2/token") {
+        await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
+          .bind("kanal-a", "user-1").run();
+        return new Response(JSON.stringify({ access_token: "refreshed-app-token", expires_in: 3600 }), { status: 200 });
+      }
+      helixUrls.push(url);
+      return new Response(JSON.stringify({ data: [{ length: 90, message: "", retry_after: 480 }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "commercial_start_denied" });
+    expect(helixUrls).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 0 });
+  });
+
   it("reports a missing channel:edit:commercial scope without calling Twitch", async () => {
-    const environment = await setup("operator", []);
+    const environment = await setup("manager", []);
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
 
@@ -533,7 +688,7 @@ describe("start commercial", () => {
   });
 
   it("rejects an invalid length before calling Twitch", async () => {
-    const environment = await setup("operator");
+    const environment = await setup("manager");
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
 

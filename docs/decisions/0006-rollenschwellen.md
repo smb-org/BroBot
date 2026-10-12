@@ -17,7 +17,7 @@ die Twitch-Rolle spielt dabei keine Rolle.
 |---|---|---|
 | **Nur Broadcaster** | `broadcaster` | Die Rolle `broadcaster` vergeben oder entziehen |
 | **Verwaltend** | `broadcaster`, `manager` | Mitglieder verwalten, Module aktivieren, Moduleinstellungen ändern, Overlay-Token ausstellen und widerrufen |
-| **Betrieblich** | alle drei | Alles Lesende: Kanalübersicht, Mitgliederliste, Ereignisprotokoll, Modulliste |
+| **Betrieblich** | alle drei | Alles Lesende: Kanalübersicht, Mitgliederliste, Ereignisprotokoll, Modulliste; ausgewählte Aktionen in aktiven Modulen |
 
 ## 2. Warum Modulaktivierung verwaltend ist und nicht betrieblich
 
@@ -155,3 +155,14 @@ nach dem Widerruf. Sie schreibt pro gelöschtem Zugang in derselben D1-Batch
 einen kanalbezogenen `overlay.access.removed`-Eintrag mit dem Stand vor der
 Löschung und dem Akteurtyp `system`. So bleiben auch diese Audit-Einträge
 neben den Einträgen zu Ausstellung, Widerruf und manueller Entfernung erhalten.
+
+## 12. Live-Aktionen und Werbung (#424)
+
+Ein `operator` darf aktive Abstimmungen starten und beenden, Shoutouts und
+Clips auslösen sowie einen Votekick abbrechen. Diese Aktionen bedienen den
+laufenden Stream und bleiben auf dem Server für alle Kanalmitglieder offen.
+
+Eine Werbepause zu verschieben oder einen Commercial zu starten bleibt dagegen
+verwaltend. Nur Broadcaster und Verwalter dürfen diese Twitch-Aktionen
+auslösen. Handler und die unmittelbar vor dem Twitch-Aufruf ausgeführte
+D1-Sitzungs- und Rollenprüfung setzen diese Schwelle durch.

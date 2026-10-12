@@ -901,7 +901,7 @@ test("immediate-action cards keep their reserved strip height after a shoutout f
     await expect(page.getByRole("textbox", { name: "Twitch login" })).toBeVisible();
     const before = await measureDocumentBox(page, ".stream-manager-actions");
     const cardsBefore = await Promise.all(Array.from({ length: 3 }, (_, index) => measureBox(page, `.stream-manager-action:nth-child(${String(index + 1)})`)));
-    expect(cardsBefore.map((box) => box[3])).toEqual([192, 192, 192]);
+    expect(cardsBefore.map((box) => box[3])).toEqual([264, 264, 264]);
     expect(cardsBefore.map((box) => box[2])).toEqual([300, 300, 300]);
     await expect(strip).toHaveAttribute("tabindex", "0");
     expect(await strip.evaluate((element) => getComputedStyle(element).scrollSnapType)).toMatch(/^x( proximity)?$/);
@@ -945,12 +945,12 @@ test("stream manager waits for module data and keeps its immediate-action strip 
     await expect(strip.locator(":scope > .stream-manager-action--loading")).toHaveCount(0);
     await expect(strip.locator(":scope > .stream-manager-action")).toHaveCount(1);
     const before = await measureDocumentBox(page, ".stream-manager-actions");
-    expect(before[3]).toBe(192);
+    expect(before[3]).toBe(264);
     await page.waitForTimeout(100);
     expect(await measureDocumentBox(page, ".stream-manager-actions")).toEqual(before);
     const card = await measureBox(page, ".stream-manager-action");
     expect(card[2]).toBe(300);
-    expect(card[3]).toBe(192);
+    expect(card[3]).toBe(264);
     await page.unrouteAll();
   }
 });

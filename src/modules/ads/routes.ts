@@ -16,7 +16,7 @@ type AdDetail = Readonly<Record<string, string | number | boolean | null>>;
 const nowIso = (): string => new Date().toISOString();
 
 const statusFor = (reason: string | null): 403 | 429 | 502 | 503 => {
-  if (reason === "scope_missing" || reason === "unauthorized") return 403;
+  if (reason === "scope_missing" || reason === "unauthorized" || reason === "management_unauthorized") return 403;
   if (reason === "rate_limited") return 429;
   if (reason === "network_error" || reason === "app_token_unavailable") return 503;
   return 502;
@@ -46,6 +46,21 @@ const log = async (
     [{ code, detail }],
     nowIso(),
   );
+};
+
+const hasManagementAuthorization = async (
+  context: Context<ModuleRouteEnvironment>,
+  channelId: string,
+): Promise<boolean> => {
+  const authorization = context.get("authorizeManagementMutation")(
+    channelId,
+    context.get("actor"),
+    nowIso(),
+  );
+  const row = await context.env.DB.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
+    .bind(...authorization.values)
+    .first<{ authorized: number }>();
+  return row !== null;
 };
 
 const snoozeOutcome = (result: SnoozeNextAdResult): AdDetail => ({
@@ -129,16 +144,21 @@ adsRoutes.post("/schedule/refresh", async (context) => {
 });
 
 adsRoutes.post("/snooze", async (context) => {
+  if (!canManage(context.get("channelRole"))) return context.json({ error: "ad_snooze_denied" }, 403);
   const channelId = context.req.param("channelId") ?? "";
   const now = nowIso();
   const triggerId = `werbung-snooze:${crypto.randomUUID()}`;
   const scopeAvailable = await context.get("broadcasterHasScope")(context.env.DB, channelId, MANAGE_ADS_SCOPE);
+  if (!await hasManagementAuthorization(context, channelId)) {
+    return context.json({ error: "ad_snooze_denied" }, 403);
+  }
   const result: SnoozeNextAdResult = scopeAvailable
     ? await snoozeNextAd(
       context.env,
       channelId,
       now,
       context.get("getAppAccessToken"),
+      () => hasManagementAuthorization(context, channelId),
       context.get("helixRequest"),
       fetch,
     )
@@ -148,6 +168,7 @@ adsRoutes.post("/snooze", async (context) => {
       detail: { scope: MANAGE_ADS_SCOPE, status: null, message: null },
       schedule: null,
     };
+  if (result.reason === "management_unauthorized") return context.json({ error: "ad_snooze_denied" }, 403);
   await log(context, channelId, triggerId, "ads.snooze", snoozeOutcome(result));
 
   const schedule = result.schedule;
@@ -166,12 +187,8 @@ adsRoutes.post("/snooze", async (context) => {
   return context.json({ schedule, asOf, snoozeScopeAvailable: scopeAvailable, recentAdBreaks });
 });
 
-/**
- * Immediate action, open to any channel member (0006's "Betrieblich" tier):
- * running a commercial doesn't reconfigure the channel, so an operator may
- * trigger it the same as ads snooze above, which has never gated on role.
- */
 adsRoutes.post("/commercial", async (context) => {
+  if (!canManage(context.get("channelRole"))) return context.json({ error: "commercial_start_denied" }, 403);
   const channelId = context.req.param("channelId") ?? "";
   const now = nowIso();
   const triggerId = `commercial:${crypto.randomUUID()}`;
@@ -180,6 +197,9 @@ adsRoutes.post("/commercial", async (context) => {
   if (!isCommercialLength(length)) return context.json({ error: "commercial_length_invalid" }, 400);
 
   const scopeAvailable = await context.get("broadcasterHasScope")(context.env.DB, channelId, COMMERCIAL_SCOPE);
+  if (!await hasManagementAuthorization(context, channelId)) {
+    return context.json({ error: "commercial_start_denied" }, 403);
+  }
   const result: CommercialResult = scopeAvailable
     ? await startCommercial(
       context.env,
@@ -187,6 +207,7 @@ adsRoutes.post("/commercial", async (context) => {
       length,
       now,
       context.get("getAppAccessToken"),
+      () => hasManagementAuthorization(context, channelId),
       context.get("helixRequest"),
       fetch,
     )
@@ -200,6 +221,7 @@ adsRoutes.post("/commercial", async (context) => {
     };
 
   if (!result.started) {
+    if (result.reason === "unauthorized") return context.json({ error: "commercial_start_denied" }, 403);
     await log(context, channelId, triggerId, "ads.commercial.failed", commercialOutcome(result));
     return context.json({
       error: result.reason === "stream_offline" ? "commercial_stream_offline" : "commercial_start_failed",

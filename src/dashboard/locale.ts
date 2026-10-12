@@ -84,7 +84,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     roleDescriptions: {
       broadcaster: "Vergibt und entzieht auch die Broadcaster-Rolle.",
       manager: "Verwaltet Mitglieder, Module und Moduleinstellungen.",
-      operator: "Sieht alles, ändert nichts.",
+      operator: "Sieht alles; darf Abstimmungen, Shoutouts, Clips und Votekicks bedienen, aber keine Werbung starten oder verschieben.",
     },
   },
   en: {
@@ -118,7 +118,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     roleDescriptions: {
       broadcaster: "Also grants and revokes the broadcaster role.",
       manager: "Manages members, modules, and module settings.",
-      operator: "Sees everything, changes nothing.",
+      operator: "Sees everything; can run votes, shoutouts, clips, and votekicks, but cannot start or snooze ads.",
     },
   },
 };
@@ -2880,8 +2880,10 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     variable_management_denied: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen oder löschen.",
     variable_value_change_denied: "Du darfst den Variablenwert nicht ändern.",
     ad_schedule_read_failed: "Der Werbezeitplan konnte nicht gelesen werden.",
+    ad_snooze_denied: "Nur Broadcaster und Verwalter dürfen Werbepausen verschieben.",
     ad_snooze_failed: "Die nächste Werbepause konnte nicht verschoben werden.",
     commercial_length_invalid: "Die Werbedauer ist ungültig.",
+    commercial_start_denied: "Nur Broadcaster und Verwalter dürfen Werbung starten.",
     commercial_start_failed: "Die Werbeeinblendung konnte nicht gestartet werden.",
     commercial_stream_offline: "Die Werbeeinblendung ist offline nicht verfügbar.",
     clip_create_failed: "Der Clip konnte nicht erstellt werden.",
@@ -2973,8 +2975,10 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     variable_management_denied: "Only broadcasters and managers may create, rename, or delete variables.",
     variable_value_change_denied: "You may not change the variable value.",
     ad_schedule_read_failed: "The ad schedule could not be read.",
+    ad_snooze_denied: "Only broadcasters and managers can snooze ads.",
     ad_snooze_failed: "The next ad break could not be postponed.",
     commercial_length_invalid: "The commercial length is invalid.",
+    commercial_start_denied: "Only broadcasters and managers can start ads.",
     commercial_start_failed: "The commercial could not be started.",
     commercial_stream_offline: "A commercial cannot run while the stream is offline.",
     clip_create_failed: "The clip could not be created.",
