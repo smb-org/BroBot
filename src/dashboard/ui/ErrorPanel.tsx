@@ -23,6 +23,7 @@ export interface ErrorPanelProps {
 export function ErrorPanel({ title, reason, action }: ErrorPanelProps) {
   return (
     <div
+      data-ui=""
       style={{
         border: `1px solid color-mix(in srgb, ${colors.error} 45%, ${colors.hairline})`,
         backgroundColor: colors.errorFill,

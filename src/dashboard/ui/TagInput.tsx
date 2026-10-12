@@ -101,7 +101,7 @@ export function TagInput({ id: suppliedId, label, hint, error, warning, invalidV
   };
 
   return (
-    <div className="ui-tag-input" role="group" aria-label={listLabel}>
+    <div data-ui="" className="ui-tag-input" role="group" aria-label={listLabel}>
       <MantineTagsInput
         id={id}
         label={label}

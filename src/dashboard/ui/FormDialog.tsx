@@ -38,7 +38,7 @@ export function FormDialog({
   };
 
   return (
-    <Modal opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={720} centered closeOnEscape={!pending} trapFocus returnFocus>
+    <Modal data-ui="" opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={720} centered closeOnEscape={!pending} trapFocus returnFocus>
       <form onSubmit={handleSubmit}>
         {description === undefined ? null : <div className="ui-form-dialog__description">{description}</div>}
         {children}

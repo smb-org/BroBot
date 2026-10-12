@@ -14,7 +14,7 @@ export interface ListRowProps {
 /** A navigable content row with a separate action area. */
 export function ListRow({ href, onNavigate, icon, title, description, status, action, selected = false }: ListRowProps) {
   return (
-    <div className={`list-row${selected ? " list-row--selected" : ""}`}>
+    <div data-ui="" className={`list-row${selected ? " list-row--selected" : ""}`}>
       <a
         className={`list-row__link${icon === undefined ? " list-row__link--no-icon" : ""}`}
         href={href}

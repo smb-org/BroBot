@@ -10,7 +10,7 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   plugins: [
     tailwindcss(),
-    react({ compiler: true, include: /\/src\/dashboard\/.*\.[jt]sx?$/ }),
+    react({ compiler: { sources: ["/src/dashboard/"] } }),
     cloudflare({ inspectorPort: false }),
   ],
   build: {

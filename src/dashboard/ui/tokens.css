@@ -1,13 +1,22 @@
 /* Dashboard palette tokens; legacy surface variables remain in styles.css. */
 @layer theme, base, mantine, components, utilities;
 
-@import "tailwindcss";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
 @import "@mantine/core/styles.layer.css";
 /* Keep legacy rules unlayered; their generic font reset excludes Mantine controls. */
 @import "../styles.css";
 
 @custom-variant dark (&:is(.dark *));
+
+@layer base {
+  :where([data-ui]),
+  :where([data-ui] *) {
+    box-sizing: border-box;
+    border: 0 solid;
+  }
+}
 
 @theme {
   --color-background: #0D1015;

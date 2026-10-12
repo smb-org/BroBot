@@ -43,7 +43,7 @@ export function SegmentedControl({ label, hint, value, onChange, options, size =
   };
 
   return (
-    <div className={`ui-segmented-control ui-segmented-control--${size}`}>
+    <div data-ui="" className={`ui-segmented-control ui-segmented-control--${size}`}>
       <span className="ui-segmented-control__label" id={labelId}>{label}</span>
       <MantineSegmentedControl
         className="ui-segmented-control__control"

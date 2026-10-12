@@ -42,7 +42,7 @@ export function ConfirmDialog({
   error,
 }: ConfirmDialogProps) {
   return (
-    <Modal opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={720} centered closeOnEscape={!pending} trapFocus returnFocus>
+    <Modal data-ui="" opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={720} centered closeOnEscape={!pending} trapFocus returnFocus>
       <Text size="sm" c="dimmed">
         {description}
       </Text>

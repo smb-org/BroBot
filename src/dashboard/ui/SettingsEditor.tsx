@@ -325,7 +325,7 @@ export function SettingsEditor<Settings extends object>({
   }
 
   return (
-    <div className="ui-settings-editor" data-section={sectionId} aria-label={section === undefined ? undefined : texts.sections[section.id]}>
+    <div data-ui="" className="ui-settings-editor" data-section={sectionId} aria-label={section === undefined ? undefined : texts.sections[section.id]}>
       {section === undefined ? null : <InspectorSection title={texts.sections[section.id]}>
         {section.fields.map(renderField)}
       </InspectorSection>}

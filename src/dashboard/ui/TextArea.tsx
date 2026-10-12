@@ -374,6 +374,7 @@ export function TextArea({
       width={400}
     >
       <Input.Wrapper
+        data-ui=""
         className="ui-textarea"
         id={id}
         label={label}
@@ -463,7 +464,7 @@ export function TextArea({
         </div>
       </Input.Wrapper>
       {suggestionOpen ? (
-        <Combobox.Dropdown className="ui-textarea__suggestions-dropdown">
+        <Combobox.Dropdown data-ui="" className="ui-textarea__suggestions-dropdown">
           <Combobox.Options id={listboxId} className="ui-textarea__suggestions" role="listbox">
             {suggestionGroups.map(({ group, options: groupOptions }) => (
               <Combobox.Group key={group.id} label={<TemplateVariableGroupHeading group={group} />}>

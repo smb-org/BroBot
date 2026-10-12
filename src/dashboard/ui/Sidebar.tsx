@@ -82,7 +82,7 @@ export function Sidebar({ groups, collapsed, onToggleCollapsed, onEntryNavigate,
   };
 
   return (
-    <div className="sidebar" data-collapsed={collapsed ? "true" : undefined}>
+    <div data-ui="" className="sidebar" data-collapsed={collapsed ? "true" : undefined}>
       <div className="sidebar__main">
         <button
           type="button"

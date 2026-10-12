@@ -15,7 +15,7 @@ export interface CodeFieldProps {
 
 export function CodeField({ id, label, value, onChange, maxLength, disabled = false, className }: CodeFieldProps): ReactElement {
   const disabledReason = useDisabledFieldReason();
-  return <MantineTextarea id={id} className={className} label={label} value={value} maxLength={maxLength}
+  return <MantineTextarea data-ui="" id={id} className={className} label={label} value={value} maxLength={maxLength}
     disabled={disabled} onChange={(event) => { onChange(event.currentTarget.value); }}
     aria-describedby={disabledReason === null ? undefined : `${disabledReason.id}-code-${id}`}
     description={disabledReason === null ? undefined : describedHelper(null, disabledReason, `code-${id}`)}

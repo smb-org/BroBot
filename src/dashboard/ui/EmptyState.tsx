@@ -21,6 +21,7 @@ export interface EmptyStateProps {
 export function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
     <div
+      data-ui=""
       style={{
         border: `1px dashed ${colors.hairlineStrong}`,
         borderRadius: "12px",

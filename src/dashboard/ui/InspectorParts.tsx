@@ -21,7 +21,7 @@ function InfoButton({ label, help }: { label: string; help: string }) {
     event.stopPropagation();
     setOpen(false);
   };
-  return <span ref={root} className="inspector-info">
+  return <span data-ui="" ref={root} className="inspector-info">
     <button
       ref={button}
       className="inspector-field-row__info"
@@ -43,7 +43,7 @@ function InfoButton({ label, help }: { label: string; help: string }) {
 export function InspectorSection({ title, children, help }: { title: ReactNode; children: ReactNode; help?: string }) {
   const headingId = useId();
   return (
-    <section className="inspector-content-section" aria-labelledby={headingId}>
+    <section data-ui="" className="inspector-content-section" aria-labelledby={headingId}>
       <h3 id={headingId} className="inspector-content-section__heading"><span>{title}</span>{help === undefined ? null : <InfoButton label={typeof title === "string" ? title : help} help={help} />}</h3>
       <div className="inspector-content-section__body">{children}</div>
     </section>
@@ -52,7 +52,7 @@ export function InspectorSection({ title, children, help }: { title: ReactNode; 
 
 export function InspectorFieldRow({ label, help, children, className }: { label: string; help?: string; children: ReactNode; className?: string }) {
   return (
-    <div className={`inspector-field-row${className === undefined ? "" : ` ${className}`}`}>
+    <div data-ui="" className={`inspector-field-row${className === undefined ? "" : ` ${className}`}`}>
       <div className="inspector-field-row__label">
         <span>{label}</span>
         {help === undefined ? null : <InfoButton label={label} help={help} />}
@@ -64,7 +64,7 @@ export function InspectorFieldRow({ label, help, children, className }: { label:
 
 export function InspectorActions({ children, destructive }: { children?: ReactNode; destructive?: ReactNode }) {
   const destructiveOnly = destructive !== undefined && (children === null || children === undefined || children === false);
-  return <div className={`inspector-actions${destructiveOnly ? " inspector-actions--destructive-only" : ""}`}>
+  return <div data-ui="" className={`inspector-actions${destructiveOnly ? " inspector-actions--destructive-only" : ""}`}>
     <div className="inspector-actions__primary">{children}</div>
     {destructive === undefined ? null : <div className="inspector-actions__destructive">{destructive}</div>}
   </div>;

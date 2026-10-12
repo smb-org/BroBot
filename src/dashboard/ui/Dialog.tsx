@@ -10,6 +10,7 @@ export function Dialog({ opened, title, children, onClose, pending = false }: {
 }): ReactElement {
   return (
     <Modal
+      data-ui=""
       opened={opened}
       onClose={pending ? () => undefined : onClose}
       title={title}

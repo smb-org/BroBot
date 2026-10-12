@@ -137,6 +137,7 @@ export function Spotlight({ items, emptyMessage, placeholder, forceOpened, query
 
   return (
     <MantineSpotlight
+      data-ui=""
       actions={actions}
       filter={filterItems}
       nothingFound={emptyMessage}

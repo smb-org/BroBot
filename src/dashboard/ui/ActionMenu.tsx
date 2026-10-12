@@ -16,7 +16,7 @@ export function ActionMenu({ label, items, size = "compact" }: { label: string; 
     <Menu.Target>
       <Button id={triggerId} size={size} icon="more" iconOnly ariaLabel={label} ariaHasPopup="menu" ariaExpanded={opened} ariaControls={dropdownId} />
     </Menu.Target>
-    <Menu.Dropdown id={dropdownId} aria-label={label} aria-labelledby={triggerId}>
+    <Menu.Dropdown data-ui="" id={dropdownId} aria-label={label} aria-labelledby={triggerId}>
       {items.map((item, index) => "divider" in item
         ? <Menu.Divider key={`divider-${String(index)}`} />
         : <Menu.Item

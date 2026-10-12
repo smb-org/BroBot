@@ -56,7 +56,7 @@ export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, di
 
   if (layout === "inline") {
     return (
-      <div className="ui-switch-field" aria-busy={pending}>
+      <div data-ui="" className="ui-switch-field" aria-busy={pending}>
         <div className="ui-switch-field__row">
           {input}
           <label className="ui-switch-field__label" htmlFor={id}>{label}{visual}</label>
@@ -74,7 +74,7 @@ export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, di
     };
     return (
       <>
-        <div className={`ui-switch-card${checked ? " ui-switch-card--checked" : ""}`} aria-busy={pending} onClick={toggleCard}>
+        <div data-ui="" className={`ui-switch-card${checked ? " ui-switch-card--checked" : ""}`} aria-busy={pending} onClick={toggleCard}>
           <div className="ui-switch-card__heading">
             {input}
             <label className="ui-switch-card__label" htmlFor={id}>
@@ -100,7 +100,7 @@ export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, di
   }
 
   return (
-    <div className="ui-switch" aria-busy={pending}>
+    <div data-ui="" className="ui-switch" aria-busy={pending}>
       {label === undefined ? null : <span className="ui-switch__label" id={labelId}>{label}</span>}
       <span className="ui-switch__control">{input}{visual}</span>
       {hintLine}

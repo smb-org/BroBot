@@ -105,6 +105,7 @@ export function Popover({ triggerLabel, icon, children }: PopoverProps): ReactEl
         </button>
       </MantinePopover.Target>
       <MantinePopover.Dropdown
+        data-ui=""
         id={contentId}
         role="tooltip"
         onClick={(event) => { event.stopPropagation(); }}

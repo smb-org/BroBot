@@ -126,6 +126,7 @@ export function Button(props: ButtonProps) {
 
   return (
     <MantineButton
+      data-ui=""
       ref={ref}
       variant={mantineVariant}
       size={size === "compact" ? "compact-md" : "md"}

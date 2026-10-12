@@ -123,6 +123,36 @@ test("captures the stable dashboard routes at desktop and mobile widths", async 
   }
 });
 
+test("legacy overlay sections keep browser spacing and list markers", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await installApiMocks(page);
+  await page.goto(`/channels/${channelId}/overlays`);
+
+  const outputDirectory = process.env.FOUNDATION_SCREENSHOT_DIR;
+  const expandedDirectory = outputDirectory === undefined ? undefined : join(outputDirectory, "expanded");
+  if (expandedDirectory !== undefined) await mkdir(expandedDirectory, { recursive: true });
+
+  const legacyLinks = page.locator(".overlay-legacy-links");
+  const description = legacyLinks.locator(":scope > p.muted");
+  await expect(description).toHaveCSS("margin-bottom", "13px");
+  await legacyLinks.locator("summary").click();
+  await expect(legacyLinks.locator(".ui-load-state")).toHaveAttribute("data-status", "empty");
+  if (expandedDirectory !== undefined) {
+    await page.screenshot({ path: join(expandedDirectory, "legacy-links-expanded-1920x1080.png"), animations: "disabled" });
+  }
+
+  await legacyLinks.getByRole("button", { name: "Import" }).click();
+  const dialog = page.getByRole("dialog", { name: "Import a legacy link" });
+  await expect(dialog).toBeVisible();
+  const warningList = dialog.locator(".overlay-legacy-import-form ul");
+  await expect(warningList).toHaveCSS("list-style-type", "disc");
+  await expect(dialog.getByRole("button", { name: "Import link" })).toHaveAttribute("data-ui", "");
+  await expect(dialog.locator("form")).toHaveCSS("border-top-style", "solid");
+  if (expandedDirectory !== undefined) {
+    await page.screenshot({ path: join(expandedDirectory, "legacy-import-dialog-1920x1080.png"), animations: "disabled" });
+  }
+});
+
 test("uses the default palette when browser storage throws", async ({ page }) => {
   await page.addInitScript(() => {
     const storage = window.localStorage;

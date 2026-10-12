@@ -12,7 +12,7 @@ export function ListPaginationFooter({
   children?: ReactNode;
 }) {
   return (
-    <div className="list-pagination-footer">
+    <div data-ui="" className="list-pagination-footer">
       <span className="list-pagination-footer__count">
         <span className="mono">{formatNumber(loadedCount)}</span> {loadedLabel}
       </span>

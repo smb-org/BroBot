@@ -19,7 +19,7 @@ export function ColorField({ id, label, value, unsetLabel, clearLabel, onChange,
   const reasonId = disabledReason === null ? undefined : `${disabledReason.id}-color-${id}`;
   const unsetDescriptionId = `${id}-unset-note`;
   const describedBy = [reasonId, value === undefined ? unsetDescriptionId : undefined].filter((descriptionId) => descriptionId !== undefined).join(" ") || undefined;
-  return <div className="ui-color-field">
+  return <div data-ui="" className="ui-color-field">
     <label htmlFor={id}>{label}</label>
     <div className="ui-color-field__controls">
       <span className="ui-color-field__swatch" data-unset={value === undefined} data-disabled={disabled}>

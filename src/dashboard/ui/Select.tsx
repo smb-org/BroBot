@@ -106,6 +106,7 @@ export function Select({
   );
   return (
     <MantineSelect
+      data-ui=""
       className={`ui-select${compact ? " ui-select--compact" : ""}`}
       label={label}
       aria-label={ariaLabel}
