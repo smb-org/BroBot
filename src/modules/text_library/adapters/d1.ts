@@ -385,11 +385,12 @@ export const createTextBlockRepository = (
       if (startLibraryRevision !== expectedLibraryRevision) return { ok: false, reason: "conflict", current: before };
       const authorization = authorizeMutation(input.channelId, actor, input.now);
       const nextRevision = before.revision + 1;
+      const renameToken = crypto.randomUUID();
       const renamedBlockGuard = `EXISTS (
         SELECT 1 FROM text_blocks
-         WHERE channel_id = ? AND block_name = ? AND revision = ?
+         WHERE channel_id = ? AND block_name = ? AND revision = ? AND rename_token = ?
       )`;
-      const renamedBlockValues = [input.channelId, input.name, nextRevision];
+      const renamedBlockValues = [input.channelId, input.name, nextRevision, renameToken];
       const advanceGraph = db.prepare(
         `UPDATE text_library_settings SET graph_revision = graph_revision + 1
           WHERE channel_id = ? AND graph_revision = ?
@@ -403,12 +404,12 @@ export const createTextBlockRepository = (
         ...authorization.values);
       const mutation = db.prepare(
         `UPDATE text_blocks
-            SET block_name = ?, category_id = ?, games_json = ?, revision = ?, updated_at = ?
+            SET block_name = ?, category_id = ?, games_json = ?, revision = ?, updated_at = ?, rename_token = ?
           WHERE channel_id = ? AND block_name = ? AND revision = ? AND changes() > 0
             AND NOT EXISTS (SELECT 1 FROM text_blocks WHERE channel_id = ? AND block_name = ?)
             AND EXISTS (SELECT 1 FROM text_library_categories WHERE channel_id = ? AND category_id = ?)
             ${authorization.sql}`,
-      ).bind(input.name, input.categoryId, JSON.stringify(input.games), nextRevision, input.now,
+      ).bind(input.name, input.categoryId, JSON.stringify(input.games), nextRevision, input.now, renameToken,
         input.channelId, fromName, before.revision, input.channelId, input.name, input.channelId, input.categoryId,
         ...authorization.values);
       const audit = prepareModuleAudit?.({
@@ -499,8 +500,10 @@ export const createTextBlockRepository = (
       ).bind(input.channelId, input.name, variant.id, position,
         JSON.stringify(variant.conditions), JSON.stringify(variant.texts), ...renamedBlockValues));
       const statements = [advanceGraph, mutation];
-      statements.push(removeRenamedVariants, ...saveRenamedVariants);
+      // The audit helper gates on changes(); keep it directly after the rename
+      // update so that predicate proves this request changed its source row.
       if (audit !== undefined) statements.push(audit);
+      statements.push(removeRenamedVariants, ...saveRenamedVariants);
       statements.push(rewriteParentRevisions, rewriteVariants,
         rewriteCommands, rewriteTimers, rewriteFaq, rewriteModuleSettings);
       const overlayUpdateIndex = statements.length;

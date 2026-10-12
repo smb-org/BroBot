@@ -1109,10 +1109,29 @@ describe("text library", () => {
     });
   });
 
-  it("keeps the winning variants when overlapping renames share a target and timestamp", async () => {
+  it("leaves every consumer unchanged when different sources race for one rename target", async () => {
     const created = await createBlock("welcome", [variant("default", "Original")]);
     if (!created.ok) throw new Error("Could not create the overlapping rename test block.");
+    const other = await createBlock("other", [variant("default", "Other original")]);
+    if (!other.ok) throw new Error("Could not create the competing rename source.");
+    const parent = await createBlock("parent", [variant("default", "Parent uses {text.other}")]);
+    if (!parent.ok) throw new Error("Could not create the rename consumer block.");
     const snapshot = await service.list(CHANNEL_ID);
+    const now = new Date(NOW).toISOString();
+    database.sqlite.exec(`
+      INSERT INTO text_commands (channel_id, command_name, response_text, template_fields_json, timeout_fallback_text, timeout_reason, created_at, updated_at)
+      VALUES ('${CHANNEL_ID}', 'other-command', 'Command {text.other}', '{"label":"{text.other}"}', 'Try {text.other}', 'Reason {text.other}', '${now}', '${now}');
+      INSERT INTO timers (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
+      VALUES ('timer-other-rename', '${CHANNEL_ID}', 'Other reminder', 1, 'interval', '{}', 'Timer {text.other}', '${now}', '${now}');
+      INSERT INTO faq_entries (faq_id, channel_id, name, matcher_json, answer_text, created_at, updated_at)
+      VALUES ('faq-other-rename', '${CHANNEL_ID}', 'Other answer', '{"patterns":["other"]}', 'FAQ {text.other}', '${now}', '${now}');
+      INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+      VALUES ('${CHANNEL_ID}', 'ads', 1, '{"automatic":"Ad {text.other}"}');
+      INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+      VALUES ('overlay-other-rename', '${CHANNEL_ID}', 'Other', '${now}', '${now}');
+      INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, text, config_json)
+      VALUES ('element-other-rename', '${CHANNEL_ID}', 'overlay-other-rename', 'text', 'Overlay {text.other}', '{"content":"{text.other}"}');
+    `);
     let resolveFirstAtBatch!: () => void;
     let resolveSecondAtBatch!: () => void;
     let resolveFirstBatchFinished!: () => void;
@@ -1137,40 +1156,80 @@ describe("text library", () => {
       },
     } as unknown as D1Database;
     const interleavedRepository = createTextBlockRepository(interleavedDatabase, authorize);
-    const now = new Date(NOW).toISOString();
-    const rename = (text: string) => interleavedRepository.rename({
+    const rename = (fromName: string, expectedRevision: number, text: string) => interleavedRepository.rename({
       channelId: CHANNEL_ID,
       name: "greeting",
       categoryId: created.block.categoryId,
       games: [],
       variants: [variant("default", text)],
-      expectedRevision: created.block.revision,
+      expectedRevision,
       expectedGraphRevision: snapshot.settings.graphRevision,
       now,
-    }, "welcome", ACTOR);
+    }, fromName, ACTOR);
 
-    const winnerPromise = rename("Winning variant");
+    const winnerPromise = rename("welcome", created.block.revision, "Winning variant");
     await firstAtBatch;
-    const loserPromise = rename("Losing variant");
+    const loserPromise = rename("other", other.block.revision, "Losing variant");
     const [winner, loser] = await Promise.all([winnerPromise, loserPromise]);
 
     expect(winner).toMatchObject({ ok: true, block: { name: "greeting" } });
-    expect(loser).toMatchObject({ ok: false });
+    expect(loser).toMatchObject({ ok: false, reason: "already_exists" });
     await expect(database.prepare(
       "SELECT texts_json FROM text_block_variants WHERE channel_id = ? AND block_name = ? AND variant_id = ?",
     ).bind(CHANNEL_ID, "greeting", "default").first()).resolves.toEqual({ texts_json: '["Winning variant"]' });
     await expect(database.prepare(
       "SELECT revision FROM text_blocks WHERE channel_id = ? AND block_name = ?",
     ).bind(CHANNEL_ID, "greeting").first()).resolves.toEqual({ revision: created.block.revision + 1 });
+    await expect(database.prepare(
+      "SELECT block_name, revision FROM text_blocks WHERE channel_id = ? AND block_name IN (?, ?) ORDER BY block_name",
+    ).bind(CHANNEL_ID, "other", "parent").all()).resolves.toMatchObject({
+      results: [
+        { block_name: "other", revision: other.block.revision },
+        { block_name: "parent", revision: parent.block.revision },
+      ],
+    });
+    await expect(database.prepare(
+      "SELECT block_name, texts_json FROM text_block_variants WHERE channel_id = ? AND block_name IN (?, ?) ORDER BY block_name",
+    ).bind(CHANNEL_ID, "other", "parent").all()).resolves.toMatchObject({
+      results: [
+        { block_name: "other", texts_json: '["Other original"]' },
+        { block_name: "parent", texts_json: '["Parent uses {text.other}"]' },
+      ],
+    });
+    await expect(database.prepare(
+      "SELECT response_text, template_fields_json, timeout_fallback_text, timeout_reason, revision FROM text_commands WHERE channel_id = ? AND command_name = ?",
+    ).bind(CHANNEL_ID, "other-command").first()).resolves.toMatchObject({
+      response_text: "Command {text.other}",
+      template_fields_json: '{"label":"{text.other}"}',
+      timeout_fallback_text: "Try {text.other}",
+      timeout_reason: "Reason {text.other}",
+      revision: 1,
+    });
+    await expect(database.prepare(
+      "SELECT message_text, revision FROM timers WHERE timer_id = ?",
+    ).bind("timer-other-rename").first()).resolves.toEqual({ message_text: "Timer {text.other}", revision: 1 });
+    await expect(database.prepare(
+      "SELECT answer_text, revision FROM faq_entries WHERE faq_id = ?",
+    ).bind("faq-other-rename").first()).resolves.toEqual({ answer_text: "FAQ {text.other}", revision: 1 });
+    await expect(database.prepare(
+      "SELECT settings, revision FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+    ).bind(CHANNEL_ID, "ads").first()).resolves.toEqual({ settings: '{"automatic":"Ad {text.other}"}', revision: 1 });
+    await expect(database.prepare(
+      "SELECT revision FROM overlays WHERE overlay_id = ?",
+    ).bind("overlay-other-rename").first()).resolves.toEqual({ revision: 1 });
+    await expect(database.prepare(
+      "SELECT text, config_json FROM overlay_elements WHERE element_id = ?",
+    ).bind("element-other-rename").first()).resolves.toEqual({ text: "Overlay {text.other}", config_json: '{"content":"{text.other}"}' });
   });
 
   it("validates timer compatibility against renamed block content", async () => {
     const created = await createBlock("welcome", [variant("default", "Welcome")]);
     if (!created.ok) throw new Error("Could not create the template compatibility test block.");
+    await createBlock("parent", [variant("default", "Nested {text.welcome}")]);
     await database.prepare(`INSERT INTO timers
       (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
       VALUES (?, ?, ?, 1, 'interval', '{}', ?, ?, ?)`)
-      .bind("timer-rename-compatibility", CHANNEL_ID, "Reminder", "Use {text.welcome}", new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+      .bind("timer-rename-compatibility", CHANNEL_ID, "Reminder", "Use {text.parent}", new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
     await insertLoginIdentityAndSession(database, "manager-rename-compatibility");
     await insertMember(database, CHANNEL_ID, "manager-rename-compatibility", "manager");
     const sessionCookie = await createSessionCookie(
