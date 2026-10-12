@@ -32,12 +32,13 @@ export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, di
     id={id}
     className="switch__track"
     checked={checked}
-    onCheckedChange={onChange}
+    onCheckedChange={(next, details) => { if (details.event.target instanceof Element && details.event.target.matches(":disabled")) return; onChange(next); }}
     disabled={isDisabled}
     aria-label={label === undefined ? ariaLabel : undefined}
     aria-labelledby={labelId}
     aria-describedby={describedBy}
     aria-busy={pending}
+    aria-disabled={isDisabled ? true : undefined}
     onClick={(event) => { event.stopPropagation(); }}
   />;
   const hintLine = hint === undefined ? null : <span id={hintId} className="ui-switch__hint">{hint}</span>;

@@ -70,7 +70,7 @@ export function Popover({ triggerLabel, icon, children }: PopoverProps): ReactEl
       >
         <Icon name={icon} size={16} />
       </PopoverPrimitive.Trigger>
-      <PopoverContent id={contentId} role="tooltip" side="top" align="end" className="ui-popover__content" onClick={(event) => { event.stopPropagation(); }} onMouseEnter={() => { dismissedRef.current = false; hoveredRef.current = true; cancelClose(); setOpened(true); }} onMouseLeave={() => { dismissedRef.current = false; hoveredRef.current = false; scheduleClose(); }}>
+      <PopoverContent id={contentId} role="tooltip" initialFocus={false} side="top" align="end" className="ui-popover__content" onClick={(event) => { event.stopPropagation(); }} onMouseEnter={() => { dismissedRef.current = false; hoveredRef.current = true; cancelClose(); setOpened(true); }} onMouseLeave={() => { dismissedRef.current = false; hoveredRef.current = false; scheduleClose(); }}>
         {children}
       </PopoverContent>
     </div>
