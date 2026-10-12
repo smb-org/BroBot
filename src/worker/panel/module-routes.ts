@@ -613,8 +613,9 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  const initialize = enabled && existing?.initialized !== true;
   let dependentMutations: readonly D1PreparedStatement[] = [];
-  if (enabled && existing === null && module.onEnable !== undefined) {
+  if (initialize && module.onEnable !== undefined) {
     dependentMutations = await module.onEnable({
       DB: context.env.DB,
       authorizeMutation: context.get("authorizeManagementMutation"),
@@ -646,6 +647,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       now,
       dependentMutations,
       existing.revision,
+      initialize,
     );
   }
   if (!changed) return context.json({ error: "module_changed_concurrently" }, 409);

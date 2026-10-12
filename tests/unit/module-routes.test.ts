@@ -699,8 +699,100 @@ describe("Module management in the panel", () => {
     expect(concurrentSaveResponse?.status).toBe(200);
     expect(response.status).toBe(409);
     await expect(database.prepare(
-      "SELECT enabled, settings, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
-    ).first()).resolves.toEqual({ enabled: 0, settings: '{"betrag":17}', revision: 2 });
+      "SELECT enabled, initialized, settings, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
+    ).first()).resolves.toEqual({ enabled: 0, initialized: 0, settings: '{"betrag":17}', revision: 2 });
+  });
+
+  it("initializes an existing never-enabled module row once and preserves its data", async () => {
+    prepareEnableCommand = true;
+    await insertChannel(database, "kanal-legacy");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-legacy", "user-1", "broadcaster");
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-legacy', 'test-modul', 0, '{"betrag":17}')`,
+    ).run();
+
+    const enable = async (enabled: boolean): Promise<Response> => panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-legacy/modules/test-modul", "PATCH", { enabled }),
+      environment,
+    );
+
+    const firstEnable = await enable(true);
+    expect(firstEnable.status).toBe(200);
+    expect(enableHookCallCount).toBe(1);
+    await expect(database.prepare(
+      "SELECT initialized FROM channel_modules WHERE channel_id = 'kanal-legacy' AND module_id = 'test-modul'",
+    ).first()).resolves.toEqual({ initialized: 1 });
+    await expect(database.prepare(
+      "SELECT command_name FROM text_commands WHERE channel_id = 'kanal-legacy' AND command_name = 'befehle'",
+    ).first()).resolves.toEqual({ command_name: "befehle" });
+    await expect(database.prepare(
+      "SELECT settings FROM channel_modules WHERE channel_id = 'kanal-legacy' AND module_id = 'test-modul'",
+    ).first()).resolves.toEqual({ settings: '{"betrag":17}' });
+
+    await database.prepare(
+      "UPDATE text_commands SET response_text = 'Customized list response' WHERE channel_id = 'kanal-legacy' AND command_name = 'befehle'",
+    ).run();
+    expect((await enable(false)).status).toBe(200);
+    expect((await enable(true)).status).toBe(200);
+
+    expect(enableHookCallCount).toBe(1);
+    await expect(database.prepare(
+      "SELECT response_text FROM text_commands WHERE channel_id = 'kanal-legacy' AND command_name = 'befehle'",
+    ).first()).resolves.toEqual({ response_text: "Customized list response" });
+    await expect(database.prepare(
+      "SELECT settings FROM channel_modules WHERE channel_id = 'kanal-legacy' AND module_id = 'test-modul'",
+    ).first()).resolves.toEqual({ settings: '{"betrag":17}' });
+  });
+
+  it("localizes legacy BELABOX defaults without replacing custom alert text", async () => {
+    registeredModules.push(belaboxModule);
+    const onEnable = vi.spyOn(belaboxModule, "onEnable");
+    environment.CHANNEL = {
+      idFromName: vi.fn((channelId: string) => channelId),
+      get: vi.fn(() => ({ runModuleAlarm: vi.fn(() => Promise.resolve()) })),
+    } as unknown as Env["CHANNEL"];
+    try {
+      await insertChannel(database, "kanal-belabox-legacy");
+      await insertLoginIdentityAndSession(database, "user-1");
+      await insertMember(database, "kanal-belabox-legacy", "user-1", "broadcaster");
+      await database.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+         VALUES ('kanal-belabox-legacy', 'belabox', 0, ?)`,
+      ).bind(JSON.stringify({
+        ...belaboxDefaultAlertTexts("en"),
+        lowText: "Custom low message",
+      })).run();
+
+      const enable = async (enabled: boolean): Promise<Response> => panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/kanal-belabox-legacy/modules/belabox", "PATCH", { enabled }),
+        environment,
+      );
+      const firstEnable = await enable(true);
+      expect(firstEnable.status).toBe(200);
+      expect(onEnable).toHaveBeenCalledOnce();
+
+      const readSettings = async (): Promise<Record<string, unknown>> => {
+        const row = await database.prepare(
+          "SELECT settings FROM channel_modules WHERE channel_id = 'kanal-belabox-legacy' AND module_id = 'belabox'",
+        ).first<{ settings: string }>();
+        return JSON.parse(row?.settings ?? "{}") as Record<string, unknown>;
+      };
+      await expect(readSettings()).resolves.toMatchObject({
+        lowText: "Custom low message",
+        disconnectText: belaboxDefaultAlertTexts("de").disconnectText,
+        recoveryText: belaboxDefaultAlertTexts("de").recoveryText,
+      });
+
+      expect((await enable(false)).status).toBe(200);
+      expect((await enable(true)).status).toBe(200);
+      expect(onEnable).toHaveBeenCalledOnce();
+      await expect(readSettings()).resolves.toMatchObject({ lowText: "Custom low message" });
+    } finally {
+      onEnable.mockRestore();
+      registeredModules.pop();
+    }
   });
 
   it("preserves BELABOX chat texts and runs its initialization hook only once", async () => {
