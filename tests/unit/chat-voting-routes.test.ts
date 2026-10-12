@@ -294,6 +294,26 @@ describe("chat voting routes", () => {
     expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "announce_start", expect.stringMatching(/^start:/u), expect.any(Number), 0);
   });
 
+  it("lets an operator close an open vote", async () => {
+    const database = await createDatabase();
+    const writeAudit = vi.fn(() => Promise.resolve());
+    const app = appFor(ballotAccess(), () => Promise.resolve([]), vi.fn(() => Promise.resolve()), authorizeModuleMutation, writeAudit);
+    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
+    const namespace = {
+      idFromName: vi.fn(() => ({})),
+      get: vi.fn(() => ({ scheduleModuleAlarm })),
+    } as unknown as Env["CHANNEL"];
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/close`, {
+      method: "POST",
+    }), { DB: database as unknown as D1Database, CHANNEL: namespace });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ closing: true, pollId: openTextVote.id });
+    expect(scheduleModuleAlarm).toHaveBeenCalledOnce();
+    expect(writeAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "chat_voting.closed" }), expect.any(String));
+  });
+
   it.each(["digit_01", "digit_12"])("does not accept the retired %s preset wire value", async (preset) => {
     const database = await createDatabase();
     await createChatVotingRepository(database as unknown as D1Database).finish(

@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
+import { PanelApiError } from "../../../contracts/panel-error";
 import type { AdsScheduleResponse } from "../contracts";
 import { Button, EmptyCellValue, Icon, LoadState, Skeleton, notify } from "../../../dashboard/ui";
 import { loadAdsSchedule, refreshAdsSchedule, snoozeAds } from "./service";
@@ -51,8 +52,10 @@ export const AdsPanel = ({ channelId, language = "de", canManage = false }: { ch
   const [refreshBusy, setRefreshBusy] = useState(false);
 
   const snoozeCount = schedule?.schedule.snoozeCount ?? null;
-  const snoozeButtonDisabled = schedule === null || snoozeBusy || !schedule.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
+  const snoozeButtonDisabled = schedule === null || !canManage || snoozeBusy || !schedule.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
   const snoozeReason = schedule === null ? ""
+    : !canManage
+    ? labels.snoozeReadOnly
     : !schedule.snoozeScopeAvailable
     ? labels.snoozeScopeMissing
     : snoozeCount === null
@@ -63,7 +66,7 @@ export const AdsPanel = ({ channelId, language = "de", canManage = false }: { ch
     formatTimestamp(schedule?.schedule.snoozeRefreshAt ?? null, language),
   );
   const snooze = async (): Promise<void> => {
-    if (schedule === null) return;
+    if (!canManage || schedule === null) return;
     setSnoozeBusy(true);
     try {
       await runModuleQueryWrite(queryClient, channelId, "ads", "schedule", () => snoozeAds(channelId), {
@@ -71,8 +74,13 @@ export const AdsPanel = ({ channelId, language = "de", canManage = false }: { ch
         updateCache: (_current, result) => result,
       });
       notify({ tone: "success", message: labels.snoozeSuccess });
-    } catch {
-      notify({ tone: "error", message: labels.snoozeError });
+    } catch (error: unknown) {
+      notify({
+        tone: "error",
+        message: error instanceof PanelApiError && error.code === "ad_snooze_denied"
+          ? labels.snoozeReadOnly
+          : labels.snoozeError,
+      });
     } finally {
       setSnoozeBusy(false);
     }

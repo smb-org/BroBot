@@ -27,9 +27,7 @@ const botBlocksRoute = (route: DashboardRoute, botSignedIn: boolean | undefined)
 /**
  * Presence and availability for a module's immediate action, from the exact
  * same source Stream Manager reads (`ImmediateActions` in stream-manager.tsx)
- * -- so Spotlight can't offer an action for a disabled module, or gate one
- * behind a role the endpoint itself doesn't require (#178's ad-now/operator
- * bug came from a Spotlight-only `manageable` check no module declares).
+ * -- so Spotlight can't offer an action for a disabled module.
  */
 const moduleImmediateActionAvailability = (
   moduleId: string,
@@ -237,23 +235,23 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
     if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
     // Ad now, clip, and shoutout are the same immediate actions Stream
-    // Manager offers -- each hidden when its module is disabled, and
-    // disabled with the module's own reason when the stream isn't live, no
-    // role check invented on top (their endpoints run for any member).
+    // Manager offers. Ads require management rights; clips and shoutouts stay
+    // available to every member. Each also reports its stream-state reason.
     const adNow = moduleImmediateActionAvailability("ads", modules, streamState);
     const clip = moduleImmediateActionAvailability("clips", modules, streamState);
     const shoutout = moduleImmediateActionAvailability("raid", modules, streamState);
     const items: SpotlightItem[] = [];
     if (adNow.offered) {
+      const adNowDisabledReason = !manageable ? texts.module.managementLocked : adNow.disabledReason;
       items.push({
         id: "action:ad-now",
         label: texts.streamManager.runAd("60"),
         group: texts.spotlight.groupActions,
         keywords: ["ad", "werbung", "commercial"],
-        disabled: adNow.disabledReason !== null,
-        ...(adNow.disabledReason === null ? {} : { disabledReason: adNow.disabledReason }),
+        disabled: adNowDisabledReason !== null,
+        ...(adNowDisabledReason === null ? {} : { disabledReason: adNowDisabledReason }),
         icon: "ad",
-        onTrigger: () => { void startCommercial(channelId, 60); },
+        onTrigger: () => { if (manageable) void startCommercial(channelId, 60); },
       });
     }
     items.push(

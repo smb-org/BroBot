@@ -11,6 +11,7 @@ export interface AdsPanelTexts {
   snoozeSection: string;
   snoozeButton: (count: string, refresh: string) => string;
   snoozeScopeMissing: string;
+  snoozeReadOnly: string;
   snoozeNone: string;
   snoozeUnknown: string;
   snoozeSuccess: string;
@@ -32,6 +33,7 @@ export interface AdsPanelTexts {
   immediateStarted: (length: string) => string;
   immediateOffline: string;
   immediateFailed: string;
+  immediateReadOnly: string;
 }
 
 const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
@@ -45,6 +47,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     snoozeSection: "Werbung verschieben",
     snoozeButton: (count, refresh) => `Snooze · ${count} verfügbar · Aufladung ${refresh}`,
     snoozeScopeMissing: "Snooze ist deaktiviert: channel:manage:ads fehlt.",
+    snoozeReadOnly: "Nur Broadcaster und Verwalter dürfen Werbepausen verschieben.",
     snoozeNone: "Snooze ist deaktiviert: keine Verschiebung mehr verfügbar.",
     snoozeUnknown: "Snooze ist deaktiviert: der Twitch-Zähler ist nicht verfügbar.",
     snoozeSuccess: "Die nächste Werbepause wurde verschoben.",
@@ -66,6 +69,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     immediateStarted: (length) => `Werbung gestartet (${length}s)`,
     immediateOffline: "Der Stream ist offline.",
     immediateFailed: "Die Werbeeinblendung konnte nicht gestartet werden.",
+    immediateReadOnly: "Nur Broadcaster und Verwalter dürfen Werbung starten.",
   },
   en: {
     title: "Announcements",
@@ -77,6 +81,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     snoozeSection: "Postpone an ad break",
     snoozeButton: (count, refresh) => `Snooze · ${count} available · refresh ${refresh}`,
     snoozeScopeMissing: "Snooze is disabled: channel:manage:ads is missing.",
+    snoozeReadOnly: "Only broadcasters and managers may snooze ad breaks.",
     snoozeNone: "Snooze is disabled: no postponements remain.",
     snoozeUnknown: "Snooze is disabled: Twitch did not provide a counter.",
     snoozeSuccess: "The next ad break was postponed.",
@@ -98,6 +103,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     immediateStarted: (length) => `Ad started (${length}s)`,
     immediateOffline: "The stream is offline.",
     immediateFailed: "The commercial could not be started.",
+    immediateReadOnly: "Only broadcasters and managers may start ads.",
   },
 };
 

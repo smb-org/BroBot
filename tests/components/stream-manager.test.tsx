@@ -77,7 +77,7 @@ describe("Stream Manager immediate actions", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={ADS_ENABLED} />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" canManage modules={ADS_ENABLED} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
 
@@ -89,12 +89,25 @@ describe("Stream Manager immediate actions", () => {
   it("disables the commercial action and explains why for a known offline stream", async () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="offline" modules={ADS_ENABLED} />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="offline" canManage modules={ADS_ENABLED} />);
 
     const button = await screen.findByRole("button", { name: /Werbung jetzt/ });
     expect(button).toBeDisabled();
     expect(screen.getAllByText("Der Stream ist offline.")).toHaveLength(1);
     expect(button).toHaveAttribute("aria-describedby", expect.stringContaining("stream-manager-ads-availability-reason"));
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("locks ad actions for operators before posting", async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={ALL_ACTIONS_ENABLED} />);
+
+    const adButton = await screen.findByRole("button", { name: /Werbung jetzt/ });
+    expect(adButton).toBeDisabled();
+    expect(adButton.nextElementSibling).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Werbung starten.");
+
+    fireEvent.click(adButton);
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -141,7 +154,7 @@ describe("Stream Manager immediate actions", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={ADS_ENABLED} />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" canManage modules={ADS_ENABLED} />);
 
     await screen.findByRole("heading", { name: "Werbung", level: 3 });
     const group = screen.getByRole("radiogroup", { name: "Werbedauer" });
@@ -256,7 +269,7 @@ describe("Stream Manager immediate actions", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={ADS_ENABLED} />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" canManage modules={ADS_ENABLED} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
 

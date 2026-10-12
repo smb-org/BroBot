@@ -8,16 +8,17 @@ import { startCommercialNow } from "./service";
 
 const AD_LENGTHS = ["30", "60", "90", "120", "150", "180"];
 
-const AdNowAction = ({ channelId, availabilityReason }: ModuleImmediateActionProperties): ReactElement => {
+const AdNowAction = ({ channelId, canManage = false, availabilityReason }: ModuleImmediateActionProperties): ReactElement => {
   const labels = adsPanelTexts(typeof navigator === "undefined" || !navigator.language.toLowerCase().startsWith("en") ? "de" : "en");
   const [length, setLength] = useState<string | null>("60");
   const [pending, setPending] = useState(false);
   const [resultMessage, setResultMessage] = useState("");
   const availabilityReasonId = "stream-manager-ads-availability-reason";
-  const unavailable = availabilityReason !== null;
+  const actionReason = canManage ? availabilityReason : labels.immediateReadOnly;
+  const unavailable = actionReason !== null;
 
   const run = async (): Promise<void> => {
-    if (pending || length === null || availabilityReason !== null) return;
+    if (pending || length === null || actionReason !== null) return;
     setPending(true);
     setResultMessage("");
     try {
@@ -26,8 +27,10 @@ const AdNowAction = ({ channelId, availabilityReason }: ModuleImmediateActionPro
       setResultMessage(message);
       notify({ tone: "success", message });
     } catch (error: unknown) {
-      const message = error instanceof PanelApiError && error.code === "commercial_stream_offline"
-        ? labels.immediateOffline
+      const message = error instanceof PanelApiError && error.code === "commercial_start_denied"
+        ? labels.immediateReadOnly
+        : error instanceof PanelApiError && error.code === "commercial_stream_offline"
+          ? labels.immediateOffline
         : labels.immediateFailed;
       setResultMessage(message);
       notify({ tone: "error", message });
@@ -55,8 +58,8 @@ const AdNowAction = ({ channelId, availabilityReason }: ModuleImmediateActionPro
       </Button>
       <p className="lock-reason" id={availabilityReasonId} data-testid="immediate-action-result-slot"
         style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite"
-        title={availabilityReason ?? resultMessage}>
-        {availabilityReason ?? resultMessage}
+        title={actionReason ?? resultMessage}>
+        {actionReason ?? resultMessage}
       </p>
     </div>
   );

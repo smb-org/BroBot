@@ -468,7 +468,7 @@ describe("Channel Spotlight", () => {
     expect(clipAction).toHaveTextContent("Der Stream ist offline.");
   });
 
-  it("lets an operator run ad-now while live -- the endpoint has no role check (#178)", async () => {
+  it("disables ad-now for an operator with the management-locked reason (#424)", async () => {
     const fetcher = stubFetch();
     renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="operator" streamState="online" modules={[{ id: "ads", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()} />);
 
@@ -476,15 +476,10 @@ describe("Channel Spotlight", () => {
     await screen.findByRole("dialog");
 
     const adNowAction = (await screen.findByText("Werbung jetzt (60s)")).closest(".mantine-Spotlight-action");
-    expect(adNowAction).not.toHaveTextContent("Nur Broadcaster und Verwalter dürfen Module ändern.");
+    expect(adNowAction).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Module ändern.");
     fireEvent.click(await screen.findByText("Werbung jetzt (60s)"));
 
-    await vi.waitFor(() => {
-      const call = fetcher.mock.calls.find(([input, init]) =>
-        requestUrl(input).pathname === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST");
-      expect(call).toBeDefined();
-      const body = call?.[1]?.body;
-      expect(JSON.parse(typeof body === "string" ? body : "{}") as unknown).toEqual({ length: 60 });
-    });
+    expect(fetcher.mock.calls.some(([input, init]) =>
+      requestUrl(input).pathname === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST")).toBe(false);
   });
 });
