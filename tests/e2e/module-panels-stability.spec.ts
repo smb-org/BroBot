@@ -1747,3 +1747,22 @@ test("the mobile live state reserves the same height while loading, failed, empt
   expect(emptyHeight).toBe(loadingHeight);
   expect(populatedHeight).toBe(loadingHeight);
 });
+
+for (const width of [1920, 390]) {
+  test(`ad lock reason is fully visible and keeps the slot height at ${String(width)}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await gotoPanel(page, "ads-action");
+    const slot = page.getByTestId("immediate-action-result-slot");
+    await expect(slot).toBeAttached();
+    const enabledHeight = (await box(slot)).height;
+
+    await gotoPanel(page, "ads-action&locked=1");
+    await expect(slot).not.toBeEmpty();
+    expect((await box(slot)).height).toBe(enabledHeight);
+    const clipped = await slot.evaluate((element) => {
+      const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight);
+      return element.scrollHeight > element.clientHeight + 1 || element.clientHeight < lineHeight * 2 - 1;
+    });
+    expect(clipped).toBe(false);
+  });
+}

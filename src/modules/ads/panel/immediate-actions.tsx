@@ -56,8 +56,8 @@ const AdNowAction = ({ channelId, canManage = false, availabilityReason }: Modul
       <Button className="stream-manager-action__button" icon="ad" variant="primary" disabled={pending || length === null || unavailable} {...(unavailable ? { describedBy: availabilityReasonId } : {})} onClick={() => { void run(); }}>
         {labels.immediateRun(length ?? "")}
       </Button>
-      <p className="lock-reason" id={availabilityReasonId} data-testid="immediate-action-result-slot"
-        style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite"
+      <p className="lock-reason stream-manager-action__result" id={availabilityReasonId} data-testid="immediate-action-result-slot"
+        aria-live="polite"
         title={actionReason ?? resultMessage}>
         {actionReason ?? resultMessage}
       </p>

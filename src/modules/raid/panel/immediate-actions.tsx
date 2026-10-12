@@ -66,8 +66,8 @@ const ShoutoutAction = ({ channelId, availabilityReason }: ModuleImmediateAction
       <Button className="stream-manager-action__button" icon="shoutout" variant="primary" disabled={pending || isEmpty || availabilityReason !== null} {...(availabilityReason !== null ? { describedBy: availabilityReasonId } : isEmpty ? { describedBy: helperId } : {})} onClick={() => { void run(); }}>
         {labels.send}
       </Button>
-      <p className="lock-reason" id={availabilityReasonId} data-testid="immediate-action-result-slot"
-        style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite"
+      <p className="lock-reason stream-manager-action__result" id={availabilityReasonId} data-testid="immediate-action-result-slot"
+        aria-live="polite"
         title={availabilityReason ?? resultMessage}>
         {availabilityReason ?? resultMessage}
       </p>
