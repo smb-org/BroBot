@@ -19,6 +19,8 @@ const channel = {
 };
 
 const moduleIds = ["ads", "belabox", "chat_voting", "clips", "faq", "moon", "raid", "sun", "text_commands", "text_library", "timers", "votekick", "weather"];
+const moduleStateIds = [...moduleIds, "api_source", "currency", "channel_events"];
+const modules = moduleStateIds.map((id) => ({ id, enabled: true, settings: "{}" }));
 const routes = [
   ["overview", "/"],
   ["platform", "/platform"],
@@ -47,12 +49,18 @@ test("capture route screenshots for issue 415", async ({ page }) => {
     if (pathname === "/api/platform/audit") return json({ entries: [], nextCursor: null });
     if (pathname === `/api/channels/${channelId}/overview`) return json({
       ...channel,
-      modules: moduleIds.map((id) => ({ id, enabled: false, settings: "{}" })),
+      modules,
       activeModules: [],
     });
     if (pathname === `/api/channels/${channelId}/settings`) return json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 });
     if (pathname === `/api/channels/${channelId}/revisions`) return json({ revisions: {} });
-    if (pathname === `/api/channels/${channelId}/modules` && route.request().method() === "GET") return json({ modules: moduleIds.map((id) => ({ id, enabled: false, settings: "{}" })) });
+    if (pathname === `/api/channels/${channelId}/modules` && route.request().method() === "GET") return json({ modules });
+    if (pathname === `/api/channels/${channelId}/modules/chat_voting/current`) return json({ vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60 });
+    if (pathname === `/api/channels/${channelId}/modules/chat_voting/templates`) return json({ templates: [], count: 0, maximum: 100 });
+    if (pathname === `/api/channels/${channelId}/modules/belabox/status`) return json({
+      configured: false, updatedAt: null, mode: null, sample: null, errorCode: null, polling: false, pollingDesired: false,
+      streamId: null, belaboxStreamId: null, alertNotice: null, fetchFailureNotice: false, intervalSeconds: 15,
+    });
     if (pathname === `/api/channels/${channelId}/overlay-tokens`) return json({ tokens: [], nextOffset: null });
     if (pathname === `/api/channels/${channelId}/system`) return json({ broadcasterConnection: channel.broadcasterConnection, bot: channel.bot, botPermissions: null, broadcasterPermissions: null, chatSubscription: channel.chatSubscription, tokens: channel.tokens });
     if (pathname === `/api/channels/${channelId}/members`) return json({ members: [], nextCursor: null, broadcasterCount: 1, viewerUserId: "fictional-viewer" });
@@ -72,6 +80,13 @@ test("capture route screenshots for issue 415", async ({ page }) => {
       await page.goto(path, { waitUntil: "domcontentloaded" });
       await page.locator("#root").waitFor();
       await page.waitForTimeout(250);
+      if (routeName === "modules") {
+        await expect(page.locator(".module-workspace [role='switch'][aria-checked='true']")).toHaveCount(moduleStateIds.length - 1);
+      }
+      if (routeName === "module-chat_voting") {
+        await expect(page.locator(`.sidebar-nav-link--module-child[href='/channels/${channelId}/modules/chat_voting']`)).toHaveCount(1);
+        await expect(page.locator(".module-detail__switch [role='switch'][aria-checked='true']")).toHaveCount(1);
+      }
       await page.screenshot({ path: join(outputDirectory, `${routeName}-${sizeName}.png`), animations: "disabled" });
     }
   }
