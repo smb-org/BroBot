@@ -5,13 +5,21 @@ export interface FaqTexts {
   title: string;
   add: string;
   name: string;
+  matcherType: string;
+  keywordsType: string;
+  regexType: string;
   patterns: string;
   patternsHint: string;
+  regexPattern: string;
+  regexPatternHint: string;
+  regexError: (reason: string) => string;
   answer: string;
   answerHint: string;
   cooldown: string;
   cooldownHint: string;
   cooldownMinError: string;
+  userCooldown: string;
+  userCooldownHint: string;
   games: string;
   chatTarget: string;
   enabled: string;
@@ -55,10 +63,13 @@ const countTextAreaMessages: TextAreaMessages = {
 
 const catalog: LocaleCatalog<FaqTexts> = {
   de: {
-    title: "FAQ & Auto-Antworten", add: "FAQ-Eintrag anlegen", name: "Name", patterns: "Schlüsselwörter und Wortgruppen",
+    title: "FAQ & Auto-Antworten", add: "FAQ-Eintrag anlegen", name: "Name", matcherType: "Auslösertyp", keywordsType: "Schlüsselwörter und Wortgruppen", regexType: "Regulärer Ausdruck (RE2)", patterns: "Schlüsselwörter und Wortgruppen",
     patternsHint: "Ein Eintrag pro Zeile. Groß-/Kleinschreibung und Akzente werden ignoriert; Wörter müssen vollständig übereinstimmen.",
+    regexPattern: "RE2-Ausdruck", regexPatternHint: "RE2-Syntax; Groß-/Kleinschreibung wird beachtet. Lookaround und Rückverweise werden nicht unterstützt.",
+    regexError: (reason) => `Ungültiger RE2-Ausdruck: ${reason}`,
     answer: "Antwort", answerHint: "Freitext mit Variablen und Textbausteinen im Format {text.name}.", cooldown: "Abkühlzeit", cooldownHint: "Mindestens 30 Sekunden; höchstens 86.400 Sekunden.",
     cooldownMinError: "Die Abkühlzeit muss mindestens 30 Sekunden betragen.",
+    userCooldown: "Abkühlzeit pro Person", userCooldownHint: "0 deaktiviert diese zusätzliche Abkühlzeit. Höchstens 86.400 Sekunden.",
     games: "Spiele", chatTarget: "Chat-Ziel", enabled: "Aktiviert", disabled: "Deaktiviert",
     create: "Eintrag anlegen", edit: "Eintrag bearbeiten", save: "Speichern", cancel: "Abbrechen", delete: "Entfernen",
     deleteConfirm: "Diesen FAQ-Eintrag wirklich entfernen?", moveUp: "In der Reihenfolge nach oben", moveDown: "In der Reihenfolge nach unten",
@@ -83,9 +94,12 @@ const catalog: LocaleCatalog<FaqTexts> = {
     },
   },
   en: {
-    title: "FAQ & Auto replies", add: "Create FAQ entry", name: "Name", patterns: "Keywords and phrases",
+    title: "FAQ & Auto replies", add: "Create FAQ entry", name: "Name", matcherType: "Trigger type", keywordsType: "Keywords and phrases", regexType: "Regular expression (RE2)", patterns: "Keywords and phrases",
     patternsHint: "One per line. Case and accents are ignored; words must match in full.", answer: "Answer", answerHint: "Free text with variables and text blocks in the {text.name} format.", cooldown: "Cooldown",
+    regexPattern: "RE2 pattern", regexPatternHint: "RE2 syntax; matching is case-sensitive. Lookaround and backreferences are not supported.",
+    regexError: (reason) => `Invalid RE2 pattern: ${reason}`,
     cooldownHint: "At least 30 seconds; up to 86,400 seconds.", cooldownMinError: "Cooldown must be at least 30 seconds.",
+    userCooldown: "Per-person cooldown", userCooldownHint: "0 disables this additional cooldown. Up to 86,400 seconds.",
     games: "Games",
     chatTarget: "Chat target", enabled: "Enabled", disabled: "Disabled", create: "Create entry", edit: "Edit entry", save: "Save",
     cancel: "Cancel", delete: "Delete", deleteConfirm: "Remove this FAQ entry?", moveUp: "Move earlier in the order", moveDown: "Move later in the order",

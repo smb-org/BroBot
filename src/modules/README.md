@@ -818,20 +818,22 @@ Schlüsselwörter und Wortgruppen ohne Beachtung von Groß-/Kleinschreibung oder
 Akzenten, mit `ß`/`ẞ` als `ss`. Buchstaben- und Ziffernseiten müssen an einer
 Unicode-Wortgrenze liegen; Symbolseiten wie Emojis dürfen überall stehen. Vor
 der Auswahl des ersten Treffers werden Spieleignung und bekannter Spielstatus
-geprüft. Ein kurzer pro-Kanal-Cache hält die vorbereiteten, normalisierten
-Matcher; lokale Schreibvorgänge leeren ihn sofort, und Cache-Einträge laufen
-nach fünf Sekunden ab. Die Abkühlzeit beträgt mindestens 30 Sekunden. D1
-reserviert sie vor dem Senden; bei Erfolg oder unklarem Ausgang bleibt sie
-bestehen, bei sicherem Nichtversand wird sie freigegeben.
+geprüft. Regex-Auslöser verwenden `re2js` mit RE2-Syntax und linearer
+Laufzeitgarantie. Ein kurzer pro-Kanal-Cache hält normalisierte Schlüsselwörter
+und kompilierte Regex-Matcher; lokale Schreibvorgänge leeren ihn sofort, und
+Cache-Einträge laufen nach fünf Sekunden ab. Die allgemeine Abkühlzeit beträgt
+mindestens 30 Sekunden; optional gilt zusätzlich eine Abkühlzeit pro Person und
+FAQ-Eintrag. D1 reserviert beide vor dem Senden; bei Erfolg oder unklarem
+Ausgang bleiben sie bestehen, bei sicherem Nichtversand werden sie freigegeben.
+Personen-Abkühlzeiten sind pro Kanal gespeichert und werden nach einem Tag
+entfernt.
 
-FAQ-Einträge wählen einen Textbaustein, eine optionale Spielauswahl, eine
-Abkühlzeit (mindestens 30 Sekunden) und eines der drei gemeinsamen Chat-Ziele. `source_only` bleibt der
-Standard. Antwortbausteine werden beim Speichern sowie über den generischen
+FAQ-Einträge wählen Schlüsselwörter oder einen RE2-Ausdruck, eine optionale
+Spielauswahl, beide Abkühlzeiten und eines der drei gemeinsamen Chat-Ziele.
+`source_only` bleibt der Standard. Antwortbausteine werden beim Speichern sowie über den generischen
 `validateTemplateContent`-Contract bei späteren Textbibliotheksänderungen auf
 Befehls-Eingabevariablen geprüft. Panel-Test, Aktivierung und Reihenfolge sind
 kanalgebundene Modulrouten; Änderungen werden mit Audit-Einträgen gespeichert.
-Das Datenmodell lässt einen späteren Regex-Matcher zu, aber die erste
-Panel-Version kennt nur Schlüsselwörter und Wortgruppen.
 
 ### Chat-Abstimmung
 

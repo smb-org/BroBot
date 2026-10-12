@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleRegisteredTemplateVariable } from "../../src/modules/contract";
 import type { FaqEntry } from "../../src/modules/faq/contracts";
 import { createFaqRepository } from "../../src/modules/faq/adapters/d1";
-import { firstFaqMatch, normalizeFaqText, prepareFaqMatchers, selectFaqMatch, validFaqMatcher } from "../../src/modules/faq/domain";
+import { firstFaqMatch, normalizeFaqText, prepareFaqMatchers, selectFaqMatch } from "../../src/modules/faq/domain";
 import { processFaqMessage, testFaqMessage } from "../../src/modules/faq/service";
 import { faqModule } from "../../src/modules/faq";
 import { textCommandModule } from "../../src/modules/text_commands";
@@ -20,6 +20,7 @@ const faqEntry = (overrides: Partial<FaqEntry> = {}): FaqEntry => ({
   matcher: { type: "keywords", patterns: ["get dark"] },
   answerText: "The sun sets at {sun.set}",
   cooldownSeconds: 60,
+  userCooldownSeconds: 0,
   games: [],
   chatTarget: "source_only",
   order: 0,
@@ -167,8 +168,63 @@ describe("FAQ literal matcher", () => {
     expect(withMatchingGame.skippedByGame).toEqual([]);
   });
 
-  it("rejects regex matchers, including patterns with catastrophic backtracking", () => {
-    expect(validFaqMatcher({ type: "regex", pattern: "(a+)+$" })).toBe(false);
+  it("matches RE2 triggers and safely handles pathological patterns", () => {
+    const prepared = prepareFaqMatchers([
+      faqEntry({ matcher: { type: "regex", pattern: "(?i)\\bhello\\b" } }),
+    ]);
+    expect(selectFaqMatch(prepared, "Well HELLO there", null).match?.matchedPattern).toBe("(?i)\\bhello\\b");
+    expect(selectFaqMatch(prepared, "say helloworld", null).match).toBeNull();
+
+    const pathological = prepareFaqMatchers([
+      faqEntry({ matcher: { type: "regex", pattern: "^(a+)+$" } }),
+    ]);
+    const message = `${"a".repeat(20_000)}!`;
+    const startedAt = performance.now();
+    expect(selectFaqMatch(pathological, message, null).match).toBeNull();
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+
+    const malformedStoredRegex = prepareFaqMatchers([
+      faqEntry({ matcher: { type: "regex", pattern: "" } }),
+    ]);
+    expect(selectFaqMatch(malformedStoredRegex, "any message", null).match).toBeNull();
+  });
+
+  it("claims an entry cooldown atomically per user and scopes it to the channel", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "channel-a");
+      await insertChannel(database, "channel-b");
+      await database.prepare(
+        `INSERT INTO faq_entries
+          (faq_id, channel_id, name, matcher_type, matcher_json, answer_text, cooldown_seconds,
+           user_cooldown_seconds, games_json, chat_target, created_at, updated_at)
+         VALUES ('faq-1', 'channel-a', 'Greeting', 'regex', ?, 'Hello!', 30, 120, '[]', 'source_only', ?, ?),
+                ('faq-1', 'channel-b', 'Greeting', 'regex', ?, 'Hello!', 30, 120, '[]', 'source_only', ?, ?)`,
+      ).bind(
+        JSON.stringify({ type: "regex", pattern: "hello" }), NOW, NOW,
+        JSON.stringify({ type: "regex", pattern: "hello" }), NOW, NOW,
+      ).run();
+
+      const repository = createFaqRepository(database as unknown as D1Database);
+      const entryA = (await repository.list("channel-a"))[0];
+      const entryB = (await repository.list("channel-b"))[0];
+      if (entryA === undefined || entryB === undefined) throw new Error("FAQ test entries were not inserted.");
+
+      await expect(repository.claim("channel-a", entryA, "viewer-1", NOW)).resolves.toMatchObject({ claimed: true });
+      await expect(repository.claim("channel-a", entryA, "viewer-2", NOW))
+        .resolves.toMatchObject({ claimed: false, reason: "cooldown" });
+      const afterGlobalCooldown = "2026-09-19T12:00:31.000Z";
+      await expect(repository.claim("channel-a", entryA, "viewer-1", afterGlobalCooldown))
+        .resolves.toMatchObject({ claimed: false, reason: "person_cooldown" });
+      await expect(repository.claim("channel-a", entryA, "viewer-2", afterGlobalCooldown))
+        .resolves.toMatchObject({ claimed: true });
+      await expect(repository.claim("channel-b", entryB, "viewer-1", afterGlobalCooldown))
+        .resolves.toMatchObject({ claimed: true });
+      await expect(repository.claim("channel-a", entryA, "viewer-1", "2026-09-19T12:02:01.000Z"))
+        .resolves.toMatchObject({ claimed: true });
+    } finally {
+      database.close();
+    }
   });
 
   it("keeps a warmed 100-entry lookup under the shared 10 ms chat CPU budget", () => {

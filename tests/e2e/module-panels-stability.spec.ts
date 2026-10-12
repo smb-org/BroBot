@@ -231,7 +231,7 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
     faqCreated = true;
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entry: {
       id: "faq-created", name: "Greeting", enabled: true, matcher: { type: "keywords", patterns: ["hello"] },
-      answerText: "Hello, chat!", cooldownSeconds: 30, games: [], chatTarget: "source_only", order: 0, revision: 1,
+      answerText: "Hello, chat!", cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: "source_only", order: 0, revision: 1,
       lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
     } }) });
   });
@@ -244,6 +244,34 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
   await expect(faqDialog.locator("form")).toBeAttached();
   await faqDialog.getByRole("textbox", { name: "Name" }).press("Enter");
   await expect.poll(() => faqCreated).toBe(true);
+});
+
+test("FAQ pattern error renders in its reserved slot without moving the Answer field", async ({ page }) => {
+  const stamp = "2030-01-01T12:00:00.000Z";
+  const entry = {
+    id: "faq-regex", name: "Schedule", enabled: true, matcher: { type: "regex", pattern: "when" }, answerText: "Mon-Fri",
+    cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: "source_only", order: 0, revision: 1,
+    lastUsedAt: null, createdAt: stamp, updatedAt: stamp,
+  };
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { entries: [entry] });
+  await page.route("**/api/channels/channel-a/modules/faq/entries/faq-regex*", async (route) => {
+    if (route.request().method() === "GET") return route.fallback();
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "faq_matcher_invalid", path: "matcher.pattern", reason: "missing closing ): `(foo`" }) });
+  });
+  await gotoPanel(page, "faq");
+  await page.getByRole("button", { name: /edit/i }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Edit entry" });
+  const pattern = dialog.getByRole("textbox", { name: "RE2 pattern" });
+  const answer = dialog.getByRole("textbox", { name: "Answer" });
+  await pattern.fill("(foo");
+  const gap = async (): Promise<number> => (await box(answer)).y - (await box(pattern)).y;
+  const before = await gap();
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog.getByText("Invalid RE2 pattern")).toBeVisible();
+  // Sub-pixel settling is tolerated; the pre-fix shift was ~40px.
+  expect(Math.abs(await gap() - before)).toBeLessThan(2);
 });
 
 test("BELABOX immediate action keeps manual results separate from live notices", async ({ page }) => {

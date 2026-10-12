@@ -8,13 +8,14 @@ export const FAQ_PATTERN_MAX_LENGTH = 80;
 export const FAQ_ANSWER_MAX_LENGTH = 500;
 export const FAQ_COOLDOWN_MAXIMUM_SECONDS = 86_400;
 export const FAQ_COOLDOWN_MINIMUM_SECONDS = 30;
+export const FAQ_USER_COOLDOWN_MAXIMUM_SECONDS = 86_400;
 export const FAQ_GAME_MAXIMUM_COUNT = 10;
 
 export type FaqMatcher =
   | { type: "keywords"; patterns: readonly string[] }
   | { type: "regex"; pattern: string };
 
-export type FaqMutationMatcher = Extract<FaqMatcher, { type: "keywords" }>;
+export type FaqMutationMatcher = FaqMatcher;
 
 export interface FaqGame {
   id: string;
@@ -29,6 +30,7 @@ export interface FaqEntry {
   matcher: FaqMatcher;
   answerText: string;
   cooldownSeconds: number;
+  userCooldownSeconds: number;
   games: readonly FaqGame[];
   chatTarget: ChatOutputTarget;
   order: number;
@@ -43,6 +45,7 @@ export interface FaqMutationInput {
   matcher: FaqMutationMatcher;
   answerText: string;
   cooldownSeconds: number;
+  userCooldownSeconds: number;
   games: readonly FaqGame[];
   chatTarget: ChatOutputTarget;
 }

@@ -15,6 +15,7 @@ const entry: FaqEntry = {
   matcher: { type: "keywords", patterns: ["hello"] },
   answerText: "Hello there!",
   cooldownSeconds: 30,
+  userCooldownSeconds: 0,
   games: [],
   chatTarget: "source_only",
   order: 0,
@@ -40,6 +41,39 @@ describe("FAQ panel", () => {
     renderWithQuery(<UiProvider><FaqPanel channelId="channel-a" language="de" /></UiProvider>);
 
     expect(await screen.findByTestId("faq-test-result-slot")).toBeInTheDocument();
+  });
+
+  it("sends regex matcher edits and shows server validation beside the pattern field", async () => {
+    const regexEntry: FaqEntry = { ...entry, matcher: { type: "regex", pattern: "hello" }, userCooldownSeconds: 60 };
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/entries/entry-1") && method === "PATCH") {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as { matcher: FaqEntry["matcher"]; userCooldownSeconds: number } : null;
+        expect(body).toMatchObject({ matcher: { type: "regex", pattern: "(?=hello)" }, userCooldownSeconds: 60 });
+        return Promise.resolve(jsonResponse({
+          error: "faq_matcher_invalid",
+          path: "matcher.pattern",
+          reason: "invalid Perl operator: (?=",
+        }, 400));
+      }
+      if (url.pathname.endsWith("/entries")) return Promise.resolve(jsonResponse({ entries: [regexEntry] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    renderWithQuery(<UiProvider><FaqPanel channelId="channel-a" language="en" /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit/u }));
+    await screen.findByRole("dialog");
+    const patternField = await screen.findByRole("textbox", { name: "RE2 pattern" });
+    fireEvent.change(patternField, { target: { value: "(?=hello)" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Invalid RE2 pattern: invalid Perl operator: (?=")).toBeInTheDocument();
+    expect(patternField).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("spinbutton", { name: "Per-person cooldown" })).toHaveValue("60");
   });
 
   it("keeps the existing-entry switch available to operators", async () => {

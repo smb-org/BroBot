@@ -11,9 +11,11 @@ describe("FAQ panel template length", () => {
     expect(templateTextLength(answerText)).toBe(500);
     expect(inputFromDraft({
       name: "Greeting",
+      matcherType: "keywords",
       patterns: "hello",
       answerText,
       cooldownSeconds: 30,
+      userCooldownSeconds: 0,
       games: [],
       chatTarget: "source_only",
     })).toMatchObject({ answerText });

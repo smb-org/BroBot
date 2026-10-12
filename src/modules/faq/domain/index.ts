@@ -1,3 +1,5 @@
+import { RE2JS } from "re2js";
+
 import {
   FAQ_PATTERN_MAXIMUM_COUNT,
   FAQ_PATTERN_MAX_LENGTH,
@@ -19,7 +21,16 @@ export interface FaqSelection extends FaqMatchResult {
 
 export interface PreparedFaqMatcher {
   entry: FaqEntry;
-  patterns: readonly { source: string; normalized: string }[];
+  patterns: readonly PreparedFaqPattern[];
+}
+
+type PreparedFaqPattern =
+  | { type: "keywords"; source: string; normalized: string }
+  | { type: "regex"; source: string; compiled: ReturnType<typeof RE2JS.compile> };
+
+export interface FaqMatcherValidationError {
+  path: "matcher.pattern" | "matcher.patterns";
+  reason: string;
 }
 
 const combiningMarks = /\p{M}/gu;
@@ -66,26 +77,38 @@ const hasWholeWordOccurrence = (message: string, pattern: string): boolean => {
 };
 
 export const prepareFaqMatchers = (entries: readonly FaqEntry[]): PreparedFaqMatcher[] => entries
-  .filter((entry) => entry.enabled && entry.matcher.type === "keywords")
+  .filter((entry) => entry.enabled)
   .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
   .map((entry) => ({
     entry,
     patterns: entry.matcher.type === "keywords"
-      ? entry.matcher.patterns.flatMap((source) => {
+      ? entry.matcher.patterns.flatMap((source): PreparedFaqPattern[] => {
         const normalized = normalizeFaqText(source);
-        return normalized.length === 0 ? [] : [{ source, normalized }];
+        return normalized.length === 0 ? [] : [{ type: "keywords", source, normalized }];
       })
-      : [],
+      : (() => {
+        if (entry.matcher.pattern.trim().length === 0) return [];
+        try {
+          return [{ type: "regex", source: entry.matcher.pattern, compiled: RE2JS.compile(entry.matcher.pattern) }];
+        } catch {
+          return [];
+        }
+      })(),
   }));
 
 export const hasCommandPrefix = (message: string): boolean => message.trimStart().split(/\s/u)[0]?.startsWith("!") === true;
+
+const patternMatches = (message: string, normalizedMessage: string, pattern: PreparedFaqPattern): boolean =>
+  pattern.type === "regex"
+    ? pattern.compiled.test(message)
+    : hasWholeWordOccurrence(normalizedMessage, pattern.normalized);
 
 export const firstFaqMatch = (prepared: readonly PreparedFaqMatcher[], message: string): FaqMatchResult => {
   if (hasCommandPrefix(message)) return { match: null, reason: "command_prefix" };
   const normalizedMessage = normalizeFaqText(message);
   for (const matcher of prepared) {
     for (const pattern of matcher.patterns) {
-      if (hasWholeWordOccurrence(normalizedMessage, pattern.normalized)) {
+      if (patternMatches(message, normalizedMessage, pattern)) {
         const match: FaqMatch = { entry: matcher.entry, matchedPattern: pattern.source };
         return { match, reason: "matched" };
       }
@@ -114,7 +137,7 @@ export const selectFaqMatch = (
   const skippedByGame: FaqSkippedMatch[] = [];
   for (const matcher of prepared) {
     for (const pattern of matcher.patterns) {
-      if (!hasWholeWordOccurrence(normalizedMessage, pattern.normalized)) continue;
+      if (!patternMatches(message, normalizedMessage, pattern)) continue;
       if (isEligibleForGame(matcher.entry, gameId)) {
         return { match: { entry: matcher.entry, matchedPattern: pattern.source }, reason: "matched", skippedByGame };
       }
@@ -125,9 +148,34 @@ export const selectFaqMatch = (
   return { match: null, reason: "no_match", skippedByGame };
 };
 
-export const validFaqMatcher = (value: unknown): value is FaqMutationMatcher => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+export const faqMatcherValidationError = (value: unknown): FaqMatcherValidationError | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { path: "matcher.patterns", reason: "A matcher is required." };
+  }
   const record = value as Record<string, unknown>;
-  if (record.type !== "keywords" || !Array.isArray(record.patterns) || record.patterns.length < 1 || record.patterns.length > FAQ_PATTERN_MAXIMUM_COUNT) return false;
-  return record.patterns.every((pattern) => typeof pattern === "string" && pattern.trim().length > 0 && pattern.trim().length <= FAQ_PATTERN_MAX_LENGTH);
+  if (record.type === "regex") {
+    if (typeof record.pattern !== "string" || record.pattern.trim().length === 0) {
+      return { path: "matcher.pattern", reason: "A regular expression is required." };
+    }
+    if (record.pattern.length > FAQ_PATTERN_MAX_LENGTH) {
+      return { path: "matcher.pattern", reason: `Regular expressions can be at most ${String(FAQ_PATTERN_MAX_LENGTH)} characters.` };
+    }
+    try {
+      RE2JS.compile(record.pattern);
+      return null;
+    } catch (error: unknown) {
+      return {
+        path: "matcher.pattern",
+        reason: error instanceof Error ? error.message : "The regular expression uses unsupported RE2 syntax.",
+      };
+    }
+  }
+  if (record.type !== "keywords" || !Array.isArray(record.patterns) ||
+      record.patterns.length < 1 || record.patterns.length > FAQ_PATTERN_MAXIMUM_COUNT ||
+      !record.patterns.every((pattern) => typeof pattern === "string" && pattern.trim().length > 0 && pattern.trim().length <= FAQ_PATTERN_MAX_LENGTH)) {
+    return { path: "matcher.patterns", reason: "Add between 1 and 20 valid keyword patterns." };
+  }
+  return null;
 };
+
+export const validFaqMatcher = (value: unknown): value is FaqMutationMatcher => faqMatcherValidationError(value) === null;
